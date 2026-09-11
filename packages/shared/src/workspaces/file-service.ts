@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { requireWorkspaceTransportAvailable } from "./transport-availability.js";
 import type {
   WorkspaceFileOperationResponse,
   WorkspaceFileRequest,
@@ -225,15 +226,44 @@ export class WorkspaceFileService {
       bytes: new Uint8Array(),
       expected: input.expected,
     };
-    const prepared = await this.reserve(userId, workspaceId, request, input.reference.declaredSize);
+    const prepared = await this.reserve(
+      userId,
+      workspaceId,
+      request,
+      input.reference.declaredSize ??
+        Math.min(
+          this.dependencies.policy().maxTransferFileBytes ?? 4 * 1024 * 1024,
+          4 * 1024 * 1024,
+        ),
+    );
     let claimed: Awaited<ReturnType<WorkspaceTransferService["claimInput"]>> | null = null;
     try {
+      this.dependencies.repository.requireResultContext(
+        userId,
+        prepared.operation.id,
+        this.dependencies.policy(),
+        this.now(),
+      );
       const handle = await this.dependencies.transfers.ingest(
         userId,
         input.reference,
         this.dependencies.nativeFetcher,
+        prepared.operation.inputBytes,
       );
       claimed = await this.dependencies.transfers.claimInput(userId, handle.referenceId);
+      const materialized = this.dependencies.repository.recordInputBytes(
+        userId,
+        prepared.operation.id,
+        claimed.bytes.byteLength,
+        this.now(),
+      );
+      if (!materialized) {
+        throw new WorkspaceResourceError(
+          "WORKSPACE_NOT_RUNNING",
+          "Native input operation authority changed",
+        );
+      }
+      prepared.operation = materialized;
       const response = await this.executePrepared(
         userId,
         {
@@ -331,6 +361,47 @@ export class WorkspaceFileService {
     return this.executePrepared(userId, request, prepared);
   }
 
+  async reconcileDownloadReference(
+    userId: string,
+    operationId: string,
+    input: { fileName: string; mimeType: string },
+  ): Promise<{ operation: WorkspaceOperationRecord; transfer: WorkspaceTransferHandle | null }> {
+    const context = this.dependencies.repository.requireResultContext(
+      userId,
+      operationId,
+      this.dependencies.policy(),
+      this.now(),
+    );
+    if (context.operation.kind !== "download") {
+      throw new WorkspaceResourceError("WORKSPACE_NOT_FOUND", "Workspace download was not found");
+    }
+    if (!this.dependencies.transfers) {
+      throw new WorkspaceResourceError(
+        "WORKSPACE_PROVIDER_UNAVAILABLE",
+        "Native transfer is unavailable",
+      );
+    }
+    const reservation = this.dependencies.transfers.reserveDownload(userId, {
+      ...input,
+      maxBytes: context.operation.stdoutLimitBytes,
+    });
+    try {
+      const response = await this.reconcile(userId, operationId);
+      if (!response.result || "state" in response.result || response.result.action !== "download") {
+        await this.dependencies.transfers.discard(reservation.record);
+        return { operation: response.operation, transfer: null };
+      }
+      const transfer = await this.dependencies.transfers.publishDownload(
+        reservation,
+        response.result.bytes,
+      );
+      return { operation: response.operation, transfer };
+    } catch (error) {
+      await this.dependencies.transfers.discard(reservation.record);
+      throw error;
+    }
+  }
+
   private async reserve(
     userId: string,
     workspaceId: string,
@@ -358,13 +429,27 @@ export class WorkspaceFileService {
           ? "WORKSPACE_NOT_FOUND"
           : reservation.outcome === "limit"
             ? "WORKSPACE_POLICY_LIMIT"
-            : reservation.outcome === "disabled"
-              ? "WORKSPACE_PROVIDER_DISABLED"
-              : "WORKSPACE_NOT_RUNNING";
+            : reservation.outcome === "busy"
+              ? "WORKSPACE_OPERATION_BUSY"
+              : reservation.outcome === "disabled"
+                ? "WORKSPACE_PROVIDER_DISABLED"
+                : "WORKSPACE_NOT_RUNNING";
       throw new WorkspaceResourceError(code, "Workspace file operation cannot be started");
     }
     const { operation, workspace } = reservation;
     await this.emit("reserve", operation);
+    try {
+      await requireWorkspaceTransportAvailable(this.dependencies.transport);
+    } catch (error) {
+      this.dependencies.repository.cancelBeforeDispatch(
+        userId,
+        operation.id,
+        this.now(),
+        "connector_unavailable_before_dispatch",
+      );
+      await this.emit("terminal", this.dependencies.repository.getOwned(userId, operation.id)!);
+      throw error;
+    }
     return { policy, operation, workspace };
   }
 
@@ -465,21 +550,47 @@ export class WorkspaceFileService {
   }
 
   async reconcile(userId: string, operationId: string): Promise<WorkspaceFileOperationResponse> {
-    const context = this.dependencies.repository.getContext(userId, operationId);
-    if (!context || context.operation.kind === "exec") {
+    const context = this.dependencies.repository.requireResultContext(
+      userId,
+      operationId,
+      this.dependencies.policy(),
+      this.now(),
+    );
+    if (context.operation.kind === "exec") {
       throw new WorkspaceResourceError(
         "WORKSPACE_NOT_FOUND",
         "Workspace file operation was not found",
       );
     }
+    await requireWorkspaceTransportAvailable(this.dependencies.transport);
+    this.dependencies.repository.requireResultContext(
+      userId,
+      operationId,
+      this.dependencies.policy(),
+      this.now(),
+    );
+    if (context.operation.state === "reserved")
+      return { operation: context.operation, result: null };
     const credential = await this.dependencies.credentials.getCredential(
       userId,
       context.operation.provider,
+    );
+    this.dependencies.repository.requireResultContext(
+      userId,
+      operationId,
+      this.dependencies.policy(),
+      this.now(),
     );
     const result = await this.dependencies.transport.inspectFile(
       credential,
       context.workspace,
       context.operation,
+    );
+    this.dependencies.repository.requireResultContext(
+      userId,
+      operationId,
+      this.dependencies.policy(),
+      this.now(),
     );
     if ("state" in result && (result.state === "running" || result.state === "absent")) {
       return {

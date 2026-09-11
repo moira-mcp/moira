@@ -25,7 +25,6 @@ import {
 } from "@mcp-moira/shared";
 import { dirname, join } from "node:path";
 
-const workspaceLogger = createLogger({ component: "WorkspaceTransfer" });
 import { GitHubCodespacesConnector } from "./github-codespaces-connector.js";
 import { OpenAINativeReferenceFetcher } from "./workspace-native-reference-fetcher.js";
 import { HttpGitHubWorkspaceClient } from "./github-workspace-client.js";
@@ -35,7 +34,7 @@ interface WorkspaceServices {
   resource: WorkspaceResourceService | null;
   operation: WorkspaceOperationService | null;
   file: WorkspaceFileService | null;
-  transfer: WorkspaceTransferService | null;
+  transfer: WorkspaceTransferService;
 }
 
 let services: WorkspaceServices | null = null;
@@ -85,12 +84,12 @@ function operationAuditAction(event: WorkspaceOperationAuditEvent): AuditAction 
 
 function initializeWorkspaceServices(): WorkspaceServices {
   if (services) return services;
+  const workspaceLogger = createLogger({ component: "WorkspaceTransfer" });
   const auditRepository = new AuditRepository(getDatabase());
   const config = getWorkspaceGitHubConfig();
   let resource: WorkspaceResourceService | null = null;
   let operation: WorkspaceOperationService | null = null;
   let file: WorkspaceFileService | null = null;
-  let transfer: WorkspaceTransferService | null = null;
   const connection = new WorkspaceConnectionService({
     repository: new WorkspaceConnectionRepository(getSqliteInstance()),
     config: getWorkspaceGitHubConfig,
@@ -111,6 +110,14 @@ function initializeWorkspaceServices(): WorkspaceServices {
       });
     },
   });
+
+  const transfer = new WorkspaceTransferService({
+    repository: new WorkspaceTransferRepository(getSqliteInstance()),
+    policy: getWorkspaceResourcePolicy,
+    root: join(dirname(getDbPath()), "workspace-transfers"),
+    onCleanupError: (error) => workspaceLogger.error("Workspace transfer cleanup failed", error),
+  });
+  transfer.start();
 
   if (config.state === "available") {
     const connector = new GitHubCodespacesConnector();
@@ -158,13 +165,6 @@ function initializeWorkspaceServices(): WorkspaceServices {
         });
       },
     });
-    transfer = new WorkspaceTransferService({
-      repository: new WorkspaceTransferRepository(getSqliteInstance()),
-      policy: getWorkspaceResourcePolicy,
-      root: join(dirname(getDbPath()), "workspace-transfers"),
-      onCleanupError: (error) => workspaceLogger.error("Workspace transfer cleanup failed", error),
-    });
-    transfer.start();
     const nativeFetcher = new OpenAINativeReferenceFetcher();
     operation = new WorkspaceOperationService({
       repository: new WorkspaceOperationRepository(getSqliteInstance()),
@@ -252,6 +252,6 @@ export function getWorkspaceFileService(): WorkspaceFileService | null {
   return initializeWorkspaceServices().file;
 }
 
-export function getWorkspaceTransferService(): WorkspaceTransferService | null {
+export function getWorkspaceTransferService(): WorkspaceTransferService {
   return initializeWorkspaceServices().transfer;
 }

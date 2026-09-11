@@ -121,9 +121,210 @@ function fetcher(bytes = Buffer.from([0, 255, 1, 2, 3])): WorkspaceNativeReferen
 }
 
 describe("private workspace transfer service", () => {
+  test("accepts the documented raw file ID without treating it as download authority", async () => {
+    const value = fixture();
+    const source = fetcher();
+    const fileId = "file_000000000b1c8210a7cb1a2d896b2ee4";
+    try {
+      const handle = await value.service.ingest(
+        "user-1",
+        { fileId, downloadUrl: reference.downloadUrl },
+        source,
+      );
+      expect(source.fetch).toHaveBeenCalledWith({ fileId, downloadUrl: reference.downloadUrl });
+      const claimed = await value.service.claimInput("user-1", handle.referenceId);
+      expect(claimed.bytes).toEqual(Buffer.from([0, 255, 1, 2, 3]));
+      await value.service.consume(claimed.record);
+    } finally {
+      value.sqlite.close();
+    }
+  });
+
+  test.each([
+    "file_",
+    "https://file_123",
+    "sediment://other_123",
+    "file_../secret",
+    `file_${"a".repeat(256)}`,
+  ])("rejects invalid native file identifier %s before fetching", async (fileId) => {
+    const value = fixture();
+    const source = fetcher();
+    try {
+      await expect(
+        value.service.ingest("user-1", { fileId, downloadUrl: reference.downloadUrl }, source),
+      ).rejects.toThrow(/identifier/);
+      expect(source.fetch).not.toHaveBeenCalled();
+    } finally {
+      value.sqlite.close();
+    }
+  });
+
+  test.each([null, 9])(
+    "reserves unknown native size before fetching and publishes resolved metadata (length %s)",
+    async (contentLength) => {
+      const value = fixture();
+      const bytes = Buffer.from("%PDF-1.7\n");
+      const cancel = jest.fn();
+      try {
+        const handle = await value.service.ingest(
+          "user-1",
+          {
+            fileId: reference.fileId,
+            downloadUrl: reference.downloadUrl,
+          },
+          {
+            fetch: async () => {
+              expect(
+                value.sqlite
+                  .prepare("SELECT state, declaredSize, fileName, mimeType FROM workspaceTransfer")
+                  .get(),
+              ).toEqual({
+                state: "reserved",
+                declaredSize: 1024,
+                fileName: "attachment.bin",
+                mimeType: "application/octet-stream",
+              });
+              return {
+                contentLength,
+                mimeType: "application/pdf; charset=binary",
+                body: (async function* () {
+                  yield bytes;
+                })(),
+                cancel,
+              };
+            },
+          },
+        );
+        expect(handle).toMatchObject({
+          size: 9,
+          fileName: "attachment.bin",
+          mimeType: "application/pdf",
+          sha256: createHash("sha256").update(bytes).digest("hex"),
+        });
+        expect(
+          value.sqlite
+            .prepare("SELECT state, declaredSize, observedSize, mimeType FROM workspaceTransfer")
+            .get(),
+        ).toEqual({
+          state: "ready",
+          declaredSize: 9,
+          observedSize: 9,
+          mimeType: "application/pdf",
+        });
+        expect(cancel).toHaveBeenCalledTimes(1);
+        const claimed = await value.service.claimInput("user-1", handle.referenceId);
+        expect(claimed.bytes).toEqual(bytes);
+        expect(claimed.record.mimeType).toBe("application/pdf");
+        await value.service.consume(claimed.record);
+      } finally {
+        value.sqlite.close();
+      }
+    },
+  );
+
+  test("bounds metadata-free native input by the caller's reserved capacity", async () => {
+    const value = fixture();
+    try {
+      const source = fetcher();
+      const fetch = source.fetch;
+      source.fetch = async (input) => {
+        expect(value.sqlite.prepare("SELECT declaredSize FROM workspaceTransfer").get()).toEqual({
+          declaredSize: 8,
+        });
+        return fetch(input);
+      };
+      const handle = await value.service.ingest(
+        "user-1",
+        { fileId: reference.fileId, downloadUrl: reference.downloadUrl },
+        source,
+        8,
+      );
+      expect(handle).toMatchObject({
+        size: 5,
+        mimeType: "application/octet-stream",
+        fileName: "attachment.bin",
+      });
+      const claimed = await value.service.claimInput("user-1", handle.referenceId);
+      expect(claimed.bytes).toEqual(Buffer.from([0, 255, 1, 2, 3]));
+      await value.service.consume(claimed.record);
+      const rejected = fetcher();
+      await expect(value.service.ingest("user-1", reference, rejected, 4)).rejects.toThrow(/limit/);
+      expect(rejected.fetch).not.toHaveBeenCalled();
+    } finally {
+      value.sqlite.close();
+    }
+  });
+
+  test.each([
+    { maxTransferBytesPerUser: 512 },
+    { maxTransferBytesGlobal: 512 },
+    { maxTransferInflightBytesPerUser: 512 },
+    { maxTransferInflightBytesGlobal: 512 },
+  ])(
+    "rejects unknown-size input before fetching when highwater reservation exceeds %j",
+    async (limits) => {
+      const value = fixture(limits);
+      const source = fetcher();
+      try {
+        await expect(
+          value.service.ingest(
+            "user-1",
+            { fileId: reference.fileId, downloadUrl: reference.downloadUrl },
+            source,
+          ),
+        ).rejects.toThrow(/quota/);
+        expect(source.fetch).not.toHaveBeenCalled();
+        expect(value.repository.listLive()).toEqual([]);
+      } finally {
+        value.sqlite.close();
+      }
+    },
+  );
+
+  test.each([
+    [1025, 0, "application/octet-stream", "limit", false],
+    [null, 1025, "application/octet-stream", "limit", true],
+    [3, 4, "application/octet-stream", "size mismatch", true],
+    [null, 4, "application/pdf", "MIME type", true],
+    [null, 4, "application/x-executable", "metadata mismatch", false],
+    [null, 4, "", "metadata mismatch", false],
+  ] as const)(
+    "rejects invalid unknown-size body (%s/%s/%s) and cancels the source",
+    async (contentLength, actualBytes, mimeType, error, consumesBody) => {
+      const value = fixture();
+      const readBody = jest.fn();
+      const cancel = jest.fn();
+      try {
+        await expect(
+          value.service.ingest(
+            "user-1",
+            { fileId: reference.fileId, downloadUrl: reference.downloadUrl },
+            {
+              fetch: async () => ({
+                contentLength,
+                mimeType,
+                cancel,
+                body: (async function* () {
+                  readBody();
+                  yield Buffer.alloc(actualBytes);
+                })(),
+              }),
+            },
+          ),
+        ).rejects.toThrow(error);
+        expect(readBody).toHaveBeenCalledTimes(consumesBody ? 1 : 0);
+        expect(cancel).toHaveBeenCalledTimes(1);
+        expect(value.repository.listLive()).toEqual([]);
+        expect(readdirSync(value.root)).toEqual([]);
+      } finally {
+        value.sqlite.close();
+      }
+    },
+  );
+
   test.each(mimeCases)(
     "accepts %s only when bytes match its content contract",
-    async (mimeType, valid) => {
+    async (mimeType, valid, _invalid) => {
       const value = fixture();
       try {
         const handle = await value.service.createDownload("user-1", {

@@ -40,6 +40,10 @@ const policy: WorkspaceResourcePolicy = {
 };
 
 class FakeFileTransport implements WorkspaceFileTransport {
+  available = true;
+  async health() {
+    return { ok: this.available, reason: null };
+  }
   result: WorkspaceFileResult = {
     action: "write",
     path: "src/file.bin",
@@ -112,26 +116,51 @@ function fixture() {
 }
 
 describe("durable workspace file operations", () => {
-  test("moves native upload and download bytes through private single-use storage", async () => {
+  test("rejects unavailable connector before credentials on file dispatch and result recovery", async () => {
     const value = fixture();
-    const root = mkdtempSync(join(tmpdir(), "moira-file-lifecycle-transfer-"));
+    const request = {
+      action: "write" as const,
+      path: "src/file.bin",
+      bytes: Buffer.from("new"),
+      expected: { exists: false },
+    };
+    try {
+      const started = await value.service.execute("user-1", "workspace-1", request);
+      value.transport.available = false;
+      value.credentials.getCredential.mockClear();
+      value.transport.executeCalls.mockClear();
+      await expect(value.service.reconcile("user-1", started.operation.id)).rejects.toMatchObject({
+        code: "WORKSPACE_PROVIDER_UNAVAILABLE",
+      });
+      await expect(value.service.execute("user-1", "workspace-1", request)).rejects.toMatchObject({
+        code: "WORKSPACE_PROVIDER_UNAVAILABLE",
+      });
+      expect(value.credentials.getCredential).not.toHaveBeenCalled();
+      expect(value.transport.executeCalls).not.toHaveBeenCalled();
+      expect(value.transport.inspectCalls).not.toHaveBeenCalled();
+      expect(value.repository.listOwned("user-1", "workspace-1")).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            state: "cancelled",
+            remoteCleanupPending: 0,
+            lastOutcome: "connector_unavailable_before_dispatch",
+          }),
+        ]),
+      );
+    } finally {
+      value.sqlite.close();
+    }
+  });
+  test("recovers a response-lost download by exact operation without redispatch and reserves private bytes before inspection", async () => {
+    const value = fixture();
+    const root = mkdtempSync(join(tmpdir(), "moira-download-recovery-"));
+    let transferPolicy = policy;
     const transfers = new WorkspaceTransferService({
       repository: new WorkspaceTransferRepository(value.sqlite),
       root,
-      policy: () => ({
-        ...policy,
-        maxTransferFileBytes: 1024,
-        maxTransferBytesPerUser: 2048,
-        maxTransferBytesGlobal: 4096,
-        maxTransferObjectsPerUser: 4,
-        maxTransferObjectsGlobal: 8,
-        maxTransferInflightBytesPerUser: 2048,
-        maxTransferInflightBytesGlobal: 4096,
-        transferTtlMs: 60_000,
-      }),
+      policy: () => transferPolicy,
       now: () => now,
     });
-    const bytes = Buffer.from([0, 255, 4, 5]);
     const service = new WorkspaceFileService({
       repository: value.repository,
       transport: value.transport,
@@ -139,78 +168,236 @@ describe("durable workspace file operations", () => {
       policy: () => policy,
       now: () => now,
       transfers,
-      nativeFetcher: {
-        fetch: async () => ({
-          contentLength: bytes.length,
-          mimeType: "application/octet-stream",
-          body: (async function* () {
-            yield bytes;
-          })(),
-        }),
-      },
     });
-    const executeFile = value.transport.executeFile.bind(value.transport);
-    value.transport.executeFile = async (...args) => {
-      const transferState = value.sqlite
-        .prepare("SELECT purpose, state, declaredSize FROM workspaceTransfer")
-        .all();
-      expect(transferState).toEqual(
-        args[3].action === "download"
-          ? [{ purpose: "workspace_download", state: "reserved", declaredSize: 1024 }]
-          : [],
-      );
-      return executeFile(...args);
-    };
+    const bytes = Buffer.from([0, 255, 17, 128]);
     try {
-      value.transport.result = {
-        action: "upload",
-        path: "input.bin",
-        previous: null,
-        current: { size: bytes.length, sha256: "a".repeat(64), modifiedAt: now },
-      };
-      await service.uploadReference("user-1", "workspace-1", {
-        path: "input.bin",
-        expected: { exists: false },
-        reference: {
-          fileId: "sediment://file_000000000b1c8210a7cb1a2d896b2ee4",
-          downloadUrl: "https://oaisdmntprdenmarkeast.blob.core.windows.net/file?sig=secret",
-          fileName: "input.bin",
-          mimeType: "application/octet-stream",
-          declaredSize: bytes.length,
-        },
+      value.transport.throwExecute = true;
+      const pending = await service.downloadReference("user-1", "workspace-1", {
+        path: "result.bin",
+        maxBytes: 16,
+        fileName: "result.bin",
+        mimeType: "application/octet-stream",
       });
-      expect(value.transport.lastRequest).toMatchObject({ action: "upload", path: "input.bin" });
-      expect((value.transport.lastRequest as { bytes: Uint8Array }).bytes).toEqual(bytes);
+      expect(pending).toMatchObject({
+        operation: { kind: "download", state: "reconcile_pending" },
+        transfer: null,
+      });
+      expect(readdirSync(root)).toEqual([]);
       expect(value.sqlite.prepare("SELECT COUNT(*) count FROM workspaceTransfer").get()).toEqual({
         count: 0,
       });
-
+      value.credentials.getCredential.mockClear();
+      transferPolicy = { ...policy, maxTransferBytesPerUser: 1 };
+      await expect(
+        service.reconcileDownloadReference("user-1", pending.operation.id, {
+          fileName: "result.bin",
+          mimeType: "application/octet-stream",
+        }),
+      ).rejects.toMatchObject({ code: "WORKSPACE_POLICY_LIMIT" });
+      expect(value.credentials.getCredential).not.toHaveBeenCalled();
+      expect(value.transport.inspectCalls).not.toHaveBeenCalled();
+      transferPolicy = policy;
+      const inspectFile = value.transport.inspectFile.bind(value.transport);
+      value.transport.inspectFile = async () => {
+        expect(
+          value.sqlite.prepare("SELECT state, declaredSize FROM workspaceTransfer").all(),
+        ).toEqual([{ state: "reserved", declaredSize: 16 }]);
+        return inspectFile();
+      };
       value.transport.result = {
         action: "download",
-        path: "output.bin",
+        path: "result.bin",
         offset: 0,
         totalSize: bytes.length,
         bytes,
-        sha256: "b".repeat(64),
+        sha256: "a".repeat(64),
       };
-      const download = await service.downloadReference("user-1", "workspace-1", {
-        path: "output.bin",
-        maxBytes: 1024,
-        fileName: "output.bin",
+      const recovered = await service.reconcileDownloadReference("user-1", pending.operation.id, {
+        fileName: "result.bin",
         mimeType: "application/octet-stream",
       });
-      const claimed = await transfers.claimDownload(download.transfer!.referenceId);
+      expect(recovered.operation).toMatchObject({
+        id: pending.operation.id,
+        state: "succeeded",
+        outputBytes: 4,
+      });
+      expect(value.repository.listOwned("user-1", "workspace-1")).toHaveLength(1);
+      expect(value.transport.executeCalls).toHaveBeenCalledTimes(1);
+      const download = await transfers.claimDownload(recovered.transfer!.referenceId);
       const chunks: Buffer[] = [];
-      for await (const chunk of claimed.stream) chunks.push(Buffer.from(chunk));
+      for await (const chunk of download.stream) chunks.push(Buffer.from(chunk));
       expect(Buffer.concat(chunks)).toEqual(bytes);
-      await transfers.consume(claimed.record);
+      await transfers.consume(download.record);
+      value.credentials.getCredential.mockClear();
+      value.transport.inspectCalls.mockClear();
+      value.sqlite.exec("UPDATE workspaceResource SET generation = 2");
+      await expect(
+        service.reconcileDownloadReference("user-1", pending.operation.id, {
+          fileName: "result.bin",
+          mimeType: "application/octet-stream",
+        }),
+      ).rejects.toMatchObject({ code: "WORKSPACE_GENERATION_CONFLICT" });
+      expect(value.credentials.getCredential).not.toHaveBeenCalled();
+      expect(value.transport.inspectCalls).not.toHaveBeenCalled();
+      expect(value.sqlite.prepare("SELECT COUNT(*) count FROM workspaceTransfer").get()).toEqual({
+        count: 0,
+      });
     } finally {
       value.sqlite.close();
       rmSync(root, { recursive: true, force: true });
     }
   });
 
+  test("does not expose file bytes when authorization changes during result inspection", async () => {
+    const value = fixture();
+    try {
+      const started = await value.service.execute("user-1", "workspace-1", {
+        action: "write",
+        path: "src/file.bin",
+        bytes: Buffer.from("new"),
+        expected: { exists: false },
+      });
+      const inspectFile = value.transport.inspectFile.bind(value.transport);
+      value.transport.inspectFile = async () => {
+        value.sqlite.exec("DELETE FROM workspaceConnectionRepository");
+        return inspectFile();
+      };
+      await expect(value.service.reconcile("user-1", started.operation.id)).rejects.toMatchObject({
+        code: "WORKSPACE_AUTHORIZATION_REQUIRED",
+      });
+      expect(value.repository.getOwned("user-1", started.operation.id)).toMatchObject({
+        state: "succeeded",
+        outputBytes: started.operation.outputBytes,
+      });
+    } finally {
+      value.sqlite.close();
+    }
+  });
+  test.each([true, false])(
+    "moves native upload with metadata=%s and download bytes through private single-use storage",
+    async (includeMetadata) => {
+      const value = fixture();
+      const root = mkdtempSync(join(tmpdir(), "moira-file-lifecycle-transfer-"));
+      const transfers = new WorkspaceTransferService({
+        repository: new WorkspaceTransferRepository(value.sqlite),
+        root,
+        policy: () => ({
+          ...policy,
+          maxTransferFileBytes: 1024,
+          maxTransferBytesPerUser: 2048,
+          maxTransferBytesGlobal: 4096,
+          maxTransferObjectsPerUser: 4,
+          maxTransferObjectsGlobal: 8,
+          maxTransferInflightBytesPerUser: 2048,
+          maxTransferInflightBytesGlobal: 4096,
+          transferTtlMs: 60_000,
+        }),
+        now: () => now,
+      });
+      const bytes = Buffer.from([0, 255, 4, 5]);
+      const service = new WorkspaceFileService({
+        repository: value.repository,
+        transport: value.transport,
+        credentials: value.credentials,
+        policy: () => policy,
+        now: () => now,
+        transfers,
+        nativeFetcher: {
+          fetch: async () => {
+            const reservedBytes = includeMetadata ? bytes.length : policy.maxTransferFileBytes;
+            expect(
+              value.sqlite.prepare("SELECT state, inputBytes FROM workspaceOperation").all(),
+            ).toEqual([{ state: "reserved", inputBytes: reservedBytes }]);
+            expect(
+              value.sqlite.prepare("SELECT state, declaredSize FROM workspaceTransfer").all(),
+            ).toEqual([{ state: "reserved", declaredSize: reservedBytes }]);
+            return {
+              contentLength: bytes.length,
+              mimeType: "application/octet-stream",
+              body: (async function* () {
+                yield bytes;
+              })(),
+            };
+          },
+        },
+      });
+      const executeFile = value.transport.executeFile.bind(value.transport);
+      value.transport.executeFile = async (...args) => {
+        const transferState = value.sqlite
+          .prepare("SELECT purpose, state, declaredSize FROM workspaceTransfer")
+          .all();
+        expect(transferState).toEqual(
+          args[3].action === "download"
+            ? [{ purpose: "workspace_download", state: "reserved", declaredSize: 1024 }]
+            : [],
+        );
+        return executeFile(...args);
+      };
+      try {
+        value.transport.result = {
+          action: "upload",
+          path: "input.bin",
+          previous: null,
+          current: { size: bytes.length, sha256: "a".repeat(64), modifiedAt: now },
+        };
+        const uploaded = await service.uploadReference("user-1", "workspace-1", {
+          path: "input.bin",
+          expected: { exists: false },
+          reference: {
+            fileId: "sediment://file_000000000b1c8210a7cb1a2d896b2ee4",
+            downloadUrl: "https://oaisdmntprdenmarkeast.blob.core.windows.net/file?sig=secret",
+            ...(includeMetadata
+              ? {
+                  fileName: "input.bin",
+                  mimeType: "application/octet-stream",
+                  declaredSize: bytes.length,
+                }
+              : {}),
+          },
+        });
+        expect(uploaded.operation.inputBytes).toBe(bytes.length);
+        expect(value.transport.lastRequest).toMatchObject({ action: "upload", path: "input.bin" });
+        expect((value.transport.lastRequest as { bytes: Uint8Array }).bytes).toEqual(bytes);
+        expect(value.sqlite.prepare("SELECT COUNT(*) count FROM workspaceTransfer").get()).toEqual({
+          count: 0,
+        });
+
+        value.transport.result = {
+          action: "download",
+          path: "output.bin",
+          offset: 0,
+          totalSize: bytes.length,
+          bytes,
+          sha256: "b".repeat(64),
+        };
+        const download = await service.downloadReference("user-1", "workspace-1", {
+          path: "output.bin",
+          maxBytes: 1024,
+          fileName: "output.bin",
+          mimeType: "application/octet-stream",
+        });
+        const claimed = await transfers.claimDownload(download.transfer!.referenceId);
+        const chunks: Buffer[] = [];
+        for await (const chunk of claimed.stream) chunks.push(Buffer.from(chunk));
+        expect(Buffer.concat(chunks)).toEqual(bytes);
+        await transfers.consume(claimed.record);
+      } finally {
+        value.sqlite.close();
+        rmSync(root, { recursive: true, force: true });
+      }
+    },
+  );
+
   test.each([
+    [
+      "unavailable connector",
+      "user-1",
+      "workspace-1",
+      (value: ReturnType<typeof fixture>) => {
+        value.transport.available = false;
+      },
+      "input.bin",
+    ],
     [
       "invalid path",
       "user-1",
@@ -594,7 +781,7 @@ describe("durable workspace file operations", () => {
       ).rejects.toThrow(/path/);
       await expect(
         value.service.execute("user-2", "workspace-1", { action: "stat", path: "src" }),
-      ).rejects.toThrow(/cannot be started/);
+      ).rejects.toMatchObject({ code: "WORKSPACE_NOT_FOUND" });
       expect(value.credentials.getCredential).not.toHaveBeenCalled();
       expect(value.transport.executeCalls).not.toHaveBeenCalled();
     } finally {
@@ -623,7 +810,7 @@ describe("durable workspace file operations", () => {
           bytes: Buffer.from("new"),
           expected: { exists: false },
         }),
-      ).rejects.toThrow(/cannot be started/);
+      ).rejects.toMatchObject({ code: "WORKSPACE_OPERATION_BUSY" });
       expect(value.credentials.getCredential).not.toHaveBeenCalled();
       expect(value.transport.executeCalls).not.toHaveBeenCalled();
     } finally {

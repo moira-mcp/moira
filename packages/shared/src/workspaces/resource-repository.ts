@@ -190,48 +190,14 @@ export class WorkspaceResourceRepository {
         return { outcome: "not_approved", reason: "Repository is not approved" } as const;
       }
 
-      const activeSql = placeholders(ACTIVE_STATES);
-      const userActive = (
-        this.sqlite
-          .prepare(
-            `SELECT COUNT(*) count FROM workspaceResource
-             WHERE userId = ? AND provider = ? AND state IN (${activeSql})`,
-          )
-          .get(input.userId, input.provider, ...ACTIVE_STATES) as { count: number }
-      ).count;
-      const globalActive = (
-        this.sqlite
-          .prepare(
-            `SELECT COUNT(*) count FROM workspaceResource
-             WHERE provider = ? AND state IN (${activeSql})`,
-          )
-          .get(input.provider, ...ACTIVE_STATES) as { count: number }
-      ).count;
-      if (
-        userActive >= input.policy.maxActivePerUser ||
-        globalActive >= input.policy.maxActiveGlobal
-      ) {
-        return { outcome: "limit", reason: "Workspace concurrency limit reached" } as const;
-      }
-      const last = this.sqlite
-        .prepare(
-          `SELECT createdAt FROM workspaceResource
-           WHERE userId = ? AND provider = ? ORDER BY createdAt DESC LIMIT 1`,
-        )
-        .get(input.userId, input.provider) as { createdAt: number } | undefined;
-      if (last && last.createdAt > input.now - input.policy.createThrottleMs) {
-        return { outcome: "limit", reason: "Workspace create throttle reached" } as const;
-      }
+      const capacity = this.checkCreateCapacity(
+        input.userId,
+        input.provider,
+        input.policy,
+        input.now,
+      );
+      if (capacity) return capacity;
       const day = utcDay(input.now);
-      const usage = this.sqlite
-        .prepare(
-          `SELECT submittedOperations FROM workspacePolicyUsage
-           WHERE userId = ? AND provider = ? AND utcDay = ?`,
-        )
-        .get(input.userId, input.provider, day) as { submittedOperations: number } | undefined;
-      if ((usage?.submittedOperations ?? 0) >= input.policy.maxOperationsPerDay) {
-        return { outcome: "limit", reason: "Daily workspace operation budget reached" } as const;
-      }
 
       const id = randomUUID();
       const capability = randomBytes(32).toString("base64url");
@@ -297,6 +263,52 @@ export class WorkspaceResourceRepository {
       } as const;
     });
     return transaction.immediate();
+  }
+
+  checkCreateCapacity(
+    userId: string,
+    provider: string,
+    policy: WorkspaceResourcePolicy,
+    now: number,
+  ): { outcome: "limit"; reason: string } | null {
+    const activeSql = placeholders(ACTIVE_STATES);
+    const userActive = (
+      this.sqlite
+        .prepare(
+          `SELECT COUNT(*) count FROM workspaceResource
+        WHERE userId = ? AND provider = ? AND state IN (${activeSql})`,
+        )
+        .get(userId, provider, ...ACTIVE_STATES) as { count: number }
+    ).count;
+    const globalActive = (
+      this.sqlite
+        .prepare(
+          `SELECT COUNT(*) count FROM workspaceResource
+        WHERE provider = ? AND state IN (${activeSql})`,
+        )
+        .get(provider, ...ACTIVE_STATES) as { count: number }
+    ).count;
+    if (userActive >= policy.maxActivePerUser || globalActive >= policy.maxActiveGlobal) {
+      return { outcome: "limit", reason: "Workspace concurrency limit reached" };
+    }
+    const last = this.sqlite
+      .prepare(
+        `SELECT createdAt FROM workspaceResource
+      WHERE userId = ? AND provider = ? ORDER BY createdAt DESC LIMIT 1`,
+      )
+      .get(userId, provider) as { createdAt: number } | undefined;
+    if (last && last.createdAt > now - policy.createThrottleMs) {
+      return { outcome: "limit", reason: "Workspace create throttle reached" };
+    }
+    const usage = this.sqlite
+      .prepare(
+        `SELECT submittedOperations FROM workspacePolicyUsage
+      WHERE userId = ? AND provider = ? AND utcDay = ?`,
+      )
+      .get(userId, provider, utcDay(now)) as { submittedOperations: number } | undefined;
+    return (usage?.submittedOperations ?? 0) >= policy.maxOperationsPerDay
+      ? { outcome: "limit", reason: "Daily workspace operation budget reached" }
+      : null;
   }
 
   private requireById(id: string): WorkspaceResourceRecord {

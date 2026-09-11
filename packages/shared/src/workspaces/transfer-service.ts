@@ -13,7 +13,8 @@ import { WorkspaceTransferRepository } from "./transfer-repository.js";
 
 const TOKEN = /^[A-Za-z0-9_-]{43}$/;
 const OBJECT = /^[a-f0-9]{48}$/;
-const FILE_ID = /^sediment:\/\/file_[A-Za-z0-9]+$/;
+const FILE_ID = /^(?:sediment:\/\/)?file_[A-Za-z0-9]+$/;
+const MAX_FILE_BYTES = 4 * 1024 * 1024;
 const MIME = /^[a-z0-9][a-z0-9!#$&^_.+-]{0,126}\/[a-z0-9][a-z0-9!#$&^_.+-]{0,126}$/;
 const BINARY_MIME_TYPES = new Set([
   "application/octet-stream",
@@ -65,6 +66,7 @@ export interface WorkspaceNativeReferenceResponse {
   contentLength: number | null;
   mimeType: string;
   body: AsyncIterable<Uint8Array>;
+  cancel?: () => void;
 }
 
 export interface WorkspaceNativeReferenceFetcher {
@@ -152,28 +154,51 @@ export class WorkspaceTransferService {
     userId: string,
     reference: WorkspaceNativeFileReference,
     fetcher: WorkspaceNativeReferenceFetcher,
+    maxBytes?: number,
   ): Promise<WorkspaceTransferHandle> {
-    this.validateReference(reference);
-    const reserved = this.reserve(
-      userId,
-      "workspace_input",
-      reference.fileName,
-      reference.mimeType,
-      reference.declaredSize,
+    const maximumBytes = Math.min(
+      this.dependencies.policy().maxTransferFileBytes ?? MAX_FILE_BYTES,
+      MAX_FILE_BYTES,
     );
+    if (
+      maxBytes !== undefined &&
+      (!Number.isSafeInteger(maxBytes) || maxBytes < 0 || maxBytes > maximumBytes)
+    ) {
+      throw new WorkspaceResourceError("WORKSPACE_RESOURCE_INVALID", "Invalid native file bound");
+    }
+    const bound = maxBytes ?? maximumBytes;
+    const fileName = reference.fileName ?? "attachment.bin";
+    const reservedMime = reference.mimeType ?? "application/octet-stream";
+    this.validateReference(reference);
+    const reservedBytes = reference.declaredSize ?? bound;
+    if (reservedBytes > bound) {
+      throw new WorkspaceResourceError("WORKSPACE_POLICY_LIMIT", "Native file exceeds its limit");
+    }
+    const reserved = this.reserve(userId, "workspace_input", fileName, reservedMime, reservedBytes);
     const partial = this.path(reserved.record.objectKey, ".partial");
     const target = this.path(reserved.record.objectKey);
+    let response: WorkspaceNativeReferenceResponse | undefined;
     try {
       await mkdir(this.root, { recursive: true, mode: 0o700 });
-      const response = await fetcher.fetch(reference);
+      response = await fetcher.fetch(reference);
+      const responseMime = response.mimeType.toLowerCase().split(";", 1)[0].trim();
+      const mimeType = reference.mimeType ?? responseMime;
       if (
-        response.mimeType.toLowerCase().split(";", 1)[0].trim() !== reference.mimeType ||
-        (response.contentLength !== null && response.contentLength !== reference.declaredSize)
+        !supportedWorkspaceTransferMime(responseMime) ||
+        (reference.mimeType !== undefined && responseMime !== reference.mimeType) ||
+        (response.contentLength !== null &&
+          (!Number.isSafeInteger(response.contentLength) ||
+            response.contentLength < 0 ||
+            (reference.declaredSize !== undefined &&
+              response.contentLength !== reference.declaredSize)))
       ) {
         throw new WorkspaceResourceError(
           "WORKSPACE_RESOURCE_INVALID",
           "Native file metadata mismatch",
         );
+      }
+      if (response.contentLength !== null && response.contentLength > reservedBytes) {
+        throw new WorkspaceResourceError("WORKSPACE_POLICY_LIMIT", "Native file exceeds its limit");
       }
       const handle = await open(partial, "wx", 0o600);
       const hash = createHash("sha256");
@@ -187,7 +212,7 @@ export class WorkspaceTransferService {
           }
           const bytes = Buffer.from(chunk);
           received += bytes.length;
-          if (received > reference.declaredSize) {
+          if (received > reservedBytes) {
             throw new WorkspaceResourceError(
               "WORKSPACE_POLICY_LIMIT",
               "Native file exceeds its limit",
@@ -197,13 +222,16 @@ export class WorkspaceTransferService {
           chunks.push(bytes);
           position = await this.writeAll(handle, bytes, position);
         }
-        if (received !== reference.declaredSize) {
+        if (
+          (reference.declaredSize !== undefined && received !== reference.declaredSize) ||
+          (response.contentLength !== null && received !== response.contentLength)
+        ) {
           throw new WorkspaceResourceError(
             "WORKSPACE_RESOURCE_INVALID",
             "Native file size mismatch",
           );
         }
-        validateMimeSignature(reference.mimeType, Buffer.concat(chunks, received));
+        validateMimeSignature(mimeType, Buffer.concat(chunks, received));
         await handle.sync();
       } finally {
         await handle.close();
@@ -212,14 +240,26 @@ export class WorkspaceTransferService {
       await rename(partial, target);
       await this.syncRoot();
       if (
-        !this.dependencies.repository.markReady(reserved.record.id, received, sha256, this.now())
+        !this.dependencies.repository.markReady(
+          reserved.record.id,
+          received,
+          sha256,
+          this.now(),
+          mimeType,
+        )
       ) {
         throw new Error("Workspace transfer reservation expired before publication");
       }
-      return this.handle(reserved.token, reserved.record, sha256);
+      return this.handle(
+        reserved.token,
+        { ...reserved.record, declaredSize: received, mimeType },
+        sha256,
+      );
     } catch (error) {
       await this.discard(reserved.record);
       throw error;
+    } finally {
+      response?.cancel?.();
     }
   }
 
@@ -446,7 +486,11 @@ export class WorkspaceTransferService {
         "Invalid native file identifier",
       );
     }
-    this.validateFileMetadata(reference.fileName, reference.mimeType, reference.declaredSize);
+    this.validateFileMetadata(
+      reference.fileName ?? "attachment.bin",
+      reference.mimeType ?? "application/octet-stream",
+      reference.declaredSize ?? 0,
+    );
   }
 
   private validateFileMetadata(fileName: string, mimeType: string, size: number): void {
@@ -460,7 +504,8 @@ export class WorkspaceTransferService {
       !supportedWorkspaceTransferMime(mimeType) ||
       !Number.isSafeInteger(size) ||
       size < 0 ||
-      size > (this.dependencies.policy().maxTransferFileBytes ?? 4 * 1024 * 1024)
+      size >
+        Math.min(this.dependencies.policy().maxTransferFileBytes ?? MAX_FILE_BYTES, MAX_FILE_BYTES)
     ) {
       throw new WorkspaceResourceError("WORKSPACE_RESOURCE_INVALID", "Invalid transfer metadata");
     }

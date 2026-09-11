@@ -858,6 +858,9 @@ describe("durable persistent workspace lifecycle", () => {
         code: "WORKSPACE_POLICY_LIMIT",
       });
       expect(value.provider.createCalls).toHaveBeenCalledTimes(1);
+      expect(value.tokenCalls).toHaveBeenCalledTimes(1);
+      expect(value.provider.healthCalls).toHaveBeenCalledTimes(1);
+      expect(value.provider.machineCalls).toHaveBeenCalledTimes(1);
 
       value.repository.setControl({
         scope: "global",

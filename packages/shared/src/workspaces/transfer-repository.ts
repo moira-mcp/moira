@@ -89,14 +89,21 @@ export class WorkspaceTransferRepository {
       .immediate();
   }
 
-  markReady(id: string, observedSize: number, sha256: string, now: number): boolean {
+  markReady(
+    id: string,
+    observedSize: number,
+    sha256: string,
+    now: number,
+    mimeType?: string,
+  ): boolean {
     return (
       this.sqlite
         .prepare(
-          `UPDATE workspaceTransfer SET state = 'ready', declaredSize = ?, observedSize = ?, sha256 = ?,
+          `UPDATE workspaceTransfer SET state = 'ready', declaredSize = ?, observedSize = ?, sha256 = ?, mimeType = COALESCE(?, mimeType),
            updatedAt = ? WHERE id = ? AND state = 'reserved' AND declaredSize >= ? AND expiresAt > ?`,
         )
-        .run(observedSize, observedSize, sha256, now, id, observedSize, now).changes === 1
+        .run(observedSize, observedSize, sha256, mimeType ?? null, now, id, observedSize, now)
+        .changes === 1
     );
   }
 

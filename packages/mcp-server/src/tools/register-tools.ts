@@ -23,6 +23,7 @@ export function registerTools(
       {
         description: resolveToolDescription(definition, context),
         inputSchema: wrapToolSchemaWithAutoparse(definition.schema),
+        ...(definition._meta ? { _meta: definition._meta } : {}),
       },
       async (params: unknown) => {
         try {
@@ -45,6 +46,7 @@ export function registerTools(
       name: definition.name,
       description: resolveToolDescription(definition, context),
       inputSchema: getToolJsonSchema(definition),
+      ...(definition._meta ? { _meta: definition._meta } : {}),
     })),
   }));
 }

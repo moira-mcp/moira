@@ -8,9 +8,9 @@ and different authorized clients may reuse the same workspace.
 
 GitHub authorization belongs to the authenticated website. Agents do not
 receive provider credentials, OAuth operations, SSH configuration or lifecycle
-capabilities. The current public runtime exposes the website GitHub connection only.
-Workspace lifecycle, direct-operation and reconciliation services are internal; no
-MCP workspace tools or website workspace-management endpoints are registered.
+capabilities. Agents reach workspaces only through the authenticated MCP
+`workspace_*` tools described below; the website owns the GitHub connection, and
+website workspace-management endpoints are not registered.
 
 ## Component boundary
 
@@ -42,6 +42,13 @@ MCP workspace tools or website workspace-management endpoints are registered.
 - `packages/web-backend/src/routes/workspace-connections.ts` and
   `packages/web-frontend/src/pages/settings/GitHubWorkspaceSettings.tsx` own the
   authenticated website authorization boundary.
+- `packages/mcp-server/src/tools/manage-workspaces.ts` is the agent-facing
+  presentation adapter: it takes the tenant from the MCP request context, projects
+  sanitized results and maps domain failures to bounded tool errors. Schemas,
+  descriptions, examples and native-file metadata live in the typed registry
+  (`tool-schemas.ts`, `tool-definitions.ts`). The adapter composes the exported
+  `@mcp-moira/web-backend/services` getters and holds no lifecycle, quota,
+  credential or byte authority of its own.
 
 Every internal resource or operation lookup supplies the authenticated Moira
 user ID and a workspace or operation ID. Ownership is resolved from SQLite;
@@ -206,9 +213,70 @@ is discarded immediately.
 Outbound download uses the rate-limited
 `/api/workspaces/transfers/:token` capability route. It sends an attachment with
 `no-store`, `noindex`, `nosniff` and no-referrer controls and consumes the capability
-after complete or interrupted delivery. The raw capability is redacted from request
-logs. This internal route does not expose an MCP `resource_link`; public workspace tools
-are not registered.
+after complete or interrupted delivery. The raw capability is redacted from application
+logs, and both Nginx variants proxy this prefix to the MCP process unbuffered with
+access and error logging disabled. `workspace_download` returns the capability to the
+agent as an MCP `resource_link`; its structured result carries name, MIME type, size,
+digest and expiry but not the URL.
+
+## MCP tools
+
+The authenticated MCP catalog exposes the workspace surface as separate tools:
+`workspace_list`, `workspace_create`, `workspace_get`, `workspace_start`,
+`workspace_stop`, `workspace_delete`, `workspace_exec`, `workspace_stat`,
+`workspace_search`, `workspace_read`, `workspace_write`, `workspace_apply_patch`,
+`workspace_upload` and `workspace_download`. The public tools reference renders their
+schemas from the typed registry. Adding or changing any of them changes
+`MCP_TOOLS_REVISION`, so a client holding an older catalog receives the ordinary
+HTTP 426 reconnect contract.
+
+Every tool derives the user from the MCP request context and addresses a persistent
+resource by `workspace_id`; no tool accepts a user, chat, session, OAuth, provider
+token, SSH or capability field, and strict schemas reject unknown fields before any
+service call. `workspace_list` returns the sanitized connection readiness (with the
+same-origin Settings URL), approved repository targets and the user's workspace
+summaries; it is the discovery path for `repository_id` and reusable `workspace_id`.
+`workspace_get` returns one owned summary; an unknown or foreign ID returns the
+generic `WORKSPACE_NOT_FOUND` result. Summaries omit connection and authorization
+generations, external owner/billing IDs, operation markers, provider resource names,
+claims and capabilities.
+
+`workspace_stop` returns `data_preserved: true`. `workspace_delete` requires
+`confirm_delete: true` and the caller's current `expected_generation`, so a stale call
+cannot remove a changed workspace, and returns `data_preserved: false`.
+
+Execution and file tools return a sanitized operation envelope (`operation_id`,
+`kind`, `state`, bounded byte counts, `exit_code`, deadline and result expiry) plus the
+action result. Failed, cancelled and timed-out commands and rejected file edits are
+returned as tool errors (`isError: true`) that keep the operation identity and any
+bounded output. A pending or `reconcile_pending` envelope is not a success: calling
+the same tool again with only `workspace_id` and `operation_id` reconciles that
+operation without dispatching a second command, write, upload or download.
+
+`workspace_exec` accepts argv as data, a repository-relative `cwd`,
+`timeout_seconds`, optional per-stream output limits and exactly one optional stdin
+form: `stdin_text` (UTF-8) or `stdin_file`, a native ChatGPT file reference. The
+registry publishes `_meta["openai/fileParams"]` for `stdin_file` and for
+`workspace_upload.file`; inside a reference only `file_id` and `download_url` are
+required, while `file_name`, `mime_type` and `size_bytes` are optional. Native input
+goes directly through the one-call native execution path and is never staged through
+the public upload tool; neither the file ID nor the temporary URL is echoed back.
+
+`workspace_read` returns UTF-8 text with offset, total size and SHA-256. A range that
+is not valid UTF-8 returns `WORKSPACE_BINARY_READ_REQUIRES_DOWNLOAD` instead of
+base64. `workspace_write` replaces a file atomically from UTF-8 text under an explicit
+existence precondition with optional size/digest guards; `workspace_apply_patch` takes
+ordered byte-offset edits with UTF-8 replacement text and returns old/new versions and
+the content-free summary. `workspace_download` returns the private transfer as a
+`resource_link` (see the previous section).
+
+Known connection, workspace, state, policy and provider failures become bounded tool
+errors with `code`, safe `message` and `retryable`; setup and authorization failures
+add only the same-origin `settings_url`. Unexpected failures return the generic
+`INTERNAL_ERROR` to the agent and are recorded server-side with the tool name and the
+request context's opaque IDs, never with agent input. The MCP process logs only the
+tool name and UUID-validated workspace/operation IDs for these tools; paths, queries,
+patches, argv, text and native references do not enter request context.
 
 ## Trust and isolation
 
@@ -373,6 +441,8 @@ docker compose config --quiet --no-env-resolution --no-path-resolution --no-inte
 ```
 
 `tests/COVERAGE-MAP.md` maps the focused connection, resource, operation,
-migration, connector, egress and packaged-isolation suites. Live GitHub App user
+migration, connector, egress, packaged-isolation and MCP tool suites, including the
+ChatGPT-compatible client scenario over real services and the HTTP contract against
+the local container (`npm run test:mcp-tools`). Live GitHub App user
 credentials, an actual personal Codespace and ChatGPT are separate external
 compatibility gates; deterministic tests do not establish them.

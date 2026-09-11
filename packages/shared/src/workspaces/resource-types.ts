@@ -148,6 +148,9 @@ export type WorkspaceResourceErrorCode =
   | "WORKSPACE_PROVIDER_DISABLED"
   | "WORKSPACE_PROVIDER_UNAVAILABLE"
   | "WORKSPACE_POLICY_LIMIT"
+  | "WORKSPACE_OPERATION_BUSY"
+  | "WORKSPACE_AUTHORIZATION_REQUIRED"
+  | "WORKSPACE_RESULT_EXPIRED"
   | "WORKSPACE_CREATE_REJECTED"
   | "WORKSPACE_CREATE_PENDING"
   | "WORKSPACE_NOT_RUNNING"
@@ -224,7 +227,11 @@ export interface WorkspaceOperationResponse {
   result: WorkspaceOperationResult | null;
 }
 
-export interface WorkspaceOperationTransport {
+export interface WorkspaceTransportAvailability {
+  health(): Promise<{ ok: boolean; reason: string | null }>;
+}
+
+export interface WorkspaceOperationTransport extends WorkspaceTransportAvailability {
   execute(
     credential: string,
     workspace: WorkspaceResourceRecord,
@@ -350,7 +357,7 @@ export interface WorkspaceFileOperationResponse {
   result: WorkspaceFileResult | null;
 }
 
-export interface WorkspaceFileTransport {
+export interface WorkspaceFileTransport extends WorkspaceTransportAvailability {
   executeFile(
     credential: string,
     workspace: WorkspaceResourceRecord,
@@ -367,9 +374,9 @@ export interface WorkspaceFileTransport {
 export interface WorkspaceNativeFileReference {
   fileId: string;
   downloadUrl: string;
-  fileName: string;
-  mimeType: string;
-  declaredSize: number;
+  fileName?: string;
+  mimeType?: string;
+  declaredSize?: number;
 }
 
 export interface WorkspaceTransferRecord {

@@ -97,10 +97,10 @@ RUN --mount=type=cache,id=astro-docs-${BUILD_ID},target=/app/packages/docs/node_
 # ===================================
 FROM base AS backend-build
 
+COPY packages/web-backend/ ./packages/web-backend/
 COPY packages/mcp-server/ ./packages/mcp-server/
 RUN npx tsc --noEmit --project packages/mcp-server/tsconfig.json
 
-COPY packages/web-backend/ ./packages/web-backend/
 RUN npx tsc --noEmit --project packages/web-backend/tsconfig.json
 
 # ===================================
