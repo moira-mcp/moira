@@ -623,18 +623,18 @@ const workspaceExecStartSchema = z
   })
   .strict();
 
-export const workspaceExecSchema = z.union([
+export const workspaceExecRequestSchema = z.union([
   workspaceExecStartSchema.extend({ stdin_text: z.string().optional() }),
   workspaceExecStartSchema.extend({ stdin_file: workspaceNativeFileSchema }),
   workspaceOperationResumeSchema,
 ]);
 
-export const workspaceStatSchema = z.union([
+export const workspaceStatRequestSchema = z.union([
   z.object({ workspace_id: workspaceIdSchema, path: workspacePathSchema }).strict(),
   workspaceOperationResumeSchema,
 ]);
 
-export const workspaceSearchSchema = z.union([
+export const workspaceSearchRequestSchema = z.union([
   z
     .object({
       workspace_id: workspaceIdSchema,
@@ -652,7 +652,7 @@ export const workspaceSearchSchema = z.union([
   workspaceOperationResumeSchema,
 ]);
 
-export const workspaceReadSchema = z.union([
+export const workspaceReadRequestSchema = z.union([
   z
     .object({
       workspace_id: workspaceIdSchema,
@@ -668,7 +668,7 @@ export const workspaceReadSchema = z.union([
   workspaceOperationResumeSchema,
 ]);
 
-export const workspaceWriteSchema = z.union([
+export const workspaceWriteRequestSchema = z.union([
   z
     .object({
       workspace_id: workspaceIdSchema,
@@ -680,7 +680,7 @@ export const workspaceWriteSchema = z.union([
   workspaceOperationResumeSchema,
 ]);
 
-export const workspaceApplyPatchSchema = z.union([
+export const workspaceApplyPatchRequestSchema = z.union([
   z
     .object({
       workspace_id: workspaceIdSchema,
@@ -712,7 +712,7 @@ export const workspaceApplyPatchSchema = z.union([
   workspaceOperationResumeSchema,
 ]);
 
-export const workspaceUploadSchema = z.union([
+export const workspaceUploadRequestSchema = z.union([
   z
     .object({
       workspace_id: workspaceIdSchema,
@@ -738,10 +738,41 @@ const workspaceDownloadStartSchema = z
   })
   .strict();
 
-export const workspaceDownloadSchema = z.union([
+export const workspaceDownloadRequestSchema = z.union([
   workspaceDownloadStartSchema,
   workspaceOperationResumeSchema.extend({
     file_name: workspaceFileNameSchema,
     mime_type: workspaceMimeTypeSchema,
   }),
 ]);
+
+/**
+ * Published root-object projection of a workspace request union. MCP clients that
+ * cannot read a root `anyOf` discover one flat object: a field is required only when
+ * every form requires it, and the strict request union is applied again at dispatch.
+ */
+function publishedWorkspaceSchema<Options extends [z.AnyZodObject, ...z.AnyZodObject[]]>(
+  request: z.ZodUnion<Options>,
+) {
+  const shape: Record<string, z.ZodTypeAny> = {};
+  const options = request.options as z.AnyZodObject[];
+  for (const option of options) {
+    for (const [key, field] of Object.entries(option.shape as Record<string, z.ZodTypeAny>)) {
+      if (shape[key]) continue;
+      const everywhere = options.every(
+        (candidate) => candidate.shape[key] && !(candidate.shape[key] as z.ZodTypeAny).isOptional(),
+      );
+      shape[key] = everywhere ? field : field.optional();
+    }
+  }
+  return z.object(shape).strict();
+}
+
+export const workspaceExecSchema = publishedWorkspaceSchema(workspaceExecRequestSchema);
+export const workspaceStatSchema = publishedWorkspaceSchema(workspaceStatRequestSchema);
+export const workspaceSearchSchema = publishedWorkspaceSchema(workspaceSearchRequestSchema);
+export const workspaceReadSchema = publishedWorkspaceSchema(workspaceReadRequestSchema);
+export const workspaceWriteSchema = publishedWorkspaceSchema(workspaceWriteRequestSchema);
+export const workspaceApplyPatchSchema = publishedWorkspaceSchema(workspaceApplyPatchRequestSchema);
+export const workspaceUploadSchema = publishedWorkspaceSchema(workspaceUploadRequestSchema);
+export const workspaceDownloadSchema = publishedWorkspaceSchema(workspaceDownloadRequestSchema);

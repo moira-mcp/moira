@@ -18,24 +18,24 @@ import {
   type WorkspaceResourceRecord,
   type WorkspaceResourceService,
 } from "@mcp-moira/shared";
-import type { z } from "zod";
+import { z } from "zod";
 import { getUserContext } from "../core/request-context.js";
 import {
-  workspaceApplyPatchSchema,
+  workspaceApplyPatchRequestSchema,
   workspaceCreateSchema,
   workspaceDeleteSchema,
-  workspaceDownloadSchema,
-  workspaceExecSchema,
+  workspaceDownloadRequestSchema,
+  workspaceExecRequestSchema,
   workspaceGetSchema,
   workspaceListSchema,
   workspaceNativeFileSchema,
-  workspaceReadSchema,
-  workspaceSearchSchema,
+  workspaceReadRequestSchema,
+  workspaceSearchRequestSchema,
   workspaceStartSchema,
-  workspaceStatSchema,
+  workspaceStatRequestSchema,
   workspaceStopSchema,
-  workspaceUploadSchema,
-  workspaceWriteSchema,
+  workspaceUploadRequestSchema,
+  workspaceWriteRequestSchema,
   workspaceExpectedSchema,
 } from "./tool-schemas.js";
 
@@ -78,15 +78,45 @@ type WorkspaceToolParams = {
   workspace_start: z.infer<typeof workspaceStartSchema>;
   workspace_stop: z.infer<typeof workspaceStopSchema>;
   workspace_delete: z.infer<typeof workspaceDeleteSchema>;
-  workspace_exec: z.infer<typeof workspaceExecSchema>;
-  workspace_stat: z.infer<typeof workspaceStatSchema>;
-  workspace_search: z.infer<typeof workspaceSearchSchema>;
-  workspace_read: z.infer<typeof workspaceReadSchema>;
-  workspace_write: z.infer<typeof workspaceWriteSchema>;
-  workspace_apply_patch: z.infer<typeof workspaceApplyPatchSchema>;
-  workspace_upload: z.infer<typeof workspaceUploadSchema>;
-  workspace_download: z.infer<typeof workspaceDownloadSchema>;
+  workspace_exec: z.infer<typeof workspaceExecRequestSchema>;
+  workspace_stat: z.infer<typeof workspaceStatRequestSchema>;
+  workspace_search: z.infer<typeof workspaceSearchRequestSchema>;
+  workspace_read: z.infer<typeof workspaceReadRequestSchema>;
+  workspace_write: z.infer<typeof workspaceWriteRequestSchema>;
+  workspace_apply_patch: z.infer<typeof workspaceApplyPatchRequestSchema>;
+  workspace_upload: z.infer<typeof workspaceUploadRequestSchema>;
+  workspace_download: z.infer<typeof workspaceDownloadRequestSchema>;
 };
+
+/**
+ * Strict per-tool request contracts applied after the SDK validated the flat published
+ * object: exactly one stdin form, a resume call carries only its identity, and a download
+ * resume still names its bounded output metadata.
+ */
+const WORKSPACE_REQUEST_SCHEMAS: { [Name in WorkspaceToolName]: z.ZodTypeAny } = {
+  workspace_create: workspaceCreateSchema,
+  workspace_list: workspaceListSchema,
+  workspace_get: workspaceGetSchema,
+  workspace_start: workspaceStartSchema,
+  workspace_stop: workspaceStopSchema,
+  workspace_delete: workspaceDeleteSchema,
+  workspace_exec: workspaceExecRequestSchema,
+  workspace_stat: workspaceStatRequestSchema,
+  workspace_search: workspaceSearchRequestSchema,
+  workspace_read: workspaceReadRequestSchema,
+  workspace_write: workspaceWriteRequestSchema,
+  workspace_apply_patch: workspaceApplyPatchRequestSchema,
+  workspace_upload: workspaceUploadRequestSchema,
+  workspace_download: workspaceDownloadRequestSchema,
+};
+
+/** Narrow published workspace input to the exact request form; rejects mixed or partial forms. */
+export function parseWorkspaceToolParams<Name extends WorkspaceToolName>(
+  name: Name,
+  params: unknown,
+): WorkspaceToolParams[Name] {
+  return WORKSPACE_REQUEST_SCHEMAS[name].parse(params) as WorkspaceToolParams[Name];
+}
 
 type WorkspaceNewToolParams<Name extends WorkspaceToolName> = Exclude<
   WorkspaceToolParams[Name],
@@ -734,8 +764,13 @@ export async function executeWorkspaceTool<Name extends WorkspaceToolName>(
 
 export async function manageWorkspaceTool<Name extends WorkspaceToolName>(
   name: Name,
-  params: WorkspaceToolParams[Name],
+  params: unknown,
 ): Promise<CallToolResult> {
   const { userId } = getUserContext();
-  return executeWorkspaceTool(name, params, userId, await workspaceToolServicesLoader());
+  return executeWorkspaceTool(
+    name,
+    parseWorkspaceToolParams(name, params),
+    userId,
+    await workspaceToolServicesLoader(),
+  );
 }

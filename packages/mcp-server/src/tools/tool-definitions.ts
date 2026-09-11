@@ -694,29 +694,19 @@ export function getToolJsonSchema(definition: Pick<ToolDefinition, "schema" | "_
     pipeStrategy: "input",
   });
   const fileParams = definition._meta?.["openai/fileParams"];
-  if (Array.isArray(fileParams) && !("properties" in schema)) {
-    const union = schema as {
-      anyOf?: Array<{ properties?: Record<string, unknown> }>;
-      oneOf?: Array<{ properties?: Record<string, unknown> }>;
-    };
-    const branches = union.anyOf ?? union.oneOf ?? [];
-    const properties: Record<string, unknown> = {};
+  if (Array.isArray(fileParams)) {
+    // Native-file discovery reads top-level properties of the published root object.
+    const properties =
+      "properties" in schema
+        ? (schema.properties as Record<string, unknown> | undefined)
+        : undefined;
     for (const field of fileParams) {
       if (typeof field !== "string") throw new Error("File parameter names must be strings");
-      const candidates = branches.flatMap((branch) =>
-        branch.properties?.[field] ? [branch.properties[field]] : [],
-      );
-      if (
-        !candidates.length ||
-        candidates.some((candidate) => JSON.stringify(candidate) !== JSON.stringify(candidates[0]))
-      ) {
-        throw new Error(`File parameter has no consistent object schema: ${field}`);
+      const candidate = properties?.[field];
+      if (!candidate || typeof candidate !== "object" || !("properties" in candidate)) {
+        throw new Error(`File parameter has no top-level object schema: ${field}`);
       }
-      properties[field] = candidates[0];
     }
-    // Native-file discovery reads top-level properties. Keep the original closed
-    // branches as constraints, so publishing file fields does not permit mixed calls.
-    return { ...schema, type: "object", properties };
   }
   return "type" in schema ? schema : { ...schema, type: "object" };
 }

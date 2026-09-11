@@ -181,7 +181,9 @@ publishes `tools/list` from the same typed projection. Every published tool sche
 which keeps the complete catalog discoverable in MCP clients that do not support a root
 `anyOf`/`oneOf`. A handler may apply a narrower action-specific schema after SDK validation; `start`
 uses a flat public object schema and then validates the exact `prepare` or `execute` branch with its
-strict discriminated request schema. Validation failures at either boundary are returned as MCP
+strict discriminated request schema, and the `workspace_*` execution and file tools publish one flat
+object per tool (only the shared identity required) and apply their strict request union at dispatch
+so a mixed stdin form or a partial resume call is rejected. Validation failures at either boundary are returned as MCP
 errors. Server bootstrap does not repeat names, schemas, actions, or descriptions. Tool descriptions
 are not stored or overridden in `globalSetting`; database-backed system prompts remain a separate MCP
 `instructions` channel.

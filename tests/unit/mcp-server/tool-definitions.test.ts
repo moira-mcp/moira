@@ -17,6 +17,10 @@ import {
   resolveToolDescription,
   renderToolReference,
 } from "../../../packages/mcp-server/src/tools/tool-definitions.js";
+import {
+  workspaceDownloadRequestSchema,
+  workspaceExecRequestSchema,
+} from "../../../packages/mcp-server/src/tools/tool-schemas.js";
 import { registerTools } from "../../../packages/mcp-server/src/tools/register-tools.js";
 import { TOOL_BINDINGS } from "../../../packages/mcp-server/src/tools/tool-bindings.js";
 
@@ -136,8 +140,28 @@ describe("MCP tool definitions", () => {
         expected_generation: 2,
       }).success,
     ).toBe(false);
+    // The published exec schema is one flat root object: every form's fields are visible,
+    // only the shared identity is required, and the strict request union decides the form.
+    const publishedExec = getToolJsonSchema(definition("workspace_exec")) as {
+      type: string;
+      required: string[];
+      properties: Record<string, unknown>;
+    };
+    expect(publishedExec.type).toBe("object");
+    expect(publishedExec.required).toEqual(["workspace_id"]);
+    expect(Object.keys(publishedExec.properties).sort()).toEqual([
+      "argv",
+      "cwd",
+      "max_stderr_bytes",
+      "max_stdout_bytes",
+      "operation_id",
+      "stdin_file",
+      "stdin_text",
+      "timeout_seconds",
+      "workspace_id",
+    ]);
     expect(
-      definition("workspace_exec").schema.safeParse({
+      workspaceExecRequestSchema.safeParse({
         workspace_id: "00000000-0000-4000-8000-000000000000",
         argv: ["node", "script.js"],
         timeout_seconds: 30,
@@ -150,7 +174,7 @@ describe("MCP tool definitions", () => {
       }).success,
     ).toBe(true);
     expect(
-      definition("workspace_exec").schema.safeParse({
+      workspaceExecRequestSchema.safeParse({
         workspace_id: "00000000-0000-4000-8000-000000000000",
         argv: ["node", "script.js"],
         timeout_seconds: 30,
@@ -162,31 +186,41 @@ describe("MCP tool definitions", () => {
       }).success,
     ).toBe(false);
     expect(
-      definition("workspace_exec").schema.safeParse({
+      workspaceExecRequestSchema.safeParse({
         workspace_id: "00000000-0000-4000-8000-000000000000",
         operation_id: "00000000-0000-4000-8000-000000000001",
         argv: ["npm", "test"],
         timeout_seconds: 30,
       }).success,
     ).toBe(false);
+    expect(
+      definition("workspace_exec").schema.safeParse({
+        workspace_id: "00000000-0000-4000-8000-000000000000",
+        chat_id: "c1",
+      }).success,
+    ).toBe(false);
   });
 
   it("requires bounded output metadata for download recovery and rejects mixing it with a new path", () => {
-    const download = TOOL_DEFINITIONS.find(
-      (definition) => definition.name === "workspace_download",
-    )!;
+    const download = workspaceDownloadRequestSchema;
     const resume = {
       workspace_id: "00000000-0000-4000-8000-000000000000",
       operation_id: "00000000-0000-4000-8000-000000000001",
       file_name: "result.bin",
       mime_type: "application/octet-stream",
     };
-    expect(download.schema.safeParse(resume).success).toBe(true);
-    expect(download.schema.safeParse({ ...resume, path: "new.bin" }).success).toBe(false);
-    expect(download.schema.safeParse({ ...resume, max_bytes: 0 }).success).toBe(false);
-    expect(download.schema.safeParse({ ...resume, file_name: "../result.bin" }).success).toBe(
-      false,
-    );
+    expect(download.safeParse(resume).success).toBe(true);
+    expect(download.safeParse({ ...resume, path: "new.bin" }).success).toBe(false);
+    expect(download.safeParse({ ...resume, max_bytes: 0 }).success).toBe(false);
+    expect(download.safeParse({ ...resume, file_name: "../result.bin" }).success).toBe(false);
+    const publishedDownload = getToolJsonSchema(
+      TOOL_DEFINITIONS.find((definition) => definition.name === "workspace_download")!,
+    ) as { required: string[] };
+    expect(publishedDownload.required.slice().sort()).toEqual([
+      "file_name",
+      "mime_type",
+      "workspace_id",
+    ]);
   });
 
   it("publishes native file metadata and optional file details at the top-level MCP boundary", async () => {

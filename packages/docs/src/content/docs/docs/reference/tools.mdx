@@ -54,7 +54,10 @@ All tools publish a root-object input schema so MCP clients can discover the com
 public `start` schema therefore exposes `action` directly and lists the fields accepted by either
 phase. Runtime validation still enforces the selected phase exactly: `prepare` requires `workflowId`
 and `parentExecutionId`, while `execute` requires `startAttemptId`; fields belonging only to the other
-phase and unknown fields are rejected as MCP errors.
+phase and unknown fields are rejected as MCP errors. The `workspace_*` execution and file tools follow
+the same pattern: one flat object per tool with only `workspace_id` required, while dispatch enforces
+the exact form (a new request, or a resume carrying only `workspace_id` and `operation_id`; exactly one
+of `stdin_text` or `stdin_file` for `workspace_exec`).
 
 `start({ action: "prepare" })` resolves and validates an authorized workflow, binds the workflow version and request options, and returns a Start attempt ID that expires after 15 minutes without creating an execution. `parentExecutionId` links a child to an existing parent; use `"none"` for a standalone execution. `skipNotificationCheck` records a policy to bypass only optional ordinary-notification preflight during execute. `skipTelegramCheck` remains a deprecated alias with the same behavior, and conflicting values are rejected.
 

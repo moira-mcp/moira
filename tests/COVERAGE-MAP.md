@@ -444,7 +444,7 @@ level headings classify the tracked test paths listed beneath them.
 
 **unit**
 
-- `tests/unit/mcp-server/input-parser-simple.test.ts`
+- `tests/unit/mcp-server/input-parser-simple.test.ts` — plus strict tool objects staying strict at SDK registration (unknown fields rejected, nested auto-parse kept)
 
 **integration**
 
