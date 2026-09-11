@@ -25,6 +25,7 @@ function progress(active = 1): ExecutionProgress {
     route: [],
     variables: [],
     routeRecorded: true,
+    cursor: null,
     source: "trace",
     nodes: [0, 1, 2].map((index) => ({
       id: `n${index}`,

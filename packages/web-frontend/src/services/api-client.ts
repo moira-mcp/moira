@@ -1419,6 +1419,7 @@ export class MoiraApiClient {
     currentNodeId: string | null;
     waitingForInputNodeId: string | null;
     revision: number;
+    metadataRevisions?: { parent: string; context: string; reminders: string };
     context: {
       variables: Record<string, unknown>;
       nodeStates: Record<string, unknown>;
@@ -1444,6 +1445,7 @@ export class MoiraApiClient {
           currentNodeId: string | null;
           waitingForInputNodeId: string | null;
           revision: number;
+          metadataRevisions?: { parent: string; context: string; reminders: string };
           context: {
             variables: Record<string, unknown>;
             nodeStates: Record<string, unknown>;
@@ -1467,10 +1469,18 @@ export class MoiraApiClient {
     }
   }
 
-  async getExecutionProgress(executionId: string): Promise<ExecutionProgress | null> {
+  /**
+   * The run projection of an execution; `at` (a visit sequence number) projects the run as it
+   * stood at that visit. Null when the workflow has no process view.
+   */
+  async getExecutionProgress(
+    executionId: string,
+    at?: number | null,
+  ): Promise<ExecutionProgress | null> {
     try {
       const response = await this.client.get<ApiResponse<ExecutionProgress>>(
         `/executions/${executionId}/progress`,
+        { params: at === undefined || at === null ? undefined : { at } },
       );
       return response.data.data ?? null;
     } catch (error) {
@@ -1483,6 +1493,38 @@ export class MoiraApiClient {
     }
   }
 
+  /**
+   * Answer the step a running execution waits for, as its owner or an administrator. The server
+   * validates the input against the step's schema and refuses a stale revision; the interceptor
+   * turns a refusal into an ApiClientError carrying the server's message and HTTP status.
+   */
+  async answerExecutionStep(
+    executionId: string,
+    input: Record<string, unknown>,
+    expectedRevision: number,
+  ): Promise<{
+    executionId: string;
+    revision: number;
+    status: string;
+    currentNodeId: string | null;
+    waitingForInputNodeId: string | null;
+    progress: ExecutionProgress | null;
+  }> {
+    type AnswerResponse = {
+      executionId: string;
+      revision: number;
+      status: string;
+      currentNodeId: string | null;
+      waitingForInputNodeId: string | null;
+      progress: ExecutionProgress | null;
+    };
+    const response = await this.client.post<ApiResponse<AnswerResponse>>(
+      `/executions/${executionId}/answer`,
+      { input, expectedRevision },
+    );
+    return response.data.data!;
+  }
+
   async getExecutionVariables(executionId: string): Promise<ExecutionVariableAccess> {
     const response = await this.client.get<ApiResponse<ExecutionVariableAccess>>(
       `/executions/${executionId}/variables`,
@@ -1493,19 +1535,21 @@ export class MoiraApiClient {
   /**
    * Update one path inside an owner execution's policy-enabled declared variable without
    * overwriting siblings. The server enforces current waiting-node policy, complete top-level
-   * registry schema and expected revision. Path is relative to `variables`.
+   * registry schema, the expected step revision and the expected context revision (from the
+   * execution detail's `metadataRevisions.context`). Path is relative to `variables`.
    */
   async updateExecutionContextPath(
     executionId: string,
     variablePath: Array<string | number>,
     value: unknown,
     expectedRevision: number,
+    expectedContextRevision: string,
   ): Promise<boolean> {
     try {
       type UpdateContextResponse = { updated: boolean };
       const response = await this.client.put<ApiResponse<UpdateContextResponse>>(
         `/executions/${executionId}/context`,
-        { variablePath, value, expectedRevision },
+        { variablePath, value, expectedRevision, expectedContextRevision },
       );
       return response.data.data!.updated;
     } catch (error) {

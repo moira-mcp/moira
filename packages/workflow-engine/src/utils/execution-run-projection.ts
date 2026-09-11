@@ -3,7 +3,10 @@
  * workflow. Block statuses, pass counts, the ordered route with loop markers and the variables
  * with their history all come from the visit log; nothing is inferred from block order. An
  * execution without a recorded route reports only the block it is on as active or waiting, every
- * other block pending, and `routeRecorded: false`. Pure: never persists or mutates its inputs.
+ * other block pending, and `routeRecorded: false`. A cursor (`at`, a visit sequence number)
+ * projects the run as it stood when that visit was the last one: the route is cut there, the
+ * execution is treated as running on that visit's node, and variables carry the last value
+ * written up to it. Pure: never persists or mutates its inputs.
  */
 
 import type { WorkflowGraph } from "../interfaces/core-interfaces.js";
@@ -255,12 +258,15 @@ export function projectRoute(
 /**
  * Every global variable and node-local output with its current value (from the execution
  * context) and its history (from the route). Registry defaults appear for variables the context
- * has not set yet.
+ * has not set yet. Under a cursor the current value is the last one the truncated route wrote,
+ * or the registry default when the route wrote it only later; a value the route never wrote is
+ * the context's, since nothing changed it.
  */
 export function projectVariables(
   workflow: WorkflowGraph,
   execution: WorkflowExecution,
   visits: readonly ExecutionVisit[],
+  cursor: number | null = null,
 ): ExecutionVariableState[] {
   const nodeIds = new Set(workflow.nodes.map((node) => node.id));
   const states = new Map<string, ExecutionVariableState>();
@@ -290,9 +296,14 @@ export function projectVariables(
     }
     ensure(name).current = value;
   }
+  const writtenLater = new Set<string>();
   for (const visit of visits) {
     for (const [name, value] of Object.entries(visit.changes)) {
       const state = ensure(name);
+      if (cursor !== null && visit.seq > cursor) {
+        writtenLater.add(name);
+        continue;
+      }
       state.history.push({
         seq: visit.seq,
         nodeId: visit.nodeId,
@@ -300,6 +311,15 @@ export function projectVariables(
         ...(visit.adjusted ? { adjusted: true } : {}),
       });
       state.adjusted = Boolean(visit.adjusted);
+      if (cursor !== null) state.current = value;
+    }
+  }
+  if (cursor !== null) {
+    for (const name of writtenLater) {
+      const state = states.get(name)!;
+      if (state.history.length > 0) continue;
+      state.current = workflow.variableRegistry?.[name]?.default;
+      state.adjusted = false;
     }
   }
   return [...states.values()].sort((a, b) =>
@@ -307,14 +327,48 @@ export function projectVariables(
   );
 }
 
+export interface ProjectExecutionRunOptions {
+  /**
+   * Route cursor: project the run as of this visit sequence number. A cursor at or beyond the
+   * last recorded visit projects the whole route, as if no cursor were given.
+   */
+  at?: number;
+}
+
+/**
+ * The execution as it stood when the visit at the cursor was the last one: the route cut there,
+ * the run still running on that visit's node, waiting there if the visit paused.
+ */
+function executionAtCursor(execution: WorkflowExecution, at: number): WorkflowExecution {
+  const visits = (execution.visits ?? []).filter((visit) => visit.seq <= at);
+  const last = [...visits].reverse().find((visit) => !visit.adjusted) ?? visits[visits.length - 1];
+  const open = last !== undefined && last.exitKey === null && Boolean(last.waited);
+  return {
+    ...execution,
+    status: "running",
+    currentNodeId: last?.nodeId ?? execution.currentNodeId,
+    waitingForInputNodeId: open ? last.nodeId : null,
+    visits,
+  };
+}
+
 /** Project an execution's recorded route onto its workflow's derived process. */
 export function projectExecutionRun(
   workflow: WorkflowGraph,
-  execution: WorkflowExecution,
+  source: WorkflowExecution,
+  options: ProjectExecutionRunOptions = {},
 ): ExecutionProgress | null {
   const definition = workflow.progress;
   const process = deriveProcess(workflow);
   if (!definition || !process) return null;
+
+  const recorded = source.visits ?? [];
+  const lastSeq = recorded.length > 0 ? recorded[recorded.length - 1].seq : -1;
+  const cursor =
+    options.at !== undefined && recorded.length > 0 && options.at < lastSeq
+      ? Math.max(0, options.at)
+      : null;
+  const execution = cursor === null ? source : executionAtCursor(source, cursor);
 
   const templateProcessor = new GraphTemplateProcessor();
   const registryDefaults = Object.fromEntries(
@@ -464,8 +518,9 @@ export function projectExecutionRun(
     diagnostics,
     process,
     route: projectRoute(process, visits),
-    variables: projectVariables(workflow, execution, visits),
+    variables: projectVariables(workflow, execution, visits, cursor),
     routeRecorded,
+    cursor,
     source: "trace",
   };
 }

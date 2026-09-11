@@ -43,8 +43,15 @@ frontend/src/
 │   ├── nodes/                   # React Flow node components
 │   │   └── CompactNode.tsx      # Unified compact node (~120x40px) for all types
 │   ├── execution/              # Execution display components
-│   │   ├── ExecutionInspector.tsx    # Unified inspector with DI (fetchExecution prop, editable flag)
+│   │   ├── ExecutionInspector.tsx    # Run page with DI (fetchExecution prop, editable/canAnswer flags)
+│   │   ├── ContextVariableEditor.tsx # Per-path context editor
 │   │   └── ExecutionErrorHistory.tsx # Error log with collapsible entries, error badges
+│   ├── run/                     # Run page: the execution as a process
+│   │   ├── LanesView.tsx / CanvasView.tsx / OutlineView.tsx / RouteView.tsx  # The four modes
+│   │   ├── BlockDetailPanel.tsx / VariablesPanel.tsx / StepList.tsx        # Panel tabs
+│   │   ├── RunCursor.tsx / Walkthrough.tsx / Guidance.tsx / status.tsx      # Cursor, guide, notes, status vocabulary
+│   │   ├── model.ts / route.ts / arcs.ts / layout.ts                        # Pure view helpers; ELK layout
+│   │   └── modes.ts / nodeTypeStyle.tsx
 │   └── workflow/                # Workflow management
 │       ├── WorkflowExplorer.tsx # Workflow list with FilterBar + DataListView + useDebounce
 │       ├── WorkflowGraph.tsx    # React Flow visualization with layout controls
@@ -202,7 +209,7 @@ Application routes:
 /admin/users (protected)           - User management (PageShell + DataListView + UserCard)
 /admin/users/:id (protected)       - User detail and security management
 /admin/executions (protected)      - Admin executions monitoring (PageShell + DataListView + ExecutionCard)
-/admin/executions/:id (protected)  - Admin execution inspector
+/admin/executions/:id (protected)  - Admin run page (same component as /executions/:id)
 /admin/audit-log (protected)       - Audit log viewer (PageShell + AuditLogCard + total-based pagination)
 /admin/settings (protected)        - Unified settings (Definitions, Values, Maintenance tabs)
 /admin/admin-settings (protected)  - Redirects to /admin/settings
@@ -363,9 +370,10 @@ Execution history at `/executions` with filtering, sorting, and pagination.
 
 Yellow alert banner displayed above the execution list when locked executions exist. Shows count ("N locked execution(s)") with individual items listing workflow name and lock duration. Items collapse to 3 by default with expand/collapse toggle. User page shows own locked executions; admin page shows all locked executions with user email. Component: `LockedExecutionsWidget.tsx`, props: `admin` (boolean), `refreshKey` (number).
 
-### ExecutionInspector Component
+### Run page (ExecutionInspector component)
 
-Unified execution detail component used by both user and admin views via dependency injection.
+The execution page shows one run as the process its workflow declares. One component serves the
+user and admin routes through dependency injection.
 
 **Routes:**
 
@@ -378,7 +386,8 @@ Unified execution detail component used by both user and admin views via depende
 interface ExecutionInspectorProps {
   executionId: string;
   fetchExecution: (id: string) => Promise<ExecutionData>;
-  editable?: boolean;
+  editable?: boolean; // context editing (per-path saves)
+  canAnswer?: boolean; // answering the waiting step; defaults to editable
   backRoute: string;
   showOwnerInfo?: boolean;
 }
@@ -386,41 +395,83 @@ interface ExecutionInspectorProps {
 
 **Dependency Injection:**
 
-- User view: `fetchExecution` → `apiClient.getExecution`, `editable` → true (context saved via `apiClient.updateExecutionContextPath`)
-- Admin view: `fetchExecution` → `apiClient.getAdminExecution`, `editable` omitted (read-only), `showOwnerInfo` → true
+- User view: `fetchExecution` → `apiClient.getExecution`, `editable` → true (context saved via
+  `apiClient.updateExecutionContextPath` with the detail's `metadataRevisions.context`)
+- Admin view: `fetchExecution` → `apiClient.getAdminExecution`, `editable` omitted (read-only
+  context), `canAnswer` → true, `showOwnerInfo` → true
+
+**Data:** the execution detail, the workflow definition (step text and input schemas for the
+block panel, editable variable list for the context editor) and the run projection from
+`apiClient.getExecutionProgress(id, at?)`. Every run fact — block statuses, pass counts, the
+route, the variables — comes from the projection; the page derives none of it. When a route cursor
+is set the page keeps the whole-run projection (for the scrubber) and fetches the projection at
+the cursor for the modes.
+
+**URL state:** `view` (`lanes | canvas | outline | route`, default lanes), `block` (selected
+block), `at` (route cursor, a visit sequence number), `guide` (walkthrough step). Unknown values
+fall back to defaults; navigation compares against the live URL so a duplicate change pushes no
+history entry.
 
 **Layout:**
 
-- Compact toolbar (single line): back button, execution ID (copy), workflow name, status badge, current node (clickable), action buttons
-- Left panel (50%): Workflow graph visualization with lazy loading via React.lazy + Suspense
-- Right panel (50%): Tabbed panel with Context, Errors, and Steps tabs
+- Compact toolbar (single line): back button, execution ID (copy), workflow name, status badge,
+  current node (focuses the node graph), owner info (admin), lock button (user view, running
+  executions), fullscreen button (context tab), refresh, error badge.
+- With a process view: a header row with the mode tabs, the route cursor (when a route is
+  recorded), the status legend and the "Explain this page" button; the mode fills the remaining
+  width and height. Without one (a workflow without `progress`): the technical node graph fills
+  the main area.
+- Panel (beside the run on `lg` and wider, stacked under it below, capped at 38 vh on a phone) with
+  tabs: **Block** (default when a process view exists), **Variables**, **Context**, **Errors**,
+  **Steps**, **Graph** (the technical node graph, present only with a process view) and **Locks**.
 
-**Toolbar Elements:**
+**Modes** (`components/run/`):
 
-- Back button with tooltip
-- Execution ID (8 chars, click to copy with visual feedback)
-- Workflow name with Tooltip for full ID
-- Status badge with icon (includes "🔒 Locked" badge when execution is locked)
-- Current node button (focuses graph on node via fitView)
-- Owner info (admin view only, truncated with Tooltip)
-- Lock button (user view only, visible when execution is "running" — opens lock dialog)
-- Fullscreen button (opens expanded context modal)
-- Refresh button
+- `LanesView` — task header (title, goal, facts), the rail of blocks in process order with the
+  current block pinned ("you are here"), pass-count badges, struck-through skipped blocks, return
+  arcs beneath the rail nested by span (`arcs.ts`), and the selected block's run content. The rail
+  scrolls horizontally and centres the current block; on a phone (the `useIsMobile` hook) it becomes
+  a vertical stepper with return chips.
+- `CanvasView` — React Flow over an ELK layered layout (`layout.ts`, `elkjs` loaded on first use):
+  forward edges as elbows with label pills, rank-skipping edges above, cycles as dashed lanes
+  below, hub blocks (many sources) as exit chips. Opens centred on the current block.
+- `OutlineView` — numbered sections with status, description, run content, block writes at the
+  cursor, transitions in words with cycle cause and exit, and expandable steps (`StepList`).
+- `RouteView` — the whole route grouped into stretches per block (`route.ts`), return markers,
+  per-block visit counts at the cursor, exit labels from transitions, adjustment visits with their
+  actor; clicking a visit sets the cursor; visits after the cursor are dimmed.
+
+**Panels:** `BlockDetailPanel` (status, description, run content, transitions, steps with the
+evidence fields each schema demands — declared `globalInputs` merged from the variable registry —
+and a click that focuses the node graph); `VariablesPanel` (fixed-layout table of variables with
+history rows and adjustment marks, node outputs, an "edit in context" shortcut for policy-editable
+variables, and the **answer form** for the waiting step: fields from the step's input schema with
+enum selects, booleans, numbers, JSON textareas, submit gated on required fields, the server's
+refusal shown inline); `ContextVariableEditor` (tree editor with per-path saves, `initialQuery`
+preset from the variables tab); `ExecutionErrorHistory`; `StepProgression`; the lazily loaded
+`WorkflowGraph` with a stable init callback and a focus request that fits the view to a node.
+
+**Answering the waiting step:** `apiClient.answerExecutionStep(id, input, expectedRevision)` calls
+`POST /api/executions/:id/answer`; the page reloads the execution and the projection afterwards
+whether the answer was accepted or refused, because a rejected answer is still an engine step that
+advances the revision.
+
+**Walkthrough** (`Walkthrough.tsx`): six anchored steps (process, agent, evidence, loop, route,
+explore), each with a selector per mode and a fallback mode, the current block and panel tab it
+needs; the highlight is a ring on the target element. **Guidance** callouts introduce every mode
+and panel; on a phone they fold to their title.
 
 **Lock Dialog:**
 
 Two-phase dialog (input → result). Input phase: reason text field (required), Lock/Cancel buttons. Result phase: shows lockId and the PIN for sharing with MCP agents — this is the only place the PIN is shown, as it is stored hashed and not retrievable afterward. Submit enabled when reason is non-empty and not in loading state. Enter key submits.
 
-**Tabbed Right Panel:**
+**Context tab:** `ContextVariableEditor` — a compact variable tree grouped into exactly two sections with count badges, alphabetically ordered: "Global variables" (declared in the workflow `variableRegistry`, readable by bare name) and "Node outputs" (per-node-id local scopes, referenced as `node-id.name`). Under the explicit output-scope model every context value is one of these two, so there is no undeclared/"appeared during execution" group. A global that a node wrote also lives in that node's local scope; it is shown once under Global and hidden from the node's tree (so a promoted global is never duplicated). A node-local scope whose only contents are globals the node wrote (e.g. the start node's seeded scope) renders empty after de-duplication and is omitted. A text filter (key / value / both) is tree-aware: a nested match is shown together with its ancestor path. The description (resolved from the `variableRegistry`, shown for globals) appears as a tooltip on the name. Object/array values render as an expandable tree with alphabetically sorted keys; leaf values are editable at any nesting level. Leaf fields are always in edit mode; Save/Cancel are present but enabled only after a change (dirty state); empty values render at normal height with a placeholder. Long/multiline strings show an expand button that opens a modal multi-line editor. Editing is per-path: only the value at the edited path is sent via `apiClient.updateExecutionContextPath` together with the execution's step revision and context revision, then the view reloads authoritative server state. Editable when the `editable` prop is true; read-only in admin view. Fullscreen button opens a Dialog modal hosting the same editor.
 
-Three tabs via shadcn `Tabs` component (four in admin view):
+**Errors tab:** ExecutionErrorHistory component showing execution errors with timestamps, collapsible entries, error type badges.
 
-- **Context** (default): `ContextVariableEditor` — a compact variable tree grouped into exactly two sections with count badges, alphabetically ordered: "Global variables" (declared in the workflow `variableRegistry`, readable by bare name) and "Node outputs" (per-node-id local scopes, referenced as `node-id.name`). Under the explicit output-scope model every context value is one of these two, so there is no undeclared/"appeared during execution" group. A global that a node wrote also lives in that node's local scope; it is shown once under Global and hidden from the node's tree (so a promoted global is never duplicated). A node-local scope whose only contents are globals the node wrote (e.g. the start node's seeded scope) renders empty after de-duplication and is omitted. A text filter (key / value / both) is tree-aware: a nested match is shown together with its ancestor path. The description (resolved from the `variableRegistry`, shown for globals) appears as a tooltip on the name. Object/array values render as an expandable tree with alphabetically sorted keys; leaf values are editable at any nesting level. Leaf fields are always in edit mode; Save/Cancel are present but enabled only after a change (dirty state); empty values render at normal height with a placeholder. Long/multiline strings show an expand button that opens a modal multi-line editor. Editing is per-path: only the value at the edited path is sent via `apiClient.updateExecutionContextPath`, then the view reloads authoritative server state. Editable when the `editable` prop is true; read-only in admin view. Fullscreen button opens a Dialog modal hosting the same editor.
-- **Errors**: ExecutionErrorHistory component showing execution errors with timestamps, collapsible entries, error type badges.
-- **Steps**: StepProgression component showing workflow nodes with completed/current/pending states. Clickable nodes focus the workflow graph.
-- **Locks**: Lock history cards showing all lock records (active/unlocked). Each card displays reason, node ID, status badge, timestamps (created/unlocked). Badge with count indicator on tab when locks exist.
-  - **Admin view**: "Unlock" button on active locks for admin override.
-  - **User view (owner)**: "Unlock" button for owner's own locks (no PIN required in web UI). The PIN is shown only once in the Lock Dialog result phase at creation time; lock history cards do not display it.
+**Steps tab:** StepProgression component showing workflow nodes with completed/current/pending states. Clickable nodes focus the workflow graph.
+
+**Locks tab:** Lock history cards showing all lock records (active/unlocked). Each card displays reason, node ID, status badge, timestamps (created/unlocked). Badge with count indicator on tab when locks exist. "Unlock" on active locks: admin override in the admin view, the owner's own unlock (no PIN) in the user view. The PIN is shown only once in the Lock Dialog result phase at creation time; lock history cards do not display it.
 
 **Context Fullscreen Modal:**
 
@@ -440,7 +491,8 @@ Three tabs via shadcn `Tabs` component (four in admin view):
 
 **Implementation:**
 
-- `components/execution/ExecutionInspector.tsx` - unified component
+- `components/execution/ExecutionInspector.tsx` - the page (toolbar, panel, dialogs, graph wrapper)
+- `components/run/` - modes, panels, cursor, walkthrough, pure view helpers and layout
 - `pages/ExecutionInspectorPage.tsx` - user view wrapper
 - `pages/AdminExecutionInspectorPage.tsx` - admin view wrapper
 - `components/execution/ExecutionErrorHistory.tsx` - error history display

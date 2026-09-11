@@ -10,7 +10,7 @@ import { loginAsAdmin } from "./helpers/auth-helper.js";
 
 const BASE_URL = getTestBaseUrl();
 
-test("renders live SDF progress in the image endpoint and execution UI", async ({ page }) => {
+test("renders live SDF progress in the image endpoint and on the run page", async ({ page }) => {
   const authenticated = await createAuthenticatedMCPClient();
 
   try {
@@ -56,8 +56,15 @@ test("renders live SDF progress in the image endpoint and execution UI", async (
     await expect(progress).toBeVisible();
     await expect(progress).toContainText("Software Development · plan r1");
     const intake = page.getByTestId("progress-node-intake");
-    await expect(intake).toHaveAccessibleName(/Capture task and repository\s*context.*current/i);
+    await expect(intake).toHaveAccessibleName(/Capture task and repository\s*context.*waiting/i);
     await expect(intake).toHaveAttribute("aria-current", "step");
+    await expect(intake).toHaveAttribute("data-status", "waiting");
+    // The run waits on the intake step: the variables tab offers the answer form for it.
+    await page.getByRole("tab", { name: /Variables|Переменные/ }).click();
+    await expect(page.getByTestId("answer-form")).toHaveAttribute(
+      "data-node-id",
+      "capture-task-and-context",
+    );
   } finally {
     await authenticated.cleanup();
   }

@@ -54,6 +54,13 @@ runtime-variable changes do not advance it or invalidate the presented attempt. 
 guard the field or stored snapshot they actually change with independent opaque parent, context,
 and reminder revisions returned by the corresponding read and mutation surfaces.
 
+A person may answer the waiting step from the run page (`POST /api/executions/:id/answer`). That
+runs the step without an attempt: the execution's compare-and-set save guards it, the accepted
+values are recorded as an adjustment visit with the acting user, and the presented attempt the
+agent was holding is marked `superseded` and linked to the presentation created for the new node.
+A superseded attempt is stale on `step` (never replayed), is not the current attempt, and is
+evicted with old receipts; the answer is refused while an attempt is executing or outcome-unknown.
+
 For a paused execution with no persisted Step attempt, `current_step` atomically installs one without
 executing the node. A presented attempt whose node and workflow bindings still match can be rebound
 from an obsolete revision and returned as the authoritative current attempt. Executing,

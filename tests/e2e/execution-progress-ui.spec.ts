@@ -1,46 +1,66 @@
+/**
+ * The run page on a real Quick Task run: the lanes rail with block statuses, the block-detail
+ * panel and the technical-graph focus, a repair loop shown as a repeated block with its return
+ * arc, the route cursor dimming later visits and changing the lanes, the loading state, and the
+ * page kept usable on a phone when the projection fails or the workflow has no process view.
+ */
+
 import { test, expect, type Page } from "./fixtures.js";
 import { getTestBaseUrl } from "../utils/test-config.js";
 import {
-  callMCPTool,
+  advanceWorkflowExecution,
   createAuthenticatedMCPClient,
-  startWorkflowExecution,
+  startWorkflowExecutionState,
+  type RunningWorkflowExecution,
 } from "../utils/mcp-auth.js";
 import { loginAsAdmin } from "./helpers/auth-helper.js";
 
 const BASE_URL = getTestBaseUrl();
+const workspace = "./moira-ws/quick-task-0000aaaa-0000-4000-8000-000000000000";
 
-type ProgressMode = "initial" | "middle" | "repair" | "long" | "none" | "error" | "slow";
-
-async function openProgressExecution(page: Page) {
-  const authenticated = await createAuthenticatedMCPClient();
-  const workflow = await callMCPTool<any>(authenticated.client, "manage", {
-    action: "get",
-    workflowId: "moira/verified-research",
-  });
-  const agentIds = workflow.nodes
-    .filter((node: any) => node.type === "agent-directive")
-    .map((node: any) => node.id);
-  const focusIds = [
-    agentIds[0],
-    agentIds[Math.floor(agentIds.length / 3)],
-    agentIds[Math.floor((agentIds.length * 2) / 3)],
-    agentIds[agentIds.length - 1],
-  ];
-  const started = await startWorkflowExecution(authenticated.client, "moira/verified-research", {
+/** Drive a Quick Task through one rejected plan review into the second review: a real loop. */
+async function quickTaskWithRepairLoop(
+  client: Awaited<ReturnType<typeof createAuthenticatedMCPClient>>["client"],
+): Promise<RunningWorkflowExecution> {
+  const run = await startWorkflowExecutionState(client, "moira/quick-task", {
     skipTelegramCheck: true,
   });
-  const executionId = started.match(/Process ID: ([a-f0-9-]+)/)?.[1];
-  expect(executionId).toBeTruthy();
+  await advanceWorkflowExecution(client, run, {
+    task_file: `${workspace}/task.md`,
+    execution_file: `${workspace}/execution.md`,
+    operating_mode: "autonomous",
+    progress_scope_outcome: "Task contract captured",
+  });
+  await advanceWorkflowExecution(client, run, {
+    current_plan_file: `${workspace}/plans/001/plan.md`,
+    total_steps: 3,
+    progress_plan_outcome: "Three-unit plan ready for review",
+  });
+  await advanceWorkflowExecution(client, run, {
+    review_file: `${workspace}/plans/001/review.md`,
+    issues_count: 1,
+    progress_plan_outcome: "Plan review found a blocking issue",
+  });
+  await advanceWorkflowExecution(client, run, {
+    current_plan_file: `${workspace}/plans/002/plan.md`,
+    total_steps: 3,
+    progress_plan_outcome: "Corrected plan replaced the rejected revision",
+  });
+  return run;
+}
 
-  let mode: ProgressMode = "initial";
-  let updatedLabel: string | undefined;
+type ProgressMode = "live" | "none" | "error" | "slow";
+
+async function openRun(page: Page) {
+  const authenticated = await createAuthenticatedMCPClient();
+  const run = await quickTaskWithRepairLoop(authenticated.client);
+  let mode: ProgressMode = "live";
   let releaseSlow: (() => void) | undefined;
   let markSlowRequestStarted: (() => void) | undefined;
   const slowRequestStarted = new Promise<void>((resolve) => {
     markSlowRequestStarted = resolve;
   });
-
-  await page.route(`**/api/executions/${executionId}/progress`, async (route) => {
+  await page.route(`**/api/executions/${run.processId}/progress**`, async (route) => {
     if (mode === "none") {
       await route.fulfill({
         status: 404,
@@ -63,58 +83,16 @@ async function openProgressExecution(page: Page) {
         releaseSlow = resolve;
       });
     }
-    const active = mode === "initial" ? 0 : mode === "middle" ? 2 : mode === "repair" ? 3 : 1;
-    const labels = ["Plan", "Implementation", "Tests", "Independent review", "Repair"];
-    const nodes = labels.map((label, index) => ({
-      id: `stage-${index}`,
-      label:
-        updatedLabel && index === 2
-          ? updatedLabel
-          : mode === "long" && index === 1
-            ? "Implementation and documentation for a deliberately long execution milestone"
-            : label,
-      state: index < active ? "completed" : index === active ? "current" : "pending",
-      connections: { default: index === 4 ? "stage-1" : `stage-${index + 1}` },
-      primaryNodeIds: [focusIds[Math.min(index, focusIds.length - 1)]],
-      focusNodeId: focusIds[Math.min(index, focusIds.length - 1)],
-      content: { summary: null, details: [], outcome: null, next: null },
-    }));
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({
-        success: true,
-        data: {
-          taskTitle: "Progress graph E2E",
-          title:
-            mode === "long"
-              ? "Software development · independent completeness review"
-              : "Software development",
-          goal: null,
-          facts: [],
-          activeNodeId: `stage-${active}`,
-          nodes,
-          workflowVersion: "1.0.0",
-          executionRevision: active + 1,
-          executionStatus: "running",
-          diagnostics: [],
-        },
-      }),
-    });
+    await route.continue();
   });
-
   await loginAsAdmin(page);
-  await page.goto(`${BASE_URL}/executions/${executionId}`);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto(`${BASE_URL}/executions/${run.processId}`);
   await expect(page.getByTestId("execution-progress")).toBeVisible();
-  await expect(page.locator(".react-flow__viewport")).toBeVisible({ timeout: 15000 });
-
   return {
-    executionId: executionId!,
+    executionId: run.processId,
     setMode(next: ProgressMode) {
       mode = next;
-    },
-    setUpdatedLabel(label: string) {
-      updatedLabel = label;
     },
     slowRequestStarted,
     releaseSlow() {
@@ -124,113 +102,237 @@ async function openProgressExecution(page: Page) {
   };
 }
 
-async function settledTransform(page: Page) {
-  return page.locator(".react-flow__viewport").evaluate(
-    (element) =>
-      new Promise<string>((resolve) => {
-        let previous = element.getAttribute("style") || "";
-        let stableFrames = 0;
-        const observe = () => {
-          const current = element.getAttribute("style") || "";
-          stableFrames = current === previous ? stableFrames + 1 : 0;
-          previous = current;
-          if (stableFrames >= 5) resolve(current);
-          else requestAnimationFrame(observe);
-        };
-        requestAnimationFrame(observe);
-      }),
-  );
-}
-
-test("shows desktop progress states and focuses primary workflow nodes", async ({ page }) => {
-  const progress = await openProgressExecution(page);
+test("lanes show the repair loop as a repeated block and the block panel drills into steps", async ({
+  page,
+}) => {
+  const run = await openRun(page);
   try {
-    for (const state of ["middle", "repair", "long"] as const) {
-      progress.setMode(state);
-      await page.reload();
-      await expect(page.getByTestId("execution-progress")).toBeVisible();
-    }
-    const workflowViewport = page.locator(".react-flow__viewport");
-    const initialTransform = await workflowViewport.getAttribute("style");
-    await page.locator(".react-flow__controls-zoomin").click();
-    await expect.poll(() => workflowViewport.getAttribute("style")).not.toBe(initialTransform);
-    const zoomedTransform = await settledTransform(page);
-    const nonActiveFocusButton = page.getByTestId("progress-node-stage-4");
-    await nonActiveFocusButton.click();
-    await expect.poll(() => workflowViewport.getAttribute("style")).not.toBe(zoomedTransform);
-    expect(await settledTransform(page)).not.toBe(zoomedTransform);
-    await expect(nonActiveFocusButton).toBeFocused();
-    await page.getByRole("tab", { name: /Errors|Ошибки/ }).click();
-    await expect(page.getByRole("tab", { name: /Errors|Ошибки/ })).toHaveAttribute(
+    // The second review is where the run waits: the review block (review, check and repair steps)
+    // is on its second pass; the plan block completed once.
+    const review = page.getByTestId("progress-node-plan-review");
+    await expect(review).toHaveAttribute("aria-current", "step");
+    await expect(review).toHaveAttribute("data-status", "waiting");
+    await expect(review.getByTestId("lane-iterations")).toHaveText("×2");
+    await expect(page.getByTestId("progress-node-plan")).toHaveAttribute("data-status", "done");
+    await expect(page.getByTestId("progress-node-execute")).toHaveAttribute(
+      "data-status",
+      "pending",
+    );
+    // The lanes rail draws the return arc of the repair loop with its authored label.
+    await expect(page.getByTestId("lanes-rail").locator("[data-arc]").first()).toBeVisible();
+    await expect(page.getByTestId("lanes-rail")).toContainText("review found issues");
+
+    // The block panel opens on the current block with its steps and expected evidence.
+    const detail = page.getByTestId("block-detail");
+    await expect(detail).toHaveAttribute("data-block-id", "plan-review");
+    const currentStep = detail.locator('[data-node-id][aria-current="step"]');
+    await expect(currentStep).toHaveAttribute("data-node-id", "plan-review");
+    await expect(currentStep.locator("[data-node-inputs]")).toContainText("issues_count");
+
+    // Selecting another block is a deep link and switches the panel to it.
+    await page.getByTestId("progress-node-scope").click();
+    await expect(page).toHaveURL(/block=scope/);
+    await expect(page.getByTestId("block-detail")).toHaveAttribute("data-block-id", "scope");
+
+    // A step focuses the technical node graph in the graph tab: focusing two different steps
+    // leaves the viewport on two different transforms.
+    const transformOf = () =>
+      page.locator(".react-flow__viewport").evaluate((el) => window.getComputedStyle(el).transform);
+    await page.getByTestId("block-detail").locator('[data-node-id="get-task"] button').click();
+    await expect(page.getByRole("tab", { name: /Graph|Граф/ })).toHaveAttribute(
       "data-state",
       "active",
     );
+    await expect(page.locator(".react-flow__viewport")).toBeVisible({ timeout: 15000 });
+    await expect.poll(transformOf).not.toBe("none");
+    const onGetTask = await transformOf();
+    await page.getByRole("tab", { name: /Block|Блок/ }).click();
+    await page.getByTestId("block-detail").locator('[data-node-id="start"] button').click();
+    await expect(page.getByRole("tab", { name: /Graph|Граф/ })).toHaveAttribute(
+      "data-state",
+      "active",
+    );
+    await expect.poll(transformOf, { timeout: 5000 }).not.toBe(onGetTask);
   } finally {
-    await progress.cleanup();
+    await run.cleanup();
   }
 });
 
-test("shows loading state and refreshes context-derived progress content", async ({ page }) => {
-  const progress = await openProgressExecution(page);
+test("the route cursor dims later visits and the lanes follow it; every mode is deep-linkable", async ({
+  page,
+}) => {
+  const run = await openRun(page);
   try {
-    progress.setMode("slow");
+    await page.goto(`${BASE_URL}/executions/${run.executionId}?view=route`);
+    const routeList = page.getByTestId("route-list");
+    await expect(routeList).toBeVisible();
+    // The repair loop stays inside the review block, so the route marks the revisited step as a
+    // loop rather than a return between blocks.
+    await expect(routeList.locator('[data-visit-seq][data-loop="true"]').first()).toBeVisible();
+    await expect(routeList.locator('[data-visit-seq="6"]')).toHaveAttribute("data-loop", "true");
+
+    // Put the cursor on the first plan step: later visits fade and the URL carries it.
+    await routeList.locator('[data-visit-seq="2"]').click();
+    await expect(page).toHaveURL(/at=2/);
+    await expect(routeList.locator('[data-visit-seq="4"]')).toHaveAttribute("data-beyond", "true");
+    await expect(page.getByTestId("cursor-position")).toContainText("2");
+
+    // Lanes at the cursor: the plan block is active, the review block not yet reached.
+    await page.getByTestId("run-modes").locator('[data-mode="lanes"]').click();
+    await expect(page).toHaveURL(/view=lanes/);
+    await expect(page.getByTestId("progress-node-plan")).toHaveAttribute("data-status", "active");
+    await expect(page.getByTestId("progress-node-plan-review")).toHaveAttribute(
+      "data-status",
+      "pending",
+    );
+    await page.getByTestId("cursor-clear").click();
+    await expect(page.getByTestId("progress-node-plan-review")).toHaveAttribute(
+      "data-status",
+      "waiting",
+    );
+
+    // Canvas fills the viewport and draws the loop as a distinct edge; outline reads the cycle.
+    await page.goto(`${BASE_URL}/executions/${run.executionId}?view=canvas`);
+    await expect(page.getByTestId("canvas-view")).toBeVisible({ timeout: 15000 });
+    await expect(page.locator('[data-edge-kind="cycle"]').first()).toBeVisible();
+    const canvasBox = await page.getByTestId("canvas-view").boundingBox();
+    const pageBox = page.viewportSize()!;
+    expect(canvasBox!.height).toBeGreaterThan(pageBox.height * 0.5);
+    await page.goto(`${BASE_URL}/executions/${run.executionId}?view=outline`);
+    await expect(page.getByTestId("outline-document")).toBeVisible();
+    await expect(page.locator('[data-transition-kind="cycle"]').first()).toBeVisible();
+
+    // The walkthrough opens from the header and lives in the URL.
+    await page.getByTestId("guide-open").click();
+    await expect(page.getByTestId("walkthrough")).toHaveAttribute("data-guide-step", "process");
+    await page.getByTestId("walkthrough-next").click();
+    await expect(page).toHaveURL(/guide=2/);
+    await expect(page.getByTestId("walkthrough")).toHaveAttribute("data-guide-step", "agent");
+  } finally {
+    await run.cleanup();
+  }
+});
+
+test("answering the waiting step from the page continues the run and records the adjustment", async ({
+  page,
+}) => {
+  const authenticated = await createAuthenticatedMCPClient();
+  try {
+    const run = await startWorkflowExecutionState(authenticated.client, "moira/quick-task", {
+      skipTelegramCheck: true,
+    });
+    await loginAsAdmin(page);
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto(`${BASE_URL}/executions/${run.processId}`);
+    await expect(page.getByTestId("progress-node-scope")).toHaveAttribute("data-status", "waiting");
+    await page.getByRole("tab", { name: /Variables|Переменные/ }).click();
+    const form = page.getByTestId("answer-form");
+    await expect(form).toHaveAttribute("data-node-id", "get-task");
+    // The form lists the step's own fields and the globals it declares; required ones gate submit.
+    await expect(page.getByTestId("answer-submit")).toBeDisabled();
+    await page.getByTestId("answer-field-task_file").fill(`${workspace}/task.md`);
+    await page.getByTestId("answer-field-execution_file").fill(`${workspace}/execution.md`);
+    await page.getByTestId("answer-field-operating_mode").selectOption("autonomous");
+    await page.getByTestId("answer-field-progress_scope_outcome").fill("Captured from the page");
+    // A schema-invalid answer is refused with the step's message and changes nothing.
+    await page.getByTestId("answer-field-task_file").fill("nope");
+    await page.getByTestId("answer-submit").click();
+    await expect(page.getByTestId("answer-error")).toContainText(/validation/i);
+    await expect(page.getByTestId("progress-node-scope")).toHaveAttribute("data-status", "waiting");
+    await page.getByTestId("answer-field-task_file").fill(`${workspace}/task.md`);
+    const answered = page.waitForResponse(
+      (r) => r.url().includes("/answer") && r.request().method() === "POST" && r.status() === 200,
+    );
+    await page.getByTestId("answer-submit").click();
+    await answered;
+    // The run moved on: the scope block is done, the plan block waits, the route carries the
+    // adjustment by the user. The variables table keeps every name inside the panel even with
+    // long path values (a broken layout pushed the first column out of view).
+    await expect(page.getByTestId("progress-node-scope")).toHaveAttribute("data-status", "done");
+    const panelBox = (await page.getByTestId("run-panel").boundingBox())!;
+    for (const name of ["operating_mode", "progress_scope_outcome"]) {
+      const cell = page.locator(`[data-variable="${name}"] td`).first();
+      const box = (await cell.boundingBox())!;
+      expect(box.x).toBeGreaterThanOrEqual(panelBox.x);
+      expect(box.x + box.width).toBeLessThanOrEqual(panelBox.x + panelBox.width + 1);
+      await expect(cell).toContainText(name);
+    }
+    await expect(page.getByTestId("progress-node-plan")).toHaveAttribute("data-status", "waiting");
+    await expect(page.getByTestId("adjustment-count")).toContainText("1");
+    await page.getByTestId("run-modes").locator('[data-mode="route"]').click();
+    const adjusted = page
+      .getByTestId("route-list")
+      .locator('[data-visit-seq][data-adjusted="true"]');
+    await expect(adjusted).toHaveCount(1);
+    await expect(adjusted).toContainText(/person|человек/i);
+    // The agent's attempt from before the answer is stale: it must read current_step.
+    const stale = await advanceWorkflowExecution(authenticated.client, run, {
+      task_file: `${workspace}/task.md`,
+      execution_file: `${workspace}/execution.md`,
+      operating_mode: "autonomous",
+      progress_scope_outcome: "from the agent",
+    });
+    expect(stale).toContain("ATTEMPT_STALE");
+  } finally {
+    await authenticated.cleanup();
+  }
+});
+
+test("shows the loading state and keeps the page usable on a phone without a projection", async ({
+  page,
+}) => {
+  const run = await openRun(page);
+  try {
+    run.setMode("slow");
     const reload = page.reload({ waitUntil: "domcontentloaded" });
-    await progress.slowRequestStarted;
+    await run.slowRequestStarted;
     await expect(page.getByTestId("execution-progress-loading")).toBeVisible();
-    progress.releaseSlow();
+    run.releaseSlow();
     await reload;
     await expect(page.getByTestId("execution-progress")).toBeVisible();
 
-    progress.setMode("middle");
-    progress.setUpdatedLabel("Tests updated from context");
+    await page.setViewportSize({ width: 600, height: 900 });
+    run.setMode("live");
     await page.reload();
-    await expect(page.getByTestId("progress-node-stage-2")).toContainText(
-      "Tests updated from context",
-    );
-  } finally {
-    progress.releaseSlow();
-    await progress.cleanup();
-  }
-});
-
-test("keeps the workflow usable across mobile progress error and absence states", async ({
-  page,
-}) => {
-  const progress = await openProgressExecution(page);
-  try {
-    await page.setViewportSize({ width: 390, height: 844 });
-    progress.setMode("middle");
-    const middleResponse = page.waitForResponse(
-      (response) => response.url().endsWith("/progress") && response.status() === 200,
-    );
-    await page.reload();
-    await middleResponse;
     await expect(page.getByTestId("execution-progress")).toBeVisible();
+    // Narrow width: the rail turns vertical and nothing overflows the page horizontally.
+    await expect(page.locator("[data-lanes-orientation]")).toHaveAttribute(
+      "data-lanes-orientation",
+      "vertical",
+    );
+    const overflow = await page.evaluate(
+      () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    );
+    expect(overflow).toBeLessThanOrEqual(0);
+    // On a phone the mode note folds to its title and the picture keeps at least two fifths of
+    // the viewport (the broken layout left the canvas a strip about a hundred pixels tall).
+    await expect(page.getByTestId("guidance-lanes")).toHaveAttribute("data-folded", "true");
+    const picture = (await page.getByTestId("execution-progress").boundingBox())!;
+    expect(picture.height).toBeGreaterThanOrEqual(900 * 0.4);
 
-    progress.setMode("error");
+    run.setMode("error");
     const errorResponse = page.waitForResponse(
-      (response) => response.url().endsWith("/progress") && response.status() === 500,
+      (response) => response.url().includes("/progress") && response.status() === 500,
     );
     await page.reload();
     await errorResponse;
     await expect(page.getByRole("status")).toContainText(
       /temporarily unavailable|временно недоступен/i,
     );
-    await expect(page.locator(".react-flow__viewport")).toBeVisible();
+    await expect(page.locator(".react-flow__viewport")).toBeVisible({ timeout: 15000 });
     await expect(page.getByRole("tab", { name: /Context|Контекст/ })).toBeVisible();
 
-    progress.setMode("none");
+    run.setMode("none");
     const absentResponse = page.waitForResponse(
-      (response) => response.url().endsWith("/progress") && response.status() === 404,
+      (response) => response.url().includes("/progress") && response.status() === 404,
     );
     await page.reload();
     await absentResponse;
-    await expect(
-      page.getByText(progress.executionId.substring(0, 8), { exact: true }),
-    ).toBeVisible();
+    await expect(page.getByText(run.executionId.substring(0, 8), { exact: true })).toBeVisible();
     await expect(page.locator(".react-flow__viewport")).toBeVisible({ timeout: 15000 });
     await expect(page.getByTestId("execution-progress")).toHaveCount(0);
   } finally {
-    await progress.cleanup();
+    run.releaseSlow();
+    await run.cleanup();
   }
 });

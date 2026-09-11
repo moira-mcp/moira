@@ -107,5 +107,10 @@ export interface ExecutionProgress {
   variables: ExecutionVariableState[];
   /** False for an execution created before routes were recorded: nothing is inferred for it. */
   routeRecorded: boolean;
+  /**
+   * The route cursor the projection was made at: the sequence number of the last visit taken
+   * into account, or null when the whole recorded route was projected.
+   */
+  cursor: number | null;
   source: "trace";
 }

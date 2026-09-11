@@ -75,10 +75,10 @@ Engine integrations with a workflow and execution use `renderExecutionProgressIm
 returns `null` when progress is absent, otherwise the PNG buffer, MIME type, dimensions, workflow
 version, and execution revision; rendering failures stay errors.
 
-On execution pages this same model appears above the technical graph and detail tabs. Actionable
-milestones can focus their mapped technical node; unmapped milestones remain readable non-controls.
-The visible card and PNG contain the same essential information. Workflows without progress keep the
-standard inspector unchanged.
+On the run page (see the _Reading a run_ guide) the same projection is shown as lanes, a canvas,
+an outline and the route, with a block panel that drills into each block's steps and focuses the
+technical node graph. The page and the PNG contain the same essential information. A workflow
+without progress shows the technical node graph and the context tabs instead.
 
 Every workflow consists of:
 

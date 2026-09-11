@@ -8,9 +8,11 @@ import type {
 export type {
   ExecutionBlockStatus,
   ExecutionProgress,
+  ExecutionProgressContent,
   ExecutionProgressNode,
   ExecutionProgressState,
   ExecutionRouteEntry,
+  ExecutionVariableChange,
   ExecutionVariableState,
 } from "./execution-progress-contract.js";
 

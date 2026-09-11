@@ -284,6 +284,14 @@ export const getSessionInfoHandlerSchema = z.object({
   variableValue: z.unknown().optional(),
   theme: z.enum(["light", "dark"]).optional(),
   viewportWidth: z.number().int().min(480).max(4096).optional(),
+  at: z
+    .number()
+    .int()
+    .min(0)
+    .optional()
+    .describe(
+      "Route cursor for progress: project the run as of this visit sequence number (the route is cut there, variables carry the values written up to it)",
+    ),
   // Parameters for execution_context action
   variables: z
     .array(z.string())

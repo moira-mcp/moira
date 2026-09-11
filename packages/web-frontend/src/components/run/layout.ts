@@ -1,0 +1,291 @@
+/**
+ * Layered layout of the block graph for the canvas mode.
+ *
+ * Forward transitions define the layering (ELK layered, left to right, so the drawing follows
+ * process direction across a wide viewport). Edges are then routed by kind so nothing crosses a
+ * block:
+ *
+ * - adjacent-rank forward edges are elbows whose vertical run sits in the gap between ranks;
+ * - forward edges that skip ranks travel along lanes above the graph;
+ * - cycles travel along lanes below the graph, dashed, one lane per cycle;
+ * - transitions into a hub — a block that many blocks exit into, such as "Replan" or "Stopped" —
+ *   are not drawn as edges at all but as exit chips inside the source block, the way process
+ *   diagrams use off-page connectors; otherwise every block sprouts a long line to the same sink.
+ *
+ * The layout is a pure function of its input: ELK is run with a fixed seed and only forward edges,
+ * so the same blocks always yield the same placement. The engine is loaded on first use so the
+ * page pays for it only when the canvas opens.
+ */
+
+import type { RunBlock, RunTransition } from "./model";
+
+export const BLOCK_WIDTH = 256;
+const BLOCK_BASE_HEIGHT = 74;
+const LINE_HEIGHT = 18;
+const NAME_LINE_HEIGHT = 20;
+const CHARS_PER_LINE = 38;
+const NAME_CHARS_PER_LINE = 22;
+const MAX_DESCRIPTION_LINES = 3;
+const NODE_SEP = 40;
+/** Wide enough for a transition label pill to sit between two blocks without touching either. */
+const RANK_SEP = 150;
+const LANE_GAP = 40;
+const LANE_STEP = 26;
+const SELF_LOOP_DEPTH = 36;
+const MARGIN = 24;
+
+export interface LaidOutBlock {
+  id: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  rank: number;
+  /** Transitions rendered as exit chips inside the block rather than as edges. */
+  exits: RunTransition[];
+}
+
+export interface LaidOutEdge {
+  id: string;
+  from: string;
+  to: string;
+  transition: RunTransition;
+  kind: "forward" | "skip" | "cycle";
+  /** SVG path in graph coordinates. */
+  path: string;
+  labelX: number;
+  labelY: number;
+  labelAnchor: "center" | "above" | "below";
+}
+
+export interface BlockLayout {
+  blocks: LaidOutBlock[];
+  edges: LaidOutEdge[];
+  hubIds: string[];
+  width: number;
+  height: number;
+}
+
+function lineCount(text: string, charsPerLine: number, max: number): number {
+  return Math.min(max, Math.max(1, Math.ceil(text.length / charsPerLine)));
+}
+
+/** Height is a pure function of the block's text so layout stays deterministic. */
+export function estimateBlockHeight(
+  name: string,
+  description: string,
+  hasNote: boolean,
+  exitCount: number,
+): number {
+  return (
+    BLOCK_BASE_HEIGHT +
+    lineCount(name, NAME_CHARS_PER_LINE, 3) * NAME_LINE_HEIGHT +
+    lineCount(description, CHARS_PER_LINE, MAX_DESCRIPTION_LINES) * LINE_HEIGHT +
+    (hasNote ? LINE_HEIGHT : 0) +
+    (exitCount > 0 ? 26 : 0)
+  );
+}
+
+interface Placed {
+  id: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/** Layer the blocks with ELK over their forward (non-cycle) transitions. */
+async function placeBlocks(
+  blocks: readonly RunBlock[],
+  sizes: ReadonlyMap<string, { width: number; height: number }>,
+): Promise<Placed[]> {
+  const { default: ELK } = await import("elkjs/lib/elk.bundled.js");
+  const elk = new ELK();
+  const ids = new Set(blocks.map((b) => b.id));
+  const edges = blocks.flatMap((block) =>
+    block.transitions
+      .filter((t) => !t.cycle && t.to !== block.id && ids.has(t.to))
+      .map((t) => ({ id: `${block.id}->${t.to}`, sources: [block.id], targets: [t.to] })),
+  );
+  const seen = new Set<string>();
+  const laid = await elk.layout({
+    id: "process",
+    layoutOptions: {
+      "elk.algorithm": "layered",
+      "elk.direction": "RIGHT",
+      "elk.randomSeed": "1",
+      "elk.spacing.nodeNode": String(NODE_SEP),
+      "elk.layered.spacing.nodeNodeBetweenLayers": String(RANK_SEP),
+      "elk.layered.nodePlacement.strategy": "NETWORK_SIMPLEX",
+      "elk.layered.crossingMinimization.strategy": "LAYER_SWEEP",
+      "elk.layered.considerModelOrder.strategy": "NODES_AND_EDGES",
+      "elk.padding": `[top=${MARGIN},left=${MARGIN},bottom=${MARGIN},right=${MARGIN}]`,
+    },
+    children: blocks.map((block) => ({ id: block.id, ...sizes.get(block.id)! })),
+    edges: edges.filter((edge) => (seen.has(edge.id) ? false : (seen.add(edge.id), true))),
+  });
+  return (laid.children ?? []).map((child) => ({
+    id: child.id,
+    x: child.x ?? 0,
+    y: child.y ?? 0,
+    width: child.width ?? BLOCK_WIDTH,
+    height: child.height ?? BLOCK_BASE_HEIGHT,
+  }));
+}
+
+export async function layoutBlocks(
+  blocks: readonly RunBlock[],
+  hubIds: readonly string[],
+): Promise<BlockLayout> {
+  const hubs = new Set(hubIds);
+  const exitsOf = new Map<string, RunTransition[]>();
+  const sizes = new Map<string, { width: number; height: number }>();
+  for (const block of blocks) {
+    const exits = block.transitions.filter((t) => !t.cycle && hubs.has(t.to) && t.to !== block.id);
+    exitsOf.set(block.id, exits);
+    sizes.set(block.id, {
+      width: BLOCK_WIDTH,
+      height: estimateBlockHeight(block.name, block.description, false, exits.length),
+    });
+  }
+  const placed = await placeBlocks(blocks, sizes);
+  const placedById = new Map(placed.map((p) => [p.id, p]));
+  const xs = [...new Set(placed.map((p) => Math.round(p.x)))].sort((a, b) => a - b);
+  const laidBlocks: LaidOutBlock[] = blocks.map((block) => {
+    const p = placedById.get(block.id)!;
+    return {
+      id: block.id,
+      x: p.x,
+      y: p.y,
+      width: p.width,
+      height: p.height,
+      rank: xs.indexOf(Math.round(p.x)),
+      exits: exitsOf.get(block.id) ?? [],
+    };
+  });
+  const byId = new Map(laidBlocks.map((b) => [b.id, b]));
+  const top = Math.min(...laidBlocks.map((b) => b.y));
+  const bottom = Math.max(...laidBlocks.map((b) => b.y + b.height));
+
+  const edges: LaidOutEdge[] = [];
+  let bottomLane = 0;
+  let topLane = 0;
+
+  for (const block of blocks) {
+    const source = byId.get(block.id)!;
+    for (const transition of block.transitions) {
+      const target = byId.get(transition.to);
+      if (!target) continue;
+      const id = `${block.id}->${transition.to}:${transition.label}`;
+
+      if (!transition.cycle && hubs.has(transition.to)) continue; // drawn as an exit chip
+
+      if (!transition.cycle) {
+        const x1 = source.x + source.width;
+        const y1 = source.y + source.height / 2;
+        const x2 = target.x;
+        const y2 = target.y + target.height / 2;
+        if (target.rank - source.rank <= 1) {
+          const midX = x1 + (x2 - x1) / 2;
+          const path =
+            Math.abs(y1 - y2) < 1
+              ? `M ${x1} ${y1} L ${x2} ${y2}`
+              : `M ${x1} ${y1} L ${midX} ${y1} L ${midX} ${y2} L ${x2} ${y2}`;
+          edges.push({
+            id,
+            from: block.id,
+            to: transition.to,
+            transition,
+            kind: "forward",
+            path,
+            labelX: midX,
+            labelY: y1 - 4,
+            labelAnchor: "above",
+          });
+        } else {
+          const laneY = top - LANE_GAP - topLane * LANE_STEP;
+          topLane += 1;
+          const xa = source.x + source.width * 0.7;
+          const xb = target.x + target.width * 0.3;
+          const path = `M ${xa} ${source.y} L ${xa} ${laneY} L ${xb} ${laneY} L ${xb} ${target.y}`;
+          edges.push({
+            id,
+            from: block.id,
+            to: transition.to,
+            transition,
+            kind: "skip",
+            path,
+            labelX: (xa + xb) / 2,
+            labelY: laneY,
+            labelAnchor: "above",
+          });
+        }
+        continue;
+      }
+
+      if (transition.to === block.id) {
+        const y = source.y + source.height;
+        const xLeft = source.x + source.width * 0.35;
+        const xRight = source.x + source.width * 0.65;
+        const dip = y + SELF_LOOP_DEPTH;
+        const path = `M ${xRight} ${y} L ${xRight} ${dip} L ${xLeft} ${dip} L ${xLeft} ${y}`;
+        edges.push({
+          id,
+          from: block.id,
+          to: transition.to,
+          transition,
+          kind: "cycle",
+          path,
+          labelX: (xLeft + xRight) / 2,
+          labelY: dip + 4,
+          labelAnchor: "below",
+        });
+        continue;
+      }
+
+      const laneY = bottom + LANE_GAP + bottomLane * LANE_STEP;
+      bottomLane += 1;
+      const x1 = source.x + source.width * 0.3;
+      const y1 = source.y + source.height;
+      const x2 = target.x + target.width * 0.7;
+      const y2 = target.y + target.height;
+      const path = `M ${x1} ${y1} L ${x1} ${laneY} L ${x2} ${laneY} L ${x2} ${y2}`;
+      edges.push({
+        id,
+        from: block.id,
+        to: transition.to,
+        transition,
+        kind: "cycle",
+        path,
+        labelX: (x1 + x2) / 2,
+        labelY: laneY,
+        labelAnchor: "above",
+      });
+    }
+  }
+
+  const bottomExtent = bottomLane > 0 ? LANE_GAP + bottomLane * LANE_STEP + 16 : 0;
+  const topExtent = topLane > 0 ? LANE_GAP + topLane * LANE_STEP + 16 : 0;
+  const width = Math.max(...laidBlocks.map((b) => b.x + b.width)) + MARGIN;
+  const height = bottom + bottomExtent + topExtent + MARGIN;
+  return { blocks: laidBlocks, edges, hubIds: [...hubs], width, height };
+}
+
+/** Pairs of blocks whose rectangles overlap; empty for a readable layout. */
+export function overlappingBlocks(layout: BlockLayout): Array<[string, string]> {
+  const pairs: Array<[string, string]> = [];
+  const { blocks } = layout;
+  for (let i = 0; i < blocks.length; i++) {
+    for (let j = i + 1; j < blocks.length; j++) {
+      const a = blocks[i];
+      const b = blocks[j];
+      const apart =
+        a.x + a.width <= b.x ||
+        b.x + b.width <= a.x ||
+        a.y + a.height <= b.y ||
+        b.y + b.height <= a.y;
+      if (!apart) pairs.push([a.id, b.id]);
+    }
+  }
+  return pairs;
+}

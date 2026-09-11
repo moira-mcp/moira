@@ -170,6 +170,61 @@ describe("recorded route of real runs", () => {
     expect(image?.executionRevision).toBe(execution.revision);
   });
 
+  test("a wait answered from outside the flow continues the route and is recorded with its actor", async () => {
+    const run = await runner(bundled("quick-task"));
+    await run.step();
+    const person = { role: "user" as const, userId: "person" };
+    // A rejected answer changes nothing: the run still waits on the same node with no adjustment.
+    await run.executor.executeStep(run.executionId, { task_file: "nope" }, undefined, {
+      userId: USER,
+      answeredBy: person,
+    });
+    let execution = await run.execution();
+    expect(execution.waitingForInputNodeId).toBe("get-task");
+    expect(execution.visits!.map((visit) => visit.nodeId)).toEqual(["start", "get-task"]);
+
+    await run.executor.executeStep(
+      run.executionId,
+      quickTaskInputs["get-task"]("autonomous"),
+      undefined,
+      { userId: USER, answeredBy: person },
+    );
+    execution = await run.execution();
+    expect(execution.waitingForInputNodeId).toBe("create-plan");
+    expect(
+      execution.visits!.map((visit) => [
+        visit.nodeId,
+        visit.exitKey,
+        visit.adjusted ?? false,
+        visit.actor ?? null,
+      ]),
+    ).toEqual([
+      ["start", "default", false, null],
+      ["get-task", "success", false, null],
+      ["get-task", null, true, person],
+      ["create-plan", null, false, null],
+    ]);
+    expect(execution.visits![2].changes).toMatchObject({ operating_mode: "autonomous" });
+
+    const projected = await run.project();
+    expect(projected.nodes.map((node) => [node.id, node.status])).toEqual([
+      ["scope", "done"],
+      ["plan", "waiting"],
+      ["plan-review", "pending"],
+      ["plan-approval", "pending"],
+      ["execute", "pending"],
+      ["verify", "pending"],
+      ["deliver", "pending"],
+    ]);
+    expect(projected.route[2]).toMatchObject({ adjusted: true, actor: person });
+    const mode = projected.variables.find((variable) => variable.name === "operating_mode")!;
+    expect(mode.adjusted).toBe(true);
+    expect(mode.history.map((change) => [change.nodeId, change.adjusted ?? false])).toEqual([
+      ["get-task", false],
+      ["get-task", true],
+    ]);
+  });
+
   test("an autonomous Quick Task run skips plan approval instead of reporting it done", async () => {
     const run = await runner(bundled("quick-task"));
     await run.step();

@@ -54,6 +54,8 @@ interface ContextVariableEditorProps {
   onSavePath?: (path: PathSeg[], value: unknown) => Promise<boolean>;
   /** Declared global variables that the server currently permits the owner to edit. */
   editableRootNames?: ReadonlySet<string>;
+  /** Filter text to open with; a later change re-applies it (the run page focuses a variable). */
+  initialQuery?: string;
 }
 
 function isContainer(v: unknown): v is Record<string, unknown> | unknown[] {
@@ -118,11 +120,15 @@ export const ContextVariableEditor: React.FC<ContextVariableEditorProps> = ({
   workflow,
   onSavePath,
   editableRootNames,
+  initialQuery,
 }) => {
   const { t } = useTranslation();
   const canEdit = Boolean(onSavePath);
 
-  const [query, setQuery] = useState("");
+  const [query, setQuery] = useState(initialQuery ?? "");
+  useEffect(() => {
+    if (initialQuery !== undefined) setQuery(initialQuery);
+  }, [initialQuery]);
   const [filterField, setFilterField] = useState<VariableFilterField>("both");
 
   const globalNames = useMemo(() => getGlobalVariableNames(workflow), [workflow]);

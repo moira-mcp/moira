@@ -308,6 +308,11 @@ export interface IDataRepository {
   ensureCurrentPresentedExecutionAttempt(
     attempt: PresentedExecutionAttempt,
   ): Promise<ExecutionAttempt>;
+  /**
+   * Replace the execution's current presentation with `attempt`: a presented attempt is marked
+   * `superseded` and linked to the new one; an executing or outcome-unknown attempt refuses.
+   */
+  supersedePresentedExecutionAttempt(attempt: PresentedExecutionAttempt): Promise<void>;
   getExecutionAttempt(attemptId: string): Promise<ExecutionAttempt | null>;
   updatePresentedExecutionAttemptResponse(
     attemptId: string,

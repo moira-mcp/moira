@@ -308,6 +308,12 @@ Authentication: Required
 
 `GET /api/executions/:id/progress` returns the execution's read-only run projection for the
 execution owner or an administrator; `session({ action: "progress" })` returns the same object.
+Both accept an optional route cursor `at` (a visit sequence number, `?at=4` or `at: 4`): the run is
+projected as it stood when that visit was the last one — the route cut there, the run active or
+waiting on that visit's node, later blocks pending, and every variable carrying the value written
+up to that visit (its registry default when the route wrote it only later). The cursor is echoed
+as `cursor`; a cursor at or beyond the last visit projects the whole route with `cursor: null`. A
+negative or non-integer `at` is a validation error.
 It contains the execution-note `taskTitle`, rendered workflow title and goal, bounded generic
 facts, `activeNodeId`, the ordered blocks (`nodes`) with rendered structured content, display
 connections (the next block in process order), deterministic primary-node focus targets, workflow
@@ -325,7 +331,7 @@ version, execution revision, execution status and diagnostics, plus:
 - `variables`: every global variable and node-local output (`nodeId.field`) with its current
   value, its history (`seq`, `nodeId`, `value`, `adjusted`) and whether the current value came
   from an adjustment;
-- `routeRecorded` and `source: "trace"`.
+- `routeRecorded`, `cursor` and `source: "trace"`.
 
 Statuses are projected from the route the engine recorded, never inferred from block order: a
 visited block is done or repeated, the block of the last visit is active or waiting, a block whose
@@ -357,10 +363,34 @@ step revision/context revision/workflow version image once with `Cache-Control: 
 foreign, or reused grants return 401. Rendering or a failed/closed HTTP response releases the
 reservation; successful response completion consumes it.
 
-The Web UI and PNG adapters consume the same wrapped visual model. Both expose the complete task,
-goal, facts and ordered milestone content; no essential field is available only through hover or
-another interactive control. Valid bounded content is wrapped into deterministic rows and is not
-truncated.
+The PNG adapter consumes the wrapped visual model; the run page reads the projection directly. Both
+expose the complete task, goal, facts and ordered block content; no essential field is available
+only through hover or another interactive control. Valid bounded content is wrapped into
+deterministic rows and is not truncated.
+
+Authentication: Required
+
+### Answering a waiting step
+
+`POST /api/executions/:id/answer` submits the input of the step a running execution waits for, on
+behalf of a person on the run page. Body: `input` (an object matching the step's input schema,
+declared `globalInputs` included) and `expectedRevision` (the execution's step revision). The
+execution's owner or an administrator may answer. The route refuses, before any engine work, an
+execution that is not running (400), one not waiting on its current node (400), an active lock
+(400), a step revision other than the current one (409), an executing or outcome-unknown agent
+attempt (409), a non-owner (403) and a malformed body (400).
+
+The answer then runs as an ordinary engine step over the same executor the MCP server uses: the
+input is validated against the step's schema; a rejected answer is logged on the execution like a
+rejected agent input, leaves the run on the same node, advances the step revision, and is returned
+as 400 with the step's validation message. An accepted answer continues the route; the accepted
+values are recorded on the route as an adjustment visit (`adjusted: true`, `actor: { role: "user",
+userId }`) right after the answered step's visit, and the next step is presented as an agent step
+would present it: the agent's outstanding attempt is marked `superseded`, so its next `step`
+receives `ATTEMPT_STALE` and `session current_step` hands out the attempt for the new node. The
+response carries `revision`, `status`, `currentNodeId`, `waitingForInputNodeId` and the run
+projection after the step. The step is audited as an execution step (`answer-wait`, with the
+acting administrator noted when the owner differs).
 
 Authentication: Required
 

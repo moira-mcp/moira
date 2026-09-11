@@ -107,6 +107,49 @@ describe("appending engine visits to the execution", () => {
     expect(run.visits![1].changes).toEqual({ "work.done": true });
   });
 
+  test("an answer from outside the flow is recorded as an adjustment visit with its actor after the wait it closed", () => {
+    const run = execution([
+      { seq: 0, nodeId: "start", exitKey: "default", changes: {} },
+      { seq: 1, nodeId: "work", exitKey: null, changes: {}, waited: true },
+    ]);
+    const actor = { role: "user" as const, userId: "person" };
+    appendEngineVisits(
+      run,
+      cycle([
+        { nodeId: "work", exitKey: "success", changes: { "work.done": true }, waited: false },
+        { nodeId: "check", exitKey: null, changes: {}, waited: true },
+      ]),
+      undefined,
+      actor,
+    );
+    expect(run.visits).toEqual([
+      { seq: 0, nodeId: "start", exitKey: "default", changes: {} },
+      { seq: 1, nodeId: "work", exitKey: "success", changes: { "work.done": true }, waited: true },
+      {
+        seq: 2,
+        nodeId: "work",
+        exitKey: null,
+        changes: { "work.done": true },
+        adjusted: true,
+        actor,
+      },
+      { seq: 3, nodeId: "check", exitKey: null, changes: {}, waited: true },
+    ]);
+  });
+
+  test("an answer the step rejected as invalid records no adjustment", () => {
+    const run = execution([{ seq: 0, nodeId: "work", exitKey: null, changes: {}, waited: true }]);
+    appendEngineVisits(
+      run,
+      cycle([{ nodeId: "work", exitKey: null, changes: {}, waited: true }]),
+      undefined,
+      { role: "user", userId: "person" },
+    );
+    expect(run.visits).toEqual([
+      { seq: 0, nodeId: "work", exitKey: null, changes: {}, waited: true },
+    ]);
+  });
+
   test("a resume that pauses again on invalid input leaves the open visit as it is", () => {
     const run = execution([{ seq: 0, nodeId: "work", exitKey: null, changes: {}, waited: true }]);
     appendEngineVisits(run, cycle([{ nodeId: "work", exitKey: null, changes: {}, waited: true }]));

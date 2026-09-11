@@ -1,369 +1,188 @@
 /**
- * E2E Tests: Execution Inspector UX Redesign
- * Tests for Step 3 implementation: compact toolbar, context modal, errors panel
+ * E2E Tests: the run page keeps the inspector's toolbar, panel tabs, context editing, technical
+ * graph and admin variant. Opens the first execution in the list, whatever its workflow: with a
+ * process view the run occupies the page and the technical graph sits in the Graph tab; without
+ * one the graph fills the page as before.
  */
 
-import { test, expect } from "./fixtures.js";
+import { test, expect, type Page } from "./fixtures.js";
 import { getTestBaseUrl } from "../utils/test-config.js";
+import { createAuthenticatedMCPClient, startWorkflowExecutionState } from "../utils/mcp-auth.js";
 import { loginAsAdmin } from "./helpers/auth-helper.js";
 
 const BASE_URL = getTestBaseUrl();
 
-test.describe("Execution Inspector UX", () => {
+async function openFirstExecution(page: Page, listUrl = `${BASE_URL}/executions`) {
+  await page.goto(listUrl);
+  await page.waitForLoadState("domcontentloaded");
+  const firstRow = page.getByTestId("execution-card").first();
+  await expect(firstRow).toBeVisible({ timeout: 10000 });
+  await firstRow.click();
+  await page.waitForURL(/\/executions\/[a-f0-9-]+/);
+  await expect(page.getByTestId("run-page")).toBeVisible({ timeout: 15000 });
+  await expect(page.getByTestId("run-panel").locator('[role="tablist"]')).toBeVisible();
+}
+
+/** Bring the technical node graph on screen: the Graph tab when the run has a process view. */
+async function showTechnicalGraph(page: Page) {
+  const graphTab = page.getByRole("tab", { name: /Graph|Граф/ });
+  if ((await graphTab.count()) > 0) await graphTab.click();
+  await expect(page.locator(".react-flow")).toBeVisible({ timeout: 15000 });
+}
+
+test.describe("Run page toolbar and panel", () => {
+  let runningExecutionId: string;
+  let cleanupRunning: () => Promise<void>;
+
+  test.beforeAll(async () => {
+    // A run known to wait on a step, so the current-node focus is exercised unconditionally.
+    const authenticated = await createAuthenticatedMCPClient();
+    cleanupRunning = authenticated.cleanup;
+    const run = await startWorkflowExecutionState(authenticated.client, "moira/quick-task", {
+      skipTelegramCheck: true,
+    });
+    runningExecutionId = run.processId;
+  });
+
+  test.afterAll(async () => {
+    await cleanupRunning();
+  });
+
   test.beforeEach(async ({ page }) => {
     await loginAsAdmin(page);
   });
 
   test("compact toolbar displays all elements", async ({ page }) => {
-    // Navigate to executions
-    await page.goto(`${BASE_URL}/executions`);
-    await page.waitForLoadState("domcontentloaded");
-
-    // Click first execution row
-    const firstRow = page.getByTestId("execution-card").first();
-    await firstRow.click();
-    await page.waitForURL(/\/executions\/[a-f0-9-]+/);
-
-    // Wait for workflow graph to load
-    await expect(page.locator(".react-flow")).toBeVisible({ timeout: 15000 });
-
-    // Toolbar should be compact (single row with all elements)
+    await openFirstExecution(page);
     const toolbar = page.locator(".border-b.bg-card").first();
     await expect(toolbar).toBeVisible();
-
-    // Execution ID (short, clickable for copy)
-    const executionId = toolbar.locator("button.font-mono");
-    await expect(executionId).toBeVisible();
-
-    // Status badge (uses classes from badgeVariants: rounded-md, text-xs, font-semibold)
-    const statusBadge = toolbar.locator('[class*="rounded-md"][class*="font-semibold"]').first();
-    await expect(statusBadge).toBeVisible();
-
-    // Refresh button (contains RefreshCw icon)
-    const refreshButton = toolbar.locator("button svg.lucide-refresh-cw").first();
-    await expect(refreshButton).toBeVisible();
-
-    // Tabs should be visible in right panel (Context is default)
-    const tabsList = page.locator('[role="tablist"]');
-    await expect(tabsList).toBeVisible();
+    await expect(toolbar.locator("button.font-mono")).toBeVisible();
+    await expect(
+      toolbar.locator('[class*="rounded-md"][class*="font-semibold"]').first(),
+    ).toBeVisible();
+    await expect(toolbar.locator("button svg.lucide-refresh-cw").first()).toBeVisible();
   });
 
-  test("context is visible in default tab", async ({ page }) => {
-    // Navigate to executions
-    await page.goto(`${BASE_URL}/executions`);
-    await page.waitForLoadState("domcontentloaded");
-
-    // Click first execution row
-    const firstRow = page.getByTestId("execution-card").first();
-    await firstRow.click();
-    await page.waitForURL(/\/executions\/[a-f0-9-]+/);
-
-    // Wait for page to load
-    await expect(page.locator(".react-flow")).toBeVisible({ timeout: 15000 });
-
-    // Context tab should be active by default
-    const contextTab = page
-      .locator('[role="tab"][data-state="active"]')
-      .filter({ hasText: /Context|Контекст/ });
-    await expect(contextTab).toBeVisible();
-
-    // Context variable editor should be visible (filter input is its stable marker)
+  test("the context tab shows the variable editor and opens fullscreen", async ({ page }) => {
+    await openFirstExecution(page);
+    await page.getByRole("tab", { name: /Context|Контекст/ }).click();
     await expect(page.getByTestId("context-filter-input")).toBeVisible({ timeout: 5000 });
+    const fullscreenButton = page.getByTestId("context-fullscreen-button");
+    await expect(fullscreenButton).toBeVisible();
+    await fullscreenButton.click();
+    const dialog = page.locator('[role="dialog"]');
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByTestId("context-filter-input")).toBeVisible();
+    await dialog.locator('[data-slot="dialog-close"]').click();
+    await expect(dialog).not.toBeVisible();
   });
 
-  test("errors tab shows error history", async ({ page }) => {
-    // Navigate to executions
-    await page.goto(`${BASE_URL}/executions`);
-    await page.waitForLoadState("domcontentloaded");
-
-    // Click first execution row
-    const firstRow = page.getByTestId("execution-card").first();
-    await firstRow.click();
-    await page.waitForURL(/\/executions\/[a-f0-9-]+/);
-
-    // Wait for page to load
-    await expect(page.locator(".react-flow")).toBeVisible({ timeout: 15000 });
-
-    // Click on Errors tab
-    const errorsTab = page.locator('[role="tab"]').filter({ hasText: /Errors|Ошибки/ });
-    await errorsTab.click();
-
-    // Active errors tab panel should be visible
-    const errorsPanel = page.locator('[role="tabpanel"][data-state="active"]');
-    await expect(errorsPanel).toBeVisible();
+  test("tabs switch between context, errors, steps and locks", async ({ page }) => {
+    await openFirstExecution(page);
+    for (const name of [/Context|Контекст/, /Errors|Ошибки/, /Steps|Шаги/, /Locks|Блокировки/]) {
+      const tab = page.getByRole("tab", { name });
+      await tab.click();
+      await expect(tab).toHaveAttribute("data-state", "active");
+      await expect(page.locator('[role="tabpanel"][data-state="active"]')).toBeVisible();
+    }
   });
 
   test("refresh button reloads execution data", async ({ page }) => {
-    // Navigate to executions
-    await page.goto(`${BASE_URL}/executions`);
-    await page.waitForLoadState("domcontentloaded");
-
-    // Click first execution row
-    const firstRow = page.getByTestId("execution-card").first();
-    await firstRow.click();
-    await page.waitForURL(/\/executions\/[a-f0-9-]+/);
-
-    // Wait for page to load
-    await expect(page.locator(".react-flow")).toBeVisible({ timeout: 15000 });
-
-    // Click refresh button
+    await openFirstExecution(page);
     const refreshButton = page.locator('button:has(svg[class*="lucide-refresh"])');
-
-    // Intercept API call to verify refresh
     const [response] = await Promise.all([
       page.waitForResponse((r) => r.url().includes("/api/executions/") && r.status() === 200),
       refreshButton.click(),
     ]);
-
     expect(response.ok()).toBe(true);
   });
 
   test("copy execution ID to clipboard", async ({ page, context }) => {
-    // Grant clipboard permissions
     await context.grantPermissions(["clipboard-read", "clipboard-write"]);
-
-    // Navigate to executions
-    await page.goto(`${BASE_URL}/executions`);
-    await page.waitForLoadState("domcontentloaded");
-
-    // Click first execution row
-    const firstRow = page.getByTestId("execution-card").first();
-    await firstRow.click();
-    await page.waitForURL(/\/executions\/[a-f0-9-]+/);
-
-    // Wait for page to load
-    await expect(page.locator(".react-flow")).toBeVisible({ timeout: 15000 });
-
-    // Click on execution ID to copy
-    const toolbar = page.locator(".border-b.bg-card");
-    const executionIdButton = toolbar.locator("button.font-mono");
-    await executionIdButton.click();
-
-    // Check icon shows copied state
-    const checkIcon = toolbar.locator('svg[class*="lucide-check"]');
-    await expect(checkIcon).toBeVisible({ timeout: 2000 });
-  });
-
-  test("workflow graph loads successfully with lazy loading", async ({ page }) => {
-    // Navigate directly to execution inspector
-    await page.goto(`${BASE_URL}/executions`);
-    await page.waitForLoadState("domcontentloaded");
-
-    // Click first execution row
-    const firstRow = page.getByTestId("execution-card").first();
-    await firstRow.click();
-    await page.waitForURL(/\/executions\/[a-f0-9-]+/);
-
-    // Graph should load (lazy loaded via React.lazy + Suspense)
-    await expect(page.locator(".react-flow")).toBeVisible({ timeout: 15000 });
-  });
-
-  test("clickable current node focuses on graph", async ({ page }) => {
-    // Navigate to executions
-    await page.goto(`${BASE_URL}/executions`);
-    await page.waitForLoadState("domcontentloaded");
-
-    // Click first execution row
-    const firstRow = page.getByTestId("execution-card").first();
-    await firstRow.click();
-    await page.waitForURL(/\/executions\/[a-f0-9-]+/);
-
-    // Wait for graph to load
-    await expect(page.locator(".react-flow")).toBeVisible({ timeout: 15000 });
-
-    // Get toolbar
+    await openFirstExecution(page);
     const toolbar = page.locator(".border-b.bg-card").first();
+    await toolbar.locator("button.font-mono").click();
+    await expect(toolbar.locator('svg[class*="lucide-check"]')).toBeVisible({ timeout: 2000 });
+  });
 
-    // Current node button should be visible (has Play icon and node ID text)
-    const currentNodeButton = toolbar.locator("button:has(svg.lucide-play)");
+  test("the technical node graph is one click away and the current node focuses it", async ({
+    page,
+  }) => {
+    await page.goto(`${BASE_URL}/executions/${runningExecutionId}`);
+    await expect(page.getByTestId("run-page")).toBeVisible({ timeout: 15000 });
+    await showTechnicalGraph(page);
+    const transformOf = () =>
+      page.locator(".react-flow__viewport").evaluate((el) => window.getComputedStyle(el).transform);
+    await expect.poll(transformOf).not.toBe("none");
+    const overview = await transformOf();
+    // The toolbar's current-node button moves the viewport onto the waiting node.
+    const toolbar = page.locator(".border-b.bg-card").first();
+    await toolbar.locator("button:has(svg.lucide-play)").click();
+    await expect.poll(transformOf, { timeout: 5000 }).not.toBe(overview);
+  });
 
-    // If current node exists (execution has a current node)
-    if ((await currentNodeButton.count()) > 0) {
-      // Get initial transform of ReactFlow viewport (CSS transform, not HTML attribute)
-      const viewportBefore = await page.locator(".react-flow__viewport").evaluate((el) => {
-        return window.getComputedStyle(el).transform;
-      });
-
-      // Click on current node to focus
-      await currentNodeButton.click();
-
-      // Wait for fitView animation
-      await page.waitForTimeout(500);
-
-      // Viewport transform should have changed (fitView was called)
-      const viewportAfter = await page.locator(".react-flow__viewport").evaluate((el) => {
-        return window.getComputedStyle(el).transform;
-      });
-
-      // Transform should exist and be valid (fitView sets proper transform)
-      // Note: in some cases may be same if already focused, but click should not error
-      expect(viewportAfter).toBeTruthy();
-      expect(viewportAfter).not.toBe("none");
-    }
+  test("the panel sits beside the run on desktop and under it on a phone", async ({ page }) => {
+    await openFirstExecution(page);
+    const panel = page.getByTestId("run-panel");
+    await expect(panel).toBeVisible();
+    const desktop = await panel.boundingBox();
+    const runPage = await page.getByTestId("run-page").boundingBox();
+    expect(desktop!.width).toBeLessThan(runPage!.width * 0.5);
+    await page.setViewportSize({ width: 600, height: 900 });
+    const phone = await panel.boundingBox();
+    const phonePage = await page.getByTestId("run-page").boundingBox();
+    expect(Math.round(phone!.width)).toBe(Math.round(phonePage!.width));
   });
 });
 
-test.describe("Tabbed Right Panel (Step 28)", () => {
+test.describe("Admin run page", () => {
+  let executionId: string;
+  let cleanup: () => Promise<void>;
+  let multiUserAdmin = false;
+
+  test.beforeAll(async () => {
+    const features = (await (await fetch(`${BASE_URL}/api/features`)).json()) as {
+      data: { features: { multiUserAdmin: boolean } };
+    };
+    multiUserAdmin = features.data.features.multiUserAdmin;
+    const authenticated = await createAuthenticatedMCPClient();
+    cleanup = authenticated.cleanup;
+    const run = await startWorkflowExecutionState(authenticated.client, "moira/quick-task", {
+      skipTelegramCheck: true,
+    });
+    executionId = run.processId;
+  });
+
+  test.afterAll(async () => {
+    await cleanup();
+  });
+
   test.beforeEach(async ({ page }) => {
+    // The admin execution routes exist only with the multi-user admin capability; a self-host
+    // instance redirects them to the admin home, so the page cannot be exercised there.
+    test.skip(!multiUserAdmin, "multiUserAdmin capability is off on this instance");
     await loginAsAdmin(page);
+    await page.goto(`${BASE_URL}/admin/executions/${executionId}`);
+    await expect(page.getByTestId("run-page")).toBeVisible({ timeout: 15000 });
   });
 
-  test("tabs switch between Context, Errors, and Steps", async ({ page }) => {
-    // Navigate to executions
-    await page.goto(`${BASE_URL}/executions`);
-    await page.waitForLoadState("domcontentloaded");
-
-    // Click first execution row
-    const firstRow = page.getByTestId("execution-card").first();
-    await firstRow.click();
-    await page.waitForURL(/\/executions\/[a-f0-9-]+/);
-
-    // Wait for page to load
-    await expect(page.locator(".react-flow")).toBeVisible({ timeout: 15000 });
-
-    // Context tab is default active
-    const contextTab = page.locator('[role="tab"]').filter({ hasText: /Context|Контекст/ });
-    await expect(contextTab).toHaveAttribute("data-state", "active");
-
-    // Switch to Errors tab
-    const errorsTab = page.locator('[role="tab"]').filter({ hasText: /Errors|Ошибки/ });
-    await errorsTab.click();
-    await expect(errorsTab).toHaveAttribute("data-state", "active");
-
-    // Switch to Steps tab
-    const stepsTab = page.locator('[role="tab"]').filter({ hasText: /Steps|Шаги/ });
-    await stepsTab.click();
-    await expect(stepsTab).toHaveAttribute("data-state", "active");
-  });
-
-  test("fullscreen button opens context modal", async ({ page }) => {
-    // Navigate to executions
-    await page.goto(`${BASE_URL}/executions`);
-    await page.waitForLoadState("domcontentloaded");
-
-    // Click first execution row
-    const firstRow = page.getByTestId("execution-card").first();
-    await firstRow.click();
-    await page.waitForURL(/\/executions\/[a-f0-9-]+/);
-
-    // Wait for page to load
-    await expect(page.locator(".react-flow")).toBeVisible({ timeout: 15000 });
-
-    // Fullscreen button should be visible (Maximize2 icon in toolbar).
-    // Target by testid — the bare maximize-2 icon also appears on per-variable
-    // expand buttons, which would make the icon selector ambiguous.
-    const fullscreenButton = page.getByTestId("context-fullscreen-button");
-    if ((await fullscreenButton.count()) > 0) {
-      await fullscreenButton.click();
-
-      // Modal should open
-      const dialog = page.locator('[role="dialog"]');
-      await expect(dialog).toBeVisible();
-
-      // Dialog should contain the context variable editor (filter input marker)
-      await expect(dialog.getByTestId("context-filter-input")).toBeVisible();
-
-      // Close modal
-      const closeButton = dialog.locator('[data-slot="dialog-close"]');
-      await closeButton.click();
-      await expect(dialog).not.toBeVisible();
-    }
-  });
-
-  test("right panel uses 50% width alongside graph", async ({ page }) => {
-    // Navigate to executions
-    await page.goto(`${BASE_URL}/executions`);
-    await page.waitForLoadState("domcontentloaded");
-
-    // Click first execution row
-    const firstRow = page.getByTestId("execution-card").first();
-    await firstRow.click();
-    await page.waitForURL(/\/executions\/[a-f0-9-]+/);
-
-    // Wait for page to load
-    await expect(page.locator(".react-flow")).toBeVisible({ timeout: 15000 });
-
-    // Right panel with tabs should be 50% width
-    const rightPanel = page.locator(".w-1\\/2.bg-card");
-    await expect(rightPanel).toBeVisible();
-  });
-
-  test("context tab shows the variable editor with execution data", async ({ page }) => {
-    // Navigate to executions
-    await page.goto(`${BASE_URL}/executions`);
-    await page.waitForLoadState("domcontentloaded");
-
-    // Click first execution row
-    const firstRow = page.getByTestId("execution-card").first();
-    await firstRow.click();
-    await page.waitForURL(/\/executions\/[a-f0-9-]+/);
-
-    // Wait for page to load
-    await expect(page.locator(".react-flow")).toBeVisible({ timeout: 15000 });
-
-    // Context tab is default - variable editor (filter input) should be visible
-    await expect(page.getByTestId("context-filter-input")).toBeVisible({ timeout: 5000 });
-  });
-});
-
-test.describe("Admin Execution Inspector", () => {
-  test.beforeEach(async ({ page }) => {
-    await loginAsAdmin(page);
-  });
-
-  test("admin view shows owner info in toolbar", async ({ page }) => {
-    // Navigate to admin executions
-    await page.goto(`${BASE_URL}/admin/executions`);
-    await page.waitForLoadState("domcontentloaded");
-
-    // Click first execution card
-    const firstCard = page.getByTestId("execution-card").first();
-    await expect(firstCard).toBeVisible({ timeout: 10000 });
-    await firstCard.click();
-    await page.waitForURL(/\/admin\/executions\/[a-f0-9-]+/);
-
-    // Wait for page to load
-    await expect(page.locator(".react-flow")).toBeVisible({ timeout: 15000 });
-
-    // Owner info should be visible in toolbar (may show username or email)
+  test("admin view shows owner info in the toolbar and the run's process view", async ({
+    page,
+  }) => {
     const toolbar = page.locator(".border-b.bg-card").first();
     await expect(toolbar).toBeVisible();
-
-    // Owner info element - truncated text with muted foreground color
-    const ownerInfo = toolbar.locator(".text-muted-foreground.truncate");
-    // Owner info may not always be visible depending on execution data
-    // but toolbar should contain it when showOwnerInfo=true
-    if ((await ownerInfo.count()) > 0) {
-      await expect(ownerInfo.first()).toBeVisible();
-    }
+    await expect(toolbar.locator(".text-muted-foreground.truncate").first()).toBeVisible();
+    await expect(page.getByTestId("execution-progress")).toBeVisible();
+    await expect(page.getByTestId("progress-node-scope")).toHaveAttribute("data-status", "waiting");
   });
 
-  test("admin view is read-only (no save on context tab)", async ({ page }) => {
-    // Navigate to admin executions
-    await page.goto(`${BASE_URL}/admin/executions`);
-    await page.waitForLoadState("domcontentloaded");
-
-    // Click first execution card
-    const firstCard = page.getByTestId("execution-card").first();
-    await expect(firstCard).toBeVisible({ timeout: 10000 });
-    await firstCard.click();
-    await page.waitForURL(/\/admin\/executions\/[a-f0-9-]+/);
-
-    // Wait for page to load
-    await expect(page.locator(".react-flow")).toBeVisible({ timeout: 15000 });
-
-    // Context tab should be active by default
-    const contextTab = page
-      .locator('[role="tab"][data-state="active"]')
-      .filter({ hasText: /Context|Контекст/ });
-    await expect(contextTab).toBeVisible();
-
-    // Variable editor should be visible (admin view is read-only)
+  test("admin view is read-only on the context tab but may answer the waiting step", async ({
+    page,
+  }) => {
+    await page.getByRole("tab", { name: /Context|Контекст/ }).click();
     await expect(page.getByTestId("context-filter-input")).toBeVisible({ timeout: 5000 });
-
-    // No edit affordances should be present (admin view passes no onSavePath) — read-only shows
-    // values as code, with no editable input fields.
-    const editInputs = page.locator('[data-testid^="context-var-input-"]');
-    await expect(editInputs).toHaveCount(0);
+    await expect(page.locator('[data-testid^="context-var-input-"]')).toHaveCount(0);
+    await page.getByRole("tab", { name: /Variables|Переменные/ }).click();
+    await expect(page.getByTestId("answer-form")).toHaveAttribute("data-node-id", "get-task");
   });
 });

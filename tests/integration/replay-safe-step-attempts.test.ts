@@ -115,6 +115,73 @@ describe("replay-safe workflow step attempts", () => {
     );
   });
 
+  test("an answer from outside the flow supersedes the agent's presentation: its attempt is stale, current_step presents the new node", async () => {
+    const { repository, executor, executionId, first } = await setup("replay-superseded");
+    const agentAttempt = attemptId(first);
+
+    // A person answers the first step on the run page: no attempt, a presentation for the next.
+    await executor.executeStep(executionId, {}, undefined, {
+      userId: USER_ID,
+      answeredBy: { role: "user", userId: USER_ID },
+      createPresentation: true,
+    });
+    const superseded = (await repository.getExecutionAttempt(agentAttempt))!;
+    const current = (await repository.getCurrentExecutionAttempt(executionId, USER_ID))!;
+    expect(superseded.state).toBe("superseded");
+    expect(superseded.nextAttemptId).toBe(current.attemptId);
+    expect(current).toMatchObject({ state: "presented", nodeId: "second" });
+    const execution = (await repository.getExecution(executionId))!;
+    expect(execution.visits!.map((v) => [v.nodeId, v.adjusted ?? false])).toEqual([
+      ["start", false],
+      ["first", false],
+      ["first", true],
+      ["second", false],
+    ]);
+
+    // The agent's outstanding attempt is neither replayed nor applied: it is stale, and the
+    // presentation current_step hands out is the one for the new node.
+    await expect(
+      executor.executeStep(executionId, {}, undefined, {
+        userId: USER_ID,
+        attemptId: agentAttempt,
+      }),
+    ).rejects.toThrow(/ATTEMPT_STALE/);
+    expect(await repository.getExecution(executionId)).toEqual(execution);
+    const presented = await executor.presentCurrentStep(executionId);
+    expect(attemptId(presented!)).toBe(current.attemptId);
+    expect(presented).toContain("Second empty response");
+    const done = await executor.executeStep(executionId, {}, undefined, {
+      userId: USER_ID,
+      attemptId: current.attemptId,
+    });
+    expect(done).toContain("completed");
+
+    // An answer cannot supersede an attempt an agent is executing.
+    const other = await setup("replay-superseded-executing");
+    const claimed = await other.repository.claimExecutionAttempt({
+      attemptId: attemptId(other.first),
+      userId: USER_ID,
+      executionId: other.executionId,
+      executionRevision: (await other.repository.getExecution(other.executionId))!.revision,
+      nodeId: "first",
+      workflowId: other.graph.id!,
+      workflowVersion: other.graph.metadata.version,
+      workflowDigest: workflowGraphDigest(other.graph),
+      inputFingerprint: stepMutationFingerprint({}, undefined),
+      ownerId: "agent-host",
+      now: Date.now(),
+      leaseMs: 60_000,
+    });
+    expect(claimed.kind).toBe("claimed");
+    await expect(
+      other.executor.executeStep(other.executionId, {}, undefined, {
+        userId: USER_ID,
+        answeredBy: { role: "user", userId: USER_ID },
+        createPresentation: true,
+      }),
+    ).rejects.toThrow(/agent step is in progress/);
+  });
+
   test("current_step rebinds a revision-only stale presentation without advancing", async () => {
     const repository = new InMemoryRepository();
     const graph = twoEmptyStepsGraph("replay-recover-stale-presentation");

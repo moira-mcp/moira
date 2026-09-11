@@ -59,8 +59,11 @@ A run is projected onto the process from its recorded route, never guessed from 
 
 An unvisited block is never shown as done. The route itself is available as an ordered list
 with loop markers, every variable carries its value history, and a value set from outside the
-flow (a runtime adjustment) is shown as such with who made it. A run recorded before routes
-existed shows only its current block and says that no route was recorded.
+flow (a runtime adjustment) is shown as such with who made it. A route cursor shows the run as it
+stood at any earlier visit, and the execution's owner can answer the step the run waits for from
+the page; the answer is validated like an agent's and recorded as an adjustment (see the
+_Reading a run_ guide). A run recorded before routes existed shows only its current block and
+says that no route was recorded.
 
 ## Making a workflow readable
 

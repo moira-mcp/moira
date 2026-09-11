@@ -345,6 +345,10 @@ export class DatabaseRepository implements IDataRepository {
     return this.executionAttemptRepo.ensureCurrentPresented(attempt);
   }
 
+  async supersedePresentedExecutionAttempt(attempt: PresentedExecutionAttempt): Promise<void> {
+    this.executionAttemptRepo.supersedePresented(attempt);
+  }
+
   async prepareStartExecutionAttempt(attempt: PreparedStartExecutionAttempt): Promise<void> {
     this.executionAttemptRepo.prepareStart(attempt);
   }

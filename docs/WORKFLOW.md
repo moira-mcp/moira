@@ -469,7 +469,12 @@ instead of opening another. The log is the `visits` column of the execution row,
 revisioned state written by every step. Setting a variable from outside the flow (`session
 set-variable`, the HTTP variable routes) appends a visit flagged `adjusted` with its `actor`
 (`agent` or `user` and the user id) in the same guarded write as the value.
-`projectExecutionRun(workflow, execution)` projects the route onto the derived process: the block
+An answer supplied from outside the flow (the run page) resumes the wait as an ordinary step and,
+when the step accepts it, appends an adjustment visit carrying the accepted values and the acting
+user right after the wait it closed; a rejected answer records nothing.
+`projectExecutionRun(workflow, execution, { at })` projects the route onto the derived process
+(`at`, a visit sequence number, cuts the route at that visit, treats the run as on that visit's
+node, and gives variables the values written up to it; the cursor is echoed as `cursor`): the block
 of the engine's last visit is `active`, or `waiting` when that visit is open on the node the
 execution waits for; a visited block is `done`, or `repeated` with the pass count of its working
 steps (start, condition and expression nodes are not passes unless the block consists of routing

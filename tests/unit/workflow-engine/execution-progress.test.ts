@@ -389,6 +389,51 @@ describe("execution run projection", () => {
     expect(projected.activeNodeId).toBe("review");
   });
 
+  test("a route cursor projects the run as it stood at that visit", () => {
+    const run = execution("review-two", "running");
+    run.globalContext.variables = { unit: 3, total: 5 };
+    run.visits = [
+      visit(0, "start", "default", { unit: 1 }),
+      visit(1, "implement", "success", {}, { waited: true }),
+      visit(2, "review-one", "success", { unit: 2 }, { waited: true }),
+      visit(3, "review-two", "success", {}, { waited: true }),
+      visit(4, "repair-one", "success", { unit: 3 }, { waited: true }),
+      visit(5, "review-one", "success", {}, { waited: true }),
+      visit(6, "review-two", null, {}, { waited: true }),
+    ];
+    const whole = projectExecutionRun(graph(), run)!;
+    expect(whole.cursor).toBeNull();
+
+    const atImplement = projectExecutionRun(graph(), run, { at: 1 })!;
+    expect(atImplement.cursor).toBe(1);
+    expect(atImplement.route.map((entry) => entry.seq)).toEqual([0, 1]);
+    // The visit at the cursor left its node, so its block is active, not waiting; later blocks
+    // are pending because the cut route never reached them.
+    expect(atImplement.nodes.map((node) => [node.status, node.iterations])).toEqual([
+      ["active", 1],
+      ["pending", 0],
+      ["pending", 0],
+    ]);
+    expect(atImplement.activeNodeId).toBe("implementation");
+    const unit = atImplement.variables.find((variable) => variable.name === "unit")!;
+    expect(unit.current).toBe(1);
+    expect(unit.history.map((change) => change.seq)).toEqual([0]);
+    // A variable the route writes only after the cursor shows its registry default.
+    const total = atImplement.variables.find((variable) => variable.name === "total")!;
+    expect(total.current).toBe(5);
+    expect(total.history).toEqual([]);
+
+    const atRepair = projectExecutionRun(graph(), run, { at: 4 })!;
+    expect(atRepair.nodes.map((node) => node.status)).toEqual(["done", "done", "active"]);
+    expect(atRepair.variables.find((variable) => variable.name === "unit")!.current).toBe(3);
+
+    // A cursor at or beyond the last visit is the whole route.
+    expect(projectExecutionRun(graph(), run, { at: 6 })!.cursor).toBeNull();
+    expect(projectExecutionRun(graph(), run, { at: 99 })!.nodes.map((n) => n.status)).toEqual(
+      whole.nodes.map((n) => n.status),
+    );
+  });
+
   test("an execution without a recorded route infers nothing", () => {
     const running = execution("review-two", "running");
     const projected = projectExecutionRun(graph(), running)!;

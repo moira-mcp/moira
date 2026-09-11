@@ -1,6 +1,7 @@
 import type Database from "better-sqlite3";
 import { createHash } from "node:crypto";
 import { canonicalJson } from "../../utils/canonical-json.js";
+import { ConflictError } from "../../errors/index.js";
 import type {
   ClaimStartExecutionAttemptInput,
   CompleteExecutionAttemptInput,
@@ -27,7 +28,7 @@ type AttemptRow = {
   workflowDigest: string;
   requestPayload: string | null;
   inputFingerprint: string | null;
-  state: "presented" | "executing" | "completed" | "outcome_unknown";
+  state: "presented" | "executing" | "completed" | "outcome_unknown" | "superseded";
   ownerId: string | null;
   fence: number;
   heartbeatAt: number | null;
@@ -372,6 +373,34 @@ export class ExecutionAttemptRepository {
       );
   }
 
+  /**
+   * Replace the execution's current presentation with `next`: the presented attempt (if any) is
+   * marked `superseded` and linked to the new one, which is created in its place. Refuses while
+   * an agent is executing the current attempt or its outcome is unknown.
+   */
+  supersedePresented(next: PresentedExecutionAttempt): void {
+    this.sqlite
+      .transaction(() => {
+        const current = this.getCurrent(next.executionId, next.userId);
+        if (current && current.state !== "presented") {
+          throw new ConflictError(
+            "An agent step is in progress on this execution; wait for it to finish before answering",
+            { executionId: next.executionId, attemptId: current.attemptId, state: current.state },
+          );
+        }
+        if (current) {
+          this.sqlite
+            .prepare(
+              `UPDATE executionMutationAttempt SET state = 'superseded', nextAttemptId = ?,
+               completedAt = ?, updatedAt = ? WHERE attemptId = ? AND state = 'presented'`,
+            )
+            .run(next.attemptId, next.createdAt, next.createdAt, current.attemptId);
+        }
+        this.createPresented(next);
+      })
+      .immediate();
+  }
+
   ensureCurrentPresented(candidate: PresentedExecutionAttempt): ExecutionAttempt {
     return this.sqlite
       .transaction(() => {
@@ -478,6 +507,7 @@ export class ExecutionAttemptRepository {
         if (!row || row.operation !== "step" || row.userId !== input.userId)
           return { kind: "invalid" };
         if (row.executionId !== input.executionId) return { kind: "stale" };
+        if (row.state === "superseded") return { kind: "stale" };
         if (row.inputFingerprint !== null && row.inputFingerprint !== input.inputFingerprint) {
           return { kind: "conflict" };
         }
@@ -657,7 +687,7 @@ export class ExecutionAttemptRepository {
         let removed = this.sqlite
           .prepare(
             `DELETE FROM executionMutationAttempt
-           WHERE operation = 'step' AND state = 'completed' AND completedAt < ?`,
+           WHERE operation = 'step' AND state IN ('completed', 'superseded') AND completedAt < ?`,
           )
           .run(now - STEP_RECEIPT_TTL_MS).changes;
         removed += this.sqlite
@@ -668,7 +698,7 @@ export class ExecutionAttemptRepository {
                  PARTITION BY executionId ORDER BY completedAt DESC, attemptId DESC
                ) AS position
                FROM executionMutationAttempt
-               WHERE operation = 'step' AND state = 'completed'
+               WHERE operation = 'step' AND state IN ('completed', 'superseded')
              ) WHERE position > ?
            )`,
           )

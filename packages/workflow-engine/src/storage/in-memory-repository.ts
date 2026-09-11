@@ -647,6 +647,33 @@ export class InMemoryRepository implements IDataRepository {
     });
   }
 
+  async supersedePresentedExecutionAttempt(next: PresentedExecutionAttempt): Promise<void> {
+    const current = [...this.executionAttempts.values()]
+      .filter(
+        (attempt) =>
+          attempt.executionId === next.executionId &&
+          attempt.userId === next.userId &&
+          attempt.operation === "step" &&
+          ["presented", "executing", "outcome_unknown"].includes(attempt.state),
+      )
+      .sort((left, right) => right.createdAt - left.createdAt)[0];
+    if (current && current.state !== "presented") {
+      throw new ConflictError(
+        "An agent step is in progress on this execution; wait for it to finish before answering",
+        { executionId: next.executionId, attemptId: current.attemptId, state: current.state },
+      );
+    }
+    if (current) {
+      Object.assign(current, {
+        state: "superseded",
+        nextAttemptId: next.attemptId,
+        completedAt: next.createdAt,
+        updatedAt: next.createdAt,
+      });
+    }
+    await this.createPresentedExecutionAttempt(next);
+  }
+
   async ensureCurrentPresentedExecutionAttempt(
     candidate: PresentedExecutionAttempt,
   ): Promise<ExecutionAttempt> {
@@ -924,6 +951,7 @@ export class InMemoryRepository implements IDataRepository {
     if (!attempt || attempt.operation !== "step" || attempt.userId !== input.userId)
       return { kind: "invalid" };
     if (attempt.executionId !== input.executionId) return { kind: "stale" };
+    if (attempt.state === "superseded") return { kind: "stale" };
     if (attempt.inputFingerprint && attempt.inputFingerprint !== input.inputFingerprint)
       return { kind: "conflict" };
     if (attempt.state === "completed" && attempt.response !== null)

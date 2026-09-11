@@ -239,6 +239,11 @@ export default defineConfig({
               slug: "docs/guides/editing-workflows",
             },
             {
+              label: "Reading a run",
+              translations: { ru: "Чтение запуска" },
+              slug: "docs/guides/run-page",
+            },
+            {
               label: "Writing Extensions",
               translations: { ru: "Написание расширений" },
               slug: "docs/guides/writing-extensions",

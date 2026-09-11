@@ -72,12 +72,17 @@ export function diffVariables(
  * Append the visits of one engine cycle to the execution. A cycle that starts on the node whose
  * visit is still open (it paused last time) continues that visit instead of opening another: the
  * exit key and the changes of the resume land on it. A teleport closes the open visit with the
- * teleport exit before the target's visit is appended. Mutates `execution.visits`.
+ * teleport exit before the target's visit is appended. When the input that resumed the wait came
+ * from outside the flow (`answeredBy`, a person on the run page rather than the agent), the
+ * accepted answer is also recorded as an adjustment visit on that node — flagged `adjusted` with
+ * its actor and carrying the values the answer wrote — right after the wait it closed, so the
+ * route shows who supplied the evidence. Mutates `execution.visits`.
  */
 export function appendEngineVisits(
   execution: WorkflowExecution,
   visits: readonly EngineVisit[],
   teleportTo?: string,
+  answeredBy?: NonNullable<ExecutionVisit["actor"]>,
 ): void {
   const log = (execution.visits ??= []);
   // The engine's last visit may sit under adjustment visits recorded during the same wait.
@@ -99,6 +104,18 @@ export function appendEngineVisits(
       last.exitKey = visit.exitKey;
       last.changes = { ...last.changes, ...visit.changes };
       if (visit.waited) last.waited = true;
+      // An answer that left the node was accepted; one that paused again was rejected as
+      // invalid and is not an adjustment of the run.
+      if (answeredBy && visit.exitKey !== null) {
+        log.push({
+          seq: log.length,
+          nodeId: visit.nodeId,
+          exitKey: null,
+          changes: { ...visit.changes },
+          adjusted: true,
+          actor: answeredBy,
+        });
+      }
       return;
     }
     log.push({

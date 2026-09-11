@@ -214,6 +214,78 @@ describe("execution attempt migration and persistence", () => {
     }
   }, 60_000);
 
+  test("a presentation superseded by an outside answer stays stale for the agent, yields the new one, and is evicted with old receipts", () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "moira-attempt-supersede-"));
+    const filename = path.join(directory, "moira.db");
+    const sqlite = new Database(filename);
+    try {
+      migrate(drizzle(sqlite), { migrationsFolder: MIGRATIONS });
+      seedBaseline(sqlite);
+      const attempts = new ExecutionAttemptRepository(sqlite);
+      attempts.createPresented(presented());
+      const answeredAt = Date.now() - 8 * 24 * 60 * 60 * 1000;
+      const next: PresentedExecutionAttempt = {
+        ...presented(),
+        attemptId: "attempt-2",
+        executionRevision: 4,
+        nodeId: "next",
+        response: null,
+        createdAt: answeredAt,
+      };
+      attempts.supersedePresented(next);
+      expect(attempts.get("attempt-1")).toMatchObject({
+        state: "superseded",
+        nextAttemptId: "attempt-2",
+        completedAt: answeredAt,
+      });
+      expect(attempts.getCurrent("attempt-execution", "attempt-user")?.attemptId).toBe("attempt-2");
+      // The agent's old attempt is stale, never replayed, whatever binding it claims with.
+      expect(
+        attempts.claim({
+          attemptId: "attempt-1",
+          userId: "attempt-user",
+          executionId: "attempt-execution",
+          executionRevision: 3,
+          nodeId: "task",
+          workflowId: "attempt-workflow",
+          workflowVersion: "1.0.0",
+          workflowDigest: "digest",
+          inputFingerprint: "fingerprint",
+          ownerId: "owner",
+          now: Date.now(),
+          leaseMs: 30_000,
+        }),
+      ).toEqual({ kind: "stale" });
+      // An answer cannot supersede an attempt an agent is executing.
+      const claimed = attempts.claim({
+        attemptId: "attempt-2",
+        userId: "attempt-user",
+        executionId: "attempt-execution",
+        executionRevision: 4,
+        nodeId: "next",
+        workflowId: "attempt-workflow",
+        workflowVersion: "1.0.0",
+        workflowDigest: "digest",
+        inputFingerprint: "fingerprint",
+        ownerId: "owner",
+        now: Date.now(),
+        leaseMs: 30_000,
+      });
+      expect(claimed.kind).toBe("claimed");
+      expect(() =>
+        attempts.supersedePresented({ ...next, attemptId: "attempt-3", executionRevision: 5 }),
+      ).toThrow(/agent step is in progress/);
+      expect(attempts.get("attempt-3")).toBeNull();
+      // A superseded row older than the receipt window is evicted like a completed receipt.
+      expect(attempts.cleanup(Date.now())).toBe(1);
+      expect(attempts.get("attempt-1")).toBeNull();
+      expect(attempts.get("attempt-2")?.state).toBe("executing");
+    } finally {
+      if (sqlite.open) sqlite.close();
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
+  }, 60_000);
+
   test("cleanup keeps the current attempt and the newest one thousand receipts", () => {
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), "moira-attempt-retention-"));
     const sqlite = new Database(path.join(directory, "moira.db"));
