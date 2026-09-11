@@ -2,8 +2,8 @@
   "id": "91b11263-a180-4a08-9399-55f406f82c69",
   "metadata": {
     "name": "Software Development Flow",
-    "version": "15.5.1",
-    "description": "Implements one complete repository change through source-grounded requirements, independently reviewed planning, vertical units, staged validation, post-validation permanent-documentation updates, independent unit completeness, and one numeric final semantic/requirements review. Reports stay semantic and diff-first; HTML reports prefer agentic-report@latest and preserve Artifact/user-communication delivery. Authorized unit checkpoints are commit-or-no-op without receipt files or automatic repair branches. Seven-stage progress, cause-aware replan, user gates, external-blocker recovery, local VCS authority, and caller-owned delivery boundaries remain intact.",
+    "version": "15.6.0",
+    "description": "Implements one complete repository change through source-grounded requirements, independently reviewed planning, vertical units, staged validation, post-validation permanent-documentation updates, independent unit completeness, and one numeric final semantic/requirements review. Reports stay semantic and diff-first; HTML reports prefer agentic-report@latest and preserve Artifact/user-communication delivery. Authorized unit checkpoints are commit-or-no-op without receipt files or automatic repair branches. A fifteen-block process view derived from the graph, cause-aware replan, user gates, external-blocker recovery, local VCS authority, and caller-owned delivery boundaries remain intact.",
     "author": "mcp-moira-team",
     "tags": [
       "development",

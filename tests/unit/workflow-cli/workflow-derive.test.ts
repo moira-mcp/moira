@@ -21,8 +21,13 @@ describe("moira-workflow derive", () => {
     expect(output.trim().endsWith("DIAGNOSTICS: none")).toBe(true);
   });
 
-  test("prints every diagnostic of a flow that is not yet annotated", () => {
-    const output = renderWorkflowDerivation(bundled("todo-list"));
+  test("prints every diagnostic of a flow whose annotation is incomplete", () => {
+    const workflow = bundled("todo-list");
+    delete workflow.nodes.find((node) => node.id === "start")!.progressNodeId;
+    for (const node of workflow.nodes) {
+      if (node.progressNodeId === "prepare") node.progressNodeId = "work";
+    }
+    const output = renderWorkflowDerivation(workflow);
     expect(output).toContain("DIAGNOSTICS");
     expect(output).toMatch(/unowned-node node=start: Node 'start' must declare progressNodeId/);
     expect(output).toMatch(/empty-block block=/);

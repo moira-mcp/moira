@@ -5,7 +5,7 @@
  */
 import type { AuthoredNode } from "../model";
 
-/** Quick Task — 23 authored nodes, workflow version 4.5.0. */
+/** Quick Task — 23 authored nodes, workflow version 4.6.0. */
 export const QUICK_TASK_AUTHORED: AuthoredNode[] = [
   {
     id: "start",
@@ -360,7 +360,7 @@ export const QUICK_TASK_AUTHORED: AuthoredNode[] = [
   },
 ];
 
-/** Software Development Flow — 130 authored nodes, workflow version 15.5.1. */
+/** Software Development Flow — 130 authored nodes, workflow version 15.6.0. */
 export const SDF_AUTHORED: AuthoredNode[] = [
   {
     id: "start",

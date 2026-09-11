@@ -100,6 +100,37 @@ describe("process derivation from the authored graph", () => {
     ]);
   });
 
+  test.each([
+    [
+      "todo-list",
+      { blocks: 3, transitions: 5, cycles: 2, order: ["checklist", "prepare", "work"] },
+    ],
+    [
+      "robust-task",
+      {
+        blocks: 6,
+        transitions: 21,
+        cycles: 12,
+        order: ["intake", "plan", "execute", "step-review", "final-review", "deliver"],
+      },
+    ],
+    [
+      "workflow-management-flow",
+      {
+        blocks: 6,
+        transitions: 27,
+        cycles: 12,
+        order: ["source", "requirements", "design", "build", "review", "delivery"],
+      },
+    ],
+    [
+      "user-onboarding",
+      { blocks: 3, transitions: 5, cycles: 1, order: ["welcome", "choose", "launch"] },
+    ],
+  ])("derives the annotated %s with its block structure and no diagnostics", (slug, expected) => {
+    expect(counts(bundled(slug))).toEqual({ ...expected, diagnostics: [] });
+  });
+
   test("returns null for a workflow without progress", () => {
     const workflow = synthetic();
     delete workflow.progress;

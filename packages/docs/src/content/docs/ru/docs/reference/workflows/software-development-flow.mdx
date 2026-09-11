@@ -18,10 +18,15 @@ mcp__moira__start({ action: "execute", startAttemptId: "<ID попытки за�
 
 Flow фиксирует source-grounded требования и полномочия, определяет одну простую visual preference (`disabled`, `screenshots` или `html_report`), создаёт и независимо проверяет architecture-aware план, после чего именно текущий план становится единственным источником visual и user-approval policy каждого unit. Flow готовит каждый unit по реальному репозиторию до мутации, реализует полное вертикальное поведение и запускает fresh producer completion до deterministic validation и independent semantic review. Документация и тесты являются частью production, а не поздней уборкой.
 
-Каждый execution также показывает постоянно видимую статическую полосу progress: Intake, Plan,
-Implement, Tests, Review, Checkpoint и Finalize. Она выводится из текущей primary workflow node,
-поэтому repair, replan и обычный multi-unit loop из checkpoint снова открывают соответствующую
-раннюю фазу без отдельных status variables. Та же shared model формирует PNG для существующих
+Каждый execution также показывает постоянно видимое представление процесса из пятнадцати блоков:
+Intake, Project health, Plan and plan review, Plan approval and activation, Implement a unit, Unit
+validation gates, Broad validation and documentation, Independent completeness review, Unit review
+with the user, Checkpoint and advance, Feature-wide validation, Final review and report, Replan,
+Finalize и Stopped. Каждая нода принадлежит одному блоку, каждая связь, выходящая из блока,
+подписана, а каждый возврат объясняет причину и условие выхода, поэтому переходы, циклы и
+блоки-хабы выводятся из исполняемого графа. Активный блок следует за текущей primary workflow
+node, поэтому repair, replan и обычный multi-unit loop из checkpoint снова открывают
+соответствующий ранний блок без отдельных status variables. Та же shared model формирует PNG для существующих
 авторизованных user notifications для plan/report/approval/completion; stopped notification остаётся
 текстовым, потому что у произвольного abort нет одной правдивой фазы. Progress не меняет routing SDF
 или его границы полномочий.

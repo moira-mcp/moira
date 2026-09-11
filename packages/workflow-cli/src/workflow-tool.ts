@@ -40,6 +40,14 @@ import { fileURLToPath } from "node:url";
 import type { WorkflowGraph, GraphNode } from "@mcp-moira/workflow-engine";
 import { renderWorkflowSchema } from "./workflow-schema.js";
 import { renderWorkflowDerivation } from "./workflow-derive.js";
+import {
+  addBlock,
+  clearConnectionLabel,
+  editBlock,
+  setConnectionLabel,
+  setNodeBlock,
+} from "./workflow-process-authoring.js";
+import { deriveProcess } from "@mcp-moira/workflow-engine/process";
 // Import GraphValidator directly to avoid auth dependencies from shared index
 import { GraphValidator } from "@mcp-moira/workflow-engine/validation";
 import { readExtensionRegistrySnapshot } from "@mcp-moira/workflow-engine/extensions";
@@ -1516,6 +1524,11 @@ async function syncWorkflow(sourcePath: string, destPath: string): Promise<void>
 }
 
 // === ARGUMENT PARSING ===
+/** Value-less switches that control version handling; never part of a command's text payload. */
+const VERSION_SWITCHES = new Set(["--force", "--no-version-bump"]);
+/** Switches that take no value; every other `--flag` consumes the next argument. */
+const FLAG_SWITCHES = new Set([...VERSION_SWITCHES, "--graph", "--detailed", "--usage"]);
+
 interface ParsedConfig {
   file: string;
   command: string;
@@ -1565,6 +1578,14 @@ ${c("cyan", "Commands:")}
   structure [--graph] [--detailed] Show workflow structure
   schema                           Print one deterministic control-flow schema
   derive                           Print the process projection: blocks, transitions, returns, diagnostics
+  set-label <node> <key> <text> [--cause <text> --exit <text>]
+                                   Label a connection; --cause/--exit explain it as a return
+  clear-label <node> <key>         Remove a connection label
+  set-block <node> <block>         Move a node to a progress block (progressNodeId)
+  add-block <id> <label> <summary> [--outcome <tpl>] [--next <text>] [--after <block>]
+                                   Add a progress block (appended, or right after --after)
+  edit-block <id> [--label <t>] [--summary <t>] [--outcome <tpl|none>] [--next <t|none>]
+                                   Edit a progress block's label, description, outcome or next
   validate                         Validate workflow
   variables [--usage]              Analyze all workflow variables
   get-variable <name>              Get declared global from variableRegistry
@@ -1611,6 +1632,7 @@ ${c("cyan", "Structure Options:")}
 ${c("cyan", "Version Validation:")}
   Content changes require version increment (semver X.Y.Z format).
   Use --force to bypass version check for emergencies.
+  Use --no-version-bump (alias of --force) to keep metadata.version unchanged on an authoring write.
 
 ${c("cyan", "Examples:")}
   moira-workflow dev-flow.json get analyze-and-plan
@@ -1653,7 +1675,7 @@ ${c("cyan", "Examples:")}
     showGraph: args.includes("--graph"),
     detailed: args.includes("--detailed"),
     typeFilter: undefined,
-    force: args.includes("--force"),
+    force: args.some((argument) => VERSION_SWITCHES.has(argument)),
     externallyWritable: args.includes("--externally-writable")
       ? args[args.indexOf("--externally-writable") + 1] === "false"
         ? false
@@ -1910,6 +1932,113 @@ async function main(): Promise<void> {
       }
       break;
 
+    case "set-label":
+    case "clear-label":
+    case "set-block":
+    case "add-block":
+    case "edit-block": {
+      const positional = args.slice(2).filter((argument, index, all) => {
+        if (argument.startsWith("--")) return false;
+        const previous = all[index - 1];
+        return !(previous && previous.startsWith("--") && !FLAG_SWITCHES.has(previous));
+      });
+      const option = (flag: string): string | undefined => {
+        const index = args.indexOf(flag);
+        return index === -1 ? undefined : args[index + 1];
+      };
+      let mutated: WorkflowGraph;
+      try {
+        switch (config.command) {
+          case "set-label": {
+            const [nodeId, key, ...text] = positional;
+            if (!nodeId || !key || text.length === 0) {
+              throw new Error(
+                "Usage: set-label <node> <key> <text> [--cause <text> --exit <text>]",
+              );
+            }
+            const cause = option("--cause");
+            const exit = option("--exit");
+            if ((cause === undefined) !== (exit === undefined)) {
+              throw new Error("A return needs both --cause and --exit");
+            }
+            mutated = setConnectionLabel(
+              workflow,
+              nodeId,
+              key,
+              text.join(" "),
+              cause !== undefined && exit !== undefined ? { cause, exit } : undefined,
+            );
+            break;
+          }
+          case "clear-label": {
+            const [nodeId, key] = positional;
+            if (!nodeId || !key) throw new Error("Usage: clear-label <node> <key>");
+            mutated = clearConnectionLabel(workflow, nodeId, key);
+            break;
+          }
+          case "set-block": {
+            const [nodeId, blockId] = positional;
+            if (!nodeId || !blockId) throw new Error("Usage: set-block <node> <block>");
+            mutated = setNodeBlock(workflow, nodeId, blockId);
+            break;
+          }
+          case "add-block": {
+            const [id, label, ...summary] = positional;
+            if (!id || !label || summary.length === 0) {
+              throw new Error(
+                "Usage: add-block <id> <label> <summary> [--outcome <tpl>] [--next <text>] [--after <block>]",
+              );
+            }
+            mutated = addBlock(
+              workflow,
+              {
+                id,
+                label,
+                summary: summary.join(" "),
+                outcome: option("--outcome"),
+                next: option("--next"),
+              },
+              option("--after"),
+            );
+            break;
+          }
+          default: {
+            const [id] = positional;
+            if (!id) {
+              throw new Error(
+                "Usage: edit-block <id> [--label <t>] [--summary <t>] [--outcome <tpl|none>] [--next <t|none>]",
+              );
+            }
+            const none = (value: string | undefined): string | undefined =>
+              value === "none" ? "" : value;
+            mutated = editBlock(workflow, id, {
+              label: option("--label"),
+              summary: option("--summary"),
+              outcome: none(option("--outcome")),
+              next: none(option("--next")),
+            });
+          }
+        }
+      } catch (error) {
+        console.error(c("red", `ERROR: ${(error as Error).message}`));
+        process.exit(1);
+      }
+      createBackup(config.file);
+      saveWorkflow(config.file, mutated, originalWorkflow, saveOptions);
+      const remaining = deriveProcess(mutated)?.diagnostics ?? [];
+      if (remaining.length > 0) {
+        console.log(
+          c(
+            "yellow",
+            `⚠ ${remaining.length} block-contract diagnostic${remaining.length === 1 ? " remains" : "s remain"} (run derive to list them)`,
+          ),
+        );
+      } else {
+        console.log(c("green", "✓ Process block contract satisfied"));
+      }
+      break;
+    }
+
     case "list-variables":
       cmdListVariables(
         workflow,
@@ -1956,7 +2085,7 @@ async function main(): Promise<void> {
       const schemaFromFile = readTextArgumentFromFile(args, "--file", "Variable schema");
       const inlineSchema = args
         .slice(3)
-        .filter((argument) => argument !== "--force")
+        .filter((argument) => !VERSION_SWITCHES.has(argument))
         .join(" ")
         .trim();
       if (schemaFromFile !== undefined && args[3] !== "--file") {
@@ -1996,7 +2125,7 @@ async function main(): Promise<void> {
     case "set-slug": {
       const slug = args
         .slice(2)
-        .filter((argument) => argument !== "--force")
+        .filter((argument) => !VERSION_SWITCHES.has(argument))
         .join(" ")
         .trim();
       if (!slug) {
@@ -2011,7 +2140,7 @@ async function main(): Promise<void> {
     case "set-name": {
       const name = args
         .slice(2)
-        .filter((argument) => argument !== "--force")
+        .filter((argument) => !VERSION_SWITCHES.has(argument))
         .join(" ")
         .trim();
       if (!name) {
@@ -2027,7 +2156,7 @@ async function main(): Promise<void> {
       const descriptionFromFile = readTextArgumentFromFile(args, "--file", "Description");
       const inlineDescription = args
         .slice(2)
-        .filter((argument) => argument !== "--force")
+        .filter((argument) => !VERSION_SWITCHES.has(argument))
         .join(" ")
         .trim();
       if (descriptionFromFile !== undefined && args[2] !== "--file") {
@@ -2074,7 +2203,7 @@ async function main(): Promise<void> {
       const progressFromFile = readTextArgumentFromFile(args, "--file", "Progress");
       const inlineProgress = args
         .slice(2)
-        .filter((argument) => argument !== "--force")
+        .filter((argument) => !VERSION_SWITCHES.has(argument))
         .join(" ")
         .trim();
       if (progressFromFile !== undefined && args[2] !== "--file") {

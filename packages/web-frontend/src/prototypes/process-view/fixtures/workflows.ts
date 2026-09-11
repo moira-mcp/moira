@@ -9,7 +9,7 @@ export const QUICK_TASK_WORKFLOW: AnnotatedWorkflow = {
   slug: "quick-task",
   title: "Quick Task",
   goal: "Complete one bounded task through a reviewed plan, sequential verified work, independent result review, and truthful delivery.",
-  version: "4.5.0",
+  version: "4.6.0",
   blocks: [
     {
       id: "scope",
@@ -72,7 +72,7 @@ export const SDF_WORKFLOW: AnnotatedWorkflow = {
   slug: "software-development-flow",
   title: "Software Development Flow",
   goal: "Deliver one complete repository change with its tests, permanent documentation, review, and truthful local closure.",
-  version: "15.5.1",
+  version: "15.6.0",
   blocks: [
     {
       id: "intake",

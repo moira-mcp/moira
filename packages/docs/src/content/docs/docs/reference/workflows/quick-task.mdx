@@ -84,7 +84,7 @@ In `interactive` mode nothing changes. In `autonomous` mode the plan-approval ga
 
 ## Execution progress
 
-The execution card and exported progress image use the same five-stage presentation: Scope → Plan → Execute → Verify → Result. The execution note remains the task title. Every user-visible waiting responsibility, including the jump-only replan entry, maps to one of these stages; the presentation does not add routes or change the executable graph.
+The execution card and exported progress image use the same seven-block process: Understand the task → Draft the plan → Independent plan review → Plan approval → Execute plan steps → Final review → Present the result. The execution note remains the task title. Every node, including routing nodes and the jump-only replan entry, belongs to one of these blocks; every edge that leaves a block is labelled, and every return carries the cause of the loop and the condition that ends it, so the process view is derived from the executable graph and never adds routes or changes it.
 
 Each stage shows its stable purpose, the exact current role, the latest confirmed outcome, and the next meaningful action. The node that owns a semantic result writes one bounded outcome: intake summarizes the resolved contract, planning roles replace the current plan synopsis, execution replaces the latest completed-unit outcome, review roles replace the current review disposition, and presentation or rework replaces the result disposition. Writers replace the value instead of appending history.
 

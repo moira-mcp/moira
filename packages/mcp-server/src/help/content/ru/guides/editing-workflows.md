@@ -69,6 +69,22 @@ moira-workflow ./workflow.json update implement --progress-active-label "Impleme
 moira-workflow ./workflow.json update notify --progress-node-id review --attach-progress-image true
 ```
 
+У контракта блоков есть собственные команды: привязать ноду к блоку, добавить или изменить блок с
+его описанием, подписать связь, выходящую из блока, и объяснить возврат причиной цикла и условием
+его завершения. Каждая запись сообщает, сколько диагностик контракта блоков осталось, поэтому flow
+размечается итеративно, пока `derive` не покажет ни одной; `--no-version-bump` сохраняет версию
+во время итераций.
+
+```bash
+moira-workflow ./workflow.json set-block route-plan-approval plan
+moira-workflow ./workflow.json add-block deliver "Deliver" "Hand the result over" --after execute
+moira-workflow ./workflow.json edit-block deliver --summary "Present the result"
+moira-workflow ./workflow.json set-label check-plan-approved true "plan approved"
+moira-workflow ./workflow.json set-label route-review false "review found defects" \
+  --cause "The independent review reported blocking findings." --exit "The review passes."
+moira-workflow ./workflow.json derive
+```
+
 Команды сохраняют schema fields, но не выводят смысл milestones и не заменяют итоговые `validate`,
 `schema`, поведенческие scenarios и независимое semantic review.
 

@@ -453,7 +453,9 @@ keyed like `connections` — a string, or `{ label, cycle: { cause, exit } }` fo
 block, which owns a node whose `globalInputs` write the variable (`outcome-duplicate`,
 `outcome-unowned`). Transitions between blocks, returns and hub blocks are derived from the
 primary graph by `deriveProcess` (`@mcp-moira/workflow-engine/process`), which the validator, the
-CLI `derive` command and `GET /api/workflows/:id/process` share. Workflows without `progress` are
+CLI `derive` command and `GET /api/workflows/:id/process` share; the CLI's `set-block`, `add-block`,
+`edit-block`, `set-label` and `clear-label` commands author the contract one mutation at a time
+(`docs/WORKFLOW-TOOLS.md`). Workflows without `progress` are
 unaffected. Multiple primary nodes may map to one block. The active primary node is that
 milestone's focus target, while every other milestone deterministically focuses its first mapped
 primary node in workflow order. At terminal completion, the last persisted mapped waiting node is
@@ -501,11 +503,12 @@ action are visible immediately. It scrolls only when needed and focuses the proj
 primary workflow node when an actionable milestone is selected; unmapped stages remain readable
 non-controls. Workflows without `progress` keep the existing inspector layout.
 
-The bundled Software Development Flow uses this contract as a static phase projection over its
-existing lifecycle: Intake, Plan, Implement, Tests, Review, Checkpoint, and Finalize. Its checkpoint
-display edge returns to Implement because that is the normal multi-unit route; finalization is
-activated directly only after the primary graph decides the plan is complete. This keeps the
-display honest without adding conditional progress edges or duplicating SDF routing.
+The bundled flows (Quick Task, Todo List, Robust Task, Software Development Flow, Workflow
+Management Flow and User Onboarding) are annotated under this contract: every node belongs to a
+block, every boundary edge is labelled and every return explains its cause and exit, so their
+process views, including the checkpoint-to-implement loop of the Software Development Flow, are
+derived from the executable graph rather than drawn separately. `moira-workflow <file> derive`
+prints each one.
 
 ### Required Fields
 

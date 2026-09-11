@@ -68,6 +68,22 @@ moira-workflow ./workflow.json update implement --progress-active-label "Impleme
 moira-workflow ./workflow.json update notify --progress-node-id review --attach-progress-image true
 ```
 
+The block contract has its own commands: own a node by a block, add or edit a block with its
+description, label a connection that leaves a block, and explain a return with the cause of the
+loop and the condition that ends it. Each write reports how many block-contract diagnostics
+remain, so a flow is annotated iteratively until `derive` shows none; `--no-version-bump` keeps
+the version while iterating.
+
+```bash
+moira-workflow ./workflow.json set-block route-plan-approval plan
+moira-workflow ./workflow.json add-block deliver "Deliver" "Hand the result over" --after execute
+moira-workflow ./workflow.json edit-block deliver --summary "Present the result"
+moira-workflow ./workflow.json set-label check-plan-approved true "plan approved"
+moira-workflow ./workflow.json set-label route-review false "review found defects" \
+  --cause "The independent review reported blocking findings." --exit "The review passes."
+moira-workflow ./workflow.json derive
+```
+
 These commands persist schema fields; they do not derive milestone meaning or replace final
 `validate`, `schema`, behavioral scenarios, or independent semantic review.
 

@@ -223,6 +223,37 @@ the authored edges behind every transition, hub blocks, and every block-contract
 a single line saying it has no block view. The output is deterministic and the command does not
 write the source file.
 
+### set-label, clear-label, set-block, add-block, edit-block - Author the block contract
+
+```bash
+# Label a boundary edge (the edge leaves the node's block)
+moira-workflow <flow>.json set-label check-plan-approved true "plan approved"
+
+# Explain a return: a label plus the cause of the loop and the condition that ends it
+moira-workflow <flow>.json set-label route-review-verdict false "review found defects" \
+  --cause "The independent review reported blocking findings." \
+  --exit "The review passes."
+
+moira-workflow <flow>.json clear-label check-plan-approved true
+
+# Own a node by a block (sets progressNodeId; the block must exist)
+moira-workflow <flow>.json set-block route-plan-approval plan
+
+# Add a block at the end, or right after another block; edit its description or outcome
+moira-workflow <flow>.json add-block deliver "Deliver" "Hand the result over" --after execute \
+  --outcome "{{progress_result_outcome}}" --next "Done"
+moira-workflow <flow>.json edit-block deliver --summary "Present the result" --next none
+```
+
+These commands apply one mutation of the process block contract each, behind the normal backup and
+content-version behaviour (`--no-version-bump`, an alias of `--force`, keeps the version). They
+refuse an unknown node, connection key or block, an empty label or summary, a duplicate block id,
+and a return with only one of `--cause`/`--exit`, leaving the file unchanged. After a successful
+write the command re-derives the process and prints whether the block contract is satisfied or how
+many diagnostics remain (`derive` lists them). `edit-block` accepts `none` for `--outcome` and
+`--next` to remove the field. Annotate a flow iteratively: own every node, label every edge
+`derive` reports as unlabelled, explain every return, then `validate`.
+
 ### set-progress - Set or remove static execution progress
 
 ```bash
@@ -485,7 +516,7 @@ moira-workflow ./workflow.json set-version 2.0.0
 
 ### --force Flag
 
-The `--force` flag skips the version auto-increment. Use it when you need to save without changing the version (e.g. formatting).
+The `--force` flag skips the version auto-increment. Use it when you need to save without changing the version (e.g. formatting). `--no-version-bump` is an alias with the same effect and reads better when the intent is iterative annotation; neither switch is ever part of a command's text argument.
 
 Available for all modifying commands:
 

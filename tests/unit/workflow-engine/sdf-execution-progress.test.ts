@@ -12,13 +12,29 @@ const workflow = structuredClone(
 
 const progressNodeIds = [
   "intake",
+  "health",
   "plan",
+  "plan-approval",
   "implement",
-  "tests",
-  "review",
+  "unit-validation",
+  "broad-validation",
+  "completeness",
+  "user-review",
   "checkpoint",
+  "feature-validation",
+  "final-review",
+  "replan",
   "finalize",
+  "stopped",
 ];
+
+/** Index projection: blocks before the active one are completed, the rest pending. */
+function statesFor(activeId: string): string[] {
+  const active = progressNodeIds.indexOf(activeId);
+  return progressNodeIds.map((_, i) =>
+    i < active ? "completed" : i === active ? "current" : "pending",
+  );
+}
 
 function execution(
   currentNodeId: string | null,
@@ -56,88 +72,60 @@ describe("bundled Software Development Flow progress", () => {
       nodeId: "capture-task-and-context",
       activeId: "intake",
       activeLabel: "Capture task and repository context",
-      states: ["current", "pending", "pending", "pending", "pending", "pending", "pending"],
     },
     {
       nodeId: "create-plan",
       activeId: "plan",
       activeLabel: "Plan r3",
-      states: ["completed", "current", "pending", "pending", "pending", "pending", "pending"],
     },
     {
       nodeId: "prepare-plan-unit-implementation",
       activeId: "implement",
       activeLabel: "Prepare · 2/5",
-      states: ["completed", "completed", "current", "pending", "pending", "pending", "pending"],
     },
     {
       nodeId: "validate-cheap",
-      activeId: "tests",
+      activeId: "unit-validation",
       activeLabel: "2/5 i4 · Checks",
-      states: ["completed", "completed", "completed", "current", "pending", "pending", "pending"],
     },
     {
       nodeId: "review-architecture",
-      activeId: "review",
+      activeId: "unit-validation",
       activeLabel: "2/5 i4 · Arch review",
-      states: ["completed", "completed", "completed", "completed", "current", "pending", "pending"],
     },
     {
       nodeId: "checkpoint-plan-unit",
       activeId: "checkpoint",
       activeLabel: "Checkpoint · 2/5",
-      states: [
-        "completed",
-        "completed",
-        "completed",
-        "completed",
-        "completed",
-        "current",
-        "pending",
-      ],
     },
     {
       nodeId: "create-final-report",
-      activeId: "finalize",
+      activeId: "final-review",
       activeLabel: "Create final report",
-      states: [
-        "completed",
-        "completed",
-        "completed",
-        "completed",
-        "completed",
-        "completed",
-        "current",
-      ],
     },
     {
       nodeId: "repair-user-feedback",
-      activeId: "implement",
+      activeId: "user-review",
       activeLabel: "2/5 i4 · Feedback fix",
-      states: ["completed", "completed", "current", "pending", "pending", "pending", "pending"],
     },
     {
       nodeId: "teleport-replan",
-      activeId: "plan",
+      activeId: "replan",
       activeLabel: "Replan · r3",
-      states: ["completed", "current", "pending", "pending", "pending", "pending", "pending"],
     },
-  ])(
-    "projects $nodeId onto the concrete SDF phase",
-    ({ nodeId, activeId, activeLabel, states }) => {
-      const projected = projectExecutionProgress(workflow, execution(nodeId));
+  ])("projects $nodeId onto the concrete SDF phase", ({ nodeId, activeId, activeLabel }) => {
+    const projected = projectExecutionProgress(workflow, execution(nodeId));
 
-      expect(projected).toMatchObject({
-        title: "Software Development · plan r3",
-        activeNodeId: activeId,
-        workflowVersion: workflow.metadata.version,
-        executionRevision: 12,
-      });
-      expect(projected?.nodes.map((node) => node.id)).toEqual(progressNodeIds);
-      expect(projected?.nodes.map((node) => node.state)).toEqual(states);
-      expect(projected?.nodes.find((node) => node.state === "current")?.label).toBe(activeLabel);
-    },
-  );
+    expect(projected).toMatchObject({
+      title: "Software Development · plan r3",
+      activeNodeId: activeId,
+      workflowVersion: workflow.metadata.version,
+      executionRevision: 12,
+    });
+    expect(projected?.nodes.map((node) => node.id)).toEqual(progressNodeIds);
+    expect(projected?.nodes.map((node) => node.state)).toEqual(statesFor(activeId));
+    expect(projected?.nodes.find((node) => node.state === "current")?.label).toBe(activeLabel);
+  });
 
   test("projects successful completion with no active phase", () => {
     const projected = projectExecutionProgress(workflow, execution(null, "completed"));

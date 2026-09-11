@@ -18,10 +18,15 @@ mcp__moira__start({ action: "execute", startAttemptId: "<Start attempt ID from p
 
 The flow captures source-grounded requirements and authority, resolves one simple visual preference (`disabled`, `screenshots`, or `html_report`), creates and independently reviews an architecture-aware plan, and then treats that current plan as the sole source of each unit's visual and user-approval policy. It prepares every unit from the real repository before mutation, implements complete vertical behavior, and runs a fresh producer-completion pass before deterministic validation and independent semantic review. Documentation and tests are part of production, not late cleanup.
 
-Every execution also exposes one always-visible static progress strip: Intake, Plan, Implement,
-Tests, Review, Checkpoint, and Finalize. It is derived from the current primary workflow node, so
-repair, replan, and the normal multi-unit checkpoint loop reopen the corresponding earlier phase
-without separate status variables. The same shared model renders the PNG attached to existing
+Every execution also exposes one always-visible process view of fifteen blocks: Intake, Project
+health, Plan and plan review, Plan approval and activation, Implement a unit, Unit validation
+gates, Broad validation and documentation, Independent completeness review, Unit review with the
+user, Checkpoint and advance, Feature-wide validation, Final review and report, Replan, Finalize,
+and Stopped. Every node belongs to one block, every edge that leaves a block is labelled, and
+every return explains its cause and exit, so transitions, loops and hub blocks are derived from
+the executable graph. The active block follows the current primary workflow node, so repair,
+replan, and the normal multi-unit checkpoint loop reopen the corresponding earlier block without
+separate status variables. The same shared model renders the PNG attached to existing
 authorized plan/report/approval/completion user notifications; stopped notifications remain text-only
 because an arbitrary abort has no truthful single phase. Progress never changes SDF routing or its
 authority boundary.

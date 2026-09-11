@@ -74,6 +74,18 @@ describe("workflow-tool identity commands", () => {
       runWorkflowTool([file, "set-name", "Renamed"]);
       expect(read(file).metadata.version).not.toBe("1.0.0");
     });
+
+    test.each(["--force", "--no-version-bump"])(
+      "keeps the version with %s and never stores the switch in the text",
+      (flag) => {
+        runWorkflowTool([file, "set-name", "Kept Version", flag]);
+        expect(read(file).metadata.name).toBe("Kept Version");
+        expect(read(file).metadata.version).toBe("1.0.0");
+        runWorkflowTool([file, "set-description", "Plain description", flag]);
+        expect(read(file).metadata.description).toBe("Plain description");
+        expect(read(file).metadata.version).toBe("1.0.0");
+      },
+    );
   });
 
   describe("set-slug", () => {
