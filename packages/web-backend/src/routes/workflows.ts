@@ -26,10 +26,27 @@ import {
   paramValidators,
 } from "../middleware/error-middleware.js";
 import { WorkflowValidationService } from "../services/validation-service.js";
+import { buildWorkflowProcessResponse } from "../services/workflow-process.js";
 import { DatabaseRepository, WorkflowGraph, GraphNode } from "@mcp-moira/workflow-engine";
 import { getWorkflowService, queryWorkflowVariables, validateSlug } from "@mcp-moira/shared";
 
 const router = Router();
+
+/**
+ * GET /api/workflows/:id/process — the derived block view of the saved workflow (blocks,
+ * labelled transitions, returns, diagnostics). `process` is null for a workflow without `progress`.
+ */
+router.get(
+  "/:id/process",
+  asyncHandler(async (req: Request, res: Response) => {
+    const userId = (req as AuthenticatedRequest).userId;
+    const repository = new DatabaseRepository();
+    const resolved = await repository.resolveWorkflow(req.params.id, userId);
+    const info = resolved ? await repository.getWorkflow(resolved.workflowId, userId) : null;
+    if (!info) throw createApiError.notFound("Workflow not found");
+    res.json(buildWorkflowProcessResponse(resolved!.workflowId, info.workflow));
+  }),
+);
 
 router.get(
   "/:id/variables",

@@ -71,6 +71,7 @@ export * from "./utils/schema-validator.js";
 export * from "./utils/registry-value-validator.js";
 export * from "./utils/execution-variable-policy.js";
 export * from "./utils/execution-progress.js";
+export * from "./utils/process-derivation.js";
 export {
   buildExecutionProgressVisualModel,
   normalizeProgressVisualOptions,

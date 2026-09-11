@@ -187,6 +187,7 @@
         },
         "nodes": {
           "type": "array",
+          "description": "Process blocks in process order. The 18 cap is justified against the largest bundled process, Software Development Flow (15 blocks), with headroom; a block view larger than this is a node diagram, not a process.",
           "minItems": 1,
           "maxItems": 18,
           "items": {

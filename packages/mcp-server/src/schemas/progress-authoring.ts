@@ -2,7 +2,8 @@ import { z } from "zod";
 
 export const progressContentAuthoringSchema = z
   .object({
-    summary: z.string().min(1).max(1000).optional(),
+    /** The block description: mandatory for every progress block (the process contract). */
+    summary: z.string().min(1).max(1000),
     details: z.array(z.string().min(1).max(500)).max(12).optional(),
     outcome: z.string().min(1).max(1000).optional(),
     next: z.string().min(1).max(500).optional(),
@@ -32,7 +33,7 @@ export const progressAuthoringSchema = z
           .object({
             id: z.string().min(1),
             label: z.string().min(1).max(200),
-            content: progressContentAuthoringSchema.optional(),
+            content: progressContentAuthoringSchema,
             connections: z
               .object({ default: z.string().min(1).optional() })
               .strict()
@@ -41,6 +42,8 @@ export const progressAuthoringSchema = z
           .strict(),
       )
       .min(1)
+      // 18 blocks: the largest bundled process (Software Development Flow) is 15 blocks; the
+      // cap leaves headroom without inviting node-level diagrams.
       .max(18),
   })
   .strict();

@@ -208,6 +208,21 @@ teleport-only regions, and disconnected roots/components. Every source node and 
 emitted exactly once; coverage footers make omissions visible. The command does not interpret
 workflow-specific meaning, execute workflow content, or write the source file.
 
+### derive - Read-only process projection
+
+```bash
+moira-workflow ./workflows/production/flows/<flow>.json derive
+```
+
+Prints the workflow's process view derived from its primary graph: every progress block in
+process order with its description, outcome template and owned nodes, each transition to another
+block with its label (`NEXT`), each return with its label, cause and exit condition (`RETURN`),
+the authored edges behind every transition, hub blocks, and every block-contract diagnostic
+(`unowned-node`, `unknown-block`, `empty-block`, `empty-description`, `unlabeled-edge`,
+`unexplained-cycle`, `outcome-duplicate`, `outcome-unowned`). A workflow without `progress` prints
+a single line saying it has no block view. The output is deterministic and the command does not
+write the source file.
+
 ### set-progress - Set or remove static execution progress
 
 ```bash

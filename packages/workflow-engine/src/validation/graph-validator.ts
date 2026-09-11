@@ -32,6 +32,7 @@ import type { ExtensionRegistry } from "../extensions/extension-registry.js";
 import { getActiveExtensionRegistry } from "../extensions/extension-registry-provider.js";
 import { canonicalJson, DECLARED_SCHEMA_AJV_OPTIONS } from "../extensions/declared-schema.js";
 import { isExtensionNodeType } from "../extensions/extension-contract.js";
+import { deriveProcess } from "../utils/process-derivation.js";
 import {
   classifyNodeType,
   describeNodeTypeClassification,
@@ -748,6 +749,31 @@ export class GraphValidator {
       }
     }
 
+    // The block contract: ownership of every node, a description per block, labelled boundary
+    // edges and explained returns, outcome templates carried by exactly one owning block. The
+    // derivation is the single source of these facts; its diagnostics become validation errors.
+    const derived = deriveProcess(workflow);
+    for (const diagnostic of derived?.diagnostics ?? []) {
+      if (diagnostic.code === "no-start") continue; // reported by the structural rules
+      const field =
+        diagnostic.code === "unlabeled-edge" || diagnostic.code === "unexplained-cycle"
+          ? `connectionLabels.${diagnostic.edge?.split(".").slice(1).join(".") ?? ""}`
+          : diagnostic.code === "empty-description"
+            ? `progress.nodes[${progress.nodes.findIndex((n) => n.id === diagnostic.blockId)}].content.summary`
+            : diagnostic.code === "outcome-duplicate" || diagnostic.code === "outcome-unowned"
+              ? `progress.nodes[${progress.nodes.findIndex((n) => n.id === diagnostic.blockId)}].content.outcome`
+              : diagnostic.code === "empty-block"
+                ? `progress.nodes[${progress.nodes.findIndex((n) => n.id === diagnostic.blockId)}]`
+                : "progressNodeId";
+      issues.push({
+        type: "structure",
+        severity: "error",
+        nodeId: diagnostic.nodeId,
+        field,
+        message: `[${diagnostic.code}] ${diagnostic.message}`,
+      });
+    }
+
     const visibleWaitingTypes = new Set([
       "agent-directive",
       "teleport",
@@ -756,24 +782,6 @@ export class GraphValidator {
       "subgraph",
     ]);
     for (const node of workflow.nodes) {
-      if (node.progressNodeId && !ids.has(node.progressNodeId)) {
-        issues.push({
-          type: "structure",
-          severity: "error",
-          nodeId: node.id,
-          field: "progressNodeId",
-          message: `Node '${node.id}' references unknown progress node '${node.progressNodeId}'.`,
-        });
-      }
-      if (visibleWaitingTypes.has(node.type) && !node.progressNodeId) {
-        issues.push({
-          type: "structure",
-          severity: "error",
-          nodeId: node.id,
-          field: "progressNodeId",
-          message: `User-visible waiting node '${node.id}' must declare progressNodeId.`,
-        });
-      }
       if (node.progressActiveLabel && !visibleWaitingTypes.has(node.type)) {
         issues.push({
           type: "structure",

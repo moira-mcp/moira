@@ -434,17 +434,27 @@ Node task-1: unclosed template bracket '{{' at position 15
 
 ### Static user-facing progress
 
-`WorkflowGraph.progress` is optional presentation metadata. It can declare a template-enabled
-`title`, `goal`, bounded generic `facts`, and ordered nodes. Each progress node has `id`, `label`,
-optional structured `content` (`summary`, `details`, `outcome`, `next`), and an optional display-only
-default connection. A primary node's `progressNodeId` activates a
-progress milestone while that primary node is current. The engine derives ordered
+`WorkflowGraph.progress` is the workflow's process view. It can declare a template-enabled
+`title`, `goal`, bounded generic `facts`, and ordered nodes — the **blocks** of the process, in
+process order. Each block has `id`, `label`, structured `content` with a mandatory `summary`
+(the block description) and optional `details`, `outcome`, `next`, and an optional display-only
+default connection that the derivation ignores. A primary node's `progressNodeId` names the block
+it belongs to and activates that block while the node is current. The engine derives ordered
 completed/current/pending state without persistence and renders labels through the existing template
 processor. Progress connections never participate in execution routing.
 
-When `progress` exists, every user-visible waiting node (`agent-directive`, `teleport`, `lock`,
-`materialize`, and `subgraph`) must declare a valid `progressNodeId`; automatic transient nodes may
-omit it. Multiple primary nodes may map to one milestone. The active primary node is that
+When `progress` exists the block contract applies and every violation is a validation error with a
+stable code: every primary node — routing nodes included — declares a `progressNodeId` naming an
+existing block (`unowned-node`, `unknown-block`); every block owns at least one node
+(`empty-block`) and carries `content.summary` (`empty-description`); every connection that leaves
+its block, or returns to an earlier block or to its own block, carries a `connectionLabels` entry
+keyed like `connections` — a string, or `{ label, cycle: { cause, exit } }` for a return
+(`unlabeled-edge`, `unexplained-cycle`); each `{{progress_*_outcome}}` template sits on exactly one
+block, which owns a node whose `globalInputs` write the variable (`outcome-duplicate`,
+`outcome-unowned`). Transitions between blocks, returns and hub blocks are derived from the
+primary graph by `deriveProcess` (`@mcp-moira/workflow-engine/process`), which the validator, the
+CLI `derive` command and `GET /api/workflows/:id/process` share. Workflows without `progress` are
+unaffected. Multiple primary nodes may map to one block. The active primary node is that
 milestone's focus target, while every other milestone deterministically focuses its first mapped
 primary node in workflow order. At terminal completion, the last persisted mapped waiting node is
 the completion frontier: that milestone and earlier milestones are complete, while later milestones

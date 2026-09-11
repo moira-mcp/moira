@@ -38,12 +38,27 @@ function graph(): WorkflowGraph {
           },
           connections: { default: "review" },
         },
-        { id: "review", label: "Review {{unit}}", connections: { default: "repair" } },
-        { id: "repair", label: "Repair", connections: { default: "review" } },
+        {
+          id: "review",
+          label: "Review {{unit}}",
+          content: { summary: "Independent review" },
+          connections: { default: "repair" },
+        },
+        {
+          id: "repair",
+          label: "Repair",
+          content: { summary: "Repair what the review found" },
+          connections: { default: "review" },
+        },
       ],
     },
     nodes: [
-      { id: "start", type: "start", connections: { default: "implement" } },
+      {
+        id: "start",
+        type: "start",
+        progressNodeId: "implementation",
+        connections: { default: "implement" },
+      },
       {
         id: "implement",
         type: "agent-directive",
@@ -52,6 +67,7 @@ function graph(): WorkflowGraph {
         directive: "Implement",
         completionCondition: "Done",
         connections: { success: "review-one" },
+        connectionLabels: { success: "implemented" },
       },
       {
         id: "review-one",
@@ -68,8 +84,23 @@ function graph(): WorkflowGraph {
         directive: "Review two",
         completionCondition: "Done",
         connections: { success: "end" },
+        connectionLabels: { success: "review passed" },
       },
-      { id: "end", type: "end" },
+      {
+        id: "repair-one",
+        type: "agent-directive",
+        progressNodeId: "repair",
+        directive: "Repair",
+        completionCondition: "Done",
+        connections: { success: "review-one" },
+        connectionLabels: {
+          success: {
+            label: "repaired",
+            cycle: { cause: "The review found issues", exit: "A clean review" },
+          },
+        },
+      },
+      { id: "end", type: "end", progressNodeId: "repair" },
     ],
   };
 }
@@ -123,7 +154,8 @@ describe("execution progress projection", () => {
       primaryNodeIds: ["review-one", "review-two"],
       focusNodeId: "review-two",
     });
-    expect(projected?.nodes[0].focusNodeId).toBe("implement");
+    // Every node is owned, so the first mapped node of the implementation block is `start`.
+    expect(projected?.nodes[0].focusNodeId).toBe("start");
   });
 
   test("projects persistent milestone content and exact active content without retaining an old revision", () => {
@@ -349,7 +381,7 @@ describe("execution progress projection", () => {
     expect(result.errors.map((error) => error.message)).toEqual(
       expect.arrayContaining([
         expect.stringContaining("Duplicate progress node id 'implementation'"),
-        expect.stringContaining("unknown progress node 'missing'"),
+        expect.stringContaining("unknown progress block 'missing'"),
       ]),
     );
   });
@@ -423,15 +455,13 @@ describe("execution progress projection", () => {
     ];
     const validator = new GraphValidator();
     const missing = await validator.validateWorkflow(workflow);
-    expect(missing.errors.map((error) => error.message)).toContain(
-      "User-visible waiting node 'wait' must declare progressNodeId.",
-    );
+    const ownership = (message: string): boolean =>
+      message.startsWith("[unowned-node] Node 'wait' must declare progressNodeId");
+    expect(missing.errors.map((error) => error.message).some(ownership)).toBe(true);
 
     waitingNode.progressNodeId = "implementation";
     const mapped = await validator.validateWorkflow(workflow);
-    expect(mapped.errors.map((error) => error.message)).not.toContain(
-      "User-visible waiting node 'wait' must declare progressNodeId.",
-    );
+    expect(mapped.errors.map((error) => error.message).some(ownership)).toBe(false);
   });
 
   test("requires mapped progress for Telegram photo attachment and bounds captions", async () => {

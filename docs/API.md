@@ -350,6 +350,13 @@ Authentication: Required
 externallyWritable filters with `hasDefault` and policy on each entry, applied filters and unknown
 names. It does not claim current execution editability.
 
+`GET /api/workflows/:id/process` (id or slug) returns the saved workflow's derived process view:
+`{ workflowId, version, process }` where `process` holds the blocks in process order (id, label,
+description, outcome template, owned node ids, transitions with label, optional `cycle`
+`{ cause, exit }` and the authored edges behind them), hub block ids, node-level back-edges and the
+block-contract diagnostics, or `null` for a workflow without `progress`. It carries nothing about
+any execution; the CLI `derive` command prints the same derivation.
+
 The local definition CLI authors policy with
 `moira-workflow <file> set-variable-write-policy <name> <node-ids|all|none>` and discovers it with
 `list-variables` plus the same definition filters.

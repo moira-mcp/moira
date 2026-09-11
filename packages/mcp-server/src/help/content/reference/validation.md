@@ -30,6 +30,12 @@ Graph structure is analyzed for correctness:
 - **Materialize declarations** - Every entry has exactly one source (`from` or empty `content`),
   registry sources are string defaults, declared paths are safe and unique, and all connection
   targets exist
+- **Process blocks** - When `progress` is present, every node declares `progressNodeId` for an
+  existing block, every block has `content.summary`, every connection leaving a block or returning
+  carries a `connectionLabels` entry (returns with `cycle.cause` and `cycle.exit`), and each
+  `{{progress_*_outcome}}` template sits on one block that owns a writer; each violation is an
+  error with a stable code (`unowned-node`, `unknown-block`, `empty-block`, `empty-description`,
+  `unlabeled-edge`, `unexplained-cycle`, `outcome-duplicate`, `outcome-unowned`)
 - **Extension node types** - Types found in the live extension registry or a published registry
   snapshot validate their declared configuration schema. A live registry that does not contain a
   type reports an error; a type absent from a snapshot, or validation without usable registry data,

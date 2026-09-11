@@ -13,8 +13,20 @@ A workflow may declare an optional top-level `progress` graph for a concise user
 definition may include a template-enabled title, goal, bounded generic facts, and ordered nodes.
 Nodes contain `id`, template-enabled `label`, optional structured plain-text `content` (`summary`,
 `details`, `outcome`, and `next`), and an optional static `connections.default` used for drawing.
-User-visible waiting nodes in the primary graph select a milestone with
-`progressNodeId`.
+
+The progress graph is the workflow's process view: its nodes are **blocks**, and their array order
+is the process order. When `progress` is present, every node of the primary graph — routing nodes
+included — declares the block it belongs to through `progressNodeId`; every block carries a
+description in `content.summary`; and every connection that leaves a block, or returns to an
+earlier block or to its own block, carries a `connectionLabels` entry keyed like `connections`:
+a plain label, or `{ "label": …, "cycle": { "cause": …, "exit": … } }` for a return. Transitions,
+loops and hub blocks are derived from the primary graph and never authored twice; the display-only
+`connections.default` is ignored by that derivation. An outcome template (`{{progress_*_outcome}}`)
+sits on exactly one block, which owns a node that writes the variable. Validation reports every
+violation as an error with a stable code — `unowned-node`, `unknown-block`, `empty-block`,
+`empty-description`, `unlabeled-edge`, `unexplained-cycle`, `outcome-duplicate`,
+`outcome-unowned` — and `moira-workflow <file> derive` or `GET /api/workflows/:id/process` shows
+the derived blocks with the same diagnostics.
 
 A waiting node may also declare template-enabled `progressActiveLabel`. It replaces the displayed
 label only while that exact primary node is current, letting a workflow show truthful unit,
@@ -35,9 +47,8 @@ is current, and later ones are pending. Returning to an earlier milestone throug
 replan automatically reopens it. Connections never route execution, and progress has no variables,
 conditions, stored status, history, or cursor.
 
-When `progress` is present, every user-visible waiting node (`agent-directive`, `teleport`, `lock`,
-`materialize`, and `subgraph`) must map to an existing milestone. Multiple primary nodes may map to
-one milestone. The currently active primary node is the focus target for its milestone; other
+When `progress` is present, every primary node maps to an existing block, as described above.
+Multiple primary nodes may map to one block. The currently active primary node is the focus target for its milestone; other
 milestones focus their first mapped primary node in workflow order. A completed execution shows all
 milestones through its last persisted mapped waiting node as complete and leaves later milestones
 pending. Completion after a final mapped responsibility therefore completes every milestone, while

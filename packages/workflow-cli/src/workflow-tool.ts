@@ -39,6 +39,7 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { WorkflowGraph, GraphNode } from "@mcp-moira/workflow-engine";
 import { renderWorkflowSchema } from "./workflow-schema.js";
+import { renderWorkflowDerivation } from "./workflow-derive.js";
 // Import GraphValidator directly to avoid auth dependencies from shared index
 import { GraphValidator } from "@mcp-moira/workflow-engine/validation";
 import { readExtensionRegistrySnapshot } from "@mcp-moira/workflow-engine/extensions";
@@ -1563,6 +1564,7 @@ ${c("cyan", "Commands:")}
   list [--type <type>]             List all nodes (with type filter)
   structure [--graph] [--detailed] Show workflow structure
   schema                           Print one deterministic control-flow schema
+  derive                           Print the process projection: blocks, transitions, returns, diagnostics
   validate                         Validate workflow
   variables [--usage]              Analyze all workflow variables
   get-variable <name>              Get declared global from variableRegistry
@@ -1893,6 +1895,15 @@ async function main(): Promise<void> {
     case "schema":
       try {
         console.log(renderWorkflowSchema(workflow));
+      } catch (error) {
+        console.error(c("red", `ERROR: ${(error as Error).message}`));
+        process.exitCode = 1;
+      }
+      break;
+
+    case "derive":
+      try {
+        console.log(renderWorkflowDerivation(workflow));
       } catch (error) {
         console.error(c("red", `ERROR: ${(error as Error).message}`));
         process.exitCode = 1;
