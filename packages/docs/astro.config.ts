@@ -94,6 +94,11 @@ export default defineConfig({
               slug: "docs/concepts/workflows",
             },
             {
+              label: "Process view",
+              translations: { ru: "Представление процесса" },
+              slug: "docs/concepts/process-view",
+            },
+            {
               label: "Nodes",
               translations: { ru: "Ноды" },
               slug: "docs/concepts/nodes",

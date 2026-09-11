@@ -128,6 +128,9 @@ tags:
       expect(resolveTopicId("tool")).toBe("tools");
       expect(resolveTopicId("validate")).toBe("validation");
       expect(resolveTopicId("pattern")).toBe("patterns");
+      expect(resolveTopicId("process")).toBe("process-view");
+      expect(resolveTopicId("run")).toBe("process-view");
+      expect(resolveTopicId("blocks")).toBe("process-view");
     });
 
     it("should return original topic if no alias exists", () => {

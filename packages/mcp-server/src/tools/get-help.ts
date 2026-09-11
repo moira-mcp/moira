@@ -61,6 +61,9 @@ const TOPIC_ALIASES: Record<string, string> = {
   validate: "validation",
   pattern: "patterns",
   note: "notes",
+  process: "process-view",
+  run: "process-view",
+  blocks: "process-view",
 };
 
 // Category order and display names
