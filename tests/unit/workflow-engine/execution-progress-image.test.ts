@@ -1,9 +1,11 @@
 import { describe, expect, test } from "@jest/globals";
 import sharp from "sharp";
 import {
+  applyProgressVisibility,
   buildExecutionProgressVisualModel,
   renderExecutionProgressPng,
   renderProgressVisualSvg,
+  resolveProgressBlockIds,
   type ExecutionProgress,
 } from "@mcp-moira/workflow-engine";
 
@@ -53,6 +55,176 @@ function progress(active = 1): ExecutionProgress {
     })),
   };
 }
+
+/** The fixture's blocks as a process: n0 → n1 → n2, n1 returns to n0 on a failed review. */
+function withProcess(base: ExecutionProgress = progress()): ExecutionProgress {
+  return {
+    ...base,
+    process: {
+      blocks: [
+        {
+          id: "n0",
+          label: "Stage 0",
+          description: "First",
+          outcome: null,
+          nodeIds: ["p0", "p0b"],
+          transitions: [{ to: "n1", label: "plan written", edges: ["p0.success"] }],
+        },
+        {
+          id: "n1",
+          label: "Review",
+          description: "Second",
+          outcome: null,
+          nodeIds: ["p1"],
+          transitions: [
+            { to: "n2", label: "review clean", edges: ["p1.true"] },
+            {
+              to: "n0",
+              label: "review found issues",
+              cycle: { cause: "The reviewer found issues", exit: "A clean review" },
+              edges: ["p1.false"],
+            },
+          ],
+        },
+        {
+          id: "n2",
+          label: "Stage 2",
+          description: "Third",
+          outcome: null,
+          nodeIds: ["p2"],
+          transitions: [],
+        },
+      ],
+      hubs: [],
+      backEdges: ["p1.false"],
+      diagnostics: [],
+    },
+  };
+}
+
+describe("progress image visibility and the process view", () => {
+  test("resolves block and node ids to blocks in process order and names unknown ids", () => {
+    const { process } = withProcess();
+    expect(resolveProgressBlockIds(process, ["p2", "n0", "p0b", "nope"])).toEqual({
+      blockIds: ["n0", "n2"],
+      unknown: ["nope"],
+    });
+  });
+
+  test("hiding a block removes it and collapses its transitions onto where it led", () => {
+    const visible = applyProgressVisibility(withProcess(), ["p1"]);
+    expect(visible.nodes.map((node) => node.id)).toEqual(["n0", "n2"]);
+    // The display chain skips the hidden block.
+    expect(visible.nodes[0].connections).toEqual({ default: "n2" });
+    // n0's only transition led into the hidden review; it now reaches Stage 2 with the joined
+    // label, and the review's return to n0 becomes n0's own labelled loop.
+    expect(visible.transitions.get("n0")).toEqual([
+      { to: "n2", label: "plan written → review clean", cycle: false },
+      { to: "n0", label: "plan written → review found issues", cycle: true },
+    ]);
+    expect(visible.transitions.get("n2")).toEqual([]);
+  });
+
+  test("the process view draws labelled transitions and a dashed loop with its cause; cards view does not", () => {
+    const cards = buildExecutionProgressVisualModel(withProcess(), { viewportWidth: 1000 });
+    expect(cards.view).toBe("cards");
+    expect(cards.edges.every((edge) => edge.label === null)).toBe(true);
+    expect(cards.nodes.every((node) => node.lines.length > 0)).toBe(true);
+
+    const model = buildExecutionProgressVisualModel(withProcess(), {
+      viewportWidth: 1000,
+      view: "process",
+    });
+    expect(model.view).toBe("process");
+    expect(model.nodes.every((node) => node.lines.length === 0)).toBe(true);
+    expect(
+      model.edges.map(({ source, target, label, cycle, direction }) => ({
+        source,
+        target,
+        label,
+        cycle,
+        direction,
+      })),
+    ).toEqual([
+      { source: "n0", target: "n1", label: "plan written", cycle: false, direction: "forward" },
+      { source: "n1", target: "n2", label: "review clean", cycle: false, direction: "forward" },
+      {
+        source: "n1",
+        target: "n0",
+        label: "review found issues",
+        cycle: true,
+        direction: "backward",
+      },
+    ]);
+    const svg = renderProgressVisualSvg(model);
+    expect(svg).toContain("review found issues");
+    expect(svg).toContain('stroke-dasharray="7 6"');
+    expect(svg).toContain("plan written");
+    // The loop lane extends the image below the row.
+    expect(model.height).toBeGreaterThan(cards.height - 200);
+  });
+
+  test("a collapsed block is a label-only chip and a hidden one is absent from the SVG", () => {
+    const model = buildExecutionProgressVisualModel(withProcess(), {
+      viewportWidth: 1000,
+      hide: ["n2"],
+      collapse: ["p0"],
+    });
+    expect(model.nodes.map((node) => [node.id, node.collapsed, node.lines.length])).toEqual([
+      ["n0", true, 0],
+      ["n1", false, 3],
+    ]);
+    expect(model.nodes[0].height).toBeLessThan(model.nodes[1].height);
+    const svg = renderProgressVisualSvg(model);
+    expect(svg).toContain('data-collapsed="true"');
+    expect(svg).not.toContain("Stage 2");
+    expect(svg).toContain("Review");
+  });
+
+  test("overlapping returns take nested lanes and hub transitions are written inside their source", () => {
+    const base = withProcess();
+    // n2 also returns to n0 (a span enclosing n1 → n0) and n0 leads to the hub n2 directly.
+    base.process.blocks[2].transitions = [
+      {
+        to: "n0",
+        label: "start over",
+        cycle: { cause: "Everything failed", exit: "A clean pass" },
+        edges: ["p2.retry"],
+      },
+    ];
+    base.process.blocks[0].transitions.push({ to: "n2", label: "skip review", edges: ["p0.skip"] });
+    base.process.hubs = ["n2"];
+    const model = buildExecutionProgressVisualModel(base, { viewportWidth: 1000, view: "process" });
+    const returns = model.edges.filter((edge) => edge.cycle);
+    expect(returns.map((edge) => edge.source)).toEqual(["n1", "n2"]);
+    // Distinct lanes: the enclosing arc's vertical segment sits further out than the inner one.
+    const laneX = (path: string) => Number(path.split(" ")[4]);
+    expect(laneX(returns[1].path)).toBeLessThan(laneX(returns[0].path));
+    // The hub transition is not an edge; it is a line in the source block.
+    expect(model.edges.some((edge) => edge.source === "n0" && edge.target === "n2")).toBe(false);
+    expect(model.nodes[0].lines.map((line) => line.text)).toEqual(["skip review → Stage 2"]);
+    // Gutter labels sit beyond the outermost lane of their side, never across a lane line.
+    const laneXs = returns.map((edge) => laneX(edge.path));
+    for (const edge of returns) expect(edge.labelX).toBeLessThan(Math.min(...laneXs));
+    expect(model.edges.every((edge) => edge.labelLines.length > 0 && edge.labelX > 0)).toBe(true);
+  });
+
+  test("the process view is byte-deterministic and differs from the cards view", async () => {
+    const options = { theme: "light" as const, viewportWidth: 720, view: "process" as const };
+    const first = await renderExecutionProgressPng(withProcess(), options);
+    const again = await renderExecutionProgressPng(withProcess(), options);
+    const cards = await renderExecutionProgressPng(withProcess(), {
+      theme: "light",
+      viewportWidth: 720,
+    });
+    expect(first.png.equals(again.png)).toBe(true);
+    expect(first.png.equals(cards.png)).toBe(false);
+    expect(await sharp(first.png).metadata()).toMatchObject({
+      width: 720,
+      height: first.model.height,
+    });
+  });
+});
 
 describe("execution progress visual model and PNG", () => {
   test("wraps complete whitespace text and long Unicode tokens without truncation", () => {

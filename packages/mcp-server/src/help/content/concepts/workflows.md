@@ -66,7 +66,13 @@ model keeps the complete task, goal, facts, completed outcomes, current activity
 action visible without hover. Text wraps without truncation and milestones pack into deterministic
 left-to-right rows when one row does not fit.
 Agents request a short-lived, revision-bound, single-use download URL through `session
-progress-image-token`; the binary does not pass through MCP. A `user-notification` node may set
+progress-image-token`; the binary does not pass through MCP. The token takes optional `theme`
+(`light|dark`), `viewportWidth` (480–4096), `view` — `cards` (the default content grid) or
+`process` (the aggregated block view: blocks in process order with labelled transitions, returns
+as dashed arcs with the transition label, hub transitions written inside their source, as the run
+page's lanes show them; a loop's cause and exit are on the run page, not in the image) — and `hide` / `collapse`: block ids or authored node ids (a node names its block)
+left out of the image with their transitions collapsed onto the neighbours, or drawn as a
+label-only chip. Unknown ids are refused when the token is minted. A `user-notification` node may set
 `attachProgressImage: true` and use its normal message as the image caption. Such a node must map to
 an existing progress milestone. The deprecated `telegram-notification` compatibility node supports
 the same attachment for existing provider-specific workflows.

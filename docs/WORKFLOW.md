@@ -512,7 +512,10 @@ structured content without hover-only information. It wraps valid text without t
 cards into deterministic left-to-right rows for the requested viewport, and routes forward,
 backward, and cross-row display edges without affecting execution. `session progress-image-token`
 and the matching HTTP endpoint render that model as a
-bounded light/dark PNG behind a short-lived, revision-bound, single-use URL. A
+bounded light/dark PNG behind a short-lived, revision-bound, single-use URL; `view: "process"`
+renders the aggregated block view instead (blocks in process order with the process's labelled
+transitions and dashed returns), and `hide` / `collapse` leave named blocks out or reduce them to
+a chip (see `docs/API.md`). A
 `user-notification` node can set `attachProgressImage: true`; it must map to a progress milestone
 and sends the rendered PNG through the current user's configured channels with its normal message.
 The deprecated `telegram-notification` compatibility node retains the same progress attachment.

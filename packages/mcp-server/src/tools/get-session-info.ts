@@ -710,6 +710,9 @@ export async function getSessionInfo(
           const data = await new ProgressImageService(repository).mint(executionId, userId, {
             theme: params.theme,
             viewportWidth: params.viewportWidth,
+            view: params.view,
+            hide: params.hide,
+            collapse: params.collapse,
           });
           return { success: true, data };
         } catch (error) {

@@ -8,8 +8,10 @@ import {
 import type { IDataRepository } from "../interfaces/data-repository.js";
 import {
   normalizeProgressVisualOptions,
+  resolveProgressBlockIds,
   type ProgressVisualOptions,
 } from "../utils/execution-progress-visual.js";
+import { deriveProcess } from "../utils/process-derivation.js";
 import { renderExecutionProgressImage } from "../utils/execution-progress-image.js";
 import { randomUUID } from "node:crypto";
 
@@ -56,7 +58,26 @@ export class ProgressImageService {
     if (!execution || execution.userId !== ownerUserId) throw new ValidationError("Access denied");
     const graph = await this.repository.getWorkflowGraph(execution.workflowId, execution.userId);
     if (!graph?.progress) throw new ValidationError("Workflow has no progress graph");
-    const normalized = normalizeProgressVisualOptions(options);
+    const requested = normalizeProgressVisualOptions(options);
+    // `hide` and `collapse` name blocks or authored nodes of this workflow's process; a name the
+    // image could not honour is refused now, so a token never carries one.
+    const process = deriveProcess(graph);
+    const resolve = (ids: string[], field: "hide" | "collapse"): string[] => {
+      if (!ids.length) return [];
+      if (!process)
+        throw new ValidationError(`${field} names blocks, but the workflow has no process`);
+      const { blockIds, unknown } = resolveProgressBlockIds(process, ids);
+      if (unknown.length)
+        throw new ValidationError(
+          `${field} names no block or node of this workflow: ${unknown.join(", ")}`,
+        );
+      return blockIds;
+    };
+    const normalized = {
+      ...requested,
+      hide: resolve(requested.hide, "hide"),
+      collapse: resolve(requested.collapse, "collapse"),
+    };
     const ttlMs = TokenManager.PROGRESS_IMAGE_TTL_MS;
     const issuedAt = Date.now();
     const contextRevision = metadataRevision(execution.globalContext);

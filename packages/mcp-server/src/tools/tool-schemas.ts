@@ -292,6 +292,24 @@ export const getSessionInfoHandlerSchema = z.object({
   variableValue: z.unknown().optional(),
   theme: z.enum(["light", "dark"]).optional(),
   viewportWidth: z.number().int().min(480).max(4096).optional(),
+  view: z
+    .enum(["cards", "process"])
+    .optional()
+    .describe(
+      "progress-image-token: cards (default) draws every block as a content card; process draws the aggregated block view with labelled transitions and loops",
+    ),
+  hide: z
+    .array(z.string().min(1).max(200))
+    .max(100)
+    .optional()
+    .describe(
+      "progress-image-token: block ids or authored node ids (resolved to their block) left out of the image; their transitions collapse",
+    ),
+  collapse: z
+    .array(z.string().min(1).max(200))
+    .max(100)
+    .optional()
+    .describe("progress-image-token: block ids or authored node ids drawn as a label-only chip"),
   at: z
     .number()
     .int()

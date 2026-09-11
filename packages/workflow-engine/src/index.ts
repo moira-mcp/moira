@@ -74,14 +74,18 @@ export * from "./utils/execution-run-projection.js";
 export * from "./utils/execution-visits.js";
 export * from "./utils/process-derivation.js";
 export {
+  applyProgressVisibility,
   buildExecutionProgressVisualModel,
   normalizeProgressVisualOptions,
+  resolveProgressBlockIds,
   PROGRESS_IMAGE_MAX_WIDTH,
   PROGRESS_IMAGE_MIN_WIDTH,
 } from "./utils/execution-progress-visual.js";
 export type {
   ProgressTheme,
+  ProgressView,
   ProgressVisualOptions,
+  VisibleTransition,
   ProgressVisualNode,
   ProgressVisualEdge,
   ProgressVisualModel,

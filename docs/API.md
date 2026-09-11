@@ -356,8 +356,21 @@ enforced again after template interpolation; an oversized resolved value fails p
 of being silently truncated.
 
 `POST /api/executions/:id/progress-image-token` mints an owner-only, five-minute, single-use PNG
-grant with `downloadUrl`, `expiresAt`, `mimeType`, and `executionRevision`. The optional body accepts
-`theme: "light"|"dark"` and `viewportWidth` from 480 through 4096. `GET
+grant with `downloadUrl`, `expiresAt`, `mimeType`, `executionRevision` and the normalised
+`options`. The optional body accepts `theme: "light"|"dark"`, `viewportWidth` from 480 through
+4096, `view: "cards"|"process"`, `hide` and `collapse` (arrays of up to 100 block ids or authored
+node ids). `cards` (the default) is the content grid: every block as a card with its summary,
+details, outcome and next text, chained in display order. `process` is the aggregated block view:
+one compact block per row in process order with its status mark and pass count, the process's
+transitions as labelled connectors, forward skips as arcs on the right, returns as dashed arcs on
+the left carrying the transition label (nested by span; the cause and exit of a loop are not
+drawn — the run page and `session progress` carry them), and transitions into hub blocks written
+inside the source block. A block named in `hide` (a node id names the block that owns it) is left
+out and every transition into it is re-targeted to where it led, labels joined with "→"; a block
+in `collapse` is drawn as a label-only chip. An id that names no block or node of the workflow's
+process is refused at mint (400), as is an invalid `view`; the stored options are the resolved
+block ids, so a grant is always honourable. Omitting the new fields yields the same bytes as
+before. `GET
 /api/public/execution-progress-image/:token` uses the token as authorization and returns the exact
 step revision/context revision/workflow version image once with `Cache-Control: no-store`; expired, stale,
 foreign, or reused grants return 401. Rendering or a failed/closed HTTP response releases the

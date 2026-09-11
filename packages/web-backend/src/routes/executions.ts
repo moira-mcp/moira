@@ -73,9 +73,24 @@ router.post(
         req.body.viewportWidth > 4096)
     )
       throw createApiError.validationFailed("viewportWidth must be an integer from 480 to 4096");
+    if (req.body?.view !== undefined && !["cards", "process"].includes(req.body.view))
+      throw createApiError.validationFailed("view must be cards or process");
+    for (const field of ["hide", "collapse"] as const) {
+      const value = req.body?.[field];
+      if (value === undefined) continue;
+      if (
+        !Array.isArray(value) ||
+        value.length > 100 ||
+        value.some((id) => typeof id !== "string" || !id.trim() || id.length > 200)
+      )
+        throw createApiError.validationFailed(`${field} must be an array of block or node ids`);
+    }
     const grant = await progressImages.mint(execution.executionId, execution.userId, {
       theme: req.body?.theme,
       viewportWidth: req.body?.viewportWidth,
+      view: req.body?.view,
+      hide: req.body?.hide,
+      collapse: req.body?.collapse,
     });
     res.json({ success: true, data: grant, timestamp: new Date().toISOString() });
   }),
