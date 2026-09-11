@@ -43,6 +43,8 @@ export interface WorkspaceOperationAuditEvent {
   inputBytes: number;
   outputBytes: number;
   exitCode: number | null;
+  createdAt: number;
+  updatedAt: number;
 }
 
 function validateRequest(
@@ -721,6 +723,8 @@ export class WorkspaceOperationService {
       inputBytes: operation.inputBytes,
       outputBytes: operation.outputBytes,
       exitCode: operation.exitCode,
+      createdAt: operation.createdAt,
+      updatedAt: operation.updatedAt,
     });
   }
 

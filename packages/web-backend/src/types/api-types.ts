@@ -50,8 +50,10 @@ export interface HealthCheckResponse {
     validation: boolean;
     mcpEngine: boolean;
     workflowReconciliation: boolean;
+    workspaces: boolean;
   };
   reconciliation: import("@mcp-moira/shared").WorkflowReconciliationStatusSummary;
+  workspaces: import("@mcp-moira/shared").WorkspacePublicReadinessView;
   uptime: number;
   timestamp: string;
   version: string;

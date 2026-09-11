@@ -45,6 +45,16 @@ export interface WorkspaceCreateResult {
   lifecycleCapability: string;
 }
 
+export interface WorkspaceControlAuditEvent {
+  action: "control_update";
+  userId: string;
+  provider: string;
+  scope: "global" | `provider:${string}`;
+  disabled: boolean;
+  reason: string | null;
+  stoppedPersistentWorkspaces: number;
+}
+
 const PROVIDER_CLOCK_SKEW_MS = 5 * 60_000;
 
 function containsControlCharacter(value: string): boolean {
@@ -129,8 +139,53 @@ export class WorkspaceResourceService {
       policy: () => WorkspaceResourcePolicy;
       now?: () => number;
       audit?: (event: WorkspaceResourceAuditEvent) => Promise<void> | void;
+      controlAudit?: (event: WorkspaceControlAuditEvent) => Promise<void> | void;
     },
   ) {}
+
+  /** Durable global and provider emergency controls as seen by administrators. */
+  listControls(): ReturnType<WorkspaceResourceRepository["listControls"]> {
+    return this.dependencies.repository.listControls(this.dependencies.providerId);
+  }
+
+  /**
+   * Set one emergency control. Disabling refuses new create/start/operation reservations,
+   * rejects unsubmitted creates and requests stop for persistent workspaces; it never
+   * deletes user data. Re-enabling only clears the control.
+   */
+  async setControl(input: {
+    scope: "global" | `provider:${string}`;
+    disabled: boolean;
+    reason: string | null;
+    updatedBy: string;
+  }): Promise<ReturnType<WorkspaceResourceRepository["listControls"]>> {
+    const providerScope: `provider:${string}` = `provider:${this.dependencies.providerId}`;
+    if (input.scope !== "global" && input.scope !== providerScope) {
+      throw new WorkspaceResourceError(
+        "WORKSPACE_RESOURCE_INVALID",
+        "Workspace control scope is not managed by this provider",
+      );
+    }
+    const now = this.now();
+    const stopped = this.dependencies.repository.setControl({
+      scope: input.scope,
+      disabled: input.disabled,
+      reason: input.reason,
+      updatedBy: input.updatedBy,
+      now,
+      cleanupDeadlineAt: now + this.dependencies.policy().cleanupDeadlineMs,
+    });
+    await this.dependencies.controlAudit?.({
+      action: "control_update",
+      userId: input.updatedBy,
+      provider: this.dependencies.providerId,
+      scope: input.scope,
+      disabled: input.disabled,
+      reason: input.reason,
+      stoppedPersistentWorkspaces: stopped,
+    });
+    return this.listControls();
+  }
 
   private now(): number {
     return (this.dependencies.now ?? Date.now)();

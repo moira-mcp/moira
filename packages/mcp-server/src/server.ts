@@ -42,9 +42,14 @@ import {
   getWorkflowReconciliationStatusSummary,
   formatWorkflowReconciliationNotice,
   CommunicationAttachmentGrantService,
+  getWorkspaceResourcePolicy,
+  projectPublicWorkspaceReadiness,
   logAuditEvent,
 } from "@mcp-moira/shared";
-import { getWorkspaceTransferService } from "@mcp-moira/web-backend/services";
+import {
+  getWorkspaceObservabilityService,
+  getWorkspaceTransferService,
+} from "@mcp-moira/web-backend/services";
 
 // Get monorepo version from root package.json (#196)
 export const MCP_SERVER_VERSION: string = getMcpServerVersion() || "0.0.0";
@@ -546,14 +551,20 @@ app.post("/mcp", mcpLimiter, async (req: Request, res: Response) => {
 });
 
 // Health check endpoint
-app.get("/health", (req: Request, res: Response) => {
+app.get("/health", async (req: Request, res: Response) => {
   const reconciliation = getWorkflowReconciliationStatusSummary(getSqliteInstance());
+  // Public liveness surface: the cached decision with only the readiness state,
+  // never operator detail; a stalled connector cannot hang this endpoint.
+  const workspaces = projectPublicWorkspaceReadiness(
+    await getWorkspaceObservabilityService().snapshot(),
+  );
   res.json({
-    status: reconciliation.status === "ok" ? "healthy" : "degraded",
+    status: reconciliation.status === "ok" && !workspaces.degraded ? "healthy" : "degraded",
     timestamp: new Date().toISOString(),
     mode: "stateless",
     version: MCP_SERVER_VERSION,
     reconciliation,
+    workspaces,
   });
 });
 
@@ -565,6 +576,8 @@ async function main() {
     const stopAttemptMaintenance = await new ExecutionAttemptMaintenance(
       new DatabaseRepository(),
     ).start();
+    // Keep this process's readiness decision and gauges current between requests.
+    getWorkspaceObservabilityService().start(getWorkspaceResourcePolicy().reconcileIntervalMs);
 
     // The MCP and API servers are separate processes, so each owns a registry and runner client.
     // This process is the single writer of the snapshot consumed by tools outside the container.
@@ -616,6 +629,7 @@ async function main() {
     process.on("SIGINT", () => {
       logger.info("Received SIGINT, shutting down HTTP server");
       stopAttemptMaintenance();
+      getWorkspaceObservabilityService().stop();
       httpServer.close(() => {
         try {
           closeDatabase();
@@ -632,6 +646,7 @@ async function main() {
     process.on("SIGTERM", () => {
       logger.info("Received SIGTERM, shutting down HTTP server");
       stopAttemptMaintenance();
+      getWorkspaceObservabilityService().stop();
       httpServer.close(() => {
         try {
           closeDatabase();

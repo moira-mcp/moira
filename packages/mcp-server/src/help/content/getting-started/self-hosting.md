@@ -257,6 +257,23 @@ Moira server and other users, not the workspace from the agent its owner authori
 incomplete, the tools return a safe error with a link to this Settings page instead of starting any
 authorization flow.
 
+Users manage the same workspaces from **Settings → Integrations → Cloud workspaces**: create one for
+an approved repository, start or stop it (stop keeps the repository data) and delete it after an
+explicit confirmation. Administrators open **Admin → Settings → Workspaces** to see the instance
+readiness (configuration, connector, reconciliation backlog, active workspaces and operations against
+their limits) and to pause work with the global or provider kill switch; pausing refuses new
+workspaces, starts and agent operations and stops running workspaces without deleting anything.
+
+For monitoring, `GET /api/health` and the MCP `/health` endpoint report the readiness state
+(`disabled`, `misconfigured`, `control_disabled`, `connector_unavailable` or `ready`); a disabled
+feature is healthy, while invalid configuration or an unreachable connector marks the instance
+degraded. Health answers from a cached decision refreshed on the reconciliation interval, and the
+connector probe is bounded to two seconds, so a stalled connector cannot hang the health check. The internal metrics port exposes `moira_workspace_*` gauges and counters. Alert when
+`moira_workspace_ready` stays at 0 with `WORKSPACE_CODESPACES_ENABLED=true`, when
+`moira_workspace_connector_available` is 0, when
+`moira_workspace_reconciliation_oldest_due_age_seconds` exceeds several reconcile intervals, or when
+`moira_workspace_rejections_total` grows for quota or busy codes.
+
 Disconnect disables local use before GitHub revocation. If GitHub is temporarily unavailable, the
 page shows a revocation-pending state and **Disconnect** retries the exact encrypted capability;
 the credential is not returned to the browser or model.

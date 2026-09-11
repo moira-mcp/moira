@@ -9,3 +9,4 @@ export { getWorkspaceResourceService } from "./workspace-resource-service.js";
 export { getWorkspaceOperationService } from "./workspace-operation-service.js";
 export { getWorkspaceFileService } from "./workspace-file-service.js";
 export { getWorkspaceTransferService } from "./workspace-transfer-service.js";
+export { getWorkspaceObservabilityService } from "./workspace-services.js";

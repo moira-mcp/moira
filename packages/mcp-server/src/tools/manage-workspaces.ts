@@ -4,6 +4,9 @@ import {
   WorkspaceResourceError,
   createLogger,
   getBaseUrl,
+  projectWorkspaceSummary,
+  recordWorkspaceRejection,
+  type WorkspaceObservabilityService,
   type WorkspaceConnectionService,
   type WorkspaceFileOperationResponse,
   type WorkspaceFileRequest,
@@ -92,6 +95,7 @@ type WorkspaceNewToolParams<Name extends WorkspaceToolName> = Exclude<
 
 export interface WorkspaceToolServices {
   connection: Pick<WorkspaceConnectionService, "getStatus">;
+  observability: Pick<WorkspaceObservabilityService, "readiness">;
   resource: Pick<
     WorkspaceResourceService,
     | "listRepositories"
@@ -183,28 +187,7 @@ function errorResult(code: string, settingsUrl?: string, retryable = false): Cal
 }
 
 function projectWorkspace(workspace: WorkspaceResourceRecord): Record<string, unknown> {
-  return {
-    workspace_id: workspace.id,
-    provider: workspace.provider,
-    repository_id: workspace.repositoryId,
-    repository: workspace.repositoryFullName,
-    ref: workspace.requestedRef,
-    machine: {
-      name: workspace.machine.name,
-      display_name: workspace.machine.displayName,
-      operating_system: workspace.machine.operatingSystem,
-      cpu_cores: workspace.machine.cpuCores,
-      memory_bytes: workspace.machine.memoryBytes,
-      storage_bytes: workspace.machine.storageBytes,
-    },
-    state: workspace.state,
-    retention_policy: workspace.retentionPolicy,
-    desired_state: workspace.desiredState,
-    observed_state: workspace.observedState,
-    generation: workspace.generation,
-    created_at: workspace.createdAt,
-    updated_at: workspace.updatedAt,
-  };
+  return { ...projectWorkspaceSummary(workspace) };
 }
 
 function projectOperation(response: WorkspaceOperationResponse | WorkspaceFileOperationResponse) {
@@ -369,6 +352,7 @@ async function loadServices(): Promise<WorkspaceToolServices> {
   const services = await import("@mcp-moira/web-backend/services");
   return {
     connection: services.getWorkspaceConnectionService(),
+    observability: services.getWorkspaceObservabilityService(),
     resource: services.getWorkspaceResourceService(),
     operation: services.getWorkspaceOperationService(),
     file: services.getWorkspaceFileService(),
@@ -487,11 +471,18 @@ export async function executeWorkspaceTool<Name extends WorkspaceToolName>(
   }
   try {
     if (name === "workspace_list") {
+      const instance = await services.observability.readiness();
       return jsonResult({
         readiness: {
           state: status.state,
           reason: status.reason,
           settings_url: status.settingsUrl,
+        },
+        instance: {
+          state: instance.state,
+          reason: instance.reason,
+          provider: instance.provider,
+          connector: instance.connector.state,
         },
         repositories:
           services.resource?.listRepositories(userId).map((repository) => ({
@@ -723,6 +714,7 @@ export async function executeWorkspaceTool<Name extends WorkspaceToolName>(
     }
   } catch (error) {
     if (error instanceof WorkspaceConnectionError || error instanceof WorkspaceResourceError) {
+      recordWorkspaceRejection(error.code);
       return errorResult(
         error.code,
         SETUP_ERROR_CODES.has(error.code) ? status.settingsUrl : undefined,

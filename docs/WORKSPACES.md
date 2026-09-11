@@ -9,8 +9,9 @@ and different authorized clients may reuse the same workspace.
 GitHub authorization belongs to the authenticated website. Agents do not
 receive provider credentials, OAuth operations, SSH configuration or lifecycle
 capabilities. Agents reach workspaces only through the authenticated MCP
-`workspace_*` tools described below; the website owns the GitHub connection, and
-website workspace-management endpoints are not registered.
+`workspace_*` tools described below; the website owns the GitHub connection and
+offers the same basic workspace management (list, create, start, stop, confirmed
+delete) over the same services. Administrators own the instance-wide kill switches.
 
 ## Component boundary
 
@@ -42,6 +43,16 @@ website workspace-management endpoints are not registered.
 - `packages/web-backend/src/routes/workspace-connections.ts` and
   `packages/web-frontend/src/pages/settings/GitHubWorkspaceSettings.tsx` own the
   authenticated website authorization boundary.
+- `packages/shared/src/workspaces/views.ts` owns the sanitized workspace and
+  operation summaries shared by the website and MCP, the readiness view, its public
+  projection and the health-degradation rule; `observability.ts` computes the
+  readiness decision, projects the Prometheus gauges and counts audit events with
+  closed labels.
+- `packages/web-backend/src/routes/workspace-management.ts` and
+  `packages/web-frontend/src/pages/settings/GitHubWorkspaceManagement.tsx` own the
+  authenticated website workspace management; `routes/admin-workspaces.ts` and
+  `packages/web-frontend/src/pages/AdminWorkspaceControls.tsx` own the administrator
+  readiness view and kill switches.
 - `packages/mcp-server/src/tools/manage-workspaces.ts` is the agent-facing
   presentation adapter: it takes the tenant from the MCP request context, projects
   sanitized results and maps domain failures to bounded tool errors. Schemas,
@@ -278,6 +289,101 @@ request context's opaque IDs, never with agent input. The MCP process logs only 
 tool name and UUID-validated workspace/operation IDs for these tools; paths, queries,
 patches, argv, text and native references do not enter request context.
 
+## Website management
+
+The Settings page renders a Cloud workspaces card under Integrations. It shows the
+instance readiness, discloses that an authorized agent has the Codespace user's
+repository, network and configured-secret access, lets the user create a workspace
+for an approved repository and ref, and lists the user's workspaces with repository,
+ref, provider and machine context, state, desired/observed state, generation and last
+update. Start and Stop are available for stopped and running workspaces; Delete
+requires a confirmation that names the repository and points to Stop for keeping data.
+Actions are disabled while a workspace is in a pending, cleanup or ambiguous state.
+The card never mentions chats or sessions.
+
+The routes are mounted under `/api/integrations/github/workspaces` behind
+`requireAuth` and are a second presentation of the same services the MCP tools use,
+with identical tenant, generation and confirmation authority:
+
+| Method   | Path                  | Behavior                                                                                       |
+| -------- | --------------------- | ---------------------------------------------------------------------------------------------- |
+| `GET`    | `/`                   | Readiness, connection view, approved repositories and sanitized workspace summaries            |
+| `POST`   | `/`                   | Create for `repository_id` and `ref`; returns the sanitized (possibly pending) workspace       |
+| `GET`    | `/:workspaceId`       | One owned workspace plus its recent metadata-only operations                                   |
+| `POST`   | `/:workspaceId/start` | Records desired running state; `data_preserved: true`                                          |
+| `POST`   | `/:workspaceId/stop`  | Records desired stopped state; `data_preserved: true`                                          |
+| `DELETE` | `/:workspaceId`       | Requires `confirm_delete: true` and the current `expected_generation`; `data_preserved: false` |
+
+Domain failures map to bounded codes: not found and malformed IDs return the generic
+404, generation conflicts and not-running states 409, quota and busy 429, provider
+disabled or unavailable 503, and a missing feature configuration 503 with the
+same-origin Settings link. Responses never carry provider resource names, markers,
+claims, capabilities or credentials.
+
+## Readiness, metrics and controls
+
+`WorkspaceObservabilityService.readiness()` is the one instance-level readiness
+decision. Its states are `disabled` (configuration absent or
+`WORKSPACE_CODESPACES_ENABLED` false), `misconfigured` (invalid GitHub App or vault
+configuration), `control_disabled` (a kill switch is on), `connector_unavailable`
+(the credential connector does not answer its health probe) and `ready`. The view
+also carries the configuration state, both controls, connector state, the
+reconciliation backlog (resources and operations the loop would claim now, plus the
+age of the oldest) and active resources/operations and live transfer bytes against
+their limits. It contains no user, workspace or operation identifier, and the
+connector is never probed while the feature is disabled.
+
+The complete view is served to authenticated callers: the website management list,
+`GET /api/admin/system-status` (`systemHealth.workspaces`) and the agent's
+`workspace_list.instance` summary. The unauthenticated liveness surfaces
+`GET /api/health` and MCP `GET /health` receive only the public projection
+`{ state, provider, degraded }`, served from `snapshot()`: the last computed decision
+while it is younger than twice `WORKSPACE_RECONCILE_INTERVAL_SECONDS`, otherwise one
+recomputation shared by concurrent requests. The connector health probe is bounded to
+two seconds; a slower probe yields `connector_unavailable` with reason
+`health_probe_timeout`, so a stalled connector never holds a health request open.
+`isWorkspaceReadinessDegraded` is the single rule:
+`misconfigured` and `connector_unavailable` degrade the instance; `disabled` and
+`control_disabled` are healthy.
+
+Prometheus metrics on the internal metrics port use closed labels only:
+
+| Metric                                                  | Labels                                | Meaning                                                    |
+| ------------------------------------------------------- | ------------------------------------- | ---------------------------------------------------------- |
+| `moira_workspace_connection_events_total`               | `provider`, `action`                  | Connection start/complete/refresh_failed/disconnect events |
+| `moira_workspace_lifecycle_events_total`                | `provider`, `action`, `state`         | Resource create/start/stop/delete/cleanup outcomes         |
+| `moira_workspace_operation_events_total`                | `provider`, `kind`, `action`, `state` | Operation reserve/reconcile/terminal outcomes              |
+| `moira_workspace_operation_duration_seconds`            | `kind`, `state`                       | Reservation-to-terminal duration histogram                 |
+| `moira_workspace_rejections_total`                      | `code`                                | Refusals before provider contact by bounded error code     |
+| `moira_workspace_reconciliation_due`                    | `kind`                                | Records waiting for reconciliation                         |
+| `moira_workspace_reconciliation_oldest_due_age_seconds` | `kind`                                | Age of the oldest waiting record                           |
+| `moira_workspace_active`                                | `kind`                                | Active resources and operations                            |
+| `moira_workspace_transfer_live_bytes`                   | —                                     | Bytes reserved or held by private transfers                |
+| `moira_workspace_connector_available`                   | `provider`                            | 1 when the connector answers its health probe              |
+| `moira_workspace_ready`                                 | `provider`                            | 1 when the instance accepts new workspace work             |
+
+Both the web backend and the MCP server process refresh their readiness decision and
+gauges on `WORKSPACE_RECONCILE_INTERVAL_SECONDS`; every readiness computation also
+refreshes them. Suggested alert conditions: `moira_workspace_ready`
+equal to 0 while `WORKSPACE_CODESPACES_ENABLED=true`; `moira_workspace_connector_available`
+equal to 0; `moira_workspace_reconciliation_oldest_due_age_seconds` above several
+reconcile intervals; a rising rate of `moira_workspace_rejections_total` with
+`code="WORKSPACE_POLICY_LIMIT"` or `"WORKSPACE_OPERATION_BUSY"` (quota saturation);
+`moira_workspace_lifecycle_events_total{action="create_rejected"}` or
+`moira_workspace_connection_events_total{action="refresh_failed"}` increasing; and an
+unusual rate of `moira_workspace_operation_events_total{action="reserve"}`.
+
+Kill switches are the durable `workspaceProviderControl` rows for the `global` scope
+and the `provider:github-codespaces` scope. Administrators read and change them through
+`GET /api/admin/workspaces` and `PUT /api/admin/workspaces/controls/:scope` (body
+`{ "disabled": boolean, "reason"?: string }`) or the Workspaces tab of the admin
+Settings page, which shows the readiness facts and asks for confirmation before
+stopping work. Disabling refuses new create, start and operation reservations,
+rejects unsubmitted creates and requests stop for persistent workspaces through
+ordinary reconciliation; it never deletes data. Re-enabling clears the control. Every
+change is audited as `WORKSPACE_CONTROL_UPDATE` with the scope, flag, reason and the
+number of workspaces asked to stop.
+
 ## Trust and isolation
 
 Direct execution is not an agent sandbox. An authorized agent has the same
@@ -424,8 +530,9 @@ authority and accounting metadata but no command, path, query, patch, file conte
 native source URL, result stream, provider token or SSH material.
 
 Audit actions cover connection start/completion/refresh failure/disconnect;
-resource create/pending/rejection/cleanup/start/stop/delete; and typed exec/file
-operation reservation/reconciliation/terminal outcomes. Metadata is limited to opaque
+resource create/pending/rejection/cleanup/start/stop/delete; typed exec/file
+operation reservation/reconciliation/terminal outcomes; and administrator control
+updates. Metadata is limited to opaque
 resource relationships, provider, state/outcome, selected machine facts, byte
 counts and exit code. Repository content, source, argv, cwd, stdin, stdout,
 stderr, OAuth code/state, session token and provider credentials are excluded.
@@ -441,8 +548,10 @@ docker compose config --quiet --no-env-resolution --no-path-resolution --no-inte
 ```
 
 `tests/COVERAGE-MAP.md` maps the focused connection, resource, operation,
-migration, connector, egress, packaged-isolation and MCP tool suites, including the
-ChatGPT-compatible client scenario over real services and the HTTP contract against
-the local container (`npm run test:mcp-tools`). Live GitHub App user
+migration, connector, egress, packaged-isolation, MCP tool, website management,
+readiness/metrics and kill-switch suites, including the ChatGPT-compatible client
+scenario over real services, the HTTP contracts against the local container
+(`npm run test:mcp-tools`, `npm run test:api`) and the Settings browser scenarios
+(`npm run test:e2e`). Live GitHub App user
 credentials, an actual personal Codespace and ChatGPT are separate external
 compatibility gates; deterministic tests do not establish them.

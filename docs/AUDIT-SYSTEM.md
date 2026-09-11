@@ -250,6 +250,12 @@ Direct-operation actions:
 
 **Logged via:** `WorkspaceOperationService`
 
+Administrator control actions:
+
+- `WORKSPACE_CONTROL_UPDATE` - a global or provider kill switch was enabled or disabled; metadata holds the scope, flag, reason and the number of persistent workspaces asked to stop
+
+**Logged via:** `WorkspaceResourceService.setControl`
+
 Connection metadata is limited to provider and outcome. Resource metadata adds
 state and selected machine limits. Operation metadata contains only the opaque
 workspace ID, provider, state, input/output byte counts and exit code. Actors and

@@ -112,3 +112,5 @@ export * from "./workspaces/operation-service.js";
 export * from "./workspaces/transfer-repository.js";
 export * from "./workspaces/transfer-service.js";
 export * from "./workspaces/file-service.js";
+export * from "./workspaces/views.js";
+export * from "./workspaces/observability.js";
