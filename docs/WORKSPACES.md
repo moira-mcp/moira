@@ -545,7 +545,15 @@ Use the root project commands; do not call Jest directly:
 npm run test:unit
 npm run test:integration
 docker compose config --quiet --no-env-resolution --no-path-resolution --no-interpolate
+npm run test:docker-connector-isolation
 ```
+
+The last command builds the runtime image target on the local Docker daemon and
+proves, from inside a connector container, that another tenant's volume, the Docker
+socket, the Moira application endpoint, the host bridge and cloud metadata are
+unreachable through the actual filesystem and network policy while the reviewed
+GitHub egress path stays usable; it removes its containers, network and volumes on
+exit and ends with `workspace-connector-isolation-ok`.
 
 `tests/COVERAGE-MAP.md` maps the focused connection, resource, operation,
 migration, connector, egress, packaged-isolation, MCP tool, website management,

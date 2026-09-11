@@ -139,9 +139,7 @@ test("GitHub integration exposes safe actionable states in English and Russian",
   await expect(page.getByRole("alertdialog")).toContainText(
     "Moira не может подтвердить отзыв обновлённого credential GitHub",
   );
-  await page
-    .getByRole("button", { name: "Удалить после внешнего отзыва", exact: true })
-    .click();
+  await page.getByRole("button", { name: "Удалить после внешнего отзыва", exact: true }).click();
   await expect(page.getByText("Подключение GitHub удалено после внешнего отзыва")).toBeVisible();
   await expect(page.getByTestId("github-workspace-status")).toHaveText("Отключено");
 
