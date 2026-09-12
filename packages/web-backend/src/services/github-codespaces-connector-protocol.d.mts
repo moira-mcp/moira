@@ -7,3 +7,7 @@ export function decodeConnectorRequest(bytes: Buffer): unknown;
 export function encodeConnectorResponse(value: unknown): Buffer;
 export function decodeConnectorResponse(bytes: Buffer): unknown;
 export function validGitHubUserCredential(value: unknown): value is string;
+export function validateCodespaceSshConfig(
+  config: unknown,
+  context: { home: string; resourceName: string },
+): boolean;

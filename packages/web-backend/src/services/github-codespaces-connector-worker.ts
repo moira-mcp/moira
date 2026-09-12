@@ -8,6 +8,7 @@ import {
   decodeConnectorRequest,
   encodeConnectorResponse,
   validGitHubUserCredential,
+  validateCodespaceSshConfig,
 } from "./github-codespaces-connector-protocol.mjs";
 
 const RESOURCE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
@@ -141,9 +142,8 @@ async function generateSshConfig(resourceName: string, input: WorkerInput): Prom
     );
   }
   if (
-    !config.includes("ProxyCommand") ||
     config.includes(input.token) ||
-    /\b(?:IdentityFile|LocalCommand|RemoteCommand)\b/i.test(config)
+    !validateCodespaceSshConfig(config, { home: input.home, resourceName })
   ) {
     throw new Error("Codespace SSH capability is unavailable (unexpected ssh configuration)");
   }
