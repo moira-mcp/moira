@@ -581,11 +581,28 @@ export class WorkspaceFileService {
       this.dependencies.policy(),
       this.now(),
     );
-    const result = await this.dependencies.transport.inspectFile(
-      credential,
-      context.workspace,
-      context.operation,
-    );
+    let result: Awaited<ReturnType<WorkspaceFileTransport["inspectFile"]>>;
+    try {
+      result = await this.dependencies.transport.inspectFile(
+        credential,
+        context.workspace,
+        context.operation,
+      );
+    } catch (error) {
+      // A connector failure during inspection is not a result: the operation stays
+      // reconcile-pending with capacity reserved, exactly like an exec inspection.
+      if (error instanceof WorkspaceResourceError) throw error;
+      this.dependencies.repository.markReconcilePending(
+        userId,
+        operationId,
+        "remote_inspection_required",
+        this.now(),
+      );
+      return {
+        operation: this.dependencies.repository.getOwned(userId, operationId)!,
+        result: null,
+      };
+    }
     this.dependencies.repository.requireResultContext(
       userId,
       operationId,

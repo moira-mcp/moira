@@ -123,6 +123,9 @@ services:
   moira-workspace-connector:
     profiles: ["workspaces"]
     image: ${MOIRA_IMAGE:-ghcr.io/moira-mcp/moira:latest}
+    # An init process reaps the gh/ssh helpers that jobs leave behind; without it they
+    # stay as zombies under the Node server and exhaust the PID and process limits.
+    init: true
     entrypoint: ["/usr/local/bin/node", "--experimental-strip-types"]
     command:
       - /app/packages/web-backend/src/services/github-codespaces-connector-server.ts
@@ -132,7 +135,7 @@ services:
     cap_add: ["SETUID", "SETGID"]
     security_opt:
       - no-new-privileges:true
-    pids_limit: 96
+    pids_limit: 384
     mem_limit: 640m
     cpus: 1.0
     tmpfs:
@@ -172,7 +175,7 @@ services:
     cap_drop: ["ALL"]
     security_opt:
       - no-new-privileges:true
-    pids_limit: 64
+    pids_limit: 128
     mem_limit: 128m
     cpus: 0.25
     volumes:
