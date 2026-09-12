@@ -42,6 +42,10 @@ const apiEnvironments = {
     // tests/utils/docker-command.ts target the local container, not the remote PC.
     env: {
       REMOTE_DOCKER_CONTEXT: "",
+      // The local dev container boots in saas mode (.env.local), as CI's primary container
+      // does; skip the two self-host-only API files here exactly as CI does, they run
+      // against a self-host container through `testfold api -e ci`.
+      API_TEST_TARGET: "saas",
     },
   },
   ci: {

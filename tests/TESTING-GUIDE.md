@@ -114,6 +114,14 @@ Do NOT read `unit.log` for workflow tests — it's huge and wastes tokens.
 **Location:** `tests/api/`
 **Purpose:** Test HTTP endpoints with real requests
 
+The suite asserts the SaaS contract, so the container it targets must run with
+`DEPLOYMENT_MODE=saas` (`.env.local.example` ships that; CI's `.env.ci` too). The `local`
+environment sets `API_TEST_TARGET=saas`, which skips the two self-host-only files
+(`auth/self-host-auth.test.ts`, `capability-boundary-api.test.ts`) exactly as CI does; CI runs
+them against a second container started with `DEPLOYMENT_MODE=self-host` on port 3031 through
+`npm run test:api:ci -- --file <file>`. To run them locally, start such a container on 3031
+(see `.github/workflows/ci.yml`, "Start self-host Docker container") and use the same command.
+
 ### 4. MCP Tools Tests
 
 **Location:** `tests/mcp-tools/`

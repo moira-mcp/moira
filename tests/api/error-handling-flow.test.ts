@@ -97,7 +97,9 @@ function ensureInternalCookieJar(): void {
     "-H",
     "Content-Type: application/json",
     "-H",
-    "Origin: http://localhost:3030",
+    // The origin must be the host the container advertises (MOIRA_HOST), which is the
+    // test base URL; saas mode refuses any other origin with INVALID_ORIGIN.
+    `Origin: ${BASE_URL}`,
     "--data-binary",
     JSON.stringify({ email, password, rememberMe: true }),
     "-o",
