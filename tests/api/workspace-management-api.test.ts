@@ -1,5 +1,6 @@
 import { beforeAll, describe, expect, test } from "@jest/globals";
 import { dockerExecSync } from "../utils/docker-command.js";
+import { createTestUserViaApi } from "../utils/mcp-auth.js";
 import { getAdminCredentials, getTestBaseUrl } from "../utils/test-config.js";
 
 const baseUrl = getTestBaseUrl();
@@ -23,23 +24,9 @@ beforeAll(async () => {
     password: "WorkspaceMgmt!Pass123",
     name: "Workspace Management Probe",
   };
-  const signUp = await fetch(`${baseUrl}/api/auth/sign-up/email`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(user),
-  });
-  expect(signUp.status).toBe(200);
-  const created = (await signUp.json()) as { user: { id: string } };
-  const verify = await fetch(`${baseUrl}/api/admin/users/${created.user.id}/verify-email`, {
-    method: "POST",
-    headers: { Cookie: adminCookie },
-  });
-  expect(verify.status).toBe(200);
-  const approve = await fetch(`${baseUrl}/api/admin/users/${created.user.id}/approve`, {
-    method: "POST",
-    headers: { Cookie: adminCookie },
-  });
-  expect([200, 409]).toContain(approve.status);
+  // Shared helper: legal consents, email verification and, only where the deployment
+  // mode gates it, administrator approval.
+  await createTestUserViaApi(baseUrl, user.email, user.password, user.name);
   userCookie = await signIn({ email: user.email, password: user.password });
 });
 
