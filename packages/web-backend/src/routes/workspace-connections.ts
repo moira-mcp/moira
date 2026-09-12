@@ -71,6 +71,16 @@ export function createWorkspaceConnectionRoutes(
       }
       const state = typeof req.query.state === "string" ? req.query.state : "";
       const code = typeof req.query.code === "string" ? req.query.code : "";
+      // GitHub sends the browser back here after the user installs the App (setup_action /
+      // installation_id) without Moira's one-time state. Nothing from that return is trusted:
+      // a fresh authorization is started, and its callback re-reads the installations.
+      if (
+        !state &&
+        (req.query.installation_id !== undefined || req.query.setup_action !== undefined)
+      ) {
+        res.redirect(303, "/api/integrations/github/start");
+        return;
+      }
       const status = await service.completeAuthorization({
         userId: authenticated.userId,
         sessionToken: authenticated.session.token,
