@@ -484,19 +484,22 @@ cannot exceed 900 seconds and persistent retention cannot exceed 30 days.
 
 All routes are mounted under `/api/integrations` after `requireAuth`.
 
-| Method   | Path                          | Behavior                                                         |
-| -------- | ----------------------------- | ---------------------------------------------------------------- |
-| `GET`    | `/github`                     | Returns the current user's sanitized connection view             |
-| `GET`    | `/github/start`               | Stores one-time browser state and redirects to GitHub            |
-| `GET`    | `/github/callback`            | Consumes state, verifies GitHub identity/grants and redirects    |
-| `DELETE` | `/github`                     | Stops managed work, revokes the GitHub grant and disconnects     |
-| `DELETE` | `/github/external-revocation` | Clears an eligible blocked state after external grant revocation |
+| Method   | Path                          | Behavior                                                                                                                               |
+| -------- | ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET`    | `/github`                     | Returns the current user's sanitized connection view                                                                                   |
+| `GET`    | `/github/start`               | Stores one-time browser state and redirects to GitHub                                                                                  |
+| `GET`    | `/github/callback`            | Consumes state, verifies GitHub identity/grants and redirects; a GitHub return from App installation (no state) restarts authorization |
+| `DELETE` | `/github`                     | Stops managed work, revokes the GitHub grant and disconnects                                                                           |
+| `DELETE` | `/github/external-revocation` | Clears an eligible blocked state after external grant revocation                                                                       |
 
 The external-revocation body must be `{ "confirmed": true }`, and the user
 must first revoke the GitHub App grant in GitHub. Start stores a SHA-256 digest
 of one-time state bound to the Moira user, web session and provider. It expires
 after ten minutes, is consumed once and returns only a bounded outcome on the
-same-origin Settings URL. Callback query strings are redacted from application
+same-origin Settings URL. After the user installs the App, GitHub redirects to the
+callback with `installation_id`/`setup_action` and no Moira state; that return is not
+trusted and is answered with a redirect to `/github/start`, so the completed
+authorization re-reads the installations and the connection becomes `connected`. Callback query strings are redacted from application
 logs and omitted from nginx access logs.
 
 The Settings integration renders sanitized connection and repository-grant

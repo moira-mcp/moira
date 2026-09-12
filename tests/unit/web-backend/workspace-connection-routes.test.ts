@@ -72,6 +72,23 @@ describe("GitHub workspace connection web routes", () => {
     expect(response.text).not.toMatch(/code-secret|state-secret|ghu_secret/);
   });
 
+  test("resumes authorization when GitHub returns from an App installation without state", async () => {
+    const completeAuthorization = jest.fn<WorkspaceConnectionService["completeAuthorization"]>();
+    const service = {
+      getStatus: () => baseStatus,
+      completeAuthorization,
+    } as unknown as WorkspaceConnectionService;
+
+    const response = await request(appWith(service)).get(
+      "/api/integrations/github/callback?code=install-code&installation_id=4242&setup_action=install",
+    );
+
+    expect(response.status).toBe(303);
+    expect(response.headers.location).toBe("/api/integrations/github/start");
+    expect(completeAuthorization).not.toHaveBeenCalled();
+    expect(response.text).not.toMatch(/install-code|4242/);
+  });
+
   test("keeps callback inputs secret when status resolution fails before authorization", async () => {
     const service = {
       getStatus: () => {
