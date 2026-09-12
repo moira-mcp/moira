@@ -9,6 +9,7 @@ import {
   CONNECTOR_MAX_RESPONSE_BYTES,
   encodeConnectorRequest,
   encodeConnectorResponse,
+  validateCodespaceSshConfig,
 } from "../../../packages/web-backend/src/services/github-codespaces-connector-protocol.mjs";
 import type { WorkspaceOperationRecord, WorkspaceResourceRecord } from "@mcp-moira/shared";
 
@@ -545,5 +546,48 @@ describe("GitHub Codespaces connector boundary", () => {
     expect(result.stdout).toBe("");
     expect(result.stderr).toContain("Codespaces connector worker failed");
     expect(result.stderr).not.toContain("ghu_secret");
+  });
+
+  describe("generated SSH configuration validation", () => {
+    const home = "/tmp/moira-codespaces-connector-abc123";
+    const key = `${home}/.ssh/codespaces.auto`;
+    const generated = [
+      "Host cs.silver-space-123.main",
+      "\tUser codespace",
+      `\tProxyCommand /usr/bin/gh cs ssh -c silver-space-123 --stdio -- -i ${key}`,
+      "\tUserKnownHostsFile=/dev/null",
+      "\tStrictHostKeyChecking no",
+      "\tLogLevel quiet",
+      "\tControlMaster auto",
+      `\tIdentityFile ${key}`,
+      "",
+    ].join("\n");
+
+    test("accepts exactly what gh codespace ssh --config generates for the Codespace", () => {
+      expect(
+        validateCodespaceSshConfig(generated, { home, resourceName: "silver-space-123" }),
+      ).toBe(true);
+    });
+
+    test.each([
+      ["another Codespace", generated.replaceAll("silver-space-123", "other-space-9")],
+      [
+        "a foreign identity file",
+        generated.replace(`IdentityFile ${key}`, "IdentityFile /root/.ssh/id_ed25519"),
+      ],
+      [
+        "a foreign key in the proxy command",
+        generated.replace(`-- -i ${key}`, "-- -i /etc/passwd"),
+      ],
+      ["a local command hook", `${generated}\tLocalCommand touch /tmp/pwned\n`],
+      ["a remote command override", `${generated}\tRemoteCommand rm -rf ~\n`],
+      ["an include directive", `${generated}\tInclude /etc/ssh/ssh_config\n`],
+      ["a second host block", `${generated}Host evil\n\tProxyCommand nc attacker 22\n`],
+      ["a missing proxy command", generated.replace(/\tProxyCommand[^\n]*\n/, "")],
+    ])("rejects %s", (_label, config) => {
+      expect(validateCodespaceSshConfig(config, { home, resourceName: "silver-space-123" })).toBe(
+        false,
+      );
+    });
   });
 });
