@@ -373,6 +373,35 @@ describe("durable persistent workspace lifecycle", () => {
     }
   });
 
+  test.each([
+    [403, "WORKSPACE_AUTHORIZATION_REQUIRED"],
+    [404, "WORKSPACE_RESOURCE_INVALID"],
+    [502, "WORKSPACE_PROVIDER_UNAVAILABLE"],
+  ])(
+    "maps a provider HTTP %s before reservation to the typed %s error without an internal failure",
+    async (status, code) => {
+      const value = fixture({ maxOperationsPerDay: 10 });
+      try {
+        value.provider.machineObservation = () => {
+          throw Object.assign(new Error(`GitHub API request failed (HTTP ${status})`), { status });
+        };
+
+        await expect(
+          value.service.create("user-1", "301", "refs/heads/main"),
+        ).rejects.toMatchObject({
+          name: "WorkspaceResourceError",
+          code,
+        });
+        expect(value.provider.createCalls).not.toHaveBeenCalled();
+        expect(value.sqlite.prepare("SELECT COUNT(*) count FROM workspaceResource").get()).toEqual({
+          count: 0,
+        });
+      } finally {
+        value.sqlite.close();
+      }
+    },
+  );
+
   test("rejects a repository grant removed before durable reservation", async () => {
     const value = fixture({ maxOperationsPerDay: 10 });
     try {

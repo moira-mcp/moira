@@ -63,6 +63,40 @@ function containsControlCharacter(value: string): boolean {
     return codePoint <= 31 || (codePoint >= 127 && codePoint <= 159);
   });
 }
+/**
+ * A provider transport failure before any durable reservation becomes a typed, bounded
+ * error instead of an internal one: an HTTP 401/403 means the stored grant no longer
+ * reaches the repository, 404 means the target is gone, and anything else (rate limit,
+ * 5xx, network) is a retryable provider outage. The status is an integer and safe to name.
+ */
+function providerFailure(error: unknown): never {
+  if (error instanceof WorkspaceResourceError || error instanceof WorkspaceConnectionError) {
+    throw error;
+  }
+  const status =
+    error && typeof error === "object" && typeof (error as { status?: unknown }).status === "number"
+      ? (error as { status: number }).status
+      : null;
+  if (status === 401 || status === 403) {
+    throw new WorkspaceResourceError(
+      "WORKSPACE_AUTHORIZATION_REQUIRED",
+      `Workspace provider refused the stored grant (HTTP ${status})`,
+    );
+  }
+  if (status === 404) {
+    throw new WorkspaceResourceError(
+      "WORKSPACE_RESOURCE_INVALID",
+      "Workspace provider no longer exposes the approved repository",
+    );
+  }
+  if (status !== null) {
+    throw new WorkspaceResourceError(
+      "WORKSPACE_PROVIDER_UNAVAILABLE",
+      `Workspace provider request failed (HTTP ${status})`,
+    );
+  }
+  throw error;
+}
 
 function smallestPermittedMachine(
   machines: WorkspaceMachine[],
@@ -338,7 +372,7 @@ export class WorkspaceResourceService {
       );
     }
     const credential = await this.dependencies.credentials.getCredential(userId, provider.id);
-    const identity = await provider.getIdentity(credential);
+    const identity = await provider.getIdentity(credential).catch(providerFailure);
     if (identity.id !== approved.externalAccountId) {
       throw new WorkspaceResourceError("WORKSPACE_RESOURCE_INVALID", "Connected identity changed");
     }
@@ -352,7 +386,7 @@ export class WorkspaceResourceService {
     }
     approved = currentApproval;
     const machine = smallestPermittedMachine(
-      await provider.listMachines(credential, approved.repository),
+      await provider.listMachines(credential, approved.repository).catch(providerFailure),
       policy,
     );
     if (!machine) {
