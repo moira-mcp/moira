@@ -246,6 +246,9 @@ export default [
       "drizzle/**/*.ts",
       "claude-temp-files",
       "moira-ws",
+      // Agent scratch files and the workflow CLI's backups: gitignored, never shipped or linted.
+      "agent_temp_files_local",
+      "workflow-backups",
     ],
   },
   // k6 load testing files - uses its own runtime with different globals
