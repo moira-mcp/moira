@@ -65,7 +65,10 @@ export function recordWorkspaceOperationEvent(
   }
 }
 
-const REJECTION_CODES: ReadonlySet<string> = new Set<WorkspaceResourceErrorCode>([
+/** Resource error codes plus the MCP-layer schema refusal, all bounded pre-provider labels. */
+const REJECTION_CODES: ReadonlySet<string> = new Set<
+  WorkspaceResourceErrorCode | "WORKSPACE_REQUEST_INVALID"
+>([
   "WORKSPACE_PROVIDER_DISABLED",
   "WORKSPACE_PROVIDER_UNAVAILABLE",
   "WORKSPACE_POLICY_LIMIT",
@@ -73,6 +76,7 @@ const REJECTION_CODES: ReadonlySet<string> = new Set<WorkspaceResourceErrorCode>
   "WORKSPACE_AUTHORIZATION_REQUIRED",
   "WORKSPACE_NOT_RUNNING",
   "WORKSPACE_GENERATION_CONFLICT",
+  "WORKSPACE_REQUEST_INVALID",
 ]);
 
 /** Count a bounded pre-provider refusal. Unknown codes are ignored to keep labels closed. */

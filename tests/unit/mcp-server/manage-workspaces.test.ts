@@ -7,10 +7,15 @@ import {
 
 import {
   executeWorkspaceTool,
+  manageWorkspaceTool,
+  parseWorkspaceToolParams,
   setWorkspaceToolFailureReporterForTests,
+  setWorkspaceToolServicesLoaderForTests,
   workspaceToolLogContext,
+  WorkspaceRequestInvalidError,
   type WorkspaceToolServices,
 } from "../../../packages/mcp-server/src/tools/manage-workspaces.js";
+import { requestContext } from "../../../packages/mcp-server/src/core/request-context.js";
 
 const USER_ID = "user-a";
 const WORKSPACE_ID = "00000000-0000-4000-8000-000000000001";
@@ -742,5 +747,77 @@ describe("workspace MCP adapter", () => {
         error: { code: "WORKSPACE_BINARY_READ_REQUIRES_DOWNLOAD" },
       },
     });
+  });
+
+  it("fills published defaults so a minimal call is a complete strict request", () => {
+    expect(
+      parseWorkspaceToolParams("workspace_read", { workspace_id: WORKSPACE_ID, path: "a" }),
+    ).toEqual({ workspace_id: WORKSPACE_ID, path: "a", offset: 0, length: 64 * 1024 });
+    expect(
+      parseWorkspaceToolParams("workspace_search", {
+        workspace_id: WORKSPACE_ID,
+        path: ".",
+        query: "TODO",
+      }),
+    ).toEqual({
+      workspace_id: WORKSPACE_ID,
+      path: ".",
+      query: "TODO",
+      mode: "literal",
+      max_matches: 100,
+      max_bytes: 64 * 1024,
+    });
+    expect(
+      parseWorkspaceToolParams("workspace_exec", { workspace_id: WORKSPACE_ID, argv: ["ls"] }),
+    ).toEqual({ workspace_id: WORKSPACE_ID, argv: ["ls"], cwd: ".", timeout_seconds: 300 });
+    expect(
+      parseWorkspaceToolParams("workspace_download", {
+        workspace_id: WORKSPACE_ID,
+        path: "dist/app.zip",
+        file_name: "app.zip",
+        mime_type: "application/zip",
+      }),
+    ).toMatchObject({ max_bytes: 4 * 1024 * 1024 });
+  });
+
+  it("names the missing or invalid fields of an incomplete request instead of a generic error", async () => {
+    expect(() =>
+      parseWorkspaceToolParams("workspace_search", { workspace_id: WORKSPACE_ID, path: "." }),
+    ).toThrow(WorkspaceRequestInvalidError);
+    let detail = "";
+    try {
+      parseWorkspaceToolParams("workspace_write", {
+        workspace_id: WORKSPACE_ID,
+        path: "src/index.ts",
+        text: "print('a secret value')",
+      });
+    } catch (error) {
+      detail = (error as WorkspaceRequestInvalidError).detail;
+    }
+    expect(detail).toBe("expected: Required");
+
+    const restoreLoader = setWorkspaceToolServicesLoaderForTests(async () => services());
+    try {
+      const result = await requestContext.run({ userId: USER_ID }, () =>
+        manageWorkspaceTool("workspace_read", {
+          workspace_id: WORKSPACE_ID,
+          path: "README.md",
+          length: "all of it",
+        }),
+      );
+      expect(result).toMatchObject({
+        isError: true,
+        structuredContent: {
+          error: {
+            code: "WORKSPACE_REQUEST_INVALID",
+            retryable: false,
+            message: expect.stringContaining("length: Expected number, received string"),
+          },
+        },
+      });
+      expect(JSON.stringify(result)).not.toContain("all of it");
+    } finally {
+      restoreLoader();
+    }
   });
 });
