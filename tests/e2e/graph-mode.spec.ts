@@ -99,7 +99,7 @@ test("the flow page's graph mode draws step cards in block groups with on-demand
   await expect(page.locator('[data-edge-label="return"]')).toHaveCount(0);
   // The definition opens on its first block; the fit-view control gives the overview back, and
   // hovering the source card's chip there lights the return edge and shows its label.
-  await page.locator("button:has-text('Fit View')").click();
+  await page.getByTestId("graph-fit-view").click();
   const [first] = [...cycleEdges];
   const [sourceId, ...labelParts] = first.split(".");
   const label = labelParts.join(".");
@@ -114,10 +114,10 @@ test("the flow page's graph mode draws step cards in block groups with on-demand
   // Forward edges inside a block keep their label.
   await expect(page.locator('[data-edge-label="forward"]').first()).toBeVisible();
   // Controls and the sidebar keep working.
-  await page.locator("button:has-text('Horizontal')").click();
+  await page.getByTestId("graph-layout-horizontal").click();
   await expect(page.locator(".react-flow__node [data-step-card]").first()).toBeVisible();
-  await page.locator("button:has-text('Vertical')").click();
-  await page.locator("button:has-text('Fit View')").click();
+  await page.getByTestId("graph-layout-vertical").click();
+  await page.getByTestId("graph-fit-view").click();
   await page.locator(`[data-graph-node="${sourceId}"]`).click();
   await expect(page.getByTestId("workflow-sidebar")).toContainText(sourceId);
 });

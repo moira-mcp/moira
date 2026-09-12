@@ -116,7 +116,7 @@ test("reads a bundled flow as a process in every mode and explains it", async ({
   // The technical graph keeps its controls and sidebar; a step in the block panel focuses it.
   await page.goto(`${BASE_URL}/workflows/moira/quick-task?view=graph`);
   await expect(page.locator(".react-flow")).toBeVisible({ timeout: 15000 });
-  await expect(page.locator("button:has-text('Fit View')")).toBeVisible();
+  await expect(page.getByTestId("graph-fit-view")).toBeVisible();
   await expect(page.getByTestId("workflow-sidebar")).toBeVisible();
   await page.goto(`${BASE_URL}/workflows/moira/quick-task?view=outline&block=verify`);
   await page.getByTestId("block-detail").locator('[data-node-id="final-review"] button').click();

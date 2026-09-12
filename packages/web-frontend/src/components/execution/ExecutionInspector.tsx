@@ -67,7 +67,9 @@ import { VariablesPanel } from "../run/VariablesPanel";
 import { RunCursor } from "../run/RunCursor";
 import { StatusLegend } from "../run/status";
 import { Walkthrough, type PanelTab } from "../run/Walkthrough";
-import { currentBlockId, runBlocks, waitingStep, type RunViewProps } from "../run/model";
+import { currentBlockId, runBlocks, stepsOf, waitingStep, type RunViewProps } from "../run/model";
+import { StepCard, StepCardList } from "../run/StepCard";
+import type { RunBlock } from "../run/model";
 import { clampCursor } from "../run/route";
 
 // Lazy load the technical graph for better initial page load
@@ -325,6 +327,16 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
     [shownProgress],
   );
   const shownBlock = shownBlocks.find((b) => b.id === shownBlockId) ?? null;
+  // The step the shown projection is at (the cursor's projection ends at the cursor's visit).
+  const shownCurrentNodeId =
+    shownBlocks.find((b) => b.id === currentBlockId(shownBlocks))?.currentNodeId ??
+    execution?.currentNodeId ??
+    null;
+  // The nodes the shown route has visited (the cursor's projection carries the route up to it).
+  const visitedNodeIds = useMemo(
+    () => new Set((shownProgress?.route ?? []).map((visit) => visit.nodeId)),
+    [shownProgress],
+  );
 
   // Lock history for both admin and user views, kept while a refetch is pending.
   const lockHistory = useResource<LockRecord[]>(
@@ -917,8 +929,9 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
             <TabsContent value="steps" className="scrollbar-thin flex-1 overflow-auto m-0 p-4">
               <StepProgression
                 workflow={workflow.workflow}
-                currentNodeId={execution.currentNodeId}
-                nodeStates={execution.context?.nodeStates}
+                blocks={shownBlocks}
+                currentNodeId={shownCurrentNodeId}
+                visitedNodeIds={visitedNodeIds}
                 onNodeClick={focusNode}
               />
             </TabsContent>
@@ -1158,88 +1171,68 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
 };
 
 /**
- * Step Progression component — shows workflow nodes as a step list
- * with current/completed/pending states
+ * The Steps tab: every node of the definition in authored order as the shared step card, marked
+ * completed, current or pending from the run; a click focuses the node on the technical graph.
  */
 interface StepProgressionProps {
   workflow: WorkflowGraphType;
+  /** The run's blocks in process order; steps are listed block by block, the rest after. */
+  blocks: RunBlock[];
   currentNodeId: string | null;
-  nodeStates?: Record<string, unknown>;
+  /** Node ids the recorded route has visited (up to the cursor); their cards carry a done mark. */
+  visitedNodeIds: ReadonlySet<string>;
   onNodeClick: (nodeId: string) => void;
 }
 
 const StepProgression: React.FC<StepProgressionProps> = ({
   workflow,
+  blocks,
   currentNodeId,
-  nodeStates,
+  visitedNodeIds,
   onNodeClick,
 }) => {
   const { t } = useTranslation();
-
-  if (!workflow?.nodes?.length) {
+  const steps = useMemo(() => {
+    const ordered = blocks.flatMap((block) => block.nodeIds);
+    const owned = new Set(ordered);
+    const rest = (workflow?.nodes ?? []).map((node) => node.id).filter((id) => !owned.has(id));
+    return stepsOf(workflow, [...ordered, ...rest]);
+  }, [workflow, blocks]);
+  if (!steps.length) {
     return (
-      <div className="text-sm text-muted-foreground text-center py-8">
+      <div className="py-8 text-center text-sm text-muted-foreground">
         {t("pages.executionInspector.steps.noSteps")}
       </div>
     );
   }
-
-  const getNodeStatus = (nodeId: string): "completed" | "current" | "pending" => {
-    if (nodeId === currentNodeId) return "current";
-    if (nodeStates && nodeId in nodeStates) return "completed";
-    return "pending";
-  };
-
   return (
-    <div className="space-y-1">
-      {workflow.nodes.map((node, index) => {
-        const status = getNodeStatus(node.id);
-        const label = node.metadata?.displayName || node.id;
-        const nodeType = node.type || "action";
-
+    <StepCardList testId="steps-list" ariaLabel={t("pages.executionInspector.tabs.steps")}>
+      {steps.map((step, index) => {
+        const current = step.id === currentNodeId;
+        const completed = !current && visitedNodeIds.has(step.id);
         return (
-          <button
-            key={node.id}
-            onClick={() => onNodeClick(node.id)}
-            className={`w-full flex items-center gap-3 px-3 py-2 rounded-md text-left transition-colors hover:bg-muted/50 ${
-              status === "current" ? "bg-primary/10 border border-primary/20" : ""
-            }`}
-          >
-            <div
-              className={`flex-shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-xs font-medium ${
-                status === "completed"
-                  ? "bg-chart-2/20 text-chart-2"
-                  : status === "current"
-                    ? "bg-primary/20 text-primary"
-                    : "bg-muted text-muted-foreground"
-              }`}
-            >
-              {status === "completed" ? <Check className="h-3.5 w-3.5" /> : index + 1}
-            </div>
-
-            <div className="flex-1 min-w-0">
-              <div
-                className={`text-sm truncate ${
-                  status === "current"
-                    ? "font-medium text-primary"
-                    : status === "completed"
-                      ? "text-foreground"
-                      : "text-muted-foreground"
-                }`}
-              >
-                {label}
-              </div>
-              <div className="text-[10px] text-muted-foreground">{nodeType}</div>
-            </div>
-
-            {status === "current" && (
-              <Badge variant="secondary" className="text-[10px] h-5">
-                {t("pages.executionInspector.steps.current")}
-              </Badge>
-            )}
-          </button>
+          <StepCard
+            key={step.id}
+            step={step}
+            position={index + 1}
+            current={current}
+            onSelect={() => onNodeClick(step.id)}
+            selectTitle={t("pages.runPage.blockDetail.focusStep")}
+            afterTitle={
+              completed ? (
+                <span
+                  className="inline-flex items-center gap-1 text-[11px] font-medium text-success"
+                  data-step-done=""
+                  title={t("pages.runPage.status.done")}
+                >
+                  <Check className="size-3.5" aria-hidden="true" />
+                  {t("pages.runPage.status.done")}
+                </span>
+              ) : undefined
+            }
+          />
         );
       })}
-    </div>
+    </StepCardList>
   );
 };

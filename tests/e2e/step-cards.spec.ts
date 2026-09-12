@@ -107,6 +107,20 @@ test("the run page's block panel uses the same cards and its tab strip never scr
     await expectOneGrid(page, stepList);
     // The current step is marked on its card.
     await expect(page.locator(`${stepList} [data-step-card][aria-current="step"]`)).toHaveCount(1);
+    // The Steps tab lists the whole definition on the same cards, in process-block order (the
+    // start node first), with the run's done marks and the current step marked once.
+    await page.getByRole("tab", { name: /Steps|Шаги/ }).click();
+    const stepsTab = '[data-testid="steps-list"]';
+    await expect(page.locator(`${stepsTab} [data-step-card]`).first()).toBeVisible();
+    await expectOneGrid(page, stepsTab);
+    await expect(
+      page.locator(`${stepsTab} [data-step-card]`).first().locator("[data-step-title]"),
+    ).toHaveText(/start/);
+    expect(
+      await page.locator(`${stepsTab} [data-step-card] [data-step-done]`).count(),
+    ).toBeGreaterThan(0);
+    await expect(page.locator(`${stepsTab} [data-step-card][aria-current="step"]`)).toHaveCount(1);
+    await page.getByRole("tab", { name: /Block|Блок/ }).click();
     // The strip fits its panel at desktop width and on a phone: no horizontal overflow, no scrollbar.
     const strip = page.getByTestId("run-panel-tabs");
     const overflow = async () => strip.evaluate((el) => el.scrollWidth - el.clientWidth);

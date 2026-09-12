@@ -176,6 +176,14 @@ test.describe("Run page toolbar and panel", () => {
     const phone = await panel.boundingBox();
     const phonePage = await page.getByTestId("run-page").boundingBox();
     expect(Math.round(phone!.width)).toBe(Math.round(phonePage!.width));
+    // On a phone neither the run canvas nor the technical graph draws a minimap over the blocks.
+    await page.getByTestId("run-modes").locator('[data-mode="canvas"]').click();
+    await expect(page.getByTestId("canvas-view").locator(".react-flow")).toBeVisible({
+      timeout: 15000,
+    });
+    await expect(page.getByTestId("canvas-view").locator(".react-flow__minimap")).toHaveCount(0);
+    const graph = await showTechnicalGraph(page);
+    await expect(graph.locator(".react-flow__minimap")).toHaveCount(0);
   });
 });
 

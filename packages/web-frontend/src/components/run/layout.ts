@@ -22,7 +22,7 @@
  */
 
 import type { RunBlock, RunTransition } from "./model";
-import { canvasChipsOf, hubExitsOf } from "./chips";
+import { PARALLEL_CHIP_MIN, canvasChipsOf, hubExitsOf } from "./chips";
 
 export const BLOCK_WIDTH = 256;
 const BLOCK_BASE_HEIGHT = 74;
@@ -32,8 +32,15 @@ const CHARS_PER_LINE = 38;
 const NAME_CHARS_PER_LINE = 22;
 const MAX_DESCRIPTION_LINES = 3;
 const NODE_SEP = 40;
-/** Wide enough for a transition label pill to sit between two blocks without touching either. */
-const RANK_SEP = 150;
+/** The least gap between ranks; it grows to hold the widest label pill drawn at rest in a gap. */
+const MIN_RANK_SEP = 150;
+/** A forward label pill is truncated beyond this width (the `max-w` of the pill in `CanvasView`). */
+export const LABEL_MAX_WIDTH = 200;
+/** Label metric of the pill's 11 px medium face: an upper bound per character plus the padding. */
+const LABEL_CHAR_WIDTH = 6.4;
+const LABEL_PADDING = 18;
+/** Clear space between a pill at rest and the blocks on either side of its gap. */
+const LABEL_CLEARANCE = 10;
 const LANE_GAP = 40;
 const LANE_STEP = 26;
 const SELF_LOOP_DEPTH = 36;
@@ -64,6 +71,8 @@ export interface LaidOutEdge {
   labelX: number;
   labelY: number;
   labelAnchor: "center" | "above" | "below";
+  /** How many adjacent forward transitions share this edge's pair of blocks (forward edges). */
+  parallelCount?: number;
 }
 
 export interface BlockLayout {
@@ -108,10 +117,52 @@ interface Placed {
   height: number;
 }
 
+/** How many adjacent forward transitions join each `from->to` pair (cycles and hubs excluded). */
+function parallelCounts(
+  blocks: readonly RunBlock[],
+  hubs: ReadonlySet<string>,
+): Map<string, number> {
+  const parallel = new Map<string, number>();
+  for (const block of blocks) {
+    for (const tr of block.transitions) {
+      if (tr.cycle || hubs.has(tr.to)) continue;
+      const pair = `${block.id}->${tr.to}`;
+      parallel.set(pair, (parallel.get(pair) ?? 0) + 1);
+    }
+  }
+  return parallel;
+}
+
+/** The width a label pill takes at rest, bounded by the pill's own cap. */
+export function labelPillWidth(label: string): number {
+  return Math.min(LABEL_MAX_WIDTH, label.length * LABEL_CHAR_WIDTH + LABEL_PADDING);
+}
+
+/**
+ * The gap between ranks: at least `MIN_RANK_SEP`, and wide enough that every forward label drawn
+ * at rest — an adjacent transition whose pair is not folded into a forward chip — sits between its
+ * blocks with clearance on both sides, so no pill runs under the next card.
+ */
+export function rankSeparation(blocks: readonly RunBlock[], hubIds: readonly string[]): number {
+  const hubs = new Set(hubIds);
+  const indexOf = new Map(blocks.map((b) => [b.id, b.index]));
+  const parallel = parallelCounts(blocks, hubs);
+  let widest = 0;
+  for (const block of blocks) {
+    for (const tr of block.transitions) {
+      if (tr.cycle || hubs.has(tr.to) || indexOf.get(tr.to) !== block.index + 1) continue;
+      if ((parallel.get(`${block.id}->${tr.to}`) ?? 1) >= PARALLEL_CHIP_MIN) continue;
+      widest = Math.max(widest, labelPillWidth(tr.label));
+    }
+  }
+  return Math.max(MIN_RANK_SEP, Math.ceil(widest + 2 * LABEL_CLEARANCE));
+}
+
 /** Layer the blocks with ELK over their forward (non-cycle) transitions. */
 async function placeBlocks(
   blocks: readonly RunBlock[],
   sizes: ReadonlyMap<string, { width: number; height: number }>,
+  rankSep: number,
 ): Promise<Placed[]> {
   const { default: ELK } = await import("elkjs/lib/elk.bundled.js");
   const elk = new ELK();
@@ -129,7 +180,7 @@ async function placeBlocks(
       "elk.direction": "RIGHT",
       "elk.randomSeed": "1",
       "elk.spacing.nodeNode": String(NODE_SEP),
-      "elk.layered.spacing.nodeNodeBetweenLayers": String(RANK_SEP),
+      "elk.layered.spacing.nodeNodeBetweenLayers": String(rankSep),
       "elk.layered.nodePlacement.strategy": "NETWORK_SIMPLEX",
       "elk.layered.crossingMinimization.strategy": "LAYER_SWEEP",
       "elk.layered.considerModelOrder.strategy": "NODES_AND_EDGES",
@@ -171,7 +222,7 @@ export async function layoutBlocks(
       ),
     });
   }
-  const placed = await placeBlocks(blocks, sizes);
+  const placed = await placeBlocks(blocks, sizes, rankSeparation(blocks, hubIds));
   const placedById = new Map(placed.map((p) => [p.id, p]));
   const xs = [...new Set(placed.map((p) => Math.round(p.x)))].sort((a, b) => a - b);
   const laidBlocks: LaidOutBlock[] = blocks.map((block) => {
@@ -198,14 +249,7 @@ export async function layoutBlocks(
   );
   // Adjacent forward transitions that join the same pair of blocks share the gap between them:
   // each takes its own horizontal line and its own label row so nothing stacks on one point.
-  const parallel = new Map<string, number>();
-  for (const block of blocks) {
-    for (const tr of block.transitions) {
-      if (tr.cycle || hubs.has(tr.to)) continue;
-      const pair = `${block.id}->${tr.to}`;
-      parallel.set(pair, (parallel.get(pair) ?? 0) + 1);
-    }
-  }
+  const parallel = parallelCounts(blocks, hubs);
   const parallelIndex = new Map<string, number>();
   const hubLane = new Map([...hubs].filter((id) => receiving.has(id)).map((id, i) => [id, i]));
   let topLane = hubLane.size;
@@ -273,6 +317,7 @@ export async function layoutBlocks(
             labelX: midX,
             labelY: ya - 4,
             labelAnchor: "above",
+            parallelCount: count,
           });
         } else {
           const laneY = top - LANE_GAP - topLane * LANE_STEP;

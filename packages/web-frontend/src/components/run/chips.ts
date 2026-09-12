@@ -9,7 +9,10 @@
 
 import type { RunBlock, RunTransition } from "./model";
 
-export type ChipKind = "return" | "skip" | "hub";
+export type ChipKind = "return" | "skip" | "hub" | "forward";
+
+/** Adjacent forward transitions into one target from this many up are named by a chip, not on their lines. */
+export const PARALLEL_CHIP_MIN = 3;
 
 export interface TransitionChip {
   /** `from→to:label` of the first transition; the chip's identity. */
@@ -109,8 +112,33 @@ export function hubExitsOf(
 }
 
 /**
+ * Adjacent forward transitions into one target, when there are `PARALLEL_CHIP_MIN` or more of
+ * them: their lines would carry a pile of labels in one gap, so the canvas names them in one chip
+ * (`×n`) in the source and keeps the lines unlabelled until hovered.
+ */
+export function parallelForwardsOf(
+  block: RunBlock,
+  hubIds: readonly string[],
+  blocks: readonly RunBlock[],
+): TransitionChip[] {
+  const byId = new Map(blocks.map((b) => [b.id, b]));
+  const hubs = new Set(hubIds);
+  return foldByTarget(
+    block,
+    block.transitions.filter((tr) => {
+      const target = byId.get(tr.to);
+      return !tr.cycle && !!target && !hubs.has(tr.to) && target.index === block.index + 1;
+    }),
+    "forward",
+    byId,
+    (group) => group.map((tr) => transitionKey(block.id, tr)),
+  ).filter((chip) => chip.labels.length >= PARALLEL_CHIP_MIN);
+}
+
+/**
  * Every chip of a block as the canvas shows them: hub exits first, then skips that do not enter a
- * hub, then returns. Lanes show the same set without the hub kind folded out (a hub is a lane).
+ * hub, then bundled parallel forwards, then returns. Lanes show the same set without the hub kind
+ * folded out (a hub is a lane) and without the forward bundle (the rail is the connection).
  */
 export function canvasChipsOf(
   block: RunBlock,
@@ -121,6 +149,7 @@ export function canvasChipsOf(
   return [
     ...hubExitsOf(block, hubIds, blocks),
     ...skipsOf(block, blocks).filter((chip) => !hubs.has(chip.transition.to)),
+    ...parallelForwardsOf(block, hubIds, blocks),
     ...returnsOf(block, blocks),
   ];
 }

@@ -133,15 +133,15 @@ function Section({
             <span
               key={w.name}
               className={cn(
-                "inline-flex max-w-[280px] items-center gap-1 truncate rounded-md border bg-background px-1.5 font-mono leading-5",
+                "inline-flex max-w-full items-center gap-1 rounded-md border bg-background px-1.5 font-mono leading-5",
                 w.adjusted && "border-warning bg-warning/10",
               )}
               title={`${w.name} = ${formatValue(w.value)} (#${w.seq})`}
               data-block-write={w.name}
             >
-              <span className="text-muted-foreground">{w.name}</span>
-              <span>= {formatValue(w.value)}</span>
-              <span className="text-muted-foreground">#{w.seq}</span>
+              <span className="shrink-0 text-muted-foreground">{w.name}</span>
+              <span className="min-w-0 max-w-[220px] truncate">= {formatValue(w.value)}</span>
+              <span className="shrink-0 text-muted-foreground">#{w.seq}</span>
             </span>
           ))}
         </div>

@@ -18,6 +18,7 @@ import {
   returnsOf,
   skipsOf,
   transitionKey,
+  PARALLEL_CHIP_MIN,
 } from "../../../packages/web-frontend/src/components/run/chips.js";
 import { buildArcs, buildLinks } from "../../../packages/web-frontend/src/components/run/arcs.js";
 import { layoutBlocks } from "../../../packages/web-frontend/src/components/run/layout.js";
@@ -72,8 +73,10 @@ describe("transition chips", () => {
         expect(chip.keys).toContain(chip.key);
         if (chip.kind !== "hub") expect(chip.keys).toHaveLength(chip.labels.length);
       }
+      // Forward edges are the rail's own connections and carry no chip, except the parallel ones a
+      // forward chip bundles.
       const edgeKeys = layout.edges
-        .filter((e) => e.kind !== "forward")
+        .filter((e) => e.kind !== "forward" || (e.parallelCount ?? 1) >= PARALLEL_CHIP_MIN)
         .map((e) => transitionKey(e.from, e.transition));
       expect(new Set(edgeKeys).size).toBe(edgeKeys.length);
       expect([...chipKeys].sort()).toEqual([...edgeKeys].sort());
@@ -112,6 +115,25 @@ describe("transition chips", () => {
       expect([...chipKeys].sort()).toEqual([...connectorKeys].sort());
     },
   );
+
+  test("three or more adjacent forward transitions into one block fold into one forward chip", () => {
+    const blocks = blocksOf("workflow-management-flow");
+    const requirements = blocks.find((b) => b.name === "Requirements")!;
+    const design = blocks[requirements.index + 1];
+    const chips = canvasChipsOf(requirements, [], blocks).filter((c) => c.kind === "forward");
+    expect(chips).toHaveLength(1);
+    expect(chips[0].transition.to).toBe(design.id);
+    expect(chips[0].labels.length).toBeGreaterThanOrEqual(PARALLEL_CHIP_MIN);
+    expect(chips[0].keys).toHaveLength(chips[0].labels.length);
+    // A pair with fewer parallel transitions gets no forward chip, and lanes never show one.
+    const quick = blocksOf("quick-task");
+    expect(
+      quick.flatMap((b) => canvasChipsOf(b, [], quick)).some((c) => c.kind === "forward"),
+    ).toBe(false);
+    expect(blocks.flatMap((b) => laneChipsOf(b, blocks)).some((c) => c.kind === "forward")).toBe(
+      false,
+    );
+  });
 
   test("a source with several transitions into one hub gets one chip carrying every label", () => {
     const blocks = blocksOf("robust-task");

@@ -143,7 +143,7 @@ export function ExecutionErrorHistory({ errors, className }: ExecutionErrorHisto
                   <div className="mt-0.5 text-muted-foreground">
                     {getErrorTypeIcon(error.errorType)}
                   </div>
-                  <div className="flex-1 text-left">
+                  <div className="min-w-0 flex-1 text-left">
                     <div className="flex items-center gap-2 flex-wrap">
                       <Badge variant={getErrorTypeBadgeVariant(error.errorType)}>
                         {t(
@@ -156,7 +156,7 @@ export function ExecutionErrorHistory({ errors, className }: ExecutionErrorHisto
                         {formatRelativeTime(error.timestamp)}
                       </span>
                     </div>
-                    <p className="mt-1 text-sm font-medium whitespace-pre-wrap break-words">
+                    <p className="mt-1 text-sm font-medium whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
                       {error.message}
                     </p>
                     <p className="mt-1 text-xs text-muted-foreground">

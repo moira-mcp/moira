@@ -524,9 +524,17 @@ history entry.
   links above the rail (`buildLinks`, `linkGeometry`); hubs receive them like any block. The arc
   and link bands are one line per nesting depth (`ARC_STEP`, `LINK_STEP`, with `ARC_TAIL` and
   `LINK_TAIL` for the arrowhead and a lit pill).
+- `runBlocks` (`run/model.ts`) joins the process blocks with the run's projection; a rendered
+  summary that equals the block's description or its name (an untemplated `content.summary`, or
+  one that renders to the label) is dropped so the views show it once, under the title.
 - `CanvasView` — React Flow over an ELK layered layout (`layout.ts`, `elkjs` loaded on first use):
   forward edges between blocks adjacent in process order as elbows with label pills (several
-  transitions between one pair take their own line and label row, `PARALLEL_STEP`), forward edges
+  transitions between one pair take their own line and label row, `PARALLEL_STEP`; from
+  `PARALLEL_CHIP_MIN` transitions the pills give way to one "forward" chip in the source block,
+  `parallelForwardsOf` in `chips.ts`, that names the target and the count and lights the bundle
+  on hover; the gap between ranks is at least `MIN_RANK_SEP` and grows to the widest label pill
+  drawn at rest plus clearance, `rankSeparation`, with the pill capped at `LABEL_MAX_WIDTH` by the
+  layout metric and the renderer alike, so no pill runs under the next card), forward edges
   that skip a block above and cycles as dashed lanes below, both thin and muted with no pill at
   rest; a transition into a hub block (many
   sources) is a muted bundled edge (`kind: "hub"`, one per source and hub, routed through the
@@ -624,7 +632,7 @@ read-only when `editable` is not set (the admin view). Test ids: `context-filter
 
 **Errors tab:** ExecutionErrorHistory component showing execution errors with timestamps, collapsible entries, error type badges.
 
-**Steps tab:** StepProgression component showing workflow nodes with completed/current/pending states. Clickable nodes focus the workflow graph.
+**Steps tab:** `StepProgression` lists the definition's nodes on the Block tab's `StepCard`s (`StepCardList`), ordered by the process blocks' node order and then the rest, each marked done when the shown route (up to the cursor) visited it (`data-step-done`) or current; clicking a card focuses the node in the graph.
 
 **Locks tab:** Lock history cards showing all lock records (active/unlocked). Each card displays reason, node ID, status badge, timestamps (created/unlocked). Badge with count indicator on tab when locks exist. "Unlock" on active locks: admin override in the admin view, the owner's own unlock (no PIN) in the user view. The PIN is shown only once in the Lock Dialog result phase at creation time; lock history cards do not display it.
 
@@ -1285,8 +1293,10 @@ The graph is the process view's detailed layer, not a separate rendering:
   the view to that node; a definition opens readable on its first block at `GRAPH_OPENING_ZOOM`.
   The placement key includes the layout generation, so it is applied again after the measured
   second pass. A direction change refits to the whole graph. The layout controls (Fit View,
-  Vertical, Horizontal; `data-testid="graph-layout-controls"`) sit in a column under the zoom
-  cluster; the minimap renders after an idle callback.
+  Vertical, Horizontal; `data-testid="graph-layout-controls"`) are `ControlButton`s inside the
+  zoom cluster (`DiagramViewport`'s `controlButtons` slot), so the cluster is one column and covers
+  no card; the minimap renders after an idle callback and not on a phone (`useIsMobile`), where
+  it would cover the graph. The run canvas hides its minimap the same way.
 
 ### Node Selection System
 

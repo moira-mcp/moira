@@ -28,6 +28,8 @@ describe("Workflow Management Flow carries the process block contract", () => {
     "unexplained-cycle",
     "outcome-duplicate",
     "outcome-unowned",
+    "unconnected-block",
+    "**Every block is connected.**",
     "set-block",
     "add-block",
     "edit-block",

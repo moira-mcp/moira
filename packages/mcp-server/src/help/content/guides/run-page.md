@@ -27,8 +27,9 @@ The tabs above the picture switch how the same run is shown; the choice is in th
   forward transitions as arrows with their labels, loops as thin dashed lines below and transitions
   that skip blocks above; a block that many other blocks lead into (a replan or stop block)
   receives one thin line from each of them. Every loop, skip and exit into such a block is named
-  by a chip in its source block; hover the chip (or the line) to light it and read its label, and
-  select a block to keep its lines lit. The map opens on the current block; scroll or drag to pan,
+  by a chip in its source block, and so are three or more parallel transitions into the next block
+  (one chip with their count instead of a pile of labels); hover the chip (or the line) to light it
+  and read its label, and select a block to keep its lines lit. The map opens on the current block; scroll or drag to pan,
   pinch (or hold Ctrl and scroll) to zoom. The lanes rail pans and zooms the same way.
 - **Outline** — the process as a document: every block as a numbered section with its
   description, what the run produced there, what its steps wrote, its transitions in words
@@ -62,9 +63,11 @@ badge on **Variables** or **Locks** means a step is waiting for your answer or a
   variable the workflow's `runtimePolicy` allows to be edited at the current step is an input in
   its row: change it and save. A value set from outside the flow is marked _adjusted_. The
   filter narrows both groups; the expand button opens the same panel in a larger window.
-- **Errors**, **Steps**, **Graph**, **Locks** — the execution's error history, the technical step
-  list, the node graph (step cards grouped by block, the run's block statuses as tints, the
-  current step marked and in view when the tab opens), and lock history.
+- **Errors**, **Steps**, **Graph**, **Locks** — the execution's error history, every step of the
+  definition on the same cards as the Block tab (block by block, the steps the run has visited
+  marked completed, the current one marked), the node graph (step cards grouped by block, the
+  run's block statuses as tints, the current step marked and in view when the tab opens, the fit
+  and direction controls in the zoom cluster), and lock history.
 
 ## Answering a waiting step
 

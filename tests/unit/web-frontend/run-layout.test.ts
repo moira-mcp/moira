@@ -10,11 +10,15 @@ import { deriveProcess, type WorkflowGraph } from "@mcp-moira/workflow-engine";
 import type { ExecutionProgress } from "@mcp-moira/workflow-engine/progress-visual";
 import {
   hubPort,
+  labelPillWidth,
   layoutBlocks,
   overlappingBlocks,
 } from "../../../packages/web-frontend/src/components/run/layout.js";
 import { runBlocks } from "../../../packages/web-frontend/src/components/run/model.js";
-import { hubExitsOf } from "../../../packages/web-frontend/src/components/run/chips.js";
+import {
+  PARALLEL_CHIP_MIN,
+  hubExitsOf,
+} from "../../../packages/web-frontend/src/components/run/chips.js";
 
 const FLOWS = [
   "quick-task",
@@ -200,6 +204,29 @@ describe("parallel forward transitions", () => {
         expect(sorted[i] - sorted[i - 1]).toBeGreaterThanOrEqual(24);
     }
   });
+});
+
+describe("forward labels at rest", () => {
+  test.each(FLOWS)(
+    "on %s every label pill drawn at rest sits in its gap clear of both blocks",
+    async (slug) => {
+      const progress = projectionOf(slug);
+      const blocks = runBlocks(progress);
+      const layout = await layoutBlocks(blocks, progress.process.hubs);
+      const byId = new Map(layout.blocks.map((b) => [b.id, b]));
+      const atRest = layout.edges.filter(
+        (e) => e.kind === "forward" && (e.parallelCount ?? 1) < PARALLEL_CHIP_MIN,
+      );
+      expect(atRest.length).toBeGreaterThan(0);
+      for (const edge of atRest) {
+        const half = labelPillWidth(edge.transition.label) / 2;
+        const source = byId.get(edge.from)!;
+        const target = byId.get(edge.to)!;
+        expect(edge.labelX - half).toBeGreaterThanOrEqual(source.x + source.width);
+        expect(edge.labelX + half).toBeLessThanOrEqual(target.x);
+      }
+    },
+  );
 });
 
 describe("self-loops", () => {

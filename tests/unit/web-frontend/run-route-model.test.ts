@@ -205,6 +205,19 @@ describe("run blocks from the projection", () => {
     expect(currentBlockId(blocks)).toBe("review");
   });
 
+  test("a rendered summary that repeats the block's description or name is dropped, a templated one kept", () => {
+    const base = progress();
+    const withSummary = (summary: string): ExecutionProgress => ({
+      ...base,
+      nodes: base.nodes.map((node) =>
+        node.id === "plan" ? { ...node, content: { ...node.content, summary } } : node,
+      ),
+    });
+    expect(runBlocks(withSummary("Write the plan. "))[0].content.summary).toBeNull();
+    expect(runBlocks(withSummary(runBlocks(base)[0].name))[0].content.summary).toBeNull();
+    expect(runBlocks(withSummary("Plan r3 written."))[0].content.summary).toBe("Plan r3 written.");
+  });
+
   test("a block's writes are the latest value per name up to the cursor, with adjustment marks", () => {
     expect(blockWrites(progress(), "repair", null)).toEqual([
       { name: "plan", value: "v2", seq: 5, adjusted: true },

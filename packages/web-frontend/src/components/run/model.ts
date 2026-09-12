@@ -67,9 +67,27 @@ export function runBlocks(progress: ExecutionProgress): RunBlock[] {
       iterations: run.iterations,
       visits: run.visits,
       currentNodeId: run.currentNodeId,
-      content: run.content,
+      content: renderedContent(run.content, [
+        block.description,
+        byId.get(block.id)?.label ?? block.label,
+      ]),
     };
   });
+}
+
+/**
+ * The run's rendered content without the summary when it says what the block's title or
+ * description already says: the description is derived from the same summary text, and a
+ * summary template may render to the block's name, so either would appear twice under the title.
+ */
+function renderedContent(
+  content: ExecutionProgressContent,
+  shownAlready: readonly string[],
+): ExecutionProgressContent {
+  if (content.summary === null) return content;
+  const summary = content.summary.trim();
+  if (!shownAlready.some((text) => text.trim() === summary)) return content;
+  return { ...content, summary: null };
 }
 
 export function blockById(blocks: readonly RunBlock[]): Map<string, RunBlock> {

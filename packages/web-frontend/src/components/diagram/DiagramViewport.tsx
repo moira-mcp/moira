@@ -36,6 +36,9 @@ export type DiagramViewportProps<N extends Node = Node, E extends Edge = Edge> =
    * its own opening viewport (first block, current lane) on top of that fit.
    */
   onReady?: (instance: ReactFlowInstance<N, E>) => void;
+  /** Extra buttons for the zoom/fit cluster (React Flow `ControlButton`s), so a diagram's own
+   * controls sit with the standard ones instead of floating over its content. */
+  controlButtons?: React.ReactNode;
 };
 
 /**
@@ -49,6 +52,7 @@ export function DiagramViewport<N extends Node = Node, E extends Edge = Edge>({
   kind,
   controlsPosition = "top-right",
   onReady,
+  controlButtons,
   children,
   ...rest
 }: DiagramViewportProps<N, E>): React.JSX.Element {
@@ -76,7 +80,9 @@ export function DiagramViewport<N extends Node = Node, E extends Edge = Edge>({
         proOptions={{ hideAttribution: true }}
         {...flowProps}
       >
-        <Controls position={controlsPosition} showInteractive={false} />
+        <Controls position={controlsPosition} showInteractive={false}>
+          {controlButtons}
+        </Controls>
         {children}
       </ReactFlow>
     </ReactFlowProvider>

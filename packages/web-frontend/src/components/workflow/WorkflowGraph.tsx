@@ -26,6 +26,7 @@ import {
   Node,
   Edge,
   ConnectionMode,
+  ControlButton,
   SelectionMode,
   type ReactFlowInstance as XyflowInstance,
 } from "@xyflow/react";
@@ -50,6 +51,7 @@ import type { RunBlock } from "../run/model";
 import { NodeDetailSheet } from "./NodeDetailSheet";
 
 import { useTheme } from "../../hooks/useTheme";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { WorkflowTransformer } from "../../utils/workflow-transformer";
 import {
   WorkflowGraph as WorkflowGraphType,
@@ -59,7 +61,6 @@ import {
 } from "../../types";
 import { useTranslation } from "react-i18next";
 import { useNodeTypes } from "../../hooks/useNodeTypes";
-import { Button } from "@/components/ui/button";
 
 // Every authored type renders the same step node; the per-type registration keeps React Flow's
 // `react-flow__node-<type>` class, which the node-type catalog and the graph specs rely on.
@@ -185,6 +186,7 @@ export const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
   focusRequest = null,
 }) => {
   const { t } = useTranslation();
+  const mobile = useIsMobile();
   const { actualTheme } = useTheme();
   // The React Flow instance arrives through the viewport's init callback; the layout effects and
   // the control panel drive fitView through this ref rather than a hook, so the graph does not
@@ -573,6 +575,36 @@ export const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
           onNodeClick={handleNodeClick}
           onInit={handleInit}
           onReady={placementReady}
+          controlButtons={
+            showControls ? (
+              <div className="contents" data-testid="graph-layout-controls">
+                <ControlButton
+                  onClick={handleFitView}
+                  title={t("components.workflowGraph.controls.fitViewTitle")}
+                  aria-label={t("components.workflowGraph.controls.fitView")}
+                  data-testid="graph-fit-view"
+                >
+                  <ZoomIn />
+                </ControlButton>
+                <ControlButton
+                  onClick={() => changeLayout({ ...currentLayoutOptions, direction: "TB" })}
+                  title={t("components.workflowGraph.controls.verticalTitle")}
+                  aria-label={t("components.workflowGraph.controls.vertical")}
+                  data-testid="graph-layout-vertical"
+                >
+                  <ArrowUpDown />
+                </ControlButton>
+                <ControlButton
+                  onClick={() => changeLayout({ ...currentLayoutOptions, direction: "LR" })}
+                  title={t("components.workflowGraph.controls.horizontalTitle")}
+                  aria-label={t("components.workflowGraph.controls.horizontal")}
+                  data-testid="graph-layout-horizontal"
+                >
+                  <ArrowLeftRight />
+                </ControlButton>
+              </div>
+            ) : undefined
+          }
           nodeTypes={nodeTypes}
           edgeTypes={edgeTypes}
           connectionMode={ConnectionMode.Strict}
@@ -587,7 +619,7 @@ export const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
           <Background gap={20} size={1} color={backgroundPatternColor} />
 
           {/* MiniMap with delayed render for better initial load performance */}
-          {showMinimap && showMiniMapDelayed && (
+          {showMinimap && showMiniMapDelayed && !mobile && (
             <MiniMap
               position="bottom-right"
               nodeColor={(node) => {
@@ -599,47 +631,6 @@ export const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
               zoomable={true}
               pannable={true}
             />
-          )}
-
-          {/* Layout controls: a column under the zoom cluster, where the graph has the least content. */}
-          {showControls && (
-            <div
-              className="absolute top-[7.5rem] right-[15px] z-10 flex flex-col gap-0.5 rounded-md border border-border bg-card/90 p-1 shadow-sm"
-              data-testid="graph-layout-controls"
-            >
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={handleFitView}
-                title={t("components.workflowGraph.controls.fitViewTitle")}
-                className="justify-start gap-1.5"
-              >
-                <ZoomIn className="w-3.5 h-3.5" />
-                {t("components.workflowGraph.controls.fitView")}
-              </Button>
-
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => changeLayout({ ...currentLayoutOptions, direction: "TB" })}
-                title={t("components.workflowGraph.controls.verticalTitle")}
-                className="justify-start gap-1.5"
-              >
-                <ArrowUpDown className="w-3.5 h-3.5" />
-                {t("components.workflowGraph.controls.vertical")}
-              </Button>
-
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => changeLayout({ ...currentLayoutOptions, direction: "LR" })}
-                title={t("components.workflowGraph.controls.horizontalTitle")}
-                className="justify-start gap-1.5"
-              >
-                <ArrowLeftRight className="w-3.5 h-3.5" />
-                {t("components.workflowGraph.controls.horizontal")}
-              </Button>
-            </div>
           )}
         </DiagramViewport>
       </TransitionFocusProvider>

@@ -7,7 +7,7 @@
  */
 
 import React, { createContext, useCallback, useContext, useMemo, useState } from "react";
-import { ArrowUpRight, RotateCcw } from "lucide-react";
+import { ArrowRight, ArrowUpRight, RotateCcw } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { TransitionChip } from "./chips";
 
@@ -69,7 +69,8 @@ export function TransitionChipView({
 }): React.JSX.Element {
   const focus = useTransitionFocus();
   const lit = chip.keys.some((key) => isLit(focus, key, chip.from));
-  const Icon = chip.kind === "return" ? RotateCcw : ArrowUpRight;
+  const Icon =
+    chip.kind === "return" ? RotateCcw : chip.kind === "forward" ? ArrowRight : ArrowUpRight;
   const hub = chip.kind === "hub";
   return (
     <span
@@ -90,6 +91,7 @@ export function TransitionChipView({
       data-return-chip={chip.kind === "return" ? chip.transition.to : undefined}
       data-skip-chip={chip.kind === "skip" ? chip.transition.to : undefined}
       data-exit-chip={hub ? chip.transition.to : undefined}
+      data-forward-chip={chip.kind === "forward" ? chip.transition.to : undefined}
       data-arc={chip.kind === "return" ? "chip" : undefined}
       data-link={chip.kind === "skip" ? "chip" : undefined}
     >

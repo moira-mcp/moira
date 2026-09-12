@@ -21,7 +21,8 @@ The tabs above the picture switch how the same definition is shown; the choice i
 - **Canvas** — the process as a map filling the whole view: blocks left to right, adjacent
   forward transitions as arrows with their labels, loops as thin dashed lines below and transitions
   that skip blocks above; a block that many other blocks lead into receives one thin line from each
-  of them. Every loop, skip and exit into such a block is named by a chip in its source block;
+  of them. Every loop, skip and exit into such a block is named by a chip in its source block, and
+  so are three or more parallel transitions into the next block (one chip with their count);
   hover the chip (or the line) to light it and read its label, and select a block to keep its lines
   lit. Scroll or drag to pan, pinch (or hold Ctrl and scroll) to zoom.
 - **Lanes** — one card per block in process order with the loops as thin arcs under the rail and
@@ -35,8 +36,8 @@ The tabs above the picture switch how the same definition is shown; the choice i
 - **Graph** — every workflow node as a step card, grouped by block in process order, with the
   same connection chips as the split view. Loops are dashed lines that run below a block's cards
   and show their label when you hover the chip (or the line); links into another block run in the
-  gap between blocks. The picture opens on the first block; the fit control shows the whole graph,
-  Vertical and Horizontal change the direction. The sidebar shows a selected node's definition,
+  gap between blocks. The picture opens on the first block; in the zoom cluster the fit control
+  shows the whole graph and Vertical and Horizontal change the direction. The sidebar shows a selected node's definition,
   and clicking a step in the block panel opens the graph on that node.
 
 ## The panel

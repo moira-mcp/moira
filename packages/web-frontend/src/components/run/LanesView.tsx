@@ -118,9 +118,9 @@ function LaneButton({
         {block.name}
       </span>
       {!definition && <span className="sr-only">{t(`pages.runPage.status.${block.status}`)}</span>}
-      {block.content.summary && (
+      {(block.content.summary ?? block.description) && (
         <span className="line-clamp-2 text-[11px] leading-4 text-muted-foreground">
-          {block.content.summary}
+          {block.content.summary ?? block.description}
         </span>
       )}
       {chips.length > 0 && (

@@ -40,11 +40,24 @@ const CANVAS_EDGE = 16;
 /** Where the block row sits when a definition opens: this fraction of the viewport height from the top. */
 const CANVAS_ROW_ANCHOR = 0.3;
 import { PassCount, StatusChip, STATUS_STYLE } from "./status";
-import { BLOCK_WIDTH, layoutBlocks, type BlockLayout, type LaidOutEdge } from "./layout";
+import {
+  BLOCK_WIDTH,
+  LABEL_MAX_WIDTH,
+  layoutBlocks,
+  type BlockLayout,
+  type LaidOutEdge,
+} from "./layout";
 import { GuidanceCallout } from "./Guidance";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { useModeGuideKey } from "../flow/editing";
 import { currentBlockId, type RunBlock, type RunViewProps } from "./model";
-import { canvasChipsOf, chipTitle, transitionKey, type TransitionChip } from "./chips";
+import {
+  PARALLEL_CHIP_MIN,
+  canvasChipsOf,
+  chipTitle,
+  transitionKey,
+  type TransitionChip,
+} from "./chips";
 import { TransitionChipView, TransitionFocusProvider, isLit, useTransitionFocus } from "./focus";
 
 type BlockNodeData = {
@@ -144,9 +157,11 @@ function RoutedEdgeView({ id, data }: EdgeProps<RoutedEdge>): React.JSX.Element 
   const title = cycle
     ? `${laid.transition.label} — ${laid.transition.cycle?.cause} — ${t("pages.runPage.lanes.endsWhen")} ${laid.transition.cycle?.exit}`
     : laid.transition.label;
-  // Adjacent forward transitions own the gap between their blocks and keep their label there;
-  // every other kind is muted at rest and labelled on demand.
-  const showLabel = forward || lit;
+  // Adjacent forward transitions own the gap between their blocks and keep their label there —
+  // unless several share one gap, when a chip in the source names them and the lines are
+  // labelled on demand; every other kind is muted at rest and labelled on demand.
+  const bundled = forward && (laid.parallelCount ?? 1) >= PARALLEL_CHIP_MIN;
+  const showLabel = (forward && !bundled) || lit;
   return (
     <>
       <g {...hover} style={{ cursor: "default" }}>
@@ -180,13 +195,13 @@ function RoutedEdgeView({ id, data }: EdgeProps<RoutedEdge>): React.JSX.Element 
           <span
             className={cn(
               "nodrag nopan absolute inline-flex items-center gap-1 whitespace-nowrap rounded-full border px-2 py-0.5 text-[11px] font-medium leading-4",
-              forward && "max-w-[136px] truncate",
+              forward && "truncate",
               lit && "z-10 shadow-sm",
               cycle
                 ? "border-primary/40 bg-background text-primary"
                 : "border-border bg-background text-muted-foreground",
             )}
-            style={{ transform: anchor }}
+            style={{ transform: anchor, maxWidth: forward ? LABEL_MAX_WIDTH : undefined }}
             data-edge-label={laid.kind}
             data-transition={key}
             title={title}
@@ -224,6 +239,8 @@ function CanvasInner({
   selectedBlockId,
   onSelectBlock,
 }: RunViewProps): React.JSX.Element {
+  // A phone has no room for the minimap beside the blocks.
+  const mobile = useIsMobile();
   const { t } = useTranslation();
   const { actualTheme } = useTheme();
   const layout = useBlockLayout(blocks, progress.process.hubs);
@@ -383,7 +400,7 @@ function CanvasInner({
           </defs>
         </svg>
         <Background gap={24} size={1} />
-        <MiniMap pannable zoomable className="!bg-card" />
+        {!mobile && <MiniMap pannable zoomable className="!bg-card" />}
       </DiagramViewport>
     </div>
   );
