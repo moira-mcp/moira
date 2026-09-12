@@ -38,6 +38,8 @@ export interface WorkspaceResourceAuditEvent {
   outcome: string;
   state: WorkspaceResourceRecord["state"];
   machine: Pick<WorkspaceMachine, "name" | "cpuCores" | "memoryBytes" | "storageBytes">;
+  /** Bounded, credential-free detail for a provider or connector refusal. */
+  reason?: string;
 }
 
 export interface WorkspaceCreateResult {
@@ -69,6 +71,12 @@ function containsControlCharacter(value: string): boolean {
  * reaches the repository, 404 means the target is gone, and anything else (rate limit,
  * 5xx, network) is a retryable provider outage. The status is an integer and safe to name.
  */
+/** Bounded, single-line detail of a connector or provider failure; never provider output. */
+function boundedReason(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.replace(/\s+/g, " ").trim().slice(0, 200) || "unknown";
+}
+
 function providerFailure(error: unknown): never {
   if (error instanceof WorkspaceResourceError || error instanceof WorkspaceConnectionError) {
     throw error;
@@ -550,13 +558,15 @@ export class WorkspaceResourceService {
       await this.emit("create_pending", pending, "provisioning");
       return { resource: pending, lifecycleCapability: capability };
     }
+    let probeReason: string | undefined;
     if (usable) {
       try {
         await this.dependencies.registry
           .require(record.provider)
           .probeConnector(credential, actual.name);
-      } catch {
+      } catch (error) {
         usable = false;
+        probeReason = boundedReason(error);
       }
     }
     const adopted = this.dependencies.repository.adopt({
@@ -589,6 +599,7 @@ export class WorkspaceResourceService {
       usable ? "create" : "create_rejected",
       current,
       current.lastOutcome ?? "unknown",
+      probeReason,
     );
     if (!usable) {
       throw new WorkspaceResourceError(
@@ -1265,6 +1276,7 @@ export class WorkspaceResourceService {
     action: WorkspaceResourceAuditEvent["action"],
     record: WorkspaceResourceRecord,
     outcome: string,
+    reason?: string,
   ): Promise<void> {
     await this.dependencies.audit?.({
       action,
@@ -1272,6 +1284,7 @@ export class WorkspaceResourceService {
       provider: record.provider,
       resourceId: record.id,
       outcome,
+      ...(reason !== undefined ? { reason } : {}),
       state: record.state,
       machine: {
         name: record.machine.name,

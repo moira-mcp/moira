@@ -555,7 +555,10 @@ resource create/pending/rejection/cleanup/start/stop/delete; typed exec/file
 operation reservation/reconciliation/terminal outcomes; and administrator control
 updates. Metadata is limited to opaque
 resource relationships, provider, state/outcome, selected machine facts, byte
-counts and exit code. Repository content, source, argv, cwd, stdin, stdout,
+counts, exit code and, for a creation rejected by the connector probe, a bounded
+`reason` naming the connector's own failure (never remote output or a credential).
+The connector sidecar keeps the underlying `gh`/`ssh` diagnostics in its own
+container log with the credential redacted; the application never receives them. Repository content, source, argv, cwd, stdin, stdout,
 stderr, OAuth code/state, session token and provider credentials are excluded.
 
 ## Verification
