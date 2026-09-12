@@ -7,30 +7,36 @@
  * blocks lead to, such as "Replan" or "Stopped") are thin muted edges bundled into one port near the
  * top of the hub's left edge; a chip inside the source names the hub (the transition label is its
  * tooltip) rather than a label on the line. Status is carried by colour, icon and a chip, so it is
- * readable without hover. The view opens centred on the block the run is at.
+ * readable without hover. The view opens fitted to the process but never below three quarters
+ * size, so a dense flow opens readable and is panned; on a run it then centres on the block the
+ * run is at. Gestures come from the shared `DiagramViewport`.
  */
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   BaseEdge,
   EdgeLabelRenderer,
   Handle,
   Position,
-  ReactFlow,
-  ReactFlowProvider,
   Background,
-  Controls,
   MiniMap,
-  useReactFlow,
   type Edge,
   type EdgeProps,
   type Node,
   type NodeProps,
+  type ReactFlowInstance,
 } from "@xyflow/react";
 import { ArrowUpRight, CornerDownRight, Loader2, RotateCcw } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useTheme } from "@/hooks/useTheme";
+import { DiagramViewport } from "../diagram/DiagramViewport";
+import { useOpeningPlacement } from "../diagram/placement";
+
+/** Gutter kept between the viewport edge and the first block when a definition opens. */
+const CANVAS_EDGE = 16;
+/** Where the block row sits when a definition opens: this fraction of the viewport height from the top. */
+const CANVAS_ROW_ANCHOR = 0.3;
 import { StatusChip, STATUS_STYLE } from "./status";
 import { BLOCK_WIDTH, layoutBlocks, type BlockLayout, type LaidOutEdge } from "./layout";
 import { GuidanceCallout } from "./Guidance";
@@ -62,7 +68,7 @@ function BlockNodeView({ data }: NodeProps<BlockNode>): React.JSX.Element {
         aria-current={block.status === "active" || block.status === "waiting" ? "step" : undefined}
         style={{ width: BLOCK_WIDTH }}
         className={cn(
-          "flex h-full flex-col gap-1.5 rounded-xl border-2 px-3.5 py-3 text-left shadow-sm transition",
+          "flex h-full flex-col gap-1.5 rounded-xl border-2 px-3.5 py-3 text-left transition",
           "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
           style.surface,
           isHub && "border-dashed",
@@ -151,7 +157,7 @@ function RoutedEdgeView({ id, data }: EdgeProps<RoutedEdge>): React.JSX.Element 
       <EdgeLabelRenderer>
         <span
           className={cn(
-            "nodrag nopan absolute inline-flex items-center gap-1 whitespace-nowrap rounded-full border px-2 py-0.5 text-[11px] font-medium leading-4 shadow-sm",
+            "nodrag nopan absolute inline-flex items-center gap-1 whitespace-nowrap rounded-full border px-2 py-0.5 text-[11px] font-medium leading-4",
             laid.kind === "forward" && "max-w-[136px] truncate",
             cycle
               ? "border-primary/40 bg-background text-primary"
@@ -199,22 +205,43 @@ function CanvasInner({
 }: RunViewProps): React.JSX.Element {
   const { t } = useTranslation();
   const { actualTheme } = useTheme();
-  const { setCenter } = useReactFlow();
   const layout = useBlockLayout(blocks, progress.process.hubs);
   const nameOf = useMemo(() => new Map(blocks.map((b) => [b.id, b.name])), [blocks]);
 
-  // Open on "where is this run now" at a readable zoom rather than a shrunk overview: the block
-  // that is active or waiting is centred; the fit-view control and the minimap give the overview.
-  useEffect(() => {
-    if (!layout) return;
-    const focusId = currentBlockId(blocks) ?? blocks[0]?.id;
-    const laid = layout.blocks.find((b) => b.id === focusId);
-    if (!laid) return;
-    void setCenter(laid.x + laid.width / 2, laid.y + laid.height / 2 + 40, {
-      zoom: 0.85,
-      duration: 0,
-    });
-  }, [layout, blocks, setCenter]);
+  // The viewport opens fitted to the process, clamped to a readable zoom (a definition has no
+  // "current" block). On a
+  // run, once that fit is in place, the block that is active or waiting is centred at a readable
+  // zoom; the fit-view control and the minimap give the overview back.
+  const focusId = currentBlockId(blocks);
+  const wrapperRef = useRef<HTMLDivElement>(null);
+  const placeViewport = useCallback(
+    (rf: ReactFlowInstance<BlockNode, RoutedEdge>, blockId: string | null) => {
+      if (!layout) return;
+      if (!blockId) {
+        // A definition: keep the fitted zoom but start at the first block with the block row in
+        // the upper third, so a process wider than the viewport is read from its beginning; the
+        // skip and hub channels above are reached by panning up, the returns below by panning down.
+        const zoom = rf.getZoom();
+        const first = layout.blocks.find((b) => b.id === blocks[0]?.id) ?? layout.blocks[0];
+        if (!first) return;
+        const height = wrapperRef.current?.clientHeight ?? 0;
+        void rf.setViewport({
+          x: CANVAS_EDGE - first.x * zoom,
+          y: Math.round(height * CANVAS_ROW_ANCHOR) - first.y * zoom,
+          zoom,
+        });
+        return;
+      }
+      const laid = layout.blocks.find((b) => b.id === blockId);
+      if (!laid) return;
+      void rf.setCenter(laid.x + laid.width / 2, laid.y + laid.height / 2 + 40, {
+        zoom: 0.85,
+        duration: 0,
+      });
+    },
+    [layout, blocks],
+  );
+  const { onInit, onReady } = useOpeningPlacement(placeViewport, focusId);
 
   const nodes = useMemo<BlockNode[]>(
     () =>
@@ -275,21 +302,20 @@ function CanvasInner({
 
   return (
     <div
+      ref={wrapperRef}
       className="h-full w-full bg-muted/20"
       data-testid="canvas-view"
       data-canvas-size={`${Math.round(layout.width)}x${Math.round(layout.height)}`}
     >
-      <ReactFlow
+      <DiagramViewport<BlockNode, RoutedEdge>
+        kind="canvas"
         nodes={nodes}
         edges={edges}
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
         colorMode={actualTheme}
-        minZoom={0.2}
-        maxZoom={1.5}
-        nodesConnectable={false}
-        elementsSelectable={false}
-        proOptions={{ hideAttribution: true }}
+        onInit={onInit}
+        onReady={onReady}
       >
         <svg aria-hidden="true">
           <defs>
@@ -329,9 +355,8 @@ function CanvasInner({
           </defs>
         </svg>
         <Background gap={24} size={1} />
-        <Controls showInteractive={false} />
         <MiniMap pannable zoomable className="!bg-card" />
-      </ReactFlow>
+      </DiagramViewport>
     </div>
   );
 }
@@ -340,21 +365,19 @@ export function CanvasView(props: RunViewProps): React.JSX.Element {
   const { t } = useTranslation();
   const guideKey = useModeGuideKey();
   return (
-    <ReactFlowProvider>
-      <div className="flex h-full flex-col">
-        <div className="px-3 pt-3">
-          <GuidanceCallout
-            title={t(`${guideKey}.canvas.title`)}
-            testId="guidance-canvas"
-            className="mb-3"
-          >
-            {t(`${guideKey}.canvas.body`)}
-          </GuidanceCallout>
-        </div>
-        <div className="min-h-0 flex-1">
-          <CanvasInner {...props} />
-        </div>
+    <div className="flex h-full flex-col">
+      <div className="px-3 pt-3">
+        <GuidanceCallout
+          title={t(`${guideKey}.canvas.title`)}
+          testId="guidance-canvas"
+          className="mb-3"
+        >
+          {t(`${guideKey}.canvas.body`)}
+        </GuidanceCallout>
       </div>
-    </ReactFlowProvider>
+      <div className="min-h-0 flex-1">
+        <CanvasInner {...props} />
+      </div>
+    </div>
   );
 }

@@ -21,9 +21,9 @@ The tabs above the picture switch how the same definition is shown; the choice i
 - **Canvas** — the process as a map filling the whole view: blocks left to right, forward
   transitions as arrows with their labels, loops as dashed lines below; a block that many other
   blocks lead into receives one thin line from each of them, and the source names it in a small
-  chip. Drag to pan, scroll to zoom.
+  chip. Scroll or drag to pan, pinch (or hold Ctrl and scroll) to zoom.
 - **Lanes** — one card per block in process order with the loops drawn as arcs under the rail and
-  transitions that skip a block as thin links above it.
+  transitions that skip a block as thin links above it; the rail pans and zooms like the map.
   Nothing is "current": the definition has no run.
 - **Split** — blocks against their implementation: pick a block on the left to see, on the right,
   the steps that implement it in the order they run, with their connections. Chips lead to the

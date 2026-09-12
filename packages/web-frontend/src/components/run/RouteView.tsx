@@ -294,7 +294,7 @@ export function RouteView({
         : "running";
 
   return (
-    <div className="h-full space-y-4 overflow-auto p-4" data-testid="route-view">
+    <div className="scrollbar-thin h-full space-y-4 overflow-auto p-4" data-testid="route-view">
       <GuidanceCallout title={t("pages.runPage.modeGuide.route.title")} testId="guidance-route">
         {t("pages.runPage.modeGuide.route.body")}
       </GuidanceCallout>

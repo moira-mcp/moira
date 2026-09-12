@@ -389,7 +389,7 @@ export function VariablesPanel({
             />
           </CollapsibleTrigger>
           <CollapsibleContent>
-            <ul className="max-h-64 divide-y overflow-y-auto border-t font-mono text-[11px]">
+            <ul className="scrollbar-thin max-h-64 divide-y overflow-y-auto border-t font-mono text-[11px]">
               {outputs.map((o) => (
                 <li key={o.name} className="flex gap-3 px-3 py-1" data-output={o.name}>
                   <span className="w-48 shrink-0 truncate">{o.name}</span>

@@ -77,7 +77,7 @@ function BlockRow({
         className={cn(
           "flex w-full items-start gap-2.5 rounded-lg border-l-[3px] border-border px-3 py-2 text-left transition",
           "hover:bg-accent/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-          selected ? "bg-accent shadow-sm" : "bg-transparent",
+          selected ? "bg-accent" : "bg-transparent",
         )}
       >
         <span className="min-w-0 flex-1">
@@ -329,7 +329,7 @@ export function SplitView({
   }, [block?.id]);
 
   return (
-    <div className="h-full space-y-4 overflow-auto p-4" data-testid="split-view">
+    <div className="scrollbar-thin h-full space-y-4 overflow-auto p-4" data-testid="split-view">
       <GuidanceCallout title={t("pages.flowPage.modeGuide.split.title")} testId="guidance-split">
         {t("pages.flowPage.modeGuide.split.body")}
       </GuidanceCallout>
@@ -386,11 +386,7 @@ export function SplitView({
                   <p className="text-sm leading-6 text-foreground/85">{block.description}</p>
                 )}
               </header>
-              <ol
-                ref={listRef}
-                className="flex-1 divide-y overflow-y-auto"
-                data-testid="split-nodes"
-              >
+              <ol ref={listRef} className="flex-1 divide-y" data-testid="split-nodes">
                 {steps.map((step, position) => (
                   <NodeRow
                     key={step.id}

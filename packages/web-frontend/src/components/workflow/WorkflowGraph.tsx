@@ -7,8 +7,8 @@
  *
  * Features:
  * - Accepts raw WorkflowGraph data and transforms it internally
- * - Layout controls (Fit View, Vertical, Horizontal) inside ReactFlowProvider
- * - Inner/outer component pattern for useReactFlow hooks access
+ * - Mounts through the shared DiagramViewport (gesture pan, pinch zoom, zoom/fit cluster)
+ * - Layout controls (Fit View, Vertical, Horizontal) driving the instance received on init
  * - Current node highlighting for execution views
  * - Optional header with workflow metadata
  * - Theme-aware styling (dark/light mode)
@@ -17,19 +17,16 @@
 
 import React, { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import {
-  ReactFlow,
-  ReactFlowProvider,
   Background,
-  Controls,
   MiniMap,
-  useReactFlow,
   Node,
   Edge,
   ConnectionMode,
   SelectionMode,
+  type ReactFlowInstance as XyflowInstance,
 } from "@xyflow/react";
-import "@xyflow/react/dist/style.css";
 import { ZoomIn, ArrowUpDown, ArrowLeftRight } from "lucide-react";
+import { DiagramViewport } from "../diagram/DiagramViewport";
 
 // Compact node component for all node types
 import CompactNode from "../nodes/CompactNode";
@@ -125,9 +122,27 @@ export interface WorkflowGraphProps {
 }
 
 /**
- * Inner component with access to ReactFlow hooks
+ * Usage:
+ * ```tsx
+ * // Basic usage with raw workflow data
+ * <WorkflowGraph workflow={workflowData} />
+ *
+ * // With execution highlighting
+ * <WorkflowGraph
+ *   workflow={workflowData}
+ *   currentNodeId={execution.currentNodeId}
+ *   onNodeClick={handleNodeClick}
+ * />
+ *
+ * // Minimal view without controls
+ * <WorkflowGraph
+ *   workflow={workflowData}
+ *   showControls={false}
+ *   showMinimap={false}
+ * />
+ * ```
  */
-const WorkflowGraphInner: React.FC<WorkflowGraphProps> = ({
+export const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
   workflow,
   validation,
   currentNodeId,
@@ -144,19 +159,21 @@ const WorkflowGraphInner: React.FC<WorkflowGraphProps> = ({
 }) => {
   const { t } = useTranslation();
   const { actualTheme } = useTheme();
-  const reactFlowInstance = useReactFlow();
-  const { fitView: reactFlowFitView } = reactFlowInstance;
-
-  // Call onInit callback when instance is available
-  useEffect(() => {
-    if (onInit && reactFlowInstance) {
-      onInit({
-        fitView: reactFlowInstance.fitView,
-        getNodes: reactFlowInstance.getNodes,
-        getEdges: reactFlowInstance.getEdges,
+  // The React Flow instance arrives through the viewport's init callback; the layout effects and
+  // the control panel drive fitView through this ref rather than a hook, so the graph does not
+  // need a provider of its own around it.
+  const instanceRef = useRef<XyflowInstance | null>(null);
+  const handleInit = useCallback(
+    (instance: XyflowInstance) => {
+      instanceRef.current = instance;
+      onInit?.({
+        fitView: instance.fitView,
+        getNodes: instance.getNodes,
+        getEdges: instance.getEdges,
       });
-    }
-  }, [onInit, reactFlowInstance]);
+    },
+    [onInit],
+  );
 
   // Use regular useState instead of useNodesState/useEdgesState for read-only view
   // This avoids zustand store subscriptions that cause continuous re-renders
@@ -275,7 +292,6 @@ const WorkflowGraphInner: React.FC<WorkflowGraphProps> = ({
       const errorNodeIdSet = new Set(errorNodeIds);
       const processedNodes = layoutResult.nodes.map((node) => ({
         ...node,
-        draggable: true,
         data: {
           ...node.data,
           onWorkflowNavigate,
@@ -307,7 +323,7 @@ const WorkflowGraphInner: React.FC<WorkflowGraphProps> = ({
 
       // Fit view after layout
       setTimeout(() => {
-        reactFlowFitView({ padding: 0.2, duration: 200 });
+        instanceRef.current?.fitView({ padding: 0.2, duration: 200 });
       }, 50);
     } catch (layoutError) {
       console.error("Layout calculation failed:", layoutError);
@@ -316,7 +332,6 @@ const WorkflowGraphInner: React.FC<WorkflowGraphProps> = ({
         const errorNodeIdSet = new Set(errorNodeIds);
         const fallbackNodes = visualizationData.nodes.map((node) => ({
           ...node,
-          draggable: true,
           data: {
             ...node.data,
             onWorkflowNavigate,
@@ -331,9 +346,6 @@ const WorkflowGraphInner: React.FC<WorkflowGraphProps> = ({
     } finally {
       setIsLayouting(false);
     }
-    // NOTE: reactFlowFitView intentionally excluded - it changes on every render
-    // and would cause infinite loop. fitView is called via setTimeout anyway.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visualizationData, currentNodeId, errorNodeIds, currentLayoutOptions, onWorkflowNavigate]);
 
   /**
@@ -383,8 +395,8 @@ const WorkflowGraphInner: React.FC<WorkflowGraphProps> = ({
    * Fit view using ReactFlow API
    */
   const handleFitView = useCallback(() => {
-    reactFlowFitView({ padding: 0.2, duration: 300 });
-  }, [reactFlowFitView]);
+    instanceRef.current?.fitView({ padding: 0.2, duration: 300 });
+  }, []);
 
   /**
    * Change layout direction (throttled to prevent rapid re-layouts)
@@ -425,7 +437,7 @@ const WorkflowGraphInner: React.FC<WorkflowGraphProps> = ({
         setCurrentLayoutOptions(newLayoutOptions);
 
         setTimeout(() => {
-          reactFlowFitView({ padding: 0.2, duration: 300 });
+          instanceRef.current?.fitView({ padding: 0.2, duration: 300 });
         }, 50);
       } catch (layoutError) {
         console.error("Layout change failed:", layoutError);
@@ -433,8 +445,6 @@ const WorkflowGraphInner: React.FC<WorkflowGraphProps> = ({
         setIsLayouting(false);
       }
     },
-    // NOTE: reactFlowFitView excluded - changes on every render
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [nodes, edges],
   );
 
@@ -448,41 +458,26 @@ const WorkflowGraphInner: React.FC<WorkflowGraphProps> = ({
 
   return (
     <div className={`h-full relative ${className}`}>
-      <ReactFlow
+      <DiagramViewport
+        kind="graph"
+        controlsPosition="top-right"
         nodes={nodes}
         edges={edges}
         // Disable change handlers for read-only view - major performance win
         onNodesChange={undefined}
         onEdgesChange={undefined}
         onNodeClick={handleNodeClick}
+        onInit={handleInit}
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
         connectionMode={ConnectionMode.Strict}
         selectionMode={SelectionMode.Partial}
-        selectNodesOnDrag={false}
-        panOnDrag={true}
-        zoomOnScroll={true}
-        zoomOnPinch={true}
-        zoomOnDoubleClick={false}
         deleteKeyCode={null}
         multiSelectionKeyCode={null}
-        minZoom={0.1}
-        maxZoom={2}
-        fitView={true}
-        fitViewOptions={{ padding: 0.2 }}
         colorMode={actualTheme}
         style={{ backgroundColor }}
-        // Performance optimizations for large graphs
-        nodesDraggable={false}
-        nodesConnectable={false}
-        edgesReconnectable={false}
-        elementsSelectable={false}
-        autoPanOnNodeDrag={false}
-        autoPanOnConnect={false}
       >
         <Background gap={20} size={1} color={backgroundPatternColor} />
-
-        <Controls position="top-right" showZoom={true} showFitView={true} showInteractive={false} />
 
         {/* MiniMap with delayed render for better initial load performance */}
         {showMinimap && showMiniMapDelayed && (
@@ -536,7 +531,7 @@ const WorkflowGraphInner: React.FC<WorkflowGraphProps> = ({
             </Button>
           </div>
         )}
-      </ReactFlow>
+      </DiagramViewport>
 
       {/* Legacy Node Detail Sheet — only when no external sidebar */}
       {showNodeDetails && !onNodeSelect && (
@@ -549,37 +544,6 @@ const WorkflowGraphInner: React.FC<WorkflowGraphProps> = ({
         />
       )}
     </div>
-  );
-};
-
-/**
- * Outer component that provides ReactFlowProvider
- *
- * Usage:
- * ```tsx
- * // Basic usage with raw workflow data
- * <WorkflowGraph workflow={workflowData} />
- *
- * // With execution highlighting
- * <WorkflowGraph
- *   workflow={workflowData}
- *   currentNodeId={execution.currentNodeId}
- *   onNodeClick={handleNodeClick}
- * />
- *
- * // Minimal view without controls
- * <WorkflowGraph
- *   workflow={workflowData}
- *   showControls={false}
- *   showMinimap={false}
- * />
- * ```
- */
-export const WorkflowGraph: React.FC<WorkflowGraphProps> = (props) => {
-  return (
-    <ReactFlowProvider>
-      <WorkflowGraphInner {...props} />
-    </ReactFlowProvider>
   );
 };
 

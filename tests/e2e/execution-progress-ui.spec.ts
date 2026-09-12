@@ -129,21 +129,25 @@ test("lanes show the repair loop as a repeated block and the block panel drills 
     await expect(currentStep).toHaveAttribute("data-node-id", "plan-review");
     await expect(currentStep.locator("[data-node-inputs]")).toContainText("issues_count");
 
-    // Selecting another block is a deep link and switches the panel to it.
+    // Selecting another block is a deep link and switches the panel to it. The rail opens
+    // centred on the current lane at full size, so the first lane is outside its viewport until
+    // the reader fits the whole rail (or pans); the fit control is the one-click way.
+    await page.getByTestId("lanes-rail").locator(".react-flow__controls-fitview").click();
     await page.getByTestId("progress-node-scope").click();
     await expect(page).toHaveURL(/block=scope/);
     await expect(page.getByTestId("block-detail")).toHaveAttribute("data-block-id", "scope");
 
     // A step focuses the technical node graph in the graph tab: focusing two different steps
-    // leaves the viewport on two different transforms.
-    const transformOf = () =>
-      page.locator(".react-flow__viewport").evaluate((el) => window.getComputedStyle(el).transform);
+    // leaves the viewport on two different transforms. The lanes rail beside the panel is a
+    // React Flow instance of its own, so the graph's viewport is read inside the panel.
+    const graphViewport = page.getByTestId("run-panel").locator(".react-flow__viewport");
+    const transformOf = () => graphViewport.evaluate((el) => window.getComputedStyle(el).transform);
     await page.getByTestId("block-detail").locator('[data-node-id="get-task"] button').click();
     await expect(page.getByRole("tab", { name: /Graph|Граф/ })).toHaveAttribute(
       "data-state",
       "active",
     );
-    await expect(page.locator(".react-flow__viewport")).toBeVisible({ timeout: 15000 });
+    await expect(graphViewport).toBeVisible({ timeout: 15000 });
     await expect.poll(transformOf).not.toBe("none");
     const onGetTask = await transformOf();
     await page.getByRole("tab", { name: /Block|Блок/ }).click();

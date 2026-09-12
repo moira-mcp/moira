@@ -22,7 +22,8 @@ The tabs above the picture switch how the same run is shown; the choice is in th
 - **Canvas** — the process as a map filling the whole view: blocks left to right, forward
   transitions as arrows with their labels, loops as dashed lines below; a block that many other
   blocks lead into (a replan or stop block) receives one thin line from each of them, and the
-  source names it in a small chip. The map opens on the current block; drag to pan, scroll to zoom.
+  source names it in a small chip. The map opens on the current block; scroll or drag to pan, pinch
+  (or hold Ctrl and scroll) to zoom. The lanes rail pans and zooms the same way.
 - **Outline** — the process as a document: every block as a numbered section with its
   description, what the run produced there, what its steps wrote, its transitions in words
   (including why a loop happens and when it ends), and its steps with the evidence each demands.

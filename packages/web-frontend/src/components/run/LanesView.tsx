@@ -9,36 +9,53 @@
  * the source lane). Beneath the rail the selected block's run content (summary, details, outcome,
  * next) is written out. On a phone the rail becomes a vertical stepper and returns and skips
  * become chips, which is what a phone can show.
+ *
+ * The horizontal rail is a React Flow instance on the shared `DiagramViewport`: lane cards are
+ * fixed nodes in one row placed by `laneLayout`, returns and links are custom edges drawing the
+ * `arcs` geometry in flow coordinates, so the rail pans and zooms like the canvas and never
+ * scrolls the page. The phone stepper is plain DOM and keeps its native scroll.
  */
 
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useMemo } from "react";
 import { useTranslation } from "react-i18next";
+import {
+  EdgeLabelRenderer,
+  Handle,
+  Position,
+  type Edge,
+  type EdgeProps,
+  type Node,
+  type NodeProps,
+  type ReactFlowInstance,
+} from "@xyflow/react";
 import { ArrowUpRight, MapPin, RotateCcw } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useIsMobile } from "@/hooks/use-mobile";
+import { useTheme } from "@/hooks/useTheme";
+import { DiagramViewport } from "../diagram/DiagramViewport";
+import { useOpeningPlacement } from "../diagram/placement";
 import { GuidanceCallout } from "./Guidance";
 import { useEditing, useModeGuideKey } from "../flow/editing";
 import { StatusChip, StatusIcon, STATUS_STYLE } from "./status";
-import { arcGeometry, arcsHeight, buildArcs, buildLinks, linkGeometry, linksHeight } from "./arcs";
+import {
+  arcGeometry,
+  buildArcs,
+  buildLinks,
+  linkGeometry,
+  type LaneArc,
+  type LaneLink,
+} from "./arcs";
+import {
+  LANE_HEIGHT,
+  LANE_WIDTH,
+  laneCenter,
+  laneRailLayout,
+  laneViewportHeight,
+  LANE_GAP,
+} from "./laneLayout";
 import { currentBlockId, type RunBlock, type RunTransition, type RunViewProps } from "./model";
 
-const LANE_MIN_WIDTH = 132;
-const LANE_GAP = 10;
-
-function useContainerWidth(): [React.RefObject<HTMLDivElement | null>, number] {
-  const ref = useRef<HTMLDivElement>(null);
-  const [width, setWidth] = useState(0);
-  useEffect(() => {
-    const el = ref.current;
-    if (!el || typeof ResizeObserver === "undefined") return;
-    const update = () => setWidth(el.clientWidth);
-    update();
-    const observer = new ResizeObserver(update);
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, []);
-  return [ref, width];
-}
+type Skip = { transition: RunTransition; targetName: string };
 
 function LaneButton({
   block,
@@ -54,7 +71,7 @@ function LaneButton({
   onClick: () => void;
   vertical: boolean;
   /** Forward transitions whose label the rail could not fit on the link: shown as chips here. */
-  skips?: Array<{ transition: RunTransition; targetName: string }>;
+  skips?: Skip[];
 }): React.JSX.Element {
   const { t } = useTranslation();
   const { definition } = useEditing();
@@ -146,6 +163,260 @@ function ForwardChip({
   );
 }
 
+type LaneNodeData = {
+  block: RunBlock;
+  selected: boolean;
+  isCurrent: boolean;
+  skips: Skip[];
+  onSelect: (id: string) => void;
+};
+type LaneNode = Node<LaneNodeData, "lane">;
+/** Geometry precomputed in flow coordinates; `y` and `d` are relative to the edge's own band. */
+type ArcEdgeData = {
+  arc: LaneArc;
+  x1: number;
+  x2: number;
+  y: number;
+  d: string;
+  rowBottom: number;
+};
+type LinkEdgeData = {
+  link: LaneLink;
+  x1: number;
+  x2: number;
+  y: number;
+  d: string;
+  labelFits: boolean;
+};
+type LaneEdge = Edge<ArcEdgeData, "arc"> | Edge<LinkEdgeData, "link">;
+
+/** A lane card as a node: hidden handles so edges can attach, the button fills the fixed box. */
+function LaneNodeView({ data }: NodeProps<LaneNode>): React.JSX.Element {
+  const { block, selected, isCurrent, skips, onSelect } = data;
+  return (
+    <div className="flex" style={{ width: LANE_WIDTH, height: LANE_HEIGHT }}>
+      <Handle type="target" position={Position.Top} className="!opacity-0" />
+      <Handle type="source" position={Position.Bottom} className="!opacity-0" />
+      <LaneButton
+        block={block}
+        selected={selected}
+        isCurrent={isCurrent}
+        onClick={() => onSelect(block.id)}
+        vertical={false}
+        skips={skips}
+      />
+    </div>
+  );
+}
+
+/** A return: a dashed primary path beneath the row and its label pill under the line. */
+function ArcEdgeView({ data }: EdgeProps<Edge<ArcEdgeData, "arc">>): React.JSX.Element | null {
+  const { t } = useTranslation();
+  if (!data) return null;
+  const { arc, x1, x2, y, d, rowBottom } = data;
+  return (
+    <>
+      <g transform={`translate(0 ${rowBottom})`}>
+        <title>{`${arc.cause} — ${t("pages.runPage.lanes.endsWhen")} ${arc.exit}`}</title>
+        <path
+          d={d}
+          fill="none"
+          stroke="var(--primary)"
+          strokeWidth={2}
+          strokeDasharray="6 5"
+          strokeLinejoin="round"
+          markerEnd="url(#lane-arrow)"
+          data-arc={`${x1}-${x2}-${y}`}
+        />
+      </g>
+      <EdgeLabelRenderer>
+        <span
+          className="nodrag nopan absolute inline-flex max-w-[260px] items-center gap-1 truncate rounded-full border border-primary/40 bg-background px-2 text-[11px] leading-[16px] text-primary"
+          style={{
+            transform: `translate(-50%, 0) translate(${(x1 + x2) / 2}px, ${rowBottom + y + 3}px)`,
+          }}
+        >
+          <RotateCcw className="size-3 shrink-0" aria-hidden="true" />
+          {arc.label}
+        </span>
+      </EdgeLabelRenderer>
+    </>
+  );
+}
+
+/** A forward link above the row, its label on the line when it fits (else the source's chip). */
+function LinkEdgeView({ data }: EdgeProps<Edge<LinkEdgeData, "link">>): React.JSX.Element | null {
+  if (!data) return null;
+  const { link, x1, x2, y, d, labelFits } = data;
+  return (
+    <g opacity={0.6}>
+      <title>{link.label}</title>
+      <path
+        d={d}
+        fill="none"
+        stroke="var(--muted-foreground)"
+        strokeWidth={1.5}
+        strokeLinejoin="round"
+        markerEnd="url(#lane-arrow-link)"
+        data-link={`${link.from}-${link.to}`}
+      />
+      {labelFits && (
+        <text
+          x={(x1 + x2) / 2}
+          y={y - 3}
+          textAnchor="middle"
+          fontSize={11}
+          fill="var(--muted-foreground)"
+          data-link-label={`${link.from}-${link.to}`}
+        >
+          {link.label}
+        </text>
+      )}
+    </g>
+  );
+}
+
+const nodeTypes = { lane: LaneNodeView };
+const edgeTypes = { arc: ArcEdgeView, link: LinkEdgeView };
+
+/**
+ * The horizontal rail: a fixed-height React Flow viewport whose height follows the geometry so
+ * the page does not jump; it opens fitted to the whole rail and, on a run, centred on the current
+ * lane at full size.
+ */
+function LanesRail({
+  blocks,
+  arcs,
+  links,
+  drawnLinks,
+  shown,
+  current,
+  onSelectBlock,
+  chipsOf,
+}: {
+  blocks: RunBlock[];
+  arcs: LaneArc[];
+  links: LaneLink[];
+  drawnLinks: Array<{ link: LaneLink } & ReturnType<typeof linkGeometry>>;
+  shown: string | null;
+  current: string | null;
+  onSelectBlock: (id: string) => void;
+  chipsOf: (block: RunBlock) => Skip[];
+}): React.JSX.Element {
+  const { t } = useTranslation();
+  const { actualTheme } = useTheme();
+  const layout = useMemo(() => laneRailLayout(blocks.length, arcs, links), [blocks, arcs, links]);
+
+  // Centre on the current lane at full size once it is known and again only when it moves: a
+  // refetch that changes nothing must not undo the reader's own panning.
+  const currentIndex = blocks.find((b) => b.id === current)?.index ?? null;
+  const rowTop = layout.rowTop;
+  const placeViewport = useCallback(
+    (rf: ReactFlowInstance<LaneNode, LaneEdge>, index: number | null) => {
+      if (index === null) {
+        // A definition has no current lane: open at full size on the first lane; the reader pans.
+        void rf.setViewport({ x: LANE_GAP, y: 0, zoom: 1 });
+        return;
+      }
+      void rf.setCenter(laneCenter(index), rowTop + LANE_HEIGHT / 2, { zoom: 1, duration: 0 });
+    },
+    [rowTop],
+  );
+  const { onInit, onReady } = useOpeningPlacement(placeViewport, currentIndex);
+
+  const nodes = useMemo<LaneNode[]>(
+    () =>
+      blocks.map((block, i) => ({
+        id: block.id,
+        type: "lane",
+        position: layout.positions[i],
+        width: LANE_WIDTH,
+        height: LANE_HEIGHT,
+        draggable: false,
+        selectable: false,
+        data: {
+          block,
+          selected: shown === block.id,
+          isCurrent: current === block.id,
+          skips: chipsOf(block),
+          onSelect: onSelectBlock,
+        },
+      })),
+    [blocks, layout, shown, current, chipsOf, onSelectBlock],
+  );
+
+  const edges = useMemo<LaneEdge[]>(() => {
+    const idOf = (index: number) => blocks[index].id;
+    const arcEdges: LaneEdge[] = arcs.map((arc) => ({
+      id: `arc-${arc.from}-${arc.to}-${arc.label}`,
+      source: idOf(arc.from),
+      target: idOf(arc.to),
+      type: "arc",
+      selectable: false,
+      focusable: false,
+      data: { arc, ...arcGeometry(arc, laneCenter), rowBottom: layout.rowBottom },
+    }));
+    const linkEdges: LaneEdge[] = drawnLinks.map(({ link, ...geometry }) => ({
+      id: `link-${link.from}-${link.to}-${link.label}`,
+      source: idOf(link.from),
+      target: idOf(link.to),
+      type: "link",
+      selectable: false,
+      focusable: false,
+      data: { link, ...geometry },
+    }));
+    return [...arcEdges, ...linkEdges];
+  }, [blocks, arcs, drawnLinks, layout]);
+
+  return (
+    <div
+      className="overflow-hidden rounded-xl border bg-muted/20"
+      style={{ height: laneViewportHeight(layout) }}
+      role="region"
+      aria-label={t("pages.runPage.lanes.rail")}
+      data-testid="lanes-rail"
+    >
+      <DiagramViewport<LaneNode, LaneEdge>
+        kind="lanes"
+        nodes={nodes}
+        edges={edges}
+        nodeTypes={nodeTypes}
+        edgeTypes={edgeTypes}
+        colorMode={actualTheme}
+        onInit={onInit}
+        onReady={onReady}
+      >
+        <svg aria-hidden="true">
+          <defs>
+            <marker
+              id="lane-arrow"
+              viewBox="0 0 10 10"
+              refX="8"
+              refY="5"
+              markerWidth="7"
+              markerHeight="7"
+              orient="auto-start-reverse"
+            >
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--primary)" />
+            </marker>
+            <marker
+              id="lane-arrow-link"
+              viewBox="0 0 10 10"
+              refX="8"
+              refY="5"
+              markerWidth="6"
+              markerHeight="6"
+              orient="auto-start-reverse"
+            >
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--muted-foreground)" />
+            </marker>
+          </defs>
+        </svg>
+      </DiagramViewport>
+    </div>
+  );
+}
+
 function BlockContent({ block }: { block: RunBlock }): React.JSX.Element | null {
   const { t } = useTranslation();
   const { definition } = useEditing();
@@ -195,54 +466,52 @@ export function LanesView({
 }: RunViewProps): React.JSX.Element {
   const { t } = useTranslation();
   const guideKey = useModeGuideKey();
-  const [containerRef, width] = useContainerWidth();
   // A phone gets the vertical stepper; on any wider screen the rail keeps process order left to
-  // right and scrolls inside its own container when the blocks do not fit.
+  // right inside a pannable, zoomable viewport.
   const vertical = useIsMobile();
   const current = useMemo(() => currentBlockId(blocks), [blocks]);
   const shown = selectedBlockId ?? current ?? blocks[0]?.id ?? null;
   const shownBlock = blocks.find((b) => b.id === shown) ?? null;
   const arcs = useMemo(() => buildArcs(blocks), [blocks]);
   const links = useMemo(() => buildLinks(blocks), [blocks]);
-  const n = blocks.length;
-  const nameOf = (id: string) => blocks.find((b) => b.id === id)?.name ?? id;
 
-  // Equal-width lanes; when they cannot fit, the rail scrolls horizontally and the current lane is
-  // brought into view rather than everything shrinking below legibility.
-  const laneWidth = Math.max(LANE_MIN_WIDTH, (width - LANE_GAP * (n - 1)) / n);
-  const railWidth = laneWidth * n + LANE_GAP * (n - 1);
-  const centerOf = (i: number) => i * (laneWidth + LANE_GAP) + laneWidth / 2;
-  const svgHeight = arcsHeight(arcs);
-  const linksSvgHeight = linksHeight(links);
-  const drawnLinks = links.map((link) => ({
-    link,
-    ...linkGeometry(link, centerOf, linksSvgHeight),
-  }));
-  // A link whose label does not fit on the line is labelled by a chip in its source lane instead.
-  const chipsOf = (block: RunBlock) =>
-    block.transitions
-      .filter((tr) => {
-        const target = blocks.find((b) => b.id === tr.to);
-        if (tr.cycle || !target || target.index <= block.index + 1) return false;
-        if (vertical) return true;
-        const drawn = drawnLinks.find(
-          (d) =>
-            d.link.from === block.index && d.link.to === target.index && d.link.label === tr.label,
-        );
-        return drawn ? !drawn.labelFits : false;
-      })
-      .map((transition) => ({ transition, targetName: nameOf(transition.to) }));
-
-  const railRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    const rail = railRef.current;
-    const target = rail?.querySelector<HTMLElement>('[aria-current="step"]');
-    if (!rail || !target) return;
-    rail.scrollLeft = Math.max(0, target.offsetLeft - (rail.clientWidth - target.offsetWidth) / 2);
-  }, [blocks, laneWidth]);
+  const linksBand = useMemo(
+    () => laneRailLayout(blocks.length, arcs, links).rowTop,
+    [blocks, arcs, links],
+  );
+  const drawnLinks = useMemo(
+    () => links.map((link) => ({ link, ...linkGeometry(link, laneCenter, linksBand) })),
+    [links, linksBand],
+  );
+  // A link whose label does not fit on the line is labelled by a chip in its source lane instead;
+  // the stepper has no links, so there every skipping transition is a chip.
+  const chipsOf = useCallback(
+    (block: RunBlock): Skip[] =>
+      block.transitions
+        .filter((tr) => {
+          const target = blocks.find((b) => b.id === tr.to);
+          if (tr.cycle || !target || target.index <= block.index + 1) return false;
+          if (vertical) return true;
+          const drawn = drawnLinks.find(
+            (d) =>
+              d.link.from === block.index &&
+              d.link.to === target.index &&
+              d.link.label === tr.label,
+          );
+          return drawn ? !drawn.labelFits : false;
+        })
+        .map((transition) => ({
+          transition,
+          targetName: blocks.find((b) => b.id === transition.to)?.name ?? transition.to,
+        })),
+    [blocks, vertical, drawnLinks],
+  );
 
   return (
-    <div className="flex h-full flex-col gap-4 overflow-auto p-4" data-testid="lanes-view">
+    <div
+      className="scrollbar-thin flex h-full flex-col gap-4 overflow-auto p-4"
+      data-testid="lanes-view"
+    >
       <header className="space-y-1">
         <h2 className="text-xl font-bold leading-7" data-testid="execution-progress-task-title">
           {progress.taskTitle}
@@ -281,11 +550,7 @@ export function LanesView({
       <GuidanceCallout title={t(`${guideKey}.lanes.title`)} testId="guidance-lanes">
         {t(`${guideKey}.lanes.body`)}
       </GuidanceCallout>
-      <div
-        ref={containerRef}
-        className="space-y-4"
-        data-lanes-orientation={vertical ? "vertical" : "horizontal"}
-      >
+      <div className="space-y-4" data-lanes-orientation={vertical ? "vertical" : "horizontal"}>
         {vertical ? (
           <ol className="space-y-2" aria-label={t("pages.runPage.lanes.rail")}>
             {blocks.map((block) => {
@@ -322,138 +587,16 @@ export function LanesView({
             })}
           </ol>
         ) : (
-          <div ref={railRef} className="overflow-x-auto pb-1 pt-3" data-testid="lanes-rail">
-            <div style={{ width: railWidth }}>
-              {links.length > 0 && (
-                <svg
-                  width={railWidth}
-                  height={linksSvgHeight}
-                  className="block overflow-visible"
-                  aria-label={t("pages.runPage.lanes.skips")}
-                  role="img"
-                  data-testid="lanes-links"
-                >
-                  <defs>
-                    <marker
-                      id="lane-arrow-link"
-                      viewBox="0 0 10 10"
-                      refX="8"
-                      refY="5"
-                      markerWidth="6"
-                      markerHeight="6"
-                      orient="auto-start-reverse"
-                    >
-                      <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--muted-foreground)" />
-                    </marker>
-                  </defs>
-                  {drawnLinks.map(({ link, x1, x2, y, d, labelFits }) => (
-                    <g key={`link-${link.from}-${link.to}-${link.label}`} opacity={0.6}>
-                      <title>{link.label}</title>
-                      <path
-                        d={d}
-                        fill="none"
-                        stroke="var(--muted-foreground)"
-                        strokeWidth={1.5}
-                        strokeLinejoin="round"
-                        markerEnd="url(#lane-arrow-link)"
-                        data-link={`${link.from}-${link.to}`}
-                      />
-                      {labelFits && (
-                        <text
-                          x={(x1 + x2) / 2}
-                          y={y - 3}
-                          textAnchor="middle"
-                          fontSize={11}
-                          fill="var(--muted-foreground)"
-                          data-link-label={`${link.from}-${link.to}`}
-                        >
-                          {link.label}
-                        </text>
-                      )}
-                    </g>
-                  ))}
-                </svg>
-              )}
-              <ol
-                className="flex items-stretch"
-                style={{ gap: LANE_GAP }}
-                aria-label={t("pages.runPage.lanes.rail")}
-              >
-                {blocks.map((block) => (
-                  <li key={block.id} className="flex" style={{ width: laneWidth }}>
-                    <LaneButton
-                      block={block}
-                      selected={shown === block.id}
-                      isCurrent={current === block.id}
-                      onClick={() => onSelectBlock(block.id)}
-                      vertical={false}
-                      skips={chipsOf(block)}
-                    />
-                  </li>
-                ))}
-              </ol>
-              {arcs.length > 0 && (
-                <svg
-                  width={railWidth}
-                  height={svgHeight}
-                  className="block overflow-visible"
-                  aria-label={t("pages.runPage.lanes.returns")}
-                  role="img"
-                >
-                  <defs>
-                    <marker
-                      id="lane-arrow"
-                      viewBox="0 0 10 10"
-                      refX="8"
-                      refY="5"
-                      markerWidth="7"
-                      markerHeight="7"
-                      orient="auto-start-reverse"
-                    >
-                      <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--primary)" />
-                    </marker>
-                  </defs>
-                  {arcs.map((arc) => {
-                    const { x1, x2, y, d } = arcGeometry(arc, centerOf);
-                    return (
-                      <g key={`path-${arc.from}-${arc.to}-${arc.label}`}>
-                        <title>{`${arc.cause} — ${t("pages.runPage.lanes.endsWhen")} ${arc.exit}`}</title>
-                        <path
-                          d={d}
-                          fill="none"
-                          stroke="var(--primary)"
-                          strokeWidth={2}
-                          strokeDasharray="6 5"
-                          strokeLinejoin="round"
-                          markerEnd="url(#lane-arrow)"
-                          data-arc={`${x1}-${x2}-${y}`}
-                        />
-                      </g>
-                    );
-                  })}
-                  {arcs.map((arc) => {
-                    const { x1, x2, y } = arcGeometry(arc, centerOf);
-                    return (
-                      <foreignObject
-                        key={`label-${arc.from}-${arc.to}-${arc.label}`}
-                        x={(x1 + x2) / 2 - 130}
-                        y={y + 3}
-                        width={260}
-                        height={18}
-                      >
-                        <div className="flex justify-center">
-                          <span className="inline-flex max-w-full items-center gap-1 truncate rounded-full border border-primary/40 bg-background px-2 text-[11px] leading-[16px] text-primary">
-                            <RotateCcw className="size-3 shrink-0" aria-hidden="true" />
-                            {arc.label}
-                          </span>
-                        </div>
-                      </foreignObject>
-                    );
-                  })}
-                </svg>
-              )}
-            </div>
-          </div>
+          <LanesRail
+            blocks={blocks}
+            arcs={arcs}
+            links={links}
+            drawnLinks={drawnLinks}
+            shown={shown}
+            current={current}
+            onSelectBlock={onSelectBlock}
+            chipsOf={chipsOf}
+          />
         )}
         {shownBlock && <BlockContent block={shownBlock} />}
       </div>

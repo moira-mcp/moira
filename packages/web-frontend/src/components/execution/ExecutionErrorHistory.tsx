@@ -232,7 +232,7 @@ export function ExecutionErrorHistory({ errors, className }: ExecutionErrorHisto
                         <Code className="h-3 w-3" />
                         {t("components.executionErrors.input", "Input")}:
                       </span>
-                      <pre className="mt-1 p-2 bg-muted rounded text-xs font-mono overflow-x-auto max-h-32">
+                      <pre className="scrollbar-thin mt-1 p-2 bg-muted rounded text-xs font-mono overflow-x-auto max-h-32">
                         {typeof error.input === "string"
                           ? error.input
                           : JSON.stringify(error.input, null, 2)}

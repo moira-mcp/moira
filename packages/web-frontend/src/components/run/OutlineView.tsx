@@ -229,7 +229,7 @@ export function OutlineView(props: RunViewProps): React.JSX.Element {
   const guideKey = useModeGuideKey();
   const { blocks, selectedBlockId, onSelectBlock } = props;
   return (
-    <div className="h-full space-y-4 overflow-auto p-4" data-testid="outline-view">
+    <div className="scrollbar-thin h-full space-y-4 overflow-auto p-4" data-testid="outline-view">
       <GuidanceCallout title={t(`${guideKey}.outline.title`)} testId="guidance-outline">
         {t(`${guideKey}.outline.body`)}
       </GuidanceCallout>

@@ -710,7 +710,7 @@ export const FlowPage: React.FC = () => {
                       <p className="mt-1 text-xs text-muted-foreground">
                         {t("pages.flowPage.edit.exportHint")}
                       </p>
-                      <ul className="mt-2 max-h-[30vh] space-y-1 overflow-auto font-mono text-[11px]">
+                      <ul className="scrollbar-thin mt-2 max-h-[30vh] space-y-1 overflow-auto font-mono text-[11px]">
                         {diff.map((entry) => (
                           <li
                             key={entry.path}
@@ -789,7 +789,7 @@ export const FlowPage: React.FC = () => {
                       {t("pages.flowPage.tabs.variables")}
                     </TabsTrigger>
                   </TabsList>
-                  <TabsContent value="block" className="flex-1 overflow-auto m-0">
+                  <TabsContent value="block" className="scrollbar-thin flex-1 overflow-auto m-0">
                     <BlockDetailPanel
                       block={shownBlock}
                       blocks={blocks}
@@ -798,7 +798,10 @@ export const FlowPage: React.FC = () => {
                       onFocusNode={focusNode}
                     />
                   </TabsContent>
-                  <TabsContent value="variables" className="flex-1 overflow-auto m-0">
+                  <TabsContent
+                    value="variables"
+                    className="scrollbar-thin flex-1 overflow-auto m-0"
+                  >
                     <RegistryPanel registry={edited.variableRegistry} />
                   </TabsContent>
                 </Tabs>

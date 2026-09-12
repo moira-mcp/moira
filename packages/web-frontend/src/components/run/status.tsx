@@ -29,7 +29,7 @@ export const STATUS_STYLE: Record<ExecutionBlockStatus, StatusStyle> = {
   },
   active: {
     icon: Loader2,
-    surface: "border-primary bg-primary/5 text-foreground ring-2 ring-primary/25 shadow-md",
+    surface: "border-primary bg-primary/5 text-foreground ring-2 ring-primary/25",
     chip: "bg-primary text-primary-foreground",
     tint: "text-primary",
     spin: true,

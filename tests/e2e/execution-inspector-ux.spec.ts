@@ -24,10 +24,19 @@ async function openFirstExecution(page: Page, listUrl = `${BASE_URL}/executions`
 }
 
 /** Bring the technical node graph on screen: the Graph tab when the run has a process view. */
+/**
+ * The technical node graph: in the panel's graph tab when the run has a process view (the lanes
+ * rail beside it is a React Flow instance of its own), else in the main section.
+ */
 async function showTechnicalGraph(page: Page) {
   const graphTab = page.getByRole("tab", { name: /Graph|Граф/ });
-  if ((await graphTab.count()) > 0) await graphTab.click();
-  await expect(page.locator(".react-flow")).toBeVisible({ timeout: 15000 });
+  const inPanel = (await graphTab.count()) > 0;
+  if (inPanel) await graphTab.click();
+  const graph = inPanel
+    ? page.getByTestId("run-panel").locator(".react-flow")
+    : page.locator(".react-flow");
+  await expect(graph).toBeVisible({ timeout: 15000 });
+  return graph;
 }
 
 test.describe("Run page toolbar and panel", () => {
@@ -110,9 +119,11 @@ test.describe("Run page toolbar and panel", () => {
   }) => {
     await page.goto(`${BASE_URL}/executions/${runningExecutionId}`);
     await expect(page.getByTestId("run-page")).toBeVisible({ timeout: 15000 });
-    await showTechnicalGraph(page);
+    const graph = await showTechnicalGraph(page);
     const transformOf = () =>
-      page.locator(".react-flow__viewport").evaluate((el) => window.getComputedStyle(el).transform);
+      graph
+        .locator(".react-flow__viewport")
+        .evaluate((el) => window.getComputedStyle(el).transform);
     await expect.poll(transformOf).not.toBe("none");
     const overview = await transformOf();
     // The toolbar's current-node button moves the viewport onto the waiting node.

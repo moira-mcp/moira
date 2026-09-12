@@ -478,8 +478,12 @@ history entry.
 
 - `LanesView` — task header (title, goal, facts), the rail of blocks in process order with the
   current block pinned ("you are here"), pass-count badges, struck-through skipped blocks, return
-  arcs beneath the rail nested by span (`arcs.ts`), and the selected block's run content. The rail
-  scrolls horizontally and centres the current block; on a phone (the `useIsMobile` hook) it becomes
+  arcs beneath the rail nested by span (`arcs.ts`), and the selected block's run content. The
+  horizontal rail is a React Flow instance on the shared `DiagramViewport` (`LanesRail`): lane cards
+  are fixed nodes in one row (`laneLayout.ts`: positions, the link band above, the arc band below,
+  the viewport height), return arcs and forward links are custom edges over the same geometry, and
+  the rail opens at full size on the first lane (definition) or centred on the current lane (run)
+  and pans and zooms instead of scrolling the page; on a phone (the `useIsMobile` hook) it becomes
   a vertical stepper with return chips and forward chips for transitions that skip a block.
   Forward transitions that skip a block are thin muted links above the rail (`buildLinks`,
   `linkGeometry`), labelled on the line when the label fits, else by a forward chip in the source
@@ -489,13 +493,27 @@ history entry.
   below; a transition into a hub block (many sources) is a muted bundled edge (`kind: "hub"`,
   one per source and hub, routed through the inter-rank gaps and a channel per hub into one port
   on the hub's left edge, `hubPort`); the exit chip in the source names the hub and carries the
-  transition label as its tooltip. Opens centred
-  on the current block.
+  transition label as its tooltip. Mounts through `DiagramViewport` and opens at the fitted zoom
+  (never below three quarters) on the first block with the block row in the upper third, or
+  centred on the current block on a run.
 - `OutlineView` — numbered sections with status, description, run content, block writes at the
   cursor, transitions in words with cycle cause and exit, and expandable steps (`StepList`).
 - `RouteView` — the whole route grouped into stretches per block (`route.ts`), return markers,
   per-block visit counts at the cursor, exit labels from transitions, adjustment visits with their
   actor; clicking a visit sets the cursor; visits after the cursor are dimmed.
+
+**Diagram substrate** (`components/diagram/`): `DiagramViewport` wraps `ReactFlowProvider` +
+`ReactFlow` with the one interaction policy every diagram shares (`interaction.ts`,
+`diagramInteractionProps(kind)`: a plain wheel pans freely, `zoomOnScroll` off, pinch zooms, drag
+pans, nodes fixed, page scroll prevented under the pointer, an opening fit clamped to a readable
+zoom per kind — canvas three quarters to full size, lanes full size, graph down to its floor), one
+zoom/fit control cluster, and an `onReady` callback that fires after an explicit fit so a diagram
+can place its opening viewport; `placement.ts` (`useOpeningPlacement`) places once on ready and
+again only when the followed block or lane changes, never on a plain refetch. The canvas, the
+lanes rail and the technical `WorkflowGraph` all mount through it. Block cards carry no shadow
+(border, fill and ring carry state); floating surfaces keep theirs. Scroll containers of the
+process pages use the `scrollbar-thin` utility (`styles/globals.css`), a thin theme-coloured
+scrollbar in both themes.
 
 **Panels:** `BlockDetailPanel` (status, description, run content, transitions, steps with the
 evidence fields each schema demands — declared `globalInputs` merged from the variable registry —

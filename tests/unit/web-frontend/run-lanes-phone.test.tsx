@@ -3,12 +3,11 @@
  * On a phone the lanes view is a vertical stepper, not a diagram: every non-adjacent forward
  * transition is shown as a forward chip beside the return chips, and no connector SVG is drawn.
  */
-import { describe, expect, test, beforeAll } from "@jest/globals";
+import { describe, expect, jest, test, beforeAll } from "@jest/globals";
 import { render, screen } from "@testing-library/react";
 import { I18nextProvider } from "react-i18next";
 import React from "react";
 import i18n from "../../../packages/web-frontend/src/i18n";
-import { LanesView } from "../../../packages/web-frontend/src/components/run/LanesView.js";
 import { runBlocks } from "../../../packages/web-frontend/src/components/run/model.js";
 import type { ExecutionProgress } from "../../../packages/web-frontend/src/types/workflow-types.js";
 import { findCatalogEntryBySlug } from "../../../packages/shared/src/services/workflow-catalog.js";
@@ -50,7 +49,28 @@ function projectionOf(slug: string): ExecutionProgress {
   } as ExecutionProgress;
 }
 
+// Until `useIsMobile` has read the viewport the view renders its horizontal branch once, and
+// that branch mounts React Flow through `DiagramViewport`, which the unit runner cannot load
+// (the project stubs `@xyflow/react` in every component test); the stepper under test never
+// renders either, so both are stubbed here.
+jest.unstable_mockModule("@xyflow/react", () => ({
+  Handle: () => null,
+  Position: { Left: "left", Top: "top", Right: "right", Bottom: "bottom" },
+  EdgeLabelRenderer: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+}));
+jest.unstable_mockModule(
+  "../../../packages/web-frontend/src/components/diagram/DiagramViewport",
+  () => ({ DiagramViewport: () => null }),
+);
+// The rail reads the theme for React Flow's colour mode; the provider is not part of this test.
+jest.unstable_mockModule("@/hooks/useTheme", () => ({
+  useTheme: () => ({ theme: "light", actualTheme: "light", setTheme: () => {} }),
+}));
+
+let LanesView: typeof import("../../../packages/web-frontend/src/components/run/LanesView.js").LanesView;
+
 beforeAll(async () => {
+  ({ LanesView } = await import("../../../packages/web-frontend/src/components/run/LanesView.js"));
   await i18n.changeLanguage("en");
   Object.defineProperty(window, "innerWidth", { configurable: true, value: 400 });
 });
@@ -90,7 +110,7 @@ describe("lanes view on a phone", () => {
         ),
       ).toBe(true);
     }
-    expect(document.querySelector('[data-testid="lanes-links"]')).toBeNull();
+    expect(document.querySelector('[data-testid="lanes-rail"]')).toBeNull();
     expect(document.querySelector("[data-arc]:not([data-arc='chip'])")).toBeNull();
   });
 });

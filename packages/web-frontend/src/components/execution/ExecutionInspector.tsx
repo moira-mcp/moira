@@ -815,7 +815,7 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
             onValueChange={(value) => setChosenTab(value as PanelTab)}
             className="flex flex-col h-full"
           >
-            <TabsList className="w-full justify-start overflow-x-auto rounded-none border-b bg-muted/30 px-2 h-10">
+            <TabsList className="scrollbar-thin w-full justify-start overflow-x-auto rounded-none border-b bg-muted/30 px-2 h-10">
               {progress && (
                 <TabsTrigger value="block" className="gap-1.5 text-xs">
                   <Boxes className="h-3.5 w-3.5" />
@@ -875,7 +875,7 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
             </TabsList>
 
             {progress && (
-              <TabsContent value="block" className="flex-1 overflow-auto m-0">
+              <TabsContent value="block" className="scrollbar-thin flex-1 overflow-auto m-0">
                 <BlockDetailPanel
                   block={shownBlock}
                   blocks={shownBlocks}
@@ -887,7 +887,7 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
             )}
 
             {progress && shownProgress && (
-              <TabsContent value="variables" className="flex-1 overflow-auto m-0">
+              <TabsContent value="variables" className="scrollbar-thin flex-1 overflow-auto m-0">
                 <VariablesPanel
                   progress={shownProgress}
                   cursor={cursor}
@@ -902,7 +902,7 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
             )}
 
             <TabsContent value="context" className="flex-1 flex flex-col overflow-hidden m-0">
-              <div className="flex-1 overflow-auto p-3">
+              <div className="scrollbar-thin flex-1 overflow-auto p-3">
                 <ContextVariableEditor
                   variables={execution?.context?.variables || {}}
                   workflow={workflow?.workflow}
@@ -913,11 +913,11 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
               </div>
             </TabsContent>
 
-            <TabsContent value="errors" className="flex-1 overflow-auto m-0 p-4">
+            <TabsContent value="errors" className="scrollbar-thin flex-1 overflow-auto m-0 p-4">
               <ExecutionErrorHistory errors={execution.errors ?? []} />
             </TabsContent>
 
-            <TabsContent value="steps" className="flex-1 overflow-auto m-0 p-4">
+            <TabsContent value="steps" className="scrollbar-thin flex-1 overflow-auto m-0 p-4">
               <StepProgression
                 workflow={workflow.workflow}
                 currentNodeId={execution.currentNodeId}
@@ -932,7 +932,7 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
               </TabsContent>
             )}
 
-            <TabsContent value="locks" className="flex-1 overflow-auto m-0 p-4">
+            <TabsContent value="locks" className="scrollbar-thin flex-1 overflow-auto m-0 p-4">
               {locksLoading ? (
                 <div className="flex items-center justify-center py-8">
                   <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
@@ -1032,7 +1032,7 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
             </DialogTitle>
           </DialogHeader>
 
-          <div className="flex-1 overflow-auto p-4 bg-background">
+          <div className="scrollbar-thin flex-1 overflow-auto p-4 bg-background">
             <ContextVariableEditor
               variables={execution?.context?.variables || {}}
               workflow={workflow?.workflow}
