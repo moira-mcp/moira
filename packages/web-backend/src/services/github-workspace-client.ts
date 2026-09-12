@@ -167,7 +167,10 @@ export class HttpGitHubWorkspaceClient implements GitHubWorkspaceClient, Workspa
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
     if (!(acceptedStatuses?.includes(response.status) ?? response.ok)) {
-      throw new GitHubWorkspaceClientError("GitHub API request failed", response.status);
+      throw new GitHubWorkspaceClientError(
+        `GitHub API request failed (HTTP ${response.status})`,
+        response.status,
+      );
     }
     const body = response.status === 204 ? undefined : await response.json().catch(() => undefined);
     return { body: body as T, response };
