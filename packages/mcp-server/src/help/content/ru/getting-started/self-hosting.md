@@ -196,8 +196,10 @@ docker compose logs | grep -A3 "ADMIN LOGIN"
 
 Подключение GitHub для рабочих пространств не связано с социальным входом через GitHub. Оно
 остаётся отключённым, пока не заданы все корректные значения GitHub App и хранилища учётных
-данных. Создайте GitHub App, включите истекающие user authorization tokens, укажите точный API-путь
-Moira для callback и URL установки с GitHub slug приложения:
+данных. Создайте GitHub App, включите истекающие user authorization tokens и «Request user
+authorization (OAuth) during installation», выдайте ему права на репозитории Codespaces (write),
+Codespaces lifecycle admin (write), Codespaces metadata (read), Contents (read) и Metadata (read),
+укажите точный API-путь Moira для callback и URL установки с GitHub slug приложения:
 
 ```bash
 WORKSPACE_GITHUB_APP_CLIENT_ID=<github-app-client-id>

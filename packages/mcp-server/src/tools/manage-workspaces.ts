@@ -146,6 +146,12 @@ export interface WorkspaceToolServices {
   > | null;
 }
 
+const PROVIDER_REFUSAL_CODES: ReadonlySet<string> = new Set([
+  "WORKSPACE_AUTHORIZATION_REQUIRED",
+  "WORKSPACE_PROVIDER_UNAVAILABLE",
+  "WORKSPACE_RESOURCE_INVALID",
+]);
+
 const SAFE_ERROR_MESSAGES: Record<string, string> = {
   CONNECTION_REQUIRED: "Connect GitHub in Moira Settings before using cloud workspaces.",
   INSTALLATION_REQUIRED: "Complete the GitHub App installation in Moira Settings.",
@@ -745,6 +751,15 @@ export async function executeWorkspaceTool<Name extends WorkspaceToolName>(
   } catch (error) {
     if (error instanceof WorkspaceConnectionError || error instanceof WorkspaceResourceError) {
       recordWorkspaceRejection(error.code);
+      if (PROVIDER_REFUSAL_CODES.has(error.code)) {
+        // The bounded internal message names only the provider's HTTP status; operators need
+        // it to tell a permission gap from an outage, while the agent sees the safe code.
+        logger.warn("Workspace provider refused the request", {
+          workspace_tool: name,
+          code: error.code,
+          detail: error.message,
+        });
+      }
       return errorResult(
         error.code,
         SETUP_ERROR_CODES.has(error.code) ? status.settingsUrl : undefined,

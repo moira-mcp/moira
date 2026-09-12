@@ -432,6 +432,20 @@ Workspace GitHub configuration is distinct from `GITHUB_CLIENT_ID` and
 | `WORKSPACE_CREDENTIAL_VAULT_KEY`         | Dedicated random 32-byte key encoded as 64 hexadecimal characters |
 | `WORKSPACE_CREDENTIAL_VAULT_KEY_VERSION` | Envelope key identifier; defaults to `v1`                         |
 
+The GitHub App must request these permissions; the user grants them when installing
+the App on their account, and a later permission change must be accepted by the user
+on GitHub before the connection works again:
+
+| GitHub App permission                  | Level | Used for                                               |
+| -------------------------------------- | ----- | ------------------------------------------------------ |
+| Repository: Codespaces                 | write | create, list, inspect and delete the user's Codespaces |
+| Repository: Codespaces lifecycle admin | write | start and stop a Codespace                             |
+| Repository: Codespaces metadata        | read  | list the machine types available for a repository      |
+| Repository: Contents                   | read  | resolve the requested ref                              |
+| Repository: Metadata                   | read  | enumerate the installation's approved repositories     |
+
+Enable "Request user authorization (OAuth) during installation" and expiring user
+authorization tokens; the callback URL is the exact same-origin Moira path below.
 If all connection values are absent, the integration is disabled. A partial,
 weak, cross-origin or malformed configuration produces a safe configuration
 error without aborting unrelated authentication. The callback uses HTTPS for a

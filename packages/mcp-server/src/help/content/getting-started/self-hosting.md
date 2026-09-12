@@ -193,8 +193,10 @@ Sign in with `ADMIN_EMAIL` (default `admin@moira.local`) and the printed passwor
 
 The GitHub workspace connection is separate from GitHub social login. It stays disabled unless
 all GitHub App and credential-vault values are present and valid. Create a GitHub App with expiring
-user authorization tokens enabled, then configure its callback URL to the exact Moira API path and
-its installation URL to the app's GitHub slug:
+user authorization tokens and "Request user authorization (OAuth) during installation" enabled,
+grant it the repository permissions Codespaces (write), Codespaces lifecycle admin (write),
+Codespaces metadata (read), Contents (read) and Metadata (read), then configure its callback URL
+to the exact Moira API path and its installation URL to the app's GitHub slug:
 
 ```bash
 WORKSPACE_GITHUB_APP_CLIENT_ID=<github-app-client-id>
