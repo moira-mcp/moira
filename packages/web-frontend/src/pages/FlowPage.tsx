@@ -139,8 +139,8 @@ export function flowGuideSteps(isOwner: boolean): GuideStep<FlowViewMode, FlowPa
       id: "loop",
       targets: {
         outline: '[data-transition-kind="cycle"]',
-        canvas: '[data-edge-kind="cycle"]',
-        lanes: "[data-arc]",
+        canvas: "[data-return-chip]",
+        lanes: "[data-return-chip]",
       },
       fallbackView: "outline",
     },

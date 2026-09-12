@@ -21,7 +21,12 @@ import {
   exitLabel,
   segmentsOf,
 } from "../../../packages/web-frontend/src/components/run/route.js";
-import { arcGeometry, buildArcs } from "../../../packages/web-frontend/src/components/run/arcs.js";
+import {
+  ARC_BASE,
+  ARC_STEP,
+  arcGeometry,
+  buildArcs,
+} from "../../../packages/web-frontend/src/components/run/arcs.js";
 import type { WorkflowGraph } from "../../../packages/web-frontend/src/types/workflow-types.js";
 
 function progress(): ExecutionProgress {
@@ -282,8 +287,9 @@ describe("lanes arcs", () => {
       [3, 0, "start over", 1],
     ]);
     const geometry = arcGeometry(arcs[1], (i) => i * 100 + 50);
-    expect(geometry).toMatchObject({ x1: 350, x2: 50, y: 50 });
-    expect(geometry.d).toBe("M 350 2 L 350 50 L 50 50 L 50 2");
+    const y = ARC_BASE + ARC_STEP;
+    expect(geometry).toMatchObject({ x1: 350, x2: 50, y });
+    expect(geometry.d).toBe(`M 350 2 L 350 ${y} L 50 ${y} L 50 2`);
   });
 });
 

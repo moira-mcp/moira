@@ -14,14 +14,23 @@ import { diagramInteractionProps } from "../diagram/interaction";
 
 export const LANE_WIDTH = 160;
 export const LANE_GAP = 12;
-/** Tall enough for the block number, a two-line name, a two-line summary and a chip row. */
+/** Tall enough for the block number, a two-line name, a two-line summary and one chip. */
 export const LANE_HEIGHT = 140;
+/** Each chip beyond the first adds one row: chips stack in a column at the lane width. */
+export const LANE_CHIP_ROW = 22;
+
+/** The height of every lane card: one row per chip of the block with the most chips. */
+export function laneCardHeight(maxChips: number): number {
+  return LANE_HEIGHT + Math.max(0, maxChips - 1) * LANE_CHIP_ROW;
+}
 /** The viewport never shrinks below the zoom control cluster plus a little room around it. */
 const RAIL_MIN_HEIGHT = 200;
 
 export interface LaneRailLayout {
   /** Top-left corner of each lane card, in process order. */
   positions: Array<{ x: number; y: number }>;
+  /** Height of every lane card (`laneCardHeight` of the block with the most chips). */
+  cardHeight: number;
   rowTop: number;
   rowBottom: number;
   width: number;
@@ -36,14 +45,16 @@ export function laneRailLayout(
   count: number,
   arcs: readonly LaneArc[],
   links: readonly LaneLink[],
+  cardHeight: number = LANE_HEIGHT,
 ): LaneRailLayout {
   const rowTop = linksHeight(links);
-  const rowBottom = rowTop + LANE_HEIGHT;
+  const rowBottom = rowTop + cardHeight;
   return {
     positions: Array.from({ length: count }, (_, i) => ({
       x: i * (LANE_WIDTH + LANE_GAP),
       y: rowTop,
     })),
+    cardHeight,
     rowTop,
     rowBottom,
     width: count > 0 ? count * LANE_WIDTH + (count - 1) * LANE_GAP : 0,

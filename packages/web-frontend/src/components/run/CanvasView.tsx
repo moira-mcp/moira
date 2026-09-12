@@ -5,9 +5,11 @@
  * transitions are elbows with their label in the gap; transitions that skip ranks travel above the
  * graph; cycles return along dashed lanes below it; and exits into a hub block (one that many
  * blocks lead to, such as "Replan" or "Stopped") are thin muted edges bundled into one port near the
- * top of the hub's left edge; a chip inside the source names the hub (the transition label is its
- * tooltip) rather than a label on the line. Status is carried by colour, icon and a chip, so it is
- * readable without hover. The view opens fitted to the process but never below three quarters
+ * top of the hub's left edge. Cycles, skips and hub bundles carry no label at rest: a chip inside
+ * the source names each target, and hovering the chip (or the edge) lights that edge and shows its
+ * label; selecting a block lights all of its connectors. Adjacent forward transitions keep their
+ * label in the gap they own. Status is carried by colour, icon and a chip, so it is readable
+ * without hover. The view opens fitted to the process but never below three quarters
  * size, so a dense flow opens readable and is panned; on a run it then centres on the block the
  * run is at. Gestures come from the shared `DiagramViewport`.
  */
@@ -27,7 +29,7 @@ import {
   type NodeProps,
   type ReactFlowInstance,
 } from "@xyflow/react";
-import { ArrowUpRight, CornerDownRight, Loader2, RotateCcw } from "lucide-react";
+import { CornerDownRight, Loader2, RotateCcw } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useTheme } from "@/hooks/useTheme";
 import { DiagramViewport } from "../diagram/DiagramViewport";
@@ -41,13 +43,15 @@ import { StatusChip, STATUS_STYLE } from "./status";
 import { BLOCK_WIDTH, layoutBlocks, type BlockLayout, type LaidOutEdge } from "./layout";
 import { GuidanceCallout } from "./Guidance";
 import { useModeGuideKey } from "../flow/editing";
-import { currentBlockId, type RunBlock, type RunTransition, type RunViewProps } from "./model";
+import { currentBlockId, type RunBlock, type RunViewProps } from "./model";
+import { canvasChipsOf, chipTitle, transitionKey, type TransitionChip } from "./chips";
+import { TransitionChipView, TransitionFocusProvider, isLit, useTransitionFocus } from "./focus";
 
 type BlockNodeData = {
   block: RunBlock;
   selected: boolean;
   isHub: boolean;
-  exits: Array<{ transition: RunTransition; targetName: string }>;
+  chips: TransitionChip[];
   onSelect: (id: string | null) => void;
 };
 type BlockNode = Node<BlockNodeData, "block">;
@@ -55,8 +59,9 @@ type RoutedEdge = Edge<{ laid: LaidOutEdge }, "routed">;
 
 function BlockNodeView({ data }: NodeProps<BlockNode>): React.JSX.Element {
   const { t } = useTranslation();
-  const { block, selected, isHub, exits, onSelect } = data;
+  const { block, selected, isHub, chips, onSelect } = data;
   const style = STATUS_STYLE[block.status];
+  const endsWhen = t("pages.runPage.lanes.endsWhen");
   return (
     <>
       <Handle type="target" position={Position.Left} className="!opacity-0" />
@@ -96,18 +101,10 @@ function BlockNodeView({ data }: NodeProps<BlockNode>): React.JSX.Element {
           <span className="text-[11px] text-muted-foreground">
             {t("pages.runPage.stepCount", { count: block.nodeIds.length })}
           </span>
-          {exits.length > 0 && (
-            <span className="flex flex-wrap justify-end gap-1">
-              {exits.map(({ transition, targetName }) => (
-                <span
-                  key={`${transition.to}-${transition.label}`}
-                  className="inline-flex items-center gap-0.5 rounded-md border border-dashed border-border bg-background px-1.5 py-0.5 text-[10px] font-medium leading-4 text-muted-foreground"
-                  title={transition.label}
-                  data-exit-chip={transition.to}
-                >
-                  <ArrowUpRight className="size-3" aria-hidden="true" />
-                  {targetName}
-                </span>
+          {chips.length > 0 && (
+            <span className="flex flex-wrap justify-end gap-1" data-testid="block-chips">
+              {chips.map((chip) => (
+                <TransitionChipView key={chip.key} chip={chip} title={chipTitle(chip, endsWhen)} />
               ))}
             </span>
           )}
@@ -119,63 +116,81 @@ function BlockNodeView({ data }: NodeProps<BlockNode>): React.JSX.Element {
 
 function RoutedEdgeView({ id, data }: EdgeProps<RoutedEdge>): React.JSX.Element | null {
   const { t } = useTranslation();
+  const focus = useTransitionFocus();
   if (!data) return null;
   const { laid } = data;
+  const key = transitionKey(laid.from, laid.transition);
+  const lit = isLit(focus, key, laid.from);
   const cycle = laid.kind === "cycle";
   const skip = laid.kind === "skip";
-  if (laid.kind === "hub") {
-    // A bundle into a hub: muted, thinner, no label on the line; the source's exit chips name it.
-    return (
-      <BaseEdge
-        id={id}
-        path={laid.path}
-        markerEnd="url(#run-arrow-hub)"
-        style={{ stroke: "var(--muted-foreground)", strokeWidth: 1.5, opacity: 0.45 }}
-        interactionWidth={0}
-        data-edge-kind="hub"
-      />
-    );
-  }
+  const hub = laid.kind === "hub";
+  const forward = laid.kind === "forward";
+  const hover = {
+    onMouseEnter: () => focus.setHovered([key]),
+    onMouseLeave: () => focus.setHovered(null),
+  };
   const anchor =
     laid.labelAnchor === "above"
       ? `translate(-50%, -100%) translate(${laid.labelX}px, ${laid.labelY - 4}px)`
       : laid.labelAnchor === "below"
         ? `translate(-50%, 0) translate(${laid.labelX}px, ${laid.labelY}px)`
         : `translate(-50%, -50%) translate(${laid.labelX}px, ${laid.labelY}px)`;
+  const title = cycle
+    ? `${laid.transition.label} — ${laid.transition.cycle?.cause} — ${t("pages.runPage.lanes.endsWhen")} ${laid.transition.cycle?.exit}`
+    : laid.transition.label;
+  // Adjacent forward transitions own the gap between their blocks and keep their label there;
+  // every other kind is muted at rest and labelled on demand.
+  const showLabel = forward || lit;
   return (
     <>
-      <BaseEdge
-        id={id}
-        path={laid.path}
-        markerEnd={cycle ? "url(#run-arrow-cycle)" : "url(#run-arrow)"}
-        style={{
-          stroke: cycle ? "var(--primary)" : "var(--border)",
-          strokeWidth: cycle ? 2 : 2.5,
-          strokeDasharray: cycle ? "6 5" : skip ? "2 4" : undefined,
-        }}
-      />
-      <EdgeLabelRenderer>
-        <span
-          className={cn(
-            "nodrag nopan absolute inline-flex items-center gap-1 whitespace-nowrap rounded-full border px-2 py-0.5 text-[11px] font-medium leading-4",
-            laid.kind === "forward" && "max-w-[136px] truncate",
+      <g {...hover} style={{ cursor: "default" }}>
+        <title>{title}</title>
+        <BaseEdge
+          id={id}
+          path={laid.path}
+          markerEnd={
             cycle
-              ? "border-primary/40 bg-background text-primary"
-              : "border-border bg-background text-muted-foreground",
-          )}
-          style={{ transform: anchor }}
-          data-edge-kind={laid.kind}
-          title={
-            cycle
-              ? `${laid.transition.cycle?.cause} — ${t("pages.runPage.lanes.endsWhen")} ${laid.transition.cycle?.exit}`
-              : laid.transition.label
+              ? lit
+                ? "url(#run-arrow-cycle)"
+                : "url(#run-arrow-cycle-muted)"
+              : hub
+                ? "url(#run-arrow-hub)"
+                : "url(#run-arrow)"
           }
-        >
-          {cycle && <RotateCcw className="size-3 shrink-0" aria-hidden="true" />}
-          {skip && <CornerDownRight className="size-3 shrink-0" aria-hidden="true" />}
-          {laid.transition.label}
-        </span>
-      </EdgeLabelRenderer>
+          interactionWidth={14}
+          style={{
+            stroke: cycle ? "var(--primary)" : hub ? "var(--muted-foreground)" : "var(--border)",
+            strokeWidth: forward ? 2.5 : lit ? 2 : hub ? 1.25 : 1.5,
+            strokeOpacity: forward ? 1 : lit ? 1 : hub ? 0.45 : 0.5,
+            strokeDasharray: cycle ? "6 5" : skip ? "2 4" : undefined,
+          }}
+          data-edge-kind={laid.kind}
+          data-transition={key}
+          data-focused={lit ? "true" : undefined}
+        />
+      </g>
+      {showLabel && (
+        <EdgeLabelRenderer>
+          <span
+            className={cn(
+              "nodrag nopan absolute inline-flex items-center gap-1 whitespace-nowrap rounded-full border px-2 py-0.5 text-[11px] font-medium leading-4",
+              forward && "max-w-[136px] truncate",
+              lit && "z-10 shadow-sm",
+              cycle
+                ? "border-primary/40 bg-background text-primary"
+                : "border-border bg-background text-muted-foreground",
+            )}
+            style={{ transform: anchor }}
+            data-edge-label={laid.kind}
+            data-transition={key}
+            title={title}
+          >
+            {cycle && <RotateCcw className="size-3 shrink-0" aria-hidden="true" />}
+            {skip && <CornerDownRight className="size-3 shrink-0" aria-hidden="true" />}
+            {laid.transition.label}
+          </span>
+        </EdgeLabelRenderer>
+      )}
     </>
   );
 }
@@ -206,7 +221,6 @@ function CanvasInner({
   const { t } = useTranslation();
   const { actualTheme } = useTheme();
   const layout = useBlockLayout(blocks, progress.process.hubs);
-  const nameOf = useMemo(() => new Map(blocks.map((b) => [b.id, b.name])), [blocks]);
 
   // The viewport opens fitted to the process, clamped to a readable zoom (a definition has no
   // "current" block). On a
@@ -259,15 +273,12 @@ function CanvasInner({
             block,
             selected: selectedBlockId === block.id,
             isHub: layout!.hubIds.includes(block.id),
-            exits: laid.exits.map((transition) => ({
-              transition,
-              targetName: nameOf.get(transition.to) ?? transition.to,
-            })),
+            chips: canvasChipsOf(block, layout!.hubIds, blocks),
             onSelect: onSelectBlock,
           },
         };
       }),
-    [layout, blocks, selectedBlockId, onSelectBlock, nameOf],
+    [layout, blocks, selectedBlockId, onSelectBlock],
   );
 
   const edges = useMemo<RoutedEdge[]>(
@@ -352,6 +363,17 @@ function CanvasInner({
             >
               <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--primary)" />
             </marker>
+            <marker
+              id="run-arrow-cycle-muted"
+              viewBox="0 0 10 10"
+              refX="9"
+              refY="5"
+              markerWidth="7"
+              markerHeight="7"
+              orient="auto-start-reverse"
+            >
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--primary)" fillOpacity={0.5} />
+            </marker>
           </defs>
         </svg>
         <Background gap={24} size={1} />
@@ -376,7 +398,9 @@ export function CanvasView(props: RunViewProps): React.JSX.Element {
         </GuidanceCallout>
       </div>
       <div className="min-h-0 flex-1">
-        <CanvasInner {...props} />
+        <TransitionFocusProvider pinnedBlock={props.selectedBlockId}>
+          <CanvasInner {...props} />
+        </TransitionFocusProvider>
       </div>
     </div>
   );

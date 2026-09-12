@@ -3,12 +3,13 @@
  *
  * The task header (title, goal, facts) sits above one rail of blocks in process order. The
  * current block is pinned as "you are here", repeats carry their count, skipped blocks are struck
- * through and dashed so they cannot be confused with blocks not yet reached, returns are drawn
- * as labelled arcs beneath the rail from lane to lane, and forward transitions that skip a lane
- * are thin muted links above it (a link's label sits on the line when it fits, else as a chip in
- * the source lane). Beneath the rail the selected block's run content (summary, details, outcome,
- * next) is written out. On a phone the rail becomes a vertical stepper and returns and skips
- * become chips, which is what a phone can show.
+ * through and dashed so they cannot be confused with blocks not yet reached, returns are thin
+ * muted arcs beneath the rail from lane to lane, and forward transitions that skip a lane are
+ * thin muted links above it. Neither carries a label at rest: each source lane names its returns
+ * and skips in chips, and hovering a chip (or a connector) lights that connector and shows its
+ * label; a lane selected by the reader lights all of its connectors. Beneath the rail the shown block's run
+ * content (summary, details, outcome, next) is written out. On a phone the rail becomes a
+ * vertical stepper with the same chips, which is what a phone can show.
  *
  * The horizontal rail is a React Flow instance on the shared `DiagramViewport`: lane cards are
  * fixed nodes in one row placed by `laneLayout`, returns and links are custom edges drawing the
@@ -28,7 +29,7 @@ import {
   type NodeProps,
   type ReactFlowInstance,
 } from "@xyflow/react";
-import { ArrowUpRight, MapPin, RotateCcw } from "lucide-react";
+import { MapPin, RotateCcw } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useTheme } from "@/hooks/useTheme";
@@ -42,20 +43,21 @@ import {
   buildArcs,
   buildLinks,
   linkGeometry,
+  pillRows,
   type LaneArc,
   type LaneLink,
 } from "./arcs";
 import {
-  LANE_HEIGHT,
   LANE_WIDTH,
+  laneCardHeight,
   laneCenter,
   laneRailLayout,
   laneViewportHeight,
   LANE_GAP,
 } from "./laneLayout";
-import { currentBlockId, type RunBlock, type RunTransition, type RunViewProps } from "./model";
-
-type Skip = { transition: RunTransition; targetName: string };
+import { currentBlockId, type RunBlock, type RunViewProps } from "./model";
+import { chipTitle, laneChipsOf, transitionKey, type TransitionChip } from "./chips";
+import { TransitionChipView, TransitionFocusProvider, isLit, useTransitionFocus } from "./focus";
 
 function LaneButton({
   block,
@@ -63,19 +65,20 @@ function LaneButton({
   isCurrent,
   onClick,
   vertical,
-  skips = [],
+  chips = [],
 }: {
   block: RunBlock;
   selected: boolean;
   isCurrent: boolean;
   onClick: () => void;
   vertical: boolean;
-  /** Forward transitions whose label the rail could not fit on the link: shown as chips here. */
-  skips?: Skip[];
+  /** The block's returns and skips: each names its target and lights its connector on hover. */
+  chips?: TransitionChip[];
 }): React.JSX.Element {
   const { t } = useTranslation();
   const { definition } = useEditing();
   const style = STATUS_STYLE[block.status];
+  const endsWhen = t("pages.runPage.lanes.endsWhen");
   return (
     <button
       type="button"
@@ -127,14 +130,10 @@ function LaneButton({
           {block.content.summary}
         </span>
       )}
-      {skips.length > 0 && (
-        <span className="flex flex-wrap gap-1">
-          {skips.map(({ transition, targetName }) => (
-            <ForwardChip
-              key={`${transition.to}-${transition.label}`}
-              label={transition.label}
-              targetName={targetName}
-            />
+      {chips.length > 0 && (
+        <span className="flex flex-col items-start gap-1" data-testid="lane-chips">
+          {chips.map((chip) => (
+            <TransitionChipView key={chip.key} chip={chip} title={chipTitle(chip, endsWhen)} />
           ))}
         </span>
       )}
@@ -142,59 +141,46 @@ function LaneButton({
   );
 }
 
-/** A forward transition as a chip: the return chips' shape with a forward icon and muted tone. */
-function ForwardChip({
-  label,
-  targetName,
-}: {
-  label: string;
-  targetName: string;
-}): React.JSX.Element {
-  return (
-    <span
-      className="inline-flex items-center gap-1 rounded-full border border-border bg-background px-2 py-0.5 text-[11px] text-muted-foreground"
-      data-arc="chip"
-      data-link="chip"
-    >
-      <ArrowUpRight className="size-3" aria-hidden="true" />
-      {label}
-      <span>→ {targetName}</span>
-    </span>
-  );
-}
-
 type LaneNodeData = {
   block: RunBlock;
   selected: boolean;
   isCurrent: boolean;
-  skips: Skip[];
+  chips: TransitionChip[];
+  cardHeight: number;
   onSelect: (id: string) => void;
 };
 type LaneNode = Node<LaneNodeData, "lane">;
 /** Geometry precomputed in flow coordinates; `y` and `d` are relative to the edge's own band. */
+/** Every connector of the same source lane, so lit pills can take one row each. */
+type Sibling = { key: string; y: number };
 type ArcEdgeData = {
   arc: LaneArc;
+  key: string;
+  from: string;
   x1: number;
   x2: number;
   y: number;
   d: string;
   rowBottom: number;
+  siblings: Sibling[];
 };
 type LinkEdgeData = {
   link: LaneLink;
+  key: string;
+  from: string;
   x1: number;
   x2: number;
   y: number;
   d: string;
-  labelFits: boolean;
+  siblings: Sibling[];
 };
 type LaneEdge = Edge<ArcEdgeData, "arc"> | Edge<LinkEdgeData, "link">;
 
 /** A lane card as a node: hidden handles so edges can attach, the button fills the fixed box. */
 function LaneNodeView({ data }: NodeProps<LaneNode>): React.JSX.Element {
-  const { block, selected, isCurrent, skips, onSelect } = data;
+  const { block, selected, isCurrent, chips, cardHeight, onSelect } = data;
   return (
-    <div className="flex" style={{ width: LANE_WIDTH, height: LANE_HEIGHT }}>
+    <div className="flex" style={{ width: LANE_WIDTH, height: cardHeight }}>
       <Handle type="target" position={Position.Top} className="!opacity-0" />
       <Handle type="source" position={Position.Bottom} className="!opacity-0" />
       <LaneButton
@@ -203,76 +189,119 @@ function LaneNodeView({ data }: NodeProps<LaneNode>): React.JSX.Element {
         isCurrent={isCurrent}
         onClick={() => onSelect(block.id)}
         vertical={false}
-        skips={skips}
+        chips={chips}
       />
     </div>
   );
 }
 
-/** A return: a dashed primary path beneath the row and its label pill under the line. */
+/**
+ * A return: a thin dashed arc beneath the row, muted at rest; lit (full primary, on top) with its
+ * label pill under the line while its chip or the arc itself is hovered or its lane is selected.
+ */
 function ArcEdgeView({ data }: EdgeProps<Edge<ArcEdgeData, "arc">>): React.JSX.Element | null {
   const { t } = useTranslation();
+  const focus = useTransitionFocus();
   if (!data) return null;
-  const { arc, x1, x2, y, d, rowBottom } = data;
+  const { arc, key, from, x1, x2, y, d, rowBottom, siblings } = data;
+  const lit = isLit(focus, key, from);
+  // Pills of the connectors lit together take one row each beneath the deepest of them.
+  const pillY = lit
+    ? pillRows(
+        siblings.filter((s) => isLit(focus, s.key, from)),
+        1,
+      ).get(key)
+    : undefined;
   return (
     <>
-      <g transform={`translate(0 ${rowBottom})`}>
-        <title>{`${arc.cause} — ${t("pages.runPage.lanes.endsWhen")} ${arc.exit}`}</title>
+      <g
+        transform={`translate(0 ${rowBottom})`}
+        onMouseEnter={() => focus.setHovered([key])}
+        onMouseLeave={() => focus.setHovered(null)}
+        style={{ cursor: "default" }}
+      >
+        <title>{`${arc.label} — ${arc.cause} — ${t("pages.runPage.lanes.endsWhen")} ${arc.exit}`}</title>
+        <path d={d} fill="none" stroke="transparent" strokeWidth={14} />
         <path
           d={d}
           fill="none"
           stroke="var(--primary)"
-          strokeWidth={2}
+          strokeWidth={lit ? 2 : 1.25}
+          strokeOpacity={lit ? 1 : 0.35}
           strokeDasharray="6 5"
           strokeLinejoin="round"
-          markerEnd="url(#lane-arrow)"
+          markerEnd={lit ? "url(#lane-arrow)" : "url(#lane-arrow-muted)"}
           data-arc={`${x1}-${x2}-${y}`}
+          data-transition={key}
+          data-focused={lit ? "true" : undefined}
         />
       </g>
-      <EdgeLabelRenderer>
-        <span
-          className="nodrag nopan absolute inline-flex max-w-[260px] items-center gap-1 truncate rounded-full border border-primary/40 bg-background px-2 text-[11px] leading-[16px] text-primary"
-          style={{
-            transform: `translate(-50%, 0) translate(${(x1 + x2) / 2}px, ${rowBottom + y + 3}px)`,
-          }}
-        >
-          <RotateCcw className="size-3 shrink-0" aria-hidden="true" />
-          {arc.label}
-        </span>
-      </EdgeLabelRenderer>
+      {lit && (
+        <EdgeLabelRenderer>
+          <span
+            className="nodrag nopan absolute z-10 inline-flex max-w-[280px] items-center gap-1 truncate rounded-full border border-primary/40 bg-background px-2 text-[11px] leading-[16px] text-primary shadow-sm"
+            style={{
+              transform: `translate(-50%, 0) translate(${(x1 + x2) / 2}px, ${rowBottom + (pillY ?? y + 3)}px)`,
+            }}
+            data-arc-label={key}
+          >
+            <RotateCcw className="size-3 shrink-0" aria-hidden="true" />
+            {arc.label}
+          </span>
+        </EdgeLabelRenderer>
+      )}
     </>
   );
 }
 
-/** A forward link above the row, its label on the line when it fits (else the source's chip). */
+/** A forward link above the row: thin and muted at rest, lit with its label while hovered. */
 function LinkEdgeView({ data }: EdgeProps<Edge<LinkEdgeData, "link">>): React.JSX.Element | null {
+  const focus = useTransitionFocus();
   if (!data) return null;
-  const { link, x1, x2, y, d, labelFits } = data;
+  const { link, key, from, x1, x2, y, d, siblings } = data;
+  const lit = isLit(focus, key, from);
+  const pillY = lit
+    ? pillRows(
+        siblings.filter((s) => isLit(focus, s.key, from)),
+        -1,
+      ).get(key)
+    : undefined;
   return (
-    <g opacity={0.6}>
-      <title>{link.label}</title>
-      <path
-        d={d}
-        fill="none"
-        stroke="var(--muted-foreground)"
-        strokeWidth={1.5}
-        strokeLinejoin="round"
-        markerEnd="url(#lane-arrow-link)"
-        data-link={`${link.from}-${link.to}`}
-      />
-      {labelFits && (
-        <text
-          x={(x1 + x2) / 2}
-          y={y - 3}
-          textAnchor="middle"
-          fontSize={11}
-          fill="var(--muted-foreground)"
-          data-link-label={`${link.from}-${link.to}`}
-        >
-          {link.label}
-        </text>
+    <>
+      <g
+        opacity={lit ? 1 : 0.5}
+        onMouseEnter={() => focus.setHovered([key])}
+        onMouseLeave={() => focus.setHovered(null)}
+        style={{ cursor: "default" }}
+      >
+        <title>{link.label}</title>
+        <path d={d} fill="none" stroke="transparent" strokeWidth={14} />
+        <path
+          d={d}
+          fill="none"
+          stroke={lit ? "var(--foreground)" : "var(--muted-foreground)"}
+          strokeWidth={lit ? 2 : 1.25}
+          strokeLinejoin="round"
+          markerEnd="url(#lane-arrow-link)"
+          data-link={`${link.from}-${link.to}`}
+          data-transition={key}
+          data-focused={lit ? "true" : undefined}
+        />
+      </g>
+      {lit && (
+        <EdgeLabelRenderer>
+          <span
+            className="nodrag nopan absolute z-10 inline-flex max-w-[280px] items-center truncate rounded-full border border-border bg-background px-2 text-[11px] leading-[16px] text-foreground shadow-sm"
+            style={{
+              transform: `translate(-50%, -100%) translate(${(x1 + x2) / 2}px, ${pillY ?? y - 3}px)`,
+            }}
+            data-link-label={key}
+          >
+            {link.label}
+          </span>
+        </EdgeLabelRenderer>
       )}
-    </g>
+    </>
   );
 }
 
@@ -301,11 +330,22 @@ function LanesRail({
   shown: string | null;
   current: string | null;
   onSelectBlock: (id: string) => void;
-  chipsOf: (block: RunBlock) => Skip[];
+  chipsOf: (block: RunBlock) => TransitionChip[];
 }): React.JSX.Element {
   const { t } = useTranslation();
   const { actualTheme } = useTheme();
-  const layout = useMemo(() => laneRailLayout(blocks.length, arcs, links), [blocks, arcs, links]);
+  const chipsByBlock = useMemo(
+    () => new Map(blocks.map((b) => [b.id, chipsOf(b)])),
+    [blocks, chipsOf],
+  );
+  const cardHeight = useMemo(
+    () => laneCardHeight(Math.max(0, ...[...chipsByBlock.values()].map((c) => c.length))),
+    [chipsByBlock],
+  );
+  const layout = useMemo(
+    () => laneRailLayout(blocks.length, arcs, links, cardHeight),
+    [blocks, arcs, links, cardHeight],
+  );
 
   // Centre on the current lane at full size once it is known and again only when it moves: a
   // refetch that changes nothing must not undo the reader's own panning.
@@ -318,9 +358,9 @@ function LanesRail({
         void rf.setViewport({ x: LANE_GAP, y: 0, zoom: 1 });
         return;
       }
-      void rf.setCenter(laneCenter(index), rowTop + LANE_HEIGHT / 2, { zoom: 1, duration: 0 });
+      void rf.setCenter(laneCenter(index), rowTop + cardHeight / 2, { zoom: 1, duration: 0 });
     },
-    [rowTop],
+    [rowTop, cardHeight],
   );
   const { onInit, onReady } = useOpeningPlacement(placeViewport, currentIndex);
 
@@ -331,22 +371,40 @@ function LanesRail({
         type: "lane",
         position: layout.positions[i],
         width: LANE_WIDTH,
-        height: LANE_HEIGHT,
+        height: cardHeight,
         draggable: false,
         selectable: false,
         data: {
           block,
           selected: shown === block.id,
           isCurrent: current === block.id,
-          skips: chipsOf(block),
+          chips: chipsByBlock.get(block.id) ?? [],
+          cardHeight,
           onSelect: onSelectBlock,
         },
       })),
-    [blocks, layout, shown, current, chipsOf, onSelectBlock],
+    [blocks, layout, shown, current, chipsByBlock, cardHeight, onSelectBlock],
   );
 
   const edges = useMemo<LaneEdge[]>(() => {
     const idOf = (index: number) => blocks[index].id;
+    const arcSiblings = new Map<string, Sibling[]>();
+    for (const arc of arcs) {
+      const from = idOf(arc.from);
+      const list = arcSiblings.get(from) ?? [];
+      list.push({
+        key: transitionKey(from, { to: idOf(arc.to), label: arc.label }),
+        y: arcGeometry(arc, laneCenter).y,
+      });
+      arcSiblings.set(from, list);
+    }
+    const linkSiblings = new Map<string, Sibling[]>();
+    for (const { link, y } of drawnLinks) {
+      const from = idOf(link.from);
+      const list = linkSiblings.get(from) ?? [];
+      list.push({ key: transitionKey(from, { to: idOf(link.to), label: link.label }), y });
+      linkSiblings.set(from, list);
+    }
     const arcEdges: LaneEdge[] = arcs.map((arc) => ({
       id: `arc-${arc.from}-${arc.to}-${arc.label}`,
       source: idOf(arc.from),
@@ -354,7 +412,14 @@ function LanesRail({
       type: "arc",
       selectable: false,
       focusable: false,
-      data: { arc, ...arcGeometry(arc, laneCenter), rowBottom: layout.rowBottom },
+      data: {
+        arc,
+        key: transitionKey(idOf(arc.from), { to: idOf(arc.to), label: arc.label }),
+        from: idOf(arc.from),
+        ...arcGeometry(arc, laneCenter),
+        rowBottom: layout.rowBottom,
+        siblings: arcSiblings.get(idOf(arc.from)) ?? [],
+      },
     }));
     const linkEdges: LaneEdge[] = drawnLinks.map(({ link, ...geometry }) => ({
       id: `link-${link.from}-${link.to}-${link.label}`,
@@ -363,7 +428,13 @@ function LanesRail({
       type: "link",
       selectable: false,
       focusable: false,
-      data: { link, ...geometry },
+      data: {
+        link,
+        key: transitionKey(idOf(link.from), { to: idOf(link.to), label: link.label }),
+        from: idOf(link.from),
+        ...geometry,
+        siblings: linkSiblings.get(idOf(link.from)) ?? [],
+      },
     }));
     return [...arcEdges, ...linkEdges];
   }, [blocks, arcs, drawnLinks, layout]);
@@ -398,6 +469,17 @@ function LanesRail({
               orient="auto-start-reverse"
             >
               <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--primary)" />
+            </marker>
+            <marker
+              id="lane-arrow-muted"
+              viewBox="0 0 10 10"
+              refX="8"
+              refY="5"
+              markerWidth="6"
+              markerHeight="6"
+              orient="auto-start-reverse"
+            >
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--primary)" fillOpacity={0.35} />
             </marker>
             <marker
               id="lane-arrow-link"
@@ -483,30 +565,8 @@ export function LanesView({
     () => links.map((link) => ({ link, ...linkGeometry(link, laneCenter, linksBand) })),
     [links, linksBand],
   );
-  // A link whose label does not fit on the line is labelled by a chip in its source lane instead;
-  // the stepper has no links, so there every skipping transition is a chip.
-  const chipsOf = useCallback(
-    (block: RunBlock): Skip[] =>
-      block.transitions
-        .filter((tr) => {
-          const target = blocks.find((b) => b.id === tr.to);
-          if (tr.cycle || !target || target.index <= block.index + 1) return false;
-          if (vertical) return true;
-          const drawn = drawnLinks.find(
-            (d) =>
-              d.link.from === block.index &&
-              d.link.to === target.index &&
-              d.link.label === tr.label,
-          );
-          return drawn ? !drawn.labelFits : false;
-        })
-        .map((transition) => ({
-          transition,
-          targetName: blocks.find((b) => b.id === transition.to)?.name ?? transition.to,
-        })),
-    [blocks, vertical, drawnLinks],
-  );
-
+  // Every lane names its returns and its skips in chips; the connectors carry no label at rest.
+  const chipsOf = useCallback((block: RunBlock) => laneChipsOf(block, blocks), [blocks]);
   return (
     <div
       className="scrollbar-thin flex h-full flex-col gap-4 overflow-auto p-4"
@@ -550,56 +610,38 @@ export function LanesView({
       <GuidanceCallout title={t(`${guideKey}.lanes.title`)} testId="guidance-lanes">
         {t(`${guideKey}.lanes.body`)}
       </GuidanceCallout>
-      <div className="space-y-4" data-lanes-orientation={vertical ? "vertical" : "horizontal"}>
-        {vertical ? (
-          <ol className="space-y-2" aria-label={t("pages.runPage.lanes.rail")}>
-            {blocks.map((block) => {
-              const returns = block.transitions.filter((tr) => tr.cycle);
-              return (
-                <li key={block.id} className="space-y-1">
+      <TransitionFocusProvider pinnedBlock={selectedBlockId}>
+        <div className="space-y-4" data-lanes-orientation={vertical ? "vertical" : "horizontal"}>
+          {vertical ? (
+            <ol className="space-y-2" aria-label={t("pages.runPage.lanes.rail")}>
+              {blocks.map((block) => (
+                <li key={block.id}>
                   <LaneButton
                     block={block}
                     selected={shown === block.id}
                     isCurrent={current === block.id}
                     onClick={() => onSelectBlock(block.id)}
                     vertical
-                    skips={chipsOf(block)}
+                    chips={chipsOf(block)}
                   />
-                  {returns.length > 0 && (
-                    <div className="flex flex-wrap gap-1 pl-3">
-                      {returns.map((tr) => (
-                        <span
-                          key={`${tr.to}-${tr.label}`}
-                          className="inline-flex items-center gap-1 rounded-full border border-primary/40 bg-background px-2 py-0.5 text-[11px] text-primary"
-                          data-arc="chip"
-                        >
-                          <RotateCcw className="size-3" aria-hidden="true" />
-                          {tr.label}
-                          <span className="text-muted-foreground">
-                            → {blocks.find((b) => b.id === tr.to)?.name}
-                          </span>
-                        </span>
-                      ))}
-                    </div>
-                  )}
                 </li>
-              );
-            })}
-          </ol>
-        ) : (
-          <LanesRail
-            blocks={blocks}
-            arcs={arcs}
-            links={links}
-            drawnLinks={drawnLinks}
-            shown={shown}
-            current={current}
-            onSelectBlock={onSelectBlock}
-            chipsOf={chipsOf}
-          />
-        )}
-        {shownBlock && <BlockContent block={shownBlock} />}
-      </div>
+              ))}
+            </ol>
+          ) : (
+            <LanesRail
+              blocks={blocks}
+              arcs={arcs}
+              links={links}
+              drawnLinks={drawnLinks}
+              shown={shown}
+              current={current}
+              onSelectBlock={onSelectBlock}
+              chipsOf={chipsOf}
+            />
+          )}
+          {shownBlock && <BlockContent block={shownBlock} />}
+        </div>
+      </TransitionFocusProvider>
     </div>
   );
 }

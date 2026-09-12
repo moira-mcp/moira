@@ -22,6 +22,7 @@
  */
 
 import type { RunBlock, RunTransition } from "./model";
+import { canvasChipsOf, hubExitsOf } from "./chips";
 
 export const BLOCK_WIDTH = 256;
 const BLOCK_BASE_HEIGHT = 74;
@@ -49,8 +50,6 @@ export interface LaidOutBlock {
   width: number;
   height: number;
   rank: number;
-  /** Transitions into hubs: drawn as bundled hub edges and labelled by exit chips inside the block. */
-  exits: RunTransition[];
 }
 
 export interface LaidOutEdge {
@@ -80,18 +79,24 @@ function lineCount(text: string, charsPerLine: number, max: number): number {
 }
 
 /** Height is a pure function of the block's text so layout stays deterministic. */
+/** Chips (hub exits, skips, returns) wrap inside the block; two fit one row at the block width. */
+const CHIPS_PER_ROW = 2;
+const CHIP_ROW_HEIGHT = 24;
+/** Parallel forward transitions between one pair of blocks spread by this much per transition. */
+const PARALLEL_STEP = 26;
+
 export function estimateBlockHeight(
   name: string,
   description: string,
   hasNote: boolean,
-  exitCount: number,
+  chipCount: number,
 ): number {
   return (
     BLOCK_BASE_HEIGHT +
     lineCount(name, NAME_CHARS_PER_LINE, 3) * NAME_LINE_HEIGHT +
     lineCount(description, CHARS_PER_LINE, MAX_DESCRIPTION_LINES) * LINE_HEIGHT +
     (hasNote ? LINE_HEIGHT : 0) +
-    (exitCount > 0 ? 26 : 0)
+    Math.ceil(chipCount / CHIPS_PER_ROW) * CHIP_ROW_HEIGHT
   );
 }
 
@@ -152,14 +157,18 @@ export async function layoutBlocks(
   hubIds: readonly string[],
 ): Promise<BlockLayout> {
   const hubs = new Set(hubIds);
-  const exitsOf = new Map<string, RunTransition[]>();
+  const indexOf = new Map(blocks.map((b) => [b.id, b.index]));
   const sizes = new Map<string, { width: number; height: number }>();
   for (const block of blocks) {
-    const exits = block.transitions.filter((t) => !t.cycle && hubs.has(t.to) && t.to !== block.id);
-    exitsOf.set(block.id, exits);
+    // Every connector away from the rail (hub exit, skip, return) is a chip inside the block.
     sizes.set(block.id, {
       width: BLOCK_WIDTH,
-      height: estimateBlockHeight(block.name, block.description, false, exits.length),
+      height: estimateBlockHeight(
+        block.name,
+        block.description,
+        false,
+        canvasChipsOf(block, hubIds, blocks).length,
+      ),
     });
   }
   const placed = await placeBlocks(blocks, sizes);
@@ -174,7 +183,6 @@ export async function layoutBlocks(
       width: p.width,
       height: p.height,
       rank: xs.indexOf(Math.round(p.x)),
-      exits: exitsOf.get(block.id) ?? [],
     };
   });
   const byId = new Map(laidBlocks.map((b) => [b.id, b]));
@@ -185,7 +193,20 @@ export async function layoutBlocks(
   let bottomLane = 0;
   // Hubs take the channels nearest the graph, one per hub, in the derivation's hub order; skip
   // edges stack above them. Only hubs that actually receive a transition get a channel.
-  const receiving = new Set(blocks.flatMap((b) => exitsOf.get(b.id)!.map((t) => t.to)));
+  const receiving = new Set(
+    blocks.flatMap((b) => hubExitsOf(b, hubIds, blocks).map((chip) => chip.transition.to)),
+  );
+  // Adjacent forward transitions that join the same pair of blocks share the gap between them:
+  // each takes its own horizontal line and its own label row so nothing stacks on one point.
+  const parallel = new Map<string, number>();
+  for (const block of blocks) {
+    for (const tr of block.transitions) {
+      if (tr.cycle || hubs.has(tr.to)) continue;
+      const pair = `${block.id}->${tr.to}`;
+      parallel.set(pair, (parallel.get(pair) ?? 0) + 1);
+    }
+  }
+  const parallelIndex = new Map<string, number>();
   const hubLane = new Map([...hubs].filter((id) => receiving.has(id)).map((id, i) => [id, i]));
   let topLane = hubLane.size;
   const bundled = new Set<string>();
@@ -227,12 +248,21 @@ export async function layoutBlocks(
         const y1 = source.y + source.height / 2;
         const x2 = target.x;
         const y2 = target.y + target.height / 2;
-        if (target.rank - source.rank <= 1) {
+        // Adjacent in process order (the same rule the chips use): an elbow in the gap with its
+        // label; anything further is a skip lane above the graph named by a chip in the source.
+        if (indexOf.get(transition.to)! <= block.index + 1) {
+          const pair = `${block.id}->${transition.to}`;
+          const count = parallel.get(pair) ?? 1;
+          const index = parallelIndex.get(pair) ?? 0;
+          parallelIndex.set(pair, index + 1);
+          const offset = (index - (count - 1) / 2) * PARALLEL_STEP;
+          const ya = y1 + offset;
+          const yb = y2 + offset;
           const midX = x1 + (x2 - x1) / 2;
           const path =
-            Math.abs(y1 - y2) < 1
-              ? `M ${x1} ${y1} L ${x2} ${y2}`
-              : `M ${x1} ${y1} L ${midX} ${y1} L ${midX} ${y2} L ${x2} ${y2}`;
+            Math.abs(ya - yb) < 1
+              ? `M ${x1} ${ya} L ${x2} ${yb}`
+              : `M ${x1} ${ya} L ${midX} ${ya} L ${midX} ${yb} L ${x2} ${yb}`;
           edges.push({
             id,
             from: block.id,
@@ -241,7 +271,7 @@ export async function layoutBlocks(
             kind: "forward",
             path,
             labelX: midX,
-            labelY: y1 - 4,
+            labelY: ya - 4,
             labelAnchor: "above",
           });
         } else {
@@ -266,10 +296,13 @@ export async function layoutBlocks(
       }
 
       if (transition.to === block.id) {
+        // Several self-loops of one block dip further one by one, each with its own label row.
+        const selfIndex = parallelIndex.get(`${block.id}->${block.id}:self`) ?? 0;
+        parallelIndex.set(`${block.id}->${block.id}:self`, selfIndex + 1);
         const y = source.y + source.height;
         const xLeft = source.x + source.width * 0.35;
         const xRight = source.x + source.width * 0.65;
-        const dip = y + SELF_LOOP_DEPTH;
+        const dip = y + SELF_LOOP_DEPTH + selfIndex * PARALLEL_STEP;
         const path = `M ${xRight} ${y} L ${xRight} ${dip} L ${xLeft} ${dip} L ${xLeft} ${y}`;
         edges.push({
           id,

@@ -26,15 +26,17 @@ export interface LaneLink {
   depth: number;
 }
 
-export const ARC_BASE = 22;
-/** Each nesting depth adds a line plus the label pill that sits beneath it. */
-export const ARC_STEP = 28;
-export const LINK_BASE = 14;
-/** Forward links carry at most a small text above the line, so they nest tighter than arcs. */
-export const LINK_STEP = 18;
-/** Width budget per label character at the 11px label size, used to decide whether a label fits. */
-const LINK_LABEL_CHAR_WIDTH = 6.5;
-const LINK_LABEL_PADDING = 24;
+export const ARC_BASE = 14;
+/** Each nesting depth adds one line: labels are shown on demand, not stacked under the lines. */
+export const ARC_STEP = 12;
+/** Room beneath the deepest arc for the arrowhead and the first lit label pill row. */
+export const ARC_TAIL = 24;
+export const LINK_BASE = 12;
+export const LINK_STEP = 12;
+/** Room above the highest link for the first lit label pill row. */
+export const LINK_TAIL = 24;
+/** Height of one lit label pill row beneath the arcs (or above the links). */
+export const PILL_ROW = 20;
 
 /** Shorter spans nest inside longer ones: assign depth by span so lines never cross each other. */
 function nestBySpan<T extends { from: number; to: number }>(
@@ -91,35 +93,66 @@ export function arcGeometry(
   return { x1, x2, y, d: `M ${x1} 2 L ${x1} ${y} L ${x2} ${y} L ${x2} 2` };
 }
 
+/**
+ * The arcs band: the deepest line, the tail for its arrowhead and one pill, plus a row for every
+ * further pill the source with the most arcs can light at once, so a revealed column of labels
+ * stays inside the rail's viewport.
+ */
 export function arcsHeight(arcs: readonly LaneArc[]): number {
-  return arcs.length ? ARC_BASE + Math.max(...arcs.map((a) => a.depth)) * ARC_STEP + 34 : 0;
+  if (!arcs.length) return 0;
+  const perSource = new Map<number, number>();
+  for (const arc of arcs) perSource.set(arc.from, (perSource.get(arc.from) ?? 0) + 1);
+  const mostLit = Math.max(...perSource.values());
+  return (
+    ARC_BASE +
+    Math.max(...arcs.map((a) => a.depth)) * ARC_STEP +
+    ARC_TAIL +
+    (mostLit - 1) * PILL_ROW
+  );
 }
 
 /**
  * A forward link rises from the source lane's top, runs along its channel above the rail and
  * drops onto the target lane's top; `height` is the SVG height so the rail's top edge is `y = height`.
- * `labelFits` says whether the label's estimated width sits inside the span; when it does not,
- * the source lane shows the label as a chip instead.
+ * The label is not on the line: the source lane's chip names the target and lights the link.
  */
 export function linkGeometry(
   link: LaneLink,
   centerOf: (index: number) => number,
   height: number,
-): { x1: number; x2: number; y: number; d: string; labelFits: boolean } {
+): { x1: number; x2: number; y: number; d: string } {
   const x1 = centerOf(link.from) + 30;
   const x2 = centerOf(link.to) - 30;
   const y = height - LINK_BASE - link.depth * LINK_STEP;
-  const labelFits =
-    link.label.length * LINK_LABEL_CHAR_WIDTH + LINK_LABEL_PADDING <= Math.abs(x2 - x1);
-  return {
-    x1,
-    x2,
-    y,
-    d: `M ${x1} ${height - 2} L ${x1} ${y} L ${x2} ${y} L ${x2} ${height - 2}`,
-    labelFits,
-  };
+  return { x1, x2, y, d: `M ${x1} ${height - 2} L ${x1} ${y} L ${x2} ${y} L ${x2} ${height - 2}` };
 }
 
 export function linksHeight(links: readonly LaneLink[]): number {
-  return links.length ? LINK_BASE + Math.max(...links.map((l) => l.depth)) * LINK_STEP + 16 : 0;
+  if (!links.length) return 0;
+  const perSource = new Map<number, number>();
+  for (const link of links) perSource.set(link.from, (perSource.get(link.from) ?? 0) + 1);
+  const mostLit = Math.max(...perSource.values());
+  return (
+    LINK_BASE +
+    Math.max(...links.map((l) => l.depth)) * LINK_STEP +
+    LINK_TAIL +
+    (mostLit - 1) * PILL_ROW
+  );
+}
+
+/**
+ * Where the pills of the connectors lit at the same time go: one row each, starting just beyond
+ * the outermost lit connector (the deepest arc, or the highest link), so pills never cover each
+ * other however many connectors a chip folds or a selected lane owns. `direction` is +1 for arcs
+ * (rows grow downward from the deepest arc) and -1 for links (rows grow upward).
+ */
+export function pillRows(
+  lit: ReadonlyArray<{ key: string; y: number }>,
+  direction: 1 | -1,
+  row: number = PILL_ROW,
+): Map<string, number> {
+  if (lit.length === 0) return new Map();
+  const ordered = [...lit].sort((a, b) => (direction === 1 ? b.y - a.y : a.y - b.y));
+  const base = direction === 1 ? ordered[0].y + 3 : ordered[0].y - 3;
+  return new Map(ordered.map((item, index) => [item.key, base + direction * index * row]));
 }

@@ -18,13 +18,17 @@ The tabs above the picture switch how the same definition is shown; the choice i
 - **Outline** (default) — the process as a document: every block as a numbered section with its
   description, its transitions in words (including why a loop happens and when it ends), and its
   steps with the evidence each demands.
-- **Canvas** — the process as a map filling the whole view: blocks left to right, forward
-  transitions as arrows with their labels, loops as dashed lines below; a block that many other
-  blocks lead into receives one thin line from each of them, and the source names it in a small
-  chip. Scroll or drag to pan, pinch (or hold Ctrl and scroll) to zoom.
-- **Lanes** — one card per block in process order with the loops drawn as arcs under the rail and
-  transitions that skip a block as thin links above it; the rail pans and zooms like the map.
-  Nothing is "current": the definition has no run.
+- **Canvas** — the process as a map filling the whole view: blocks left to right, adjacent
+  forward transitions as arrows with their labels, loops as thin dashed lines below and transitions
+  that skip blocks above; a block that many other blocks lead into receives one thin line from each
+  of them. Every loop, skip and exit into such a block is named by a chip in its source block;
+  hover the chip (or the line) to light it and read its label, and select a block to keep its lines
+  lit. Scroll or drag to pan, pinch (or hold Ctrl and scroll) to zoom.
+- **Lanes** — one card per block in process order with the loops as thin arcs under the rail and
+  transitions that skip a block as thin links above it, unlabelled at rest; each card names its
+  loops and skips in chips (several to one block fold into one chip with `×k`), and hovering a chip
+  (or a line) lights the line(s) with the label and, for a single loop, its cause and exit. The rail pans and zooms like the map. Nothing is "current": the
+  definition has no run.
 - **Split** — blocks against their implementation: pick a block on the left to see, on the right,
   the steps that implement it in the order they run, with their connections. Chips lead to the
   block a connection leaves for; the finder above answers "which block is this step in".

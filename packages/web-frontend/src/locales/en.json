@@ -695,7 +695,7 @@
           },
           "loop": {
             "title": "A failed review sends the work back",
-            "body": "Some steps are reviews. When a review finds problems, the process does not continue: it returns to an earlier block, and the work is done again. That return is a loop. The highlighted arrow is one of this process's loops, labelled with what causes it."
+            "body": "Some steps are reviews. When a review finds problems, the process does not continue: it returns to an earlier block, and the work is done again. That return is a loop. The highlighted chip marks one of this process's loops: hover it to light the return arrow and read what causes it."
           },
           "route": {
             "title": "Every run leaves a route",
@@ -710,11 +710,11 @@
       "modeGuide": {
         "lanes": {
           "title": "Lanes: how far the run got",
-          "body": "One rail, one card per block in process order. The current block is pinned as \"you are here\"; a number badge counts how many times a block was repeated; struck-through blocks were skipped. Arcs under the rail are the loops; thin links above it are transitions that skip a block. Scroll or drag to move along the rail, pinch (or hold Ctrl and scroll) to zoom. Click a card for its details on the right."
+          "body": "One rail, one card per block in process order. The current block is pinned as \"you are here\"; a number badge counts how many times a block was repeated; struck-through blocks were skipped. Thin arcs under the rail are the loops and thin links above it are transitions that skip a block; each card names its loops and skips in chips, and hovering a chip (or a line) lights that line and shows its label; a selected card keeps its lines lit. Scroll or drag to move along the rail, pinch (or hold Ctrl and scroll) to zoom. Click a card for its details on the right."
         },
         "canvas": {
           "title": "Canvas: the process as a map",
-          "body": "Blocks are laid out left to right in process order; dashed lines below are loops. A block that many others lead to receives one thin bundled line from each of them, and the source block names it in a small chip. The map opens on the block the run is at. Scroll or drag to pan, pinch (or hold Ctrl and scroll) to zoom, click a block to select it."
+          "body": "Blocks are laid out left to right in process order; thin dashed lines below are loops. Every loop, skip and exit into a shared block is named by a chip in its source block; hover the chip (or the line) to light it and read its label, and select a block to keep its lines lit. The map opens on the block the run is at. Scroll or drag to pan, pinch (or hold Ctrl and scroll) to zoom, click a block to select it."
         },
         "outline": {
           "title": "Outline: the process as a document",
@@ -1061,11 +1061,11 @@
         },
         "canvas": {
           "title": "Canvas: the process as a map",
-          "body": "Blocks are laid out left to right in process order; dashed lines below are loops. A block that many others lead to receives one thin bundled line from each of them, and the source block names it in a small chip. Scroll or drag to pan, pinch (or hold Ctrl and scroll) to zoom, click a block to select it."
+          "body": "Blocks are laid out left to right in process order; thin dashed lines below are loops. Every loop, skip and exit into a shared block is named by a chip in its source block; hover the chip (or the line) to light it and read its label, and select a block to keep its lines lit. Scroll or drag to pan, pinch (or hold Ctrl and scroll) to zoom, click a block to select it."
         },
         "lanes": {
           "title": "Lanes: the process in order",
-          "body": "One rail, one card per block in process order; arcs under the rail are the loops, labelled with what causes them, and thin links above it are transitions that skip a block. Nothing is \"current\" here: this is the definition, not a run. Scroll or drag to move along the rail, pinch (or hold Ctrl and scroll) to zoom. Click a card for its details on the right."
+          "body": "One rail, one card per block in process order; thin arcs under the rail are the loops and thin links above it are transitions that skip a block. Each card names its loops and skips in chips: hover a chip (or a line) to light that line and read its label and what causes the loop; a selected card keeps its lines lit. Nothing is \"current\" here: this is the definition, not a run. Scroll or drag to move along the rail, pinch (or hold Ctrl and scroll) to zoom. Click a card for its details on the right."
         }
       },
       "split": {
@@ -1141,7 +1141,7 @@
           },
           "loop": {
             "title": "A failed review sends the work back",
-            "body": "Some steps are reviews. When a review finds problems, the process does not continue: it returns to an earlier block, and the work is done again. That return is a loop. The highlighted arrow is one of this process's loops, labelled with what causes it and what ends it."
+            "body": "Some steps are reviews. When a review finds problems, the process does not continue: it returns to an earlier block, and the work is done again. That return is a loop. The highlighted chip marks one of this process's loops: hover it to light the return arrow and read what causes it and what ends it."
           },
           "edit": {
             "title": "The definition can be edited here",

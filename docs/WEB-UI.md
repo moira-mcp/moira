@@ -493,22 +493,46 @@ history entry.
 
 - `LanesView` — task header (title, goal, facts), the rail of blocks in process order with the
   current block pinned ("you are here"), pass-count badges, struck-through skipped blocks, return
-  arcs beneath the rail nested by span (`arcs.ts`), and the selected block's run content. The
+  arcs beneath the rail nested by span (`arcs.ts`), and the selected block's run content. Every
+  connector away from the rail — returns, forward links that skip a block — is thin and muted with
+  no label at rest; the source lane names each one in a chip (`chips.ts`: `laneChipsOf` =
+  `returnsOf` + `skipsOf`, `canvasChipsOf` adds `hubExitsOf`). Transitions of one kind into one
+  target fold into one chip carrying every label and every connector key (`keys`; a hub bundle has
+  one key, the source's first transition into the hub); `TransitionChipView` in `focus.tsx` renders
+  `↩ n name` (`×k` when it folds k transitions) / `↗ n name` with the labels, and a single return's
+  cause and exit, as the tooltip; `data-connector-count` is the number of connectors the chip
+  lights, which equals `k` except for a hub bundle (k labels, one bundled edge). Hovering a chip lights every connector it folds; hovering a
+  connector lights that one. Pills of connectors lit together take one row each beyond the
+  outermost of them (`pillRows` in `arcs.ts`, `PILL_ROW`), so a folded chip or a selected lane
+  never stacks pills, and the arc and link bands reserve a row for every pill the source with the
+  most connectors can light (`arcsHeight`, `linksHeight`), so the column stays inside the rail; on the canvas every parallel forward transition and every self-loop of a
+  block has its own line and label row (`PARALLEL_STEP`). Chips stack in a column inside the
+  lane card and every card is as tall as the block with the most chips (`laneCardHeight`,
+  `LANE_CHIP_ROW`), so no chip spills out.
+  `TransitionFocusProvider` holds the lit transition: hovering a chip or a connector lights it
+  (`data-focused="true"`) and renders its label pill (`data-arc-label`, `data-link-label`); the
+  block the reader selected (`selectedBlockId`) keeps all of its connectors lit while nothing is
+  hovered. The
   horizontal rail is a React Flow instance on the shared `DiagramViewport` (`LanesRail`): lane cards
   are fixed nodes in one row (`laneLayout.ts`: positions, the link band above, the arc band below,
   the viewport height), return arcs and forward links are custom edges over the same geometry, and
   the rail opens at full size on the first lane (definition) or centred on the current lane (run)
   and pans and zooms instead of scrolling the page; on a phone (the `useIsMobile` hook) it becomes
-  a vertical stepper with return chips and forward chips for transitions that skip a block.
-  Forward transitions that skip a block are thin muted links above the rail (`buildLinks`,
-  `linkGeometry`), labelled on the line when the label fits, else by a forward chip in the source
-  lane; hubs receive them like any block.
+  a vertical stepper with the same chips. Forward transitions that skip a block are thin muted
+  links above the rail (`buildLinks`, `linkGeometry`); hubs receive them like any block. The arc
+  and link bands are one line per nesting depth (`ARC_STEP`, `LINK_STEP`, with `ARC_TAIL` and
+  `LINK_TAIL` for the arrowhead and a lit pill).
 - `CanvasView` — React Flow over an ELK layered layout (`layout.ts`, `elkjs` loaded on first use):
-  forward edges as elbows with label pills, rank-skipping edges above, cycles as dashed lanes
-  below; a transition into a hub block (many sources) is a muted bundled edge (`kind: "hub"`,
-  one per source and hub, routed through the inter-rank gaps and a channel per hub into one port
-  on the hub's left edge, `hubPort`); the exit chip in the source names the hub and carries the
-  transition label as its tooltip. Mounts through `DiagramViewport` and opens at the fitted zoom
+  forward edges between blocks adjacent in process order as elbows with label pills (several
+  transitions between one pair take their own line and label row, `PARALLEL_STEP`), forward edges
+  that skip a block above and cycles as dashed lanes below, both thin and muted with no pill at
+  rest; a transition into a hub block (many
+  sources) is a muted bundled edge (`kind: "hub"`, one per source and hub, routed through the
+  inter-rank gaps and a channel per hub into one port on the hub's left edge, `hubPort`). Every
+  cycle, skip and hub exit is a chip in its source block (the shared `chips.ts` model and
+  `TransitionChipView`), and the same `TransitionFocusProvider` lights the edge (`data-focused`)
+  and renders its pill (`data-edge-label`) on hover or for the selected block; the block height
+  estimate (`estimateBlockHeight`) reserves a row per two chips, counted with `canvasChipsOf`. Mounts through `DiagramViewport` and opens at the fitted zoom
   (never below three quarters) on the first block with the block row in the upper third, or
   centred on the current block on a run.
 - `OutlineView` — numbered sections with status, description, run content, block writes at the

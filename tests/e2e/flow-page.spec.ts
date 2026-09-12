@@ -53,6 +53,27 @@ test("reads a bundled flow as a process in every mode and explains it", async ({
     page.locator('[data-testid="flow-view"] [data-block-id="execute"]').first(),
   ).toBeVisible();
   await expect(page.locator('[data-edge-kind="cycle"]').first()).toBeVisible();
+  // The canvas draws cycles muted and unlabelled; the selected block's own connectors are lit,
+  // and hovering another block's return chip lights that edge with its label instead.
+  // A chip may fold several returns to one target (`data-connector-count`): count connectors.
+  const connectorsOf = async (selector: string) =>
+    (
+      await page
+        .locator(selector)
+        .evaluateAll((chips) =>
+          chips.map((c) => Number(c.getAttribute("data-connector-count") ?? 1)),
+        )
+    ).reduce((a, b) => a + b, 0);
+  const executeReturns = await connectorsOf('[data-block-id="execute"] [data-return-chip]');
+  await expect(page.locator('[data-edge-label="cycle"]')).toHaveCount(executeReturns);
+  const otherChip = page
+    .locator('[data-block-id]:not([data-block-id="execute"]) [data-return-chip]')
+    .first();
+  await otherChip.hover();
+  await expect(page.locator('[data-edge-label="cycle"]')).toHaveCount(1);
+  await expect(page.locator('[data-edge-kind="cycle"][data-focused="true"]')).toHaveCount(1);
+  await page.mouse.move(0, 0);
+  await expect(page.locator('[data-edge-label="cycle"]')).toHaveCount(executeReturns);
   await page.goto(`${BASE_URL}/workflows/moira/quick-task?view=lanes`);
   await expect(page.locator("[data-lane-index]")).toHaveCount(7);
   // A definition has no run: no status chips, no "the run has not reached" text, and the mode
@@ -64,7 +85,24 @@ test("reads a bundled flow as a process in every mode and explains it", async ({
   await expect(page.getByTestId("lanes-content")).not.toContainText(
     /has not reached this block|ещё не дошёл/,
   );
-  await expect(page.locator("[data-arc]").first()).toBeVisible();
+  await expect(page.locator("[data-arc]:not([data-arc='chip'])").first()).toBeVisible();
+  // Returns carry no label at rest; a chip in the source lane lights its arc and label on hover.
+  await expect(page.locator("[data-arc-label]")).toHaveCount(0);
+  const returnChip = page.locator("[data-lane-index] [data-return-chip]").first();
+  await returnChip.hover();
+  await expect(page.locator("[data-arc-label]")).toHaveCount(1);
+  await expect(page.locator('[data-arc][data-focused="true"]')).toHaveCount(1);
+  // A block deep link selects it: its return arcs stay lit with their labels, no other block's.
+  await page.goto(`${BASE_URL}/workflows/moira/quick-task?view=lanes&block=plan-review`);
+  await expect(
+    page.locator('[data-block-id="plan-review"] [data-return-chip]').first(),
+  ).toBeVisible();
+  const selectedReturns = await connectorsOf('[data-block-id="plan-review"] [data-return-chip]');
+  await expect(page.locator("[data-arc-label]")).toHaveCount(selectedReturns);
+  await expect(page.locator('[data-arc][data-focused="true"]')).toHaveCount(selectedReturns);
+  await expect(
+    page.locator('[data-arc][data-focused="true"][data-transition^="plan-review→"]'),
+  ).toHaveCount(selectedReturns);
   await page.goto(`${BASE_URL}/workflows/moira/quick-task?view=split&block=plan-review`);
   await expect(page.getByTestId("split-implementation")).toHaveAttribute(
     "data-block-id",

@@ -101,13 +101,38 @@ describe("lanes view on a phone", () => {
       stepper.closest("[data-lanes-orientation]")?.getAttribute("data-lanes-orientation"),
     ).toBe("vertical");
     const forwardChips = document.querySelectorAll('[data-link="chip"]');
-    expect(forwardChips).toHaveLength(skipping.length);
+    const skipPairs = new Set(
+      blocks.flatMap((b) =>
+        b.transitions
+          .filter((tr) => {
+            const target = blocks.find((x) => x.id === tr.to);
+            return !tr.cycle && target !== undefined && target.index > b.index + 1;
+          })
+          .map((tr) => `${b.id}>${tr.to}`),
+      ),
+    );
+    expect(forwardChips).toHaveLength(skipPairs.size);
     for (const tr of skipping) {
       const target = blocks.find((x) => x.id === tr.to)!;
       expect(
         [...forwardChips].some(
-          (chip) => chip.textContent?.includes(tr.label) && chip.textContent.includes(target.name),
+          (chip) =>
+            chip.textContent?.includes(target.name) &&
+            chip.getAttribute("title")?.includes(tr.label),
         ),
+      ).toBe(true);
+    }
+    // Returns are chips of the same shape; the connector label and cause are their tooltip.
+    const returning = blocks.flatMap((b) => b.transitions.filter((tr) => tr.cycle));
+    const returnChips = document.querySelectorAll('[data-arc="chip"]');
+    const returnPairs = new Set(
+      blocks.flatMap((b) => b.transitions.filter((tr) => tr.cycle).map((tr) => `${b.id}>${tr.to}`)),
+    );
+    expect(returnChips).toHaveLength(returnPairs.size);
+    for (const tr of returning) {
+      expect(
+        // A chip folding several returns lists their labels; a single one adds its cause.
+        [...returnChips].some((chip) => chip.getAttribute("title")?.includes(tr.label)),
       ).toBe(true);
     }
     expect(document.querySelector('[data-testid="lanes-rail"]')).toBeNull();

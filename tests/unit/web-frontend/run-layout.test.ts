@@ -14,6 +14,7 @@ import {
   overlappingBlocks,
 } from "../../../packages/web-frontend/src/components/run/layout.js";
 import { runBlocks } from "../../../packages/web-frontend/src/components/run/model.js";
+import { hubExitsOf } from "../../../packages/web-frontend/src/components/run/chips.js";
 
 const FLOWS = [
   "quick-task",
@@ -82,10 +83,11 @@ describe("canvas layout of bundled flows", () => {
         layout.edges.filter((e) => e.kind === "hub").map((e) => `${e.from}->${e.to}`),
       );
       for (const block of blocks) {
-        const laid = layout.blocks.find((b) => b.id === block.id)!;
+        const hubChips = hubExitsOf(block, layout.hubIds, blocks);
         for (const transition of block.transitions) {
-          const asChip = laid.exits.some(
-            (e) => e.to === transition.to && e.label === transition.label,
+          const asChip = hubChips.some(
+            (chip) =>
+              chip.transition.to === transition.to && chip.labels.includes(transition.label),
           );
           const intoHub = !transition.cycle && hubs.has(transition.to);
           expect(asChip).toBe(intoHub);
@@ -134,9 +136,13 @@ describe("canvas layout of bundled flows", () => {
       const port = hubPort(laidHub);
       for (const edge of into) {
         expect(edge.path.endsWith(`L ${port.x} ${port.y}`)).toBe(true);
-        expect(layout.blocks.find((b) => b.id === edge.from)!.exits.map((e) => e.to)).toContain(
-          hub,
-        );
+        expect(
+          hubExitsOf(
+            blocks.find((b) => b.id === edge.from)!,
+            layout.hubIds,
+            blocks,
+          ).map((chip) => chip.transition.to),
+        ).toContain(hub);
       }
     }
     // A bundle's runs stay in the gaps and the channel above the graph: no segment crosses a block
@@ -168,5 +174,49 @@ describe("canvas layout of bundled flows", () => {
     expect(new Set([...channels.values()].map((ys) => [...ys][0])).size).toBe(channels.size);
     const first = layout.blocks.find((b) => b.id === blocks[0].id)!;
     for (const block of layout.blocks) expect(block.x).toBeGreaterThanOrEqual(first.x);
+  });
+});
+
+describe("parallel forward transitions", () => {
+  test("transitions joining the same pair of adjacent blocks take distinct lines and label rows", async () => {
+    const progress = projectionOf("workflow-management-flow");
+    const blocks = runBlocks(progress);
+    const layout = await layoutBlocks(blocks, progress.process.hubs);
+    const byPair = new Map<string, typeof layout.edges>();
+    for (const edge of layout.edges.filter((e) => e.kind === "forward")) {
+      const pair = `${edge.from}->${edge.to}`;
+      byPair.set(pair, [...(byPair.get(pair) ?? []), edge]);
+    }
+    const parallel = [...byPair.values()].filter((edges) => edges.length > 1);
+    expect(parallel.length).toBeGreaterThan(0);
+    for (const edges of parallel) {
+      const labelYs = edges.map((e) => e.labelY);
+      expect(new Set(labelYs).size).toBe(edges.length);
+      const paths = edges.map((e) => e.path);
+      expect(new Set(paths).size).toBe(edges.length);
+      const sorted = [...labelYs].sort((a, b) => a - b);
+      // A label pill is 22 px tall: rows at least 24 px apart never touch.
+      for (let i = 1; i < sorted.length; i += 1)
+        expect(sorted[i] - sorted[i - 1]).toBeGreaterThanOrEqual(24);
+    }
+  });
+});
+
+describe("self-loops", () => {
+  test("several self-loops of one block dip to distinct depths with distinct label rows", async () => {
+    const progress = projectionOf("workflow-management-flow");
+    const blocks = runBlocks(progress);
+    const layout = await layoutBlocks(blocks, progress.process.hubs);
+    const selfLoops = new Map<string, typeof layout.edges>();
+    for (const edge of layout.edges.filter((e) => e.kind === "cycle" && e.from === e.to)) {
+      selfLoops.set(edge.from, [...(selfLoops.get(edge.from) ?? []), edge]);
+    }
+    const multi = [...selfLoops.values()].filter((edges) => edges.length > 1);
+    expect(multi.length).toBeGreaterThan(0);
+    for (const edges of multi) {
+      expect(new Set(edges.map((e) => e.path)).size).toBe(edges.length);
+      const ys = edges.map((e) => e.labelY).sort((a, b) => a - b);
+      for (let i = 1; i < ys.length; i += 1) expect(ys[i] - ys[i - 1]).toBeGreaterThanOrEqual(24);
+    }
   });
 });

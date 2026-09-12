@@ -118,9 +118,21 @@ test("lanes show the repair loop as a repeated block and the block panel drills 
       "data-status",
       "pending",
     );
-    // The lanes rail draws the return arc of the repair loop with its authored label.
-    await expect(page.getByTestId("lanes-rail").locator("[data-arc]").first()).toBeVisible();
-    await expect(page.getByTestId("lanes-rail")).toContainText("review found issues");
+    // The lanes rail draws the return arc of the repair loop as a thin muted line with no label
+    // at rest; the source lane's chip names the target, and hovering the chip lights the arc and
+    // shows the authored label. Selecting the lane keeps its arcs lit.
+    const rail = page.getByTestId("lanes-rail");
+    await expect(rail.locator("[data-arc]:not([data-arc='chip'])").first()).toBeVisible();
+    // (The SVG <title> tooltips carry the labels for assistive tech; the visible pill is the
+    // `data-arc-label` element, absent at rest.)
+    await expect(rail.locator("[data-arc-label]")).toHaveCount(0);
+    const chip = review.locator("[data-return-chip]").first();
+    await expect(chip).toContainText(/\d/);
+    await chip.hover();
+    await expect(rail.locator("[data-arc-label]")).toContainText("review found issues");
+    await expect(rail.locator('[data-arc][data-focused="true"]')).toHaveCount(1);
+    await page.mouse.move(0, 0);
+    await expect(rail.locator("[data-arc-label]")).toHaveCount(0);
 
     // The block panel opens on the current block with its steps and expected evidence.
     const detail = page.getByTestId("block-detail");

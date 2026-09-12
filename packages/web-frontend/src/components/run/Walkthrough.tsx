@@ -68,8 +68,8 @@ export const GUIDE_STEPS: GuideStep[] = [
   {
     id: "loop",
     targets: {
-      canvas: '[data-edge-kind="cycle"]',
-      lanes: "[data-arc]",
+      canvas: "[data-return-chip]",
+      lanes: "[data-return-chip]",
       outline: '[data-transition-kind="cycle"]',
       route: "[data-loop-marker]",
     },

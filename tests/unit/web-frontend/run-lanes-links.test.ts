@@ -1,7 +1,7 @@
 /**
  * The lanes rail's forward links: every forward transition that skips at least one lane is a
  * link above the rail (adjacent ones are the rail itself), links nest by span without crossing,
- * and a label is placed on the line only when it fits the span.
+ * and a link's path rises from the source lane, runs along its channel and drops onto the target.
  */
 
 import { describe, expect, test } from "@jest/globals";
@@ -106,19 +106,13 @@ describe("lanes forward links", () => {
     expect(linksHeight([])).toBe(0);
   });
 
-  test("a label sits on the line only when the span can hold it", () => {
+  test("a link's path rises from the source, runs along its channel and drops onto the target", () => {
     const centerOf = (i: number) => i * 140;
     const short = linkGeometry({ from: 0, to: 2, label: "ok", depth: 0 }, centerOf, 30);
-    const long = linkGeometry(
-      { from: 0, to: 2, label: "a label far too long for a two-lane span", depth: 0 },
-      centerOf,
-      30,
-    );
-    expect(short.labelFits).toBe(true);
-    expect(long.labelFits).toBe(false);
     expect(short.d.startsWith("M 30 28 L 30")).toBe(true);
     expect(short.d.endsWith("L 250 28")).toBe(true);
     expect(short.y).toBeLessThan(30);
+    expect(short.y).toBeGreaterThan(0);
   });
 });
 

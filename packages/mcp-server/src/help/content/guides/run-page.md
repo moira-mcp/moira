@@ -16,14 +16,20 @@ The tabs above the picture switch how the same run is shown; the choice is in th
 - **Lanes** (default) — one card per block in process order. The block the run is on is pinned
   as "you are here" and marked _in progress_ or _waiting for you_; a completed block shows a tick,
   a block that ran several times shows its pass count (×2, ×3), a block the run bypassed is struck
-  through as _skipped_, and blocks not reached yet are dimmed. Return arcs under the rail are the
-  loops, labelled with what causes them; thin links above the rail are transitions that skip a
-  block. Below the rail the selected block's outcome text is written out.
-- **Canvas** — the process as a map filling the whole view: blocks left to right, forward
-  transitions as arrows with their labels, loops as dashed lines below; a block that many other
-  blocks lead into (a replan or stop block) receives one thin line from each of them, and the
-  source names it in a small chip. The map opens on the current block; scroll or drag to pan, pinch
-  (or hold Ctrl and scroll) to zoom. The lanes rail pans and zooms the same way.
+  through as _skipped_, and blocks not reached yet are dimmed. Thin arcs under the rail are the
+  loops and thin links above it are transitions that skip a block; neither carries a label at
+  rest. Each card names its loops and skips in chips (`↩ 3 Plan` returns to block 3, `↗ 6 Stop`
+  skips to block 6, `↩ 3 Plan ×2` folds two loops to the same block); hover a chip or a line to
+  light the line(s) and read the label and, for a single loop, what causes it and what ends it; a
+  card you selected keeps its lines lit. Below the rail the
+  selected block's outcome text is written out.
+- **Canvas** — the process as a map filling the whole view: blocks left to right, adjacent
+  forward transitions as arrows with their labels, loops as thin dashed lines below and transitions
+  that skip blocks above; a block that many other blocks lead into (a replan or stop block)
+  receives one thin line from each of them. Every loop, skip and exit into such a block is named
+  by a chip in its source block; hover the chip (or the line) to light it and read its label, and
+  select a block to keep its lines lit. The map opens on the current block; scroll or drag to pan,
+  pinch (or hold Ctrl and scroll) to zoom. The lanes rail pans and zooms the same way.
 - **Outline** — the process as a document: every block as a numbered section with its
   description, what the run produced there, what its steps wrote, its transitions in words
   (including why a loop happens and when it ends), and its steps with the evidence each demands.
