@@ -12,18 +12,10 @@ import {
   blockUserViaApi,
   unblockUserViaApi,
   signInUser,
+  formatSessionCookie,
 } from "../../utils/mcp-auth.js";
 
 const BASE_URL = getTestBaseUrl();
-
-/**
- * Format session cookie for the protocol.
- */
-function formatSessionCookie(baseUrl: string, sessionCookie: string): string {
-  const isSecure = baseUrl.startsWith("https://");
-  const cookieName = isSecure ? "__Secure-better-auth.session_token" : "better-auth.session_token";
-  return `${cookieName}=${sessionCookie}`;
-}
 
 describe("MCP Blocked User Security", () => {
   let testUserId: string;

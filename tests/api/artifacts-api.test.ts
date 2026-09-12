@@ -4,26 +4,27 @@
  */
 
 import { describe, test, expect, beforeAll, afterAll } from "@jest/globals";
-import { getTestBaseUrl, getAdminCredentials } from "../utils/test-config.js";
+import { getTestBaseUrl } from "../utils/test-config.js";
+import {
+  createTestUserViaApi,
+  formatSessionCookie,
+  getAdminSessionCookie,
+  signInUser,
+} from "../utils/mcp-auth.js";
 
 const BASE_URL = getTestBaseUrl();
-const ADMIN_CREDENTIALS = getAdminCredentials();
 
 // Test users
 const TEST_USER_A = {
   email: `artifacts-api-user-a-${Date.now()}@example.com`,
   password: "TestPass123!",
   name: "Artifacts Test User A",
-  acceptedTermsAt: new Date().toISOString(),
-  acceptedNotRussianResidentAt: new Date().toISOString(),
 };
 
 const TEST_USER_B = {
   email: `artifacts-api-user-b-${Date.now()}@example.com`,
   password: "TestPass123!",
   name: "Artifacts Test User B",
-  acceptedTermsAt: new Date().toISOString(),
-  acceptedNotRussianResidentAt: new Date().toISOString(),
 };
 
 let userACookie: string;
@@ -34,57 +35,19 @@ let adminCookie: string;
 const createdUuids: { userA: string[]; userB: string[] } = { userA: [], userB: [] };
 
 beforeAll(async () => {
-  // Login as admin
-  const adminLoginRes = await fetch(`${BASE_URL}/api/auth/sign-in/email`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(ADMIN_CREDENTIALS),
-  });
-  adminCookie = adminLoginRes.headers.get("set-cookie") || "";
+  adminCookie = formatSessionCookie(BASE_URL, await getAdminSessionCookie(BASE_URL));
 
-  // Create and verify User A
-  const signUpResA = await fetch(`${BASE_URL}/api/auth/sign-up/email`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(TEST_USER_A),
-  });
-  const signUpDataA = (await signUpResA.json()) as { user?: { id: string } };
-  if (!signUpDataA?.user?.id) {
-    throw new Error(`Failed to create test user A: ${JSON.stringify(signUpDataA)}`);
-  }
+  await createTestUserViaApi(BASE_URL, TEST_USER_A.email, TEST_USER_A.password, TEST_USER_A.name);
+  userACookie = formatSessionCookie(
+    BASE_URL,
+    await signInUser(BASE_URL, TEST_USER_A.email, TEST_USER_A.password),
+  );
 
-  await fetch(`${BASE_URL}/api/admin/users/${signUpDataA.user.id}/verify-email`, {
-    method: "POST",
-    headers: { Cookie: adminCookie },
-  });
-  const loginResA = await fetch(`${BASE_URL}/api/auth/sign-in/email`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email: TEST_USER_A.email, password: TEST_USER_A.password }),
-  });
-  userACookie = loginResA.headers.get("set-cookie") || "";
-
-  // Create and verify User B
-  const signUpResB = await fetch(`${BASE_URL}/api/auth/sign-up/email`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(TEST_USER_B),
-  });
-  const signUpDataB = (await signUpResB.json()) as { user?: { id: string } };
-  if (!signUpDataB?.user?.id) {
-    throw new Error(`Failed to create test user B: ${JSON.stringify(signUpDataB)}`);
-  }
-
-  await fetch(`${BASE_URL}/api/admin/users/${signUpDataB.user.id}/verify-email`, {
-    method: "POST",
-    headers: { Cookie: adminCookie },
-  });
-  const loginResB = await fetch(`${BASE_URL}/api/auth/sign-in/email`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email: TEST_USER_B.email, password: TEST_USER_B.password }),
-  });
-  userBCookie = loginResB.headers.get("set-cookie") || "";
+  await createTestUserViaApi(BASE_URL, TEST_USER_B.email, TEST_USER_B.password, TEST_USER_B.name);
+  userBCookie = formatSessionCookie(
+    BASE_URL,
+    await signInUser(BASE_URL, TEST_USER_B.email, TEST_USER_B.password),
+  );
 });
 
 afterAll(async () => {
@@ -294,10 +257,10 @@ describe("Artifacts API - Listing", () => {
     });
     const page2 = (await page2Res.json()) as { data: { artifacts: Array<{ uuid: string }> } };
 
-    // Different pages should have different artifacts
-    if (page1.data.artifacts.length > 0 && page2.data.artifacts.length > 0) {
-      expect(page1.data.artifacts[0].uuid).not.toBe(page2.data.artifacts[0].uuid);
-    }
+    // Different pages should have different artifacts (the describe created at least 3)
+    expect(page1.data.artifacts).toHaveLength(2);
+    expect(page2.data.artifacts.length).toBeGreaterThan(0);
+    expect(page1.data.artifacts[0].uuid).not.toBe(page2.data.artifacts[0].uuid);
   });
 });
 

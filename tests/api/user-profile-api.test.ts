@@ -7,72 +7,32 @@
  */
 
 import { describe, test, expect, beforeAll } from "@jest/globals";
-import { getTestBaseUrl, getAdminCredentials } from "../utils/test-config.js";
+import { getTestBaseUrl } from "../utils/test-config.js";
+import { createTestUserViaApi, formatSessionCookie, signInUser } from "../utils/mcp-auth.js";
 
 const BASE_URL = getTestBaseUrl();
-const ADMIN_CREDENTIALS = getAdminCredentials();
 const TEST_USER = {
   email: `profile-test-${Date.now()}@example.com`,
   password: "ProfileTest123!",
   name: "Profile Test User",
-  acceptedTermsAt: new Date().toISOString(),
-  acceptedNotRussianResidentAt: new Date().toISOString(),
 };
 
 let authCookie: string;
-let adminCookie: string;
 let testUserId: string;
 
+/** Session cookie header for TEST_USER with its current password. */
+async function signInTestUser(): Promise<string> {
+  return formatSessionCookie(
+    BASE_URL,
+    await signInUser(BASE_URL, TEST_USER.email, TEST_USER.password),
+  );
+}
+
 beforeAll(async () => {
-  // Create test user
-  const signUpRes = await fetch(`${BASE_URL}/api/auth/sign-up/email`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(TEST_USER),
-  });
-  const signUpData = (await signUpRes.json()) as any;
-  testUserId = signUpData.user.id;
-
-  // Login as admin to verify email
-  const adminLoginRes = await fetch(`${BASE_URL}/api/auth/sign-in/email`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(ADMIN_CREDENTIALS),
-  });
-  adminCookie = adminLoginRes.headers.get("set-cookie") || "";
-
-  const featuresRes = await fetch(`${BASE_URL}/api/features`);
-  const featureData = (await featuresRes.json()) as {
-    data: {
-      features: { accountApproval: boolean };
-    };
-  };
-
-  // Verify test user email
-  await fetch(`${BASE_URL}/api/admin/users/${testUserId}/verify-email`, {
-    method: "POST",
-    headers: { Cookie: adminCookie },
-  });
-  if (featureData.data.features.accountApproval) {
-    const approvalRes = await fetch(`${BASE_URL}/api/admin/users/${testUserId}/approve`, {
-      method: "POST",
-      headers: { Cookie: adminCookie },
-    });
-    expect(approvalRes.status).toBe(200);
-  }
-
-  // Login as test user
-  const loginRes = await fetch(`${BASE_URL}/api/auth/sign-in/email`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      email: TEST_USER.email,
-      password: TEST_USER.password,
-    }),
-  });
-
-  const cookies = loginRes.headers.get("set-cookie");
-  authCookie = cookies || "";
+  testUserId = (
+    await createTestUserViaApi(BASE_URL, TEST_USER.email, TEST_USER.password, TEST_USER.name)
+  ).userId;
+  authCookie = await signInTestUser();
 });
 
 describe("User Profile API", () => {
@@ -266,15 +226,7 @@ describe("User Profile API", () => {
 
     test("revokes all sessions except current on password change", async () => {
       // Create second session (login from another "browser")
-      const secondLoginRes = await fetch(`${BASE_URL}/api/auth/sign-in/email`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          email: TEST_USER.email,
-          password: TEST_USER.password,
-        }),
-      });
-      const secondCookie = secondLoginRes.headers.get("set-cookie") || "";
+      const secondCookie = await signInTestUser();
 
       // Verify both sessions work
       const sessions1 = await fetch(`${BASE_URL}/api/user/sessions`, {
@@ -321,15 +273,7 @@ describe("User Profile API", () => {
 
       // Update password and re-login for other tests
       TEST_USER.password = newPassword;
-      const reloginRes = await fetch(`${BASE_URL}/api/auth/sign-in/email`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          email: TEST_USER.email,
-          password: TEST_USER.password,
-        }),
-      });
-      authCookie = reloginRes.headers.get("set-cookie") || authCookie;
+      authCookie = await signInTestUser();
     });
 
     test("revokes all OAuth tokens on password change", async () => {
@@ -357,15 +301,7 @@ describe("User Profile API", () => {
 
       // Update password and re-login for other tests
       TEST_USER.password = newPassword;
-      const reloginRes = await fetch(`${BASE_URL}/api/auth/sign-in/email`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          email: TEST_USER.email,
-          password: TEST_USER.password,
-        }),
-      });
-      authCookie = reloginRes.headers.get("set-cookie") || authCookie;
+      authCookie = await signInTestUser();
     });
   });
 });

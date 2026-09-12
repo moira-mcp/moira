@@ -20,6 +20,14 @@ describe("MCP Workflow CRUD Tools E2E", () => {
     const mcpClient = await createAuthenticatedMCPClient();
     client = mcpClient.client;
     cleanup = mcpClient.cleanup;
+
+    // Dedicated workflow for the edit_workflow tests so they never depend on create tests' state
+    const created = await callMCPTool(client, "manage", {
+      action: "create",
+      workflow: { ...CRUD_WORKFLOWS.SIMPLE_CREATE },
+    });
+    expect(created).toHaveProperty("success", true);
+    testWorkflowId = created.workflowId;
   });
 
   afterAll(async () => {
@@ -57,7 +65,7 @@ describe("MCP Workflow CRUD Tools E2E", () => {
     expect(result).toHaveProperty("workflowId");
     expect(result).toHaveProperty("validation.valid", true);
 
-    testWorkflowId = result.workflowId;
+    const createdId = result.workflowId;
     const testSlug = result.slug;
 
     // Verify workflow exists - list returns id as "ownerHandle/slug" format
@@ -68,7 +76,7 @@ describe("MCP Workflow CRUD Tools E2E", () => {
     expect(created).toBeDefined();
     expect(created.name).toBe(CRUD_WORKFLOWS.SIMPLE_CREATE.metadata.name);
 
-    createdWorkflows.push(testWorkflowId);
+    createdWorkflows.push(createdId);
   });
 
   test("create_workflow with overwrite replaces existing", async () => {
@@ -125,12 +133,6 @@ describe("MCP Workflow CRUD Tools E2E", () => {
   });
 
   test("edit_workflow updates metadata", async () => {
-    // Use existing test workflow
-    if (!testWorkflowId) {
-      console.warn("No test workflow available, skipping");
-      return;
-    }
-
     const result = await callMCPTool(client, "manage", {
       action: "edit",
       workflowId: testWorkflowId,
@@ -157,11 +159,6 @@ describe("MCP Workflow CRUD Tools E2E", () => {
   });
 
   test("edit_workflow adds nodes", async () => {
-    if (!testWorkflowId) {
-      console.warn("No test workflow available, skipping");
-      return;
-    }
-
     const result = await callMCPTool(client, "manage", {
       action: "edit",
       workflowId: testWorkflowId,
@@ -185,11 +182,6 @@ describe("MCP Workflow CRUD Tools E2E", () => {
   });
 
   test("edit_workflow updates nodes", async () => {
-    if (!testWorkflowId) {
-      console.warn("No test workflow available, skipping");
-      return;
-    }
-
     const result = await callMCPTool(client, "manage", {
       action: "edit",
       workflowId: testWorkflowId,
@@ -221,11 +213,6 @@ describe("MCP Workflow CRUD Tools E2E", () => {
   });
 
   test("edit_workflow removes nodes", async () => {
-    if (!testWorkflowId) {
-      console.warn("No test workflow available, skipping");
-      return;
-    }
-
     const result = await callMCPTool(client, "manage", {
       action: "edit",
       workflowId: testWorkflowId,

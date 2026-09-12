@@ -62,25 +62,11 @@ describe("SubgraphNode Error Handling Scenarios", () => {
 
     const executionId = await executor.startWorkflow(parentWorkflow, undefined, "test-user-123");
 
-    // Execute workflow step - subgraph with invalid child should fail quickly
-    let result;
-    try {
-      result = await executor.executeStep(executionId);
-      expect(result).toBeDefined();
-
-      // If we get here, workflow should have completed with error routing
-      if (typeof result === "string") {
-        expect(result).toContain("Process ID:");
-      }
-    } catch (error) {
-      // Expected: subgraph execution should fail due to invalid child
-      expect(error).toBeDefined();
-      // Child workflow references non-existent node, so execution fails with "not found"
-      expect((error as Error).message).toMatch(/not found|invalid.*node/i);
-
-      // This is expected behavior - subgraph fails immediately when child
-      // has an invalid node reference
-    }
+    // The child references a node that does not exist, so delegation fails immediately
+    // with a thrown error instead of routing to the parent's error connection
+    await expect(executor.executeStep(executionId)).rejects.toThrow(
+      "Node 'invalid-node' not found in workflow",
+    );
   });
 
   test("should validate resource cleanup after delegation failures", async () => {

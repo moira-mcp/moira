@@ -1,184 +1,125 @@
 /**
  * Integration tests for input enhancement functionality
- * Tests the actual MCP server behavior with different input types using proper workflow execution
+ * Tests parseInputData at the execute_step tool boundary against a real (test) database:
+ * JSON strings, objects, primitives, malformed strings and null must all reach schema validation.
  */
 
 import { describe, test, expect, beforeAll, afterAll } from "@jest/globals";
-import { executeStep } from "@mcp-moira/mcp-server";
-import type { MCPEngineClass } from "@mcp-moira/mcp-server";
-import type { InMemoryRepository } from "@mcp-moira/workflow-engine";
+import { readFileSync } from "node:fs";
+import { eq } from "drizzle-orm";
+import { getDatabase, getWorkflowService, user } from "@mcp-moira/shared";
+import { DatabaseRepository, type WorkflowGraph } from "@mcp-moira/workflow-engine";
+import { MCPEngine } from "../../packages/mcp-server/src/core/mcp-engine.js";
+import { runWithMCPContext } from "../../packages/mcp-server/src/core/request-context.js";
+import { executeStep } from "../../packages/mcp-server/src/tools/execute-step.js";
+import { startWorkflow } from "../../packages/mcp-server/src/tools/start-workflow.js";
+
+const TEST_USER_ID = `input-enhancement-${Date.now()}`;
+const FIXTURE_PATH = "./tests/workflows/simple-linear-test.json";
+
+function requiredId(response: string, label: "Process" | "Step attempt"): string {
+  const id = response.match(new RegExp(`${label} ID:\\s*([a-f0-9-]+)`, "i"))?.[1];
+  if (!id) throw new Error(`${label} ID missing from response: ${response}`);
+  return id;
+}
 
 describe("Input Enhancement Integration Tests", () => {
-  let engine: MCPEngineClass;
-  let repository: InMemoryRepository;
-  let processId: string;
+  const repository = new DatabaseRepository();
+  let workflowId: string;
+  const executionIds: string[] = [];
 
   beforeAll(async () => {
-    const setup = await createTestMCPEngine();
-    engine = setup.engine;
-    repository = setup.repository;
+    const now = new Date().toISOString();
+    await getDatabase()
+      .insert(user)
+      .values({
+        id: TEST_USER_ID,
+        email: `${TEST_USER_ID}@test.invalid`,
+        name: "Input Enhancement Test User",
+        handle: TEST_USER_ID,
+        emailVerified: true,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .onConflictDoNothing();
 
-    // Start a proper test workflow for integration testing
-    try {
-      const response = await engine.startWorkflow("simple-linear-test");
-
-      // Extract process ID from formatted string response
-      const processIdMatch = response.match(/Process ID: ([a-f0-9-]+)/);
-      processId = processIdMatch ? processIdMatch[1] : "";
-
-      // Verify we have a valid process ID
-      expect(processId).toBeDefined();
-      expect(typeof processId).toBe("string");
-      expect(processId.length).toBeGreaterThan(0);
-
-      console.log("Integration test setup successful, processId:", processId.slice(0, 8));
-      console.log("Workflow start response:", response);
-
-      // Check process state immediately after start
-      const state = await engine.getProcessState(processId);
-      console.log("Process state after start:", JSON.stringify(state, null, 2));
-    } catch (error) {
-      // If workflow not found, skip integration tests
-      console.warn("Test workflow not available, skipping integration tests:", error);
-      processId = ""; // Mark as invalid for conditional test execution
-    }
+    const graph = JSON.parse(readFileSync(FIXTURE_PATH, "utf-8")) as WorkflowGraph;
+    const saved = await getWorkflowService().save({
+      graph,
+      userId: TEST_USER_ID,
+      visibility: "private",
+    });
+    workflowId = saved.id;
+    MCPEngine.getInstance(repository);
   });
 
   afterAll(async () => {
-    // Cleanup test storage if needed
-    // Note: Not cleaning up as it might be used by other tests
+    for (const executionId of executionIds) {
+      await repository.deleteExecution(executionId);
+    }
+    await repository.deleteWorkflow(workflowId, TEST_USER_ID);
+    await getDatabase().delete(user).where(eq(user.id, TEST_USER_ID));
+    MCPEngine.resetInstance();
   });
 
-  test("integration: handles string input via execute_step", async () => {
-    // Skip if no valid workflow process available
-    if (!processId) {
-      console.warn("Skipping integration test - no valid workflow process");
-      return;
-    }
+  /** Start a fresh execution paused at step1 (requires { name }) and return its ids */
+  async function startAtStep1(): Promise<{ processId: string; attemptId: string }> {
+    const started = await runWithMCPContext({ userId: TEST_USER_ID }, () =>
+      startWorkflow({ workflowId, parentExecutionId: "none" }),
+    );
+    expect(started.success).toBe(true);
+    const processId = requiredId(String(started.data), "Process");
+    executionIds.push(processId);
+    return { processId, attemptId: requiredId(String(started.data), "Step attempt") };
+  }
 
-    // Test input parsing directly through the same engine that created the process
-    try {
-      const result = await engine.executeStep(processId, {
-        name: "Integration Test User",
-        action: "process",
-      });
+  function step(processId: string, attemptId: string, input: unknown) {
+    return runWithMCPContext({ userId: TEST_USER_ID }, () =>
+      executeStep({ processId, attemptId, input }),
+    );
+  }
 
-      console.log("Direct engine executeStep result:", JSON.stringify(result, null, 2));
+  test("parses a JSON string input and advances the workflow", async () => {
+    const { processId, attemptId } = await startAtStep1();
 
-      expect(result).toBeDefined();
-      expect(typeof result).toBe("string");
-      expect(result).toContain("Your next task:");
-    } catch (error) {
-      console.error("Direct engine execute failed:", error);
-      throw error;
-    }
-
-    // Also test parseInputData logic through tools/execute-step
-    const toolResult = await executeStep({
-      processId: processId,
-      input: '{"name": "Integration Test User", "action": "process"}',
-      repository: repository,
-    });
-
-    console.log("Tool executeStep result:", JSON.stringify(toolResult, null, 2));
-
-    // ✅ INTEGRATION TEST SUCCESSFUL:
-    // Direct engine execution worked - input parsing correctly processed object data
-    // Workflow advanced from step1 to step2, proving input integration works
-
-    // Note: Tool layer uses different storage context (expected behavior)
-    // The core input parsing functionality is validated via direct engine test
-  });
-
-  // Conditional tests that skip if no valid workflow process
-  const conditionalTest = (name: string, testFn: () => Promise<void>) => {
-    test(name, async () => {
-      if (!processId) {
-        console.warn(`Skipping ${name} - no valid workflow process`);
-        return;
-      }
-
-      // These tests verify that parseInputData is called, but execution may fail
-      // due to different storage context. The main validation is the direct engine test above.
-      try {
-        await testFn();
-      } catch (error) {
-        console.warn(`${name} - parsing logic executed successfully, execution context differs`);
-        // This is expected behavior - the important part is that parseInputData was called
-      }
-    });
-  };
-
-  conditionalTest("integration: handles object input via execute_step", async () => {
-    const result = await executeStep({
-      processId: processId,
-      input: {
-        user: "Direct Object User",
-        action: "analyze",
-      },
-      repository: repository,
-    });
-
-    // Test that parseInputData is called - if we get here, parsing worked
-    // Execution may fail due to storage context, but that's expected
-    if (!result.success) {
-      expect(result.error).toContain("not found"); // parseInputData was called
-      return;
-    }
+    const result = await step(processId, attemptId, '{"name": "Integration Test User"}');
 
     expect(result.success).toBe(true);
-    expect(result.data).toBeDefined();
-    expect(typeof result.data).toBe("string");
+    expect(result.data).toContain("Your next task: ВТОРОЙ ШАГ");
+    await expect(repository.getExecution(processId)).resolves.toMatchObject({
+      currentNodeId: "step2",
+    });
   });
 
-  conditionalTest(
-    "integration: validates parseInputData is called for all input types",
-    async () => {
-      // Test nested object structure
-      const nestedResult = await executeStep({
-        processId: processId,
-        input: { data: { user: "Test User" } },
-        repository: repository,
-      });
-      expect(nestedResult.error).toContain("not found"); // parseInputData was called
+  test("accepts a direct object input and advances the workflow", async () => {
+    const { processId, attemptId } = await startAtStep1();
 
-      // Test primitive
-      const primitiveResult = await executeStep({
-        processId: processId,
-        input: 42,
-        repository: repository,
-      });
-      expect(primitiveResult.error).toContain("not found"); // parseInputData was called
+    const result = await step(processId, attemptId, { name: "Direct Object User" });
 
-      // Test malformed JSON
-      const malformedResult = await executeStep({
-        processId: processId,
-        input: "invalid { json",
-        repository: repository,
-      });
-      expect(malformedResult.error).toContain("not found"); // parseInputData was called
+    expect(result.success).toBe(true);
+    expect(result.data).toContain("Your next task: ВТОРОЙ ШАГ");
+    await expect(repository.getExecution(processId)).resolves.toMatchObject({
+      currentNodeId: "step2",
+    });
+  });
 
-      // Test null/empty
-      const nullResult = await executeStep({
-        processId: processId,
-        input: null,
-        repository: repository,
-      });
-      expect(nullResult.error).toContain("not found"); // parseInputData was called
+  test.each<[string, unknown]>([
+    ["nested object without the required field", { data: { user: "Test User" } }],
+    ["primitive number", 42],
+    ["malformed JSON string", "invalid { json"],
+    ["null", null],
+  ])("rejects %s against the step schema and keeps the execution paused", async (_label, input) => {
+    const { processId, attemptId } = await startAtStep1();
 
-      // Test complex JSON
-      const complexInput = JSON.stringify({
-        user: { name: "Complex User" },
-        data: [1, 2, 3],
-      });
-      const complexResult = await executeStep({
-        processId: processId,
-        input: complexInput,
-        repository: repository,
-      });
-      expect(complexResult.error).toContain("not found"); // parseInputData was called
+    const result = await step(processId, attemptId, input);
 
-      // All tests reaching this point prove parseInputData processes all input types
-    },
-  );
+    // parseInputData normalised the value into an object that lacks `name`; schema validation
+    // answers with feedback (success stays true) and the execution remains on step1
+    expect(result.success).toBe(true);
+    expect(result.data).toMatch(/name/);
+    expect(result.data).not.toContain("ВТОРОЙ ШАГ");
+    await expect(repository.getExecution(processId)).resolves.toMatchObject({
+      currentNodeId: "step1",
+    });
+  });
 });

@@ -14,14 +14,19 @@
 
 import { describe, test, expect, beforeAll, afterAll } from "@jest/globals";
 import fetch from "node-fetch";
-import { getTestBaseUrl, getAdminCredentials } from "../utils/test-config.js";
+import { getTestBaseUrl } from "../utils/test-config.js";
+import {
+  createTestUserViaApi,
+  formatSessionCookie,
+  getAdminSessionCookie,
+  signInUser,
+} from "../utils/mcp-auth.js";
 
 const BASE_URL = getTestBaseUrl();
-const ADMIN_CREDENTIALS = getAdminCredentials();
 
 // Second user credentials for invite acceptance tests
 const SECOND_USER_CREDENTIALS = {
-  email: "test-user-2@example.com",
+  email: `workflow-sharing-user-2-${Date.now()}@example.com`,
   password: "test-password-123",
 };
 
@@ -33,38 +38,19 @@ describe("Workflow Sharing API", () => {
   const createdInvites: { workflowId: string; inviteId: string }[] = [];
 
   beforeAll(async () => {
-    // Sign in as admin
-    const signinResponse = await fetch(`${BASE_URL}/api/auth/sign-in/email`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(ADMIN_CREDENTIALS),
-    });
+    authCookie = formatSessionCookie(BASE_URL, await getAdminSessionCookie(BASE_URL));
 
-    const cookies = signinResponse.headers.get("set-cookie");
-    if (!cookies) {
-      throw new Error("No session cookie received from sign-in");
-    }
-    authCookie = cookies;
-
-    // Try to sign in as second user, or create if doesn't exist
-    try {
-      const secondSignin = await fetch(`${BASE_URL}/api/auth/sign-in/email`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(SECOND_USER_CREDENTIALS),
-      });
-
-      if (secondSignin.status === 200) {
-        secondUserCookie = secondSignin.headers.get("set-cookie") || "";
-        const profile = await fetch(`${BASE_URL}/api/user/profile`, {
-          headers: { Cookie: secondUserCookie },
-        });
-        const profileData = (await profile.json()) as { data: { id: string } };
-        secondUserId = profileData.data.id;
-      }
-    } catch {
-      // Second user might not exist - some tests will be skipped
-    }
+    const secondUser = await createTestUserViaApi(
+      BASE_URL,
+      SECOND_USER_CREDENTIALS.email,
+      SECOND_USER_CREDENTIALS.password,
+      "Workflow Sharing User 2",
+    );
+    secondUserId = secondUser.userId;
+    secondUserCookie = formatSessionCookie(
+      BASE_URL,
+      await signInUser(BASE_URL, SECOND_USER_CREDENTIALS.email, SECOND_USER_CREDENTIALS.password),
+    );
   });
 
   afterAll(async () => {
@@ -481,8 +467,7 @@ describe("Workflow Sharing API", () => {
       expect(result.error.code).toBe("SELF_INVITE");
     });
 
-    // This test requires a second user
-    (secondUserCookie ? test : test.skip)("accepts invite as different user", async () => {
+    test("accepts invite as different user", async () => {
       const workflowId = await createWorkflow();
 
       // Create invite
@@ -523,8 +508,7 @@ describe("Workflow Sharing API", () => {
       expect(result.data.workflowId).toBe(workflowId);
     });
 
-    // This test requires a second user
-    (secondUserCookie ? test : test.skip)("prevents double acceptance", async () => {
+    test("prevents double acceptance", async () => {
       const workflowId = await createWorkflow();
 
       // Create two invites
@@ -636,8 +620,7 @@ describe("Workflow Sharing API", () => {
       expect(response.status).toBe(404);
     });
 
-    // This test requires a second user with access
-    (secondUserCookie && secondUserId ? test : test.skip)("revokes user access", async () => {
+    test("revokes user access", async () => {
       const workflowId = await createWorkflow();
 
       // Create and accept invite

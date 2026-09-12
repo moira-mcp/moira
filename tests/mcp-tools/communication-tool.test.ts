@@ -4,8 +4,10 @@ import {
   callMCPTool,
   createAuthenticatedMCPClient,
   createTestUserViaApi,
+  signInUser,
+  formatSessionCookie,
 } from "../utils/mcp-auth.js";
-import { getTestFetchUrl, getTestRequestOrigin } from "../utils/test-config.js";
+import { getTestFetchUrl } from "../utils/test-config.js";
 import { execSqliteInDocker } from "../utils/docker-command.js";
 
 const baseUrl = getTestFetchUrl();
@@ -37,21 +39,13 @@ describe("MCP communication tool", () => {
       await createTestUserViaApi(baseUrl, user.email, password, user.name);
       clients.push(await createAuthenticatedMCPClient({ email: user.email, password }));
     }
-    const signIn = await fetch(`${baseUrl}/api/auth/sign-in/email`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Origin: getTestRequestOrigin() },
-      body: JSON.stringify({ email: users[0].email, password }),
-    });
-    const session = signIn.headers
-      .get("set-cookie")
-      ?.match(/(?:__Secure-)?better-auth\.session_token=([^;]+)/)?.[1];
-    if (!session) throw new Error("Persistent-token test sign-in failed");
-    const cookieName = baseUrl.startsWith("https://")
-      ? "__Secure-better-auth.session_token"
-      : "better-auth.session_token";
+    const session = await signInUser(baseUrl, users[0].email, password);
     const tokenResponse = await fetch(`${baseUrl}/api/tokens`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", Cookie: `${cookieName}=${session}` },
+      headers: {
+        "Content-Type": "application/json",
+        Cookie: formatSessionCookie(baseUrl, session),
+      },
       body: JSON.stringify({ name: "communication-upload", expiresIn: "30d" }),
     });
     const tokenResponseText = await tokenResponse.text();

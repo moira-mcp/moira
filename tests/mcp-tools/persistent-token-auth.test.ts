@@ -10,27 +10,27 @@ import { describe, test, expect, beforeAll, afterAll } from "@jest/globals";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { MCP_TOOLS_REVISION } from "@mcp-moira/mcp-server/tool-contract";
-import { createAuthenticatedMCPClient, callMCPTool, verifyUserEmail } from "../utils/mcp-auth.js";
 import {
-  getTestFetchUrl,
-  getTestRequestOrigin,
-  getAdminCredentials,
-} from "../utils/test-config.js";
+  blockUserViaApi,
+  callMCPTool,
+  createAuthenticatedMCPClient,
+  createTestUserViaApi,
+  signInUser,
+  unblockUserViaApi,
+  formatSessionCookie,
+} from "../utils/mcp-auth.js";
+import { getTestFetchUrl } from "../utils/test-config.js";
 import { execSqliteInDocker } from "../utils/docker-command.js";
 
 const FETCH_URL = getTestFetchUrl();
-const ADMIN_CREDENTIALS = getAdminCredentials();
 
 const TEST_USER = {
   email: `mcp-pat-test-${Date.now()}@example.com`,
   password: "TestPass123!",
   name: "MCP PAT Test User",
-  acceptedTermsAt: new Date().toISOString(),
-  acceptedNotRussianResidentAt: new Date().toISOString(),
 };
 
 let userCookie: string;
-let adminCookie: string;
 let testUserId: string;
 
 const initializeBody = (id: number) => ({
@@ -44,20 +44,9 @@ const initializeBody = (id: number) => ({
   },
 });
 
-/** Sign in and return session cookie */
+/** Sign in through the shared helper and return a ready-to-send Cookie header value */
 async function signIn(email: string, password: string): Promise<string> {
-  const res = await fetch(`${FETCH_URL}/api/auth/sign-in/email`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Origin: getTestRequestOrigin() },
-    body: JSON.stringify({ email, password }),
-  });
-  const cookies = res.headers.get("set-cookie");
-  const match = cookies?.match(/(?:__Secure-)?better-auth\.session_token=([^;]+)/);
-  if (!match) throw new Error("Failed to sign in");
-  const cookieName = FETCH_URL.startsWith("https://")
-    ? "__Secure-better-auth.session_token"
-    : "better-auth.session_token";
-  return `${cookieName}=${match[1]}`;
+  return formatSessionCookie(FETCH_URL, await signInUser(FETCH_URL, email, password));
 }
 
 /** Create a persistent API token via REST API */
@@ -83,24 +72,6 @@ async function revokeToken(cookie: string, tokenId: string): Promise<void> {
     headers: { Cookie: cookie },
   });
   if (!res.ok) throw new Error(`Revoke failed: ${res.status}`);
-}
-
-/** Block user via admin API */
-async function blockUser(userId: string): Promise<void> {
-  const res = await fetch(`${FETCH_URL}/api/admin/users/${userId}/block`, {
-    method: "POST",
-    headers: { Cookie: adminCookie },
-  });
-  if (!res.ok) throw new Error(`Block failed: ${res.status}`);
-}
-
-/** Unblock user via admin API */
-async function unblockUser(userId: string): Promise<void> {
-  const res = await fetch(`${FETCH_URL}/api/admin/users/${userId}/unblock`, {
-    method: "POST",
-    headers: { Cookie: adminCookie },
-  });
-  if (!res.ok) throw new Error(`Unblock failed: ${res.status}`);
 }
 
 /** Make raw MCP JSON-RPC request with a Bearer token */
@@ -147,34 +118,10 @@ async function createPersistentTokenMCPClient(token: string): Promise<{
 
 describe("MCP Persistent Token Authentication", () => {
   beforeAll(async () => {
-    // Create test user
-    const signUpRes = await fetch(`${FETCH_URL}/api/auth/sign-up/email`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Origin: getTestRequestOrigin() },
-      body: JSON.stringify(TEST_USER),
-    });
-    const signUpData = (await signUpRes.json()) as { user?: { id: string } };
-    if (!signUpData?.user) throw new Error("Failed to create test user");
-    testUserId = signUpData.user.id;
-
-    // Sign in as admin for deployment-mode admission and block/unblock operations.
-    adminCookie = await signIn(ADMIN_CREDENTIALS.email, ADMIN_CREDENTIALS.password);
-
-    // Verify email via admin helper
-    await verifyUserEmail(FETCH_URL, TEST_USER.email);
-
-    const featuresResponse = await fetch(`${FETCH_URL}/api/features`);
-    expect(featuresResponse.status).toBe(200);
-    const features = (await featuresResponse.json()) as {
-      data: { features: { accountApproval: boolean } };
-    };
-    if (features.data.features.accountApproval) {
-      const approvalResponse = await fetch(`${FETCH_URL}/api/admin/users/${testUserId}/approve`, {
-        method: "POST",
-        headers: { Cookie: adminCookie },
-      });
-      expect(approvalResponse.status).toBe(200);
-    }
+    // Shared helper signs up, verifies email and (in approval mode) approves the user
+    testUserId = (
+      await createTestUserViaApi(FETCH_URL, TEST_USER.email, TEST_USER.password, TEST_USER.name)
+    ).userId;
 
     // Sign in as test user
     userCookie = await signIn(TEST_USER.email, TEST_USER.password);
@@ -183,7 +130,7 @@ describe("MCP Persistent Token Authentication", () => {
   afterAll(async () => {
     // Ensure user is unblocked for cleanup
     try {
-      await unblockUser(testUserId);
+      await unblockUserViaApi(FETCH_URL, testUserId);
     } catch {
       /* ignore */
     }
@@ -262,7 +209,7 @@ describe("MCP Persistent Token Authentication", () => {
     const { token } = await createToken(userCookie, "blocked-user-test");
 
     // Block the user
-    await blockUser(testUserId);
+    await blockUserViaApi(FETCH_URL, testUserId);
 
     try {
       const { status, body } = await mcpRequest(token, initializeBody(1));
@@ -271,7 +218,7 @@ describe("MCP Persistent Token Authentication", () => {
       expect(body).toHaveProperty("error", "access_denied");
     } finally {
       // Unblock and re-sign in (block/unblock may invalidate session)
-      await unblockUser(testUserId);
+      await unblockUserViaApi(FETCH_URL, testUserId);
       userCookie = await signIn(TEST_USER.email, TEST_USER.password);
     }
   });

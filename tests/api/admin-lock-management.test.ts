@@ -2,123 +2,108 @@
  * Admin Lock Management API Tests
  * Tests admin endpoints for viewing and managing execution locks
  *
+ * The execution under test is started through MCP and paused at an agent step, then locked
+ * through the owner's `POST /api/executions/:id/lock` (a lock node would need Telegram delivery,
+ * which the test container does not have).
+ *
  * IMPORTANT: Tests run against Docker by default (localhost:DOCKER_PORT from .env)
  */
 
 import { describe, test, expect, beforeAll, afterAll } from "@jest/globals";
-import { getTestBaseUrl, getAdminCredentials } from "../utils/test-config.js";
+import { getTestBaseUrl } from "../utils/test-config.js";
+import {
+  callMCPTool,
+  createAuthenticatedMCPClient,
+  formatSessionCookie,
+  getAdminSessionCookie,
+  requireMCPResponseId,
+  startWorkflowExecution,
+} from "../utils/mcp-auth.js";
 
 const BASE_URL = getTestBaseUrl();
-const ADMIN_CREDENTIALS = getAdminCredentials();
 
 let adminCookie: string;
+let cleanupMcp: () => Promise<void>;
 let testWorkflowId: string;
+/** Admin-owned execution paused at "wait" with one active human lock. */
 let testExecutionId: string;
 let testLockId: string;
+let lockActive = false;
 
 /**
- * Build a workflow with a lock node for testing admin lock management.
+ * Build a workflow that pauses at an agent step so a lock can be placed on it.
  */
 function buildLockTestWorkflow() {
   return {
     metadata: {
-      name: "Admin Lock Test",
+      name: `Admin Lock Test ${Date.now()}`,
       version: "1.0.0",
       description: "Workflow for testing admin lock management API",
     },
     nodes: [
+      { type: "start", id: "start", connections: { default: "wait" } },
       {
-        type: "start",
-        id: "start",
-        connections: { default: "lock-gate" },
+        type: "agent-directive",
+        id: "wait",
+        directive: "Wait for the admin lock test.",
+        completionCondition: "The lock is resolved.",
+        connections: { success: "end" },
       },
-      {
-        type: "lock",
-        id: "lock-gate",
-        reason: "Admin lock test gate",
-        expirationMs: 600000, // 10 min so it doesn't expire during test
-        connections: {
-          unlocked: "end-success",
-          rejected: "end-rejected",
-          expired: "end-expired",
-        },
-      },
-      {
-        type: "end",
-        id: "end-success",
-        finalOutput: ["lockResolution"],
-      },
-      {
-        type: "end",
-        id: "end-rejected",
-        finalOutput: ["lockResolution"],
-      },
-      {
-        type: "end",
-        id: "end-expired",
-        finalOutput: ["lockResolution"],
-      },
+      { type: "end", id: "end" },
     ],
   };
 }
 
 describe("Admin Lock Management API", () => {
   beforeAll(async () => {
-    // Login as admin
-    const adminLoginRes = await fetch(`${BASE_URL}/api/auth/sign-in/email`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(ADMIN_CREDENTIALS),
+    adminCookie = formatSessionCookie(BASE_URL, await getAdminSessionCookie(BASE_URL));
+
+    const mcp = await createAuthenticatedMCPClient();
+    cleanupMcp = mcp.cleanup;
+    const created = await callMCPTool(mcp.client, "manage", {
+      action: "create",
+      workflow: buildLockTestWorkflow(),
     });
-    expect(adminLoginRes.ok).toBe(true);
-    adminCookie = adminLoginRes.headers.get("set-cookie") || "";
-    expect(adminCookie).toBeTruthy();
+    testWorkflowId = created.workflowId;
+    const started = await startWorkflowExecution(mcp.client, testWorkflowId);
+    testExecutionId = requireMCPResponseId(started, "Process");
 
-    // Create a test workflow via admin API / MCP manage
-    const createRes = await fetch(`${BASE_URL}/api/workflows`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Cookie: adminCookie },
-      body: JSON.stringify(buildLockTestWorkflow()),
-    });
-
-    if (createRes.ok) {
-      const createData = (await createRes.json()) as any;
-      testWorkflowId = createData.data?.id || createData.id;
-    }
-
-    // If direct API doesn't work, try via MCP to create and start workflow
-    // We need to start an execution that hits the lock node
-    if (!testWorkflowId) {
-      // Skip test suite if we can't create workflow
-      return;
-    }
-
-    // Start execution via internal API
-    const startRes = await fetch(`${BASE_URL}/api/workflows/${testWorkflowId}/execute`, {
+    const lockRes = await fetch(`${BASE_URL}/api/executions/${testExecutionId}/lock`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Cookie: adminCookie },
-      body: JSON.stringify({}),
+      body: JSON.stringify({ reason: "Admin lock test gate" }),
     });
-
-    if (startRes.ok) {
-      const startData = (await startRes.json()) as any;
-      testExecutionId = startData.data?.executionId || startData.executionId;
+    if (!lockRes.ok) {
+      throw new Error(`Failed to lock test execution: ${lockRes.status} ${await lockRes.text()}`);
     }
+    const lockData = (await lockRes.json()) as { data: { lockId: string } };
+    testLockId = lockData.data.lockId;
+    lockActive = true;
   });
 
   afterAll(async () => {
-    // Cleanup: delete test workflow if created
-    if (testWorkflowId) {
-      await fetch(`${BASE_URL}/api/workflows/${testWorkflowId}`, {
-        method: "DELETE",
-        headers: { Cookie: adminCookie },
-      });
+    if (lockActive) {
+      const unlockRes = await fetch(
+        `${BASE_URL}/api/executions/${testExecutionId}/locks/${testLockId}/unlock`,
+        { method: "POST", headers: { Cookie: adminCookie } },
+      );
+      if (!unlockRes.ok) {
+        throw new Error(`Failed to clean test lock: ${unlockRes.status}`);
+      }
     }
+    const deleteRes = await fetch(`${BASE_URL}/api/workflows/${testWorkflowId}`, {
+      method: "DELETE",
+      headers: { Cookie: adminCookie },
+    });
+    if (!deleteRes.ok && deleteRes.status !== 404) {
+      throw new Error(`Failed to clean test workflow: ${deleteRes.status}`);
+    }
+    await cleanupMcp();
   });
 
   describe("GET /api/admin/executions - hasActiveLock field", () => {
     test("admin execution list includes hasActiveLock field", async () => {
-      const res = await fetch(`${BASE_URL}/api/admin/executions?limit=5`, {
+      const res = await fetch(`${BASE_URL}/api/admin/executions?status=locked&limit=100`, {
         headers: { Cookie: adminCookie },
       });
 
@@ -132,52 +117,44 @@ describe("Admin Lock Management API", () => {
       for (const exec of data.data.executions) {
         expect(typeof exec.hasActiveLock).toBe("boolean");
       }
+
+      // The locked test execution is reported as locked
+      const locked = data.data.executions.find((e: any) => e.executionId === testExecutionId);
+      expect(locked).toMatchObject({ status: "locked", hasActiveLock: true });
     });
   });
 
   describe("GET /api/admin/executions/:id - activeLock field", () => {
     test("admin execution detail includes activeLock field", async () => {
-      // Get first execution for testing
-      const listRes = await fetch(`${BASE_URL}/api/admin/executions?limit=1`, {
-        headers: { Cookie: adminCookie },
-      });
-      const listData = (await listRes.json()) as any;
-      const execId = listData.data?.executions?.[0]?.executionId;
-
-      if (!execId) return; // Skip if no executions
-
-      const res = await fetch(`${BASE_URL}/api/admin/executions/${execId}`, {
+      const res = await fetch(`${BASE_URL}/api/admin/executions/${testExecutionId}`, {
         headers: { Cookie: adminCookie },
       });
 
       expect(res.ok).toBe(true);
       const data = (await res.json()) as any;
       expect(data.success).toBe(true);
-      // activeLock can be null or an object
-      expect("activeLock" in data.data).toBe(true);
+      expect(data.data.activeLock).toMatchObject({
+        id: testLockId,
+        nodeId: "wait",
+        reason: "Admin lock test gate",
+        status: "active",
+      });
     });
   });
 
   describe("GET /api/admin/executions/:id/locks", () => {
     test("returns lock list for execution", async () => {
-      // Get first execution
-      const listRes = await fetch(`${BASE_URL}/api/admin/executions?limit=1`, {
-        headers: { Cookie: adminCookie },
-      });
-      const listData = (await listRes.json()) as any;
-      const execId = listData.data?.executions?.[0]?.executionId;
-
-      if (!execId) return;
-
-      const res = await fetch(`${BASE_URL}/api/admin/executions/${execId}/locks`, {
+      const res = await fetch(`${BASE_URL}/api/admin/executions/${testExecutionId}/locks`, {
         headers: { Cookie: adminCookie },
       });
 
       expect(res.ok).toBe(true);
       const data = (await res.json()) as any;
       expect(data.success).toBe(true);
-      expect(Array.isArray(data.data.locks)).toBe(true);
-      expect(typeof data.data.total).toBe("number");
+      expect(data.data.total).toBe(1);
+      expect(data.data.locks).toEqual([
+        expect.objectContaining({ id: testLockId, nodeId: "wait", status: "active" }),
+      ]);
     });
 
     test("returns 404 for non-existent execution", async () => {
@@ -188,9 +165,7 @@ describe("Admin Lock Management API", () => {
         },
       );
 
-      // Should still return 200 with empty locks (execution may not exist but that's fine)
-      // or 404 depending on implementation
-      expect([200, 404]).toContain(res.status);
+      expect(res.status).toBe(404);
     });
 
     test("requires admin authentication", async () => {
@@ -200,14 +175,22 @@ describe("Admin Lock Management API", () => {
   });
 
   describe("POST /api/admin/executions/:id/locks/:lockId/unlock", () => {
-    test("returns 404 for non-existent lock", async () => {
+    test("returns 404 for non-existent execution", async () => {
       const res = await fetch(`${BASE_URL}/api/admin/executions/fake-exec/locks/fake-lock/unlock`, {
         method: "POST",
         headers: { Cookie: adminCookie },
       });
 
-      // Should return 404 (lock not found) or 400
-      expect([400, 404]).toContain(res.status);
+      expect(res.status).toBe(404);
+    });
+
+    test("returns 404 for non-existent lock on an existing execution", async () => {
+      const res = await fetch(
+        `${BASE_URL}/api/admin/executions/${testExecutionId}/locks/fake-lock/unlock`,
+        { method: "POST", headers: { Cookie: adminCookie } },
+      );
+
+      expect(res.status).toBe(404);
     });
 
     test("requires admin authentication", async () => {
@@ -215,6 +198,25 @@ describe("Admin Lock Management API", () => {
         method: "POST",
       });
       expect(res.status).toBe(401);
+    });
+
+    test("admin override unlocks the active lock once", async () => {
+      const res = await fetch(
+        `${BASE_URL}/api/admin/executions/${testExecutionId}/locks/${testLockId}/unlock`,
+        { method: "POST", headers: { Cookie: adminCookie } },
+      );
+
+      expect(res.status).toBe(200);
+      const data = (await res.json()) as any;
+      expect(data.data).toEqual({ lockId: testLockId, status: "unlocked", adminOverride: true });
+      lockActive = false;
+
+      // A second override on the same lock is refused: it is no longer active
+      const again = await fetch(
+        `${BASE_URL}/api/admin/executions/${testExecutionId}/locks/${testLockId}/unlock`,
+        { method: "POST", headers: { Cookie: adminCookie } },
+      );
+      expect(again.status).toBe(400);
     });
   });
 });

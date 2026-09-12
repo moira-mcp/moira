@@ -7,71 +7,29 @@
  */
 
 import { describe, test, expect, beforeAll } from "@jest/globals";
-import { getTestBaseUrl, getAdminCredentials } from "../utils/test-config.js";
+import { getTestBaseUrl } from "../utils/test-config.js";
+import { createTestUserViaApi, formatSessionCookie, signInUser } from "../utils/mcp-auth.js";
 
 const BASE_URL = getTestBaseUrl();
-const ADMIN_CREDENTIALS = getAdminCredentials();
 const TEST_USER = {
   email: `oauth-test-${Date.now()}@example.com`,
   password: "OAuthTest123!",
   name: "OAuth Test User",
-  acceptedTermsAt: new Date().toISOString(),
-  acceptedNotRussianResidentAt: new Date().toISOString(),
 };
 
 let authCookie: string;
-let testUserId: string;
-let secondSessionCookie: string;
 
 beforeAll(async () => {
-  // Create test user
-  const signUpRes = await fetch(`${BASE_URL}/api/auth/sign-up/email`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(TEST_USER),
-  });
-  const signUpData = (await signUpRes.json()) as any;
-  testUserId = signUpData.user.id;
+  await createTestUserViaApi(BASE_URL, TEST_USER.email, TEST_USER.password, TEST_USER.name);
 
-  // Login as admin to verify email
-  const adminLoginRes = await fetch(`${BASE_URL}/api/auth/sign-in/email`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(ADMIN_CREDENTIALS),
-  });
-  const adminCookies = adminLoginRes.headers.get("set-cookie");
+  // First session is the one the tests act as
+  authCookie = formatSessionCookie(
+    BASE_URL,
+    await signInUser(BASE_URL, TEST_USER.email, TEST_USER.password),
+  );
 
-  // Verify test user email
-  await fetch(`${BASE_URL}/api/admin/users/${testUserId}/verify-email`, {
-    method: "POST",
-    headers: { Cookie: adminCookies || "" },
-  });
-
-  // Login as test user (first session)
-  const loginRes = await fetch(`${BASE_URL}/api/auth/sign-in/email`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      email: TEST_USER.email,
-      password: TEST_USER.password,
-    }),
-  });
-
-  const cookies = loginRes.headers.get("set-cookie");
-  authCookie = cookies || "";
-
-  // Create second session for testing session revoke
-  const loginRes2 = await fetch(`${BASE_URL}/api/auth/sign-in/email`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      email: TEST_USER.email,
-      password: TEST_USER.password,
-    }),
-  });
-
-  const cookies2 = loginRes2.headers.get("set-cookie");
-  secondSessionCookie = cookies2 || "";
+  // Second session exists only to be revoked by the session-revoke test
+  await signInUser(BASE_URL, TEST_USER.email, TEST_USER.password);
 });
 
 describe("User OAuth Consents API", () => {
@@ -209,12 +167,7 @@ describe("User Sessions API", () => {
 
       // Find non-current session (we created second session in beforeAll)
       const nonCurrentSession = getData.data.find((s: any) => s.isCurrent === false);
-
-      if (!nonCurrentSession) {
-        // If no non-current session found, skip this test
-        console.log("No non-current session found, skipping revoke test");
-        return;
-      }
+      expect(nonCurrentSession).toBeDefined();
 
       // Revoke non-current session
       const res = await fetch(`${BASE_URL}/api/user/sessions/${nonCurrentSession.id}`, {
@@ -250,49 +203,18 @@ describe("User Sessions API", () => {
     });
 
     test("prevents revoking another user session", async () => {
-      // Create another user
-      const otherUser = {
-        email: `other-oauth-test-${Date.now()}@example.com`,
-        password: "OtherTest123!",
-        name: "Other Test User",
-        acceptedTermsAt: new Date().toISOString(),
-        acceptedNotRussianResidentAt: new Date().toISOString(),
-      };
-
-      const signUpRes = await fetch(`${BASE_URL}/api/auth/sign-up/email`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(otherUser),
-      });
-      const signUpData = (await signUpRes.json()) as any;
-
-      // Login as admin to verify
-      const adminLoginRes = await fetch(`${BASE_URL}/api/auth/sign-in/email`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(ADMIN_CREDENTIALS),
-      });
-      const adminCookies = adminLoginRes.headers.get("set-cookie");
-
-      await fetch(`${BASE_URL}/api/admin/users/${signUpData.user.id}/verify-email`, {
-        method: "POST",
-        headers: { Cookie: adminCookies || "" },
-      });
-
-      // Login as other user
-      const otherLoginRes = await fetch(`${BASE_URL}/api/auth/sign-in/email`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          email: otherUser.email,
-          password: otherUser.password,
-        }),
-      });
-      const otherCookies = otherLoginRes.headers.get("set-cookie");
+      // Create another user with its own session
+      const otherEmail = `other-oauth-test-${Date.now()}@example.com`;
+      const otherPassword = "OtherTest123!";
+      await createTestUserViaApi(BASE_URL, otherEmail, otherPassword, "Other Test User");
+      const otherCookie = formatSessionCookie(
+        BASE_URL,
+        await signInUser(BASE_URL, otherEmail, otherPassword),
+      );
 
       // Get other user's session
       const getRes = await fetch(`${BASE_URL}/api/user/sessions`, {
-        headers: { Cookie: otherCookies || "" },
+        headers: { Cookie: otherCookie },
       });
       const getData = (await getRes.json()) as any;
       const otherUserSessionId = getData.data[0].id;

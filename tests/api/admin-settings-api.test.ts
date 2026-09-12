@@ -6,23 +6,21 @@
  */
 
 import { describe, test, expect, beforeAll } from "@jest/globals";
-import { getTestBaseUrl, getAdminCredentials } from "../utils/test-config.js";
+import { getTestBaseUrl } from "../utils/test-config.js";
+import {
+  createTestUserViaApi,
+  formatSessionCookie,
+  getAdminSessionCookie,
+  signInUser,
+} from "../utils/mcp-auth.js";
 
 const BASE_URL = getTestBaseUrl();
-const ADMIN_CREDENTIALS = getAdminCredentials();
 
 let adminCookie: string;
 
 describe("Admin Settings API", () => {
   beforeAll(async () => {
-    // Login as admin
-    const adminLoginRes = await fetch(`${BASE_URL}/api/auth/sign-in/email`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(ADMIN_CREDENTIALS),
-    });
-    const adminCookies = adminLoginRes.headers.get("set-cookie");
-    adminCookie = adminCookies || "";
+    adminCookie = formatSessionCookie(BASE_URL, await getAdminSessionCookie(BASE_URL));
   });
 
   describe("Extension communication trust approval", () => {
@@ -30,29 +28,13 @@ describe("Admin Settings API", () => {
     let regularUserCookie: string;
 
     beforeAll(async () => {
-      const credentials = {
-        email: `channel-approval-${Date.now()}@example.com`,
-        password: "ChannelApproval123!",
-        name: "Channel Approval User",
-        acceptedTermsAt: new Date().toISOString(),
-        acceptedNotRussianResidentAt: new Date().toISOString(),
-      };
-      const signup = await fetch(`${BASE_URL}/api/auth/sign-up/email`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(credentials),
-      });
-      const body = (await signup.json()) as { user: { id: string } };
-      await fetch(`${BASE_URL}/api/admin/users/${body.user.id}/verify-email`, {
-        method: "POST",
-        headers: { Cookie: adminCookie },
-      });
-      const login = await fetch(`${BASE_URL}/api/auth/sign-in/email`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: credentials.email, password: credentials.password }),
-      });
-      regularUserCookie = login.headers.get("set-cookie") || "";
+      const email = `channel-approval-${Date.now()}@example.com`;
+      const password = "ChannelApproval123!";
+      await createTestUserViaApi(BASE_URL, email, password, "Channel Approval User");
+      regularUserCookie = formatSessionCookie(
+        BASE_URL,
+        await signInUser(BASE_URL, email, password),
+      );
     });
 
     test("an ordinary authenticated user cannot change installation trust approval", async () => {

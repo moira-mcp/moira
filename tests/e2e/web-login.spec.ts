@@ -1,6 +1,6 @@
 import { test, expect } from "./fixtures.js";
 import { getTestBaseUrl, getTestFetchUrl } from "../utils/test-config.js";
-import { verifyUserEmail } from "../utils/mcp-auth.js";
+import { createTestUserViaApi } from "../utils/mcp-auth.js";
 
 const BASE_URL = getTestBaseUrl();
 const FETCH_URL = getTestFetchUrl();
@@ -8,26 +8,11 @@ const TEST_USER = {
   name: "Web Login Test",
   email: "web-login-test@example.com",
   password: "TestPass123!",
-  acceptedTermsAt: new Date().toISOString(),
-  acceptedNotRussianResidentAt: new Date().toISOString(),
 };
 
 test.beforeAll(async () => {
-  // Pre-create test user
-  try {
-    await fetch(`${FETCH_URL}/api/auth/sign-up/email`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(TEST_USER),
-    });
-    console.log("✓ Test user created");
-  } catch (error) {
-    console.log("Test user already exists (expected)");
-  }
-
-  // Verify email for test user
-  await verifyUserEmail(FETCH_URL, TEST_USER.email);
-  console.log("✓ Test user email verified");
+  // Pre-create the verified test user (idempotent when it already exists)
+  await createTestUserViaApi(FETCH_URL, TEST_USER.email, TEST_USER.password, TEST_USER.name);
 });
 
 test.describe("Web Interface Login Flow", () => {

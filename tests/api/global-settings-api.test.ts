@@ -4,27 +4,20 @@
  */
 
 import { describe, test, expect, beforeAll } from "@jest/globals";
-import { getTestBaseUrl, getAdminCredentials } from "../utils/test-config.js";
+import { getTestBaseUrl } from "../utils/test-config.js";
+import {
+  createTestUserViaApi,
+  formatSessionCookie,
+  getAdminSessionCookie,
+  signInUser,
+} from "../utils/mcp-auth.js";
 
 const BASE_URL = getTestBaseUrl();
-const ADMIN_CREDENTIALS = getAdminCredentials();
 
 let adminCookie: string;
 
 beforeAll(async () => {
-  // Login as admin
-  const loginRes = await fetch(`${BASE_URL}/api/auth/sign-in/email`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(ADMIN_CREDENTIALS),
-  });
-
-  if (!loginRes.ok) {
-    throw new Error(`Admin login failed: ${loginRes.status}`);
-  }
-
-  const cookies = loginRes.headers.get("set-cookie");
-  adminCookie = cookies || "";
+  adminCookie = formatSessionCookie(BASE_URL, await getAdminSessionCookie(BASE_URL));
 });
 
 describe("Global Settings Admin API", () => {
@@ -329,41 +322,13 @@ describe("Global Settings Admin API", () => {
     let regularUserCookie: string;
 
     beforeAll(async () => {
-      // Create regular user
-      const testUser = {
-        email: `global-settings-test-${Date.now()}@example.com`,
-        password: "TestPass123!",
-        name: "Global Settings Test User",
-        acceptedTermsAt: new Date().toISOString(),
-        acceptedNotRussianResidentAt: new Date().toISOString(),
-      };
-
-      const signUpRes = await fetch(`${BASE_URL}/api/auth/sign-up/email`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(testUser),
-      });
-
-      const signUpData = (await signUpRes.json()) as any;
-      const userId = signUpData?.user?.id;
-
-      // Verify email via admin
-      await fetch(`${BASE_URL}/api/admin/users/${userId}/verify-email`, {
-        method: "POST",
-        headers: { Cookie: adminCookie },
-      });
-
-      // Login as regular user
-      const loginRes = await fetch(`${BASE_URL}/api/auth/sign-in/email`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          email: testUser.email,
-          password: testUser.password,
-        }),
-      });
-
-      regularUserCookie = loginRes.headers.get("set-cookie") || "";
+      const email = `global-settings-test-${Date.now()}@example.com`;
+      const password = "TestPass123!";
+      await createTestUserViaApi(BASE_URL, email, password, "Global Settings Test User");
+      regularUserCookie = formatSessionCookie(
+        BASE_URL,
+        await signInUser(BASE_URL, email, password),
+      );
     });
 
     test("denies GET global-settings to non-admin user", async () => {

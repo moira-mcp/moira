@@ -846,10 +846,11 @@ describe("Manage Workflow New Actions Integration Tests", () => {
 
       expect(result.success).toBe(true);
       expect(result.data.resultCount).toBeGreaterThanOrEqual(1);
-      // Check that results have snippet field
+      // Both agent-directive nodes contain "directive"; every node hit carries a snippet
       const nodeResults = result.data.results.filter((r: { type: string }) => r.type === "node");
-      if (nodeResults.length > 0) {
-        expect(nodeResults[0].snippet).toBeDefined();
+      expect(nodeResults.length).toBeGreaterThanOrEqual(1);
+      for (const nodeResult of nodeResults) {
+        expect(nodeResult.snippet).toBeDefined();
       }
     });
   });

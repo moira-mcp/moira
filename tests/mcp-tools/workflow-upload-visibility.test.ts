@@ -6,17 +6,17 @@
 import { describe, test, expect, beforeAll, afterAll } from "@jest/globals";
 import fetch from "node-fetch";
 import FormData from "form-data";
-import { getTestBaseUrl, getTestFetchUrl, getAdminCredentials } from "../utils/test-config.js";
+import { getTestFetchUrl } from "../utils/test-config.js";
 import {
   createAuthenticatedMCPClient,
   callMCPTool,
+  getAdminSessionCookie,
   parseTokenResponse,
+  formatSessionCookie,
 } from "../utils/mcp-auth.js";
 import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
 
-const BASE_URL = getTestBaseUrl();
 const FETCH_URL = getTestFetchUrl();
-const ADMIN_CREDENTIALS = getAdminCredentials();
 
 describe("Upload workflow via token with visibility parameter", () => {
   let authCookie: string;
@@ -25,18 +25,8 @@ describe("Upload workflow via token with visibility parameter", () => {
   const createdWorkflows: string[] = [];
 
   beforeAll(async () => {
-    // Sign in for REST API
-    const signinResponse = await fetch(`${FETCH_URL}/api/auth/sign-in/email`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(ADMIN_CREDENTIALS),
-    });
-
-    const cookies = signinResponse.headers.get("set-cookie");
-    if (!cookies) {
-      throw new Error("No session cookie received from sign-in");
-    }
-    authCookie = cookies;
+    // Admin session for REST cleanup
+    authCookie = formatSessionCookie(FETCH_URL, await getAdminSessionCookie(FETCH_URL));
 
     // Create MCP client for token generation
     const mcp = await createAuthenticatedMCPClient();
@@ -73,10 +63,11 @@ describe("Upload workflow via token with visibility parameter", () => {
   }
 
   /**
-   * Helper to create workflow JSON
+   * Helper to upload a workflow JSON through a fresh token, optionally with a visibility field
    */
-  function createWorkflowJson(suffix: string): object {
-    return {
+  async function uploadWorkflow(suffix: string, visibility?: string) {
+    const token = await getUploadToken();
+    const workflowJson = {
       metadata: {
         name: `Upload Visibility Test ${suffix}`,
         version: "1.0.0",
@@ -87,24 +78,27 @@ describe("Upload workflow via token with visibility parameter", () => {
         { type: "end", id: "end" },
       ],
     };
+
+    const form = new FormData();
+    form.append("workflow", Buffer.from(JSON.stringify(workflowJson)), {
+      filename: "workflow.json",
+      contentType: "application/json",
+    });
+    if (visibility !== undefined) form.append("visibility", visibility);
+
+    return fetch(`${FETCH_URL}/api/public/workflows/upload/${token}`, {
+      method: "POST",
+      body: form,
+      headers: form.getHeaders(),
+    });
   }
 
-  test("upload with visibility=public creates public workflow", async () => {
-    const token = await getUploadToken();
-    const workflowJson = createWorkflowJson(`public-${Date.now()}`);
-
-    const form = new FormData();
-    form.append("workflow", Buffer.from(JSON.stringify(workflowJson)), {
-      filename: "workflow.json",
-      contentType: "application/json",
-    });
-    form.append("visibility", "public");
-
-    const response = await fetch(`${FETCH_URL}/api/public/workflows/upload/${token}`, {
-      method: "POST",
-      body: form,
-      headers: form.getHeaders(),
-    });
+  test.each([
+    ["public", "public"],
+    ["private", "private"],
+    [undefined, "private"], // no visibility field → default
+  ])("upload with visibility=%s creates a %s workflow", async (visibility, expected) => {
+    const response = await uploadWorkflow(`${visibility ?? "default"}-${Date.now()}`, visibility);
 
     expect(response.status).toBe(200);
     const data = (await response.json()) as any;
@@ -113,94 +107,16 @@ describe("Upload workflow via token with visibility parameter", () => {
     const workflowId = data.data.workflowId;
     createdWorkflows.push(workflowId);
 
-    // Verify visibility is public via MCP (same user who owns the token)
+    // Verify visibility via MCP (same user who owns the token)
     const verifyResult = await callMCPTool(mcpClient, "manage", {
       action: "get",
       workflowId,
     });
-    expect(verifyResult).toHaveProperty("visibility", "public");
-  });
-
-  test("upload with visibility=private creates private workflow", async () => {
-    const token = await getUploadToken();
-    const workflowJson = createWorkflowJson(`private-${Date.now()}`);
-
-    const form = new FormData();
-    form.append("workflow", Buffer.from(JSON.stringify(workflowJson)), {
-      filename: "workflow.json",
-      contentType: "application/json",
-    });
-    form.append("visibility", "private");
-
-    const response = await fetch(`${FETCH_URL}/api/public/workflows/upload/${token}`, {
-      method: "POST",
-      body: form,
-      headers: form.getHeaders(),
-    });
-
-    expect(response.status).toBe(200);
-    const data = (await response.json()) as any;
-    expect(data.success).toBe(true);
-    expect(data.data.workflowId).toBeDefined();
-    const workflowId = data.data.workflowId;
-    createdWorkflows.push(workflowId);
-
-    // Verify visibility is private via MCP
-    const verifyResult = await callMCPTool(mcpClient, "manage", {
-      action: "get",
-      workflowId,
-    });
-    expect(verifyResult).toHaveProperty("visibility", "private");
-  });
-
-  test("upload without visibility defaults to private", async () => {
-    const token = await getUploadToken();
-    const workflowJson = createWorkflowJson(`default-${Date.now()}`);
-
-    const form = new FormData();
-    form.append("workflow", Buffer.from(JSON.stringify(workflowJson)), {
-      filename: "workflow.json",
-      contentType: "application/json",
-    });
-    // No visibility field
-
-    const response = await fetch(`${FETCH_URL}/api/public/workflows/upload/${token}`, {
-      method: "POST",
-      body: form,
-      headers: form.getHeaders(),
-    });
-
-    expect(response.status).toBe(200);
-    const data = (await response.json()) as any;
-    expect(data.success).toBe(true);
-    expect(data.data.workflowId).toBeDefined();
-    const workflowId = data.data.workflowId;
-    createdWorkflows.push(workflowId);
-
-    // Verify visibility defaults to private via MCP
-    const verifyResult = await callMCPTool(mcpClient, "manage", {
-      action: "get",
-      workflowId,
-    });
-    expect(verifyResult).toHaveProperty("visibility", "private");
+    expect(verifyResult).toHaveProperty("visibility", expected);
   });
 
   test("upload with invalid visibility returns error", async () => {
-    const token = await getUploadToken();
-    const workflowJson = createWorkflowJson(`invalid-${Date.now()}`);
-
-    const form = new FormData();
-    form.append("workflow", Buffer.from(JSON.stringify(workflowJson)), {
-      filename: "workflow.json",
-      contentType: "application/json",
-    });
-    form.append("visibility", "invalid_value");
-
-    const response = await fetch(`${FETCH_URL}/api/public/workflows/upload/${token}`, {
-      method: "POST",
-      body: form,
-      headers: form.getHeaders(),
-    });
+    const response = await uploadWorkflow(`invalid-${Date.now()}`, "invalid_value");
 
     expect(response.status).toBe(400);
     const data = (await response.json()) as any;

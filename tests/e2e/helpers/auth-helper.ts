@@ -11,6 +11,7 @@
 import { Page, BrowserContext } from "@playwright/test";
 import { getTestBaseUrl, getTestFetchUrl } from "../../utils/test-config.js";
 import { TEST_USERS } from "../fixtures/test-constants.js";
+import { signInUser } from "../../utils/mcp-auth.js";
 import { approveTestUserIfRequired } from "./approve-test-user.js";
 
 const BASE_URL = getTestBaseUrl();
@@ -259,29 +260,18 @@ export async function createTestUser(
 }
 
 /**
+ * Sign in over HTTP and return a ready `Cookie` header value for Node-side
+ * `fetch` calls made on behalf of that user (API seeding, cleanup). Each call
+ * creates a new web session for the user.
+ */
+export async function getSessionCookieHeader(email: string, password: string): Promise<string> {
+  const sessionCookie = await signInUser(FETCH_URL, email, password);
+  return formatSessionCookie(FETCH_URL, sessionCookie);
+}
+
+/**
  * Get admin session cookie via pure HTTP sign-in
  */
 async function getAdminSessionCookie(): Promise<string> {
-  const response = await fetch(`${FETCH_URL}/api/auth/sign-in/email`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      email: TEST_USERS.ADMIN.email,
-      password: TEST_USERS.ADMIN.password,
-      rememberMe: true,
-    }),
-  });
-
-  if (!response.ok) {
-    throw new Error(`Admin sign-in failed: ${response.status}`);
-  }
-
-  const setCookieHeader = response.headers.get("set-cookie");
-  const sessionCookie = extractSessionCookie(setCookieHeader);
-
-  if (!sessionCookie) {
-    throw new Error("No session cookie in admin sign-in response");
-  }
-
-  return sessionCookie;
+  return signInUser(FETCH_URL, TEST_USERS.ADMIN.email, TEST_USERS.ADMIN.password);
 }

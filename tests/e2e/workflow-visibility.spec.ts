@@ -4,67 +4,29 @@
  */
 
 import { test, expect } from "./fixtures.js";
-import { getTestBaseUrl, getTestFetchUrl } from "../utils/test-config.js";
-import { verifyUserEmail } from "../utils/mcp-auth.js";
+import { getTestBaseUrl } from "../utils/test-config.js";
+import { createTestUser, login } from "./helpers/auth-helper.js";
 
 const BASE_URL = getTestBaseUrl();
-const FETCH_URL = getTestFetchUrl();
 const TEST_USER = {
   name: "Visibility Test User",
   email: "visibility-test@example.com",
   password: "TestPass123!",
-  acceptedTermsAt: new Date().toISOString(),
-  acceptedNotRussianResidentAt: new Date().toISOString(),
 };
 
 test.beforeAll(async () => {
-  // Pre-create test user
-  try {
-    await fetch(`${FETCH_URL}/api/auth/sign-up/email`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(TEST_USER),
-    });
-    console.log("✓ Visibility test user created");
-  } catch (error) {
-    console.log("Test user already exists (expected)");
-  }
-
-  // Verify email for test user
-  await verifyUserEmail(FETCH_URL, TEST_USER.email);
-  console.log("✓ Visibility test user email verified");
+  // Pre-create the verified test user (idempotent when it already exists)
+  const created = await createTestUser(TEST_USER.email, TEST_USER.password, TEST_USER.name);
+  if (!created.success) throw new Error(`Failed to create test user: ${created.error}`);
 });
 
 test.describe("Workflow Visibility Features", () => {
   test.beforeEach(async ({ page }) => {
-    // Dismiss beta agreement modal via cookie before any navigation
-    const url = new URL(BASE_URL);
-    await page.context().addCookies([
-      {
-        name: "moira-beta-accepted",
-        value: "true",
-        domain: url.hostname,
-        path: "/",
-        httpOnly: false,
-        secure: BASE_URL.startsWith("https://"),
-        sameSite: "Lax",
-      },
-    ]);
+    // Login via the shared helper (session cookie + beta agreement bypass)
+    await login(page, TEST_USER.email, TEST_USER.password);
   });
 
   test("Visibility badges displayed for workflows", async ({ page }) => {
-    // Login
-    await page.goto(`${BASE_URL}/login`);
-    await page.waitForLoadState("domcontentloaded");
-
-    const emailInput = page.getByRole("textbox", { name: "Email" });
-    await emailInput.fill(TEST_USER.email);
-    await page.getByRole("textbox", { name: "Password" }).fill(TEST_USER.password);
-    await page.getByRole("button", { name: "Login" }).click();
-
-    // Wait for redirect to complete
-    await page.waitForURL((url) => !url.toString().includes("/login"), { timeout: 10000 });
-
     // Navigate to workflows page
     await page.goto(`${BASE_URL}/workflows`);
     await page.waitForLoadState("domcontentloaded");
@@ -84,18 +46,6 @@ test.describe("Workflow Visibility Features", () => {
   });
 
   test("Visibility filter dropdown accessible and functional", async ({ page }) => {
-    // Login
-    await page.goto(`${BASE_URL}/login`);
-    await page.waitForLoadState("domcontentloaded");
-
-    const emailInput = page.getByRole("textbox", { name: "Email" });
-    await emailInput.fill(TEST_USER.email);
-    await page.getByRole("textbox", { name: "Password" }).fill(TEST_USER.password);
-    await page.getByRole("button", { name: "Login" }).click();
-
-    // Wait for redirect to complete
-    await page.waitForURL((url) => !url.toString().includes("/login"), { timeout: 10000 });
-
     // Navigate to workflows page
     await page.goto(`${BASE_URL}/workflows`);
     await page.waitForLoadState("domcontentloaded");
@@ -114,18 +64,6 @@ test.describe("Workflow Visibility Features", () => {
   });
 
   test("Owner name displayed in workflow cards", async ({ page }) => {
-    // Login
-    await page.goto(`${BASE_URL}/login`);
-    await page.waitForLoadState("domcontentloaded");
-
-    const emailInput = page.getByRole("textbox", { name: "Email" });
-    await emailInput.fill(TEST_USER.email);
-    await page.getByRole("textbox", { name: "Password" }).fill(TEST_USER.password);
-    await page.getByRole("button", { name: "Login" }).click();
-
-    // Wait for redirect to complete
-    await page.waitForURL((url) => !url.toString().includes("/login"), { timeout: 10000 });
-
     // Navigate to workflows page
     await page.goto(`${BASE_URL}/workflows`);
     await page.waitForLoadState("domcontentloaded");
@@ -142,18 +80,6 @@ test.describe("Workflow Visibility Features", () => {
   });
 
   test("Public workflows accessible after login", async ({ page }) => {
-    // Login
-    await page.goto(`${BASE_URL}/login`);
-    await page.waitForLoadState("domcontentloaded");
-
-    const emailInput = page.getByRole("textbox", { name: "Email" });
-    await emailInput.fill(TEST_USER.email);
-    await page.getByRole("textbox", { name: "Password" }).fill(TEST_USER.password);
-    await page.getByRole("button", { name: "Login" }).click();
-
-    // Wait for redirect to complete
-    await page.waitForURL((url) => !url.toString().includes("/login"), { timeout: 10000 });
-
     // Navigate to workflows page
     await page.goto(`${BASE_URL}/workflows`);
     await page.waitForLoadState("domcontentloaded");

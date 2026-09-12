@@ -7,28 +7,22 @@
  */
 
 import { describe, test, expect, beforeAll, afterAll } from "@jest/globals";
-import { getTestBaseUrl, getAdminCredentials } from "../utils/test-config.js";
+import { getTestBaseUrl } from "../utils/test-config.js";
+import {
+  createTestUserViaApi,
+  formatSessionCookie,
+  getAdminSessionCookie,
+  signInUser,
+} from "../utils/mcp-auth.js";
 
 const BASE_URL = getTestBaseUrl();
-const ADMIN_CREDENTIALS = getAdminCredentials();
 
 describe("Workflow Slug API", () => {
   let authCookie: string;
   const createdWorkflows: string[] = [];
 
   beforeAll(async () => {
-    // Sign in and get session cookie
-    const signinResponse = await fetch(`${BASE_URL}/api/auth/sign-in/email`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(ADMIN_CREDENTIALS),
-    });
-
-    const cookies = signinResponse.headers.get("set-cookie");
-    if (!cookies) {
-      throw new Error("No session cookie received from sign-in");
-    }
-    authCookie = cookies;
+    authCookie = formatSessionCookie(BASE_URL, await getAdminSessionCookie(BASE_URL));
   });
 
   afterAll(async () => {
@@ -392,44 +386,11 @@ describe("Workflow Slug API", () => {
       const secondUserEmail = `ref-access-test-${Date.now()}@example.com`;
       const secondUserPassword = "TestPass123!";
 
-      await fetch(`${BASE_URL}/api/auth/sign-up/email`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          email: secondUserEmail,
-          password: secondUserPassword,
-          name: "Second Test User",
-          acceptedTermsAt: new Date().toISOString(),
-          acceptedNotRussianResidentAt: new Date().toISOString(),
-        }),
-      });
-
-      // Verify email via admin
-      const usersRes = await fetch(
-        `${BASE_URL}/api/admin/users?search=${encodeURIComponent(secondUserEmail)}&limit=10`,
-        {
-          headers: { Cookie: authCookie },
-        },
+      await createTestUserViaApi(BASE_URL, secondUserEmail, secondUserPassword, "Second Test User");
+      const secondUserCookie = formatSessionCookie(
+        BASE_URL,
+        await signInUser(BASE_URL, secondUserEmail, secondUserPassword),
       );
-      const usersData = (await usersRes.json()) as any;
-      const secondUser = usersData.data.users.find((u: any) => u.email === secondUserEmail);
-      if (secondUser) {
-        await fetch(`${BASE_URL}/api/admin/users/${secondUser.id}/verify-email`, {
-          method: "POST",
-          headers: { Cookie: authCookie },
-        });
-      }
-
-      // Login as second user
-      const loginRes = await fetch(`${BASE_URL}/api/auth/sign-in/email`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          email: secondUserEmail,
-          password: secondUserPassword,
-        }),
-      });
-      const secondUserCookie = loginRes.headers.get("set-cookie") || "";
 
       // Try to access private workflow with different user
       const response = await fetch(`${BASE_URL}/api/workflows/${ownerHandle}/${customSlug}`, {

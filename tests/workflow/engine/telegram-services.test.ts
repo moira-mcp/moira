@@ -259,16 +259,17 @@ describe("Telegram Services", () => {
       });
 
       test("should handle timeout errors", async () => {
-        // Skip timeout test in CI/test environment to avoid Jest conflicts
-        if (process.env.NODE_ENV === "test") {
-          console.log("⏭️ Skipping timeout test in test environment");
-          return;
-        }
-
-        // Mock fetch that takes longer than timeout
+        // Mock fetch that never responds but honours the client's abort signal,
+        // exactly like a real fetch does when the timeout fires
         mockFetch.mockImplementationOnce(
-          () =>
-            new Promise<Response>((resolve) => setTimeout(() => resolve(Response.json({})), 100)),
+          (_url, init) =>
+            new Promise<Response>((_resolve, reject) => {
+              init?.signal?.addEventListener("abort", () => {
+                const abortError = new Error("The operation was aborted");
+                abortError.name = "AbortError";
+                reject(abortError);
+              });
+            }),
         );
 
         const shortTimeoutClient = new TelegramClient(

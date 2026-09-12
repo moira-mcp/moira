@@ -298,6 +298,7 @@ describe("MCP Workflow Execution Tools E2E", () => {
     const processId = execution.processId;
 
     // Execute all 5 steps
+    let lastStepResult = "";
     for (let i = 1; i <= 5; i++) {
       const currentStep = await callMCPTool<string>(client, "session", {
         action: "current_step",
@@ -307,13 +308,11 @@ describe("MCP Workflow Execution Tools E2E", () => {
       expect(currentStep).toContain(`Complete step ${i}`);
 
       execution.attemptId = requiredId(currentStep, "Step attempt");
-      const stepResult = await advanceExecution(client, execution, { result: `Step ${i} done` });
-
-      // Last step should complete workflow
-      if (i === 5) {
-        expect(stepResult).toContain("Workflow completed");
-      }
+      lastStepResult = await advanceExecution(client, execution, { result: `Step ${i} done` });
     }
+
+    // The fifth step completes the workflow
+    expect(lastStepResult).toContain("Workflow completed");
 
     console.log("✓ Multi-step workflow executed sequentially");
   });

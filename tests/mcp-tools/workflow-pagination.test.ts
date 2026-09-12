@@ -7,6 +7,9 @@ import { describe, test, expect, beforeAll, afterAll } from "@jest/globals";
 import { createAuthenticatedMCPClient, callMCPTool } from "../utils/mcp-auth.js";
 import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
 
+const STEP_COUNT = 4;
+const TOTAL_NODES = STEP_COUNT + 2; // start + steps + end
+
 describe("MCP Workflow Pagination E2E", () => {
   let client: Client;
   let cleanup: () => Promise<void>;
@@ -17,22 +20,32 @@ describe("MCP Workflow Pagination E2E", () => {
     client = mcpClient.client;
     cleanup = mcpClient.cleanup;
 
-    // Find workflow with multiple nodes
-    const listResult = await callMCPTool(client, "list", {});
-    const workflows = listResult.workflows || listResult;
-    for (const wf of workflows) {
-      const rawDetails = await callMCPTool(client, "manage", {
-        action: "get",
-        workflowId: wf.id,
-      });
-      // Handle wrapped response {success, metadata, nodes, ...} or direct {id, metadata, nodes}
-      const details = rawDetails.metadata ? rawDetails : rawDetails;
-      const nodes = details.nodes || [];
-      if (nodes.length >= 5) {
-        largeWorkflowId = wf.id;
-        break;
-      }
-    }
+    // Dedicated workflow with a known node count so every pagination assertion is exact
+    const steps = Array.from({ length: STEP_COUNT }, (_, index) => ({
+      type: "agent-directive",
+      id: `step-${index + 1}`,
+      directive: `Do step ${index + 1}`,
+      completionCondition: `Step ${index + 1} done`,
+      inputSchema: { type: "object", properties: {}, additionalProperties: false },
+      connections: { success: index + 1 < STEP_COUNT ? `step-${index + 2}` : "end" },
+    }));
+    const created = await callMCPTool(client, "manage", {
+      action: "create",
+      workflow: {
+        metadata: {
+          name: "Pagination Source",
+          version: "1.0.0",
+          description: "Workflow with enough nodes to paginate",
+        },
+        nodes: [
+          { type: "start", id: "start", connections: { default: "step-1" } },
+          ...steps,
+          { type: "end", id: "end" },
+        ],
+      },
+    });
+    expect(created).toHaveProperty("success", true);
+    largeWorkflowId = created.workflowId;
   });
 
   afterAll(async () => {
@@ -40,11 +53,6 @@ describe("MCP Workflow Pagination E2E", () => {
   });
 
   test("get_workflow_details without pagination returns all nodes", async () => {
-    if (!largeWorkflowId) {
-      console.warn("No large workflow available, skipping");
-      return;
-    }
-
     const rawResult = await callMCPTool(client, "manage", {
       action: "get",
       workflowId: largeWorkflowId,
@@ -53,17 +61,11 @@ describe("MCP Workflow Pagination E2E", () => {
     // MCP tool returns wrapped response with success, validation, metadata, nodes
     expect(rawResult).toHaveProperty("success", true);
     expect(rawResult).toHaveProperty("metadata");
-    expect(rawResult).toHaveProperty("nodes");
     expect(Array.isArray(rawResult.nodes)).toBe(true);
-    expect(rawResult.nodes.length).toBeGreaterThanOrEqual(5);
+    expect(rawResult.nodes).toHaveLength(TOTAL_NODES);
   });
 
   test("get_workflow_details with pagination returns subset", async () => {
-    if (!largeWorkflowId) {
-      console.warn("No large workflow available, skipping");
-      return;
-    }
-
     const result = await callMCPTool(client, "manage", {
       action: "get",
       workflowId: largeWorkflowId,
@@ -71,29 +73,18 @@ describe("MCP Workflow Pagination E2E", () => {
       limit: 2,
     });
 
-    expect(result).toHaveProperty("nodes");
-    expect(result.nodes.length).toBe(2);
-    expect(result).toHaveProperty("totalNodes");
-    expect(result).toHaveProperty("hasMore");
-    expect(result.totalNodes).toBeGreaterThanOrEqual(5);
+    expect(result.nodes).toHaveLength(2);
+    expect(result.totalNodes).toBe(TOTAL_NODES);
     expect(result.hasMore).toBe(true);
   });
 
   test("pagination offset and limit work correctly", async () => {
-    if (!largeWorkflowId) {
-      console.warn("No large workflow available, skipping");
-      return;
-    }
-
-    // Get first 2 nodes
     const page1 = await callMCPTool(client, "manage", {
       action: "get",
       workflowId: largeWorkflowId,
       offset: 0,
       limit: 2,
     });
-
-    // Get next 2 nodes
     const page2 = await callMCPTool(client, "manage", {
       action: "get",
       workflowId: largeWorkflowId,
@@ -101,19 +92,15 @@ describe("MCP Workflow Pagination E2E", () => {
       limit: 2,
     });
 
-    // Nodes should be different
-    expect(page1.nodes[0].id).not.toBe(page2.nodes[0].id);
-
-    // Total should be same
-    expect(page1.totalNodes).toBe(page2.totalNodes);
+    const pageIds = (page: { nodes: Array<{ id: string }> }) => page.nodes.map((n) => n.id);
+    expect(pageIds(page1)).toHaveLength(2);
+    expect(pageIds(page2)).toHaveLength(2);
+    expect(new Set([...pageIds(page1), ...pageIds(page2)]).size).toBe(4);
+    expect(page1.totalNodes).toBe(TOTAL_NODES);
+    expect(page2.totalNodes).toBe(TOTAL_NODES);
   });
 
   test("metadata-only mode excludes nodes", async () => {
-    if (!largeWorkflowId) {
-      console.warn("No large workflow available, skipping");
-      return;
-    }
-
     const result = await callMCPTool(client, "manage", {
       action: "get",
       workflowId: largeWorkflowId,

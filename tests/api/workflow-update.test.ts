@@ -9,10 +9,10 @@
 
 import { describe, test, expect, beforeAll, afterAll } from "@jest/globals";
 import fetch from "node-fetch";
-import { getTestBaseUrl, getAdminCredentials } from "../utils/test-config.js";
+import { getTestBaseUrl } from "../utils/test-config.js";
+import { formatSessionCookie, getAdminSessionCookie } from "../utils/mcp-auth.js";
 
 const BASE_URL = getTestBaseUrl();
-const ADMIN_CREDENTIALS = getAdminCredentials();
 
 const definition = (directive: string) => ({
   metadata: { name: "Update Route Test", version: "1.0.0", description: "PUT workflow" },
@@ -50,13 +50,7 @@ describe("PUT /api/workflows/:id", () => {
   };
 
   beforeAll(async () => {
-    const signin = await fetch(`${BASE_URL}/api/auth/sign-in/email`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(ADMIN_CREDENTIALS),
-    });
-    authCookie = signin.headers.get("set-cookie")!;
-    expect(authCookie).toBeTruthy();
+    authCookie = formatSessionCookie(BASE_URL, await getAdminSessionCookie(BASE_URL));
 
     const created = await fetch(`${BASE_URL}/api/workflows`, {
       method: "POST",

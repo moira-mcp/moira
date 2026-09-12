@@ -4,7 +4,7 @@ import { loginAsAdmin } from "./helpers/auth-helper.js";
 
 const BASE_URL = getTestBaseUrl();
 
-test.describe("Stage 4 Functionality Verification - All 27 Functions", () => {
+test.describe("Stage 4 Functionality Verification", () => {
   test.use({ locale: "en-US" });
 
   // 1. Admin Dashboard page rendering and translations
@@ -96,15 +96,10 @@ test.describe("Stage 4 Functionality Verification - All 27 Functions", () => {
     await loginAsAdmin(page);
     await page.goto(`${BASE_URL}/admin/users`);
     await page.waitForLoadState("domcontentloaded");
-    // Check View buttons exist on User Management page
-    const viewBtn = page.locator('a:has-text("View")').first();
-    if ((await viewBtn.count()) > 0) {
-      // View button exists, means user detail navigation is available
-      expect(await viewBtn.isVisible()).toBe(true);
-    } else {
-      // No users to view, page still works
-      await expect(page.locator('h1:has-text("User Management")')).toBeVisible();
-    }
+    // The admin account always exists, so a user card opens its detail page
+    await page.getByTestId("user-card").first().click();
+    await page.waitForURL(/\/admin\/users\/[^/]+$/);
+    await expect(page.locator("text=Security Actions").first()).toBeVisible({ timeout: 10000 });
   });
 
   // 10. Admin User Detail actions
@@ -149,14 +144,14 @@ test.describe("Stage 4 Functionality Verification - All 27 Functions", () => {
     await loginAsAdmin(page);
     await page.goto(`${BASE_URL}/admin/audit-log`);
     await page.waitForLoadState("networkidle");
-    // Try clicking a card if data exists
+    // Admin logins are audited, so the log always has at least one card; clicking it opens the
+    // detail dialog with the translated title
     const firstCard = page.locator('[data-testid="audit-log-card"]').first();
-    if ((await firstCard.count()) > 0) {
-      await firstCard.click();
-      await page.waitForTimeout(500);
-      // Modal may or may not appear
-    }
-    expect(true).toBe(true);
+    await expect(firstCard).toBeVisible({ timeout: 15000 });
+    await firstCard.click();
+    const dialog = page.getByRole("dialog");
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByRole("heading", { name: "Audit Entry Details" })).toBeVisible();
   });
 
   // 14. Audit Log pagination
@@ -267,10 +262,6 @@ test.describe("Stage 4 Functionality Verification - All 27 Functions", () => {
         .first()
         .or(page.getByText("No deleted workflows", { exact: false })),
     ).toBeVisible({ timeout: 10000 });
-    const hasCards = await page.getByTestId("deleted-workflow-card").count();
-    if (hasCards === 0) {
-      await expect(page.getByText("No deleted workflows", { exact: false })).toBeVisible();
-    }
   });
 
   // 24. Deleted Workflows restore/permanent delete actions
@@ -298,16 +289,5 @@ test.describe("Stage 4 Functionality Verification - All 27 Functions", () => {
     await expect(page.locator("text=Dashboard").first()).toBeVisible();
     await expect(page.locator("text=Users").first()).toBeVisible();
     await expect(page.locator("text=Audit Log")).toBeVisible();
-  });
-
-  // 27. Language switching between English and Russian
-  test("27. Language switching", async ({ page }) => {
-    await loginAsAdmin(page);
-    await page.goto(`${BASE_URL}/admin`);
-    await page.waitForLoadState("domcontentloaded");
-    // English is active
-    await expect(page.locator('h1:has-text("Admin Dashboard")')).toBeVisible();
-    // The language switcher functionality is part of Stage 5
-    expect(true).toBe(true);
   });
 });

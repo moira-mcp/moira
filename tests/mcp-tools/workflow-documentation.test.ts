@@ -199,11 +199,9 @@ describe("MCP Help System E2E", () => {
     expect(result).toMatch(/^#/m); // Has headers
     expect(result).toMatch(/\n\n/); // Has paragraphs
 
-    // Count code blocks (should be even - opening and closing)
-    const codeBlocks = result.match(/```/g);
-    if (codeBlocks) {
-      expect(codeBlocks.length % 2).toBe(0);
-    }
+    // Code fences must be balanced (an even count of ``` markers, zero included)
+    const fenceCount = (result.match(/```/g) ?? []).length;
+    expect(fenceCount % 2).toBe(0);
 
     console.log("✓ Valid markdown structure");
   });

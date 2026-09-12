@@ -164,7 +164,7 @@ level headings classify the tracked test paths listed beneath them.
 
 **integration**
 
-- `tests/integration/agent-message-enhancement.test.ts`
+- `tests/integration/agent-message-enhancement.test.ts` — formatted agent messages via MCPEngine over the integration DB: first directive with task, criteria and input schema, next directive after input, a full simple-linear cycle to completion
 
 ### context
 
@@ -298,7 +298,7 @@ level headings classify the tracked test paths listed beneath them.
 
 **api**
 
-- `tests/api/executions-errors-api.test.ts`
+- `tests/api/executions-errors-api.test.ts` — `GET /api/executions` `errorCount` and `GET /api/executions/:id` `errors[]` for an execution that recorded one input-schema validation error (type `validation`, node id of the rejecting step)
 
 **mcp-tools**
 
@@ -373,7 +373,7 @@ level headings classify the tracked test paths listed beneath them.
 
 **mcp-tools**
 
-- `tests/mcp-tools/workflow-upload-visibility.test.ts`
+- `tests/mcp-tools/workflow-upload-visibility.test.ts` — upload visibility public/private/default via `test.each`, plus an invalid value → 400
 
 ### github-collaboration
 
@@ -450,7 +450,7 @@ level headings classify the tracked test paths listed beneath them.
 
 **integration**
 
-- `tests/integration/input-enhancement.test.ts`
+- `tests/integration/input-enhancement.test.ts` — `parseInputData` at the `executeStep` tool boundary: JSON-string and object inputs advance; nested, primitive, malformed and null inputs receive schema feedback and stay on the same node
 
 **mcp-tools**
 
@@ -588,8 +588,8 @@ level headings classify the tracked test paths listed beneath them.
 
 **api**
 
-- `tests/api/admin-lock-management.test.ts`
-- `tests/api/user-lock-management.test.ts` — owner/foreign lock access and PIN validation boundaries plus owner-only one-time human PIN creation compatibility
+- `tests/api/admin-lock-management.test.ts` — admin lock endpoints (`hasActiveLock` in the list, `activeLock` in the detail, `/locks`, `/locks/:lockId/unlock`) against an MCP-started execution locked through the owner lock route: shapes, exact 404s, admin override unlock once then 400
+- `tests/api/user-lock-management.test.ts` — owner, non-owner and admin access to `/locks` and `/validate-pin` (401 non-owner, 404 unknown execution, 400 missing PIN), locked-status filters and owner-only PIN creation, all against an admin-owned execution created in setup
 
 **e2e**
 
@@ -794,7 +794,7 @@ level headings classify the tracked test paths listed beneath them.
 - `tests/e2e/sidebar.spec.ts`
 - `tests/e2e/theme-integration.spec.ts`
 - `tests/e2e/theme-loading-state.spec.ts`
-- `tests/e2e/verify-step24.spec.ts` — navigation, dashboard statistics, and execution-card behavior
+- `tests/e2e/verify-step24.spec.ts` — navigation, dashboard statistics, execution-card behavior, and beta-banner placement and dismissal
 - `tests/e2e/visual-regression.spec.ts` — light/dark screenshots of the principal application pages
 
 ### workflow-engine
@@ -887,7 +887,7 @@ level headings classify the tracked test paths listed beneath them.
 - `tests/workflow/engine/schema-validator-agent-format.test.ts` — including exact context-derived artifact paths that resolve the engine-owned execution identity and reject a schema-valid foreign workspace
 - `tests/workflow/engine/subgraph-delegation.test.ts`
 - `tests/workflow/engine/subgraph-handler-simple.test.ts` — including discriminated child-failure provenance
-- `tests/workflow/engine/subgraph-handler.test.ts`
+- `tests/workflow/engine/subgraph-handler.test.ts` — subgraph delegation, mappings and missing-workflow errors; delegation at `_subgraphDepth` 100 still pauses (MAX_DEPTH is logged, not enforced)
 - `tests/workflow/engine/subgraph-validation.test.ts`
 - `tests/workflow/engine/system-reminder-priority.test.ts`
 - `tests/workflow/engine/telegram-services.test.ts`

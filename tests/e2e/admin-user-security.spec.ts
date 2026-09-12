@@ -3,8 +3,8 @@
  * Tests admin security actions in AdminUserDetail page
  */
 
-import { test, expect } from "./fixtures.js";
-import { loginAsAdmin, createTestUser } from "./helpers/auth-helper.js";
+import { test, expect, type Page } from "./fixtures.js";
+import { loginAsAdmin, createTestUser, getSessionCookieHeader } from "./helpers/auth-helper.js";
 import { getTestBaseUrl, getTestFetchUrl } from "../utils/test-config.js";
 
 const BASE_URL = getTestBaseUrl();
@@ -91,15 +91,9 @@ test.describe("Admin User Security Management", () => {
 
   test.describe("Functional Tests - Force Password Reset", () => {
     test("force password reset workflow updates user status", async ({ page }) => {
-      // Initial state - badge not visible
+      // Initial state - the flag was cleared in beforeEach, so the badge is absent
       const badge = page.locator("text=Password Reset Required").first();
-      const badgeVisible = await badge.isVisible().catch(() => false);
-
-      if (badgeVisible) {
-        // Already has reset required, skip functional test
-        console.log("Password reset already required, skipping functional test");
-        return;
-      }
+      await expect(badge).not.toBeVisible();
 
       // Click force reset button
       const forceResetBtn = page.locator("button", {
@@ -138,26 +132,9 @@ test.describe("Admin User Security Management", () => {
     });
 
     test("force password reset revokes all user sessions (Step 6)", async ({ page, context }) => {
-      // Create multiple sessions for target user
-      const session1 = await fetch(`${FETCH_URL}/api/auth/sign-in/email`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          email: targetEmail,
-          password: targetPassword,
-        }),
-      });
-      expect(session1.status).toBe(200);
-
-      const session2 = await fetch(`${FETCH_URL}/api/auth/sign-in/email`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          email: targetEmail,
-          password: targetPassword,
-        }),
-      });
-      expect(session2.status).toBe(200);
+      // Create multiple sessions for target user (each sign-in opens a new web session)
+      await getSessionCookieHeader(targetEmail, targetPassword);
+      await getSessionCookieHeader(targetEmail, targetPassword);
 
       // Reload page to see sessions in UI
       await page.reload();
@@ -223,44 +200,28 @@ test.describe("Admin User Security Management", () => {
         hasText: "Revoke All OAuth Tokens",
       });
 
-      // Check if password reset already required
-      const badgeVisible = await page
-        .locator("text=Password Reset Required")
-        .first()
-        .isVisible()
-        .catch(() => false);
+      // beforeEach cleared the password-reset flag: no badge, force reset available
+      await expect(page.locator("text=Password Reset Required")).toHaveCount(0);
+      await expect(forceResetBtn).toBeEnabled();
 
-      if (badgeVisible) {
-        // Button should be disabled
-        await expect(forceResetBtn).toBeDisabled();
-      } else {
-        // Button should be enabled
-        await expect(forceResetBtn).toBeEnabled();
-      }
-
-      // Check OAuth tokens count
-      const statsText = await page.locator("text=OAuth Tokens").first().locator("..").textContent();
-      const tokenCount = parseInt(statsText?.match(/\d+/)?.[0] || "0");
-
-      if (tokenCount === 0) {
-        await expect(revokeTokensBtn).toBeDisabled();
-      } else {
-        await expect(revokeTokensBtn).toBeEnabled();
-      }
+      // The target user never authorized an OAuth client: zero tokens, revoke disabled
+      await expect(page.locator("text=OAuth Tokens").first().locator("..")).toContainText("0");
+      await expect(revokeTokensBtn).toBeDisabled();
     });
   });
 
   test.describe("Step 5: Web Sessions Section", () => {
+    // The Web Sessions heading reads "Web Sessions (N)"; N is the session count.
+    const sessionCountOf = async (page: Page): Promise<number> => {
+      const headingText = await page.locator("text=Web Sessions").first().textContent();
+      const match = headingText?.match(/\((\d+)\)/);
+      if (!match) throw new Error(`Web Sessions heading has no count: ${headingText}`);
+      return parseInt(match[1]);
+    };
+
     test.beforeEach(async ({ page }) => {
-      // Create at least one session for target user
-      await fetch(`${FETCH_URL}/api/auth/sign-in/email`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          email: targetEmail,
-          password: targetPassword,
-        }),
-      });
+      // Create at least one session for target user (a sign-in opens a new web session)
+      await getSessionCookieHeader(targetEmail, targetPassword);
 
       // Reload page to see new session
       await page.reload();
@@ -274,109 +235,47 @@ test.describe("Admin User Security Management", () => {
     });
 
     test("lists user sessions with details", async ({ page }) => {
-      // Check if sessions heading shows count
-      const heading = page.locator("text=Web Sessions").first();
-      const headingText = await heading.textContent();
-
-      // Sessions should exist (at least the one we just created)
-      expect(headingText).toContain("Web Sessions");
-
-      // Check count in parentheses
-      const match = headingText?.match(/\((\d+)\)/);
-      if (match) {
-        const count = parseInt(match[1]);
-        // Should have at least 1 session from beforeEach
-        expect(count).toBeGreaterThan(0);
-      }
+      // At least the session created in beforeEach is counted in the heading
+      expect(await sessionCountOf(page)).toBeGreaterThan(0);
     });
 
     test("revoke individual session shows confirmation dialog", async ({ page }) => {
-      // Check if we have sessions
-      const heading = page.locator("text=Web Sessions").first();
-      const headingText = await heading.textContent();
-      const match = headingText?.match(/\((\d+)\)/);
-      const sessionCount = match ? parseInt(match[1]) : 0;
+      expect(await sessionCountOf(page)).toBeGreaterThan(0);
 
-      if (sessionCount === 0) {
-        // No sessions to test, skip
-        return;
-      }
-
-      // Find first revoke button for individual session
-      const revokeButton = page.locator("button").filter({ hasText: "Revoke" }).first();
-      const isEnabled = await revokeButton.isEnabled().catch(() => false);
-
-      if (isEnabled) {
-        await revokeButton.click();
-        // AlertDialog should appear
-        await expect(page.locator('[role="alertdialog"]')).toBeVisible();
-        // Dismiss by clicking Cancel
-        await page.locator('[role="alertdialog"] button:has-text("Cancel")').click();
-      }
+      // The per-session button is the only one named exactly "Revoke"
+      await page.getByRole("button", { name: "Revoke", exact: true }).first().click();
+      // AlertDialog should appear
+      await expect(page.locator('[role="alertdialog"]')).toBeVisible();
+      // Dismiss by clicking Cancel
+      await page.locator('[role="alertdialog"] button:has-text("Cancel")').click();
+      await expect(page.locator('[role="alertdialog"]')).not.toBeVisible();
     });
 
     test("revoke all sessions button exists and shows confirmation", async ({ page }) => {
-      // Check if we have sessions
-      const heading = page.locator("text=Web Sessions").first();
-      const headingText = await heading.textContent();
-      const match = headingText?.match(/\((\d+)\)/);
-      const sessionCount = match ? parseInt(match[1]) : 0;
+      expect(await sessionCountOf(page)).toBeGreaterThan(0);
 
-      // Look for "Revoke All Sessions" button
-      const revokeAllBtn = page.locator("button").filter({ hasText: "Revoke All Sessions" });
-      const isVisible = await revokeAllBtn.isVisible().catch(() => false);
-
-      if (!isVisible || sessionCount === 0) {
-        // No button or no sessions, skip
-        return;
-      }
-
-      const isEnabled = await revokeAllBtn.isEnabled().catch(() => false);
-      if (isEnabled) {
-        await revokeAllBtn.click();
-        // AlertDialog should appear
-        await expect(page.locator('[role="alertdialog"]')).toBeVisible();
-        // Dismiss by clicking Cancel
-        await page.locator('[role="alertdialog"] button:has-text("Cancel")').click();
-      }
+      // With sessions present the "Revoke All Sessions" button is rendered and enabled
+      const revokeAllBtn = page.getByRole("button", { name: "Revoke All Sessions", exact: true });
+      await expect(revokeAllBtn.first()).toBeEnabled();
+      await revokeAllBtn.first().click();
+      // AlertDialog should appear
+      await expect(page.locator('[role="alertdialog"]')).toBeVisible();
+      // Dismiss by clicking Cancel
+      await page.locator('[role="alertdialog"] button:has-text("Cancel")').click();
+      await expect(page.locator('[role="alertdialog"]')).not.toBeVisible();
     });
 
     test("can revoke individual session successfully", async ({ page }) => {
-      // Wait for Web Sessions section to be fully loaded
-      const heading = page.locator("text=Web Sessions").first();
-      await heading.waitFor({ timeout: 15000 });
+      const initialCount = await sessionCountOf(page);
+      expect(initialCount).toBeGreaterThan(0);
 
-      // Get initial session count
-      const initialText = await heading.textContent();
-      const initialMatch = initialText?.match(/\((\d+)\)/);
-      const initialCount = initialMatch ? parseInt(initialMatch[1]) : 0;
-
-      if (initialCount === 0) {
-        // No sessions to revoke
-        return;
-      }
-
-      // Click first revoke button
-      const revokeButton = page.locator("button").filter({ hasText: "Revoke" }).first();
-      const isEnabled = await revokeButton.isEnabled().catch(() => false);
-
-      if (!isEnabled) {
-        // Button not enabled, skip
-        return;
-      }
-
-      await revokeButton.click();
-      // Confirm in AlertDialog
+      // Revoke the first session and confirm in the AlertDialog
+      await page.getByRole("button", { name: "Revoke", exact: true }).first().click();
       await page.locator('[role="alertdialog"]').waitFor();
       await page.locator('[role="alertdialog"] button:has-text("Revoke")').click();
 
       // Wait for session count to decrease
-      await expect(async () => {
-        const updatedText = await heading.textContent();
-        const updatedMatch = updatedText?.match(/\((\d+)\)/);
-        const updatedCount = updatedMatch ? parseInt(updatedMatch[1]) : 0;
-        expect(updatedCount).toBeLessThan(initialCount);
-      }).toPass({ timeout: 10000 });
+      await expect.poll(() => sessionCountOf(page), { timeout: 10000 }).toBeLessThan(initialCount);
     });
   });
 
@@ -387,18 +286,10 @@ test.describe("Admin User Security Management", () => {
     });
 
     test("shows empty state when no OAuth connections", async ({ page }) => {
+      // The target user never authorized an OAuth client: zero count and the empty message
       const heading = page.locator("text=OAuth Connections").first();
-      await heading.waitFor({ timeout: 5000 });
-      const countText = await heading.textContent();
-
-      // OAuth Connections heading exists
-      expect(countText).toContain("OAuth Connections");
-
-      // If count is (0), should show "No OAuth connections" message
-      if (countText?.includes("(0)")) {
-        const emptyMessage = page.locator("text=No OAuth connections");
-        await expect(emptyMessage).toBeVisible();
-      }
+      await expect(heading).toContainText("OAuth Connections (0)");
+      await expect(page.locator("text=No OAuth connections")).toBeVisible();
     });
 
     test("revoke all OAuth button exists", async ({ page }) => {
@@ -416,27 +307,15 @@ test.describe("Admin User Security Management", () => {
       expect(count).toBeGreaterThan(0);
     });
 
-    test("revoke all OAuth shows confirmation dialog when connections exist", async ({ page }) => {
-      const heading = page.locator("text=OAuth Connections").first();
-      await heading.waitFor({ timeout: 5000 });
-      const countText = await heading.textContent();
-      const match = countText?.match(/\((\d+)\)/);
-      const connectionCount = match ? parseInt(match[1]) : 0;
+    test("revoke all OAuth is disabled without connections", async ({ page }) => {
+      await expect(page.locator("text=OAuth Connections").first()).toContainText("(0)");
 
-      if (connectionCount === 0) {
-        // No connections, button should be disabled
-        const revokeAllBtn = page.locator("button", { hasText: "Revoke All OAuth" });
-        await expect(revokeAllBtn).toBeDisabled();
-        return;
-      }
-
-      // Has connections, test confirmation dialog
-      const revokeAllBtn = page.locator("button", { hasText: "Revoke All OAuth" });
-      await revokeAllBtn.click();
-      // AlertDialog should appear
-      await expect(page.locator('[role="alertdialog"]')).toBeVisible();
-      // Dismiss by clicking Cancel
-      await page.locator('[role="alertdialog"] button:has-text("Cancel")').click();
+      // Without connections the section renders no "Revoke All OAuth" button and the
+      // Security Actions "Revoke All OAuth Tokens" button is disabled
+      await expect(page.getByRole("button", { name: "Revoke All OAuth", exact: true })).toHaveCount(
+        0,
+      );
+      await expect(page.locator("button", { hasText: "Revoke All OAuth Tokens" })).toBeDisabled();
     });
   });
 

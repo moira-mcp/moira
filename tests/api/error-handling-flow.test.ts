@@ -18,25 +18,10 @@
 
 import { describe, test, expect, beforeAll } from "@jest/globals";
 import { getTestBaseUrl, getAdminCredentials } from "../utils/test-config.js";
-import { signInUser } from "../utils/mcp-auth.js";
+import { createTestUserViaApi, formatSessionCookie, signInUser } from "../utils/mcp-auth.js";
 import { dockerExecSync } from "../utils/docker-command.js";
 
 const BASE_URL = getTestBaseUrl();
-
-/**
- * Get session cookie name based on URL protocol
- */
-function getSessionCookieName(baseUrl: string): string {
-  const isSecure = baseUrl.startsWith("https://");
-  return isSecure ? "__Secure-better-auth.session_token" : "better-auth.session_token";
-}
-
-/**
- * Format session cookie for HTTP header
- */
-function formatSessionCookie(baseUrl: string, sessionCookie: string): string {
-  return `${getSessionCookieName(baseUrl)}=${sessionCookie}`;
-}
 
 /**
  * Flush Docker log buffers and find one request log in a single SSH round-trip.
@@ -192,39 +177,8 @@ describe("Error Handling Flow - Log Once Validation", () => {
     // Create a non-admin user for 403 tests (done in beforeAll to avoid per-test timeout)
     const testEmail = `test-user-${Date.now()}@example.com`;
     const testPassword = "TestPass123!";
-
-    await fetch(`${BASE_URL}/api/auth/sign-up/email`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        email: testEmail,
-        password: testPassword,
-        name: "Test User",
-        acceptedTermsAt: new Date().toISOString(),
-        acceptedNotRussianResidentAt: new Date().toISOString(),
-      }),
-    });
-
-    // Verify email via admin
-    const usersResponse = await fetch(
-      `${BASE_URL}/api/admin/users?search=${encodeURIComponent(testEmail)}&limit=10`,
-      {
-        headers: { Cookie: formatSessionCookie(BASE_URL, adminSessionCookie) },
-      },
-    );
-    const users = (await usersResponse.json()) as {
-      data: { users: Array<{ id: string; email: string }> };
-    };
-    const testUser = users.data?.users?.find((u) => u.email === testEmail);
-
-    if (testUser) {
-      await fetch(`${BASE_URL}/api/admin/users/${testUser.id}/verify-email`, {
-        method: "POST",
-        headers: { Cookie: formatSessionCookie(BASE_URL, adminSessionCookie) },
-      });
-
-      nonAdminSessionCookie = await signInUser(BASE_URL, testEmail, testPassword);
-    }
+    await createTestUserViaApi(BASE_URL, testEmail, testPassword, "Test User");
+    nonAdminSessionCookie = await signInUser(BASE_URL, testEmail, testPassword);
   });
 
   describe("ValidationError (400) - Operational Error", () => {
@@ -335,12 +289,6 @@ describe("Error Handling Flow - Log Once Validation", () => {
     });
 
     test("non-admin accessing admin endpoint returns 403 and logs WARN once", async () => {
-      // Skip if non-admin user setup failed in beforeAll
-      if (!nonAdminSessionCookie) {
-        console.warn("Skipping: non-admin user setup failed in beforeAll");
-        return;
-      }
-
       // Try to access admin endpoint with non-admin session
       const response = await fetch(`${BASE_URL}/api/admin/users`, {
         headers: { Cookie: formatSessionCookie(BASE_URL, nonAdminSessionCookie) },

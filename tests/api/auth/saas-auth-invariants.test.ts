@@ -5,8 +5,9 @@
 
 import { afterEach, beforeAll, describe, expect, test } from "@jest/globals";
 import { randomUUID } from "node:crypto";
-import { getAdminCredentials, getTestBaseUrl } from "../../utils/test-config.js";
+import { getTestBaseUrl } from "../../utils/test-config.js";
 import { execSqliteInDocker, waitForDockerLog } from "../../utils/docker-command.js";
+import { formatSessionCookie, getAdminSessionCookie } from "../../utils/mcp-auth.js";
 
 const BASE_URL = getTestBaseUrl();
 const OAUTH_REDIRECT_URI = "http://localhost:3333/oauth/callback";
@@ -18,13 +19,7 @@ function cookieFrom(response: Response): string {
 }
 
 async function signInAdmin(): Promise<string> {
-  const response = await fetch(`${BASE_URL}/api/auth/sign-in/email`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(getAdminCredentials()),
-  });
-  expect(response.status).toBe(200);
-  return cookieFrom(response);
+  return formatSessionCookie(BASE_URL, await getAdminSessionCookie(BASE_URL));
 }
 
 describe("SaaS authentication invariants", () => {

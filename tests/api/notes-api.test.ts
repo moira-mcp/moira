@@ -4,26 +4,27 @@
  */
 
 import { describe, test, expect, beforeAll, afterAll } from "@jest/globals";
-import { getTestBaseUrl, getAdminCredentials } from "../utils/test-config.js";
+import { getTestBaseUrl } from "../utils/test-config.js";
+import {
+  createTestUserViaApi,
+  formatSessionCookie,
+  getAdminSessionCookie,
+  signInUser,
+} from "../utils/mcp-auth.js";
 
 const BASE_URL = getTestBaseUrl();
-const ADMIN_CREDENTIALS = getAdminCredentials();
 
 // Test users
 const TEST_USER_A = {
   email: `notes-api-user-a-${Date.now()}@example.com`,
   password: "TestPass123!",
   name: "Notes Test User A",
-  acceptedTermsAt: new Date().toISOString(),
-  acceptedNotRussianResidentAt: new Date().toISOString(),
 };
 
 const TEST_USER_B = {
   email: `notes-api-user-b-${Date.now()}@example.com`,
   password: "TestPass123!",
   name: "Notes Test User B",
-  acceptedTermsAt: new Date().toISOString(),
-  acceptedNotRussianResidentAt: new Date().toISOString(),
 };
 
 let userACookie: string;
@@ -37,59 +38,19 @@ const TEST_KEY_2 = `${TEST_KEY_PREFIX}-note2`;
 const TEST_KEY_3 = `${TEST_KEY_PREFIX}-note3`;
 
 beforeAll(async () => {
-  // Login as admin
-  const adminLoginRes = await fetch(`${BASE_URL}/api/auth/sign-in/email`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(ADMIN_CREDENTIALS),
-  });
-  adminCookie = adminLoginRes.headers.get("set-cookie") || "";
+  adminCookie = formatSessionCookie(BASE_URL, await getAdminSessionCookie(BASE_URL));
 
-  // Create and verify User A
-  const signUpResA = await fetch(`${BASE_URL}/api/auth/sign-up/email`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(TEST_USER_A),
-  });
-  const signUpDataA = (await signUpResA.json()) as { user?: { id: string } };
-  if (!signUpDataA?.user?.id) {
-    throw new Error(`Failed to create test user A: ${JSON.stringify(signUpDataA)}`);
-  }
+  await createTestUserViaApi(BASE_URL, TEST_USER_A.email, TEST_USER_A.password, TEST_USER_A.name);
+  userACookie = formatSessionCookie(
+    BASE_URL,
+    await signInUser(BASE_URL, TEST_USER_A.email, TEST_USER_A.password),
+  );
 
-  await fetch(`${BASE_URL}/api/admin/users/${signUpDataA.user.id}/verify-email`, {
-    method: "POST",
-    headers: { Cookie: adminCookie },
-  });
-
-  const loginResA = await fetch(`${BASE_URL}/api/auth/sign-in/email`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email: TEST_USER_A.email, password: TEST_USER_A.password }),
-  });
-  userACookie = loginResA.headers.get("set-cookie") || "";
-
-  // Create and verify User B
-  const signUpResB = await fetch(`${BASE_URL}/api/auth/sign-up/email`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(TEST_USER_B),
-  });
-  const signUpDataB = (await signUpResB.json()) as { user?: { id: string } };
-  if (!signUpDataB?.user?.id) {
-    throw new Error(`Failed to create test user B: ${JSON.stringify(signUpDataB)}`);
-  }
-
-  await fetch(`${BASE_URL}/api/admin/users/${signUpDataB.user.id}/verify-email`, {
-    method: "POST",
-    headers: { Cookie: adminCookie },
-  });
-
-  const loginResB = await fetch(`${BASE_URL}/api/auth/sign-in/email`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email: TEST_USER_B.email, password: TEST_USER_B.password }),
-  });
-  userBCookie = loginResB.headers.get("set-cookie") || "";
+  await createTestUserViaApi(BASE_URL, TEST_USER_B.email, TEST_USER_B.password, TEST_USER_B.name);
+  userBCookie = formatSessionCookie(
+    BASE_URL,
+    await signInUser(BASE_URL, TEST_USER_B.email, TEST_USER_B.password),
+  );
 });
 
 afterAll(async () => {

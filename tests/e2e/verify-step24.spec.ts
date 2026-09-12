@@ -105,14 +105,16 @@ test.describe("Step 24: Navigation, Dashboard, Card Fixes", () => {
   });
 
   test("9. Beta banner at bottom of page", async ({ page }) => {
-    // Clear beta dismissal to make banner visible
+    // loginAsAdmin accepted the beta agreement via cookie, so the persistent banner shows
+    // (SaaS deployments only); it is rendered after the main content, not before it
     await page.goto(`${getTestBaseUrl()}/`);
-    await page.evaluate(() => localStorage.removeItem("beta_banner_dismissed"));
-    await page.reload();
-    await page.waitForLoadState("networkidle");
-    // Check if banner exists (may have been accepted already)
-    // The banner should be after main content, not before
-    // We verify by checking DOM order
+    const banner = page.locator("#main-content ~ *").filter({ hasText: "Beta Version:" });
+    await expect(banner).toBeVisible();
+    await expect(page.locator("#main-content").locator("text=Beta Version:")).toHaveCount(0);
+
+    // Dismissing hides the banner
+    await banner.getByRole("button", { name: "Dismiss beta warning" }).click();
+    await expect(banner).toHaveCount(0);
   });
 
   test("10. DataListView grid has padding", async ({ page }) => {
