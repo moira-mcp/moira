@@ -106,6 +106,7 @@ frontend/src/
 │   ├── AuthProvider.tsx         # Better Auth UI provider
 │   └── better-auth-client.ts    # Auth client config
 ├── hooks/
+│   ├── useResource.ts           # Page-local data store with last-good retention
 │   ├── useWorkflowData.ts       # Workflow API integration
 │   ├── useNotes.ts              # Notes API integration
 │   └── useTheme.ts              # Theme management
@@ -166,7 +167,9 @@ Higher-level composable components in `src/components/`:
 | ServerPagination  | `ServerPagination.tsx`  | Server-side pagination (total-based or cursor-based), matches DataTable style                       |
 | EmptyState        | `empty-state.tsx`       | Centered icon + title + description + action CTA                                                    |
 | InlineError       | `inline-error.tsx`      | Alert destructive with optional retry                                                               |
-| PageLoader        | `page-loader.tsx`       | Skeleton stat cards + table rows placeholder                                                        |
+| PageLoader        | `page-loader.tsx`       | Skeleton stat cards + table rows placeholder; only before a page's first data                       |
+| RouteSkeleton     | `route-skeleton.tsx`    | In-layout skeleton while a lazily loaded page's code arrives                                        |
+| DiagramSkeleton   | `route-skeleton.tsx`    | Quiet surface while the technical graph chunk arrives (flow and run pages)                          |
 | ConfirmDialog     | `confirm-dialog.tsx`    | AlertDialog wrapper with async onConfirm, loading state, ReactNode description                      |
 
 DataTable subcomponents: `column-header.tsx` (sortable headers), `pagination.tsx` (page nav + i18n props + aria-labels), `toolbar.tsx` (search + reset).
@@ -383,7 +386,13 @@ declares (`pages/FlowPage.tsx`).
 
 **Data:** the workflow detail (`apiClient.getWorkflow`, whose `fileInfo.revision` is the
 definition revision the page saves against) and the saved definition's derived process
-(`apiClient.getWorkflowProcess`). While the page holds unsaved edits it re-derives the process in
+(`apiClient.getWorkflowProcess`), both held in `useResource` stores (the detail through
+`useWorkflowDetail`, the process keyed by workflow id and refreshed when the revision changes): a
+refetch keeps the current value on screen with a "Refreshing…" indicator (`flow-pending`, in the
+header row or the no-process bar), the page loader appears only before the first data of a
+workflow (a move to another workflow through breadcrumbs or a subgraph link is a first load and
+shows nothing of the previous one), and a failed refetch keeps the content and reports once
+through a toast. While the page holds unsaved edits it re-derives the process in
 the browser with the engine's `deriveProcess` (the `@mcp-moira/workflow-engine/process` subpath),
 so the diagnostics it shows are the ones the server's validation would raise. The modes render a
 run-less projection (`components/flow/model.ts`: every block pending, no route, no cursor, no run
@@ -416,7 +425,8 @@ condition, message, expressions) and registry entries; `applyEdits` yields the e
 are applied). The save calls
 `apiClient.updateWorkflow(id, edited, fileInfo.revision)` (`PUT /api/workflows/:id`); a 409 shows
 the conflict text and a 400 the server's message, both keeping the edits; a success clears them and
-reloads the detail. The walkthrough (`Walkthrough`, generic over the page's modes) explains block,
+reloads the detail and then the process for the new revision, the previous picture staying mounted
+through both. The walkthrough (`Walkthrough`, generic over the page's modes) explains block,
 step, evidence, loop, editing and the modes.
 
 ### Run page (ExecutionInspector component)
@@ -465,7 +475,12 @@ history entry.
 
 - Compact toolbar (single line): back button, execution ID (copy), workflow name, status badge,
   current node (focuses the node graph), owner info (admin), lock button (user view, running
-  executions), fullscreen button (context tab), refresh, error badge.
+  executions), fullscreen button (context tab), refresh (spins, `data-pending="true"`, while an
+  execution or progress request is in flight), error badge. A refresh that fails keeps the run on
+  screen and reports through a toast; a progress refetch that fails keeps the projection already on
+  screen (the "unavailable" banner is a first-load state only). The Locks tab holds its history in a
+  `useResource` store: opening it again refreshes behind the list (`locks-panel` with
+  `data-pending`), the spinner (`locks-loading`) shows only before the first list.
 - With a process view: a header row with the mode tabs, the route cursor (when a route is
   recorded), the status legend and the "Explain this page" button; the mode fills the remaining
   width and height. Without one (a workflow without `progress`): the technical node graph fills
@@ -1238,6 +1253,23 @@ useAsyncErrorBoundary(): (error: Error) => void
 
 ## State Management
 
+### Page-local data store (`useResource`)
+
+```typescript
+useResource<T>(key: string | null, fetcher: (key: string) => Promise<T>, describeError?): {
+  data: T | undefined;      // last successful value; kept while a refetch is pending
+  dataKey: string | null;   // the key `data` belongs to
+  pending: boolean;         // a fetch is in flight (first load or refetch)
+  error: string | null;     // last failure, cleared by the next success; `data` is kept
+  refresh: () => Promise<void>;
+}
+```
+
+Fetches when `key` changes and on `refresh()`; a response from an older request that resolves
+after a newer one is dropped; a `null` key clears the value. A page shows its full-page loader only
+while `data` is undefined and `pending` is true; every later fetch renders the previous value with
+a local pending indicator. The fetcher is read through a ref, so it may close over page state.
+
 ### Workflow Data Hook
 
 ```typescript
@@ -1245,6 +1277,16 @@ useAsyncErrorBoundary(): (error: Error) => void
 useWorkflowApp(): {
   selectedWorkflow: string | null;
   selectWorkflow: (id: string) => void;
+}
+
+// Workflow detail (built on useResource)
+useWorkflowDetail(id?: string): {
+  workflow: WorkflowDetailResponse | null;
+  loading: boolean;   // first load of this id only
+  pending: boolean;   // any fetch in flight
+  current: boolean;   // the held workflow is the requested id
+  error: string | null;
+  refreshWorkflow: () => Promise<void>;
 }
 
 // Workflow list data
@@ -1334,7 +1376,11 @@ Avoid hardcoded colors:
 - **aria-labels**: Required on all icon-only buttons (e.g., delete, clear, close)
 - **aria-live regions**: `assertive` on error displays (AuthErrorDisplay, ErrorBoundary), `polite` on loading states
 - **Keyboard navigation**: All interactive elements reachable via Tab/Enter/Space/Escape
-- **Code splitting**: Heavy pages use `React.lazy()` with Suspense fallback in `App.tsx`
+- **Code splitting**: Heavy pages use `React.lazy()`; the Suspense boundary sits inside
+  `MainAppLayout` and `AdminLayout` around the outlet with `RouteSkeleton` as the fallback, so the
+  sidebar stays while a page's code arrives (an in-app navigation is a router transition and keeps
+  the current page until the next one can render; the skeleton shows on a direct load). The outer
+  boundary in `App.tsx` uses the same fallback.
 
 ### Responsive Design
 

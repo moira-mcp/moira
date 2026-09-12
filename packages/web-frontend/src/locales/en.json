@@ -1036,6 +1036,7 @@
     },
     "flowPage": {
       "title": "Flow",
+      "refreshing": "Refreshing…",
       "noProcess": "This workflow declares no process view (no blocks), so the page shows its node graph. Add a `progress` section with blocks to read it as a process.",
       "diagnostics": "Process diagnostics",
       "modes": {

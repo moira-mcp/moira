@@ -11,6 +11,9 @@
  */
 
 import React, { useState, useEffect, useCallback, useMemo, Suspense, useRef } from "react";
+import { toast } from "sonner";
+import { useResource } from "../../hooks/useResource";
+import { DiagramSkeleton } from "../route-skeleton";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { apiClient } from "../../services/api-client";
@@ -181,8 +184,9 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
     createdAt: string;
     unlockedAt: string | null;
   }
-  const [locks, setLocks] = useState<LockRecord[]>([]);
-  const [locksLoading, setLocksLoading] = useState(false);
+  // The lock history is wanted once the tab has been opened; switching away and back refreshes it
+  // behind the list already shown.
+  const [locksWanted, setLocksWanted] = useState(false);
   const [unlocking, setUnlocking] = useState<string | null>(null);
   const [lockDialogOpen, setLockDialogOpen] = useState(false);
   const [lockReason, setLockReason] = useState("");
@@ -205,10 +209,8 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
         setProgressError(false);
       }
     } catch {
-      if (request === progressRequestRef.current) {
-        setProgress(null);
-        setProgressError(true);
-      }
+      // A failed refetch keeps the projection already on screen; only a first load has none.
+      if (request === progressRequestRef.current) setProgressError(true);
     } finally {
       if (request === progressRequestRef.current) setProgressLoading(false);
     }
@@ -249,7 +251,10 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
         void loadProgress(execData.executionId);
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : t("common.errors.failedToLoad");
-        setError(message);
+        // A failed refresh keeps the run on screen and says so once; only a first load has
+        // nothing to keep.
+        if (isRefresh) toast.error(message);
+        else setError(message);
       } finally {
         setLoading(false);
         setRefreshing(false);
@@ -321,25 +326,24 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
   );
   const shownBlock = shownBlocks.find((b) => b.id === shownBlockId) ?? null;
 
-  // Load locks for both admin and user views
-  const loadLocks = useCallback(async () => {
-    setLocksLoading(true);
-    try {
-      const data = showOwnerInfo
+  // Lock history for both admin and user views, kept while a refetch is pending.
+  const lockHistory = useResource<LockRecord[]>(
+    locksWanted ? `${executionId}:${showOwnerInfo ? "admin" : "owner"}` : null,
+    async () =>
+      (showOwnerInfo
         ? await apiClient.getExecutionLocks(executionId)
-        : await apiClient.getUserExecutionLocks(executionId);
-      setLocks(data.locks);
-    } catch {
-      setLocks([]);
-    } finally {
-      setLocksLoading(false);
-    }
-  }, [executionId, showOwnerInfo]);
-
+        : await apiClient.getUserExecutionLocks(executionId)
+      ).locks,
+  );
+  const locks = lockHistory.data ?? [];
+  const locksLoading = lockHistory.data === undefined && lockHistory.pending;
+  const loadLocks = lockHistory.refresh;
+  const locksHeldRef = useRef(false);
+  locksHeldRef.current = lockHistory.data !== undefined;
   useEffect(() => {
-    if (activeTab === "locks") {
-      loadLocks();
-    }
+    if (activeTab !== "locks") return;
+    setLocksWanted(true);
+    if (locksHeldRef.current) void loadLocks();
   }, [activeTab, loadLocks]);
 
   const handleAdminUnlock = useCallback(
@@ -559,13 +563,7 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
   const errorsCount = execution.errors?.length ?? 0;
   const ModeView = MODE_COMPONENTS[mode];
   const technicalGraph = (
-    <Suspense
-      fallback={
-        <div className="flex items-center justify-center h-full bg-muted/20">
-          <div className="text-muted-foreground">{t("components.workflowGraph.loading")}</div>
-        </div>
-      }
-    >
+    <Suspense fallback={<DiagramSkeleton />}>
       <WorkflowGraphWithFocus
         workflow={workflow.workflow}
         validation={workflow.validation}
@@ -701,8 +699,16 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
 
           <Tooltip>
             <TooltipTrigger asChild>
-              <Button variant="outline" size="sm" onClick={handleRefresh} disabled={refreshing}>
-                <RefreshCw className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleRefresh}
+                disabled={refreshing}
+                data-pending={refreshing || progressLoading ? "true" : undefined}
+              >
+                <RefreshCw
+                  className={`h-4 w-4 ${refreshing || progressLoading ? "animate-spin" : ""}`}
+                />
               </Button>
             </TooltipTrigger>
             <TooltipContent>{t("pages.executionInspector.toolbar.refresh")}</TooltipContent>
@@ -932,9 +938,23 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
               </TabsContent>
             )}
 
-            <TabsContent value="locks" className="scrollbar-thin flex-1 overflow-auto m-0 p-4">
+            <TabsContent
+              value="locks"
+              className="scrollbar-thin flex-1 overflow-auto m-0 p-4"
+              data-testid="locks-panel"
+              data-pending={lockHistory.pending ? "true" : undefined}
+            >
+              {lockHistory.error && (
+                <div
+                  className="mb-3 text-xs text-destructive"
+                  role="alert"
+                  data-testid="locks-error"
+                >
+                  {lockHistory.error}
+                </div>
+              )}
               {locksLoading ? (
-                <div className="flex items-center justify-center py-8">
+                <div className="flex items-center justify-center py-8" data-testid="locks-loading">
                   <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
                 </div>
               ) : locks.length === 0 ? (

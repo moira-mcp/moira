@@ -16,7 +16,7 @@
  * shows the node graph only.
  */
 
-import React, { Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import React, { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import {
@@ -56,8 +56,10 @@ import WorkflowBreadcrumbComponent from "../components/workflow/WorkflowBreadcru
 import { ShareDialog } from "../components/workflow/ShareDialog";
 import { ConfirmDialog } from "../components/confirm-dialog";
 import { PageLoader } from "../components/page-loader";
+import { DiagramSkeleton } from "../components/route-skeleton";
 import { InlineError } from "../components/inline-error";
 import { useWorkflowApp } from "../hooks/useWorkflowData";
+import { useResource } from "../hooks/useResource";
 import { useSession } from "../auth/better-auth-client";
 import { apiClient, ApiClientError } from "../services/api-client";
 import { ROUTES } from "../constants/routes";
@@ -153,6 +155,21 @@ export function flowGuideSteps(isOwner: boolean): GuideStep<FlowViewMode, FlowPa
   ];
 }
 
+/** The slim pending state of a refetch: the content stays, this says a refresh is running. */
+function PendingIndicator(): React.JSX.Element {
+  const { t } = useTranslation();
+  return (
+    <span
+      className="inline-flex items-center gap-1 text-xs text-muted-foreground"
+      role="status"
+      data-testid="flow-pending"
+    >
+      <Loader2 className="size-3 animate-spin" aria-hidden="true" />
+      {t("pages.flowPage.refreshing")}
+    </span>
+  );
+}
+
 export const FlowPage: React.FC = () => {
   const { id, handle, slug } = useParams<{ id?: string; handle?: string; slug?: string }>();
   const navigate = useNavigate();
@@ -172,10 +189,6 @@ export const FlowPage: React.FC = () => {
   }>({ incoming: [], outgoing: [] });
   const [focusRequest, setFocusRequest] = useState<{ nodeId: string; token: number } | null>(null);
   const [chosenTab, setChosenTab] = useState<FlowPanelTab>("block");
-  const [savedProcess, setSavedProcess] = useState<{
-    key: string;
-    process: ProcessProjection | null;
-  } | null>(null);
   const [edits, setEdits] = useFlowEdits();
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -190,24 +203,32 @@ export const FlowPage: React.FC = () => {
   const fileInfo = detail?.fileInfo;
   const savedWorkflow = detail?.workflow;
   const isOwner = fileInfo?.accessType === "owner";
-  const processKey = fileInfo ? `${fileInfo.id}@${fileInfo.revision}` : null;
 
-  // The saved definition's process comes from the server.
+  // The saved definition's process comes from the server, held per workflow: a new revision of
+  // the same workflow refreshes it while the previous projection stays on screen; a move to
+  // another workflow (breadcrumbs, a subgraph link) fetches afresh and shows nothing of the old one.
+  const workflowId = fileInfo?.id;
+  const revision = fileInfo?.revision;
+  const savedProcess = useResource<ProcessProjection | null>(workflowId ?? null, () =>
+    workflowId
+      ? apiClient.getWorkflowProcess(workflowId).then((r) => r.process)
+      : Promise.resolve(null),
+  );
+  const refreshProcess = savedProcess.refresh;
+  const seenRef = useRef<{ id: string; revision: number } | null>(null);
   useEffect(() => {
-    if (!fileInfo || !processKey) return;
-    let cancelled = false;
-    void apiClient
-      .getWorkflowProcess(fileInfo.id)
-      .then((response) => {
-        if (!cancelled) setSavedProcess({ key: processKey, process: response.process });
-      })
-      .catch(() => {
-        if (!cancelled) setSavedProcess({ key: processKey, process: null });
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [fileInfo, processKey]);
+    if (!workflowId || revision === undefined) return;
+    const seen = seenRef.current;
+    seenRef.current = { id: workflowId, revision };
+    if (seen && seen.id === workflowId && seen.revision !== revision) void refreshProcess();
+  }, [workflowId, revision, refreshProcess]);
+  const heldProcess = savedProcess.dataKey === workflowId ? savedProcess.data : undefined;
+
+  // A refetch that fails while the page has content keeps the content and says so once.
+  const detailError = workflowDetail.error;
+  useEffect(() => {
+    if (detailError && savedWorkflow) toast.error(detailError);
+  }, [detailError, savedWorkflow]);
 
   // --- URL state
   const editing = isOwner && searchParams.get(EDIT_PARAM) === "1";
@@ -242,9 +263,14 @@ export const FlowPage: React.FC = () => {
   const process = useMemo<ProcessProjection | null>(() => {
     if (!edited) return null;
     if (hasEdits) return deriveProcess(edited as unknown as Parameters<typeof deriveProcess>[0]);
-    return savedProcess && savedProcess.key === processKey ? savedProcess.process : null;
-  }, [edited, hasEdits, savedProcess, processKey]);
-  const processLoading = !hasEdits && (!savedProcess || savedProcess.key !== processKey);
+    return heldProcess ?? null;
+  }, [edited, hasEdits, heldProcess]);
+  // Before the first projection of this workflow the page has nothing to show yet; a refetch for
+  // a new revision keeps the previous projection and only marks the page pending.
+  const processLoading = !hasEdits && heldProcess === undefined && savedProcess.pending;
+  const refetching =
+    (workflowDetail.pending && !workflowDetail.loading) ||
+    (savedProcess.pending && heldProcess !== undefined);
   const progress = useMemo(
     () => (edited && process ? definitionProgress(edited, process) : null),
     [edited, process],
@@ -434,13 +460,7 @@ export const FlowPage: React.FC = () => {
   const technicalGraph = savedWorkflow && edited && (
     <div className="flex h-full min-h-0">
       <div className="flex-1 min-w-0">
-        <Suspense
-          fallback={
-            <div className="flex items-center justify-center h-full bg-muted/20">
-              <div className="text-muted-foreground">{t("components.workflowGraph.loading")}</div>
-            </div>
-          }
-        >
+        <Suspense fallback={<DiagramSkeleton />}>
           <WorkflowGraphWithFocus
             workflow={edited}
             validation={detail?.validation}
@@ -580,9 +600,9 @@ export const FlowPage: React.FC = () => {
           />
         )}
 
-        {workflowDetail.loading || (savedWorkflow && processLoading) ? (
+        {workflowDetail.loading || (workflowDetail.current && processLoading) ? (
           <PageLoader />
-        ) : workflowDetail.error ? (
+        ) : workflowDetail.error && !workflowDetail.current ? (
           <div className="flex items-center justify-center h-full">
             <InlineError
               message={workflowDetail.error}
@@ -628,6 +648,7 @@ export const FlowPage: React.FC = () => {
                     </TabsList>
                   </Tabs>
                   <div className="flex-1" />
+                  {refetching && <PendingIndicator />}
                   <button
                     type="button"
                     onClick={() => update({ [GUIDE_PARAM]: "1" })}
@@ -642,10 +663,11 @@ export const FlowPage: React.FC = () => {
 
               {!process && (
                 <div
-                  className="border-b bg-muted/20 px-4 py-2 text-xs text-muted-foreground"
+                  className="border-b bg-muted/20 px-4 py-2 text-xs text-muted-foreground flex flex-wrap items-center gap-2"
                   data-testid="flow-no-process"
                 >
-                  {t("pages.flowPage.noProcess")}
+                  <span className="flex-1">{t("pages.flowPage.noProcess")}</span>
+                  {refetching && <PendingIndicator />}
                 </div>
               )}
 

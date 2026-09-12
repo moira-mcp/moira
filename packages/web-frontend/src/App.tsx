@@ -28,6 +28,7 @@ import { Settings } from "./pages/Settings";
 import { TestError } from "./pages/TestError";
 import { InviteAcceptPage } from "./pages/InviteAccept";
 import { APP_PREFIX, ROUTES } from "./constants/routes";
+import { RouteSkeleton } from "./components/route-skeleton";
 
 // Lazy-loaded heavy pages
 const FlowPage = lazy(() => import("./pages/FlowPage").then((m) => ({ default: m.FlowPage })));
@@ -88,11 +89,13 @@ import "./i18n";
 
 /**
  * Main Application Component
- * Dashboard-centric layout with sidebar navigation
+ * Dashboard-centric layout with sidebar navigation. Lazily loaded pages inside the layouts are
+ * caught by the layouts' own Suspense boundaries (the sidebar stays while a page's code
+ * arrives); this outer boundary only covers a chunk loaded outside any layout.
  */
 const App: React.FC = () => {
   return (
-    <Suspense fallback={<div aria-live="polite">loading...</div>}>
+    <Suspense fallback={<RouteSkeleton />}>
       <BrowserRouter>
         <ThemeProvider>
           <FeaturesProvider>

@@ -4,13 +4,14 @@
  * Handles beta agreement modal and warning banner
  */
 
-import React, { useState, useEffect } from "react";
+import React, { Suspense, useState, useEffect } from "react";
 import { Outlet, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { apiClient } from "../../services/api-client";
 import { BetaAgreementModal } from "../BetaAgreementModal";
 import { BetaWarningBanner } from "../BetaWarningBanner";
 import { AnimatedPage } from "../AnimatedPage";
+import { RouteSkeleton } from "../route-skeleton";
 import { useBetaAgreement } from "../../hooks/useBetaAgreement";
 import { useSession, signOut } from "../../auth/better-auth-client";
 import { SidebarProvider, SidebarInset, SidebarTrigger } from "@/components/ui/sidebar";
@@ -91,7 +92,9 @@ export const MainAppLayout: React.FC = () => {
           </header>
           <main id="main-content" className="flex-1 overflow-y-auto">
             <AnimatedPage>
-              <Outlet />
+              <Suspense fallback={<RouteSkeleton />}>
+                <Outlet />
+              </Suspense>
             </AnimatedPage>
           </main>
           {showBanner && <BetaWarningBanner onDismiss={dismissBanner} />}
