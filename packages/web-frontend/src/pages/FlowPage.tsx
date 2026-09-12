@@ -84,9 +84,9 @@ import {
   useFlowEdits,
 } from "../components/flow/editing";
 
-const WorkflowGraphWithFocus = React.lazy(() =>
-  import("../components/workflow/WorkflowGraphWithFocus").then((module) => ({
-    default: module.WorkflowGraphWithFocus,
+const TechnicalGraph = React.lazy(() =>
+  import("../components/workflow/WorkflowGraph").then((module) => ({
+    default: module.WorkflowGraph,
   })),
 );
 
@@ -461,9 +461,10 @@ export const FlowPage: React.FC = () => {
     <div className="flex h-full min-h-0">
       <div className="flex-1 min-w-0">
         <Suspense fallback={<DiagramSkeleton />}>
-          <WorkflowGraphWithFocus
+          <TechnicalGraph
             workflow={edited}
             validation={detail?.validation}
+            blocks={blocks}
             onWorkflowNavigate={handleNavigate}
             onNodeSelect={handleNodeSelect}
             showNodeDetails={false}

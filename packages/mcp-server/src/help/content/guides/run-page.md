@@ -61,7 +61,8 @@ badge on **Variables** or **Locks** means a step is waiting for your answer or a
 - **Context** — the context editor: a declared variable the workflow's `runtimePolicy` allows to
   be edited at the current step can be changed here (the variables tab offers a shortcut to it).
 - **Errors**, **Steps**, **Graph**, **Locks** — the execution's error history, the technical step
-  list, the node graph, and lock history.
+  list, the node graph (step cards grouped by block, the run's block statuses as tints, the
+  current step marked and in view when the tab opens), and lock history.
 
 ## Answering a waiting step
 

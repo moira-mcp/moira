@@ -81,9 +81,6 @@ const OperationalDashboard = lazy(() =>
   import("./pages/OperationalDashboard").then((m) => ({ default: m.OperationalDashboard })),
 );
 
-// Import global styles
-import "./styles/node-styles.css";
-
 // Import i18n configuration
 import "./i18n";
 

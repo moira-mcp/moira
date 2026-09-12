@@ -142,7 +142,7 @@ test.describe("Workflow Canvas Controls", () => {
     await expect(page.locator("button:has-text('Horizontal')")).toBeVisible();
 
     // Buttons should be in a control panel container
-    const controlPanel = page.locator(".absolute.bottom-20.left-4");
+    const controlPanel = page.getByTestId("graph-layout-controls");
     await expect(controlPanel).toBeVisible();
   });
 });

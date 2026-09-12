@@ -47,6 +47,7 @@ export function StepCard({
   highlighted = false,
   connections = [],
   onConnection,
+  onConnectionHover,
   onSelect,
   selectTitle,
   afterTitle,
@@ -62,6 +63,8 @@ export function StepCard({
   highlighted?: boolean;
   connections?: StepConnection[];
   onConnection?: (connection: StepConnection) => void;
+  /** Hovering a connection chip (or leaving it): the graph lights the matching edge. */
+  onConnectionHover?: (connection: StepConnection | null) => void;
   /** Makes the card a button (the run page focuses the step on the node graph). */
   onSelect?: () => void;
   selectTitle?: string;
@@ -161,7 +164,12 @@ export function StepCard({
                         }
                       : {})}
                     data-edge-kind={connection.internal ? "internal" : "external"}
+                    data-connection={connection.label}
                     title={connection.targetName}
+                    onMouseEnter={
+                      onConnectionHover ? () => onConnectionHover(connection) : undefined
+                    }
+                    onMouseLeave={onConnectionHover ? () => onConnectionHover(null) : undefined}
                     className={cn(
                       "inline-flex max-w-full items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10px] leading-4 transition",
                       onConnection &&

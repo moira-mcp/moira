@@ -5,14 +5,18 @@
  * Single source of truth for workflow visualization across the application.
  * Replaces both WorkflowCanvas and WorkflowViewerPlaceholder.
  *
+ * The detailed layer of the process view: every node is the shared step card, grouped inside a
+ * tinted block group in process order (ELK layered, top to bottom or left to right), forward
+ * connections labelled, returns dashed in the primary colour and labelled on demand through the
+ * same focus the lanes and canvas use.
+ *
  * Features:
- * - Accepts raw WorkflowGraph data and transforms it internally
+ * - Accepts raw WorkflowGraph data; node data (validation, catalog) still comes from the
+ *   transformer, the step facts from the process-view model (`graphModel`)
  * - Mounts through the shared DiagramViewport (gesture pan, pinch zoom, zoom/fit cluster)
  * - Layout controls (Fit View, Vertical, Horizontal) driving the instance received on init
- * - Current node highlighting for execution views
- * - Optional header with workflow metadata
+ * - Current node and error node highlighting for execution views
  * - Theme-aware styling (dark/light mode)
- * - Compact node visualization with unified CompactNode component
  */
 
 import React, { useState, useCallback, useEffect, useMemo, useRef } from "react";
@@ -27,22 +31,28 @@ import {
 } from "@xyflow/react";
 import { ZoomIn, ArrowUpDown, ArrowLeftRight } from "lucide-react";
 import { DiagramViewport } from "../diagram/DiagramViewport";
+import { useOpeningPlacement } from "../diagram/placement";
 
-// Compact node component for all node types
-import CompactNode from "../nodes/CompactNode";
-// Enhanced node detail sheet
+import { graphModel, definitionBlocks } from "../run/graphModel";
+import { GRAPH_MARGIN, layoutGraph } from "./graphLayout";
+import {
+  BlockGroupView,
+  GraphDefs,
+  GraphMeasuredHeights,
+  GraphEdgeView,
+  StepNodeView,
+  type BlockGroupNode,
+  type GraphEdge,
+  type StepNode,
+} from "./graphNodes";
+import { TransitionFocusProvider } from "../run/focus";
+import type { RunBlock } from "../run/model";
 import { NodeDetailSheet } from "./NodeDetailSheet";
-// Note: SmartStepEdge (A* pathfinding) was removed due to severe performance issues
-// with large graphs (142 nodes, 192 edges = 82% CPU usage during idle).
-// Using default bezier edges instead - much faster, acceptable visual quality.
 
 import { useTheme } from "../../hooks/useTheme";
-import { LayoutEngine } from "../../utils/layout-algorithm";
 import { WorkflowTransformer } from "../../utils/workflow-transformer";
 import {
   WorkflowGraph as WorkflowGraphType,
-  MoiraReactFlowNode,
-  MoiraReactFlowEdge,
   LayoutOptions,
   DEFAULT_LAYOUT_OPTIONS,
   WorkflowValidationStatus,
@@ -51,33 +61,38 @@ import { useTranslation } from "react-i18next";
 import { useNodeTypes } from "../../hooks/useNodeTypes";
 import { Button } from "@/components/ui/button";
 
-// All node types now use CompactNode for unified compact visualization
+// Every authored type renders the same step node; the per-type registration keeps React Flow's
+// `react-flow__node-<type>` class, which the node-type catalog and the graph specs rely on.
 const nodeTypes = {
-  start: CompactNode,
-  "agent-directive": CompactNode,
-  agentDirective: CompactNode,
-  condition: CompactNode,
-  "telegram-notification": CompactNode,
-  "user-notification": CompactNode,
-  telegram: CompactNode,
-  subgraph: CompactNode,
-  expression: CompactNode,
-  "read-note": CompactNode,
-  "write-note": CompactNode,
-  "upsert-note": CompactNode,
-  materialize: CompactNode,
-  end: CompactNode,
+  start: StepNodeView,
+  "agent-directive": StepNodeView,
+  agentDirective: StepNodeView,
+  condition: StepNodeView,
+  "telegram-notification": StepNodeView,
+  "user-notification": StepNodeView,
+  telegram: StepNodeView,
+  subgraph: StepNodeView,
+  expression: StepNodeView,
+  "read-note": StepNodeView,
+  "write-note": StepNodeView,
+  "upsert-note": StepNodeView,
+  materialize: StepNodeView,
+  teleport: StepNodeView,
+  lock: StepNodeView,
+  end: StepNodeView,
   // A type Moira knows and this bundle has no dedicated rendering for; drawn from the catalog.
-  catalog: CompactNode,
-  fallback: CompactNode,
+  catalog: StepNodeView,
+  fallback: StepNodeView,
+  "block-group": BlockGroupView,
 };
 
-// Edge types - using default edges (no custom types needed)
-// SmartStepEdge was removed due to O(n²) performance on large graphs
-const edgeTypes = {};
+const edgeTypes = { graph: GraphEdgeView };
 
 // Empty array constant to avoid creating new array on each render
 const EMPTY_ERROR_NODE_IDS: string[] = [];
+/** A grouped graph opens at least this readable, on its first block. */
+const GRAPH_OPENING_ZOOM = 0.7;
+const GRAPH_OPENING_EDGE = 16;
 
 /** ReactFlow instance interface for external control */
 export interface ReactFlowInstance {
@@ -95,6 +110,11 @@ export interface WorkflowGraphProps {
   currentNodeId?: string | null;
   /** Node IDs that have runtime errors (for error highlighting) */
   errorNodeIds?: string[];
+  /**
+   * The process blocks to group the nodes by (a run's blocks carry their status); derived from
+   * the definition when absent.
+   */
+  blocks?: RunBlock[];
   /** Layout options */
   layoutOptions?: LayoutOptions;
   /** Node click handler */
@@ -119,6 +139,11 @@ export interface WorkflowGraphProps {
   ) => void;
   /** Callback when ReactFlow instance is initialized - used for external control like focusOnNode */
   onInit?: (instance: ReactFlowInstance) => void;
+  /**
+   * A node to bring into view (a step chosen in a list, the toolbar's current node); the token
+   * makes the same node focusable twice. It takes over the opening placement while set.
+   */
+  focusRequest?: { nodeId: string; token: number } | null;
 }
 
 /**
@@ -147,6 +172,7 @@ export const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
   validation,
   currentNodeId,
   errorNodeIds = EMPTY_ERROR_NODE_IDS,
+  blocks,
   layoutOptions = DEFAULT_LAYOUT_OPTIONS,
   onNodeClick,
   onWorkflowNavigate,
@@ -156,6 +182,7 @@ export const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
   showNodeDetails = true,
   onNodeSelect,
   onInit,
+  focusRequest = null,
 }) => {
   const { t } = useTranslation();
   const { actualTheme } = useTheme();
@@ -163,23 +190,103 @@ export const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
   // the control panel drive fitView through this ref rather than a hook, so the graph does not
   // need a provider of its own around it.
   const instanceRef = useRef<XyflowInstance | null>(null);
+  /** The last layout's block groups, read by the opening placement. */
+  const groupsRef = useRef<{ id: string; x: number; y: number }[]>([]);
+  /**
+   * The opening placement, applied on top of the viewport's own fit once it reports ready and
+   * again when what it follows changes: a requested node, else a run's current node, is brought
+   * into view; a definition opens readable on its first block (the fit-view control gives the
+   * overview back), as the canvas does. The key carries the node and a tag (the request token or
+   * `current`) so a repeated request places again.
+   */
+  // The layout runs a second time with the heights the browser measured when a card is taller
+  // than its estimate (a long summary, wrapped chips); the placement is applied again after it.
+  const [measuredHeights, setMeasuredHeights] = useState<Map<string, number> | null>(null);
+  const [layoutGeneration, setLayoutGeneration] = useState(0);
+  const laidHeightsRef = useRef<Map<string, number>>(new Map());
+  const placementKey = `${layoutGeneration}|${
+    focusRequest
+      ? `node:${focusRequest.token}:${focusRequest.nodeId}`
+      : currentNodeId
+        ? `node:current:${currentNodeId}`
+        : "first"
+  }`;
+  const placeViewport = useCallback((instance: XyflowInstance, generationKey: string) => {
+    const key = generationKey.slice(generationKey.indexOf("|") + 1);
+    // A frame later: a placement after a relayout must see the nodes' new positions.
+    window.requestAnimationFrame(() => {
+      if (key.startsWith("node:")) {
+        const nodeId = key.slice(key.indexOf(":", 5) + 1);
+        void instance.fitView({ nodes: [{ id: nodeId }], padding: 0.5, maxZoom: 1, duration: 0 });
+        return;
+      }
+      const first = groupsRef.current[0];
+      if (!first) return;
+      const zoom = Math.max(GRAPH_OPENING_ZOOM, instance.getZoom());
+      // The margin before the first group holds the return lanes; a third of it stays in view.
+      void instance.setViewport({
+        x: GRAPH_OPENING_EDGE - (first.x - GRAPH_MARGIN / 3) * zoom,
+        y: GRAPH_OPENING_EDGE - (first.y - GRAPH_MARGIN / 3) * zoom,
+        zoom,
+      });
+    });
+  }, []);
+  const { onInit: placementInit, onReady: placementReady } = useOpeningPlacement<
+    Node,
+    Edge,
+    string
+  >(placeViewport, placementKey);
+  const handleMeasured = useCallback((heights: Map<string, number>) => {
+    // Cards taller or shorter than laid out: lay out again with what the browser measured.
+    let differs = false;
+    for (const [id, height] of heights) {
+      if (Math.abs(height - (laidHeightsRef.current.get(id) ?? 0)) > 2) differs = true;
+    }
+    if (differs) setMeasuredHeights(heights);
+  }, []);
   const handleInit = useCallback(
     (instance: XyflowInstance) => {
       instanceRef.current = instance;
+      placementInit(instance);
       onInit?.({
         fitView: instance.fitView,
         getNodes: instance.getNodes,
         getEdges: instance.getEdges,
       });
     },
-    [onInit],
+    [onInit, placementInit],
   );
 
   // Use regular useState instead of useNodesState/useEdgesState for read-only view
   // This avoids zustand store subscriptions that cause continuous re-renders
-  const [nodes, setNodes] = useState<Node[]>([]);
+  const [laidNodes, setLaidNodes] = useState<Node[]>([]);
+  /** The direction of the last laid-out graph: a change refits to the whole graph. */
+  const laidDirectionRef = useRef<string | null>(null);
   const [edges, setEdges] = useState<Edge[]>([]);
-  const [isLayouting, setIsLayouting] = useState(false);
+  // True until the first layout has produced nodes, so the viewport mounts once, with them, and
+  // the instance a caller receives on init is the one that holds the graph.
+  const [isLayouting, setIsLayouting] = useState(true);
+
+  // What changes without a relayout — the current node, the error nodes and the navigation
+  // callback — is merged into the laid-out nodes here, so a page re-render or a run advancing
+  // never lays the graph out again (and never refits it under the reader).
+  const nodes = useMemo<Node[]>(() => {
+    const errorNodeIdSet = new Set(errorNodeIds);
+    return laidNodes.map((node) =>
+      node.type === "block-group"
+        ? node
+        : {
+            ...node,
+            data: {
+              ...node.data,
+              onWorkflowNavigate,
+              current: node.id === currentNodeId,
+              error: errorNodeIdSet.has(node.id),
+            },
+            selected: node.id === currentNodeId,
+          },
+    );
+  }, [laidNodes, currentNodeId, errorNodeIds, onWorkflowNavigate]);
   const [currentLayoutOptions, setCurrentLayoutOptions] = useState(layoutOptions);
 
   // Node detail sheet state
@@ -218,11 +325,11 @@ export const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
       .filter((e) => e.source === nodeId)
       .map((e) => {
         const targetNode = nodeMap.get(e.target);
-        const edgeData = e.data as { connectionType?: string } | undefined;
+        const edgeData = e.data as { link?: { label: string } } | undefined;
         return {
           id: e.target,
           label: (targetNode?.data?.label as string) || e.target,
-          connectionType: edgeData?.connectionType || "default",
+          connectionType: edgeData?.link?.label ?? "default",
         };
       });
 
@@ -257,102 +364,137 @@ export const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
     loading: nodeTypesLoading,
   } = useNodeTypes();
 
-  // Transform workflow to visualization data (memoized)
+  // Per-node presentation data (validation, catalog styling); positions come from `layoutGraph`,
+  // so the transformer's own layout pass is skipped.
   const visualizationData = useMemo(() => {
     if (!workflow || nodeTypesLoading) return null;
     return WorkflowTransformer.transformWorkflow(
       workflow,
       validation,
-      DEFAULT_LAYOUT_OPTIONS,
+      { ...DEFAULT_LAYOUT_OPTIONS, algorithm: "manual" },
       nodeTypeIndex,
       nodeTypeCatalog?.extensionsAvailable ?? false,
     );
   }, [workflow, validation, nodeTypesLoading, nodeTypeIndex, nodeTypeCatalog?.extensionsAvailable]);
 
+  // The process the graph is grouped by: the caller's blocks (a run's, with status) or the
+  // definition's own derivation.
+  const graphBlocks = useMemo(() => blocks ?? definitionBlocks(workflow), [blocks, workflow]);
+  const model = useMemo(() => graphModel(workflow, graphBlocks), [workflow, graphBlocks]);
+
   /**
-   * Apply layout when visualization data changes
+   * Lay the model out (asynchronously, through ELK) whenever it or the direction changes, then
+   * build the React Flow nodes: one group per block, one step node per workflow node carrying
+   * the transformer's data (validation, catalog) beside the process-view step.
    */
   useEffect(() => {
     if (!visualizationData) {
-      setNodes([]);
+      setLaidNodes([]);
       setEdges([]);
       return;
     }
-
+    let cancelled = false;
+    const horizontal =
+      currentLayoutOptions.direction === "LR" || currentLayoutOptions.direction === "RL";
     setIsLayouting(true);
-
-    try {
-      const layoutResult = LayoutEngine.applyDagreLayout(
-        visualizationData.nodes as MoiraReactFlowNode[],
-        visualizationData.edges as MoiraReactFlowEdge[],
-        currentLayoutOptions,
-      );
-
-      // Process nodes - highlight current, mark errors, add callbacks, pass layout direction
-      const errorNodeIdSet = new Set(errorNodeIds);
-      const processedNodes = layoutResult.nodes.map((node) => ({
-        ...node,
-        data: {
-          ...node.data,
-          onWorkflowNavigate,
-          isCurrent: node.id === currentNodeId,
-          isError: errorNodeIdSet.has(node.id),
-          layoutDirection: currentLayoutOptions.direction,
-        },
-        selected: node.id === currentNodeId,
-      }));
-
-      // Process edges - add sourceHandle and targetHandle based on connection type
-      const processedEdges = layoutResult.edges.map((edge) => {
-        const edgeData = edge.data as { connectionType?: string } | undefined;
-        const connectionType = edgeData?.connectionType || "default";
-
-        // Source handle: use connection type for condition nodes (true/false), otherwise "output"
-        const sourceHandle =
-          connectionType === "true" || connectionType === "false" ? connectionType : "output";
-
-        return {
-          ...edge,
-          sourceHandle,
+    void layoutGraph(model, horizontal ? "RIGHT" : "DOWN", measuredHeights ?? undefined)
+      .then((layout) => {
+        if (cancelled) return;
+        laidHeightsRef.current = new Map(layout.steps.map((step) => [step.id, step.height]));
+        setLayoutGeneration((generation) => generation + 1);
+        const transformed = new Map(visualizationData.nodes.map((n) => [n.id, n]));
+        const blockById = new Map(graphBlocks.map((b) => [b.id, b]));
+        const groupNodes: BlockGroupNode[] = layout.groups.map((group) => {
+          const block = blockById.get(group.id)!;
+          return {
+            id: `block:${group.id}`,
+            type: "block-group",
+            position: { x: group.x, y: group.y },
+            style: { width: group.width, height: group.height },
+            draggable: false,
+            selectable: false,
+            focusable: false,
+            zIndex: -1,
+            data: { blockId: block.id, index: block.index, name: block.name, status: block.status },
+          };
+        });
+        const stepById = new Map(model.steps.map((s) => [s.id, s]));
+        const stepNodes: StepNode[] = layout.steps.map((laid) => {
+          const source = transformed.get(laid.id);
+          const graph = stepById.get(laid.id)!;
+          return {
+            id: laid.id,
+            type: source?.type ?? "fallback",
+            position: { x: laid.x, y: laid.y },
+            // Sizes for the first fit only: the card's real height is measured, and a layout
+            // pass with the measured heights follows when they differ from the estimates.
+            initialWidth: laid.width,
+            initialHeight: laid.height,
+            parentId: laid.parentId ? `block:${laid.parentId}` : undefined,
+            extent: laid.parentId ? ("parent" as const) : undefined,
+            draggable: false,
+            // Above the edges, which run above the group surfaces.
+            zIndex: 2,
+            data: {
+              ...(source?.data ?? {}),
+              graph,
+              current: false,
+              error: false,
+              // Steps run across the stacking direction inside a group (see graphLayout).
+              horizontal: graphBlocks.length > 0 ? !horizontal : horizontal,
+            },
+          };
+        });
+        const graphEdges: GraphEdge[] = model.links.map((link) => ({
+          id: link.id,
+          source: link.source,
+          target: link.target,
+          sourceHandle: "output",
           targetHandle: "input",
-        };
-      });
-
-      setNodes(processedNodes);
-      setEdges(processedEdges as Edge[]);
-
-      // Fit view after layout
-      setTimeout(() => {
-        instanceRef.current?.fitView({ padding: 0.2, duration: 200 });
-      }, 50);
-    } catch (layoutError) {
-      console.error("Layout calculation failed:", layoutError);
-      // Fallback without layout
-      if (visualizationData) {
-        const errorNodeIdSet = new Set(errorNodeIds);
-        const fallbackNodes = visualizationData.nodes.map((node) => ({
-          ...node,
+          type: "graph",
+          selectable: false,
+          focusable: false,
+          // React Flow adds an edge's zIndex to its nodes' level: 0 keeps the edges at the cards'
+          // level, where the edge layer paints first (below the cards) and above the groups.
+          zIndex: 0,
           data: {
-            ...node.data,
-            onWorkflowNavigate,
-            isCurrent: node.id === currentNodeId,
-            isError: errorNodeIdSet.has(node.id),
+            link,
+            route: layout.routes[link.id],
+            horizontal: graphBlocks.length > 0 ? !horizontal : horizontal,
           },
-          selected: node.id === currentNodeId,
         }));
-        setNodes(fallbackNodes as Node[]);
-        setEdges(visualizationData.edges as Edge[]);
-      }
-    } finally {
-      setIsLayouting(false);
-    }
-  }, [visualizationData, currentNodeId, errorNodeIds, currentLayoutOptions, onWorkflowNavigate]);
+        groupsRef.current = layout.groups.map((g) => ({ id: g.id, x: g.x, y: g.y }));
+        setLaidNodes([...groupNodes, ...stepNodes]);
+        setEdges(graphEdges);
+        const directionChanged =
+          laidDirectionRef.current !== null &&
+          laidDirectionRef.current !== currentLayoutOptions.direction;
+        laidDirectionRef.current = currentLayoutOptions.direction;
+        if (directionChanged) {
+          // A layout the reader asked for (a direction change) refits to the whole graph.
+          setTimeout(() => {
+            instanceRef.current?.fitView({ padding: 0.1, duration: 200 });
+          }, 50);
+        }
+      })
+      .catch((layoutError: unknown) => {
+        console.error("Layout calculation failed:", layoutError);
+      })
+      .finally(() => {
+        if (!cancelled) setIsLayouting(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [visualizationData, model, graphBlocks, currentLayoutOptions.direction, measuredHeights]);
 
   /**
    * Handle node click - notify external sidebar via onNodeSelect, or open sheet as fallback
    */
   const handleNodeClick = useCallback(
     (event: React.MouseEvent, node: Node) => {
+      // A block group is a frame, not a node the pages inspect.
+      if (node.type === "block-group") return;
       // Call external handler if provided
       onNodeClick?.(event, node);
 
@@ -372,11 +514,11 @@ export const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
           .filter((e) => e.source === nodeId)
           .map((e) => {
             const targetNode = nodeMap.get(e.target);
-            const edgeData = e.data as { connectionType?: string } | undefined;
+            const edgeData = e.data as { link?: { label: string } } | undefined;
             return {
               id: e.target,
               label: (targetNode?.data?.label as string) || e.target,
-              connectionType: edgeData?.connectionType || "default",
+              connectionType: edgeData?.link?.label ?? "default",
             };
           });
 
@@ -399,56 +541,17 @@ export const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
   }, []);
 
   /**
-   * Change layout direction (throttled to prevent rapid re-layouts)
+   * Change layout direction (throttled to prevent rapid re-layouts); the layout effect re-runs.
    */
-  const changeLayout = useCallback(
-    (newLayoutOptions: LayoutOptions) => {
-      if (nodes.length === 0) return;
+  const changeLayout = useCallback((newLayoutOptions: LayoutOptions) => {
+    if (layoutThrottleRef.current) return;
+    layoutThrottleRef.current = setTimeout(() => {
+      layoutThrottleRef.current = null;
+    }, LAYOUT_THROTTLE_MS);
+    setCurrentLayoutOptions(newLayoutOptions);
+  }, []);
 
-      // Throttle layout changes
-      if (layoutThrottleRef.current) {
-        return; // Skip if a layout change is pending
-      }
-
-      layoutThrottleRef.current = setTimeout(() => {
-        layoutThrottleRef.current = null;
-      }, LAYOUT_THROTTLE_MS);
-
-      setIsLayouting(true);
-
-      try {
-        const layoutResult = LayoutEngine.applyDagreLayout(
-          nodes as MoiraReactFlowNode[],
-          edges as MoiraReactFlowEdge[],
-          newLayoutOptions,
-        );
-
-        // Update nodes with new layout direction
-        const updatedNodes = layoutResult.nodes.map((node) => ({
-          ...node,
-          data: {
-            ...node.data,
-            layoutDirection: newLayoutOptions.direction,
-          },
-        }));
-
-        setNodes(updatedNodes);
-        setEdges(layoutResult.edges as Edge[]);
-        setCurrentLayoutOptions(newLayoutOptions);
-
-        setTimeout(() => {
-          instanceRef.current?.fitView({ padding: 0.2, duration: 300 });
-        }, 50);
-      } catch (layoutError) {
-        console.error("Layout change failed:", layoutError);
-      } finally {
-        setIsLayouting(false);
-      }
-    },
-    [nodes, edges],
-  );
-
-  if (isLayouting || nodeTypesLoading) {
+  if ((isLayouting && nodes.length === 0) || nodeTypesLoading) {
     return (
       <div className="flex items-center justify-center h-full">
         <div className="text-muted-foreground">{t("components.workflowGraph.loading")}</div>
@@ -458,80 +561,88 @@ export const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
 
   return (
     <div className={`h-full relative ${className}`}>
-      <DiagramViewport
-        kind="graph"
-        controlsPosition="top-right"
-        nodes={nodes}
-        edges={edges}
-        // Disable change handlers for read-only view - major performance win
-        onNodesChange={undefined}
-        onEdgesChange={undefined}
-        onNodeClick={handleNodeClick}
-        onInit={handleInit}
-        nodeTypes={nodeTypes}
-        edgeTypes={edgeTypes}
-        connectionMode={ConnectionMode.Strict}
-        selectionMode={SelectionMode.Partial}
-        deleteKeyCode={null}
-        multiSelectionKeyCode={null}
-        colorMode={actualTheme}
-        style={{ backgroundColor }}
-      >
-        <Background gap={20} size={1} color={backgroundPatternColor} />
+      <TransitionFocusProvider pinnedBlock={null}>
+        <DiagramViewport
+          kind="graph"
+          controlsPosition="top-right"
+          nodes={nodes}
+          edges={edges}
+          // Disable change handlers for read-only view - major performance win
+          onNodesChange={undefined}
+          onEdgesChange={undefined}
+          onNodeClick={handleNodeClick}
+          onInit={handleInit}
+          onReady={placementReady}
+          nodeTypes={nodeTypes}
+          edgeTypes={edgeTypes}
+          connectionMode={ConnectionMode.Strict}
+          selectionMode={SelectionMode.Partial}
+          deleteKeyCode={null}
+          multiSelectionKeyCode={null}
+          colorMode={actualTheme}
+          style={{ backgroundColor }}
+        >
+          <GraphDefs />
+          <GraphMeasuredHeights onMeasured={handleMeasured} />
+          <Background gap={20} size={1} color={backgroundPatternColor} />
 
-        {/* MiniMap with delayed render for better initial load performance */}
-        {showMinimap && showMiniMapDelayed && (
-          <MiniMap
-            position="bottom-right"
-            nodeColor={(node) => {
-              const nodeData = node.data as { color?: string };
-              return nodeData?.color || "#3B82F6";
-            }}
-            maskColor="rgba(255, 255, 255, 0.2)"
-            nodeStrokeWidth={2}
-            zoomable={true}
-            pannable={true}
-          />
-        )}
+          {/* MiniMap with delayed render for better initial load performance */}
+          {showMinimap && showMiniMapDelayed && (
+            <MiniMap
+              position="bottom-right"
+              nodeColor={(node) => {
+                const nodeData = node.data as { color?: string };
+                return nodeData?.color || "#3B82F6";
+              }}
+              maskColor="rgba(255, 255, 255, 0.2)"
+              nodeStrokeWidth={2}
+              zoomable={true}
+              pannable={true}
+            />
+          )}
 
-        {/* Layout Controls - inside ReactFlow/ReactFlowProvider for useReactFlow access */}
-        {showControls && (
-          <div className="absolute bottom-20 left-4 flex gap-2 bg-card/95 p-2 rounded-md border border-border shadow-sm z-10">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleFitView}
-              title={t("components.workflowGraph.controls.fitViewTitle")}
-              className="gap-1"
+          {/* Layout controls: a column under the zoom cluster, where the graph has the least content. */}
+          {showControls && (
+            <div
+              className="absolute top-[7.5rem] right-[15px] z-10 flex flex-col gap-0.5 rounded-md border border-border bg-card/90 p-1 shadow-sm"
+              data-testid="graph-layout-controls"
             >
-              <ZoomIn className="w-3.5 h-3.5" />
-              {t("components.workflowGraph.controls.fitView")}
-            </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={handleFitView}
+                title={t("components.workflowGraph.controls.fitViewTitle")}
+                className="justify-start gap-1.5"
+              >
+                <ZoomIn className="w-3.5 h-3.5" />
+                {t("components.workflowGraph.controls.fitView")}
+              </Button>
 
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => changeLayout({ ...currentLayoutOptions, direction: "TB" })}
-              title={t("components.workflowGraph.controls.verticalTitle")}
-              className="gap-1"
-            >
-              <ArrowUpDown className="w-3.5 h-3.5" />
-              {t("components.workflowGraph.controls.vertical")}
-            </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => changeLayout({ ...currentLayoutOptions, direction: "TB" })}
+                title={t("components.workflowGraph.controls.verticalTitle")}
+                className="justify-start gap-1.5"
+              >
+                <ArrowUpDown className="w-3.5 h-3.5" />
+                {t("components.workflowGraph.controls.vertical")}
+              </Button>
 
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => changeLayout({ ...currentLayoutOptions, direction: "LR" })}
-              title={t("components.workflowGraph.controls.horizontalTitle")}
-              className="gap-1"
-            >
-              <ArrowLeftRight className="w-3.5 h-3.5" />
-              {t("components.workflowGraph.controls.horizontal")}
-            </Button>
-          </div>
-        )}
-      </DiagramViewport>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => changeLayout({ ...currentLayoutOptions, direction: "LR" })}
+                title={t("components.workflowGraph.controls.horizontalTitle")}
+                className="justify-start gap-1.5"
+              >
+                <ArrowLeftRight className="w-3.5 h-3.5" />
+                {t("components.workflowGraph.controls.horizontal")}
+              </Button>
+            </div>
+          )}
+        </DiagramViewport>
+      </TransitionFocusProvider>
 
       {/* Legacy Node Detail Sheet — only when no external sidebar */}
       {showNodeDetails && !onNodeSelect && (

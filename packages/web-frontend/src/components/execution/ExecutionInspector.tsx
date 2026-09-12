@@ -73,10 +73,10 @@ import { Walkthrough, type PanelTab } from "../run/Walkthrough";
 import { currentBlockId, runBlocks, waitingStep, type RunViewProps } from "../run/model";
 import { clampCursor } from "../run/route";
 
-// Lazy load the technical graph (with its focus wrapper) for better initial page load
-const WorkflowGraphWithFocus = React.lazy(() =>
-  import("../workflow/WorkflowGraphWithFocus").then((module) => ({
-    default: module.WorkflowGraphWithFocus,
+// Lazy load the technical graph for better initial page load
+const WorkflowGraph = React.lazy(() =>
+  import("../workflow/WorkflowGraph").then((module) => ({
+    default: module.WorkflowGraph,
   })),
 );
 
@@ -568,9 +568,10 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
   const ModeView = MODE_COMPONENTS[mode];
   const technicalGraph = (
     <Suspense fallback={<DiagramSkeleton />}>
-      <WorkflowGraphWithFocus
+      <WorkflowGraph
         workflow={workflow.workflow}
         validation={workflow.validation}
+        blocks={blocks}
         currentNodeId={execution.currentNodeId}
         errorNodeIds={errorNodeIds}
         onNodeClick={handleNodeClick}

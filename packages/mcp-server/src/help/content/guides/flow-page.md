@@ -32,8 +32,12 @@ The tabs above the picture switch how the same definition is shown; the choice i
 - **Split** — blocks against their implementation: pick a block on the left to see, on the right,
   the steps that implement it in the order they run, with their connections. Chips lead to the
   block a connection leaves for; the finder above answers "which block is this step in".
-- **Graph** — the technical node graph with its layout controls and a sidebar that shows a
-  selected node's definition. Clicking a step in the block panel opens the graph on that node.
+- **Graph** — every workflow node as a step card, grouped by block in process order, with the
+  same connection chips as the split view. Loops are dashed lines that run below a block's cards
+  and show their label when you hover the chip (or the line); links into another block run in the
+  gap between blocks. The picture opens on the first block; the fit control shows the whole graph,
+  Vertical and Horizontal change the direction. The sidebar shows a selected node's definition,
+  and clicking a step in the block panel opens the graph on that node.
 
 ## The panel
 

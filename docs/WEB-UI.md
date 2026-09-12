@@ -40,8 +40,6 @@ frontend/src/
 │   │   ├── AppSidebar.tsx       # Config-driven sidebar with shadcn/ui
 │   │   ├── UserMenu.tsx         # User dropdown (theme, language, logout)
 │   │   └── WorkflowViewerPlaceholder.tsx  # Workflow detail page container
-│   ├── nodes/                   # React Flow node components
-│   │   └── CompactNode.tsx      # Unified compact node (~120x40px) for all types
 │   ├── execution/              # Execution display components
 │   │   ├── ExecutionInspector.tsx    # Run page with DI (fetchExecution prop, editable/canAnswer flags)
 │   │   ├── ContextVariableEditor.tsx # Per-path context editor
@@ -114,8 +112,7 @@ frontend/src/
 ├── services/
 │   └── api-client.ts            # HTTP client
 └── utils/
-    ├── node-factory.ts          # React Flow node registry
-    └── layout-algorithm.ts      # Dagre layout
+    └── workflow-transformer.ts  # Per-node presentation data for the graph
 ```
 
 ## Design Token System
@@ -414,8 +411,9 @@ entry count so a value typed back to what is stored is not an edit; discard, whi
 recorded edit; save; the loaded revision; the export diff as flow-file path / before / after;
 the server's refusal message); the process diagnostics inline; the mode filling the main area; a
 panel beside it (under it on a phone) with the **Block** tab (`BlockDetailPanel`, a step click opens the graph mode on that node) and the
-**Variables** tab (`RegistryPanel`). The graph mode mounts `WorkflowGraphWithFocus` with its
-controls beside `WorkflowSidebar`, as the former workflow detail page did.
+**Variables** tab (`RegistryPanel`). The graph mode mounts `WorkflowGraph` (its `focusRequest`
+prop brings a chosen node into view) with its controls beside `WorkflowSidebar`, as the former
+workflow detail page did.
 
 **Editing** (`components/flow/editing.tsx`): the edit set covers block label and summary,
 connection labels with a loop's cause and exit, node ownership, node text (directive, completion
@@ -633,12 +631,8 @@ Two-phase dialog (input → result). Input phase: reason text field (required), 
 
 **Error Node Highlighting:**
 
-WorkflowGraph receives `errorNodeIds` prop computed from execution errors. CompactNode displays error styling:
-
-- Red border (`border-red-500`)
-- Red ring highlight (`ring-red-500`)
-- Red background tint (`bg-red-500/20`)
-- AlertCircle icon
+WorkflowGraph receives `errorNodeIds` prop computed from execution errors; a step card whose
+node is in it carries a destructive ring (`ring-destructive`) around the card.
 
 ### Artifacts Page
 
@@ -1233,42 +1227,46 @@ interface WorkflowViewerProps {
 }
 ```
 
-## React Flow Features
+## The technical node graph (`WorkflowGraph`)
 
-### Available Components
+The graph is the process view's detailed layer, not a separate rendering:
 
-- **Background**: Grid pattern with configurable gap and color
-- **Controls**: Zoom controls and fit view functionality
-- **MiniMap**: Node overview with custom node colors
-- **Node Types**: Unified CompactNode component (~120x40px) for all node types with color-coded borders and smart edge routing
-
-### Layout Controls
-
-```typescript
-// Layout algorithm options
-interface LayoutOptions {
-  direction: "TB" | "BT" | "LR" | "RL";
-  spacing: number;
-  algorithm: "dagre" | "manual" | "force";
-}
-```
-
-### Canvas Control Buttons
-
-WorkflowGraph provides layout control buttons at bottom-left:
-
-- **Fit View**: Centers and fits all nodes in viewport
-- **Vertical**: Applies top-to-bottom (TB) dagre layout
-- **Horizontal**: Applies left-to-right (LR) dagre layout
-
-```typescript
-// WorkflowGraph control buttons
-<Button onClick={handleFitView}>Fit View</Button>
-<Button onClick={() => changeLayout({ direction: "TB" })}>Vertical</Button>
-<Button onClick={() => changeLayout({ direction: "LR" })}>Horizontal</Button>
-```
-
-Implementation uses ReactFlowProvider wrapper pattern with useReactFlow() hook for fitView API access.
+- **Model** (`components/run/graphModel.ts`): `graphModel(workflow, blocks)` builds one `GraphStep`
+  per workflow node (the same `StepInfo` and `stepConnections` the split view uses, owned by the
+  block the derivation names) and one `GraphLink` per connection, classified `forward` (inside a
+  block), `external` (into a later block) or `return` (a derived cycle transition's edge, or into
+  an earlier block). `definitionBlocks(workflow)` derives run-less blocks in the browser when a
+  caller passes none; both pages pass their own `blocks` so a run's groups carry status.
+- **Layout** (`components/workflow/graphLayout.ts`): `layoutGraph(model, direction, measuredHeights?)`
+  lays each block's steps out with ELK layered (model order, in-block forward edges only) and stacks
+  the block groups in process order — top to bottom, or left to right for Horizontal — with the
+  steps no block owns in one flat set after the groups. Card heights are estimated
+  (`estimateStepHeight`) for the first pass; `GraphMeasuredHeights` (mounted inside the viewport,
+  reading React Flow's store) reports the measured heights, and a second pass with them runs when
+  any differs from its estimate, so cards never overlap. A block's box grows by a corridor under
+  its cards (to their right in a row) holding one lane per routed edge.
+- **Routing** (`routeLinks`, pure): a forward link inside a block is drawn straight (smooth step).
+  Everything else is a `GraphRoute` (stub, lane waypoints, side): a return inside a block leaves its
+  source, runs along the block's bottom corridor and enters its target from before it; a link into
+  a later block runs in the gap after its source's block; a return to an earlier block runs in the
+  gap, climbs the margin before the groups (`GRAPH_MARGIN`) and comes in through the target block's
+  corridor. Lanes sharing a corridor are offset by `LANE_STEP`. `GraphEdgeView` draws a routed edge
+  as a rounded polyline (`routedPoints`, `roundedPath`) with its label on the first lane run.
+- **Rendering** (`components/workflow/graphNodes.tsx`): every node type is registered to
+  `StepNodeView` (the shared `StepCard` with hidden handles; the per-type registration keeps React
+  Flow's `react-flow__node-<type>` classes), `block-group` to `BlockGroupView` (the shared status
+  surface, `data-graph-group`, `data-block-id`), and one `graph` edge type. Groups sit at z-index
+  −1 and cards at 2; edges carry 0, which React Flow adds to their nodes' level, so the edge layer
+  shares the cards' level and paints first — above the groups, below the cards. Forward edges keep a label pill; external ones are muted; returns are
+  dashed in the primary colour, unlabelled at rest and lit with their label through the transition
+  focus context when the source card's connection chip or the edge is hovered.
+- **Viewport**: the graph mounts through `DiagramViewport` (`kind="graph"`). The opening placement
+  uses `useOpeningPlacement`: a `focusRequest` (node id + token) or a run's `currentNodeId` fits
+  the view to that node; a definition opens readable on its first block at `GRAPH_OPENING_ZOOM`.
+  The placement key includes the layout generation, so it is applied again after the measured
+  second pass. A direction change refits to the whole graph. The layout controls (Fit View,
+  Vertical, Horizontal; `data-testid="graph-layout-controls"`) sit in a column under the zoom
+  cluster; the minimap renders after an idle callback.
 
 ### Node Selection System
 
@@ -1742,110 +1740,12 @@ export class MoiraApiClient {
 export const apiClient = new MoiraApiClient("");
 ```
 
-## React Flow Integration
+## The workflow transformer
 
-### Node Factory System
-
-```typescript
-// WorkflowGraph.tsx - All node types use CompactNode
-const nodeTypes = {
-  start: CompactNode,
-  "agent-directive": CompactNode,
-  agentDirective: CompactNode,
-  condition: CompactNode,
-  "telegram-notification": CompactNode,
-  "user-notification": CompactNode,
-  telegram: CompactNode,
-  subgraph: CompactNode,
-  expression: CompactNode,
-  end: CompactNode,
-  "read-note": CompactNode, // Notes system - cyan styling
-  "write-note": CompactNode, // Notes system - teal styling
-  "upsert-note": CompactNode, // Notes system - sky styling
-  fallback: CompactNode, // Unknown types - stone/gray styling, warning status
-};
-
-// Node styling by type (defined in react-flow-types.ts DEFAULT_NODE_STYLES)
-// Note nodes: read-note (cyan), write-note (teal), upsert-note (sky)
-// Fallback: stone/gray for unknown node types, displays with HelpCircle icon
-
-// Edge types - SmartStepEdge uses A* pathfinding
-const edgeTypes = {
-  smart: SmartStepEdge, // @tisoap/react-flow-smart-edge
-};
-```
-
-### Layout Engine
-
-```typescript
-// utils/layout-algorithm.ts
-export class LayoutEngine {
-  static applyDagreLayout(
-    nodes: MoiraReactFlowNode[],
-    edges: MoiraReactFlowEdge[],
-    options: LayoutOptions = DEFAULT_LAYOUT_OPTIONS,
-  ): { nodes: MoiraReactFlowNode[]; edges: MoiraReactFlowEdge[] };
-
-  static calculateViewport(nodes: MoiraReactFlowNode[], width: number, height: number);
-}
-```
-
-### Performance Optimizations
-
-WorkflowGraph uses several optimization techniques for smooth operation on complex workflows:
-
-**CompactNode Memoization:**
-
-```typescript
-// CompactNode.tsx - React.memo with custom comparison
-function arePropsEqual(prevProps: CompactNodeProps, nextProps: CompactNodeProps): boolean {
-  return (
-    prevProps.selected === nextProps.selected &&
-    prevProps.data.nodeId === nextProps.data.nodeId &&
-    prevProps.data.nodeType === nextProps.data.nodeType &&
-    prevProps.data.label === nextProps.data.label &&
-    prevProps.data.validationStatus === nextProps.data.validationStatus &&
-    prevProps.data.isCurrent === nextProps.data.isCurrent &&
-    prevProps.data.isError === nextProps.data.isError &&
-    prevProps.data.layoutDirection === nextProps.data.layoutDirection
-  );
-}
-const CompactNode = React.memo(CompactNodeInner, arePropsEqual);
-```
-
-**Layout Throttle:**
-
-```typescript
-// WorkflowGraph.tsx - 100ms throttle on layout changes
-const layoutThrottleRef = useRef<NodeJS.Timeout | null>(null);
-const LAYOUT_THROTTLE_MS = 100;
-
-const changeLayout = useCallback(
-  (options: LayoutOptions) => {
-    if (layoutThrottleRef.current) return; // Skip if pending
-    layoutThrottleRef.current = setTimeout(() => {
-      layoutThrottleRef.current = null;
-    }, LAYOUT_THROTTLE_MS);
-    // ... layout calculation
-  },
-  [nodes, edges],
-);
-```
-
-**Delayed MiniMap Render:**
-
-```typescript
-// WorkflowGraph.tsx - requestIdleCallback for MiniMap
-useEffect(() => {
-  if (showMinimap && !showMiniMapDelayed) {
-    if ("requestIdleCallback" in window) {
-      window.requestIdleCallback(() => setShowMiniMapDelayed(true), { timeout: 500 });
-    } else {
-      setTimeout(() => setShowMiniMapDelayed(true), 200);
-    }
-  }
-}, [showMinimap, showMiniMapDelayed]);
-```
+`utils/workflow-transformer.ts` turns a definition into per-node presentation data (validation
+status, catalog styling from `DEFAULT_NODE_STYLES`, extension names) that the technical graph
+merges into its step nodes; it is the only consumer of that palette. There is no separate node
+renderer, node registry or dagre layout module: every page draws the graph described above.
 
 ## Configuration Files
 
@@ -1870,47 +1770,6 @@ useEffect(() => {
 // Production build only - no dev server
 // Frontend is built as static files and served by nginx in Docker
 // API requests use same-origin (empty base URL), proxied by nginx to backend
-```
-
-## Workflow Visualization
-
-### React Flow Setup
-
-```typescript
-// Professional React Flow configuration
-<ReactFlow
-  nodes={nodes}
-  edges={edges}
-  nodeTypes={nodeTypes}
-  connectionMode={ConnectionMode.Strict}
-  minZoom={0.1}
-  maxZoom={2}
-  deleteKeyCode={null}
-  multiSelectionKeyCode={null}
->
-  <Background gap={20} size={1} color="#E5E7EB" />
-  <Controls position="top-right" showZoom={true} showFitView={true} />
-  <MiniMap position="bottom-right" nodeStrokeWidth={2} />
-</ReactFlow>
-```
-
-### Layout Controls
-
-```typescript
-// Layout control buttons
-const fitView = useCallback(() => {
-  const optimalViewport = LayoutEngine.calculateViewport(nodes, 800, 600);
-  setViewport(optimalViewport);
-}, [nodes]);
-
-const changeLayout = useCallback(
-  async (newLayoutOptions: LayoutOptions) => {
-    const layoutResult = LayoutEngine.applyDagreLayout(nodes, edges, newLayoutOptions);
-    setNodes(layoutResult.nodes);
-    setEdges(layoutResult.edges as Edge[]);
-  },
-  [nodes, edges],
-);
 ```
 
 ## Animations
@@ -1970,11 +1829,10 @@ frontend/
 │   │   ├── auth/                # Authentication components (Login, Register, ProtectedRoute)
 │   │   ├── layout/              # Layout components (AppHeader, AppFooter, WorkflowViewerPlaceholder)
 │   │   ├── workflow/            # Workflow components (WorkflowExplorer, WorkflowCard)
-│   │   └── nodes/               # ReactFlow node components (CompactNode - unified for all types)
 │   ├── contexts/                # ThemeProvider for dark mode
 │   ├── hooks/                   # useWorkflowData, useLayoutState, use-mobile
 │   ├── services/                # api-client.ts HTTP communication
-│   ├── utils/                   # node-factory.ts, layout-algorithm.ts
+│   ├── utils/                   # workflow-transformer.ts
 │   ├── lib/                     # utils.ts for cn() className utility
 │   └── styles/                  # globals.css (Tailwind v4 + semantic tokens)
 ├── components.json              # shadcn/ui configuration

@@ -1,5 +1,5 @@
 /**
- * Visual language for authored node types, aligned with the app's CompactNode palette so the
+ * Visual language for authored node types, aligned with the transformer's node palette (`DEFAULT_NODE_STYLES`) so the
  * nodes behind a block look the same here as on the authored graph.
  */
 

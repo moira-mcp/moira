@@ -125,11 +125,30 @@ test.describe("Run page toolbar and panel", () => {
         .locator(".react-flow__viewport")
         .evaluate((el) => window.getComputedStyle(el).transform);
     await expect.poll(transformOf).not.toBe("none");
-    const overview = await transformOf();
-    // The toolbar's current-node button moves the viewport onto the waiting node.
+    // The graph opens on the waiting node: its card sits inside the graph's own box.
+    const inView = async () => {
+      const box = await graph.boundingBox();
+      const card = await graph
+        .locator('[data-graph-node] [data-step-card][aria-current="step"]')
+        .first()
+        .boundingBox();
+      return (
+        !!box &&
+        !!card &&
+        card.x >= box.x &&
+        card.y >= box.y &&
+        card.x + card.width <= box.x + box.width &&
+        card.y + card.height <= box.y + box.height
+      );
+    };
+    await expect.poll(inView, { timeout: 5000 }).toBe(true);
+    const onCurrent = await transformOf();
+    // The fit-view control gives the overview back; the toolbar's current-node button returns.
+    await graph.locator(".react-flow__controls-fitview").click();
+    await expect.poll(transformOf, { timeout: 5000 }).not.toBe(onCurrent);
     const toolbar = page.locator(".border-b.bg-card").first();
     await toolbar.locator("button:has(svg.lucide-play)").click();
-    await expect.poll(transformOf, { timeout: 5000 }).not.toBe(overview);
+    await expect.poll(inView, { timeout: 5000 }).toBe(true);
   });
 
   test("the panel sits beside the run on desktop and under it on a phone", async ({ page }) => {
