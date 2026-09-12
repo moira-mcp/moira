@@ -185,9 +185,23 @@ async function runSupervisor(resourceName: string, input: WorkerInput): Promise<
     Number(input.job.timeoutMs ?? 30_000) + 90_000,
     CONNECTOR_MAX_RESPONSE_BYTES,
   );
-  if (result.exitCode !== 0) throw new Error("Codespace operation failed");
+  if (result.exitCode !== 0) {
+    throw new Error(
+      `Codespace operation failed (ssh exit ${result.exitCode}: ${diagnostic(
+        result.stderr.toString("utf8"),
+      )})`,
+    );
+  }
   const envelope = JSON.parse(result.stdout.toString("utf8")) as { ok?: boolean; result?: unknown };
-  if (envelope.ok !== true) throw new Error("Codespace supervisor rejected the operation");
+  if (envelope.ok !== true) {
+    throw new Error(
+      `Codespace supervisor rejected the operation (${diagnostic(
+        typeof (envelope as { error?: unknown }).error === "string"
+          ? String((envelope as { error?: unknown }).error)
+          : result.stderr.toString("utf8"),
+      )})`,
+    );
+  }
   return envelope.result;
 }
 
