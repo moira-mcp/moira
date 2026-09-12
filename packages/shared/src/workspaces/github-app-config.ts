@@ -50,7 +50,11 @@ export interface WorkspaceGitHubConfigInput {
 
 function normalizeAppPrefix(raw: string | undefined): string {
   if (!raw || raw === "/") return "";
-  const trimmed = raw.replace(/\/+$/, "");
+  // Linear trailing-slash trim: the value comes from deployment configuration, and a
+  // backtracking `/\/+$/` scan is superlinear on long runs of slashes.
+  let end = raw.length;
+  while (end > 0 && raw[end - 1] === "/") end -= 1;
+  const trimmed = raw.slice(0, end);
   return trimmed.startsWith("/") ? trimmed : `/${trimmed}`;
 }
 

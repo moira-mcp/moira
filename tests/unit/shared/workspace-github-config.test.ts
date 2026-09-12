@@ -65,4 +65,18 @@ describe("GitHub workspace configuration", () => {
   ])("fails closed for an invalid partial or security-sensitive value", (input, reason) => {
     expect(evaluateWorkspaceGitHubConfig(input)).toMatchObject({ state: "invalid", reason });
   });
+
+  test.each([
+    ["", "https://moira.example.com/settings#integrations-github"],
+    ["/", "https://moira.example.com/settings#integrations-github"],
+    ["app/", "https://moira.example.com/app/settings#integrations-github"],
+    ["/app//", "https://moira.example.com/app/settings#integrations-github"],
+    ["/app" + "/".repeat(20_000), "https://moira.example.com/app/settings#integrations-github"],
+  ])("normalizes the app prefix %j into the settings link in linear time", (appPrefix, url) => {
+    const started = Date.now();
+    expect(evaluateWorkspaceGitHubConfig({ baseUrl: valid.baseUrl, appPrefix }).settingsUrl).toBe(
+      url,
+    );
+    expect(Date.now() - started).toBeLessThan(1_000);
+  });
 });
