@@ -1510,6 +1510,8 @@ export class MoiraApiClient {
     currentNodeId: string | null;
     waitingForInputNodeId: string | null;
     revision: number;
+    /** Compare-and-swap tokens for metadata writes; `context` guards PUT /context. */
+    metadataRevisions: { parent: string; context: string; reminders: string };
     context: {
       variables: Record<string, unknown>;
       nodeStates: Record<string, unknown>;
@@ -1535,6 +1537,7 @@ export class MoiraApiClient {
           currentNodeId: string | null;
           waitingForInputNodeId: string | null;
           revision: number;
+          metadataRevisions: { parent: string; context: string; reminders: string };
           context: {
             variables: Record<string, unknown>;
             nodeStates: Record<string, unknown>;
@@ -1584,19 +1587,21 @@ export class MoiraApiClient {
   /**
    * Update one path inside an owner execution's policy-enabled declared variable without
    * overwriting siblings. The server enforces current waiting-node policy, complete top-level
-   * registry schema and expected revision. Path is relative to `variables`.
+   * registry schema, the expected step revision and the expected context revision (the
+   * compare-and-swap token from `metadataRevisions.context`). Path is relative to `variables`.
    */
   async updateExecutionContextPath(
     executionId: string,
     variablePath: Array<string | number>,
     value: unknown,
     expectedRevision: number,
+    expectedContextRevision: string,
   ): Promise<boolean> {
     try {
       type UpdateContextResponse = { updated: boolean };
       const response = await this.client.put<ApiResponse<UpdateContextResponse>>(
         `/executions/${executionId}/context`,
-        { variablePath, value, expectedRevision },
+        { variablePath, value, expectedRevision, expectedContextRevision },
       );
       return response.data.data!.updated;
     } catch (error) {
