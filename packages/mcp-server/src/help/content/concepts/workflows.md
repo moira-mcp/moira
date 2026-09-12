@@ -25,7 +25,7 @@ loops and hub blocks are derived from the primary graph and never authored twice
 sits on exactly one block, which owns a node that writes the variable. Validation reports every
 violation as an error with a stable code — `unowned-node`, `unknown-block`, `empty-block`,
 `empty-description`, `unlabeled-edge`, `unexplained-cycle`, `outcome-duplicate`,
-`outcome-unowned` — and `moira-workflow <file> derive` or `GET /api/workflows/:id/process` shows
+`outcome-unowned`, `unconnected-block` — and `moira-workflow <file> derive` or `GET /api/workflows/:id/process` shows
 the derived blocks with the same diagnostics.
 
 A node that pauses the run (an `agent-directive` step or another pausing node type) may also

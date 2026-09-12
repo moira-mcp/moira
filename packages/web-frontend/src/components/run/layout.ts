@@ -9,8 +9,12 @@
  * - forward edges that skip ranks travel along lanes above the graph;
  * - cycles travel along lanes below the graph, dashed, one lane per cycle;
  * - transitions into a hub — a block that many blocks exit into, such as "Replan" or "Stopped" —
- *   are not drawn as edges at all but as exit chips inside the source block, the way process
- *   diagrams use off-page connectors; otherwise every block sprouts a long line to the same sink.
+ *   are bundled: one muted edge per source and hub, leaving the source's right edge, rising in the
+ *   gap after its rank to a channel above the graph that the hub owns, and dropping in the gap
+ *   before the hub's rank into one port on the hub's left edge. Vertical runs stay in the gaps
+ *   between ranks, so a bundle never crosses a block placed above its source or its hub. The
+ *   labels stay as exit chips inside the source block, the way process diagrams use off-page
+ *   connectors.
  *
  * The layout is a pure function of its input: ELK is run with a fixed seed and only forward edges,
  * so the same blocks always yield the same placement. The engine is loaded on first use so the
@@ -33,6 +37,10 @@ const LANE_GAP = 40;
 const LANE_STEP = 26;
 const SELF_LOOP_DEPTH = 36;
 const MARGIN = 24;
+/** How far into the gap between ranks a hub bundle's vertical run sits, off the label pills' centre. */
+const HUB_GAP_INSET = 24;
+/** The hub port sits this far below the hub's top on its left edge, clear of skip-lane landings. */
+const HUB_PORT_INSET = 24;
 
 export interface LaidOutBlock {
   id: string;
@@ -41,7 +49,7 @@ export interface LaidOutBlock {
   width: number;
   height: number;
   rank: number;
-  /** Transitions rendered as exit chips inside the block rather than as edges. */
+  /** Transitions into hubs: drawn as bundled hub edges and labelled by exit chips inside the block. */
   exits: RunTransition[];
 }
 
@@ -49,8 +57,9 @@ export interface LaidOutEdge {
   id: string;
   from: string;
   to: string;
+  /** The transition drawn; for a hub bundle, the first of the source's transitions into the hub. */
   transition: RunTransition;
-  kind: "forward" | "skip" | "cycle";
+  kind: "forward" | "skip" | "cycle" | "hub";
   /** SVG path in graph coordinates. */
   path: string;
   labelX: number;
@@ -133,6 +142,11 @@ async function placeBlocks(
   }));
 }
 
+/** Where every bundled hub edge enters a hub: a point near the top of its left edge. */
+export function hubPort(block: Pick<LaidOutBlock, "x" | "y">): { x: number; y: number } {
+  return { x: block.x, y: block.y + HUB_PORT_INSET };
+}
+
 export async function layoutBlocks(
   blocks: readonly RunBlock[],
   hubIds: readonly string[],
@@ -169,7 +183,12 @@ export async function layoutBlocks(
 
   const edges: LaidOutEdge[] = [];
   let bottomLane = 0;
-  let topLane = 0;
+  // Hubs take the channels nearest the graph, one per hub, in the derivation's hub order; skip
+  // edges stack above them. Only hubs that actually receive a transition get a channel.
+  const receiving = new Set(blocks.flatMap((b) => exitsOf.get(b.id)!.map((t) => t.to)));
+  const hubLane = new Map([...hubs].filter((id) => receiving.has(id)).map((id, i) => [id, i]));
+  let topLane = hubLane.size;
+  const bundled = new Set<string>();
 
   for (const block of blocks) {
     const source = byId.get(block.id)!;
@@ -178,7 +197,30 @@ export async function layoutBlocks(
       if (!target) continue;
       const id = `${block.id}->${transition.to}:${transition.label}`;
 
-      if (!transition.cycle && hubs.has(transition.to)) continue; // drawn as an exit chip
+      if (!transition.cycle && hubs.has(transition.to)) {
+        const bundleId = `${block.id}->${transition.to}:hub`;
+        if (bundled.has(bundleId)) continue; // one edge per source and hub; the chips carry the labels
+        bundled.add(bundleId);
+        const laneY = top - LANE_GAP - hubLane.get(transition.to)! * LANE_STEP;
+        const x1 = source.x + source.width;
+        const y1 = source.y + HUB_PORT_INSET;
+        const xa = x1 + HUB_GAP_INSET;
+        const port = hubPort(target);
+        const xb = port.x - HUB_GAP_INSET;
+        const path = `M ${x1} ${y1} L ${xa} ${y1} L ${xa} ${laneY} L ${xb} ${laneY} L ${xb} ${port.y} L ${port.x} ${port.y}`;
+        edges.push({
+          id: bundleId,
+          from: block.id,
+          to: transition.to,
+          transition,
+          kind: "hub",
+          path,
+          labelX: (xa + xb) / 2,
+          labelY: laneY,
+          labelAnchor: "above",
+        });
+        continue;
+      }
 
       if (!transition.cycle) {
         const x1 = source.x + source.width;

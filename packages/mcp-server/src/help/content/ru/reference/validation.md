@@ -36,7 +36,7 @@ Workflow валидируются против определения JSON Schem
   `cycle.exit`), а каждый шаблон `{{progress_*_outcome}}` стоит на одном блоке, владеющем
   записывающей нодой; каждое нарушение — ошибка со стабильным кодом (`unowned-node`,
   `unknown-block`, `empty-block`, `empty-description`, `unlabeled-edge`, `unexplained-cycle`,
-  `outcome-duplicate`, `outcome-unowned`)
+  `outcome-duplicate`, `outcome-unowned`, `unconnected-block`)
 - **Типы узлов расширений** - Для типов из live-реестра расширений или опубликованного snapshot
   проверяется объявленная ими схема конфигурации. Если live-реестр не содержит тип, это ошибка;
   если типа нет в snapshot или доступных данных реестра нет, валидатор выдаёт предупреждение о

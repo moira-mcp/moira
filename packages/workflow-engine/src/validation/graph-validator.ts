@@ -762,7 +762,7 @@ export class GraphValidator {
             ? `progress.nodes[${progress.nodes.findIndex((n) => n.id === diagnostic.blockId)}].content.summary`
             : diagnostic.code === "outcome-duplicate" || diagnostic.code === "outcome-unowned"
               ? `progress.nodes[${progress.nodes.findIndex((n) => n.id === diagnostic.blockId)}].content.outcome`
-              : diagnostic.code === "empty-block"
+              : diagnostic.code === "empty-block" || diagnostic.code === "unconnected-block"
                 ? `progress.nodes[${progress.nodes.findIndex((n) => n.id === diagnostic.blockId)}]`
                 : "progressNodeId";
       issues.push({

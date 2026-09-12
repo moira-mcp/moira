@@ -17,12 +17,12 @@ The tabs above the picture switch how the same run is shown; the choice is in th
   as "you are here" and marked _in progress_ or _waiting for you_; a completed block shows a tick,
   a block that ran several times shows its pass count (×2, ×3), a block the run bypassed is struck
   through as _skipped_, and blocks not reached yet are dimmed. Return arcs under the rail are the
-  loops, labelled with what causes them. Below the rail the selected block's outcome text is written
-  out.
+  loops, labelled with what causes them; thin links above the rail are transitions that skip a
+  block. Below the rail the selected block's outcome text is written out.
 - **Canvas** — the process as a map filling the whole view: blocks left to right, forward
-  transitions as arrows with their labels, loops as dashed lines below, and blocks that many other
-  blocks lead into (a replan or stop block) as small chips inside their sources. The map opens on
-  the current block; drag to pan, scroll to zoom.
+  transitions as arrows with their labels, loops as dashed lines below; a block that many other
+  blocks lead into (a replan or stop block) receives one thin line from each of them, and the
+  source names it in a small chip. The map opens on the current block; drag to pan, scroll to zoom.
 - **Outline** — the process as a document: every block as a numbered section with its
   description, what the run produced there, what its steps wrote, its transitions in words
   (including why a loop happens and when it ends), and its steps with the evidence each demands.

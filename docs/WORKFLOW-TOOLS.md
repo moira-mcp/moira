@@ -219,7 +219,8 @@ process order with its description, outcome template and owned nodes, each trans
 block with its label (`NEXT`), each return with its label, cause and exit condition (`RETURN`),
 the authored edges behind every transition, hub blocks, and every block-contract diagnostic
 (`unowned-node`, `unknown-block`, `empty-block`, `empty-description`, `unlabeled-edge`,
-`unexplained-cycle`, `outcome-duplicate`, `outcome-unowned`). A workflow without `progress` prints
+`unexplained-cycle`, `outcome-duplicate`, `outcome-unowned`, `unconnected-block`). A workflow without
+`progress` prints
 a single line saying it has no block view. The output is deterministic and the command does not
 write the source file.
 

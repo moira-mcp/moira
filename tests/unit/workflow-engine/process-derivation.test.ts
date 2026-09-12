@@ -154,13 +154,19 @@ describe("process derivation from the authored graph", () => {
   });
 
   test.each<[string, (w: WorkflowGraph) => void, ProcessDiagnosticCode[]]>([
-    ["an unowned routing node", (w) => delete w.nodes[2].progressNodeId, ["unowned-node"]],
+    // Detaching the only routing node of a block also leaves that block without a transition in
+    // or out, and the derivation reports both facts rather than hiding the second behind the first.
+    [
+      "an unowned routing node",
+      (w) => delete w.nodes[2].progressNodeId,
+      ["unowned-node", "unconnected-block"],
+    ],
     [
       "a node owned by an unknown block",
       (w) => {
         w.nodes[1].progressNodeId = "ghost";
       },
-      ["unknown-block", "outcome-unowned"],
+      ["unknown-block", "outcome-unowned", "unconnected-block"],
     ],
     [
       "a block without a description",
@@ -232,6 +238,47 @@ describe("process derivation from the authored graph", () => {
   test("a hub is a block that at least three blocks lead into", () => {
     expect(deriveProcess(bundled("quick-task"))!.hubs).toEqual([]);
   });
+
+  test("a block with no transition to or from another block is reported as unconnected, even when it returns to itself", () => {
+    const workflow = synthetic();
+    workflow.progress!.nodes.push({
+      id: "orphan",
+      label: "Orphan",
+      content: { summary: "Nothing leads here" },
+    });
+    workflow.nodes.push({
+      id: "lonely",
+      type: "agent-directive",
+      progressNodeId: "orphan",
+      directive: "Wait",
+      completionCondition: "Never",
+      connections: { retry: "lonely" },
+      connectionLabels: {
+        retry: { label: "try again", cycle: { cause: "Not done", exit: "Done" } },
+      },
+    } as WorkflowGraph["nodes"][number]);
+    const projection = deriveProcess(workflow)!;
+    expect(projection.diagnostics).toEqual([
+      {
+        code: "unconnected-block",
+        blockId: "orphan",
+        message: expect.stringContaining("'orphan' has no transition to or from another block"),
+      },
+    ]);
+    // The start block leads out and the terminal block is led into: neither is reported.
+    expect(projection.blocks.map((b) => b.id)).toEqual(["work", "check", "orphan"]);
+  });
+
+  test.each([
+    "quick-task",
+    "todo-list",
+    "robust-task",
+    "software-development-flow",
+    "workflow-management-flow",
+    "user-onboarding",
+  ])("the annotated %s has no unconnected block", (slug) => {
+    expect(codes(bundled(slug))).not.toContain("unconnected-block");
+  });
 });
 
 describe("validator enforces the block contract through the derivation", () => {
@@ -260,6 +307,34 @@ describe("validator enforces the block contract through the derivation", () => {
     ]);
     expect(errors[0]).toContain("check-plan-review-clean");
     expect(errors[2]).toContain("check-plan-approved.true");
+  });
+
+  test("an unconnected block is a validation error on its progress entry", async () => {
+    const workflow = bundled("quick-task");
+    workflow.progress!.nodes.push({
+      id: "orphan",
+      label: "Orphan",
+      content: { summary: "Nothing leads here" },
+    });
+    workflow.nodes.push({
+      id: "lonely",
+      type: "agent-directive",
+      progressNodeId: "orphan",
+      directive: "Wait",
+      completionCondition: "Never",
+      connections: { success: "lonely" },
+      connectionLabels: {
+        success: { label: "try again", cycle: { cause: "Not done", exit: "Done" } },
+      },
+    } as WorkflowGraph["nodes"][number]);
+    const result = await validator.validateUnified(workflow);
+    const errors = result.issues.filter((i) => i.severity === "error");
+    expect(errors).toEqual([
+      expect.objectContaining({
+        field: "progress.nodes[7]",
+        message: expect.stringContaining("[unconnected-block] Progress block 'orphan'"),
+      }),
+    ]);
   });
 
   test("the same copy without progress passes: a workflow without progress is unaffected", async () => {

@@ -4,9 +4,10 @@
  * Blocks are laid out in layers that follow process direction left to right. Adjacent forward
  * transitions are elbows with their label in the gap; transitions that skip ranks travel above the
  * graph; cycles return along dashed lanes below it; and exits into a hub block (one that many
- * blocks lead to, such as "Replan" or "Stopped") are shown as chips inside the block instead of as
- * edges. Status is carried by colour, icon and a chip, so it is readable without hover. The view
- * opens centred on the block the run is at.
+ * blocks lead to, such as "Replan" or "Stopped") are thin muted edges bundled into one port near the
+ * top of the hub's left edge; a chip inside the source names the hub (the transition label is its
+ * tooltip) rather than a label on the line. Status is carried by colour, icon and a chip, so it is
+ * readable without hover. The view opens centred on the block the run is at.
  */
 
 import React, { useEffect, useMemo, useState } from "react";
@@ -116,6 +117,19 @@ function RoutedEdgeView({ id, data }: EdgeProps<RoutedEdge>): React.JSX.Element 
   const { laid } = data;
   const cycle = laid.kind === "cycle";
   const skip = laid.kind === "skip";
+  if (laid.kind === "hub") {
+    // A bundle into a hub: muted, thinner, no label on the line; the source's exit chips name it.
+    return (
+      <BaseEdge
+        id={id}
+        path={laid.path}
+        markerEnd="url(#run-arrow-hub)"
+        style={{ stroke: "var(--muted-foreground)", strokeWidth: 1.5, opacity: 0.45 }}
+        interactionWidth={0}
+        data-edge-kind="hub"
+      />
+    );
+  }
   const anchor =
     laid.labelAnchor === "above"
       ? `translate(-50%, -100%) translate(${laid.labelX}px, ${laid.labelY - 4}px)`
@@ -239,8 +253,9 @@ function CanvasInner({
         selectable: false,
         focusable: false,
         data: { laid },
-        // Cycles are drawn above forward edges so a loop is never hidden behind one.
-        zIndex: laid.kind === "cycle" ? 1 : 0,
+        // Cycles are drawn above forward edges so a loop is never hidden behind one; hub bundles
+        // sit beneath everything so they read as background wiring.
+        zIndex: laid.kind === "cycle" ? 1 : laid.kind === "hub" ? -1 : 0,
       })),
     [layout],
   );
@@ -288,6 +303,17 @@ function CanvasInner({
               orient="auto-start-reverse"
             >
               <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--border)" />
+            </marker>
+            <marker
+              id="run-arrow-hub"
+              viewBox="0 0 10 10"
+              refX="9"
+              refY="5"
+              markerWidth="7"
+              markerHeight="7"
+              orient="auto-start-reverse"
+            >
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--muted-foreground)" />
             </marker>
             <marker
               id="run-arrow-cycle"

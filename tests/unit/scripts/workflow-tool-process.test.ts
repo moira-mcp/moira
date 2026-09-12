@@ -106,8 +106,11 @@ describe("workflow-tool process block authoring", () => {
 
   test("reports remaining diagnostics after a partial annotation without refusing the write", () => {
     const output = run([file, "set-label", "do", "success", "work done", "--no-version-bump"]);
-    expect(output).toMatch(/1 block-contract diagnostic remains/);
-    expect(run([file, "derive"])).toContain("unowned-node node=verify");
+    // The unowned node and, because it was the block's only step, the block it left unconnected.
+    expect(output).toMatch(/2 block-contract diagnostics remain/);
+    const derived = run([file, "derive"]);
+    expect(derived).toContain("unowned-node node=verify");
+    expect(derived).toContain("unconnected-block");
   });
 
   test("bumps the patch version unless --no-version-bump or --force is given", () => {

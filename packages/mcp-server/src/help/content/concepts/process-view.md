@@ -28,7 +28,8 @@ produced.
   the cause of the repetition and what ends it (`cycle.cause`, `cycle.exit`); the view marks
   the arrow as a return.
 - **Hub.** A block that several other blocks lead into (a replan or a stop). It is placed after
-  the blocks that feed it, so the process reads left to right.
+  the blocks that feed it, so the process reads left to right, and every view draws one bundled
+  connector from each source into it, named by a chip in the source.
 - **Run.** One execution of the workflow. The engine records its **route**: every step it ran,
   the connection it left through, the variables it changed, and where it waited.
 
@@ -41,7 +42,9 @@ whose process would be unreadable: a step without a block (`unowned-node`), a bl
 description (`empty-description`) or without steps (`empty-block`), a boundary edge without a
 label (`unlabeled-edge`), a return without its cause and exit (`unexplained-cycle`), an outcome
 template on a block that owns no writer of its variable (`outcome-unowned`) or on two blocks
-(`outcome-duplicate`). `moira-workflow <file> derive` prints the derived process with any of
+(`outcome-duplicate`), a block with no transition to or from another block
+(`unconnected-block`; the block owning the start node is exempt, and a self-return alone connects
+nothing). `moira-workflow <file> derive` prints the derived process with any of
 these diagnostics, and `set-block`, `add-block`, `edit-block`, `set-label` and `clear-label`
 author it one change at a time.
 

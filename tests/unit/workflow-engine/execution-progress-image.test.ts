@@ -1,13 +1,43 @@
 import { describe, expect, test } from "@jest/globals";
 import sharp from "sharp";
+import { findSystemCatalogEntry } from "../../../packages/shared/src/services/workflow-catalog.js";
 import {
   applyProgressVisibility,
   buildExecutionProgressVisualModel,
+  projectExecutionRun,
   renderExecutionProgressPng,
   renderProgressVisualSvg,
   resolveProgressBlockIds,
   type ExecutionProgress,
+  type WorkflowExecution,
+  type WorkflowGraph,
 } from "@mcp-moira/workflow-engine";
+
+/** The progress of a bundled flow's run that has not started: every block pending, the full process. */
+function bundledProgress(slug: string): ExecutionProgress {
+  const workflow = structuredClone(findSystemCatalogEntry(slug, "public")!.graph) as WorkflowGraph;
+  const execution: WorkflowExecution = {
+    executionId: `image-${slug}`,
+    workflowId: workflow.id ?? slug,
+    userId: "test-user",
+    currentNodeId: null,
+    waitingForInputNodeId: null,
+    globalContext: {
+      variables: {},
+      nodeStates: {},
+      executionId: `image-${slug}`,
+      workflowId: workflow.id ?? slug,
+      userId: "test-user",
+      currentNodeId: null,
+    },
+    status: "running",
+    revision: 1,
+    createdAt: 1,
+    updatedAt: 1,
+    visits: [],
+  };
+  return projectExecutionRun(workflow, execution)!;
+}
 
 function progress(active = 1): ExecutionProgress {
   return {
@@ -181,7 +211,7 @@ describe("progress image visibility and the process view", () => {
     expect(svg).toContain("Review");
   });
 
-  test("overlapping returns take nested lanes and hub transitions are written inside their source", () => {
+  test("overlapping returns take nested lanes and a hub transition is a connector labelled inside its source", () => {
     const base = withProcess();
     // n2 also returns to n0 (a span enclosing n1 → n0) and n0 leads to the hub n2 directly.
     base.process.blocks[2].transitions = [
@@ -200,14 +230,84 @@ describe("progress image visibility and the process view", () => {
     // Distinct lanes: the enclosing arc's vertical segment sits further out than the inner one.
     const laneX = (path: string) => Number(path.split(" ")[4]);
     expect(laneX(returns[1].path)).toBeLessThan(laneX(returns[0].path));
-    // The hub transition is not an edge; it is a line in the source block.
-    expect(model.edges.some((edge) => edge.source === "n0" && edge.target === "n2")).toBe(false);
+    // The hub transition is a drawn connector in the right gutter whose label stays inside the
+    // source block, so the gutter carries no text for it.
+    const hubEdge = model.edges.find((edge) => edge.source === "n0" && edge.target === "n2")!;
+    expect(hubEdge).toMatchObject({ direction: "forward", cycle: false, label: "skip review" });
+    expect(hubEdge.labelLines).toEqual([]);
+    const hub = model.nodes[2];
+    expect(laneX(hubEdge.path)).toBeGreaterThan(hub.x + hub.width);
+    expect(hubEdge.path.endsWith(`L ${hub.x + hub.width} ${hub.y + hub.height / 2}`)).toBe(true);
     expect(model.nodes[0].lines.map((line) => line.text)).toEqual(["skip review → Stage 2"]);
     // Gutter labels sit beyond the outermost lane of their side, never across a lane line.
     const laneXs = returns.map((edge) => laneX(edge.path));
     for (const edge of returns) expect(edge.labelX).toBeLessThan(Math.min(...laneXs));
-    expect(model.edges.every((edge) => edge.labelLines.length > 0 && edge.labelX > 0)).toBe(true);
+    expect(
+      model.edges
+        .filter((edge) => edge !== hubEdge)
+        .every((edge) => edge.labelLines.length > 0 && edge.labelX > 0),
+    ).toBe(true);
   });
+
+  test("several sources into one hub share one bundled lane and one port on the hub", () => {
+    const base = withProcess();
+    base.nodes.push({
+      ...base.nodes[2],
+      id: "n3",
+      label: "Stage 3",
+      connections: {},
+    });
+    base.nodes[2] = { ...base.nodes[2], connections: { default: "n3" } };
+    base.process.blocks.push({
+      id: "n3",
+      label: "Stage 3",
+      description: "Hub",
+      outcome: null,
+      nodeIds: ["p3"],
+      transitions: [],
+    });
+    base.process.blocks[0].transitions.push({ to: "n3", label: "to hub", edges: ["p0.hub"] });
+    base.process.blocks[1].transitions.push({ to: "n3", label: "also hub", edges: ["p1.hub"] });
+    base.process.blocks[2].transitions.push({ to: "n3", label: "next", edges: ["p2.ok"] });
+    base.process.hubs = ["n3"];
+    const model = buildExecutionProgressVisualModel(base, { viewportWidth: 1000, view: "process" });
+    const laneX = (path: string) => Number(path.split(" ")[4]);
+    const intoHub = model.edges.filter((edge) => edge.target === "n3");
+    expect(intoHub.map((edge) => edge.source)).toEqual(["n0", "n1", "n2"]);
+    const [fromN0, fromN1] = intoHub;
+    expect(laneX(fromN0.path)).toBe(laneX(fromN1.path));
+    expect(fromN0.path.split(" L ").at(-1)).toBe(fromN1.path.split(" L ").at(-1));
+    expect(model.nodes[0].lines.map((line) => line.text)).toEqual(["to hub → Stage 3"]);
+    expect(model.nodes[1].lines.map((line) => line.text)).toEqual(["also hub → Stage 3"]);
+  });
+
+  test.each([
+    ["quick-task", 0],
+    ["todo-list", 0],
+    ["robust-task", 2],
+    ["software-development-flow", 4],
+    ["workflow-management-flow", 0],
+    ["user-onboarding", 0],
+  ])(
+    "the process view of %s draws every derived transition into its %i hubs as an edge",
+    (slug, hubCount) => {
+      const progress = bundledProgress(slug);
+      const model = buildExecutionProgressVisualModel(progress, {
+        viewportWidth: 1280,
+        view: "process",
+      });
+      const hubs = new Set(progress.process.hubs);
+      expect(hubs.size).toBe(hubCount);
+      const expected = progress.process.blocks.flatMap((block) =>
+        block.transitions
+          .filter((transition) => hubs.has(transition.to))
+          .map((transition) => `${block.id}→${transition.to}`),
+      );
+      expect(expected.length).toBeGreaterThanOrEqual(hubCount * 3);
+      const drawn = new Set(model.edges.map((edge) => `${edge.source}→${edge.target}`));
+      expect(expected.filter((pair) => !drawn.has(pair))).toEqual([]);
+    },
+  );
 
   test("a collapsed chip is a pill of its own height and a self-return is a visible bracket", () => {
     const base = withProcess();

@@ -3,22 +3,24 @@
  *
  * The task header (title, goal, facts) sits above one rail of blocks in process order. The
  * current block is pinned as "you are here", repeats carry their count, skipped blocks are struck
- * through and dashed so they cannot be confused with blocks not yet reached, and returns are
- * drawn as labelled arcs beneath the rail from lane to lane. Beneath the rail the selected block's
- * run content (summary, details, outcome, next) is written out. On a phone the rail becomes a
- * vertical stepper and returns become chips, which is what a phone can show.
+ * through and dashed so they cannot be confused with blocks not yet reached, returns are drawn
+ * as labelled arcs beneath the rail from lane to lane, and forward transitions that skip a lane
+ * are thin muted links above it (a link's label sits on the line when it fits, else as a chip in
+ * the source lane). Beneath the rail the selected block's run content (summary, details, outcome,
+ * next) is written out. On a phone the rail becomes a vertical stepper and returns and skips
+ * become chips, which is what a phone can show.
  */
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { MapPin, RotateCcw } from "lucide-react";
+import { ArrowUpRight, MapPin, RotateCcw } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { GuidanceCallout } from "./Guidance";
 import { useEditing, useModeGuideKey } from "../flow/editing";
 import { StatusChip, StatusIcon, STATUS_STYLE } from "./status";
-import { arcGeometry, arcsHeight, buildArcs } from "./arcs";
-import { currentBlockId, type RunBlock, type RunViewProps } from "./model";
+import { arcGeometry, arcsHeight, buildArcs, buildLinks, linkGeometry, linksHeight } from "./arcs";
+import { currentBlockId, type RunBlock, type RunTransition, type RunViewProps } from "./model";
 
 const LANE_MIN_WIDTH = 132;
 const LANE_GAP = 10;
@@ -44,12 +46,15 @@ function LaneButton({
   isCurrent,
   onClick,
   vertical,
+  skips = [],
 }: {
   block: RunBlock;
   selected: boolean;
   isCurrent: boolean;
   onClick: () => void;
   vertical: boolean;
+  /** Forward transitions whose label the rail could not fit on the link: shown as chips here. */
+  skips?: Array<{ transition: RunTransition; targetName: string }>;
 }): React.JSX.Element {
   const { t } = useTranslation();
   const { definition } = useEditing();
@@ -105,7 +110,39 @@ function LaneButton({
           {block.content.summary}
         </span>
       )}
+      {skips.length > 0 && (
+        <span className="flex flex-wrap gap-1">
+          {skips.map(({ transition, targetName }) => (
+            <ForwardChip
+              key={`${transition.to}-${transition.label}`}
+              label={transition.label}
+              targetName={targetName}
+            />
+          ))}
+        </span>
+      )}
     </button>
+  );
+}
+
+/** A forward transition as a chip: the return chips' shape with a forward icon and muted tone. */
+function ForwardChip({
+  label,
+  targetName,
+}: {
+  label: string;
+  targetName: string;
+}): React.JSX.Element {
+  return (
+    <span
+      className="inline-flex items-center gap-1 rounded-full border border-border bg-background px-2 py-0.5 text-[11px] text-muted-foreground"
+      data-arc="chip"
+      data-link="chip"
+    >
+      <ArrowUpRight className="size-3" aria-hidden="true" />
+      {label}
+      <span>→ {targetName}</span>
+    </span>
   );
 }
 
@@ -166,7 +203,9 @@ export function LanesView({
   const shown = selectedBlockId ?? current ?? blocks[0]?.id ?? null;
   const shownBlock = blocks.find((b) => b.id === shown) ?? null;
   const arcs = useMemo(() => buildArcs(blocks), [blocks]);
+  const links = useMemo(() => buildLinks(blocks), [blocks]);
   const n = blocks.length;
+  const nameOf = (id: string) => blocks.find((b) => b.id === id)?.name ?? id;
 
   // Equal-width lanes; when they cannot fit, the rail scrolls horizontally and the current lane is
   // brought into view rather than everything shrinking below legibility.
@@ -174,6 +213,25 @@ export function LanesView({
   const railWidth = laneWidth * n + LANE_GAP * (n - 1);
   const centerOf = (i: number) => i * (laneWidth + LANE_GAP) + laneWidth / 2;
   const svgHeight = arcsHeight(arcs);
+  const linksSvgHeight = linksHeight(links);
+  const drawnLinks = links.map((link) => ({
+    link,
+    ...linkGeometry(link, centerOf, linksSvgHeight),
+  }));
+  // A link whose label does not fit on the line is labelled by a chip in its source lane instead.
+  const chipsOf = (block: RunBlock) =>
+    block.transitions
+      .filter((tr) => {
+        const target = blocks.find((b) => b.id === tr.to);
+        if (tr.cycle || !target || target.index <= block.index + 1) return false;
+        if (vertical) return true;
+        const drawn = drawnLinks.find(
+          (d) =>
+            d.link.from === block.index && d.link.to === target.index && d.link.label === tr.label,
+        );
+        return drawn ? !drawn.labelFits : false;
+      })
+      .map((transition) => ({ transition, targetName: nameOf(transition.to) }));
 
   const railRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -240,6 +298,7 @@ export function LanesView({
                     isCurrent={current === block.id}
                     onClick={() => onSelectBlock(block.id)}
                     vertical
+                    skips={chipsOf(block)}
                   />
                   {returns.length > 0 && (
                     <div className="flex flex-wrap gap-1 pl-3">
@@ -265,6 +324,56 @@ export function LanesView({
         ) : (
           <div ref={railRef} className="overflow-x-auto pb-1 pt-3" data-testid="lanes-rail">
             <div style={{ width: railWidth }}>
+              {links.length > 0 && (
+                <svg
+                  width={railWidth}
+                  height={linksSvgHeight}
+                  className="block overflow-visible"
+                  aria-label={t("pages.runPage.lanes.skips")}
+                  role="img"
+                  data-testid="lanes-links"
+                >
+                  <defs>
+                    <marker
+                      id="lane-arrow-link"
+                      viewBox="0 0 10 10"
+                      refX="8"
+                      refY="5"
+                      markerWidth="6"
+                      markerHeight="6"
+                      orient="auto-start-reverse"
+                    >
+                      <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--muted-foreground)" />
+                    </marker>
+                  </defs>
+                  {drawnLinks.map(({ link, x1, x2, y, d, labelFits }) => (
+                    <g key={`link-${link.from}-${link.to}-${link.label}`} opacity={0.6}>
+                      <title>{link.label}</title>
+                      <path
+                        d={d}
+                        fill="none"
+                        stroke="var(--muted-foreground)"
+                        strokeWidth={1.5}
+                        strokeLinejoin="round"
+                        markerEnd="url(#lane-arrow-link)"
+                        data-link={`${link.from}-${link.to}`}
+                      />
+                      {labelFits && (
+                        <text
+                          x={(x1 + x2) / 2}
+                          y={y - 3}
+                          textAnchor="middle"
+                          fontSize={11}
+                          fill="var(--muted-foreground)"
+                          data-link-label={`${link.from}-${link.to}`}
+                        >
+                          {link.label}
+                        </text>
+                      )}
+                    </g>
+                  ))}
+                </svg>
+              )}
               <ol
                 className="flex items-stretch"
                 style={{ gap: LANE_GAP }}
@@ -278,6 +387,7 @@ export function LanesView({
                       isCurrent={current === block.id}
                       onClick={() => onSelectBlock(block.id)}
                       vertical={false}
+                      skips={chipsOf(block)}
                     />
                   </li>
                 ))}

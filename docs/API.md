@@ -364,8 +364,9 @@ details, outcome and next text, chained in display order. `process` is the aggre
 one compact block per row in process order with its status mark and pass count, the process's
 transitions as labelled connectors, forward skips as arcs on the right, returns as dashed arcs on
 the left carrying the transition label (nested by span; the cause and exit of a loop are not
-drawn — the run page and `session progress` carry them), and transitions into hub blocks written
-inside the source block. A block named in `hide` (a node id names the block that owns it) is left
+drawn — the run page and `session progress` carry them), and transitions into hub blocks as
+bundled connectors in the right gutter (one lane and one port per hub) labelled inside the source
+block. A block named in `hide` (a node id names the block that owns it) is left
 out and every transition into it is re-targeted to where it led, labels joined with "→"; a block
 in `collapse` is drawn as a label-only chip. An id that names no block or node of the workflow's
 process is refused at mint (400), as is an invalid `view`; the stored options are the resolved

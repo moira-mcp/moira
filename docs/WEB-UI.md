@@ -480,10 +480,17 @@ history entry.
   current block pinned ("you are here"), pass-count badges, struck-through skipped blocks, return
   arcs beneath the rail nested by span (`arcs.ts`), and the selected block's run content. The rail
   scrolls horizontally and centres the current block; on a phone (the `useIsMobile` hook) it becomes
-  a vertical stepper with return chips.
+  a vertical stepper with return chips and forward chips for transitions that skip a block.
+  Forward transitions that skip a block are thin muted links above the rail (`buildLinks`,
+  `linkGeometry`), labelled on the line when the label fits, else by a forward chip in the source
+  lane; hubs receive them like any block.
 - `CanvasView` — React Flow over an ELK layered layout (`layout.ts`, `elkjs` loaded on first use):
   forward edges as elbows with label pills, rank-skipping edges above, cycles as dashed lanes
-  below, hub blocks (many sources) as exit chips. Opens centred on the current block.
+  below; a transition into a hub block (many sources) is a muted bundled edge (`kind: "hub"`,
+  one per source and hub, routed through the inter-rank gaps and a channel per hub into one port
+  on the hub's left edge, `hubPort`); the exit chip in the source names the hub and carries the
+  transition label as its tooltip. Opens centred
+  on the current block.
 - `OutlineView` — numbered sections with status, description, run content, block writes at the
   cursor, transitions in words with cycle cause and exit, and expandable steps (`StepList`).
 - `RouteView` — the whole route grouped into stretches per block (`route.ts`), return markers,

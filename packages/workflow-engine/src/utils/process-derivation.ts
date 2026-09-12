@@ -25,6 +25,7 @@ export type ProcessDiagnosticCode =
   | "unexplained-cycle"
   | "outcome-duplicate"
   | "outcome-unowned"
+  | "unconnected-block"
   | "no-start";
 
 export interface ProcessDiagnostic {
@@ -262,6 +263,23 @@ export function deriveProcess(workflow: WorkflowGraph): ProcessProjection | null
   const inDegree = new Map<string, Set<string>>(progress.nodes.map((b) => [b.id, new Set()]));
   for (const [from, list] of transitionsByBlock) {
     for (const t of list) if (t.to !== from) inDegree.get(t.to)?.add(from);
+  }
+
+  // Connectivity: every block takes part in the process through at least one transition to or
+  // from another block; a self-return alone connects a block to nothing. The block owning the
+  // start node is exempt (a one-block process leads nowhere), and a terminal block — one owning an
+  // `end` node that another block leads into — is connected by that incoming transition.
+  const startBlock = start ? owner.get(start.id) : undefined;
+  for (const block of progress.nodes) {
+    if (block.id === startBlock) continue;
+    const leadsOut = (transitionsByBlock.get(block.id) ?? []).some((t) => t.to !== block.id);
+    const ledInto = (inDegree.get(block.id)?.size ?? 0) > 0;
+    if (leadsOut || ledInto) continue;
+    diagnostics.push({
+      code: "unconnected-block",
+      blockId: block.id,
+      message: `Progress block '${block.id}' has no transition to or from another block; every block except the start block and a terminal block must be connected to the process.`,
+    });
   }
 
   const blocks: ProcessBlock[] = progress.nodes.map((block) => ({

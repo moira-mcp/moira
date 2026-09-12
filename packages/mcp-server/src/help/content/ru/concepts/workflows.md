@@ -26,7 +26,8 @@ plain-text `content` (`summary`, `details`, `outcome`, `next`) и статиче
 (`{{progress_*_outcome}}`) стоит ровно на одном блоке, которому принадлежит нода, записывающая эту
 переменную. Валидация сообщает о каждом нарушении как об ошибке со стабильным кодом —
 `unowned-node`, `unknown-block`, `empty-block`, `empty-description`, `unlabeled-edge`,
-`unexplained-cycle`, `outcome-duplicate`, `outcome-unowned`, — а `moira-workflow <file> derive` и
+`unexplained-cycle`, `outcome-duplicate`, `outcome-unowned`, `unconnected-block`, — а
+`moira-workflow <file> derive` и
 `GET /api/workflows/:id/process` показывают выведенные блоки с теми же диагностиками.
 
 Нода, на которой запуск останавливается (шаг `agent-directive` или другой останавливающий тип),

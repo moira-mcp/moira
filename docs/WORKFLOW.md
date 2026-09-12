@@ -453,7 +453,9 @@ its block, or returns to an earlier block or to its own block, carries a `connec
 keyed like `connections` — a string, or `{ label, cycle: { cause, exit } }` for a return
 (`unlabeled-edge`, `unexplained-cycle`); each `{{progress_*_outcome}}` template sits on exactly one
 block, which owns a node whose `globalInputs` write the variable (`outcome-duplicate`,
-`outcome-unowned`). Transitions between blocks, returns and hub blocks are derived from the
+`outcome-unowned`); every block except the block owning the start node has a transition to or
+from another block — a self-return alone connects nothing (`unconnected-block`). Transitions
+between blocks, returns and hub blocks are derived from the
 primary graph by `deriveProcess` (`@mcp-moira/workflow-engine/process`), which the validator, the
 CLI `derive` command and `GET /api/workflows/:id/process` share; the CLI's `set-block`, `add-block`,
 `edit-block`, `set-label` and `clear-label` commands author the contract one mutation at a time
@@ -516,8 +518,9 @@ transitions and returns between the cards without affecting execution. `session 
 and the matching HTTP endpoint render that model as a
 bounded light/dark PNG behind a short-lived, revision-bound, single-use URL; `view: "process"`
 renders the aggregated block view instead (blocks in process order with the process's labelled
-transitions and dashed returns), and `hide` / `collapse` leave named blocks out or reduce them to
-a chip (see `docs/API.md`). A
+transitions and dashed returns; transitions into a hub block share one bundled connector per hub
+in the right gutter, labelled inside the source block), and `hide` / `collapse` leave named blocks
+out or reduce them to a chip (see `docs/API.md`). A
 `user-notification` node can set `attachProgressImage: true`; it must belong to a block
 and sends the rendered PNG through the current user's configured channels with its normal message.
 The deprecated `telegram-notification` compatibility node retains the same progress attachment.

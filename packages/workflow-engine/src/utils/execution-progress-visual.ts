@@ -508,6 +508,8 @@ interface ProcessArc {
   from: number;
   to: number;
   lane: number;
+  /** A forward transition into a hub: drawn on the hub's bundled lane, labelled inside its source. */
+  hub: boolean;
 }
 
 /** Lanes by span: an arc nested inside another takes the lane inside it; returns the lane count. */
@@ -539,9 +541,11 @@ function assignLanes(side: ProcessArc[]): number {
  * The aggregated block view: one column of compact blocks in process order. Adjacent forward
  * transitions are short connectors with their label beside them; forward skips are arcs in the
  * right gutter and returns dashed arcs in the left gutter, each on a lane by its span so arcs nest
- * instead of crossing, labelled at their midpoint; transitions into hub blocks are written inside
- * the source block instead of drawn. It is the run page's lanes picture turned vertical, which any
- * viewport width can hold.
+ * instead of crossing, labelled at their midpoint. Forward transitions into a hub block share one
+ * bundled lane per hub in the right gutter and enter the hub at a single port; their labels are
+ * written inside the source block rather than beside the bundle, so the connection is visible
+ * without the gutter labels of several sources piling up. It is the run page's lanes picture turned
+ * vertical, which any viewport width can hold.
  */
 function layoutProcessColumn(
   progress: ExecutionProgress,
@@ -568,12 +572,12 @@ function layoutProcessColumn(
       const to = index.get(transition.to);
       const from = index.get(node.id);
       if (to === undefined || from === undefined) continue;
-      if (!transition.cycle && visible.hubs.has(transition.to) && to !== from + 1) {
+      const hub = !transition.cycle && visible.hubs.has(transition.to) && to > from + 1;
+      if (hub) {
         inline.set(node.id, [
           ...(inline.get(node.id) ?? []),
           `${transition.label} → ${blockLabel.get(transition.to) ?? transition.to}`,
         ]);
-        continue;
       }
       arcs.push({
         source: node.id,
@@ -583,10 +587,21 @@ function layoutProcessColumn(
         from,
         to,
         lane: 0,
+        hub,
       });
     }
   }
-  const rightLanes = assignLanes(arcs.filter((arc) => !arc.cycle && arc.to !== arc.from + 1));
+  // Every forward skip takes a right-gutter lane by its span; the skips into one hub are laid out
+  // as a single bundle spanning from the earliest source to the hub, and each takes the bundle's lane.
+  const skips = arcs.filter((arc) => !arc.cycle && arc.to !== arc.from + 1);
+  const bundles = new Map<string, ProcessArc>();
+  for (const arc of skips.filter((arc) => arc.hub)) {
+    const bundle = bundles.get(arc.target);
+    if (bundle) bundle.from = Math.min(bundle.from, arc.from);
+    else bundles.set(arc.target, { ...arc });
+  }
+  const rightLanes = assignLanes([...skips.filter((arc) => !arc.hub), ...bundles.values()]);
+  for (const arc of skips) if (arc.hub) arc.lane = bundles.get(arc.target)!.lane;
   const leftLanes = assignLanes(arcs.filter((arc) => arc.cycle));
 
   const gutterFor = (lanes: number) => (lanes ? LANE_BASE + lanes * LANE_STEP + 150 : 24);
@@ -651,10 +666,10 @@ function layoutProcessColumn(
     const source = byId.get(arc.source)!;
     const target = byId.get(arc.target)!;
     const adjacent = !arc.cycle && arc.to === arc.from + 1;
-    const labelLines = wrapProgressText(
-      arc.label,
-      adjacent ? labelCharacters : gutterCharacters,
-    ).slice(0, 2);
+    // A hub connector carries its label inside the source block (the "next" line), not in the gutter.
+    const labelLines = arc.hub
+      ? []
+      : wrapProgressText(arc.label, adjacent ? labelCharacters : gutterCharacters).slice(0, 2);
     if (adjacent) {
       const x = source.x + source.width / 2;
       const y1 = source.y + source.height;
@@ -686,7 +701,7 @@ function layoutProcessColumn(
     const endX = right ? target.x + target.width : target.x;
     const sideKey = `${arc.source}:${right ? "r" : "l"}`;
     const stack = leaving.get(sideKey) ?? 0;
-    leaving.set(sideKey, stack + 1);
+    if (!arc.hub) leaving.set(sideKey, stack + 1);
     edges.push({
       source: arc.source,
       target: arc.target,
