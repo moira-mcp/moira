@@ -573,12 +573,23 @@ export class WorkspaceOperationService {
             this.now(),
           );
         } else if ("state" in fileResult && fileResult.state === "absent") {
-          this.dependencies.repository.releaseClaim(
+          // Exact-marker inspection proved the remote holds no such operation: terminal,
+          // capacity released, the same way an absent exec result is finalized.
+          const completed = this.dependencies.repository.completeMetadata(
+            operation.userId,
             operation.id,
-            claimId,
-            "remote_inspection_required",
+            operation.resourceGeneration,
+            0,
+            this.now() + policy.cleanupDeadlineMs,
             this.now(),
+            "failed",
           );
+          if (completed) {
+            await this.emit(
+              "terminal",
+              this.dependencies.repository.getOwned(operation.userId, operation.id)!,
+            );
+          }
         } else {
           const completed = this.dependencies.repository.completeMetadata(
             operation.userId,

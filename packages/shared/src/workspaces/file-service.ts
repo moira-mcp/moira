@@ -609,11 +609,16 @@ export class WorkspaceFileService {
       this.dependencies.policy(),
       this.now(),
     );
-    if ("state" in result && (result.state === "running" || result.state === "absent")) {
+    if ("state" in result && result.state === "running") {
       return {
         operation: this.dependencies.repository.getOwned(userId, operationId)!,
         result: null,
       };
+    }
+    if ("state" in result && result.state === "absent") {
+      // Exact-marker inspection proved the remote never ran or no longer holds this
+      // operation: it is terminal and its capacity is released, exactly like an exec.
+      return this.completeAbsent(userId, context.operation);
     }
     if (result.action !== context.operation.kind) {
       throw new Error("Workspace file transport returned a mismatched result");
@@ -629,6 +634,27 @@ export class WorkspaceFileService {
       return { operation: context.operation, result };
     }
     return this.complete(userId, context.operation, result);
+  }
+
+  private async completeAbsent(
+    userId: string,
+    operation: WorkspaceOperationRecord,
+  ): Promise<WorkspaceFileOperationResponse> {
+    if (["succeeded", "failed", "cancelled", "timed_out"].includes(operation.state)) {
+      return { operation, result: null };
+    }
+    const completed = this.dependencies.repository.completeMetadata(
+      userId,
+      operation.id,
+      operation.resourceGeneration,
+      0,
+      this.now() + this.dependencies.policy().cleanupDeadlineMs,
+      this.now(),
+      "failed",
+    );
+    const current = this.dependencies.repository.getOwned(userId, operation.id)!;
+    if (completed) await this.emit("terminal", current);
+    return { operation: current, result: null };
   }
 
   private async complete(

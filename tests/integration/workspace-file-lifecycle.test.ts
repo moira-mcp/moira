@@ -797,6 +797,33 @@ describe("durable workspace file operations", () => {
     }
   });
 
+  test("finalizes a pending file operation as failed when exact inspection proves it absent", async () => {
+    const value = fixture();
+    try {
+      value.transport.throwExecute = true;
+      const pending = await value.service.execute("user-1", "workspace-1", {
+        action: "stat",
+        path: "src/file.bin",
+      });
+      expect(pending).toMatchObject({ operation: { state: "reconcile_pending" }, result: null });
+      value.transport.throwExecute = false;
+      value.transport.inspectFile = async () => ({ state: "absent" as const });
+      await expect(value.service.reconcile("user-1", pending.operation.id)).resolves.toMatchObject({
+        operation: { state: "failed", outputBytes: 0 },
+        result: null,
+      });
+      // Capacity is released: the same workspace accepts new work again.
+      value.transport.result = { action: "stat", path: "src/file.bin", exists: false };
+      const next = await value.service.execute("user-1", "workspace-1", {
+        action: "stat",
+        path: "src/file.bin",
+      });
+      expect(next.operation.state).toBe("succeeded");
+    } finally {
+      value.sqlite.close();
+    }
+  });
+
   test("rejects traversal and cross-tenant replay before credential or transport contact", async () => {
     const value = fixture();
     try {
