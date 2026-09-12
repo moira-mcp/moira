@@ -25,7 +25,9 @@ export default defineConfig({
   testMatch: "**/*.spec.ts",
   testIgnore: ["**/auth-mvp/**", "**/packages/**", ...ciOnlyIgnores],
   timeout: isRemote ? 60000 : 30000,
-  globalTimeout: isRemote ? 1800000 : isCi ? 900000 : 300000,
+  // The complete suite needs roughly five minutes on a local machine, so the local cap matches
+  // CI instead of aborting a healthy run; per-test timeouts are unchanged.
+  globalTimeout: isRemote ? 1800000 : 900000,
   retries: 1,
   workers: isRemote ? 4 : 5,
   fullyParallel: true,

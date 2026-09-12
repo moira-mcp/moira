@@ -17,7 +17,7 @@
  */
 
 import { describe, test, expect, beforeAll } from "@jest/globals";
-import { getTestBaseUrl, getAdminCredentials } from "../utils/test-config.js";
+import { getTestBaseUrl, getAdminCredentials, getTestRequestOrigin } from "../utils/test-config.js";
 import { signInUser } from "../utils/mcp-auth.js";
 import { dockerExecSync } from "../utils/docker-command.js";
 
@@ -97,7 +97,7 @@ function ensureInternalCookieJar(): void {
     "-H",
     "Content-Type: application/json",
     "-H",
-    "Origin: http://localhost:3030",
+    `Origin: ${getTestRequestOrigin()}`,
     "--data-binary",
     JSON.stringify({ email, password, rememberMe: true }),
     "-o",
