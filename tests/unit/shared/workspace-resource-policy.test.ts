@@ -14,7 +14,7 @@ describe("workspace resource policy", () => {
       maxStorageBytes: 32 * 1024 ** 3,
       maxActivePerUser: 1,
       maxActiveGlobal: 4,
-      maxOperationsPerDay: 10,
+      maxOperationsPerDay: 200,
       persistentRetentionMs: 30 * 24 * 60 * 60_000,
       maxConcurrentOperationsPerUser: 2,
       maxConcurrentOperationsGlobal: 20,
