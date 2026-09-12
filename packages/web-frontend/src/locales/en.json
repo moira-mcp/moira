@@ -479,11 +479,9 @@
         "focusNode": "Focus on current node",
         "context": "View context",
         "refresh": "Refresh",
-        "fullscreen": "Fullscreen",
         "lock": "Lock Execution"
       },
       "tabs": {
-        "context": "Context",
         "errors": "Errors",
         "steps": "Steps",
         "locks": "Locks"
@@ -508,15 +506,8 @@
         "unlocked": "Unlocked:"
       },
       "context": {
-        "title": "Execution Context",
-        "saving": "Saving...",
-        "fullscreen": "Fullscreen",
-        "close": "Close",
-        "editor": "Execution Context Editor",
-        "editingNote": "Context editing available only for running/waiting status",
         "save": "Save",
         "saveFailed": "Failed to save context",
-        "unsaved": "Unsaved",
         "filterPlaceholder": "Filter variables...",
         "filterField": {
           "both": "All",
@@ -527,8 +518,6 @@
         "noMatches": "No variables match the filter",
         "globalSection": "Global variables",
         "nodeLocalSection": "Node outputs",
-        "invalidJson": "Invalid JSON",
-        "clickToEdit": "Click to edit",
         "emptyValue": "(empty)",
         "editLong": "Edit in a larger editor"
       },
@@ -572,9 +561,8 @@
       },
       "tabHints": {
         "block": "The selected block: what it does, where it leads, and the steps that implement it",
-        "variables": "Declared variables and the values each step returned, with history; answer the waiting step here",
+        "variables": "Declared variables with their values and history, each step's outputs, edits in place where the run allows them; answer the waiting step here",
         "variablesWaiting": "A step is waiting for your answer",
-        "context": "The run's raw context: every variable and node state as JSON, editable per path",
         "errors": "Errors the run recorded, newest first",
         "errorCount_one": "{{count}} error recorded",
         "errorCount_other": "{{count}} errors recorded",
@@ -658,18 +646,13 @@
       },
       "variables": {
         "guideTitle": "Values as the run goes",
-        "guideBody": "Every value here comes from the run's route: the variables the workflow declares and the fields each step returned. Open a variable's history to see which step changed it and when. Answering the waiting step or editing a variable acts on the run, never on the definition, and is recorded in the route as an adjustment with your name on it.",
+        "guideBody": "Every value here comes from the run's route: the variables the workflow declares and the fields each step returned. Open a variable's history to see which step changed it and when; edit a value in its row where the run allows it. Answering the waiting step or editing a variable acts on the run, never on the definition, and is recorded in the route as an adjustment with your name on it.",
         "atCursor": "Values as they stood at visit {{at}}.",
-        "name": "Variable",
-        "value": "Current value",
-        "changes": "Changes",
         "adjusted": "adjusted",
-        "edit": "Edit in the context tab",
-        "none": "This run has no declared variables.",
-        "outputs_one": "{{count}} step output",
-        "outputs_other": "{{count}} step outputs",
         "adjustmentCount_one": "{{count}} runtime adjustment recorded in the route",
         "adjustmentCount_other": "{{count}} runtime adjustments recorded in the route",
+        "fullscreen": "Open the variables in a larger view",
+        "changes": "Changes",
         "wrote": "wrote"
       },
       "answer": {
@@ -1104,7 +1087,8 @@
         "newName": "new_variable_name",
         "add": "Declare",
         "remove": "Remove this declaration",
-        "schema": "Declaration as JSON Schema (type, description, default, enum, items, properties…)"
+        "schema": "Declaration as JSON Schema (type, description, default, enum, items, properties…)",
+        "title": "Declared variables"
       },
       "edit": {
         "off": "Edit flow",

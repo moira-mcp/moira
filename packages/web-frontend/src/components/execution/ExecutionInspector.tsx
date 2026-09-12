@@ -21,7 +21,6 @@ const TAB_CLASS = "h-8 flex-none gap-1.5 px-2 text-xs";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { apiClient } from "../../services/api-client";
-import { ContextVariableEditor } from "./ContextVariableEditor";
 import type { WorkflowGraph as WorkflowGraphType } from "../../types";
 import type { ExecutionProgress } from "@mcp-moira/workflow-engine/progress-visual";
 import {
@@ -32,13 +31,11 @@ import {
 import {
   ArrowLeft,
   RefreshCw,
-  FileJson,
   Play,
   AlertTriangle,
   Check,
   Compass,
   Loader2,
-  Maximize2,
   ListChecks,
   Lock,
   Unlock,
@@ -170,13 +167,12 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
   const progressRequestRef = useRef(0);
   const cursorRequestRef = useRef(0);
 
-  // Context editing state (per-variable save is handled inside ContextVariableEditor)
-  const [contextFullscreen, setContextFullscreen] = useState(false);
-  const [contextQuery, setContextQuery] = useState<string | undefined>(undefined);
+  // The variables panel opened as a dialog (the same panel, more room).
+  const [variablesFullscreen, setVariablesFullscreen] = useState(false);
 
-  // Panel tab: the block detail once the run has a process view, the context otherwise.
+  // Panel tab: the block detail once the run has a process view, the variables otherwise.
   const [chosenTab, setChosenTab] = useState<PanelTab | null>(null);
-  const activeTab: PanelTab = chosenTab ?? (progress ? "block" : "context");
+  const activeTab: PanelTab = chosenTab ?? (progress ? "block" : "variables");
 
   // Lock management state
   interface LockRecord {
@@ -481,11 +477,6 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
     [execution, fetchExecution, loadProgress, t],
   );
 
-  const handleEditVariable = useCallback((name: string) => {
-    setContextQuery(name);
-    setChosenTab("context");
-  }, []);
-
   const waiting = useMemo(
     () =>
       execution &&
@@ -686,22 +677,6 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
             </Tooltip>
           )}
 
-          {activeTab === "context" && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setContextFullscreen(true)}
-                  data-testid="context-fullscreen-button"
-                >
-                  <Maximize2 className="h-4 w-4" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>{t("pages.executionInspector.toolbar.fullscreen")}</TooltipContent>
-            </Tooltip>
-          )}
-
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
@@ -845,29 +820,19 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
                   {t("pages.runPage.tabs.block")}
                 </TabsTrigger>
               )}
-              {progress && (
-                <TabsTrigger
-                  value="variables"
-                  className={TAB_CLASS}
-                  title={t("pages.runPage.tabHints.variables")}
-                >
-                  <Variable className="size-3.5" />
-                  {t("pages.runPage.tabs.variables")}
-                  <TabBadge
-                    warning={Boolean(answerable && waiting)}
-                    tone="warning"
-                    label={t("pages.runPage.tabHints.variablesWaiting")}
-                    testId="variables-waiting-badge"
-                  />
-                </TabsTrigger>
-              )}
               <TabsTrigger
-                value="context"
+                value="variables"
                 className={TAB_CLASS}
-                title={t("pages.runPage.tabHints.context")}
+                title={t("pages.runPage.tabHints.variables")}
               >
-                <FileJson className="size-3.5" />
-                {t("pages.executionInspector.tabs.context")}
+                <Variable className="size-3.5" />
+                {t("pages.runPage.tabs.variables")}
+                <TabBadge
+                  warning={Boolean(answerable && waiting)}
+                  tone="warning"
+                  label={t("pages.runPage.tabHints.variablesWaiting")}
+                  testId="variables-waiting-badge"
+                />
               </TabsTrigger>
               <TabsTrigger
                 value="errors"
@@ -929,31 +894,20 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
               </TabsContent>
             )}
 
-            {progress && shownProgress && (
-              <TabsContent value="variables" className="scrollbar-thin flex-1 overflow-auto m-0">
-                <VariablesPanel
-                  progress={shownProgress}
-                  cursor={cursor}
-                  waiting={waiting}
-                  waitingBlockName={waitingBlockName}
-                  canAdjust={answerable}
-                  editableVariableNames={editableVariableNames}
-                  onAnswer={handleAnswer}
-                  onEditVariable={handleEditVariable}
-                />
-              </TabsContent>
-            )}
-
-            <TabsContent value="context" className="flex-1 flex flex-col overflow-hidden m-0">
-              <div className="scrollbar-thin flex-1 overflow-auto p-3">
-                <ContextVariableEditor
-                  variables={execution?.context?.variables || {}}
-                  workflow={workflow?.workflow}
-                  onSavePath={canEdit ? handleSavePath : undefined}
-                  editableRootNames={editableVariableNames}
-                  initialQuery={contextQuery}
-                />
-              </div>
+            <TabsContent value="variables" className="scrollbar-thin flex-1 overflow-auto m-0">
+              <VariablesPanel
+                progress={shownProgress}
+                cursor={cursor}
+                context={execution?.context?.variables}
+                workflow={workflow?.workflow}
+                waiting={waiting}
+                waitingBlockName={waitingBlockName}
+                canAdjust={answerable}
+                editableVariableNames={editableVariableNames}
+                onAnswer={handleAnswer}
+                onSavePath={canEdit ? handleSavePath : undefined}
+                onFullscreen={() => setVariablesFullscreen(true)}
+              />
             </TabsContent>
 
             <TabsContent value="errors" className="scrollbar-thin flex-1 overflow-auto m-0 p-4">
@@ -1071,16 +1025,16 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
         </aside>
       </div>
 
-      {/* Context Fullscreen Modal */}
-      <Dialog open={contextFullscreen} onOpenChange={setContextFullscreen}>
-        <DialogContent className="w-[90vw] max-w-5xl min-w-[800px] max-h-[90vh] flex flex-col p-0 gap-0 overflow-hidden">
-          <DialogHeader className="px-6 py-4 border-b bg-muted/30">
+      {/* The variables panel with more room: the same panel in a dialog */}
+      <Dialog open={variablesFullscreen} onOpenChange={setVariablesFullscreen}>
+        <DialogContent className="flex max-h-[90vh] w-[90vw] flex-col gap-0 overflow-hidden p-0 sm:max-w-5xl">
+          <DialogHeader className="border-b bg-muted/30 px-6 py-4">
             <DialogTitle className="flex items-center gap-3">
-              <div className="p-2 rounded-md bg-primary/10">
-                <FileJson className="h-5 w-5 text-primary" />
+              <div className="rounded-md bg-primary/10 p-2">
+                <Variable className="h-5 w-5 text-primary" />
               </div>
               <div className="flex flex-col gap-1">
-                <span>{t("pages.executionInspector.context.title")}</span>
+                <span>{t("pages.runPage.tabs.variables")}</span>
                 <span className="text-xs font-normal text-muted-foreground">
                   {execution.workflowName || execution.workflowId} •{" "}
                   {execution.executionId.substring(0, 8)}
@@ -1088,13 +1042,18 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
               </div>
             </DialogTitle>
           </DialogHeader>
-
-          <div className="scrollbar-thin flex-1 overflow-auto p-4 bg-background">
-            <ContextVariableEditor
-              variables={execution?.context?.variables || {}}
+          <div className="scrollbar-thin flex-1 overflow-auto bg-background">
+            <VariablesPanel
+              progress={shownProgress}
+              cursor={cursor}
+              context={execution?.context?.variables}
               workflow={workflow?.workflow}
+              waiting={waiting}
+              waitingBlockName={waitingBlockName}
+              canAdjust={answerable}
+              editableVariableNames={editableVariableNames}
+              onAnswer={handleAnswer}
               onSavePath={canEdit ? handleSavePath : undefined}
-              editableRootNames={editableVariableNames}
             />
           </div>
         </DialogContent>

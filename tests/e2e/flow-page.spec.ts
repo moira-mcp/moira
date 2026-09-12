@@ -191,7 +191,9 @@ test("an owner edits the definition in place; the save persists and advances the
       .fill("current_step = current_step + 2");
     await page.getByRole("tab", { name: /Variables|Переменные/ }).click();
     await page.getByTestId("registry-total_steps-default").fill("4");
-    // The whole declaration is editable as JSON Schema: a keyword the field editors do not offer.
+    // The whole declaration is editable as JSON Schema (a keyword the field editors do not
+    // offer) in the row's expanded body.
+    await page.getByTestId("registry-total_steps-toggle").click();
     await page
       .getByTestId("registry-total_steps-schema")
       .fill('{"type":"number","description":"Steps in the plan","default":4,"minimum":1}');

@@ -42,7 +42,6 @@ frontend/src/
 │   │   └── WorkflowViewerPlaceholder.tsx  # Workflow detail page container
 │   ├── execution/              # Execution display components
 │   │   ├── ExecutionInspector.tsx    # Run page with DI (fetchExecution prop, editable/canAnswer flags)
-│   │   ├── ContextVariableEditor.tsx # Per-path context editor
 │   │   └── ExecutionErrorHistory.tsx # Error log with collapsible entries, error badges
 │   ├── flow/                    # Flow page: the definition as a process, edited in place
 │   │   ├── editing.tsx / model.ts / modes.ts        # Edit set (apply, export diff), run-less projection, modes
@@ -51,6 +50,7 @@ frontend/src/
 │   ├── run/                     # Run page: the execution as a process
 │   │   ├── LanesView.tsx / CanvasView.tsx / OutlineView.tsx / RouteView.tsx  # The four modes
 │   │   ├── BlockDetailPanel.tsx / VariablesPanel.tsx / StepList.tsx        # Panel tabs
+│   │   ├── variableRows.ts / variableTree.tsx                              # Variables grouping model; shared rows, groups, tree, leaf editor
 │   │   ├── StepCard.tsx / TabBadge.tsx                                      # One step card for every list; the panel badge
 │   │   ├── RunCursor.tsx / Walkthrough.tsx / Guidance.tsx / status.tsx      # Cursor, guide, notes, status vocabulary
 │   │   ├── model.ts / route.ts / arcs.ts / layout.ts                        # Pure view helpers; ELK layout
@@ -411,7 +411,10 @@ entry count so a value typed back to what is stored is not an edit; discard, whi
 recorded edit; save; the loaded revision; the export diff as flow-file path / before / after;
 the server's refusal message); the process diagnostics inline; the mode filling the main area; a
 panel beside it (under it on a phone) with the **Block** tab (`BlockDetailPanel`, a step click opens the graph mode on that node) and the
-**Variables** tab (`RegistryPanel`). The graph mode mounts `WorkflowGraph` (its `focusRequest`
+**Variables** tab (`RegistryPanel`: the registry on the shared variable rows — name, type badge
+and default in the row, description and the whole declaration as JSON Schema in the opened row;
+in edit mode the type select, default input, description and schema editors sit in the same
+places, a row's control removes the entry and a form below declares one). The graph mode mounts `WorkflowGraph` (its `focusRequest`
 prop brings a chosen node into view) with its controls beside `WorkflowSidebar`, as the former
 workflow detail page did.
 
@@ -474,7 +477,7 @@ history entry.
 
 - Compact toolbar (single line): back button, execution ID (copy), workflow name, status badge,
   current node (focuses the node graph), owner info (admin), lock button (user view, running
-  executions), fullscreen button (context tab), refresh (spins, `data-pending="true"`, while an
+  executions), refresh (spins, `data-pending="true"`, while an
   execution or progress request is in flight), error badge. A refresh that fails keeps the run on
   screen and reports through a toast; a progress refetch that fails keeps the projection already on
   screen (the "unavailable" banner is a first-load state only). The Locks tab holds its history in a
@@ -575,12 +578,10 @@ line (`route-summary`).
 **Panels:** `BlockDetailPanel` (status, description, run content, a facts line with the step count,
 pass count and visits, transitions, steps as cards with the
 evidence fields each schema demands — declared `globalInputs` merged from the variable registry —
-and a click that focuses the node graph); `VariablesPanel` (fixed-layout table of variables with
-history rows and adjustment marks, node outputs, an "edit in context" shortcut for policy-editable
-variables, and the **answer form** for the waiting step: fields from the step's input schema with
+and a click that focuses the node graph); `VariablesPanel` (the one variables surface, see
+below, with the **answer form** for the waiting step: fields from the step's input schema with
 enum selects, booleans, numbers, JSON textareas, submit gated on required fields, the server's
-refusal shown inline); `ContextVariableEditor` (tree editor with per-path saves, `initialQuery`
-preset from the variables tab); `ExecutionErrorHistory`; `StepProgression`; the lazily loaded
+refusal shown inline); `ExecutionErrorHistory`; `StepProgression`; the lazily loaded
 `WorkflowGraph` with a stable init callback and a focus request that fits the view to a node.
 
 **Answering the waiting step:** `apiClient.answerExecutionStep(id, input, expectedRevision)` calls
@@ -597,7 +598,29 @@ and panel; on a phone they fold to their title.
 
 Two-phase dialog (input → result). Input phase: reason text field (required), Lock/Cancel buttons. Result phase: shows lockId and the PIN for sharing with MCP agents — this is the only place the PIN is shown, as it is stored hashed and not retrievable afterward. Submit enabled when reason is non-empty and not in loading state. Enter key submits.
 
-**Context tab:** `ContextVariableEditor` — a compact variable tree grouped into exactly two sections with count badges, alphabetically ordered: "Global variables" (declared in the workflow `variableRegistry`, readable by bare name) and "Node outputs" (per-node-id local scopes, referenced as `node-id.name`). Under the explicit output-scope model every context value is one of these two, so there is no undeclared/"appeared during execution" group. A global that a node wrote also lives in that node's local scope; it is shown once under Global and hidden from the node's tree (so a promoted global is never duplicated). A node-local scope whose only contents are globals the node wrote (e.g. the start node's seeded scope) renders empty after de-duplication and is omitted. A text filter (key / value / both) is tree-aware: a nested match is shown together with its ancestor path. The description (resolved from the `variableRegistry`, shown for globals) appears as a tooltip on the name. Object/array values render as an expandable tree with alphabetically sorted keys; leaf values are editable at any nesting level. Leaf fields are always in edit mode; Save/Cancel are present but enabled only after a change (dirty state); empty values render at normal height with a placeholder. Long/multiline strings show an expand button that opens a modal multi-line editor. Editing is per-path: only the value at the edited path is sent via `apiClient.updateExecutionContextPath` together with the execution's step revision and context revision, then the view reloads authoritative server state. Editable when the `editable` prop is true; read-only in admin view. Fullscreen button opens a Dialog modal hosting the same editor.
+**Variables tab:** `VariablesPanel` (`components/run/VariablesPanel.tsx`) is the run page's one
+variables surface; it is always present and is the default tab when the run has no process view.
+Rows come from the pure grouping model `variableRows` (`components/run/variableRows.ts`): the
+declared variables (every registry name plus any undeclared top-level context key) in name order
+with the registry description, the server's editability (`editableVariableNames`, the policy at
+the current node), and — when the run has a process view — the projection's history and
+adjusted mark; the value shown is the projection's while a cursor is set (a note says so) and the
+context's otherwise, and an edit always targets the context. A node's outputs form a group under
+its node id; a global the node wrote is one declared row and is hidden from the node's group; a
+scope holding only such globals is no group. The panel shows, in order: the answer form when the
+run waits and the page may answer; a tree-aware filter (name / value / both) with the fullscreen
+button; the **Global variables** group and the **Node outputs** group, both collapsible
+(`variables-group-<id>`, `data-open`) with a secondary count; the adjustment count as secondary
+text. A row (`VariableRow` in `variableTree.tsx`: one grid for name, value and trailing controls)
+shows a leaf as an input in edit mode with dirty-gated save and cancel and a modal for long text,
+or as read-only text; objects and arrays open as a tree of rows with alphabetically sorted keys,
+editable per path. The secondary history count opens the list of changes (seq, writing node,
+value, adjusted) under the row. Saves go through `apiClient.updateExecutionContextPath` with the
+execution's step revision and context revision, then the execution and projection reload;
+read-only when `editable` is not set (the admin view). Test ids: `context-filter-input`,
+`context-filter-field-*`, `context-var-<path>`, `context-node-toggle-<path>`,
+`context-var-input|save|cancel|expand|modal-textarea-<path>`, `variable-history-<name>`,
+`data-history-of`, `variables-cursor-note`, `context-fullscreen-button`.
 
 **Errors tab:** ExecutionErrorHistory component showing execution errors with timestamps, collapsible entries, error type badges.
 
@@ -605,12 +628,9 @@ Two-phase dialog (input → result). Input phase: reason text field (required), 
 
 **Locks tab:** Lock history cards showing all lock records (active/unlocked). Each card displays reason, node ID, status badge, timestamps (created/unlocked). Badge with count indicator on tab when locks exist. "Unlock" on active locks: admin override in the admin view, the owner's own unlock (no PIN) in the user view. The PIN is shown only once in the Lock Dialog result phase at creation time; lock history cards do not display it.
 
-**Context Fullscreen Modal:**
-
-- Opens via Maximize2 button in Context tab
-- Wide modal: `w-[90vw] max-w-5xl min-w-[800px]`
-- Hosts the same `ContextVariableEditor` (per-path save inside the tree)
-- Read-only mode when `editable` is not set (admin view)
+**Variables fullscreen:** the fullscreen button in the panel's filter bar opens a wide Dialog
+(`w-[90vw] sm:max-w-5xl`) hosting the same `VariablesPanel` with the same props (no guidance, no
+second fullscreen button); read-only when `editable` is not set.
 
 **ExecutionErrorHistory Component:**
 
@@ -1526,7 +1546,7 @@ src/
     },
     "executionInspector": {
       "loading", "notFound", "backToExecutions", "execution", "workflow", "selected", "current", "clearSelection",
-      "context": { "title", "saving", "fullscreen", "close", "editor", "editingNote" }
+      "context": { "save", "saveFailed", "filterPlaceholder", "filterField", "empty", "noMatches", "globalSection", "nodeLocalSection", "emptyValue", "editLong" }
     },
     "settings": {
       "title", "loading", "required", "enable", "saveChanges", "saving", "cancel", "noSettings", "saveSuccess", "saveFailed", "fixErrors",

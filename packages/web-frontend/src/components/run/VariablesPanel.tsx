@@ -1,23 +1,28 @@
 /**
- * Variables — every value of the run at the cursor with its history, and the two runtime
- * adjustments the page offers as engine operations: answering the step the run waits for (the
- * fields its input schema demands, submitted through the answer endpoint) and setting a variable
- * (handed to the existing context editor, which saves through the policy-governed path). Both are
- * recorded by the engine as adjusted visits with the acting user; nothing here touches the
- * definition.
+ * Variables — the one variables surface of the run page: the declared variables as aligned rows
+ * (the value at the cursor, a secondary history count that opens the changes, an inline editor
+ * where the server allows an edit, objects and arrays as a tree inside the row) and each step's
+ * outputs as a group under its node, both groups collapsible and filtered together. The answer
+ * form for the waiting step sits on top. Editing saves one path through the policy-governed
+ * context route and answering goes through the answer route; both are recorded by the engine as
+ * adjusted visits with the acting user; nothing here touches the definition. The fullscreen mode
+ * is this same panel in a dialog.
  */
 
 import React, { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { ChevronDown, History, Loader2, PencilLine, Send, Variable } from "lucide-react";
+import { History, Loader2, Maximize2, Search, Send } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { GuidanceCallout } from "./Guidance";
 import type { ExecutionProgress, EvidenceField, StepInfo } from "./model";
 import { formatValue } from "./model";
+import type { WorkflowGraph } from "../../types/workflow-types";
+import type { VariableFilterField } from "../../utils/context-variable-model";
+import { variableRows, type DeclaredRow } from "./variableRows";
+import { TreeNode, VariableGroup, subtreeMatches, type SavePath } from "./variableTree";
 
 type Draft = Record<string, string>;
 
@@ -228,44 +233,98 @@ export function AnswerForm({
   );
 }
 
-export function VariablesPanel({
-  progress,
-  cursor,
-  waiting,
-  waitingBlockName,
-  canAdjust,
-  editableVariableNames,
-  onAnswer,
-  onEditVariable,
-}: {
-  progress: ExecutionProgress;
+/** The changes a variable went through, opened from its row. */
+function HistoryList({ row }: { row: DeclaredRow }): React.JSX.Element {
+  const { t } = useTranslation();
+  return (
+    <ol
+      className="space-y-0.5 border-t bg-muted/30 px-3 py-2 font-mono text-[11px]"
+      data-history-of={row.name}
+    >
+      {row.history.map((h) => (
+        <li key={h.seq} className="flex gap-3" data-history-seq={h.seq}>
+          <span className="w-10 shrink-0 text-right text-muted-foreground">#{h.seq}</span>
+          <span className="w-28 shrink-0 truncate text-muted-foreground">{h.nodeId}</span>
+          <span className="min-w-0 break-all">{formatValue(h.value)}</span>
+          {h.adjusted && (
+            <span className="shrink-0 text-warning-foreground">
+              {t("pages.runPage.variables.adjusted")}
+            </span>
+          )}
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+export interface VariablesPanelProps {
+  /** The projection shown (at the cursor while one is set); null without a process view. */
+  progress: ExecutionProgress | null;
   cursor: number | null;
+  /** The run's context as it stands now: the values an edit changes. */
+  context: Record<string, unknown> | undefined;
+  workflow: WorkflowGraph | undefined;
   /** The step the run waits for, when the page may answer it. */
   waiting: StepInfo | null;
   waitingBlockName: string | null;
   canAdjust: boolean;
   editableVariableNames: ReadonlySet<string>;
   onAnswer: (input: Record<string, unknown>) => Promise<string | null>;
-  /** Open the context editor on a variable. */
-  onEditVariable: (name: string) => void;
-}): React.JSX.Element {
+  /** Per-path save; absent when the viewer may not edit (the admin page). */
+  onSavePath?: SavePath;
+  /** Opens the same panel in a dialog; absent inside the dialog. */
+  onFullscreen?: () => void;
+}
+
+export function VariablesPanel({
+  progress,
+  cursor,
+  context,
+  workflow,
+  waiting,
+  waitingBlockName,
+  canAdjust,
+  editableVariableNames,
+  onAnswer,
+  onSavePath,
+  onFullscreen,
+}: VariablesPanelProps): React.JSX.Element {
   const { t } = useTranslation();
-  const variables = useMemo(
-    () => progress.variables.filter((v) => v.kind === "variable"),
-    [progress.variables],
-  );
-  const outputs = useMemo(
-    () => progress.variables.filter((v) => v.kind === "output"),
-    [progress.variables],
-  );
+  const [query, setQuery] = useState("");
+  const [filterField, setFilterField] = useState<VariableFilterField>("both");
   const [openHistory, setOpenHistory] = useState<string | null>(null);
-  const adjustments = progress.route.filter((v) => v.adjusted).length;
+  const q = query.trim().toLowerCase();
+
+  const rows = useMemo(
+    () =>
+      variableRows({
+        context,
+        workflow,
+        projection: progress?.variables,
+        atCursor: cursor !== null,
+        editableNames: editableVariableNames,
+      }),
+    [context, workflow, progress, cursor, editableVariableNames],
+  );
+  const declared = rows.declared.filter((row) =>
+    subtreeMatches(row.name, row.value, q, filterField),
+  );
+  const outputs = rows.outputs.filter((group) =>
+    subtreeMatches(group.nodeId, group.value, q, filterField),
+  );
+  const adjustments = progress ? progress.route.filter((v) => v.adjusted).length : 0;
+  const fields: VariableFilterField[] = ["both", "key", "value"];
 
   return (
     <div className="space-y-3 p-3" data-testid="variables-panel">
-      <GuidanceCallout title={t("pages.runPage.variables.guideTitle")} testId="guidance-variables">
-        {t("pages.runPage.variables.guideBody")}
-      </GuidanceCallout>
+      {onFullscreen && (
+        <GuidanceCallout
+          title={t("pages.runPage.variables.guideTitle")}
+          testId="guidance-variables"
+        >
+          {t("pages.runPage.variables.guideBody")}
+        </GuidanceCallout>
+      )}
       {cursor !== null && (
         <p className="text-xs text-muted-foreground" data-testid="variables-cursor-note">
           {t("pages.runPage.variables.atCursor", { at: cursor })}
@@ -276,135 +335,140 @@ export function VariablesPanel({
         <AnswerForm step={waiting} blockName={waitingBlockName} onAnswer={onAnswer} />
       )}
 
-      <div className="rounded-lg border bg-card">
-        {/* A fixed layout keeps long values from widening the table past the panel: names and
-            values wrap inside their columns instead of pushing the first column out of view. */}
-        <table className="w-full table-fixed text-sm">
-          <colgroup>
-            <col className="w-[36%]" />
-            <col />
-            <col className="w-[88px]" />
-          </colgroup>
-          <thead className="text-left text-[11px] uppercase tracking-wide text-muted-foreground">
-            <tr>
-              <th className="px-3 py-2 font-semibold">{t("pages.runPage.variables.name")}</th>
-              <th className="px-3 py-2 font-semibold">{t("pages.runPage.variables.value")}</th>
-              <th className="px-3 py-2 text-right font-semibold">
-                {t("pages.runPage.variables.changes")}
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {variables.map((v) => (
-              <React.Fragment key={v.name}>
-                <tr
-                  className={cn("border-t", v.adjusted && "bg-warning/10")}
-                  data-variable={v.name}
-                  data-value={formatValue(v.current)}
-                  data-adjusted={v.adjusted ? "true" : undefined}
-                >
-                  <td className="break-all px-3 py-1.5 font-mono text-xs">
-                    <Variable
-                      className="mr-1 inline size-3 text-muted-foreground"
-                      aria-hidden="true"
-                    />
-                    {v.name}
-                  </td>
-                  <td className="break-all px-3 py-1.5 font-mono text-xs">
-                    <span className="line-clamp-3" title={formatValue(v.current)}>
-                      {formatValue(v.current)}
-                    </span>
-                    {v.adjusted && (
-                      <span className="ml-2 rounded-full bg-warning/20 px-1.5 text-[10px] font-medium text-warning-foreground">
-                        {t("pages.runPage.variables.adjusted")}
-                      </span>
-                    )}
-                  </td>
-                  <td className="whitespace-nowrap px-3 py-1.5 text-right">
-                    {canAdjust && editableVariableNames.has(v.name) && (
-                      <button
-                        type="button"
-                        className="mr-1 inline-flex items-center gap-1 rounded-md px-1.5 text-xs text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                        onClick={() => onEditVariable(v.name)}
-                        data-testid={`variable-edit-${v.name}`}
-                        title={t("pages.runPage.variables.edit")}
-                      >
-                        <PencilLine className="size-3" aria-hidden="true" />
-                      </button>
-                    )}
-                    <button
-                      type="button"
-                      className="inline-flex items-center gap-1 rounded-md px-1.5 text-xs tabular-nums text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-40"
-                      disabled={v.history.length === 0}
-                      onClick={() => setOpenHistory(openHistory === v.name ? null : v.name)}
-                      data-testid={`variable-history-${v.name}`}
-                      aria-expanded={openHistory === v.name}
-                    >
-                      <History className="size-3" aria-hidden="true" />
-                      {v.history.length}
-                    </button>
-                  </td>
-                </tr>
-                {openHistory === v.name && (
-                  <tr className="border-t bg-muted/30" data-history-of={v.name}>
-                    <td colSpan={3} className="px-3 py-2">
-                      <ol className="space-y-0.5 font-mono text-[11px]">
-                        {v.history.map((h) => (
-                          <li key={h.seq} className="flex gap-3" data-history-seq={h.seq}>
-                            <span className="w-10 shrink-0 text-right text-muted-foreground">
-                              #{h.seq}
-                            </span>
-                            <span className="w-28 shrink-0 truncate text-muted-foreground">
-                              {h.nodeId}
-                            </span>
-                            <span className="min-w-0 break-all">{formatValue(h.value)}</span>
-                            {h.adjusted && (
-                              <span className="shrink-0 text-warning-foreground">
-                                {t("pages.runPage.variables.adjusted")}
-                              </span>
-                            )}
-                          </li>
-                        ))}
-                      </ol>
-                    </td>
-                  </tr>
-                )}
-              </React.Fragment>
-            ))}
-            {variables.length === 0 && (
-              <tr className="border-t">
-                <td colSpan={3} className="px-3 py-3 text-center text-xs text-muted-foreground">
-                  {t("pages.runPage.variables.none")}
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-        <Collapsible>
-          <CollapsibleTrigger className="group flex w-full items-center gap-1.5 border-t px-3 py-2 text-left text-xs text-muted-foreground hover:text-foreground">
-            {t("pages.runPage.variables.outputs", { count: outputs.length })}
-            <ChevronDown
-              className="size-3.5 transition-transform group-data-[state=open]:rotate-180"
-              aria-hidden="true"
-            />
-          </CollapsibleTrigger>
-          <CollapsibleContent>
-            <ul className="scrollbar-thin max-h-64 divide-y overflow-y-auto border-t font-mono text-[11px]">
-              {outputs.map((o) => (
-                <li key={o.name} className="flex gap-3 px-3 py-1" data-output={o.name}>
-                  <span className="w-48 shrink-0 truncate">{o.name}</span>
-                  <span className="truncate text-muted-foreground" title={formatValue(o.current)}>
-                    {formatValue(o.current)}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          </CollapsibleContent>
-        </Collapsible>
+      <div className="flex items-center gap-2">
+        <div className="relative min-w-0 flex-1">
+          <Search className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder={t("pages.executionInspector.context.filterPlaceholder")}
+            className="h-8 pl-8 text-sm"
+            data-testid="context-filter-input"
+          />
+        </div>
+        <div className="flex overflow-hidden rounded-md border border-border">
+          {fields.map((f) => (
+            <button
+              key={f}
+              type="button"
+              onClick={() => setFilterField(f)}
+              className={cn(
+                "px-2 py-1 text-xs transition-colors",
+                filterField === f
+                  ? "bg-primary text-primary-foreground"
+                  : "bg-background text-muted-foreground hover:bg-muted",
+              )}
+              data-testid={`context-filter-field-${f}`}
+            >
+              {t(`pages.executionInspector.context.filterField.${f}`)}
+            </button>
+          ))}
+        </div>
+        {onFullscreen && (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-8 w-8 shrink-0 p-0"
+            onClick={onFullscreen}
+            title={t("pages.runPage.variables.fullscreen")}
+            aria-label={t("pages.runPage.variables.fullscreen")}
+            data-testid="context-fullscreen-button"
+          >
+            <Maximize2 className="size-3.5" aria-hidden="true" />
+          </Button>
+        )}
       </div>
-      <p className="text-[11px] text-muted-foreground" data-testid="adjustment-count">
-        {t("pages.runPage.variables.adjustmentCount", { count: adjustments })}
-      </p>
+
+      {rows.declared.length === 0 && rows.outputs.length === 0 ? (
+        <p className="px-1 py-6 text-center text-sm text-muted-foreground">
+          {t("pages.executionInspector.context.empty")}
+        </p>
+      ) : declared.length === 0 && outputs.length === 0 ? (
+        <p className="px-1 py-6 text-center text-sm text-muted-foreground">
+          {t("pages.executionInspector.context.noMatches")}
+        </p>
+      ) : (
+        <>
+          {declared.length > 0 && (
+            <VariableGroup
+              id="declared"
+              title={t("pages.executionInspector.context.globalSection")}
+              count={declared.length}
+            >
+              {declared.map((row) => (
+                <TreeNode
+                  key={row.name}
+                  nodeKey={row.name}
+                  value={row.value}
+                  path={[row.name]}
+                  depth={0}
+                  description={row.description}
+                  query={q}
+                  filterField={filterField}
+                  canEdit={row.editable && Boolean(onSavePath)}
+                  onSavePath={onSavePath}
+                  defaultExpanded={false}
+                  attributes={{
+                    "data-variable": row.name,
+                    "data-value": formatValue(row.value),
+                    "data-adjusted": row.adjusted ? "true" : undefined,
+                  }}
+                  trailing={
+                    <>
+                      {row.adjusted && (
+                        <span className="rounded-full bg-warning/20 px-1.5 text-[10px] font-medium text-warning-foreground">
+                          {t("pages.runPage.variables.adjusted")}
+                        </span>
+                      )}
+                      {row.history.length > 0 && (
+                        <button
+                          type="button"
+                          className="inline-flex items-center gap-1 rounded-md px-1.5 text-[11px] tabular-nums text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                          onClick={() => setOpenHistory(openHistory === row.name ? null : row.name)}
+                          data-testid={`variable-history-${row.name}`}
+                          aria-expanded={openHistory === row.name}
+                          title={t("pages.runPage.variables.changes")}
+                        >
+                          <History className="size-3" aria-hidden="true" />
+                          {row.history.length}
+                        </button>
+                      )}
+                    </>
+                  }
+                  extra={openHistory === row.name ? <HistoryList row={row} /> : undefined}
+                />
+              ))}
+            </VariableGroup>
+          )}
+          {outputs.length > 0 && (
+            <VariableGroup
+              id="outputs"
+              title={t("pages.executionInspector.context.nodeLocalSection")}
+              count={outputs.length}
+            >
+              {outputs.map((group) => (
+                <TreeNode
+                  key={group.nodeId}
+                  nodeKey={group.nodeId}
+                  value={group.value}
+                  path={[group.nodeId]}
+                  depth={0}
+                  query={q}
+                  filterField={filterField}
+                  canEdit={false}
+                  attributes={{ "data-output": group.nodeId }}
+                />
+              ))}
+            </VariableGroup>
+          )}
+        </>
+      )}
+      {progress && (
+        <p className="text-[11px] text-muted-foreground" data-testid="adjustment-count">
+          {t("pages.runPage.variables.adjustmentCount", { count: adjustments })}
+        </p>
+      )}
     </div>
   );
 }

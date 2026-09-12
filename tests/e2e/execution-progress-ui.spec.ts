@@ -262,16 +262,16 @@ test("answering the waiting step from the page continues the run and records the
     await page.getByTestId("answer-submit").click();
     await answered;
     // The run moved on: the scope block is done, the plan block waits, the route carries the
-    // adjustment by the user. The variables table keeps every name inside the panel even with
+    // adjustment by the user. The variables rows keep every name inside the panel even with
     // long path values (a broken layout pushed the first column out of view).
     await expect(page.getByTestId("progress-node-scope")).toHaveAttribute("data-status", "done");
     const panelBox = (await page.getByTestId("run-panel").boundingBox())!;
     for (const name of ["operating_mode", "progress_scope_outcome"]) {
-      const cell = page.locator(`[data-variable="${name}"] td`).first();
-      const box = (await cell.boundingBox())!;
+      const row = page.locator(`[data-variable="${name}"]`).first();
+      const box = (await row.boundingBox())!;
       expect(box.x).toBeGreaterThanOrEqual(panelBox.x);
       expect(box.x + box.width).toBeLessThanOrEqual(panelBox.x + panelBox.width + 1);
-      await expect(cell).toContainText(name);
+      await expect(row).toContainText(name);
     }
     await expect(page.getByTestId("progress-node-plan")).toHaveAttribute("data-status", "waiting");
     await expect(page.getByTestId("adjustment-count")).toContainText("1");
@@ -281,6 +281,28 @@ test("answering the waiting step from the page continues the run and records the
       .locator('[data-visit-seq][data-adjusted="true"]');
     await expect(adjusted).toHaveCount(1);
     await expect(adjusted).toContainText(/person|человек/i);
+    // The progress_scope_outcome row's history opens under the row: the change by the answering
+    // node, marked as adjusted. With the cursor on the start visit the row shows the registry
+    // default and the panel says the values are the cursor's; cleared, the answered value again.
+    await page.getByRole("tab", { name: /Variables|Переменные/ }).click();
+    const history = page.getByTestId("variable-history-progress_scope_outcome");
+    await expect(history).toBeVisible();
+    await history.click();
+    const changes = page.locator('[data-history-of="progress_scope_outcome"]');
+    await expect(changes).toBeVisible();
+    await expect(changes.locator("[data-history-seq]").last()).toContainText("get-task");
+    await expect(changes.locator("[data-history-seq]").last()).toContainText(/adjusted|изменено/);
+    await page.getByTestId("route-list").locator('[data-visit-seq="0"]').click();
+    await expect(page.getByTestId("variables-cursor-note")).toBeVisible();
+    await expect(page.locator('[data-variable="progress_scope_outcome"]')).toHaveAttribute(
+      "data-value",
+      "Pending",
+    );
+    await page.getByTestId("cursor-clear").click();
+    await expect(page.locator('[data-variable="progress_scope_outcome"]')).toHaveAttribute(
+      "data-value",
+      "Captured from the page",
+    );
     // The agent's attempt from before the answer is stale: it must read current_step.
     const stale = await advanceWorkflowExecution(authenticated.client, run, {
       task_file: `${workspace}/task.md`,
@@ -332,11 +354,12 @@ test("shows the loading state and keeps the page usable on a phone without a pro
     );
     await page.reload();
     await errorResponse;
-    await expect(page.getByRole("status")).toContainText(
-      /temporarily unavailable|временно недоступен/i,
-    );
+    // The projection's status line (the variables tab's waiting badge is a status of its own).
+    await expect(
+      page.getByRole("status").filter({ hasText: /temporarily unavailable|временно недоступен/i }),
+    ).toBeVisible();
     await expect(page.locator(".react-flow__viewport")).toBeVisible({ timeout: 15000 });
-    await expect(page.getByRole("tab", { name: /Context|Контекст/ })).toBeVisible();
+    await expect(page.getByRole("tab", { name: /Variables|Переменные/ })).toBeVisible();
 
     run.setMode("none");
     const absentResponse = page.waitForResponse(

@@ -14,7 +14,7 @@ import { ChevronLeft, ChevronRight, Compass, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { RunViewMode } from "./modes";
 
-export type PanelTab = "block" | "variables" | "context" | "errors" | "steps" | "graph" | "locks";
+export type PanelTab = "block" | "variables" | "errors" | "steps" | "graph" | "locks";
 
 /** One anchored step of a walkthrough; `M` is the page's mode id type. */
 export interface GuideStep<M extends string = RunViewMode, P extends string = PanelTab> {

@@ -1,10 +1,7 @@
 import {
-  buildContextVariables,
   getGlobalVariableNames,
   getNodeIds,
   getVariableDescriptions,
-  sortVariablesByName,
-  type ContextVariable,
 } from "../../../packages/web-frontend/src/utils/context-variable-model";
 import type { WorkflowGraph } from "../../../packages/web-frontend/src/types/workflow-types";
 
@@ -70,65 +67,5 @@ describe("getVariableDescriptions", () => {
 
   it("returns empty map without a registry", () => {
     expect(getVariableDescriptions(undefined)).toEqual({});
-  });
-});
-
-describe("buildContextVariables", () => {
-  it("classifies origin: global (registry) vs node-local (node id) vs runtime", () => {
-    const vars = buildContextVariables(
-      {
-        current_iteration: 3, // registry global
-        ask: { result: "answered" }, // node-local scope (node id 'ask')
-        runtime_only: "appeared", // neither
-      },
-      workflow,
-    );
-    const byName = Object.fromEntries(vars.map((v) => [v.name, v]));
-    expect(byName.current_iteration.origin).toBe("global");
-    expect(byName.ask.origin).toBe("node-local");
-    expect(byName.runtime_only.origin).toBe("runtime");
-  });
-
-  it("attaches registry descriptions to globals only", () => {
-    const vars = buildContextVariables(
-      {
-        current_iteration: 3,
-        ask: { result: "answered" },
-        runtime_only: "appeared",
-      },
-      workflow,
-    );
-    const byName = Object.fromEntries(vars.map((v) => [v.name, v]));
-    expect(byName.current_iteration.description).toBe("Stores current iteration");
-    expect(byName.ask.description).toBeUndefined();
-    expect(byName.runtime_only.description).toBeUndefined();
-  });
-
-  it("returns empty list for empty/undefined context", () => {
-    expect(buildContextVariables(undefined, workflow)).toEqual([]);
-    expect(buildContextVariables({}, workflow)).toEqual([]);
-  });
-
-  it("works without a workflow definition (all runtime, no descriptions)", () => {
-    const vars = buildContextVariables({ a: 1, b: { x: 1 } }, undefined);
-    expect(vars).toHaveLength(2);
-    for (const v of vars) {
-      expect(v.origin).toBe("runtime");
-      expect(v.description).toBeUndefined();
-    }
-  });
-});
-
-describe("sortVariablesByName", () => {
-  it("sorts case-insensitively by name and does not mutate input", () => {
-    const input: ContextVariable[] = [
-      { name: "Zebra", value: 1, origin: "runtime" },
-      { name: "alpha", value: 1, origin: "runtime" },
-      { name: "Beta", value: 1, origin: "runtime" },
-    ];
-    const sorted = sortVariablesByName(input);
-    expect(sorted.map((v) => v.name)).toEqual(["alpha", "Beta", "Zebra"]);
-    // input untouched
-    expect(input.map((v) => v.name)).toEqual(["Zebra", "alpha", "Beta"]);
   });
 });

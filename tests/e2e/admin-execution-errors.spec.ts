@@ -71,10 +71,10 @@ test.describe("Admin Execution Inspector Error Display", () => {
     await expect(page.locator("text=No errors recorded")).toBeVisible({ timeout: 3000 });
   });
 
-  test("Admin sees the execution context of another user's execution", async ({ page }) => {
-    await page.getByRole("tab", { name: /Context|Контекст/ }).click();
+  test("Admin sees the variables of another user's execution", async ({ page }) => {
+    await page.getByRole("tab", { name: /Variables|Переменные/ }).click();
 
-    // The context editor renders the run's variables; the filter input is its stable anchor.
+    // The variables panel renders the run's values; the filter input is its stable anchor.
     await expect(page.getByTestId("context-filter-input")).toBeVisible({ timeout: 5000 });
   });
 });

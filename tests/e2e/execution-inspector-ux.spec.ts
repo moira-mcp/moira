@@ -72,23 +72,37 @@ test.describe("Run page toolbar and panel", () => {
     await expect(toolbar.locator("button svg.lucide-refresh-cw").first()).toBeVisible();
   });
 
-  test("the context tab shows the variable editor and opens fullscreen", async ({ page }) => {
+  test("the variables tab holds the run's values and opens the same panel fullscreen", async ({
+    page,
+  }) => {
     await openFirstExecution(page);
-    await page.getByRole("tab", { name: /Context|Контекст/ }).click();
+    await page.getByRole("tab", { name: /Variables|Переменные/ }).click();
     await expect(page.getByTestId("context-filter-input")).toBeVisible({ timeout: 5000 });
+    // There is no separate context tab: the variables panel is the one surface.
+    await expect(page.getByRole("tab", { name: /Context|Контекст/ })).toHaveCount(0);
     const fullscreenButton = page.getByTestId("context-fullscreen-button");
     await expect(fullscreenButton).toBeVisible();
     await fullscreenButton.click();
     const dialog = page.locator('[role="dialog"]');
     await expect(dialog).toBeVisible();
     await expect(dialog.getByTestId("context-filter-input")).toBeVisible();
+    // "Fullscreen" gives the panel room: the dialog is at least twice as wide as the docked
+    // panel (the dialog primitive's small default would be narrower than the panel).
+    const panelWidth = (await page.getByTestId("run-panel").boundingBox())!.width;
+    const dialogWidth = (await dialog.boundingBox())!.width;
+    expect(dialogWidth).toBeGreaterThanOrEqual(panelWidth * 2);
     await dialog.locator('[data-slot="dialog-close"]').click();
     await expect(dialog).not.toBeVisible();
   });
 
-  test("tabs switch between context, errors, steps and locks", async ({ page }) => {
+  test("tabs switch between variables, errors, steps and locks", async ({ page }) => {
     await openFirstExecution(page);
-    for (const name of [/Context|Контекст/, /Errors|Ошибки/, /Steps|Шаги/, /Locks|Блокировки/]) {
+    for (const name of [
+      /Variables|Переменные/,
+      /Errors|Ошибки/,
+      /Steps|Шаги/,
+      /Locks|Блокировки/,
+    ]) {
       const tab = page.getByRole("tab", { name });
       await tab.click();
       await expect(tab).toHaveAttribute("data-state", "active");
@@ -206,13 +220,13 @@ test.describe("Admin run page", () => {
     await expect(page.getByTestId("progress-node-scope")).toHaveAttribute("data-status", "waiting");
   });
 
-  test("admin view is read-only on the context tab but may answer the waiting step", async ({
+  test("admin view is read-only in the variables panel but may answer the waiting step", async ({
     page,
   }) => {
-    await page.getByRole("tab", { name: /Context|Контекст/ }).click();
-    await expect(page.getByTestId("context-filter-input")).toBeVisible({ timeout: 5000 });
-    await expect(page.locator('[data-testid^="context-var-input-"]')).toHaveCount(0);
     await page.getByRole("tab", { name: /Variables|Переменные/ }).click();
+    await expect(page.getByTestId("context-filter-input")).toBeVisible({ timeout: 5000 });
+    await expect(page.locator("[data-variable]").first()).toBeVisible();
+    await expect(page.locator('[data-testid^="context-var-input-"]')).toHaveCount(0);
     await expect(page.getByTestId("answer-form")).toHaveAttribute("data-node-id", "get-task");
   });
 });

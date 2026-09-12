@@ -7,7 +7,7 @@ Opening an execution in the web UI (`/executions/<id>`, or `/admin/executions/<i
 administrator) shows the **run page**: one run of a workflow shown as the process the workflow
 declares. Everything on the page comes from the run's recorded route; nothing is inferred from
 block order. A workflow without a process view (`progress`) shows the technical node graph and the
-context tabs instead.
+variables panel instead.
 
 ## Modes
 
@@ -56,10 +56,12 @@ badge on **Variables** or **Locks** means a step is waiting for your answer or a
   as cards of one shape — the type badge in the same place on every card, then the step's name,
   the first sentence of its instruction and the fields it must return, the evidence Moira
   validates before the run continues. Clicking a step shows it on the technical node graph.
-- **Variables** — every declared variable and every step output with its current value and a
-  history of the steps that changed it. A value set from outside the flow is marked _adjusted_.
-- **Context** — the context editor: a declared variable the workflow's `runtimePolicy` allows to
-  be edited at the current step can be changed here (the variables tab offers a shortcut to it).
+- **Variables** — the run's values as two collapsible groups of aligned rows: every declared
+  variable (name, current value, a small count that opens the history of the steps that changed
+  it) and every step's outputs under its step. Objects open as a tree inside the row. A declared
+  variable the workflow's `runtimePolicy` allows to be edited at the current step is an input in
+  its row: change it and save. A value set from outside the flow is marked _adjusted_. The
+  filter narrows both groups; the expand button opens the same panel in a larger window.
 - **Errors**, **Steps**, **Graph**, **Locks** — the execution's error history, the technical step
   list, the node graph (step cards grouped by block, the run's block statuses as tints, the
   current step marked and in view when the tab opens), and lock history.
@@ -71,8 +73,8 @@ variables tab shows **Answer the waiting step** with the fields that step demand
 declared global variables it writes. Submitting runs the answer as an ordinary engine step: the
 input is validated against the step's schema exactly as an agent's answer would be, and a rejected
 answer is shown with the step's message and changes nothing. An accepted answer continues the route
-and is recorded on it as a runtime adjustment with your name, as is a variable edited in the
-context tab.
+and is recorded on it as a runtime adjustment with your name, as is a variable edited in its
+row of the variables panel.
 
 An agent that was holding the step you answered receives `ATTEMPT_STALE` on its next `step` and
 reads `session current_step` for the step the run is now on. An answer is refused while an agent is

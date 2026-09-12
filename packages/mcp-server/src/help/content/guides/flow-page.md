@@ -45,8 +45,9 @@ The tabs above the picture switch how the same definition is shown; the choice i
   and its steps as cards of one shape (the type badge in the same place, then the name, the first
   sentence and the fields it must return — the evidence Moira validates before a run continues);
   the split mode shows the same cards with their connections.
-- **Variables** — the variable registry: every global the workflow declares, with its type,
-  description and default.
+- **Variables** — the variable registry as rows: every global the workflow declares with its
+  type and default; open a row for its description and the whole declaration as JSON Schema.
+  While editing, the type, default, description and schema are edited in the row.
 
 ## Editing the definition
 

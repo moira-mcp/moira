@@ -1,11 +1,12 @@
 /**
- * E2E Tests: Context Variable Editor (tree)
+ * E2E Tests: the run page's variables panel (the former context variable editor)
  *
- * Verifies the tree-based context variable editor under the explicit output-scope model:
- * exactly TWO sections (Global variables / Node outputs) with no undeclared "runtime" group, a
- * global a node wrote is shown once under Global and hidden from the node's tree, registry
- * descriptions (tooltip), tree-aware filter, always-edit fields with dirty-gated save, per-path
- * nested editing (no whole-object overwrite), long-text modal, and empty-value handling.
+ * Verifies the variables panel under the explicit output-scope model: exactly TWO collapsible
+ * groups (Global variables / Node outputs) with no undeclared "runtime" group, a global a node
+ * wrote is shown once under Global and hidden from the node's tree, registry descriptions
+ * (tooltip), tree-aware filter, always-edit fields with dirty-gated save, per-path nested editing
+ * (no whole-object overwrite), long-text modal, empty-value handling, a group that collapses, and
+ * an in-place edit that survives a reload.
  *
  * Seeds an admin-owned running execution via execSqliteInDocker for deterministic data.
  */
@@ -212,6 +213,40 @@ test.describe("Context Variable Editor (tree)", () => {
     await expect(page.getByTestId("context-var-expand-long_text")).toBeVisible();
     await page.getByTestId("context-var-expand-long_text").click();
     await expect(page.getByTestId("context-var-modal-textarea-long_text")).toBeVisible();
+  });
+
+  test("a group collapses and an in-place edit is saved and shown again after a reload", async ({
+    page,
+  }) => {
+    // Collapsing the declared group hides its rows; the outputs group keeps its own state.
+    await expect(page.getByTestId("context-var-alpha_start")).toBeVisible();
+    await page.getByTestId("variables-group-toggle-declared").click();
+    await expect(page.getByTestId("variables-group-declared")).toHaveAttribute(
+      "data-open",
+      "false",
+    );
+    await expect(page.getByTestId("context-var-alpha_start")).toBeHidden();
+    await expect(page.getByTestId("context-var-ask")).toBeVisible();
+    await page.getByTestId("variables-group-toggle-declared").click();
+    // A policy-enabled string is edited in its row; after a reload the row shows the saved value.
+    const input = page.getByTestId("context-var-input-empty_value");
+    await input.fill("filled in place");
+    const savePut = page.waitForResponse(
+      (r) =>
+        r.url().includes(`/api/executions/${seededExecutionId}/context`) &&
+        r.request().method() === "PUT" &&
+        r.status() === 200,
+    );
+    await page.getByTestId("context-var-save-empty_value").click();
+    await savePut;
+    await page.reload();
+    await expect(page.getByTestId("context-var-input-empty_value")).toHaveValue("filled in place", {
+      timeout: 15000,
+    });
+    await expect(page.getByTestId("context-var-empty_value")).toHaveAttribute(
+      "data-value",
+      "filled in place",
+    );
   });
 
   test("empty value renders an editable field (not a sliver)", async ({ page }) => {

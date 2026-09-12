@@ -87,7 +87,7 @@ definition itself and lets its owner edit it in place. On the run page (see the 
 guide) the same projection is shown as lanes, a canvas,
 an outline and the route, with a block panel that drills into each block's steps and focuses the
 technical node graph. The page and the PNG contain the same essential information. A workflow
-without progress shows the technical node graph and the context tabs instead.
+without progress shows the technical node graph and the variables panel instead.
 
 Every workflow consists of:
 
