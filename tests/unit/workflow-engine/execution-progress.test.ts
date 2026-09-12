@@ -211,7 +211,7 @@ describe("execution run projection", () => {
     ]);
   });
 
-  test("projects persistent milestone content and exact active content without retaining an old revision", () => {
+  test("projects persistent block content and exact active content without retaining an old revision", () => {
     const first = atImplement();
     first.globalContext.variables = {
       unit: 1,
@@ -249,7 +249,7 @@ describe("execution run projection", () => {
     expect(JSON.stringify(projected?.nodes)).not.toContain("Implement core");
   });
 
-  test("omits stale outcome from pending and skipped milestones while retaining pending guidance", () => {
+  test("omits stale outcome from pending and skipped blocks while retaining pending guidance", () => {
     const workflow = graph();
     workflow.progress!.nodes[2].content = {
       summary: "Repair a confirmed finding",
@@ -350,6 +350,70 @@ describe("execution run projection", () => {
       ["review-one", "review", true],
       ["review-two", "review", true],
     ]);
+  });
+
+  test("a fact over a variable the run has not set is omitted instead of showing the undefined marker", () => {
+    const definition = graph();
+    definition.progress!.facts = [
+      { label: "Mode", value: "{{mode}}" },
+      { label: "Operator", value: "{{operator_name}}" },
+      { label: "{{missing_label}}", value: "x" },
+      { label: "Empty", value: "{{empty_value}}" },
+    ];
+    definition.variableRegistry!.operator_name = { type: "string", description: "Set later" };
+    definition.variableRegistry!.missing_label = { type: "string", description: "Set later" };
+    definition.variableRegistry!.empty_value = {
+      type: "string",
+      description: "Blank",
+      default: "",
+    };
+    const projected = projectExecutionRun(definition, atImplement())!;
+    expect(projected.facts).toEqual([{ label: "Mode", value: "Autonomous", tone: "neutral" }]);
+    expect(JSON.stringify(projected.facts)).not.toContain("UNDEFINED");
+  });
+
+  test("an adjusted visit that carries an exit key is a closed visit: it closes the wait it sits on", () => {
+    const run = execution("review-two", "running");
+    run.visits = [
+      visit(0, "start", "default"),
+      visit(1, "implement", "success", {}, { waited: true }),
+      visit(2, "review-one", "success", {}, { waited: true }),
+      visit(3, "review-two", null, {}, { waited: true }),
+      visit(
+        4,
+        "review-two",
+        "success",
+        { "review-two.verdict": "ok" },
+        {
+          adjusted: true,
+          actor: { role: "user", userId: "u" },
+        },
+      ),
+    ];
+    const projected = projectExecutionRun(graph(), run)!;
+    // The block is where the run is, but no longer waiting: the adjustment closed the wait.
+    expect(projected.nodes.find((node) => node.id === "review")).toMatchObject({
+      status: "active",
+      iterations: 1,
+    });
+    expect(projected.route[4]).toMatchObject({
+      nodeId: "review-two",
+      adjusted: true,
+      exitKey: "success",
+    });
+    // An open adjustment (the usual kind) leaves the wait as the run's position.
+    run.visits[4] = visit(
+      4,
+      "review-two",
+      null,
+      { "review-two.verdict": "ok" },
+      { adjusted: true },
+    );
+    expect(
+      projectExecutionRun(graph(), run)!.nodes.find((node) => node.id === "review"),
+    ).toMatchObject({
+      status: "waiting",
+    });
   });
 
   test("a completed run reports every visited block done and nothing unvisited done", () => {

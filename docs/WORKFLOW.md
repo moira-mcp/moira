@@ -441,7 +441,9 @@ process order. Each block has `id`, `label`, structured `content` with a mandato
 default connection that the derivation ignores. A primary node's `progressNodeId` names the block
 it belongs to and activates that block while the node is current. Block statuses come from the
 execution's recorded route (below) and labels are rendered through the existing template
-processor. Progress connections never participate in execution routing.
+processor. Progress connections never participate in execution routing. A fact whose label or
+value resolves to nothing, or refers to a variable the run has not set yet, is omitted from the
+projection rather than rendered with the template processor's undefined marker.
 
 When `progress` exists the block contract applies and every violation is a validation error with a
 stable code: every primary node — routing nodes included — declares a `progressNodeId` naming an
@@ -489,34 +491,34 @@ attaches a progress image renders it inside the cycle that reached it, before th
 are persisted; the handlers therefore project an unpersisted copy of the execution with an open
 visit of the notification node, so the image shows that node's block as active.
 
-A user-visible waiting node may set template-enabled `progressActiveLabel`. The projection uses it
-only while that exact primary node is current; inactive milestones keep the stable base label from
-`progress.nodes`. The field requires `progressNodeId`, follows ordinary template validation, and
+A node that pauses the run (an `agent-directive` step or another pausing node type) may set
+template-enabled `progressActiveLabel`. The projection uses it only while that exact node is
+current; the block otherwise keeps the stable base label from `progress.nodes`. The field requires `progressNodeId`, follows ordinary template validation, and
 never changes focus, state, connections, routing, or persistence.
 
-The execution `note` is projected separately as `taskTitle`. A user-visible waiting node may also
-set `progressActiveContent` with the same structured fields; while that exact node is current its
-fields replace matching base milestone fields and omitted fields keep their base values. All nested
+The execution `note` is projected separately as `taskTitle`. The same node may also set
+`progressActiveContent` with the same structured fields; while that exact node is current its
+fields replace the matching base fields of its block and omitted fields keep their base values. All nested
 strings use ordinary template validation and resolution. Content is bounded plain text, not HTML.
 Resolved values are checked against the same consumer-safe limits after interpolation. Overflow is
 an explicit projection error; values are never silently truncated into a misleading task, goal, or
 stage result. The projection has no stored presentation state: changing a declared context value, including an
 atomic plan-revision projection, produces a complete replacement on the next read rather than
 merging history from prior revisions.
-An `outcome` is exposed only for a completed or current milestone. Pending milestones keep their
+An `outcome` is exposed only for a completed or current block. Pending blocks keep their
 summary, details, and next guidance but suppress an old outcome, so an engine-owned revision or unit
 transition cannot temporarily present a prior result as current truth.
 
-The shared visual model renders the full task identity and goal, facts, and every milestone's
+The shared visual model renders the full task identity and goal, facts, and every block's
 structured content without hover-only information. It wraps valid text without truncation, packs
-cards into deterministic left-to-right rows for the requested viewport, and routes forward,
-backward, and cross-row display edges without affecting execution. `session progress-image-token`
+cards into deterministic left-to-right rows for the requested viewport, and draws the process's
+transitions and returns between the cards without affecting execution. `session progress-image-token`
 and the matching HTTP endpoint render that model as a
 bounded light/dark PNG behind a short-lived, revision-bound, single-use URL; `view: "process"`
 renders the aggregated block view instead (blocks in process order with the process's labelled
 transitions and dashed returns), and `hide` / `collapse` leave named blocks out or reduce them to
 a chip (see `docs/API.md`). A
-`user-notification` node can set `attachProgressImage: true`; it must map to a progress milestone
+`user-notification` node can set `attachProgressImage: true`; it must belong to a block
 and sends the rendered PNG through the current user's configured channels with its normal message.
 The deprecated `telegram-notification` compatibility node retains the same progress attachment.
 
@@ -526,11 +528,10 @@ definition exists; otherwise it returns `{ buffer, mimeType: "image/png", width,
 workflowVersion, executionRevision }`. Projection/render failures propagate. The lower-level
 projection and PNG adapter remain available when their narrower contracts are required.
 
-The execution inspector renders the same complete visual model below the execution header and above
-the technical graph/tabs. Task, goal, facts, completed outcomes, current activity, details and next
-action are visible immediately. It scrolls only when needed and focuses the projection-selected
-primary workflow node when an actionable milestone is selected; unmapped stages remain readable
-non-controls. Workflows without `progress` keep the existing inspector layout.
+The run page (`/executions/:id`) renders the same projection in its outline, canvas and lanes
+modes, with the task, goal, facts, block outcomes, the active block and its next action visible
+immediately, and answers the waiting step from the page; the technical node graph stays on its
+Graph tab (see `docs/WEB-UI.md`). Workflows without `progress` show the technical view only.
 
 The bundled flows (Quick Task, Todo List, Robust Task, Software Development Flow, Workflow
 Management Flow and User Onboarding) are annotated under this contract: every node belongs to a

@@ -231,23 +231,25 @@ export const FlowPage: React.FC = () => {
     () => (savedWorkflow ? applyEdits(savedWorkflow, edits) : undefined),
     [savedWorkflow, edits],
   );
-  const editCount = countEdits(edits);
+  // The count shown (and what enables Save) is the number of flow-file entries that actually
+  // change; an edit typed back to the stored value is not a change.
+  const diff = useMemo(
+    () => (savedWorkflow ? exportDiff(savedWorkflow, edits) : []),
+    [savedWorkflow, edits],
+  );
+  const editCount = diff.length;
+  const hasEdits = countEdits(edits) > 0;
   const process = useMemo<ProcessProjection | null>(() => {
     if (!edited) return null;
-    if (editCount > 0)
-      return deriveProcess(edited as unknown as Parameters<typeof deriveProcess>[0]);
+    if (hasEdits) return deriveProcess(edited as unknown as Parameters<typeof deriveProcess>[0]);
     return savedProcess && savedProcess.key === processKey ? savedProcess.process : null;
-  }, [edited, editCount, savedProcess, processKey]);
-  const processLoading = editCount === 0 && (!savedProcess || savedProcess.key !== processKey);
+  }, [edited, hasEdits, savedProcess, processKey]);
+  const processLoading = !hasEdits && (!savedProcess || savedProcess.key !== processKey);
   const progress = useMemo(
     () => (edited && process ? definitionProgress(edited, process) : null),
     [edited, process],
   );
   const blocks = useMemo(() => (progress ? runBlocks(progress) : []), [progress]);
-  const diff = useMemo(
-    () => (savedWorkflow ? exportDiff(savedWorkflow, edits) : []),
-    [savedWorkflow, edits],
-  );
 
   const requestedMode = resolveFlowMode(searchParams.get(VIEW_PARAM));
   const mode: FlowViewMode = process ? requestedMode : "graph";
@@ -666,7 +668,7 @@ export const FlowPage: React.FC = () => {
                     <button
                       type="button"
                       onClick={() => onEditsChange(EMPTY_EDITS)}
-                      disabled={editCount === 0}
+                      disabled={!hasEdits}
                       className="inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-xs hover:bg-accent disabled:opacity-40"
                       data-testid="flow-edit-reset"
                     >

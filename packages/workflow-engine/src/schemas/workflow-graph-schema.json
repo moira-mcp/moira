@@ -248,7 +248,7 @@
       "type": "string",
       "minLength": 1,
       "maxLength": 200,
-      "description": "Template-enabled milestone label rendered only while this exact primary node is current"
+      "description": "Template-enabled label of the node's block, rendered only while this exact node is current"
     },
     "progressContent": {
       "type": "object",
@@ -280,7 +280,7 @@
     },
     "progressActiveContent": {
       "allOf": [{ "$ref": "#/$defs/progressContent" }],
-      "description": "Template-enabled presentation merged into the active milestone while this exact primary node is current"
+      "description": "Template-enabled presentation merged into the node's block while this exact node is current"
     },
     "startNode": {
       "type": "object",

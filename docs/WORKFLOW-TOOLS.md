@@ -40,10 +40,10 @@ moira-workflow ./workflows/production/flows/<flow>.json update check-plan-approv
 # Update a message (for notifications)
 moira-workflow ./workflows/production/flows/<flow>.json update notify-plan-ready --message "Plan is ready!"
 
-# Map a waiting node to a static progress milestone (or clear with none)
+# Move a node to a progress block (or clear with none); `set-block` does the same
 moira-workflow ./workflows/production/flows/<flow>.json update analyze-and-plan --progress-node-id implementation
 
-# Override only the current milestone label (or clear with none)
+# Override the block's label only while this node is current (or clear with none)
 moira-workflow ./workflows/production/flows/<flow>.json update analyze-and-plan --progress-active-label "Implement {{unit}}/{{total}}"
 
 # Attach/clear the shared progress PNG on a notification node
@@ -97,12 +97,12 @@ moira-workflow ./workflows/production/flows/<flow>.json move node-to-move
 - Backup format: `<filename>.backup-<timestamp>.json`
 
 `--attach-progress-image` accepts `true` or `false` and is rejected for every node type except
-`user-notification` or deprecated `telegram-notification`. These update options persist the requested fields; they do not derive a
-milestone or validate its semantic meaning.
+`user-notification` or deprecated `telegram-notification`. These update options persist the requested fields; they do not derive the
+process or validate its meaning — run `derive` afterwards.
 
-`--progress-active-label` is valid only for a mapped user-visible waiting node. It follows normal
-template validation and changes only that node's active rendered label; inactive milestone labels
-remain the top-level definition.
+`--progress-active-label` is valid only for a node that pauses the run and belongs to a block. It
+follows normal template validation and changes only the label rendered while that node is
+current; the block's own label remains the top-level definition.
 
 ### search - Find nodes
 
@@ -202,10 +202,10 @@ moira-workflow ./workflows/production/flows/<flow>.json schema
 Prints one deterministic plain-text control-flow schema derived only from the workflow JSON. It
 expands real node IDs, canonically ordered labelled connections, conditions, declared local/global
 outputs, final outputs, subgraph mappings, automatic-node output variables, context references,
-basic blocks, cyclic regions, and the complete static progress topology with ordered milestones,
-display edges, and primary-node mappings. It distinguishes normal start reachability, explicit
-teleport-only regions, and disconnected roots/components. Every source node and connection is
-emitted exactly once; coverage footers make omissions visible. The command does not interpret
+basic blocks, cyclic regions, and the complete progress definition with its ordered blocks, any
+legacy display edges still stored on them, and node-to-block mappings. It distinguishes normal
+start reachability, explicit teleport-only regions, and disconnected roots/components. Every
+source node and connection is emitted exactly once; coverage footers make omissions visible. The command does not interpret
 workflow-specific meaning, execute workflow content, or write the source file.
 
 ### derive - Read-only process projection
@@ -265,9 +265,10 @@ moira-workflow ./workflows/production/flows/<flow>.json set-progress none
 ```
 
 The command accepts a JSON object with a `nodes` array, creates the normal backup, and uses normal
-content-version behavior. Map each user-visible waiting node separately with `update
---progress-node-id`. After all staged mutations, run both `validate` and `schema`: mutation commands
-persist fields but do not compute mapping completeness, routing meaning, or milestone semantics.
+content-version behavior. Give every node its block with `set-block` (or `update
+--progress-node-id`). After all staged mutations, run `validate` and `derive`: mutation commands
+persist fields but do not compute block coverage, transition labels, or return causes; `derive`
+reports the diagnostics.
 
 ### Variables - Working with workflow variables
 

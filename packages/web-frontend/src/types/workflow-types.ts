@@ -229,6 +229,8 @@ export interface RegistryVariable {
   type: "string" | "number" | "boolean" | "object" | "array" | "null";
   description: string;
   default?: unknown;
+  /** Any other JSON Schema keyword (enum, items, properties, pattern…) the declaration carries. */
+  [keyword: string]: unknown;
 }
 
 export interface WorkflowGraph {

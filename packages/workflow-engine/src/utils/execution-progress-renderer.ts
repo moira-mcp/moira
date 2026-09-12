@@ -184,7 +184,7 @@ export function renderProgressVisualSvg(model: ProgressVisualModel): string {
           return rendered;
         })
         .join("");
-      return `<g${node.collapsed ? ' data-collapsed="true"' : ""}><title>${escapeXml(`${state}: ${node.label}`)}</title><rect x="${node.x}" y="${node.y}" width="${node.width}" height="${node.height}" rx="${node.collapsed ? 999 : 16}" fill="${fill}" stroke="${stroke}" stroke-width="${node.state === "current" ? 4 : 2}"${node.collapsed ? ' stroke-dasharray="4 4"' : ""}/><text x="${node.x + 14}" y="${node.y + 27}" fill="${stroke}" font-size="18" font-weight="700">${mark}</text>${label}${content}</g>`;
+      return `<g${node.collapsed ? ' data-collapsed="true"' : ""}><title>${escapeXml(`${state}: ${node.label}`)}</title><rect x="${node.x}" y="${node.y}" width="${node.width}" height="${node.height}" rx="${node.collapsed ? node.height / 2 : 16}" fill="${fill}" stroke="${stroke}" stroke-width="${node.state === "current" ? 4 : 2}"${node.collapsed ? ' stroke-dasharray="4 4"' : ""}/><text x="${node.x + 14}" y="${node.y + 27}" fill="${stroke}" font-size="18" font-weight="700">${mark}</text>${label}${content}</g>`;
     })
     .join("");
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${model.width}" height="${model.height}" viewBox="0 0 ${model.width} ${model.height}" font-family="DejaVu Sans, sans-serif"><rect width="100%" height="100%" fill="${palette.background}"/>${header.join("")}${facts}${edges}${nodes}</svg>`;

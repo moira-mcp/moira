@@ -81,8 +81,8 @@ byte-for-byte unchanged.
 --input-schema '{"type":"..."}'  # Update inputSchema
 --condition "expr"              # Update condition
 --message "text"                # Update message
---progress-node-id <id|none>    # Set or clear the node's progress milestone
---progress-active-label <text|none> # Set or clear its active-only milestone label
+--progress-node-id <id|none>    # Set or clear the node's progress block
+--progress-active-label <text|none> # Set or clear its active-only block label
 --attach-progress-image <bool>  # Set true/false; notification nodes only
 --connections '{"key":"target"}' # Update connections
 --add-connection <key> <target> # Add connection
@@ -117,8 +117,9 @@ Every change creates a backup in `workflow-backups/` before writing.
 
 Progress mutation uses the same backup and content-version behavior as other edits. `set-progress`
 persists the complete top-level static definition; node update options set or clear mappings and
-notification attachment. The CLI does not derive milestone meaning or mapping semantics. Finish staged
-progress edits with `validate` and inspect the complete `schema` projection before semantic review.
+notification attachment. The CLI does not judge the meaning of blocks or mappings. Finish staged
+progress edits with `validate` and `derive` and inspect the complete `schema` projection before
+semantic review.
 
 ## Versioning
 

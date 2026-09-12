@@ -56,11 +56,11 @@ export interface NodeExecutionResult {
 export interface BaseNode {
   type: string;
   id: string;
-  /** User-facing progress milestone activated while this primary node is current. */
+  /** The progress block this node belongs to; the block is active while the node is current. */
   progressNodeId?: string;
   /** Template-enabled label used only while this exact primary node is current. */
   progressActiveLabel?: string;
-  /** Template-enabled presentation merged into the active progress milestone. */
+  /** Template-enabled presentation merged into the node's block while the node is current. */
   progressActiveContent?: ProgressContentTemplate;
   metadata?: {
     displayName?: string;

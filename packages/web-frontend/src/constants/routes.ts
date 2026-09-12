@@ -68,7 +68,6 @@ export function buildRoutes(appPrefix: string): RoutesShape {
     SETTINGS: `${appPrefix}/settings`,
     INVITE_ACCEPT: `${appPrefix}/invites/:token`,
     NOTES: `${appPrefix}/notes`,
-    // Interface prototypes for the aggregated process view (#180); fixture-backed.
 
     // Admin routes
     ADMIN: admin,

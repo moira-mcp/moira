@@ -152,6 +152,15 @@ function coarseState(status: ExecutionBlockStatus): ExecutionProgressState {
 }
 
 /**
+ * The visit that says where the run is: the engine's own visits, and an adjustment that carries
+ * an exit key (a closed adjusted visit is a closed visit — it neither reopens a wait nor is
+ * skipped when it is the last thing the run did). An open adjustment (the usual kind, written
+ * after the wait it answered) is skipped so the wait it sits on stays the run's position.
+ */
+const closesOrIsEngine = (visit: ExecutionVisit): boolean =>
+  !visit.adjusted || visit.exitKey !== null;
+
+/**
  * Block statuses from the route: the block of the last visit is active, or waiting when that
  * visit is open on the node the execution waits for; visited blocks are done, or repeated with
  * the pass count of their working steps; blocks where only routing nodes ran (unless the block
@@ -172,7 +181,7 @@ export function blockStatuses(
   // Cancellation also ends in "completed" (its error log says why), so this is the only terminal.
   const finished = execution.status === "completed";
   // Adjustments sit on the node the run is on; the engine's own last visit says where it is.
-  const last = [...visits].reverse().find((visit) => !visit.adjusted);
+  const last = [...visits].reverse().find(closesOrIsEngine);
   const currentBlock = last ? owner.get(last.nodeId) : undefined;
   // An open last visit on a finished execution is where the run stopped (cancelled or aborted
   // while waiting): that block stays the frontier, never done.
@@ -341,7 +350,7 @@ export interface ProjectExecutionRunOptions {
  */
 function executionAtCursor(execution: WorkflowExecution, at: number): WorkflowExecution {
   const visits = (execution.visits ?? []).filter((visit) => visit.seq <= at);
-  const last = [...visits].reverse().find((visit) => !visit.adjusted) ?? visits[visits.length - 1];
+  const last = [...visits].reverse().find(closesOrIsEngine) ?? visits[visits.length - 1];
   const open = last !== undefined && last.exitKey === null && Boolean(last.waited);
   return {
     ...execution,
@@ -400,7 +409,7 @@ export function projectExecutionRun(
   let activePrimaryNodeId: string | null;
   if (routeRecorded) {
     statuses = blockStatuses(process, nodeTypes, execution, visits);
-    const last = [...visits].reverse().find((visit) => !visit.adjusted) ?? visits[0];
+    const last = [...visits].reverse().find(closesOrIsEngine) ?? visits[0];
     const stoppedOnWait = last.exitKey === null && Boolean(last.waited);
     activeNodeId = finished && !stoppedOnWait ? null : (owner.get(last.nodeId) ?? null);
     activePrimaryNodeId = finished && !stoppedOnWait ? null : last.nodeId;
@@ -497,19 +506,29 @@ export function projectExecutionRun(
       EXECUTION_PROGRESS_TEXT_LIMITS.goal,
       "goal",
     ),
-    facts: (definition.facts ?? []).map((fact) => ({
-      label: enforceResolvedLimit(
-        templateProcessor.processDirective(fact.label, context).trim(),
-        EXECUTION_PROGRESS_TEXT_LIMITS.factLabel,
-        "facts[].label",
+    // A fact over a variable the run has not set yet (the template processor's undefined
+    // marker) or that resolves to nothing is left out rather than shown as a marker.
+    facts: (definition.facts ?? [])
+      .map((fact) => ({
+        label: enforceResolvedLimit(
+          templateProcessor.processDirective(fact.label, context).trim(),
+          EXECUTION_PROGRESS_TEXT_LIMITS.factLabel,
+          "facts[].label",
+        ),
+        value: enforceResolvedLimit(
+          templateProcessor.processDirective(fact.value, context).trim(),
+          EXECUTION_PROGRESS_TEXT_LIMITS.factValue,
+          "facts[].value",
+        ),
+        tone: fact.tone ?? "neutral",
+      }))
+      .filter(
+        (fact) =>
+          fact.label !== "" &&
+          fact.value !== "" &&
+          !fact.label.includes(GraphTemplateProcessor.UNDEFINED_PLACEHOLDER) &&
+          !fact.value.includes(GraphTemplateProcessor.UNDEFINED_PLACEHOLDER),
       ),
-      value: enforceResolvedLimit(
-        templateProcessor.processDirective(fact.value, context).trim(),
-        EXECUTION_PROGRESS_TEXT_LIMITS.factValue,
-        "facts[].value",
-      ),
-      tone: fact.tone ?? "neutral",
-    })),
     activeNodeId,
     nodes,
     workflowVersion: workflow.metadata.version,

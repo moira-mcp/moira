@@ -79,7 +79,7 @@ export interface ProgressVisualEdge {
   labelX: number;
   labelY: number;
   labelAnchor: "start" | "middle" | "end";
-  /** A return to an earlier block, drawn dashed and labelled with its cause. */
+  /** A return to an earlier block (or to itself), drawn dashed with the transition label. */
   cycle: boolean;
 }
 export interface ProgressVisualModel {
@@ -677,8 +677,11 @@ function layoutProcessColumn(
     const laneX = right
       ? columnX + columnWidth + LANE_BASE + arc.lane * LANE_STEP
       : columnX - LANE_BASE - arc.lane * LANE_STEP;
-    const startY = source.y + source.height / 2;
-    const endY = target.y + target.height / 2;
+    // A self-return leaves the block's upper half and re-enters its lower half, so the loop is
+    // a visible bracket rather than a flat stub.
+    const self = arc.source === arc.target;
+    const startY = self ? source.y + source.height / 3 : source.y + source.height / 2;
+    const endY = self ? target.y + (target.height * 2) / 3 : target.y + target.height / 2;
     const startX = right ? source.x + source.width : source.x;
     const endX = right ? target.x + target.width : target.x;
     const sideKey = `${arc.source}:${right ? "r" : "l"}`;

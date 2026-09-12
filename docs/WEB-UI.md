@@ -399,10 +399,11 @@ on edit mode; ignored for non-owners).
 
 **Layout:** the toolbar (back, name and version, edit toggle with its hint for owners, the owner
 actions: copy for public flows, visibility, share, delete); a header row with the mode tabs and
-"Explain this page"; the edit panel while editing (edit count, discard, save, the loaded revision,
-the export diff as flow-file path / before / after, the server's refusal message); the process
-diagnostics inline; the mode filling the main area; a panel beside it (under it on a phone) with
-the **Block** tab (`BlockDetailPanel`, a step click opens the graph mode on that node) and the
+"Explain this page"; the edit panel while editing (the edit count, which is the export diff's
+entry count so a value typed back to what is stored is not an edit; discard, which clears every
+recorded edit; save; the loaded revision; the export diff as flow-file path / before / after;
+the server's refusal message); the process diagnostics inline; the mode filling the main area; a
+panel beside it (under it on a phone) with the **Block** tab (`BlockDetailPanel`, a step click opens the graph mode on that node) and the
 **Variables** tab (`RegistryPanel`). The graph mode mounts `WorkflowGraphWithFocus` with its
 controls beside `WorkflowSidebar`, as the former workflow detail page did.
 

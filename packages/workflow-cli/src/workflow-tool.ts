@@ -475,7 +475,7 @@ function updateNode(
     ]);
     if (!activeLabelNodeTypes.has(node.type as string)) {
       console.error(
-        c("red", "ERROR: --progress-active-label is valid only for user-visible waiting nodes"),
+        c("red", "ERROR: --progress-active-label is valid only for nodes that pause the run"),
       );
       process.exit(1);
     }
@@ -505,7 +505,7 @@ function updateNode(
     ]);
     if (!activeContentNodeTypes.has(node.type as string)) {
       console.error(
-        c("red", "ERROR: --progress-active-content is valid only for user-visible waiting nodes"),
+        c("red", "ERROR: --progress-active-content is valid only for nodes that pause the run"),
       );
       process.exit(1);
     }
@@ -1614,8 +1614,8 @@ ${c("cyan", "Update Options:")}
   --completion-condition "text"        Update completionCondition
   --input-schema '{"type":"object"}'   Update inputSchema
   --final-output '["result"]'           Update an End node terminal projection
-  --progress-node-id <id|none>          Set or clear the node's progress milestone
-  --progress-active-label <text|none>   Set or clear its active-only milestone label
+  --progress-node-id <id|none>          Set or clear the node's progress block
+  --progress-active-label <text|none>   Set or clear its active-only block label
   --progress-active-content <json|none> Set or clear its active-only structured content
   --attach-progress-image <true|false>  Toggle progress image on notification nodes
   --condition "expression"             Update condition

@@ -209,6 +209,31 @@ describe("progress image visibility and the process view", () => {
     expect(model.edges.every((edge) => edge.labelLines.length > 0 && edge.labelX > 0)).toBe(true);
   });
 
+  test("a collapsed chip is a pill of its own height and a self-return is a visible bracket", () => {
+    const base = withProcess();
+    base.process.blocks[0].transitions.push({
+      to: "n0",
+      label: "try again",
+      cycle: { cause: "Not done", exit: "Done" },
+      edges: ["p0.retry"],
+    });
+    const model = buildExecutionProgressVisualModel(base, {
+      viewportWidth: 1000,
+      view: "process",
+      collapse: ["n2"],
+    });
+    const chip = model.nodes.find((node) => node.id === "n2")!;
+    const svg = renderProgressVisualSvg(model);
+    expect(chip.collapsed).toBe(true);
+    expect(svg).toContain(`rx="${chip.height / 2}"`);
+    expect(svg).not.toContain('rx="999"');
+    const self = model.edges.find((edge) => edge.source === "n0" && edge.target === "n0")!;
+    const points = self.path.match(/-?\d+(\.\d+)?/g)!.map(Number);
+    // M x y L laneX y L laneX y2 L x y2: the loop leaves and re-enters at different heights.
+    expect(points[1]).not.toBe(points[5]);
+    expect(Math.abs(points[5] - points[1])).toBeGreaterThan(8);
+  });
+
   test("the process view is byte-deterministic and differs from the cards view", async () => {
     const options = { theme: "light" as const, viewportWidth: 720, view: "process" as const };
     const first = await renderExecutionProgressPng(withProcess(), options);

@@ -57,8 +57,10 @@ moira-workflow ./workflow.json set-description --file ./description.txt
 moira-workflow ./workflow.json set-variable-schema result --file ./result-schema.json
 ```
 
-Статический progress исполнения использует тот же файловый authoring surface. Задайте полный граф
-отображения из JSON, затем сопоставьте каждую пользовательскую waiting node. Вложение прогресса
+Вид процесса использует тот же файловый authoring surface. Задайте полный список блоков из JSON
+командой `set-progress` (или наращивайте его через `add-block` / `edit-block`), затем назначьте
+каждой ноде её блок командой `set-block` — включая маршрутизирующие ноды: вывод процесса отклоняет
+ноду без блока. Вложение прогресса
 доступно для `user-notification` и устаревшей `telegram-notification`; значения `none` и `false`
 удаляют соответствующие опциональные поля.
 
@@ -85,8 +87,8 @@ moira-workflow ./workflow.json set-label route-review false "review found defect
 moira-workflow ./workflow.json derive
 ```
 
-Команды сохраняют schema fields, но не выводят смысл milestones и не заменяют итоговые `validate`,
-`schema`, поведенческие scenarios и независимое semantic review.
+Команды сохраняют schema fields, но не выводят процесс и не судят о его смысле; они не заменяют
+итоговые `validate`, `derive`, `schema`, поведенческие scenarios и независимое semantic review.
 
 Для полной спланированной замены `sync` сохраняет идентичность целевого workflow и его catalog
 migration aliases в `previousSlugs`. Catalog reader проверяет aliases отдельно, а в engine validator
@@ -108,8 +110,9 @@ moira-workflow ./workflows/production/flows/<flow>.json schema
 
 Схема показывает каждую реальную ноду и именованный переход, условия, циклы, объявленные выходы и
 маппинги, ссылки на контекст, обычные пути от start, отдельные области, доступные только через
-teleport, и несвязанные компоненты. Если workflow определяет пользовательский progress, та же
-проекция включает все упорядоченные этапы, отображаемые связи и маппинги нод основного графа. Это
+teleport, и несвязанные компоненты. Если workflow определяет вид процесса, та же
+проекция включает все упорядоченные блоки, сохранённые на них устаревшие отрисовочные связи и
+принадлежность каждой ноды блоку. Это
 структурная проекция только для чтения и анализа агентом или человеком: команда не запускает
 workflow, не интерпретирует его предметный смысл и не утверждает семантическую корректность
 видимого маршрута.

@@ -788,7 +788,7 @@ export class GraphValidator {
           severity: "error",
           nodeId: node.id,
           field: "progressActiveLabel",
-          message: `Node '${node.id}' cannot declare progressActiveLabel because it is not a user-visible waiting node.`,
+          message: `Node '${node.id}' cannot declare progressActiveLabel because it is not a node that pauses the run.`,
         });
       } else if (node.progressActiveLabel && !node.progressNodeId) {
         issues.push({
@@ -805,7 +805,7 @@ export class GraphValidator {
           severity: "error",
           nodeId: node.id,
           field: "progressActiveContent",
-          message: `Node '${node.id}' cannot declare progressActiveContent because it is not a user-visible waiting node.`,
+          message: `Node '${node.id}' cannot declare progressActiveContent because it is not a node that pauses the run.`,
         });
       } else if (node.progressActiveContent && !node.progressNodeId) {
         issues.push({

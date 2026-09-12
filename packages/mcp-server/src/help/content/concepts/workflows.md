@@ -28,14 +28,15 @@ violation as an error with a stable code — `unowned-node`, `unknown-block`, `e
 `outcome-unowned` — and `moira-workflow <file> derive` or `GET /api/workflows/:id/process` shows
 the derived blocks with the same diagnostics.
 
-A waiting node may also declare template-enabled `progressActiveLabel`. It replaces the displayed
-label only while that exact primary node is current, letting a workflow show truthful unit,
-iteration, validation, or repair detail without changing stable inactive milestone labels. It
-requires a valid mapping and never affects routing or stored state.
+A node that pauses the run (an `agent-directive` step or another pausing node type) may also
+declare template-enabled `progressActiveLabel`. It replaces its block's displayed label only while
+that exact node is current, letting a workflow show truthful unit, iteration, validation, or repair
+detail without changing the block's stable label. It requires the node to belong to a block and
+never affects routing or stored state.
 
-The execution note is projected as the task title. A waiting node may declare
-`progressActiveContent` with the same structured fields. Its fields replace matching milestone
-content only while that exact node is current; omitted fields keep their stable base values. Nested
+The execution note is projected as the task title. The same node may declare
+`progressActiveContent` with the same structured fields. Its fields replace the matching content
+of its block only while that exact node is current; omitted fields keep their stable base values. Nested
 strings use the normal variable registry and template protection. Progress stores no presentation
 history, so replacing revision-bound context replaces the next projection instead of retaining
 stale values from an earlier plan.
@@ -63,7 +64,7 @@ or unit result cannot appear current during an engine-owned transition.
 
 The engine exposes one shared content-rich visual model and a bounded light/dark PNG renderer. The
 model keeps the complete task, goal, facts, completed outcomes, current activity, details and next
-action visible without hover. Text wraps without truncation and milestones pack into deterministic
+action visible without hover. Text wraps without truncation and blocks pack into deterministic
 left-to-right rows when one row does not fit.
 Agents request a short-lived, revision-bound, single-use download URL through `session
 progress-image-token`; the binary does not pass through MCP. The token takes optional `theme`
@@ -73,8 +74,8 @@ as dashed arcs with the transition label, hub transitions written inside their s
 page's lanes show them; a loop's cause and exit are on the run page, not in the image) — and `hide` / `collapse`: block ids or authored node ids (a node names its block)
 left out of the image with their transitions collapsed onto the neighbours, or drawn as a
 label-only chip. Unknown ids are refused when the token is minted. A `user-notification` node may set
-`attachProgressImage: true` and use its normal message as the image caption. Such a node must map to
-an existing progress milestone. The deprecated `telegram-notification` compatibility node supports
+`attachProgressImage: true` and use its normal message as the image caption. Such a node must belong to
+an existing block. The deprecated `telegram-notification` compatibility node supports
 the same attachment for existing provider-specific workflows.
 
 Engine integrations with a workflow and execution use `renderExecutionProgressImage(...)`. It

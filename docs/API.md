@@ -348,9 +348,9 @@ unpersisted copy with an open visit of the node being rendered. It returns `null
 returns the PNG buffer, `image/png`, dimensions, workflow version, step revision, and context
 revision. Failures
 remain errors rather than an empty image. `progressActiveLabel` may replace only the active
-milestone's returned label; inactive labels remain the static definition.
+block's returned label; inactive labels remain the static definition.
 `progressActiveContent` applies the same active-only rule to `summary`, `details`, `outcome`, and
-`next`; omitted active fields retain the milestone's base content. The response is derived afresh
+`next`; omitted active fields retain the block's base content. The response is derived afresh
 from the current execution context and does not accumulate values from older revisions. Limits are
 enforced again after template interpolation; an oversized resolved value fails projection instead
 of being silently truncated.
