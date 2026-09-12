@@ -127,7 +127,7 @@ client. `workspace_stop` preserves the repository data (`data_preserved: true`);
 `generation`, so a stale call cannot delete a changed workspace.
 
 `workspace_exec` runs argv as data (no shell interpolation) in a repository-relative `cwd` with a
-timeout and optional per-stream output limits, and returns bounded `stdout`, `stderr` and the exact
+timeout (`timeout_seconds`, default 300) and optional per-stream output limits, and returns bounded `stdout`, `stderr` and the exact
 `exit_code`. Supply at most one stdin form: `stdin_text` for UTF-8 text or `stdin_file` for a native
 ChatGPT file reference; the file's bytes reach the process without base64 in the conversation.
 Failed, timed-out and cancelled commands and rejected file edits are returned as tool errors that
@@ -135,8 +135,11 @@ keep `operation_id` and the available output. A result whose `state` is not term
 success: call the same tool again with only `workspace_id` and `operation_id` to obtain the stored
 outcome without running the command or mutation twice.
 
-`workspace_read` returns UTF-8 text with `offset`, `total_size` and `sha256`; a non-text range
-returns `WORKSPACE_BINARY_READ_REQUIRES_DOWNLOAD`. `workspace_write` replaces a file atomically
+`workspace_read` returns UTF-8 text with `offset`, `total_size` and `sha256`; `length` defaults to
+64 KiB, and `workspace_search` defaults to 100 matches within 64 KiB of results, so naming only the
+workspace, path and query is a complete call. A non-text range returns
+`WORKSPACE_BINARY_READ_REQUIRES_DOWNLOAD`. A call that matches no request form returns
+`WORKSPACE_REQUEST_INVALID` naming the missing or invalid fields. `workspace_write` replaces a file atomically
 under an `expected` precondition (`exists`, optional `size_bytes` and `sha256`), and
 `workspace_apply_patch` applies ordered byte-offset edits per file with the same preconditions and
 returns old/new versions plus a content-free summary. `workspace_upload` writes a native file

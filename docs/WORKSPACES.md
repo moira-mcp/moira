@@ -269,7 +269,7 @@ the same tool again with only `workspace_id` and `operation_id` reconciles that
 operation without dispatching a second command, write, upload or download.
 
 `workspace_exec` accepts argv as data, a repository-relative `cwd`,
-`timeout_seconds`, optional per-stream output limits and exactly one optional stdin
+`timeout_seconds` (default 300), optional per-stream output limits and exactly one optional stdin
 form: `stdin_text` (UTF-8) or `stdin_file`, a native ChatGPT file reference. The
 registry publishes `_meta["openai/fileParams"]` for `stdin_file` and for
 `workspace_upload.file`; inside a reference only `file_id` and `download_url` are
@@ -277,9 +277,11 @@ required, while `file_name`, `mime_type` and `size_bytes` are optional. Native i
 goes directly through the one-call native execution path and is never staged through
 the public upload tool; neither the file ID nor the temporary URL is echoed back.
 
-`workspace_read` returns UTF-8 text with offset, total size and SHA-256. A range that
-is not valid UTF-8 returns `WORKSPACE_BINARY_READ_REQUIRES_DOWNLOAD` instead of
-base64. `workspace_write` replaces a file atomically from UTF-8 text under an explicit
+`workspace_read` returns UTF-8 text with offset, total size and SHA-256; `length`
+defaults to 64 KiB, and `workspace_search` defaults to 100 matches within 64 KiB of
+result bytes, so a call that names only the workspace, path and query is complete.
+A range that is not valid UTF-8 returns `WORKSPACE_BINARY_READ_REQUIRES_DOWNLOAD`
+instead of base64. `workspace_write` replaces a file atomically from UTF-8 text under an explicit
 existence precondition with optional size/digest guards; `workspace_apply_patch` takes
 ordered byte-offset edits with UTF-8 replacement text and returns old/new versions and
 the content-free summary. `workspace_download` returns the private transfer as a
@@ -287,7 +289,10 @@ the content-free summary. `workspace_download` returns the private transfer as a
 
 Known connection, workspace, state, policy and provider failures become bounded tool
 errors with `code`, safe `message` and `retryable`; setup and authorization failures
-add only the same-origin `settings_url`. Unexpected failures return the generic
+add only the same-origin `settings_url`. Input that matches no strict request form
+returns `WORKSPACE_REQUEST_INVALID` whose message names the offending field paths
+and the generic schema issue (for example `expected: Required`), never the
+submitted values. Unexpected failures return the generic
 `INTERNAL_ERROR` to the agent and are recorded server-side with the tool name and the
 request context's opaque IDs, never with agent input. The MCP process logs only the
 tool name and UUID-validated workspace/operation IDs for these tools; paths, queries,

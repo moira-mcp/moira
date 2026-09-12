@@ -607,7 +607,7 @@ const workspaceExecStartSchema = z
       .min(1)
       .max(128),
     cwd: z.string().max(4096).default("."),
-    timeout_seconds: z.number().int().min(1).max(900),
+    timeout_seconds: z.number().int().min(1).max(900).default(300),
     max_stdout_bytes: z
       .number()
       .int()
@@ -641,12 +641,13 @@ export const workspaceSearchRequestSchema = z.union([
       path: workspacePathSchema,
       query: z.string().min(1).max(4096),
       mode: z.enum(["literal", "regex"]).default("literal"),
-      max_matches: z.number().int().min(1).max(1000),
+      max_matches: z.number().int().min(1).max(1000).default(100),
       max_bytes: z
         .number()
         .int()
         .min(1)
-        .max(1024 * 1024),
+        .max(1024 * 1024)
+        .default(64 * 1024),
     })
     .strict(),
   workspaceOperationResumeSchema,
@@ -662,7 +663,8 @@ export const workspaceReadRequestSchema = z.union([
         .number()
         .int()
         .min(1)
-        .max(4 * 1024 * 1024),
+        .max(4 * 1024 * 1024)
+        .default(64 * 1024),
     })
     .strict(),
   workspaceOperationResumeSchema,
@@ -732,7 +734,8 @@ const workspaceDownloadStartSchema = z
       .number()
       .int()
       .min(1)
-      .max(4 * 1024 * 1024),
+      .max(4 * 1024 * 1024)
+      .default(4 * 1024 * 1024),
     file_name: workspaceFileNameSchema,
     mime_type: workspaceMimeTypeSchema,
   })

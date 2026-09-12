@@ -110,12 +110,50 @@ const WORKSPACE_REQUEST_SCHEMAS: { [Name in WorkspaceToolName]: z.ZodTypeAny } =
   workspace_download: workspaceDownloadRequestSchema,
 };
 
+/**
+ * Published input that matches no strict request form. The bounded detail names only schema
+ * field paths and Zod's generic issue text, never the submitted values.
+ */
+export class WorkspaceRequestInvalidError extends Error {
+  constructor(readonly detail: string) {
+    super(`Invalid workspace request: ${detail}`);
+    this.name = "WorkspaceRequestInvalidError";
+  }
+}
+
+const MAX_REPORTED_ISSUES = 8;
+
+function describeRequestIssues(error: z.ZodError): string {
+  // A union failure reports the branch that came closest so the agent sees the field it
+  // actually forgot rather than every alternative form.
+  const closest = (issues: z.ZodIssue[]): z.ZodIssue[] =>
+    issues.flatMap((issue) =>
+      issue.code === "invalid_union"
+        ? closest(
+            issue.unionErrors
+              .map((branch) => branch.issues)
+              .reduce((best, branch) => (branch.length < best.length ? branch : best)),
+          )
+        : [issue],
+    );
+  const issues = closest(error.issues);
+  const described = issues
+    .slice(0, MAX_REPORTED_ISSUES)
+    .map(
+      (issue) => `${issue.path.length > 0 ? issue.path.join(".") : "request"}: ${issue.message}`,
+    );
+  if (issues.length > MAX_REPORTED_ISSUES) described.push("…");
+  return described.join("; ");
+}
+
 /** Narrow published workspace input to the exact request form; rejects mixed or partial forms. */
 export function parseWorkspaceToolParams<Name extends WorkspaceToolName>(
   name: Name,
   params: unknown,
 ): WorkspaceToolParams[Name] {
-  return WORKSPACE_REQUEST_SCHEMAS[name].parse(params) as WorkspaceToolParams[Name];
+  const parsed = WORKSPACE_REQUEST_SCHEMAS[name].safeParse(params);
+  if (!parsed.success) throw new WorkspaceRequestInvalidError(describeRequestIssues(parsed.error));
+  return parsed.data as WorkspaceToolParams[Name];
 }
 
 type WorkspaceNewToolParams<Name extends WorkspaceToolName> = Exclude<
@@ -175,6 +213,7 @@ const SAFE_ERROR_MESSAGES: Record<string, string> = {
   WORKSPACE_GENERATION_CONFLICT:
     "The workspace or its authorization changed; refresh workspace state before continuing.",
   WORKSPACE_RESOURCE_INVALID: "The workspace input or current authorization is invalid.",
+  WORKSPACE_REQUEST_INVALID: "The request does not match the tool's input schema.",
   WORKSPACE_NOT_FOUND: "Workspace was not found.",
   WORKSPACE_BINARY_READ_REQUIRES_DOWNLOAD:
     "The requested range is not UTF-8 text; use workspace_download for binary bytes.",
@@ -208,10 +247,16 @@ function jsonResult(data: Record<string, unknown>): CallToolResult {
   };
 }
 
-function errorResult(code: string, settingsUrl?: string, retryable = false): CallToolResult {
+function errorResult(
+  code: string,
+  settingsUrl?: string,
+  retryable = false,
+  detail?: string,
+): CallToolResult {
+  const safeMessage = SAFE_ERROR_MESSAGES[code] ?? SAFE_ERROR_MESSAGES.INTERNAL_ERROR;
   const error = {
     code,
-    message: SAFE_ERROR_MESSAGES[code] ?? SAFE_ERROR_MESSAGES.INTERNAL_ERROR,
+    message: detail ? `${safeMessage} ${detail}` : safeMessage,
     retryable,
     ...(settingsUrl && SETUP_ERROR_CODES.has(code) ? { settings_url: settingsUrl } : {}),
   };
@@ -782,10 +827,15 @@ export async function manageWorkspaceTool<Name extends WorkspaceToolName>(
   params: unknown,
 ): Promise<CallToolResult> {
   const { userId } = getUserContext();
-  return executeWorkspaceTool(
-    name,
-    parseWorkspaceToolParams(name, params),
-    userId,
-    await workspaceToolServicesLoader(),
-  );
+  let parsed: WorkspaceToolParams[Name];
+  try {
+    parsed = parseWorkspaceToolParams(name, params);
+  } catch (error) {
+    if (error instanceof WorkspaceRequestInvalidError) {
+      recordWorkspaceRejection("WORKSPACE_REQUEST_INVALID");
+      return errorResult("WORKSPACE_REQUEST_INVALID", undefined, false, error.detail);
+    }
+    throw error;
+  }
+  return executeWorkspaceTool(name, parsed, userId, await workspaceToolServicesLoader());
 }
