@@ -194,6 +194,7 @@ function initializeWorkspaceServices(): WorkspaceServices {
           metadata: {
             provider: event.provider,
             outcome: event.outcome,
+            ...(event.reason !== undefined ? { reason: event.reason } : {}),
             state: event.state,
             machine: event.machine,
           },

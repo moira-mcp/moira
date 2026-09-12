@@ -1167,6 +1167,12 @@ describe("durable persistent workspace lifecycle", () => {
         state: "cleanup_pending",
         lastOutcome: "connector_unavailable",
       });
+      // The rejection audit carries the bounded probe failure so operators can tell a
+      // connector outage from a verification mismatch; usable creations carry no reason.
+      expect(value.audits.find((event) => event.action === "create_rejected")).toMatchObject({
+        outcome: "connector_unavailable",
+        reason: "remote ssh unavailable",
+      });
     } finally {
       value.sqlite.close();
     }

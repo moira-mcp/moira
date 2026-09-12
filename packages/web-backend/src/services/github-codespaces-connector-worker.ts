@@ -11,6 +11,15 @@ import {
 } from "./github-codespaces-connector-protocol.mjs";
 
 const RESOURCE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
+const DIAGNOSTIC_EXCERPT_BYTES = 300;
+
+// Diagnostics never leave this sidecar's own stderr, and never carry the credential.
+let redactionToken: string | null = null;
+
+function diagnostic(text: string): string {
+  const redacted = redactionToken ? text.split(redactionToken).join("[redacted]") : text;
+  return redacted.replace(/\s+/g, " ").trim().slice(0, DIAGNOSTIC_EXCERPT_BYTES);
+}
 
 interface WorkerInput {
   token: string;
@@ -32,6 +41,7 @@ async function readInput(): Promise<WorkerInput> {
   if (!validGitHubUserCredential(value.token)) {
     throw new Error("Invalid GitHub App user credential");
   }
+  redactionToken = value.token as string;
   if (
     typeof value.home !== "string" ||
     !/^\/tmp\/moira-codespaces-connector-[A-Za-z0-9]+$/.test(value.home)
@@ -123,13 +133,19 @@ async function generateSshConfig(resourceName: string, input: WorkerInput): Prom
     30_000,
   );
   const config = result.stdout.toString("utf8");
+  if (result.exitCode !== 0) {
+    throw new Error(
+      `Codespace SSH capability is unavailable (gh exit ${result.exitCode}: ${diagnostic(
+        result.stderr.toString("utf8"),
+      )})`,
+    );
+  }
   if (
-    result.exitCode !== 0 ||
     !config.includes("ProxyCommand") ||
     config.includes(input.token) ||
     /\b(?:IdentityFile|LocalCommand|RemoteCommand)\b/i.test(config)
   ) {
-    throw new Error("Codespace SSH capability is unavailable");
+    throw new Error("Codespace SSH capability is unavailable (unexpected ssh configuration)");
   }
   return config;
 }
@@ -198,7 +214,8 @@ async function main(): Promise<void> {
   }
 }
 
-main().catch(() => {
-  process.stderr.write("Codespaces connector worker failed\n");
+main().catch((error: unknown) => {
+  const message = error instanceof Error ? error.message : String(error);
+  process.stderr.write(`Codespaces connector worker failed: ${diagnostic(message)}\n`);
   process.exitCode = 1;
 });

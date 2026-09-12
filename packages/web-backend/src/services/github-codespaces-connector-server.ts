@@ -23,6 +23,8 @@ const EGRESS_SOCKET_PATH = "/run/moira-workspace-egress/proxy.sock";
 const LOCAL_PROXY_PORT = 18080;
 let ready = false;
 
+const WORKER_DIAGNOSTIC_BYTES = 4096;
+
 interface ConnectorRequest {
   action: "ssh-config" | "operation";
   resourceName: string;
@@ -177,13 +179,37 @@ async function runWorker(input: ConnectorRequest): Promise<string> {
           finish(new Error("worker output too large"));
         } else stdout.push(Buffer.from(chunk));
       });
-      child.stderr.resume();
+      // Worker diagnostics stay in this sidecar's own log (operator-visible only), bounded
+      // and with the credential redacted; the application still receives a generic failure.
+      const stderr: Buffer[] = [];
+      let stderrBytes = 0;
+      child.stderr.on("data", (chunk: Buffer) => {
+        if (stderrBytes >= WORKER_DIAGNOSTIC_BYTES) return;
+        const value = Buffer.from(chunk).subarray(0, WORKER_DIAGNOSTIC_BYTES - stderrBytes);
+        stderrBytes += value.length;
+        stderr.push(value);
+      });
       child.once("error", (error) => finish(error));
-      child.once("close", (code) =>
-        code === 0
-          ? finish(undefined, Buffer.concat(stdout).toString("utf8"))
-          : finish(new Error("worker failed")),
-      );
+      child.once("close", (code) => {
+        if (code === 0) {
+          finish(undefined, Buffer.concat(stdout).toString("utf8"));
+          return;
+        }
+        process.stderr.write(
+          `${JSON.stringify({
+            event: "connector_worker_failed",
+            action: input.action,
+            exitCode: code,
+            stderr: Buffer.concat(stderr)
+              .toString("utf8")
+              .split(input.token)
+              .join("[redacted]")
+              .replace(/\s+/g, " ")
+              .trim(),
+          })}\n`,
+        );
+        finish(new Error("worker failed"));
+      });
       child.stdin.end(
         encodeConnectorRequest({
           token: input.token,
