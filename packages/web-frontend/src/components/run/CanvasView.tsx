@@ -39,7 +39,7 @@ import { useOpeningPlacement } from "../diagram/placement";
 const CANVAS_EDGE = 16;
 /** Where the block row sits when a definition opens: this fraction of the viewport height from the top. */
 const CANVAS_ROW_ANCHOR = 0.3;
-import { StatusChip, STATUS_STYLE } from "./status";
+import { PassCount, StatusChip, STATUS_STYLE } from "./status";
 import { BLOCK_WIDTH, layoutBlocks, type BlockLayout, type LaidOutEdge } from "./layout";
 import { GuidanceCallout } from "./Guidance";
 import { useModeGuideKey } from "../flow/editing";
@@ -92,7 +92,7 @@ function BlockNodeView({ data }: NodeProps<BlockNode>): React.JSX.Element {
             <span className="mr-1.5 tabular-nums text-muted-foreground">{block.index + 1}.</span>
             {block.name}
           </span>
-          <StatusChip status={block.status} iterations={block.iterations} />
+          <StatusChip status={block.status} />
         </div>
         <p className="line-clamp-3 text-xs leading-[18px] text-foreground/80">
           {block.description}
@@ -100,6 +100,12 @@ function BlockNodeView({ data }: NodeProps<BlockNode>): React.JSX.Element {
         <div className="mt-auto flex items-end justify-between gap-2">
           <span className="text-[11px] text-muted-foreground">
             {t("pages.runPage.stepCount", { count: block.nodeIds.length })}
+            {block.iterations > 1 && (
+              <>
+                {" · "}
+                <PassCount iterations={block.iterations} />
+              </>
+            )}
           </span>
           {chips.length > 0 && (
             <span className="flex flex-wrap justify-end gap-1" data-testid="block-chips">

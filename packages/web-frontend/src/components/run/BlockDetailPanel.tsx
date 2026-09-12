@@ -11,6 +11,7 @@ import { cn } from "@/lib/utils";
 import { GuidanceCallout } from "./Guidance";
 import { StatusChip } from "./status";
 import { StepList } from "./StepList";
+import { useEditing } from "../flow/editing";
 import type { WorkflowGraph } from "../../types/workflow-types";
 import { blockById, stepsOf, type RunBlock } from "./model";
 
@@ -28,6 +29,7 @@ export function BlockDetailPanel({
   onFocusNode: (nodeId: string) => void;
 }): React.JSX.Element {
   const { t } = useTranslation();
+  const { definition } = useEditing();
   const steps = useMemo(() => (block ? stepsOf(workflow, block.nodeIds) : []), [workflow, block]);
   if (!block) {
     return (
@@ -51,9 +53,16 @@ export function BlockDetailPanel({
             <span className="mr-2 tabular-nums text-muted-foreground">{block.index + 1}.</span>
             {block.name}
           </h3>
-          <StatusChip status={block.status} iterations={block.iterations} />
+          <StatusChip status={block.status} />
         </div>
         <p className="text-sm leading-6 text-foreground/85">{block.description}</p>
+        {!definition && (
+          <p className="text-[11px] text-muted-foreground" data-testid="block-detail-facts">
+            {t("pages.runPage.stepCount", { count: steps.length })}
+            {block.iterations > 1 && ` · ${t("pages.runPage.ran", { count: block.iterations })}`}
+            {block.visits > 0 && ` · ${t("pages.runPage.visited", { count: block.visits })}`}
+          </p>
+        )}
         {(content.summary || content.details.length > 0 || content.outcome || content.next) && (
           <dl className="space-y-0.5 pt-1 text-sm" data-testid="block-detail-content">
             {content.summary && <dd className="font-medium">{content.summary}</dd>}

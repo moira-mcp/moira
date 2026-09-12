@@ -37,7 +37,7 @@ import { DiagramViewport } from "../diagram/DiagramViewport";
 import { useOpeningPlacement } from "../diagram/placement";
 import { GuidanceCallout } from "./Guidance";
 import { useEditing, useModeGuideKey } from "../flow/editing";
-import { StatusChip, StatusIcon, STATUS_STYLE } from "./status";
+import { PassCount, StatusChip, StatusIcon, STATUS_STYLE } from "./status";
 import {
   arcGeometry,
   buildArcs,
@@ -107,14 +107,7 @@ function LaneButton({
       <span className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
         <StatusIcon status={block.status} className="size-3.5" />
         {t("pages.runPage.lanes.phase", { index: block.index + 1 })}
-        {block.iterations > 1 ? (
-          <span
-            className="ml-auto rounded-full bg-success/15 px-1.5 text-[10px] tabular-nums text-success"
-            data-testid="lane-iterations"
-          >
-            ×{block.iterations}
-          </span>
-        ) : null}
+        <PassCount iterations={block.iterations} className="ml-auto" testId="lane-iterations" />
       </span>
       <span
         className={cn(
@@ -517,7 +510,7 @@ function BlockContent({ block }: { block: RunBlock }): React.JSX.Element | null 
           <span className="mr-2 tabular-nums text-muted-foreground">{block.index + 1}.</span>
           {block.name}
         </h3>
-        <StatusChip status={block.status} iterations={block.iterations} />
+        <StatusChip status={block.status} />
       </div>
       <p className="mt-1 text-sm leading-6 text-foreground/85">{block.description}</p>
       {hasContent ? (

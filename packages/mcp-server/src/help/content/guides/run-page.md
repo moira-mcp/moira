@@ -15,7 +15,7 @@ The tabs above the picture switch how the same run is shown; the choice is in th
 
 - **Lanes** (default) — one card per block in process order. The block the run is on is pinned
   as "you are here" and marked _in progress_ or _waiting for you_; a completed block shows a tick,
-  a block that ran several times shows its pass count (×2, ×3), a block the run bypassed is struck
+  a block that ran several times shows its pass count as small muted text (×2, ×3), a block the run bypassed is struck
   through as _skipped_, and blocks not reached yet are dimmed. Thin arcs under the rail are the
   loops and thin links above it are transitions that skip a block; neither carries a label at
   rest. Each card names its loops and skips in chips (`↩ 3 Plan` returns to block 3, `↗ 6 Stop`
@@ -34,8 +34,8 @@ The tabs above the picture switch how the same run is shown; the choice is in th
   description, what the run produced there, what its steps wrote, its transitions in words
   (including why a loop happens and when it ends), and its steps with the evidence each demands.
 - **Route** — the run as the route it took: each card is a stretch of consecutive steps inside one
-  block, a badge counts the times the run returned to a block, a line marks a return to an earlier
-  block, and each step shows the connection it left through, whether it waited for input, and what
+  block, a small count beside the block name says which visit to that block it is, a line marks a
+  return to an earlier block, and each step shows the connection it left through, whether it waited for input, and what
   it set.
 
 ## The cursor
@@ -47,9 +47,15 @@ up to it. "Show whole run" returns to the present.
 
 ## The panel
 
+The panel's tabs form one strip that wraps on a narrow panel instead of scrolling; hovering a tab
+says what it holds, a count badge on **Errors** gives the number of recorded errors, and a `!`
+badge on **Variables** or **Locks** means a step is waiting for your answer or a lock is active.
+
 - **Block** — the selected block (the current one by default): its status, description, outcome
-  text, where it leads, and its steps. Each step names the fields it must return — the evidence
-  Moira validates before the run continues. Clicking a step shows it on the technical node graph.
+  text, a muted facts line (steps, how many times it ran, visits), where it leads, and its steps
+  as cards of one shape — the type badge in the same place on every card, then the step's name,
+  the first sentence of its instruction and the fields it must return, the evidence Moira
+  validates before the run continues. Clicking a step shows it on the technical node graph.
 - **Variables** — every declared variable and every step output with its current value and a
   history of the steps that changed it. A value set from outside the flow is marked _adjusted_.
 - **Context** — the context editor: a declared variable the workflow's `runtimePolicy` allows to

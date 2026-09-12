@@ -13,7 +13,7 @@ import { useTranslation } from "react-i18next";
 import { ArrowRight, ChevronDown, RotateCcw } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-import { StatusChip, StatusIcon, STATUS_STYLE } from "./status";
+import { PassCount, StatusChip, StatusIcon, STATUS_STYLE } from "./status";
 import { GuidanceCallout } from "./Guidance";
 import { StepList } from "./StepList";
 import { useEditing, useModeGuideKey } from "../flow/editing";
@@ -100,7 +100,7 @@ function Section({
             </button>
           )}
         </h3>
-        {!editing && <StatusChip status={block.status} iterations={block.iterations} />}
+        {!editing && <StatusChip status={block.status} />}
         <DiagnosticBadge blockId={block.id} />
       </header>
 
@@ -266,11 +266,7 @@ export function OutlineView(props: RunViewProps): React.JSX.Element {
                   <StatusIcon status={block.status} className="size-3.5" />
                   <span className="tabular-nums text-muted-foreground">{block.index + 1}.</span>
                   <span className="truncate">{block.name}</span>
-                  {block.status === "repeated" && block.iterations ? (
-                    <span className="ml-auto text-[11px] tabular-nums text-success">
-                      ×{block.iterations}
-                    </span>
-                  ) : null}
+                  <PassCount iterations={block.iterations} className="ml-auto" />
                 </a>
               </li>
             ))}

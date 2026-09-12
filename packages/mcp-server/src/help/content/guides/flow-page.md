@@ -38,8 +38,9 @@ The tabs above the picture switch how the same definition is shown; the choice i
 ## The panel
 
 - **Block** — the selected block (the first one by default): its description, where it leads,
-  and its steps. Each step names the fields it must return — the evidence Moira validates before a
-  run continues.
+  and its steps as cards of one shape (the type badge in the same place, then the name, the first
+  sentence and the fields it must return — the evidence Moira validates before a run continues);
+  the split mode shows the same cards with their connections.
 - **Variables** — the variable registry: every global the workflow declares, with its type,
   description and default.
 

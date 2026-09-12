@@ -570,6 +570,23 @@
         "repeated": "repeated",
         "skipped": "skipped"
       },
+      "tabHints": {
+        "block": "The selected block: what it does, where it leads, and the steps that implement it",
+        "variables": "Declared variables and the values each step returned, with history; answer the waiting step here",
+        "variablesWaiting": "A step is waiting for your answer",
+        "context": "The run's raw context: every variable and node state as JSON, editable per path",
+        "errors": "Errors the run recorded, newest first",
+        "errorCount_one": "{{count}} error recorded",
+        "errorCount_other": "{{count}} errors recorded",
+        "steps": "Every step the run took, in order",
+        "graph": "The technical node graph with the current node focused",
+        "locks": "Locks placed on this run and their history",
+        "lockActive": "A lock is active on this run"
+      },
+      "ran_one": "ran ×{{count}}",
+      "ran_other": "ran ×{{count}}",
+      "visited_one": "{{count}} visit",
+      "visited_other": "{{count}} visits",
       "stepCount_one": "{{count}} step",
       "stepCount_other": "{{count}} steps",
       "guidance": {
@@ -722,7 +739,7 @@
         },
         "route": {
           "title": "Route: follow the run",
-          "body": "This is the route the run actually took, in the order it happened. Each card is a stretch of the run inside one block; a green badge counts the times the run came back to that block; a blue line under a card marks a return to an earlier block. Click any visit to put the cursor there: everything after it fades, and the other tabs show the process as it stood at that moment."
+          "body": "This is the route the run actually took, in the order it happened. Each card is a stretch of the run inside one block; a small count beside the block name says which visit to that block it is; a blue line under a card marks a return to an earlier block. Click any visit to put the cursor there: everything after it fades, and the other tabs show the process as it stood at that moment."
         }
       }
     },

@@ -53,6 +53,7 @@ frontend/src/
 │   ├── run/                     # Run page: the execution as a process
 │   │   ├── LanesView.tsx / CanvasView.tsx / OutlineView.tsx / RouteView.tsx  # The four modes
 │   │   ├── BlockDetailPanel.tsx / VariablesPanel.tsx / StepList.tsx        # Panel tabs
+│   │   ├── StepCard.tsx / TabBadge.tsx                                      # One step card for every list; the panel badge
 │   │   ├── RunCursor.tsx / Walkthrough.tsx / Guidance.tsx / status.tsx      # Cursor, guide, notes, status vocabulary
 │   │   ├── model.ts / route.ts / arcs.ts / layout.ts                        # Pure view helpers; ELK layout
 │   │   └── modes.ts / nodeTypeStyle.tsx
@@ -554,7 +555,27 @@ lanes rail and the technical `WorkflowGraph` all mount through it. Block cards c
 process pages use the `scrollbar-thin` utility (`styles/globals.css`), a thin theme-coloured
 scrollbar in both themes.
 
-**Panels:** `BlockDetailPanel` (status, description, run content, transitions, steps with the
+The panel's tab strip (`run-panel-tabs`) is the shadcn tabs' `line` variant with `flex-wrap`:
+content-sized triggers with a `title` from `pages.runPage.tabHints.*`, wrapping to a second row on
+a narrow panel instead of scrolling; counters and warnings are `TabBadge` (`components/run/TabBadge.tsx`:
+a count or a `!`, `role="status"` with an accessible label; `errors-count-badge`,
+`variables-waiting-badge`, `locks-active-badge`).
+
+**Step cards:** every list of steps — the block panel and the outline (`StepList`), the flow
+page's split view — renders `StepCard` (`components/run/StepCard.tsx`): a card on one grid with an
+optional position column, a type badge of one width and height (`NodeTypeTag` with `fixed`,
+`data-step-badge`), and a body whose title (`data-step-title`) and first line start at the same
+point in every card; evidence chips and connection chips (`stepConnections` in `model.ts`:
+internal → the sibling step, external → the owning block's name, `data-edge-kind`) wrap inside the
+body; slots take the split view's owner select, diagnostics and editor and the run page's
+"current" marker. Pass counts are secondary text everywhere (`PassCount` in `status.tsx`: `×n` in
+muted small type on the lane card's phase line, the canvas card's footer, the outline's contents
+list, the block panel's facts line `block-detail-facts` and the route mode's segment headers
+`segment-entry`); the status chip carries none, and the route mode's figures are one muted summary
+line (`route-summary`).
+
+**Panels:** `BlockDetailPanel` (status, description, run content, a facts line with the step count,
+pass count and visits, transitions, steps as cards with the
 evidence fields each schema demands — declared `globalInputs` merged from the variable registry —
 and a click that focuses the node graph); `VariablesPanel` (fixed-layout table of variables with
 history rows and adjustment marks, node outputs, an "edit in context" shortcut for policy-editable

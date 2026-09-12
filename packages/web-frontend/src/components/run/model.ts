@@ -117,6 +117,44 @@ export interface StepInfo {
   routing: boolean;
 }
 
+/** One outgoing connection of a step: inside its block (points at a sibling step) or out of it. */
+export interface StepConnection {
+  label: string;
+  target: string;
+  internal: boolean;
+  /** The block the target belongs to when the connection leaves the step's block. */
+  targetBlockId: string | null;
+  /** What the chip shows: the sibling step's id, or the target block's name. */
+  targetName: string;
+}
+
+/**
+ * The connections of a step as the cards show them: the same classification on the run page's
+ * block panel, the flow page's split view and the technical graph, so a step reads the same
+ * everywhere.
+ */
+export function stepConnections(
+  node: { connections?: Record<string, string> } | undefined,
+  block: Pick<RunBlock, "id" | "nodeIds">,
+  blocks: readonly RunBlock[],
+): StepConnection[] {
+  if (!node?.connections) return [];
+  const inBlock = new Set(block.nodeIds);
+  const owners = nodeOwners(blocks);
+  const byId = blockById(blocks);
+  return Object.entries(node.connections).map(([label, target]) => {
+    const internal = inBlock.has(target);
+    const targetBlockId = internal ? null : (owners.get(target) ?? null);
+    return {
+      label,
+      target,
+      internal,
+      targetBlockId,
+      targetName: internal ? target : (byId.get(targetBlockId ?? "")?.name ?? target),
+    };
+  });
+}
+
 const SUMMARY_LIMIT = 180;
 
 /** The first sentence of an authored text, cut at a sentence end or the limit. */

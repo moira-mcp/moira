@@ -194,7 +194,7 @@ function SegmentCard({
             </button>
             {segment.entry > 1 && (
               <span
-                className="rounded-full bg-success/15 px-1.5 text-[10px] font-semibold leading-4 text-success"
+                className="text-[11px] tabular-nums text-muted-foreground"
                 data-testid="segment-entry"
               >
                 {t("pages.runPage.route.entry", { n: segment.entry })}
@@ -301,7 +301,10 @@ export function RouteView({
 
       <div className="grid gap-4 lg:grid-cols-[300px_minmax(0,1fr)]">
         <aside className="space-y-3 lg:sticky lg:top-0 lg:self-start">
-          <dl className="grid grid-cols-4 gap-2 rounded-lg border bg-card p-3 text-center text-sm">
+          <p
+            className="rounded-lg border bg-card px-3 py-2 text-xs leading-5 text-muted-foreground tabular-nums"
+            data-testid="route-summary"
+          >
             {(
               [
                 ["visits", route.length],
@@ -309,15 +312,10 @@ export function RouteView({
                 ["loops", loops],
                 ["adjustments", adjustments],
               ] as const
-            ).map(([k, v]) => (
-              <div key={k} className="rounded-md bg-muted/50 py-1.5">
-                <dt className="text-[10px] uppercase tracking-wide text-muted-foreground">
-                  {t(`pages.runPage.route.stat.${k}`)}
-                </dt>
-                <dd className="text-lg font-semibold tabular-nums">{v}</dd>
-              </div>
-            ))}
-          </dl>
+            )
+              .map(([k, v]) => `${v} ${t(`pages.runPage.route.stat.${k}`)}`)
+              .join(" · ")}
+          </p>
 
           <div className="rounded-lg border bg-card" data-testid="route-block-summary">
             <p className="border-b px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">

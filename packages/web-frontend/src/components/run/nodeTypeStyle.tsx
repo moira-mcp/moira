@@ -147,9 +147,12 @@ export function nodeTypeStyle(type: string): NodeTypeStyle {
 export function NodeTypeTag({
   type,
   className,
+  fixed = false,
 }: {
   type: string;
   className?: string;
+  /** One box for every type (the step cards' badge column): same width and height, label centred. */
+  fixed?: boolean;
 }): React.JSX.Element {
   const style = nodeTypeStyle(type);
   const Icon = style.icon;
@@ -157,11 +160,13 @@ export function NodeTypeTag({
     <span
       className={cn(
         "inline-flex shrink-0 items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10px] font-semibold tracking-wide",
+        fixed && "h-6 w-[84px] justify-center px-1 text-[9px] tracking-normal",
         style.border,
         style.bg,
         style.tint,
         className,
       )}
+      data-step-badge={fixed ? type : undefined}
     >
       <Icon className="size-3" aria-hidden="true" />
       {style.label}

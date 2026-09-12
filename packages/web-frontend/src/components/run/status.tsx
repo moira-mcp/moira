@@ -88,14 +88,12 @@ export function StatusIcon({
   );
 }
 
-/** Compact chip: icon + status word, plus the pass count when the block repeated. */
+/** Compact chip: icon + status word. The pass count is secondary text on the card, not here. */
 export function StatusChip({
   status,
-  iterations,
   className,
 }: {
   status: ExecutionBlockStatus;
-  iterations?: number;
   className?: string;
 }): React.JSX.Element | null {
   const { t } = useTranslation();
@@ -115,11 +113,6 @@ export function StatusChip({
     >
       <Icon className={cn("size-3", style.spin && "animate-spin")} aria-hidden="true" />
       {t(`pages.runPage.status.${status}`)}
-      {status === "repeated" && iterations ? (
-        <span className="ml-0.5 tabular-nums" data-testid="status-iterations">
-          ×{iterations}
-        </span>
-      ) : null}
     </span>
   );
 }
@@ -142,5 +135,28 @@ export function StatusLegend({ className }: { className?: string }): React.JSX.E
         </li>
       ))}
     </ul>
+  );
+}
+
+/** The pass count as secondary text ("ran ×2"), shown only when a block repeated. */
+export function PassCount({
+  iterations,
+  className,
+  testId,
+}: {
+  iterations: number;
+  className?: string;
+  testId?: string;
+}): React.JSX.Element | null {
+  const { t } = useTranslation();
+  if (iterations <= 1) return null;
+  return (
+    <span
+      className={cn("text-[11px] tabular-nums text-muted-foreground", className)}
+      data-testid={testId}
+      title={t("pages.runPage.ran", { count: iterations })}
+    >
+      ×{iterations}
+    </span>
   );
 }

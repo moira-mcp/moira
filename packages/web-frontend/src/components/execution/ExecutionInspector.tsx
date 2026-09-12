@@ -14,6 +14,10 @@ import React, { useState, useEffect, useCallback, useMemo, Suspense, useRef } fr
 import { toast } from "sonner";
 import { useResource } from "../../hooks/useResource";
 import { DiagramSkeleton } from "../route-skeleton";
+import { TabBadge } from "../run/TabBadge";
+
+/** One tab of the panel strip: content-sized, underline when active, never stretched. */
+const TAB_CLASS = "h-8 flex-none gap-1.5 px-2 text-xs";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { apiClient } from "../../services/api-client";
@@ -821,62 +825,94 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
             onValueChange={(value) => setChosenTab(value as PanelTab)}
             className="flex flex-col h-full"
           >
-            <TabsList className="scrollbar-thin w-full justify-start overflow-x-auto rounded-none border-b bg-muted/30 px-2 h-10">
+            {/* The panel strip: underline tabs that wrap on a narrow panel instead of scrolling;
+                each tab says what it holds, and counters and warnings are one badge. The list's
+                height must follow the wrapped rows (the tabs variant fixes it at one row, hence
+                the important override), so the second row never paints over the content. */}
+            <TabsList
+              variant="line"
+              className="!h-auto w-full flex-wrap justify-start gap-x-0 gap-y-1 rounded-none border-b bg-card px-2 py-1"
+              data-testid="run-panel-tabs"
+            >
               {progress && (
-                <TabsTrigger value="block" className="gap-1.5 text-xs">
-                  <Boxes className="h-3.5 w-3.5" />
+                <TabsTrigger
+                  value="block"
+                  className={TAB_CLASS}
+                  title={t("pages.runPage.tabHints.block")}
+                >
+                  <Boxes className="size-3.5" />
                   {t("pages.runPage.tabs.block")}
                 </TabsTrigger>
               )}
               {progress && (
-                <TabsTrigger value="variables" className="gap-1.5 text-xs">
-                  <Variable className="h-3.5 w-3.5" />
+                <TabsTrigger
+                  value="variables"
+                  className={TAB_CLASS}
+                  title={t("pages.runPage.tabHints.variables")}
+                >
+                  <Variable className="size-3.5" />
                   {t("pages.runPage.tabs.variables")}
-                  {answerable && waiting && (
-                    <Badge
-                      variant="secondary"
-                      className="ml-1 h-5 px-1.5 text-[10px] bg-warning/20 text-warning-foreground"
-                      data-testid="variables-waiting-badge"
-                    >
-                      !
-                    </Badge>
-                  )}
+                  <TabBadge
+                    warning={Boolean(answerable && waiting)}
+                    tone="warning"
+                    label={t("pages.runPage.tabHints.variablesWaiting")}
+                    testId="variables-waiting-badge"
+                  />
                 </TabsTrigger>
               )}
-              <TabsTrigger value="context" className="gap-1.5 text-xs">
-                <FileJson className="h-3.5 w-3.5" />
+              <TabsTrigger
+                value="context"
+                className={TAB_CLASS}
+                title={t("pages.runPage.tabHints.context")}
+              >
+                <FileJson className="size-3.5" />
                 {t("pages.executionInspector.tabs.context")}
               </TabsTrigger>
-              <TabsTrigger value="errors" className="gap-1.5 text-xs">
-                <AlertTriangle className="h-3.5 w-3.5" />
+              <TabsTrigger
+                value="errors"
+                className={TAB_CLASS}
+                title={t("pages.runPage.tabHints.errors")}
+              >
+                <AlertTriangle className="size-3.5" />
                 {t("pages.executionInspector.tabs.errors")}
-                {errorsCount > 0 && (
-                  <Badge variant="destructive" className="ml-1 h-5 px-1.5 text-[10px]">
-                    {errorsCount}
-                  </Badge>
-                )}
+                <TabBadge
+                  count={errorsCount}
+                  tone="danger"
+                  label={t("pages.runPage.tabHints.errorCount", { count: errorsCount })}
+                  testId="errors-count-badge"
+                />
               </TabsTrigger>
-              <TabsTrigger value="steps" className="gap-1.5 text-xs">
-                <ListChecks className="h-3.5 w-3.5" />
+              <TabsTrigger
+                value="steps"
+                className={TAB_CLASS}
+                title={t("pages.runPage.tabHints.steps")}
+              >
+                <ListChecks className="size-3.5" />
                 {t("pages.executionInspector.tabs.steps")}
               </TabsTrigger>
               {progress && (
-                <TabsTrigger value="graph" className="gap-1.5 text-xs">
-                  <Workflow className="h-3.5 w-3.5" />
+                <TabsTrigger
+                  value="graph"
+                  className={TAB_CLASS}
+                  title={t("pages.runPage.tabHints.graph")}
+                >
+                  <Workflow className="size-3.5" />
                   {t("pages.runPage.tabs.graph")}
                 </TabsTrigger>
               )}
-              <TabsTrigger value="locks" className="gap-1.5 text-xs">
-                <Lock className="h-3.5 w-3.5" />
+              <TabsTrigger
+                value="locks"
+                className={TAB_CLASS}
+                title={t("pages.runPage.tabHints.locks")}
+              >
+                <Lock className="size-3.5" />
                 {t("pages.executionInspector.tabs.locks")}
-                {locks.some((l) => l.status === "active") && (
-                  <Badge
-                    variant="secondary"
-                    className="ml-1 h-5 px-1.5 text-[10px] bg-yellow-500/20 text-yellow-600"
-                  >
-                    !
-                  </Badge>
-                )}
+                <TabBadge
+                  warning={locks.some((l) => l.status === "active")}
+                  tone="warning"
+                  label={t("pages.runPage.tabHints.lockActive")}
+                  testId="locks-active-badge"
+                />
               </TabsTrigger>
             </TabsList>
 

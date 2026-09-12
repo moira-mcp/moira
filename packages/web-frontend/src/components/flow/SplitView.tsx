@@ -12,12 +12,20 @@
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { ArrowDownRight, ArrowUpRight, CornerDownLeft, Search } from "lucide-react";
+import { CornerDownLeft, Search } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import { GuidanceCallout } from "../run/Guidance";
 import { NodeTypeTag } from "../run/nodeTypeStyle";
-import { blockById, nodeOwners, stepsOf, type RunBlock, type RunViewProps } from "../run/model";
+import {
+  blockById,
+  nodeOwners,
+  stepConnections,
+  stepsOf,
+  type RunBlock,
+  type RunViewProps,
+} from "../run/model";
+import { StepCard, StepCardList } from "../run/StepCard";
 import type { StepInfo } from "../run/model";
 import type { WorkflowGraph, WorkflowNode } from "../../types/workflow-types";
 import {
@@ -187,97 +195,27 @@ function NodeRow({
   onSelectBlock: (id: string) => void;
   onJumpToNode: (id: string) => void;
 }): React.JSX.Element {
-  const { t } = useTranslation();
-  const byId = blockById(blocks);
-  const owners = nodeOwners(blocks);
-  const inBlock = new Set(block.nodeIds);
-  const connections = Object.entries(node?.connections ?? {});
-
+  const connections = stepConnections(node, block, blocks);
   return (
-    <li
+    <StepCard
       id={`split-node-${step.id}`}
-      data-node-id={step.id}
-      className={cn(
-        "relative flex gap-3 px-4 py-2.5 transition-colors",
-        highlighted && "bg-accent",
-      )}
-    >
-      <span className="w-6 shrink-0 pt-0.5 text-right text-[11px] tabular-nums text-muted-foreground">
-        {position + 1}
-      </span>
-      <NodeTypeTag type={step.type} className="mt-0.5" />
-      <div className="min-w-0 flex-1">
-        <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
-          <span className="font-mono text-xs font-medium">
-            {step.displayName ?? step.id}
-            {step.displayName && <span className="ml-1 text-muted-foreground">({step.id})</span>}
-          </span>
-          <OwnerSelect nodeId={step.id} currentBlockId={block.id} blocks={blocks} />
-        </div>
-        <DiagnosticBadge nodeId={step.id} className="mt-1" />
-        {step.summary && (
-          <p className="mt-0.5 text-xs leading-5 text-muted-foreground">{step.summary}</p>
-        )}
-        {step.evidence.length > 0 && (
-          <p
-            className="mt-1 flex flex-wrap items-center gap-1 text-[10px] text-muted-foreground"
-            data-node-inputs={step.evidence.map((field) => field.name).join(",")}
-          >
-            <span>{t("pages.runPage.blockDetail.returns")}</span>
-            {step.evidence.map((field) => (
-              <span
-                key={field.name}
-                className={cn(
-                  "rounded border bg-background px-1 font-mono leading-4",
-                  field.required && "border-foreground/40",
-                )}
-                title={field.description ?? undefined}
-              >
-                {field.name}
-                {field.type && <span className="text-muted-foreground">: {field.type}</span>}
-              </span>
-            ))}
-          </p>
-        )}
-        {connections.length > 0 && (
-          <div className="mt-1.5 flex flex-wrap gap-1">
-            {connections.map(([label, target]) => {
-              const internal = inBlock.has(target);
-              const targetBlock = internal ? undefined : byId.get(owners.get(target) ?? "");
-              return (
-                <button
-                  key={`${label}-${target}`}
-                  type="button"
-                  onClick={() =>
-                    internal ? onJumpToNode(target) : targetBlock && onSelectBlock(targetBlock.id)
-                  }
-                  data-edge-kind={internal ? "internal" : "external"}
-                  title={internal ? target : (targetBlock?.name ?? target)}
-                  className={cn(
-                    "inline-flex max-w-full items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10px] leading-4 transition",
-                    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                    internal
-                      ? "border-border bg-background text-muted-foreground hover:bg-accent"
-                      : "border-primary/40 bg-primary/5 text-primary hover:bg-primary/10",
-                  )}
-                >
-                  {internal ? (
-                    <ArrowDownRight className="size-3 shrink-0" aria-hidden="true" />
-                  ) : (
-                    <ArrowUpRight className="size-3 shrink-0" aria-hidden="true" />
-                  )}
-                  <span className="font-medium">{label}</span>
-                  <span className="truncate opacity-80">
-                    {internal ? target : (targetBlock?.name ?? target)}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-        )}
-        {node && <NodeTextEditor step={step} node={node as unknown as Record<string, unknown>} />}
-      </div>
-    </li>
+      step={step}
+      position={position + 1}
+      highlighted={highlighted}
+      connections={connections}
+      onConnection={(connection) =>
+        connection.internal
+          ? onJumpToNode(connection.target)
+          : connection.targetBlockId && onSelectBlock(connection.targetBlockId)
+      }
+      afterTitle={<OwnerSelect nodeId={step.id} currentBlockId={block.id} blocks={blocks} />}
+      beforeSummary={<DiagnosticBadge nodeId={step.id} className="mt-1" />}
+      footer={
+        node ? (
+          <NodeTextEditor step={step} node={node as unknown as Record<string, unknown>} />
+        ) : undefined
+      }
+    />
   );
 }
 
@@ -386,7 +324,7 @@ export function SplitView({
                   <p className="text-sm leading-6 text-foreground/85">{block.description}</p>
                 )}
               </header>
-              <ol ref={listRef} className="flex-1 divide-y" data-testid="split-nodes">
+              <StepCardList listRef={listRef} className="flex-1 p-3" testId="split-nodes">
                 {steps.map((step, position) => (
                   <NodeRow
                     key={step.id}
@@ -400,7 +338,7 @@ export function SplitView({
                     onJumpToNode={jumpToNode}
                   />
                 ))}
-              </ol>
+              </StepCardList>
             </>
           ) : (
             <p className="p-6 text-sm text-muted-foreground">
