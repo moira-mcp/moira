@@ -462,7 +462,7 @@ interface ExecutionInspectorProps {
   context), `canAnswer` → true, `showOwnerInfo` → true
 
 **Data:** the execution detail, the workflow definition (step text and input schemas for the
-block panel, editable variable list for the context editor) and the run projection from
+block panel, editable variable list for the Variables panel) and the run projection from
 `apiClient.getExecutionProgress(id, at?)`. Every run fact — block statuses, pass counts, the
 route, the variables — comes from the projection; the page derives none of it. When a route cursor
 is set the page keeps the whole-run projection (for the scrubber) and fetches the projection at
@@ -488,13 +488,13 @@ history entry.
   width and height. Without one (a workflow without `progress`): the technical node graph fills
   the main area.
 - Panel (beside the run on `lg` and wider, stacked under it below, capped at 38 vh on a phone) with
-  tabs: **Block** (default when a process view exists), **Variables**, **Context**, **Errors**,
+  tabs: **Block** (default when a process view exists), **Variables**, **Errors**,
   **Steps**, **Graph** (the technical node graph, present only with a process view) and **Locks**.
 
 **Modes** (`components/run/`):
 
 - `LanesView` — task header (title, goal, facts), the rail of blocks in process order with the
-  current block pinned ("you are here"), pass-count badges, struck-through skipped blocks, return
+  current block pinned ("you are here"), pass counts as secondary text, struck-through skipped blocks, return
   arcs beneath the rail nested by span (`arcs.ts`), and the selected block's run content. Every
   connector away from the rail — returns, forward links that skip a block — is thin and muted with
   no label at rest; the source lane names each one in a chip (`chips.ts`: `laneChipsOf` =
