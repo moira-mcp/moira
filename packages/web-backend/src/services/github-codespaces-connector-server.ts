@@ -83,7 +83,7 @@ function workerHealth(): Promise<string | null> {
     execFile(
       "/usr/bin/prlimit",
       [
-        "--nproc=64:64",
+        "--nproc=256:256",
         "--fsize=16777216:16777216",
         "--nofile=128:128",
         "--",
@@ -125,7 +125,7 @@ async function runWorker(input: ConnectorRequest): Promise<string> {
       const child = spawn(
         "/usr/bin/prlimit",
         [
-          "--nproc=64:64",
+          "--nproc=256:256",
           "--fsize=16777216:16777216",
           "--nofile=128:128",
           "--",

@@ -40,7 +40,7 @@ docker run -d --name "$EGRESS_NAME" \
   --read-only \
   --cap-drop ALL \
   --security-opt no-new-privileges:true \
-  --pids-limit 64 \
+  --pids-limit 128 \
   --memory 128m \
   --cpus 0.25 \
   -v "$EGRESS_VOLUME:/run/moira-workspace-egress" \
@@ -56,7 +56,8 @@ docker run -d --name "$CONNECTOR_NAME" \
   --cap-add SETUID \
   --cap-add SETGID \
   --security-opt no-new-privileges:true \
-  --pids-limit 96 \
+  --init \
+  --pids-limit 384 \
   --memory 640m \
   --cpus 1 \
   --tmpfs /tmp:rw,nosuid,nodev,noexec,size=536870912,mode=1777 \
@@ -85,9 +86,13 @@ test "$attempt" -lt 30
 # The credential-bearing connector has only loopback and two narrow Unix sockets.
 test "$(docker inspect "$CONNECTOR_NAME" --format '{{.HostConfig.NetworkMode}}')" = "none"
 test "$(docker inspect "$CONNECTOR_NAME" --format '{{.HostConfig.ReadonlyRootfs}}')" = "true"
-test "$(docker inspect "$CONNECTOR_NAME" --format '{{.HostConfig.PidsLimit}}')" = "96"
+test "$(docker inspect "$CONNECTOR_NAME" --format '{{.HostConfig.PidsLimit}}')" = "384"
+# The init process reaps gh/ssh helpers that jobs leave behind, so they cannot pile up as zombies.
+test "$(docker inspect "$CONNECTOR_NAME" --format '{{.HostConfig.Init}}')" = "true"
+docker exec "$CONNECTOR_NAME" sh -c 'test "$(cat /proc/1/comm)" = "docker-init"'
 test "$(docker inspect "$CONNECTOR_NAME" --format '{{.HostConfig.Memory}}')" = "671088640"
-test "$(docker top "$CONNECTOR_NAME" -eo pid,user | tail -n +2 | awk '{print $2}' | sort -u)" = "1000"
+# Every connector process except the minimal init reaper runs as the unprivileged user.
+test "$(docker top "$CONNECTOR_NAME" -eo pid,user,comm | tail -n +2 | grep -v ' docker-init$' | awk '{print $2}' | sort -u)" = "1000"
 ! docker inspect "$CONNECTOR_NAME" --format '{{range .Mounts}}{{println .Name}}{{end}}' |
   grep -qx "$TENANT_VOLUME"
 

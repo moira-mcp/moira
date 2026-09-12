@@ -773,6 +773,30 @@ describe("durable workspace file operations", () => {
     }
   });
 
+  test("keeps a pending file operation reconcile-pending when the connector fails during inspection", async () => {
+    const value = fixture();
+    try {
+      value.transport.throwExecute = true;
+      const pending = await value.service.execute("user-1", "workspace-1", {
+        action: "stat",
+        path: "src/file.bin",
+      });
+      expect(pending).toMatchObject({ operation: { state: "reconcile_pending" }, result: null });
+      value.transport.throwExecute = false;
+      value.transport.inspectFile = async () => {
+        throw new Error("Connector sidecar is unavailable");
+      };
+      // A connector failure is not a result: no throw, capacity stays reserved and the
+      // operation waits for a later exact inspection instead of surfacing an internal error.
+      await expect(value.service.reconcile("user-1", pending.operation.id)).resolves.toMatchObject({
+        operation: { state: "reconcile_pending", lastOutcome: "remote_inspection_required" },
+        result: null,
+      });
+    } finally {
+      value.sqlite.close();
+    }
+  });
+
   test("rejects traversal and cross-tenant replay before credential or transport contact", async () => {
     const value = fixture();
     try {

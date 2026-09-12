@@ -401,14 +401,16 @@ execution is outside this contract.
 The connector boundary protects the multi-tenant Moira server:
 
 - the credential-bearing connector is non-root, read-only, capability-limited
-  and bounded to 1 CPU, 640 MiB memory and 96 PIDs;
+  runs under an init process that reaps finished gh/ssh helpers, and is bounded to
+  1 CPU, 640 MiB memory and 384 tasks (each job's worker is further limited to 256
+  processes and threads);
 - it mounts only private Unix-socket volumes and a bounded tmpfs, with no Moira
   database, data directory, vault key, Docker socket or other-tenant volume;
 - `network_mode: none` removes its direct network path;
 - a separate credential-free CONNECT proxy accepts only reviewed
   GitHub/Codespaces HTTPS hosts, rejects IP-literal and non-public resolution,
   and verifies the connected peer; the proxy is bounded to 0.25 CPU, 128 MiB
-  memory and 64 PIDs.
+  memory and 128 tasks.
 
 The optional Compose profile is disabled by default. Start the connector pair
 with the same application image only after configuring the GitHub App, vault and
