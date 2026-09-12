@@ -465,7 +465,7 @@ not supplied:
 | `WORKSPACE_MAX_STORAGE_GB`                     |      32 | Maximum selected machine storage                             |
 | `WORKSPACE_MAX_ACTIVE_PER_USER`                |       1 | Active resource reservations per user                        |
 | `WORKSPACE_MAX_ACTIVE_GLOBAL`                  |       4 | Active resource reservations across the instance             |
-| `WORKSPACE_MAX_OPERATIONS_PER_DAY`             |      10 | Submitted lifecycle and direct operations per user/UTC day   |
+| `WORKSPACE_MAX_OPERATIONS_PER_DAY`             |     200 | Submitted lifecycle and direct operations per user/UTC day   |
 | `WORKSPACE_CREATE_THROTTLE_SECONDS`            |      60 | Minimum interval between creation reservations               |
 | `WORKSPACE_REMOTE_TTL_MINUTES`                 |     120 | Codespaces idle timeout requested at creation                |
 | `WORKSPACE_PERSISTENT_RETENTION_DAYS`          |      30 | Codespaces stopped-workspace retention requested at creation |

@@ -175,7 +175,7 @@ docker compose --profile workspaces up -d
 | `WORKSPACE_MAX_STORAGE_GB`                     |      32 | Maximum selected machine storage                              |
 | `WORKSPACE_MAX_ACTIVE_PER_USER`                |       1 | Active resource reservations per user; maximum 64             |
 | `WORKSPACE_MAX_ACTIVE_GLOBAL`                  |       4 | Instance-wide active resource reservations; maximum 1024      |
-| `WORKSPACE_MAX_OPERATIONS_PER_DAY`             |      10 | Submitted lifecycle/direct operations per user/day; max 10000 |
+| `WORKSPACE_MAX_OPERATIONS_PER_DAY`             |     200 | Submitted lifecycle/direct operations per user/day; max 10000 |
 | `WORKSPACE_CREATE_THROTTLE_SECONDS`            |      60 | Minimum interval between creation reservations                |
 | `WORKSPACE_REMOTE_TTL_MINUTES`                 |     120 | Codespaces idle timeout requested at creation; minimum 5      |
 | `WORKSPACE_PERSISTENT_RETENTION_DAYS`          |      30 | Provider retention requested for stopped workspaces; max 30   |
@@ -457,7 +457,7 @@ WORKSPACE_MAX_MEMORY_GB=8
 WORKSPACE_MAX_STORAGE_GB=32
 WORKSPACE_MAX_ACTIVE_PER_USER=1
 WORKSPACE_MAX_ACTIVE_GLOBAL=4
-WORKSPACE_MAX_OPERATIONS_PER_DAY=10
+WORKSPACE_MAX_OPERATIONS_PER_DAY=200
 WORKSPACE_CREATE_THROTTLE_SECONDS=60
 WORKSPACE_REMOTE_TTL_MINUTES=120
 WORKSPACE_PERSISTENT_RETENTION_DAYS=30

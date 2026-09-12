@@ -107,7 +107,7 @@ export function evaluateWorkspaceResourcePolicy(
     maxStorageBytes: scaledInteger("WORKSPACE_MAX_STORAGE_GB", 32, 1024 ** 3),
     maxActivePerUser,
     maxActiveGlobal,
-    maxOperationsPerDay: integer("WORKSPACE_MAX_OPERATIONS_PER_DAY", 10, 1, 10_000),
+    maxOperationsPerDay: integer("WORKSPACE_MAX_OPERATIONS_PER_DAY", 200, 1, 10_000),
     createThrottleMs: scaledInteger("WORKSPACE_CREATE_THROTTLE_SECONDS", 60, 1000),
     remoteTtlMs: scaledInteger("WORKSPACE_REMOTE_TTL_MINUTES", 120, 60_000, 5),
     persistentRetentionMs: persistentRetentionDays * 24 * 60 * 60_000,
