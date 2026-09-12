@@ -255,9 +255,10 @@ async function inspectPath(root, relative, allowDirectory = false) {
   }
 }
 
-async function readRegular(root, relative, maximum = MAX_FILE_BYTES) {
+async function readRegular(root, relative, maximum = MAX_FILE_BYTES, { keepOpen = false } = {}) {
   const inspected = await inspectPath(root, relative);
   const handle = inspected.handle;
+  let transferred = false;
   try {
     const current = await handle.stat({ bigint: true });
     if (!current.isFile() || current.nlink !== 1n || current.size > BigInt(maximum)) {
@@ -281,13 +282,21 @@ async function readRegular(root, relative, maximum = MAX_FILE_BYTES) {
     ) {
       fail("workspace file changed during read");
     }
+    transferred = keepOpen;
     return {
       bytes,
-      stat: { ...inspected.stat, mtimeMs: Number(after.mtimeNs / 1_000_000n) },
+      stat: {
+        ...inspected.stat,
+        mtimeMs: Number(after.mtimeNs / 1_000_000n),
+        identity: fileIdentity(after),
+      },
       path: inspected.relative,
+      // With keepOpen the caller owns this descriptor. While it stays open the inode
+      // cannot be recycled, and an unlinked original reports zero links on it.
+      handle: keepOpen ? handle : null,
     };
   } finally {
-    await handle.close();
+    if (!transferred) await handle.close();
   }
 }
 
@@ -319,14 +328,38 @@ function validateExpected(expected, current) {
     fail("file digest precondition failed");
 }
 
-function sameFileIdentity(left, right) {
+/**
+ * Identity of a regular file captured from a bigint stat. Device and inode alone are
+ * not enough: Linux filesystems recycle a freed inode number immediately, so a file
+ * removed and recreated with the same bytes between staging and commit would pass an
+ * inode check. Size and nanosecond timestamps distinguish that substitution.
+ */
+function fileIdentity(value) {
+  return {
+    dev: value.dev.toString(),
+    ino: value.ino.toString(),
+    nlink: value.nlink.toString(),
+    size: value.size.toString(),
+    mtimeNs: value.mtimeNs.toString(),
+    ctimeNs: value.ctimeNs.toString(),
+  };
+}
+
+/**
+ * Compare two file identities. A rename we performed ourselves updates the change
+ * time, so the post-rename check keeps every other field and skips ctime.
+ */
+function sameFileIdentity(left, right, { afterRename = false } = {}) {
   return Boolean(
     left &&
     right &&
     left.dev === right.dev &&
     left.ino === right.ino &&
     left.nlink === right.nlink &&
-    left.nlink === 1,
+    left.nlink === "1" &&
+    left.size === right.size &&
+    left.mtimeNs === right.mtimeNs &&
+    (afterRename || left.ctimeNs === right.ctimeNs),
   );
 }
 
@@ -358,8 +391,11 @@ async function verifyEntryIdentity(parentHandle, name, expected) {
     constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
   );
   try {
-    const current = await handle.stat();
-    if (!current.isFile() || !sameFileIdentity(expected, current)) {
+    const current = await handle.stat({ bigint: true });
+    if (
+      !current.isFile() ||
+      !sameFileIdentity(expected, fileIdentity(current), { afterRename: true })
+    ) {
       fail("workspace target identity changed during commit");
     }
   } finally {
@@ -375,9 +411,9 @@ async function parentDirectory(root, relative) {
   return { handle, name, relative: normalized };
 }
 
-async function currentFile(root, relative) {
+async function currentFile(root, relative, options = {}) {
   try {
-    return await readRegular(root, relative);
+    return await readRegular(root, relative, MAX_FILE_BYTES, options);
   } catch (error) {
     if (error?.code === "ENOENT") return null;
     throw error;
@@ -389,9 +425,10 @@ async function stageReplacement(root, relative, bytes, expected, marker) {
     fail("workspace write exceeds its bound");
   const location = await parentDirectory(root, relative);
   let temporaryName = null;
+  let current = null;
   try {
     const parentIdentity = await directoryIdentity(location.handle);
-    const current = await currentFile(root, relative);
+    current = await currentFile(root, relative, { keepOpen: true });
     validateExpected(expected, current);
     temporaryName = `.moira-${marker}-${randomBytes(8).toString("hex")}.tmp`;
     const handle = await open(
@@ -414,6 +451,7 @@ async function stageReplacement(root, relative, bytes, expected, marker) {
       );
       await syncDirectory(location.handle).catch(() => undefined);
     }
+    if (current?.handle) await current.handle.close().catch(() => undefined);
     await location.handle.close().catch(() => undefined);
     throw error;
   }
@@ -429,6 +467,11 @@ async function cleanupStaged(staged) {
     } catch (error) {
       cleanupError ??= error;
     } finally {
+      if (item.current?.handle) {
+        await item.current.handle.close().catch((error) => {
+          cleanupError ??= error;
+        });
+      }
       try {
         await item.handle.close();
       } catch (error) {
@@ -497,8 +540,17 @@ async function commitStaged(staged, marker, directory) {
           : { exists: false },
         current,
       );
-      if (item.current && !sameFileIdentity(item.current.stat, current?.stat)) {
-        fail("workspace target identity changed during commit");
+      if (item.current) {
+        // The descriptor held since staging pins the original inode: a removed or
+        // replaced original shows zero links there even when the path now resolves to
+        // a recreated file with an identical inode number and timestamps.
+        const held = fileIdentity(await item.current.handle.stat({ bigint: true }));
+        if (
+          !sameFileIdentity(item.current.stat.identity, held) ||
+          !sameFileIdentity(item.current.stat.identity, current?.stat.identity)
+        ) {
+          fail("workspace target identity changed during commit");
+        }
       }
       const target = descriptorPath(item.handle, item.name);
       const temporary = descriptorPath(item.handle, item.temporaryName);
@@ -507,7 +559,7 @@ async function commitStaged(staged, marker, directory) {
         await rename(target, backup);
         await syncDirectory(item.handle);
         try {
-          await verifyEntryIdentity(item.handle, entry.backup, item.current.stat);
+          await verifyEntryIdentity(item.handle, entry.backup, item.current.stat.identity);
         } catch (error) {
           await rename(backup, target);
           await syncDirectory(item.handle);
