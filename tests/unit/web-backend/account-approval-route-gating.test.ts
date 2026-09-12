@@ -88,6 +88,8 @@ jest.unstable_mockModule("@mcp-moira/shared", () => ({
   isEmailConfigured: jest.fn(),
   isRateLimitDisabled: () => true,
   isTestEnvironment: () => true,
+  isWorkspaceReadinessDegraded: (view: { state: string }) =>
+    view.state === "misconfigured" || view.state === "connector_unavailable",
   logAuditEvent: jest.fn(),
 }));
 
@@ -121,6 +123,35 @@ jest.unstable_mockModule(
 jest.unstable_mockModule("../../../packages/web-backend/src/auth.js", () => ({
   auth: { api: {} },
 }));
+
+// Admin system status composes the shared workspace readiness decision; this test only
+// exercises approval gating, so the disabled (healthy) readiness view is enough.
+jest.unstable_mockModule(
+  "../../../packages/web-backend/src/services/workspace-services.js",
+  () => ({
+    getWorkspaceObservabilityService: () => ({
+      readiness: async () => ({
+        state: "disabled",
+        reason: "NOT_CONFIGURED",
+        provider: "github-codespaces",
+        configuration: "absent",
+        resources_enabled: false,
+        controls: [],
+        connector: { state: "not_applicable", reason: null },
+        reconciliation: { due_resources: 0, due_operations: 0, oldest_due_age_ms: null },
+        usage: {
+          active_resources: 0,
+          max_active_resources: 0,
+          active_operations: 0,
+          max_active_operations: null,
+          transfer_live_bytes: 0,
+          max_transfer_live_bytes: null,
+        },
+        checked_at: 0,
+      }),
+    }),
+  }),
+);
 
 async function mountProductionAdminRoutes(app: express.Application): Promise<void> {
   const { adminRoutes } = await import("../../../packages/web-backend/src/routes/admin.js");
@@ -241,6 +272,7 @@ describe("account approval route capability", () => {
         backendStatus: "degraded",
         databaseSize: 0,
         workflowReconciliation: reconciliationState,
+        workspaces: expect.objectContaining({ state: "disabled" }),
       },
     });
     expect(JSON.stringify(response.body.data.systemHealth.workflowReconciliation)).not.toContain(
@@ -286,6 +318,7 @@ describe("account approval route capability", () => {
         backendStatus: "healthy",
         databaseSize: 0,
         workflowReconciliation: reconciliationState,
+        workspaces: expect.objectContaining({ state: "disabled" }),
       },
       activeExecutions: 1,
       recentActivity: [

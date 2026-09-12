@@ -602,6 +602,176 @@
           "channel_error": "The channel could not deliver the test message."
         }
       },
+      "workspaces": {
+        "title": "Cloud workspaces",
+        "description": "Persistent Codespaces created by Moira for approved repositories. Agents work in them through the MCP workspace tools by workspace ID; the same workspace can be reused from any connected client.",
+        "loadFailed": "Failed to load cloud workspaces",
+        "loadFailedDescription": "Your other settings are still available. Retry this request.",
+        "retry": "Retry",
+        "refresh": "Refresh",
+        "requestFailed": "The workspace request was rejected",
+        "created": "Workspace creation was accepted",
+        "started": "Workspace start was requested",
+        "stopped": "Workspace stopped; repository data is preserved",
+        "deleted": "Workspace deletion was requested",
+        "disclosureTitle": "Agents get full Codespace access",
+        "disclosureDescription": "Inside a workspace the agent acts as the Codespace user: it can read the repository, use the network and read any secrets configured for that Codespace. Moira protects this server and other users, not the workspace from the agent you authorize.",
+        "instanceStates": {
+          "disabled": "Disabled on this instance",
+          "misconfigured": "Server configuration is invalid",
+          "control_disabled": "Stopped by an administrator",
+          "connector_unavailable": "Connector unavailable",
+          "ready": "Ready"
+        },
+        "instanceDescriptions": {
+          "disabled": "An administrator must configure the GitHub App, vault and workspace policy before workspaces can be created.",
+          "misconfigured": "Ask an administrator to correct the GitHub App or vault configuration.",
+          "control_disabled": "An administrator paused workspace work. Existing files are preserved.",
+          "connector_unavailable": "The credential connector is not answering. Try again later or contact an administrator.",
+          "ready": "Workspaces can be created and used."
+        },
+        "connectFirstTitle": "Connect GitHub first",
+        "connectFirstDescription": "Workspaces are created for repositories approved in the GitHub connection above.",
+        "repository": "Repository",
+        "ref": "Branch or ref",
+        "create": "Create workspace",
+        "createHint": "{{active}} of {{max}} active workspaces are in use on this instance. Codespaces are billed to your personal GitHub account.",
+        "list": "Your workspaces",
+        "empty": "No workspaces yet.",
+        "providerLine": "GitHub Codespaces · personal billing · {{machine}}",
+        "detailLine": "Desired {{desired}}, observed {{observed}} · generation {{generation}} · updated {{updated}}",
+        "states": {
+          "create_pending": "Creating",
+          "create_submitted": "Creating",
+          "usable": "Running",
+          "start_pending": "Starting",
+          "stop_pending": "Stopping",
+          "stopped": "Stopped (data kept)",
+          "delete_pending": "Deleting",
+          "cleanup_pending": "Cleaning up",
+          "deleted": "Deleted",
+          "rejected": "Rejected",
+          "ambiguous": "Needs reconciliation"
+        },
+        "desired": {
+          "running": "running",
+          "stopped": "stopped",
+          "deleted": "deleted"
+        },
+        "observed": {
+          "unknown": "unknown",
+          "provisioning": "provisioning",
+          "running": "running",
+          "stopped": "stopped",
+          "deleting": "deleting",
+          "absent": "absent",
+          "failed": "failed"
+        },
+        "start": "Start",
+        "stop": "Stop",
+        "delete": "Delete",
+        "confirmDeleteTitle": "Delete this workspace?",
+        "confirmDeleteDescription": "The Codespace for {{repository}} and every uncommitted change inside it will be removed permanently. Use Stop instead to keep the data."
+      },
+      "github": {
+        "title": "GitHub workspaces",
+        "description": "Connect GitHub on this website so Moira can use approved, user-owned Codespaces. Agents never receive GitHub credentials or authorization links.",
+        "loadFailed": "Failed to load the GitHub workspace connection",
+        "loadFailedDescription": "Your other settings are still available. Retry this connection status request.",
+        "retry": "Retry",
+        "disabledTitle": "GitHub workspaces are disabled",
+        "disabledDescription": "An administrator must configure the GitHub App and credential vault before accounts can be connected.",
+        "accountId": "GitHub account ID {{id}}",
+        "connect": "Connect GitHub",
+        "reconnect": "Reconnect GitHub",
+        "install": "Install GitHub App",
+        "disconnect": "Disconnect",
+        "confirmDisconnect": "Disconnect GitHub and revoke Moira's stored access? Active cloud workspace sessions will no longer be authorized.",
+        "disconnected": "GitHub was disconnected",
+        "disconnectFailed": "Failed to disconnect GitHub",
+        "revocationPending": "The connection is disabled while GitHub revocation is retried",
+        "confirmExternalRevocationAction": "Forget after external revoke",
+        "confirmExternalRevocationTitle": "Confirm GitHub access was revoked",
+        "confirmExternalRevocationDescription": "Moira cannot decrypt this credential to revoke it. First revoke the Moira GitHub App grant in GitHub settings. Confirm only after GitHub no longer lists the grant; Moira will then delete the unreadable local credential.",
+        "confirmExternalGrantRevocationDescription": "Moira cannot prove that a refreshed GitHub credential was revoked. First revoke the entire Moira GitHub App grant in GitHub settings. Confirm only after GitHub no longer lists the grant; Moira will then remove the blocked local connection.",
+        "externalRevocationCompleted": "The unreadable GitHub credential was removed",
+        "externalGrantRevocationCompleted": "The GitHub connection was removed after external revocation",
+        "externalRevocationFailed": "Failed to finish external revocation recovery",
+        "repositories": "Approved repositories",
+        "noRepositories": "The GitHub App does not currently grant access to a repository.",
+        "private": "Private",
+        "public": "Public",
+        "states": {
+          "disabled": "Disabled",
+          "configuration_error": "Configuration error",
+          "connection_required": "Not connected",
+          "connecting": "Connecting",
+          "installation_required": "App installation required",
+          "connected": "Connected",
+          "refresh_failed": "Reconnect required",
+          "revocation_pending": "Disconnecting",
+          "disconnected": "Disconnected"
+        },
+        "outcomes": {
+          "connected": "GitHub connected successfully",
+          "installation_required": "Authorize the GitHub App installation to finish setup",
+          "authorization_failed": "GitHub authorization failed or expired. Try again from Settings."
+        },
+        "errors": {
+          "INCOMPLETE_CONFIGURATION": {
+            "title": "GitHub workspace configuration is incomplete",
+            "description": "Ask an administrator to configure every required GitHub App and vault setting."
+          },
+          "INVALID_CLIENT_ID": {
+            "title": "GitHub App client ID is invalid",
+            "description": "Ask an administrator to correct the server configuration."
+          },
+          "INVALID_CLIENT_SECRET": {
+            "title": "GitHub App client secret is invalid",
+            "description": "Ask an administrator to replace the server secret."
+          },
+          "INVALID_CALLBACK_URL": {
+            "title": "GitHub App URL configuration is invalid",
+            "description": "Ask an administrator to correct the exact callback URL."
+          },
+          "INVALID_INSTALL_URL": {
+            "title": "GitHub App installation URL is invalid",
+            "description": "Ask an administrator to configure the app's exact GitHub installation URL."
+          },
+          "CALLBACK_ORIGIN_MISMATCH": {
+            "title": "GitHub callback does not match this Moira site",
+            "description": "Ask an administrator to use this site's exact callback URL."
+          },
+          "INVALID_VAULT_KEY": {
+            "title": "Credential vault key is invalid",
+            "description": "Ask an administrator to configure a strong dedicated vault key."
+          },
+          "INVALID_KEY_VERSION": {
+            "title": "Credential vault key version is invalid",
+            "description": "Ask an administrator to correct the vault key version."
+          },
+          "AUTH_REFRESH_FAILED": {
+            "title": "GitHub must be reconnected",
+            "description": "The saved GitHub credential expired or was revoked. Reconnect it on this page."
+          },
+          "AUTH_GRANT_REVOCATION_REQUIRED": {
+            "title": "Revoke the GitHub App grant before reconnecting",
+            "description": "A refresh outcome could not be safely retained or revoked. Revoke the entire Moira GitHub App grant in GitHub settings, then confirm that external revocation below. Reconnect remains disabled until recovery is complete."
+          },
+          "CREDENTIAL_UNREADABLE": {
+            "title": "The saved GitHub credential cannot be decrypted",
+            "description": "Revoke the Moira GitHub App grant in GitHub settings, then confirm the external revocation below. Reconnect is disabled until this recovery is complete."
+          },
+          "REVOCATION_PENDING": {
+            "title": "GitHub access is being revoked",
+            "description": "The connection is already disabled. Retry Disconnect to finish remote revocation."
+          },
+          "UNKNOWN": {
+            "title": "GitHub connection needs attention",
+            "description": "Review the connection and try again from this page."
+          }
+        }
+      },
       "saveChanges": "Save Changes",
       "saving": "Saving...",
       "cancel": "Cancel",
@@ -619,6 +789,7 @@
         "oauth": "OAuth Authorizations",
         "sessions": "Active Sessions",
         "notifications": "Notifications",
+        "integrations": "Integrations",
         "connections": "Connections & Sessions",
         "settings": "Settings",
         "apiTokens": "API Tokens"
@@ -1417,8 +1588,60 @@
       "tabs": {
         "definitions": "Definitions",
         "values": "Values",
-        "maintenance": "Maintenance"
+        "maintenance": "Maintenance",
+        "workspaces": "Workspaces"
       }
+    },
+    "workspaces": {
+      "loadFailed": "Failed to load cloud workspace status",
+      "retry": "Retry",
+      "refresh": "Refresh",
+      "readinessTitle": "Cloud workspace readiness",
+      "readinessDescription": "One shared decision for the website, MCP tools and health checks. A disabled feature is healthy; invalid configuration or an unreachable connector degrades the instance.",
+      "reason": "Reason: {{reason}}",
+      "states": {
+        "disabled": "Disabled",
+        "misconfigured": "Misconfigured",
+        "control_disabled": "Stopped by control",
+        "connector_unavailable": "Connector unavailable",
+        "ready": "Ready"
+      },
+      "configuration": {
+        "absent": "Not configured",
+        "invalid": "Invalid",
+        "available": "Configured"
+      },
+      "connector": {
+        "available": "Available",
+        "unavailable": "Unavailable",
+        "not_applicable": "Not started"
+      },
+      "facts": {
+        "configuration": "GitHub App configuration",
+        "resources": "Workspace creation",
+        "connector": "Credential connector",
+        "reconciliation": "Reconciliation backlog",
+        "activeResources": "Active workspaces / limit",
+        "activeOperations": "Active operations / limit",
+        "transferBytes": "Live transfer bytes / limit"
+      },
+      "reconciliationValue": "{{resources}} workspaces, {{operations}} operations, oldest {{age}}",
+      "controlsTitle": "Emergency controls",
+      "controlsDescription": "Disabling a control refuses new workspace creation, start and agent operations and stops running workspaces. Repository data is preserved; nothing is deleted.",
+      "scopes": {
+        "global": "All providers",
+        "provider": "Provider {{provider}}"
+      },
+      "stopped": "Stopped",
+      "accepting": "Accepting work",
+      "reasonLabel": "Reason shown to operators",
+      "enable": "Resume",
+      "disable": "Stop new work",
+      "confirmDisableTitle": "Stop workspace work?",
+      "confirmDisableDescription": "New workspaces, starts and agent operations will be refused and running workspaces will be stopped. Files stay in the workspaces; no data is deleted.",
+      "disabledToast": "Workspace control disabled new work",
+      "enabledToast": "Workspace control resumed",
+      "saveFailed": "Failed to update the workspace control"
     },
     "systemSettings": {
       "title": "System Settings",

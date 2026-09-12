@@ -54,7 +54,10 @@ All tools publish a root-object input schema so MCP clients can discover the com
 public `start` schema therefore exposes `action` directly and lists the fields accepted by either
 phase. Runtime validation still enforces the selected phase exactly: `prepare` requires `workflowId`
 and `parentExecutionId`, while `execute` requires `startAttemptId`; fields belonging only to the other
-phase and unknown fields are rejected as MCP errors.
+phase and unknown fields are rejected as MCP errors. The `workspace_*` execution and file tools follow
+the same pattern: one flat object per tool with only `workspace_id` required, while dispatch enforces
+the exact form (a new request, or a resume carrying only `workspace_id` and `operation_id`; exactly one
+of `stdin_text` or `stdin_file` for `workspace_exec`).
 
 `start({ action: "prepare" })` resolves and validates an authorized workflow, binds the workflow version and request options, and returns a Start attempt ID that expires after 15 minutes without creating an execution. `parentExecutionId` links a child to an existing parent; use `"none"` for a standalone execution. `skipNotificationCheck` records a policy to bypass only optional ordinary-notification preflight during execute. `skipTelegramCheck` remains a deprecated alias with the same behavior, and conflicting values are rejected.
 
@@ -107,6 +110,46 @@ For an upload grant returned by `token`, submit the selected file to its `upload
 ```bash
 curl -X POST "${uploadUrl}" -F "workflow=@your-workflow.json"
 ```
+
+### Cloud workspaces
+
+The `workspace_*` tools give an agent a persistent, user-owned cloud development environment
+(currently a personal GitHub Codespace) without a local shell or filesystem. GitHub is connected
+only on the Moira website; no tool starts, resumes or polls an authorization. When the connection,
+installation or server configuration is missing, every tool returns a bounded error with a
+same-origin `settings_url` for the user to complete setup, and nothing is provisioned.
+
+Every call names a `workspace_id` obtained from `workspace_list` or `workspace_create`. Ownership
+is checked server-side, so an unknown or foreign ID returns the generic `WORKSPACE_NOT_FOUND`
+result. A workspace is not tied to a chat or session: reuse the same `workspace_id` from any
+client. `workspace_stop` preserves the repository data (`data_preserved: true`);
+`workspace_delete` is destructive and requires `confirm_delete: true` with the workspace's current
+`generation`, so a stale call cannot delete a changed workspace.
+
+`workspace_exec` runs argv as data (no shell interpolation) in a repository-relative `cwd` with a
+timeout (`timeout_seconds`, default 300) and optional per-stream output limits, and returns bounded `stdout`, `stderr` and the exact
+`exit_code`. Supply at most one stdin form: `stdin_text` for UTF-8 text or `stdin_file` for a native
+ChatGPT file reference; the file's bytes reach the process without base64 in the conversation.
+Failed, timed-out and cancelled commands and rejected file edits are returned as tool errors that
+keep `operation_id` and the available output. A result whose `state` is not terminal is not a
+success: call the same tool again with only `workspace_id` and `operation_id` to obtain the stored
+outcome without running the command or mutation twice.
+
+`workspace_read` returns UTF-8 text with `offset`, `total_size` and `sha256`; `length` defaults to
+64 KiB, and `workspace_search` defaults to 100 matches within 64 KiB of results, so naming only the
+workspace, path and query is a complete call. A non-text range returns
+`WORKSPACE_BINARY_READ_REQUIRES_DOWNLOAD`. A call that matches no request form returns
+`WORKSPACE_REQUEST_INVALID` naming the missing or invalid fields. `workspace_write` replaces a file atomically
+under an `expected` precondition (`exists`, optional `size_bytes` and `sha256`), and
+`workspace_apply_patch` applies ordered byte-offset edits per file with the same preconditions and
+returns old/new versions plus a content-free summary. `workspace_upload` writes a native file
+reference to a path; `workspace_download` returns the file as an MCP `resource_link` whose one-use
+HTTPS link expires automatically and is never repeated in the JSON result.
+
+The agent runs as the ordinary Codespace user with that environment's repository, network and
+configured secrets. Moira bounds its own concurrency, input/output size, time and quotas and
+protects the Moira server and other users; it does not sandbox the workspace from the agent its
+owner authorized.
 
 ### Runtime help
 

@@ -8,24 +8,28 @@ import * as path from "node:path";
 
 const MIGRATIONS = path.resolve(process.cwd(), "packages/web-backend/drizzle");
 const TABLE = "communication_attachment_grant";
-const ATTEMPT_TABLE = "executionMutationAttempt";
 const MIGRATION_TAG = "0023_communication_attachment_grants";
+
+function copyBeforeGrantMigration(directory: string): string {
+  const target = path.join(directory, "before-communication-grants");
+  fs.cpSync(MIGRATIONS, target, { recursive: true });
+  const journalPath = path.join(target, "meta/_journal.json");
+  const journal = JSON.parse(fs.readFileSync(journalPath, "utf8")) as {
+    entries: Array<{ tag: string }>;
+  };
+  const index = journal.entries.findIndex((entry) => entry.tag === MIGRATION_TAG);
+  if (index < 1) throw new Error("Communication grant migration is absent from the journal");
+  journal.entries = journal.entries.slice(0, index);
+  fs.writeFileSync(journalPath, `${JSON.stringify(journal, null, 2)}\n`);
+  return target;
+}
 
 describe("communication attachment grant migration", () => {
   test("upgrades an existing database with the digest-only grant shape", () => {
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), "moira-communication-migration-"));
     const sqlite = new Database(path.join(directory, "moira.db"));
     try {
-      const journal = JSON.parse(
-        fs.readFileSync(path.join(MIGRATIONS, "meta/_journal.json"), "utf8"),
-      ) as { entries: Array<{ tag: string; when: number }> };
-      const migrationTimestamp = journal.entries.find((entry) => entry.tag === MIGRATION_TAG)!.when;
-      migrate(drizzle(sqlite), { migrationsFolder: MIGRATIONS });
-      sqlite.exec(`DROP TABLE ${ATTEMPT_TABLE}`);
-      sqlite.exec(`DROP TABLE ${TABLE}`);
-      sqlite
-        .prepare("DELETE FROM __drizzle_migrations WHERE created_at >= ?")
-        .run(migrationTimestamp);
+      migrate(drizzle(sqlite), { migrationsFolder: copyBeforeGrantMigration(directory) });
       migrate(drizzle(sqlite), { migrationsFolder: MIGRATIONS });
 
       const columns = (

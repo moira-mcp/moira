@@ -19,9 +19,8 @@ import * as path from "path";
 const MIGRATIONS = path.resolve(process.cwd(), "packages/web-backend/drizzle");
 const NEW_TABLE = "extensionSettingValue";
 const NEW_MIGRATION_TAG = "0022_extension_setting_values";
-const LATER_TABLE = "communication_attachment_grant";
-const ATTEMPT_TABLE = "executionMutationAttempt";
 const ATTEMPT_MIGRATION_TAG = "0024_execution_mutation_attempts";
+const WORKSPACE_MIGRATION_TAG = "0026_workspace_resources";
 
 function tableNames(sqlite: ReturnType<typeof Database>): string[] {
   return (
@@ -42,27 +41,30 @@ describe("Migrating a database created before the extension value store", () => 
   test("the new table appears, the existing ones are untouched, and their rows survive", () => {
     const journal = JSON.parse(
       fs.readFileSync(path.join(MIGRATIONS, "meta/_journal.json"), "utf8"),
-    ) as { entries: Array<{ tag: string; when: number }> };
+    ) as { entries: Array<{ tag: string }> };
     expect(journal.entries.map((entry) => entry.tag)).toContain(NEW_MIGRATION_TAG);
     expect(journal.entries.map((entry) => entry.tag)).toContain(ATTEMPT_MIGRATION_TAG);
-    const newMigrationTimestamp = journal.entries.find(
-      (entry) => entry.tag === NEW_MIGRATION_TAG,
-    )!.when;
+    expect(journal.entries.map((entry) => entry.tag)).toContain(WORKSPACE_MIGRATION_TAG);
 
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "moira-migration-"));
+    const beforeMigrations = path.join(dir, "before-extension-settings");
+    fs.cpSync(MIGRATIONS, beforeMigrations, { recursive: true });
+    const beforeJournalPath = path.join(beforeMigrations, "meta/_journal.json");
+    const beforeJournal = JSON.parse(fs.readFileSync(beforeJournalPath, "utf8")) as {
+      entries: Array<{ tag: string }>;
+    };
+    const extensionMigrationIndex = beforeJournal.entries.findIndex(
+      (entry) => entry.tag === NEW_MIGRATION_TAG,
+    );
+    beforeJournal.entries = beforeJournal.entries.slice(0, extensionMigrationIndex);
+    fs.writeFileSync(beforeJournalPath, `${JSON.stringify(beforeJournal, null, 2)}\n`);
     const file = path.join(dir, "moira.db");
     const sqlite = new Database(file);
     sqlite.pragma("foreign_keys = ON");
 
     try {
       // A database as it was before this change: everything applied except the new migration.
-      migrate(drizzle(sqlite), { migrationsFolder: MIGRATIONS });
-      sqlite.exec(`DROP TABLE ${ATTEMPT_TABLE}`);
-      sqlite.exec(`DROP TABLE ${LATER_TABLE}`);
-      sqlite.exec(`DROP TABLE ${NEW_TABLE}`);
-      sqlite
-        .prepare("DELETE FROM __drizzle_migrations WHERE created_at >= ?")
-        .run(newMigrationTimestamp);
+      migrate(drizzle(sqlite), { migrationsFolder: beforeMigrations });
       expect(tableNames(sqlite)).not.toContain(NEW_TABLE);
 
       // Data an installation would already have, so that "untouched" means something.
@@ -81,11 +83,10 @@ describe("Migrating a database created before the extension value store", () => 
       // the journal thinks it ran, and the installation starts without the table.
       expect(tableNames(sqlite)).toContain(NEW_TABLE);
 
-      const schemaAfter = tableSchemas(sqlite);
-      delete schemaAfter.__drizzle_migrations;
-      delete schemaAfter[NEW_TABLE];
-      delete schemaAfter[LATER_TABLE];
-      delete schemaAfter[ATTEMPT_TABLE];
+      const allSchemasAfter = tableSchemas(sqlite);
+      const schemaAfter = Object.fromEntries(
+        Object.keys(schemaBefore).map((name) => [name, allSchemasAfter[name]]),
+      );
       // Every other table is byte-for-byte the definition it had before.
       expect(schemaAfter).toEqual(schemaBefore);
 

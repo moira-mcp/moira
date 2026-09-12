@@ -1,5 +1,33 @@
 export const toolDescriptions = {
   default: {
+    workspace_list:
+      "List the authenticated user's reusable cloud workspaces and approved repository targets. Use workspace_id from this result for every later operation. Workspaces are persistent and are not mapped to chats or sessions. Authorization is configured only in Moira Settings.\n",
+    workspace_create:
+      "Create a persistent user-owned cloud workspace for an approved repository_id and ref. Discover approved targets with workspace_list. Creation may return a pending state. This tool never imports an existing provider workspace and never performs authorization.\n",
+    workspace_get:
+      "Inspect one persistent workspace owned by the authenticated user. The opaque workspace_id grants no authority by itself. The result omits provider credentials, connector details and internal lifecycle capabilities.\n",
+    workspace_start:
+      "Start one stopped persistent workspace by workspace_id. The operation may remain pending while the exact provider resource reconciles. Configure or repair GitHub authorization only in Moira Settings.\n",
+    workspace_stop:
+      "Stop one persistent workspace by workspace_id while preserving its repository data. Stopping is not deletion. Use workspace_delete only for an explicitly confirmed destructive operation.\n",
+    workspace_delete:
+      "Permanently delete one workspace. Pass confirm_delete=true and the expected_generation returned by workspace_get or workspace_list; a stale generation fails without deletion. This is destructive and does not preserve workspace data.\n",
+    workspace_exec:
+      "Run one bounded argv command directly as the ordinary user of a persistent cloud workspace. Arguments are data, not a shell string. Provide at most one stdin form: stdin_text for UTF-8 text or stdin_file for a native ChatGPT file reference; omit both for empty stdin. Native file stdin is fetched and dispatched directly without workspace_upload, base64 or shell redirection. File name, MIME type and exact size are optional; unknown sizes reserve the configured maximum before downloading. Results preserve separate bounded stdout/stderr and the exact exit code when terminal. If a result is pending, call this same tool again with only workspace_id and the returned operation_id to reconcile it without dispatching a duplicate command.\n",
+    workspace_stat:
+      "Inspect bounded metadata for one repository-relative file or directory in a persistent workspace. Paths are data; absolute paths, traversal, links and special-file escapes are rejected by the workspace service. Resume a pending result with only workspace_id and its operation_id.\n",
+    workspace_search:
+      "Search repository text under one relative path with explicit match, result-byte and remote-time limits. Choose literal or regex mode. The response returns exact coordinates and a truthful truncated flag; it does not download the repository. Resume a pending result with only workspace_id and its operation_id.\n",
+    workspace_read:
+      "Read one bounded byte range as UTF-8 text with offset, total size and SHA-256 metadata. Use workspace_download for non-UTF-8 or other binary bytes; do not request or construct base64. Resume a pending result with only workspace_id and its operation_id.\n",
+    workspace_write:
+      "Atomically replace one repository-relative UTF-8 file. Always state whether the target must exist and include the prior size/SHA-256 when available so concurrent or stale writes fail closed. Do not use shell redirection. Resume a pending result with only workspace_id and its operation_id instead of writing again.\n",
+    workspace_apply_patch:
+      "Apply ordered byte-offset UTF-8 edits to one or more repository-relative files as one coherent structured patch. Every file has existence and optional size/SHA-256 preconditions. The result contains versions and a bounded content-free summary. Do not send a shell patch command. Resume a pending result with only workspace_id and its operation_id instead of applying it again.\n",
+    workspace_upload:
+      "Atomically write a native ChatGPT file reference to a repository-relative workspace path. Pass the native file object and a write precondition. The reference requires only file_id and download_url; preserve file_name, mime_type and size_bytes when supplied, but do not invent them. The server reserves bounded capacity before fetching, validates the actual bytes, and never needs base64 in model context. Resume a pending result with only workspace_id and its operation_id; do not replay the consumed file reference.\n",
+    workspace_download:
+      "Create a bounded one-use MCP resource_link for a repository-relative workspace file. Declare the maximum bytes, safe output name and MIME type. Resume a pending download with workspace_id, operation_id, file_name and mime_type, omitting path and max_bytes; this retrieves retained bytes under the original byte limit without dispatching another download. The result link expires and is consumed after complete or interrupted delivery; it is not available through resources/list or resources/read.\n",
     communication:
       "Send information to the authenticated user through configured communication channels.\n\nActions:\n\n- send: Deliver a text message immediately.\n- attachment-token: Create a five-minute, single-use grant for one authenticated binary upload. Send the bytes with a valid MCP Bearer credential for the same user to the returned uploadUrl and put the grant in X-Moira-Communication-Grant.\n\nThe server chooses configured providers and recipients. Provider names, destinations, credentials, paths, URLs, and arbitrary headers are not accepted. For attachments, declare kind, filename, MIME type, and exact byte size; image uploads accept PNG and JPEG.\n",
     artifacts:

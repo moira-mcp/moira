@@ -50,6 +50,42 @@ services:
       - WORKFLOWS_DIR=./workflows/production
       - METRICS_PORT=9090
       - LOG_LEVEL=${LOG_LEVEL:-info}
+      # GitHub workspace connection is fail-closed unless every value is supplied
+      # by the operator's untracked .env or deployment secret manager.
+      - WORKSPACE_GITHUB_APP_CLIENT_ID=${WORKSPACE_GITHUB_APP_CLIENT_ID:-}
+      - WORKSPACE_GITHUB_APP_CLIENT_SECRET=${WORKSPACE_GITHUB_APP_CLIENT_SECRET:-}
+      - WORKSPACE_GITHUB_APP_CALLBACK_URL=${WORKSPACE_GITHUB_APP_CALLBACK_URL:-}
+      - WORKSPACE_GITHUB_APP_INSTALL_URL=${WORKSPACE_GITHUB_APP_INSTALL_URL:-}
+      - WORKSPACE_CREDENTIAL_VAULT_KEY=${WORKSPACE_CREDENTIAL_VAULT_KEY:-}
+      - WORKSPACE_CREDENTIAL_VAULT_KEY_VERSION=${WORKSPACE_CREDENTIAL_VAULT_KEY_VERSION:-v1}
+      - WORKSPACE_CODESPACES_ENABLED=${WORKSPACE_CODESPACES_ENABLED:-false}
+      - WORKSPACE_MAX_CPU_CORES=${WORKSPACE_MAX_CPU_CORES:-4}
+      - WORKSPACE_MAX_MEMORY_GB=${WORKSPACE_MAX_MEMORY_GB:-8}
+      - WORKSPACE_MAX_STORAGE_GB=${WORKSPACE_MAX_STORAGE_GB:-32}
+      - WORKSPACE_MAX_ACTIVE_PER_USER=${WORKSPACE_MAX_ACTIVE_PER_USER:-1}
+      - WORKSPACE_MAX_ACTIVE_GLOBAL=${WORKSPACE_MAX_ACTIVE_GLOBAL:-4}
+      - WORKSPACE_MAX_OPERATIONS_PER_DAY=${WORKSPACE_MAX_OPERATIONS_PER_DAY:-200}
+      - WORKSPACE_CREATE_THROTTLE_SECONDS=${WORKSPACE_CREATE_THROTTLE_SECONDS:-60}
+      - WORKSPACE_REMOTE_TTL_MINUTES=${WORKSPACE_REMOTE_TTL_MINUTES:-120}
+      - WORKSPACE_PERSISTENT_RETENTION_DAYS=${WORKSPACE_PERSISTENT_RETENTION_DAYS:-30}
+      - WORKSPACE_CREATE_DEADLINE_MINUTES=${WORKSPACE_CREATE_DEADLINE_MINUTES:-15}
+      - WORKSPACE_CLEANUP_DEADLINE_MINUTES=${WORKSPACE_CLEANUP_DEADLINE_MINUTES:-15}
+      - WORKSPACE_CLAIM_LEASE_SECONDS=${WORKSPACE_CLAIM_LEASE_SECONDS:-30}
+      - WORKSPACE_RECONCILE_INTERVAL_SECONDS=${WORKSPACE_RECONCILE_INTERVAL_SECONDS:-30}
+      - WORKSPACE_MAX_CONCURRENT_OPERATIONS_PER_USER=${WORKSPACE_MAX_CONCURRENT_OPERATIONS_PER_USER:-2}
+      - WORKSPACE_MAX_CONCURRENT_OPERATIONS_GLOBAL=${WORKSPACE_MAX_CONCURRENT_OPERATIONS_GLOBAL:-20}
+      - WORKSPACE_MAX_OPERATION_INPUT_KB=${WORKSPACE_MAX_OPERATION_INPUT_KB:-1024}
+      - WORKSPACE_MAX_OPERATION_STDOUT_KB=${WORKSPACE_MAX_OPERATION_STDOUT_KB:-1024}
+      - WORKSPACE_MAX_OPERATION_STDERR_KB=${WORKSPACE_MAX_OPERATION_STDERR_KB:-256}
+      - WORKSPACE_MAX_OPERATION_SECONDS=${WORKSPACE_MAX_OPERATION_SECONDS:-900}
+      - WORKSPACE_MAX_TRANSFER_FILE_MB=${WORKSPACE_MAX_TRANSFER_FILE_MB:-4}
+      - WORKSPACE_MAX_TRANSFER_TOTAL_MB_PER_USER=${WORKSPACE_MAX_TRANSFER_TOTAL_MB_PER_USER:-100}
+      - WORKSPACE_MAX_TRANSFER_TOTAL_MB_GLOBAL=${WORKSPACE_MAX_TRANSFER_TOTAL_MB_GLOBAL:-1024}
+      - WORKSPACE_MAX_TRANSFER_OBJECTS_PER_USER=${WORKSPACE_MAX_TRANSFER_OBJECTS_PER_USER:-10}
+      - WORKSPACE_MAX_TRANSFER_OBJECTS_GLOBAL=${WORKSPACE_MAX_TRANSFER_OBJECTS_GLOBAL:-1000}
+      - WORKSPACE_MAX_TRANSFER_INFLIGHT_MB_PER_USER=${WORKSPACE_MAX_TRANSFER_INFLIGHT_MB_PER_USER:-40}
+      - WORKSPACE_MAX_TRANSFER_INFLIGHT_MB_GLOBAL=${WORKSPACE_MAX_TRANSFER_INFLIGHT_MB_GLOBAL:-256}
+      - WORKSPACE_TRANSFER_TTL_MINUTES=${WORKSPACE_TRANSFER_TTL_MINUTES:-10}
       # Empty keeps extensions disabled. When the optional profile is enabled, point this at the
       # runner service over the Compose network.
       - MOIRA_EXTENSION_RUNNER_URL=${MOIRA_EXTENSION_RUNNER_URL:-}
@@ -57,6 +93,9 @@ services:
     # The dependency is optional because the runner profile is off by default. When the profile is
     # selected, wait for its catalog endpoint before Moira performs its one-time registry sync.
     depends_on:
+      moira-workspace-connector:
+        condition: service_healthy
+        required: false
       moira-extension-runner:
         condition: service_healthy
         required: false
@@ -69,6 +108,7 @@ services:
     # SQLite database + execution storage persist on the host. Survives rebuilds.
     volumes:
       - ./data:/app/data
+      - workspace_connector_run:/run/moira-workspace-connector
 
     # Internal metrics/health server (9090) is the source of truth for health.
     healthcheck:
@@ -76,6 +116,77 @@ services:
       interval: 30s
       timeout: 10s
       start_period: 40s
+      retries: 3
+
+  # Credential-bearing GitHub CLI/SSH work is isolated from the application,
+  # database, vault and application network. Only this Unix socket is shared.
+  moira-workspace-connector:
+    profiles: ["workspaces"]
+    image: ${MOIRA_IMAGE:-ghcr.io/moira-mcp/moira:latest}
+    # An init process reaps the gh/ssh helpers that jobs leave behind; without it they
+    # stay as zombies under the Node server and exhaust the PID and process limits.
+    init: true
+    entrypoint: ["/usr/local/bin/node", "--experimental-strip-types"]
+    command:
+      - /app/packages/web-backend/src/services/github-codespaces-connector-server.ts
+    restart: "on-failure:3"
+    read_only: true
+    cap_drop: ["ALL"]
+    cap_add: ["SETUID", "SETGID"]
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 384
+    mem_limit: 640m
+    cpus: 1.0
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,noexec,size=536870912,mode=1777
+    volumes:
+      - workspace_connector_run:/run/moira-workspace-connector
+      - workspace_egress_run:/run/moira-workspace-egress
+    network_mode: none
+    environment:
+      - HTTPS_PROXY=http://127.0.0.1:18080
+      - HTTP_PROXY=http://127.0.0.1:18080
+      - NO_PROXY=
+    depends_on:
+      moira-workspace-egress:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          'curl --fail --silent --unix-socket /run/moira-workspace-connector/connector.sock http://localhost/health | grep -q ''"state":"available"''',
+        ]
+      interval: 10s
+      timeout: 3s
+      start_period: 10s
+      retries: 3
+
+  # Credential-free CONNECT proxy. It is the connector's only route to the
+  # public network and accepts only reviewed GitHub/Codespaces HTTPS hosts.
+  moira-workspace-egress:
+    profiles: ["workspaces"]
+    image: ${MOIRA_IMAGE:-ghcr.io/moira-mcp/moira:latest}
+    entrypoint: ["/usr/local/bin/node", "--experimental-strip-types"]
+    command:
+      - /app/packages/web-backend/src/services/github-codespaces-egress-proxy.ts
+    restart: "on-failure:3"
+    read_only: true
+    cap_drop: ["ALL"]
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
+    mem_limit: 128m
+    cpus: 0.25
+    volumes:
+      - workspace_egress_run:/run/moira-workspace-egress
+    networks:
+      - workspace_connector_public
+    healthcheck:
+      test: ["CMD", "test", "-S", "/run/moira-workspace-egress/proxy.sock"]
+      interval: 10s
+      timeout: 3s
+      start_period: 5s
       retries: 3
 
   # Extension handlers run in a companion process. The profile is deliberately disabled by
@@ -101,3 +212,10 @@ services:
       timeout: 10s
       start_period: 20s
       retries: 3
+
+volumes:
+  workspace_connector_run:
+  workspace_egress_run:
+
+networks:
+  workspace_connector_public:

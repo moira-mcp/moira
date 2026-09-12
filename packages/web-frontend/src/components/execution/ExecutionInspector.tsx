@@ -71,6 +71,8 @@ export interface ExecutionData {
   currentNodeId: string | null;
   waitingForInputNodeId: string | null;
   revision: number;
+  /** Present on owner executions; the `context` token guards per-path context saves. */
+  metadataRevisions?: { parent: string; context: string; reminders: string };
   context: {
     variables: Record<string, unknown>;
     nodeStates: Record<string, unknown>;
@@ -335,12 +337,13 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
   // keeps the graph mounted and the save atomic from the UI's perspective.
   const handleSavePath = useCallback(
     async (path: Array<string | number>, value: unknown): Promise<boolean> => {
-      if (!editable || !execution) return false;
+      if (!editable || !execution?.metadataRevisions) return false;
       const success = await apiClient.updateExecutionContextPath(
         execution.executionId,
         path,
         value,
         execution.revision,
+        execution.metadataRevisions.context,
       );
       if (success) {
         // Refresh execution state only. On a transient fetch error, keep the current

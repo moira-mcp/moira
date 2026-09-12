@@ -94,6 +94,7 @@ describe("public workflow selection surfaces", () => {
       ["software-development-flow", "notify-report-ready"],
       ["software-development-flow", "notify-unit-approval"],
       ["software-development-flow", "notify-workflow-complete"],
+      ["software-development-flow", "notify-workflow-finished-without-finalization"],
       ["software-development-flow", "notify-workflow-stopped"],
       ["universal-research-workflow", "send-notification"],
     ]);

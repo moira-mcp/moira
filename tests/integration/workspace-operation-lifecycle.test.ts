@@ -1,0 +1,1251 @@
+import { describe, expect, jest, test } from "@jest/globals";
+import Database from "better-sqlite3";
+import { drizzle } from "drizzle-orm/better-sqlite3";
+import { migrate } from "drizzle-orm/better-sqlite3/migrator";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import {
+  WorkspaceOperationRepository,
+  WorkspaceOperationService,
+  WorkspaceFileService,
+  WorkspaceResourceRepository,
+  WorkspaceTransferRepository,
+  WorkspaceTransferService,
+  type WorkspaceOperationResult,
+  type WorkspaceOperationTransport,
+  type WorkspaceResourcePolicy,
+} from "@mcp-moira/shared";
+
+const migrations = path.resolve(process.cwd(), "packages/web-backend/drizzle");
+const now = 1_788_850_000_000;
+const policy: WorkspaceResourcePolicy = {
+  enabled: true,
+  maxCpuCores: 4,
+  maxMemoryBytes: 8 * 1024 ** 3,
+  maxStorageBytes: 32 * 1024 ** 3,
+  maxActivePerUser: 2,
+  maxActiveGlobal: 10,
+  maxOperationsPerDay: 10,
+  createThrottleMs: 0,
+  remoteTtlMs: 60_000,
+  createDeadlineMs: 30_000,
+  cleanupDeadlineMs: 30_000,
+  claimLeaseMs: 5_000,
+  reconcileIntervalMs: 60_000,
+  maxConcurrentOperationsPerUser: 1,
+  maxConcurrentOperationsGlobal: 2,
+  maxOperationInputBytes: 1024,
+  maxOperationStdoutBytes: 1024,
+  maxOperationStderrBytes: 512,
+  maxOperationMs: 60_000,
+};
+
+class FakeTransport implements WorkspaceOperationTransport {
+  available = true;
+  async health() {
+    return { ok: this.available, reason: null };
+  }
+  executeResult: WorkspaceOperationResult | { state: "running" } = {
+    state: "succeeded",
+    stdout: "ok",
+    stderr: "",
+    exitCode: 0,
+  };
+  cancelResult: WorkspaceOperationResult | { state: "running" } | { state: "absent" } = {
+    state: "running",
+  };
+  throwExecute = false;
+  throwFinalize = false;
+  lastWorkspace: Parameters<WorkspaceOperationTransport["execute"]>[1] | null = null;
+  lastRequest: Parameters<WorkspaceOperationTransport["execute"]>[3] | null = null;
+  executeGate: Promise<void> | null = null;
+  executeObservation: (() => void) | null = null;
+  lastInspectedOperation: Parameters<WorkspaceOperationTransport["inspect"]>[2] | null = null;
+  readonly executeCalls = jest.fn();
+  readonly inspectCalls = jest.fn();
+  readonly cancelCalls = jest.fn();
+  readonly finalizeCalls = jest.fn();
+
+  async execute(
+    _credential: string,
+    workspace: Parameters<WorkspaceOperationTransport["execute"]>[1],
+    _operation: Parameters<WorkspaceOperationTransport["execute"]>[2],
+    request: Parameters<WorkspaceOperationTransport["execute"]>[3],
+  ) {
+    this.executeCalls();
+    this.lastWorkspace = workspace;
+    this.lastRequest = request;
+    if (this.throwExecute) throw new Error("ssh response lost");
+    this.executeObservation?.();
+    if (this.executeGate) await this.executeGate;
+    return this.executeResult;
+  }
+
+  async inspect(
+    _credential: string,
+    _workspace: Parameters<WorkspaceOperationTransport["inspect"]>[1],
+    operation: Parameters<WorkspaceOperationTransport["inspect"]>[2],
+  ) {
+    this.inspectCalls();
+    this.lastInspectedOperation = operation;
+    return this.executeResult;
+  }
+
+  async cancel() {
+    this.cancelCalls();
+    return this.cancelResult;
+  }
+
+  async finalize() {
+    this.finalizeCalls();
+    if (this.throwFinalize) throw new Error("remote cleanup unavailable");
+  }
+}
+
+function fixture() {
+  const sqlite = new Database(":memory:");
+  sqlite.pragma("foreign_keys = ON");
+  migrate(drizzle(sqlite), { migrationsFolder: migrations });
+  sqlite.exec(`
+    INSERT INTO user (id, email, handle, createdAt, updatedAt) VALUES
+      ('user-1', 'one@example.test', 'user-one', 'now', 'now'),
+      ('user-2', 'two@example.test', 'user-two', 'now', 'now');
+    INSERT INTO workspaceConnection
+      (id, userId, provider, externalAccountId, externalLogin, status,
+       credentialGeneration, createdAt, updatedAt)
+      VALUES ('connection-1', 'user-1', 'github-codespaces', '101', 'owner',
+              'connected', 1, ${now}, ${now});
+    INSERT INTO workspaceConnectionRepository
+      (connectionId, externalInstallationId, externalRepositoryId, fullName, private, createdAt)
+      VALUES ('connection-1', '201', '301', 'owner/repository', 1, ${now});
+    INSERT INTO workspaceResource
+      (id, userId, connectionId, authorizationGeneration, provider, repositoryId,
+       repositoryFullName, requestedRef, operationMarker, providerResourceName,
+       externalOwnerId, billableOwnerId, machineName, machineDisplayName,
+       machineOperatingSystem, machineCpuCores, machineMemoryBytes, machineStorageBytes,
+       state, retentionPolicy, desiredState, observedState, generation,
+       createDeadlineAt, remoteExpiresAt, createdAt, updatedAt)
+      VALUES ('workspace-1', 'user-1', 'connection-1', 1, 'github-codespaces', '301',
+       'owner/repository', 'refs/heads/main', 'moira-workspace', 'silver-space', '101', '101',
+       'basic', 'Basic', 'linux', 2, 8589934592, 34359738368,
+       'usable', 'persistent', 'running', 'running', 1, ${now + 30_000},
+       ${now + 60_000}, ${now}, ${now});
+  `);
+  const repository = new WorkspaceOperationRepository(sqlite);
+  const transport = new FakeTransport();
+  const credentials = { getCredential: jest.fn(async () => "ghu_access") };
+  let currentNow = now;
+  const service = new WorkspaceOperationService({
+    repository,
+    transport,
+    credentials,
+    policy: () => policy,
+    now: () => currentNow,
+  });
+  return {
+    sqlite,
+    repository,
+    transport,
+    credentials,
+    service,
+    advance: (milliseconds: number) => {
+      currentNow += milliseconds;
+    },
+  };
+}
+
+describe("durable direct workspace operations", () => {
+  test("rejects unavailable connector before credentials on dispatch and result recovery", async () => {
+    const value = fixture();
+    const request = {
+      argv: ["true"],
+      cwd: ".",
+      stdin: { kind: "inline" as const, bytes: new Uint8Array() },
+      timeoutMs: 1000,
+    };
+    try {
+      const started = await value.service.execute("user-1", "workspace-1", request);
+      value.transport.available = false;
+      value.credentials.getCredential.mockClear();
+      value.transport.executeCalls.mockClear();
+      await expect(value.service.reconcile("user-1", started.operation.id)).rejects.toMatchObject({
+        code: "WORKSPACE_PROVIDER_UNAVAILABLE",
+      });
+      await expect(value.service.execute("user-1", "workspace-1", request)).rejects.toMatchObject({
+        code: "WORKSPACE_PROVIDER_UNAVAILABLE",
+      });
+      expect(value.credentials.getCredential).not.toHaveBeenCalled();
+      expect(value.transport.executeCalls).not.toHaveBeenCalled();
+      expect(value.transport.inspectCalls).not.toHaveBeenCalled();
+      expect(value.repository.listOwned("user-1", "workspace-1")).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            state: "cancelled",
+            remoteCleanupPending: 0,
+            lastOutcome: "connector_unavailable_before_dispatch",
+          }),
+        ]),
+      );
+    } finally {
+      value.sqlite.close();
+    }
+  });
+  test.each([
+    ["generation", "UPDATE workspaceResource SET generation = 2", "WORKSPACE_GENERATION_CONFLICT"],
+    [
+      "authorization generation",
+      "UPDATE workspaceConnection SET credentialGeneration = 2",
+      "WORKSPACE_GENERATION_CONFLICT",
+    ],
+    [
+      "revoked grant",
+      "DELETE FROM workspaceConnectionRepository",
+      "WORKSPACE_AUTHORIZATION_REQUIRED",
+    ],
+    [
+      "disconnected",
+      "UPDATE workspaceConnection SET status = 'disconnected'",
+      "WORKSPACE_AUTHORIZATION_REQUIRED",
+    ],
+    ["stopped", "UPDATE workspaceResource SET desiredState = 'stopped'", "WORKSPACE_NOT_RUNNING"],
+    [
+      "disabled",
+      "INSERT INTO workspaceProviderControl (scope,disabled,reason,updatedAt) VALUES ('global',1,'test',0)",
+      "WORKSPACE_PROVIDER_DISABLED",
+    ],
+  ])(
+    "denies %s result access before credentials for exec and file results",
+    async (_case, sql, code) => {
+      for (const kind of ["exec", "stat"] as const) {
+        const value = fixture();
+        try {
+          const reservation = value.repository.reserve({
+            userId: "user-1",
+            resourceId: "workspace-1",
+            kind,
+            inputBytes: 0,
+            stdoutLimitBytes: 1024,
+            stderrLimitBytes: 512,
+            deadlineAt: now + 1000,
+            policy,
+            now,
+          });
+          value.repository.beginDispatch(
+            "user-1",
+            reservation.operation!.id,
+            1,
+            "dispatch",
+            now + 1000,
+            now,
+          );
+          value.sqlite.exec(sql);
+          const inspectFile = jest.fn(async () => ({ state: "running" as const }));
+          const service =
+            kind === "exec"
+              ? value.service
+              : new WorkspaceFileService({
+                  repository: value.repository,
+                  credentials: value.credentials,
+                  policy: () => policy,
+                  now: () => now,
+                  transport: {
+                    health: async () => ({ ok: true, reason: null }),
+                    inspectFile,
+                    executeFile: async () => ({ state: "running" }),
+                  },
+                });
+          await expect(
+            service.reconcile("user-1", reservation.operation!.id),
+          ).rejects.toMatchObject({ code });
+          expect(value.credentials.getCredential).not.toHaveBeenCalled();
+          expect(value.transport.inspectCalls).not.toHaveBeenCalled();
+          expect(inspectFile).not.toHaveBeenCalled();
+        } finally {
+          value.sqlite.close();
+        }
+      }
+    },
+  );
+
+  test("rejects policy-disabled result access and distinguishes daily quota from busy capacity", async () => {
+    const value = fixture();
+    try {
+      const started = await value.service.execute("user-1", "workspace-1", {
+        argv: ["true"],
+        cwd: ".",
+        stdin: { kind: "inline", bytes: new Uint8Array() },
+        timeoutMs: 1000,
+      });
+      value.credentials.getCredential.mockClear();
+      const disabled = new WorkspaceOperationService({
+        repository: value.repository,
+        transport: value.transport,
+        credentials: value.credentials,
+        policy: () => ({ ...policy, enabled: false }),
+        now: () => now,
+      });
+      await expect(disabled.reconcile("user-1", started.operation.id)).rejects.toMatchObject({
+        code: "WORKSPACE_PROVIDER_DISABLED",
+      });
+      value.sqlite
+        .prepare("UPDATE workspacePolicyUsage SET submittedOperations = ?")
+        .run(policy.maxOperationsPerDay);
+      await expect(
+        value.service.execute("user-1", "workspace-1", {
+          argv: ["true"],
+          cwd: ".",
+          stdin: { kind: "inline", bytes: new Uint8Array() },
+          timeoutMs: 1000,
+        }),
+      ).rejects.toMatchObject({ code: "WORKSPACE_POLICY_LIMIT" });
+      expect(value.credentials.getCredential).not.toHaveBeenCalled();
+      expect(value.transport.inspectCalls).not.toHaveBeenCalled();
+    } finally {
+      value.sqlite.close();
+    }
+  });
+
+  test("rechecks result authority after asynchronous credential refresh", async () => {
+    const value = fixture();
+    try {
+      const started = await value.service.execute("user-1", "workspace-1", {
+        argv: ["true"],
+        cwd: ".",
+        stdin: { kind: "inline", bytes: new Uint8Array() },
+        timeoutMs: 1000,
+      });
+      value.credentials.getCredential.mockImplementationOnce(async () => {
+        value.sqlite.exec("UPDATE workspaceResource SET generation = 2");
+        return "ghu_access";
+      });
+      await expect(value.service.reconcile("user-1", started.operation.id)).rejects.toMatchObject({
+        code: "WORKSPACE_GENERATION_CONFLICT",
+      });
+      expect(value.transport.inspectCalls).not.toHaveBeenCalled();
+    } finally {
+      value.sqlite.close();
+    }
+  });
+
+  test("denies expired retained output before credentials while background cleanup still finalizes it", async () => {
+    const value = fixture();
+    try {
+      const started = await value.service.execute("user-1", "workspace-1", {
+        argv: ["true"],
+        cwd: ".",
+        stdin: { kind: "inline", bytes: new Uint8Array() },
+        timeoutMs: 1000,
+      });
+      value.credentials.getCredential.mockClear();
+      value.advance(policy.cleanupDeadlineMs);
+      await expect(value.service.reconcile("user-1", started.operation.id)).rejects.toMatchObject({
+        code: "WORKSPACE_RESULT_EXPIRED",
+      });
+      expect(value.credentials.getCredential).not.toHaveBeenCalled();
+      expect(value.transport.inspectCalls).not.toHaveBeenCalled();
+      await expect(value.service.reconcileOnce()).resolves.toBe(true);
+      expect(value.repository.getOwned("user-1", started.operation.id)?.remoteCleanupPending).toBe(
+        0,
+      );
+    } finally {
+      value.sqlite.close();
+    }
+  });
+  test.each([true, false])(
+    "ingests a native reference with metadata=%s and dispatches exact bytes through one call",
+    async (includeMetadata) => {
+      const value = fixture();
+      const root = mkdtempSync(path.join(tmpdir(), "moira-native-operation-input-"));
+      const bytes = Buffer.from([0, 255, 17, 128, 4]);
+      const transfers = new WorkspaceTransferService({
+        repository: new WorkspaceTransferRepository(value.sqlite),
+        root,
+        policy: () => policy,
+        now: () => now,
+      });
+      const nativeFetch = jest.fn(async () => {
+        const reservedBytes = includeMetadata ? bytes.length : policy.maxOperationInputBytes;
+        expect(
+          value.sqlite.prepare("SELECT state, inputBytes FROM workspaceOperation").all(),
+        ).toEqual([{ state: "reserved", inputBytes: reservedBytes }]);
+        expect(
+          value.sqlite.prepare("SELECT state, declaredSize FROM workspaceTransfer").all(),
+        ).toEqual([{ state: "reserved", declaredSize: reservedBytes }]);
+        return {
+          contentLength: bytes.length,
+          mimeType: "application/octet-stream",
+          body: (async function* () {
+            yield bytes.subarray(0, 2);
+            yield bytes.subarray(2);
+          })(),
+        };
+      });
+      const service = new WorkspaceOperationService({
+        repository: value.repository,
+        transport: value.transport,
+        credentials: value.credentials,
+        transfers,
+        nativeFetcher: { fetch: nativeFetch },
+        policy: () => policy,
+        now: () => now,
+      });
+      try {
+        const result = await service.executeNativeReference(
+          "user-1",
+          "workspace-1",
+          { argv: ["sha256sum"], cwd: ".", timeoutMs: 5_000 },
+          {
+            fileId: "sediment://file_000000000b1c8210a7cb1a2d896b2ee4",
+            downloadUrl: "https://oaisdmntprdenmarkeast.blob.core.windows.net/file?sig=private",
+            ...(includeMetadata
+              ? {
+                  fileName: "stdin.bin",
+                  mimeType: "application/octet-stream",
+                  declaredSize: bytes.length,
+                }
+              : {}),
+          },
+        );
+        expect(result.operation.state).toBe("succeeded");
+        expect(result.operation.inputBytes).toBe(bytes.length);
+        expect(value.transport.lastRequest?.stdin).toEqual({ kind: "inline", bytes });
+        expect(value.sqlite.prepare("SELECT COUNT(*) count FROM workspaceTransfer").get()).toEqual({
+          count: 0,
+        });
+        await expect(
+          service.executeNativeReference(
+            "user-1",
+            "workspace-1",
+            { argv: ["cat"], cwd: ".", timeoutMs: 5_000 },
+            {
+              fileId: "sediment://file_oversized",
+              downloadUrl: "https://oaisdmntprdenmarkeast.blob.core.windows.net/file?sig=private",
+              fileName: "oversized.bin",
+              mimeType: "application/octet-stream",
+              declaredSize: 1025,
+            },
+          ),
+        ).rejects.toThrow(/input exceeds/);
+        expect(nativeFetch).toHaveBeenCalledTimes(1);
+        expect(value.sqlite.prepare("SELECT COUNT(*) count FROM workspaceTransfer").get()).toEqual({
+          count: 0,
+        });
+        expect(value.sqlite.prepare("SELECT COUNT(*) count FROM workspaceOperation").get()).toEqual(
+          {
+            count: 1,
+          },
+        );
+      } finally {
+        value.sqlite.close();
+        rmSync(root, { recursive: true, force: true });
+      }
+    },
+  );
+
+  test.each([
+    ["foreign", "user-2", "workspace-1", (_value: ReturnType<typeof fixture>) => undefined],
+    [
+      "unavailable connector",
+      "user-1",
+      "workspace-1",
+      (value: ReturnType<typeof fixture>) => {
+        value.transport.available = false;
+      },
+    ],
+    ["missing", "user-1", "workspace-missing", (_value: ReturnType<typeof fixture>) => undefined],
+    [
+      "stopped",
+      "user-1",
+      "workspace-1",
+      (value: ReturnType<typeof fixture>) => {
+        value.sqlite
+          .prepare(
+            "UPDATE workspaceResource SET state = 'stopped', desiredState = 'stopped' WHERE id = 'workspace-1'",
+          )
+          .run();
+      },
+    ],
+    [
+      "disabled",
+      "user-1",
+      "workspace-1",
+      (value: ReturnType<typeof fixture>) => {
+        new WorkspaceResourceRepository(value.sqlite).setControl({
+          scope: "global",
+          disabled: true,
+          reason: "incident",
+          updatedBy: null,
+          now,
+          cleanupDeadlineAt: now + 30_000,
+        });
+      },
+    ],
+    [
+      "busy",
+      "user-1",
+      "workspace-1",
+      (value: ReturnType<typeof fixture>) => {
+        value.repository.reserve({
+          userId: "user-1",
+          resourceId: "workspace-1",
+          inputBytes: 0,
+          stdoutLimitBytes: 16,
+          stderrLimitBytes: 16,
+          deadlineAt: now + 30_000,
+          policy,
+          now,
+        });
+      },
+    ],
+  ] as const)(
+    "rejects a %s workspace before native fetch or downstream contact",
+    async (_caseName, userId, workspaceId, arrange) => {
+      const value = fixture();
+      const root = mkdtempSync(path.join(tmpdir(), "moira-native-operation-authority-"));
+      const nativeFetch = jest.fn(async () => ({
+        contentLength: 1,
+        mimeType: "application/octet-stream",
+        body: (async function* () {
+          yield Buffer.from([1]);
+        })(),
+      }));
+      const service = new WorkspaceOperationService({
+        repository: value.repository,
+        transport: value.transport,
+        credentials: value.credentials,
+        transfers: new WorkspaceTransferService({
+          repository: new WorkspaceTransferRepository(value.sqlite),
+          root,
+          policy: () => policy,
+          now: () => now,
+        }),
+        nativeFetcher: { fetch: nativeFetch },
+        policy: () => policy,
+        now: () => now,
+      });
+      try {
+        arrange(value);
+        await expect(
+          service.executeNativeReference(
+            userId,
+            workspaceId,
+            { argv: ["cat"], cwd: ".", timeoutMs: 5_000 },
+            {
+              fileId: "sediment://file_000000000b1c8210a7cb1a2d896b2ee4",
+              downloadUrl: "https://oaisdmntprdenmarkeast.blob.core.windows.net/file?sig=private",
+              fileName: "stdin.bin",
+              mimeType: "application/octet-stream",
+              declaredSize: 1,
+            },
+          ),
+        ).rejects.toBeInstanceOf(Error);
+        expect(nativeFetch).not.toHaveBeenCalled();
+        expect(value.sqlite.prepare("SELECT COUNT(*) count FROM workspaceTransfer").get()).toEqual({
+          count: 0,
+        });
+        expect(value.credentials.getCredential).not.toHaveBeenCalled();
+        expect(value.transport.executeCalls).not.toHaveBeenCalled();
+      } finally {
+        value.sqlite.close();
+        rmSync(root, { recursive: true, force: true });
+      }
+    },
+  );
+
+  test("materializes native-reference stdin as exact binary bytes and consumes it after durable dispatch", async () => {
+    const value = fixture();
+    const bytes = Buffer.from([0, 255, 1, 2]);
+    const record = {
+      id: "transfer-1",
+      userId: "user-1",
+      purpose: "workspace_input",
+      state: "claimed",
+      fileName: "stdin.bin",
+      mimeType: "application/octet-stream",
+      declaredSize: bytes.length,
+      observedSize: bytes.length,
+      sha256: "a".repeat(64),
+      objectKey: "b".repeat(48),
+      ownerPid: process.pid,
+      ownerStartTime: null,
+      claimId: "claim-1",
+      claimExpiresAt: now + 10_000,
+      expiresAt: now + 60_000,
+      createdAt: now,
+      updatedAt: now,
+    } as const;
+    const transfers = {
+      claimInput: jest.fn(async () => ({ record, bytes })),
+      release: jest.fn(),
+      consume: jest.fn(async () => undefined),
+    };
+    const service = new WorkspaceOperationService({
+      repository: value.repository,
+      transport: value.transport,
+      credentials: value.credentials,
+      transfers,
+      policy: () => policy,
+      now: () => now,
+    });
+    try {
+      const result = await service.execute("user-1", "workspace-1", {
+        argv: ["sha256sum"],
+        cwd: ".",
+        stdin: {
+          kind: "reference",
+          referenceId: "workspace-file://abcdefghijklmnopqrstuvwxyzABCDEFGH123456789",
+          declaredBytes: bytes.length,
+          declaredMimeType: "application/octet-stream",
+        },
+        timeoutMs: 5_000,
+      });
+      expect(result.operation.state).toBe("succeeded");
+      expect(value.transport.lastRequest?.stdin).toEqual({ kind: "inline", bytes });
+      expect(transfers.consume).toHaveBeenCalledWith(record);
+      expect(transfers.release).not.toHaveBeenCalled();
+    } finally {
+      value.sqlite.close();
+    }
+  });
+
+  test("rejects unavailable and size-mismatched native stdin before credentials or connector contact", async () => {
+    const value = fixture();
+    const unavailableTransfers = {
+      claimInput: jest.fn(async () => {
+        throw new Error("expired, consumed or foreign reference");
+      }),
+      release: jest.fn(),
+      consume: jest.fn(async () => undefined),
+    };
+    const service = new WorkspaceOperationService({
+      repository: value.repository,
+      transport: value.transport,
+      credentials: value.credentials,
+      transfers: unavailableTransfers,
+      policy: () => policy,
+      now: () => now,
+    });
+    try {
+      const unavailable = await service.execute("user-1", "workspace-1", {
+        argv: ["cat"],
+        cwd: ".",
+        stdin: {
+          kind: "reference",
+          referenceId: "workspace-file://unavailable",
+          declaredBytes: 4,
+          declaredMimeType: "application/octet-stream",
+        },
+        timeoutMs: 5_000,
+      });
+      expect(unavailable).toMatchObject({
+        operation: {
+          state: "cancelled",
+          lastOutcome: "native_input_unavailable_before_dispatch",
+          remoteCleanupPending: 0,
+        },
+        result: null,
+      });
+
+      const record = {
+        id: "transfer-2",
+        userId: "user-1",
+        purpose: "workspace_input",
+        state: "claimed",
+        fileName: "stdin.bin",
+        mimeType: "application/octet-stream",
+        declaredSize: 4,
+        observedSize: 4,
+        sha256: "a".repeat(64),
+        objectKey: "b".repeat(48),
+        ownerPid: process.pid,
+        ownerStartTime: null,
+        claimId: "claim-2",
+        claimExpiresAt: now + 10_000,
+        expiresAt: now + 60_000,
+        createdAt: now,
+        updatedAt: now,
+      } as const;
+      const mismatchTransfers = {
+        claimInput: jest.fn(async () => ({ record, bytes: Buffer.from([1, 2, 3, 4]) })),
+        release: jest.fn(),
+        consume: jest.fn(async () => undefined),
+      };
+      const mismatchService = new WorkspaceOperationService({
+        repository: value.repository,
+        transport: value.transport,
+        credentials: value.credentials,
+        transfers: mismatchTransfers,
+        policy: () => policy,
+        now: () => now,
+      });
+      const mismatch = await mismatchService.execute("user-1", "workspace-1", {
+        argv: ["cat"],
+        cwd: ".",
+        stdin: {
+          kind: "reference",
+          referenceId: "workspace-file://size-mismatch",
+          declaredBytes: 3,
+          declaredMimeType: "application/octet-stream",
+        },
+        timeoutMs: 5_000,
+      });
+      expect(mismatch).toMatchObject({
+        operation: {
+          state: "cancelled",
+          lastOutcome: "native_input_unavailable_before_dispatch",
+          remoteCleanupPending: 0,
+        },
+        result: null,
+      });
+      const mimeMismatch = await mismatchService.execute("user-1", "workspace-1", {
+        argv: ["cat"],
+        cwd: ".",
+        stdin: {
+          kind: "reference",
+          referenceId: "workspace-file://mime-mismatch",
+          declaredBytes: 4,
+          declaredMimeType: "text/plain",
+        },
+        timeoutMs: 5_000,
+      });
+      expect(mimeMismatch).toMatchObject({
+        operation: {
+          state: "cancelled",
+          lastOutcome: "native_input_unavailable_before_dispatch",
+          remoteCleanupPending: 0,
+        },
+        result: null,
+      });
+      expect(mismatchTransfers.release).toHaveBeenCalledWith(record);
+      expect(value.credentials.getCredential).not.toHaveBeenCalled();
+      expect(value.transport.executeCalls).not.toHaveBeenCalled();
+    } finally {
+      value.sqlite.close();
+    }
+  });
+
+  test("preserves argv boundaries and exact exit 23 without persisting command or stdin", async () => {
+    const value = fixture();
+    try {
+      value.transport.executeResult = {
+        state: "failed",
+        stdout: "partial output",
+        stderr: "expected failure",
+        exitCode: 23,
+      };
+      const stdin = new TextEncoder().encode("opaque input");
+      const operation = await value.service.execute("user-1", "workspace-1", {
+        argv: ["printf", "%s", "argument with spaces;$(false)"],
+        cwd: "src",
+        stdin: { kind: "inline", bytes: stdin },
+        timeoutMs: 5_000,
+      });
+      expect(operation.operation).toMatchObject({
+        state: "failed",
+        exitCode: 23,
+        outputBytes: Buffer.byteLength("partial output") + Buffer.byteLength("expected failure"),
+        inputBytes: stdin.byteLength,
+      });
+      expect(operation.result).toEqual({
+        state: "failed",
+        stdout: "partial output",
+        stderr: "expected failure",
+        exitCode: 23,
+      });
+      expect(value.transport.lastWorkspace?.machine).toEqual({
+        name: "basic",
+        displayName: "Basic",
+        operatingSystem: "linux",
+        cpuCores: 2,
+        memoryBytes: 8_589_934_592,
+        storageBytes: 34_359_738_368,
+      });
+      expect(operation.operation).toMatchObject({
+        remoteCleanupPending: 1,
+        resultExpiresAt: now + policy.cleanupDeadlineMs,
+      });
+      expect(value.transport.finalizeCalls).not.toHaveBeenCalled();
+      const stored = value.sqlite.prepare("SELECT * FROM workspaceOperation").get() as object;
+      expect(Object.keys(stored).join(" ")).not.toMatch(
+        /argv|command|cwd|stdin|token|credential|ssh/i,
+      );
+      expect(stored).not.toHaveProperty("stdout");
+      expect(stored).not.toHaveProperty("stderr");
+      expect(JSON.stringify(stored)).not.toContain("argument with spaces");
+      expect(JSON.stringify(stored)).not.toContain("opaque input");
+      value.advance(policy.cleanupDeadlineMs + 1);
+      await expect(value.service.reconcileOnce("user-1")).resolves.toBe(true);
+      expect(value.transport.finalizeCalls).toHaveBeenCalledTimes(1);
+    } finally {
+      value.sqlite.close();
+    }
+  });
+
+  test("releases a reservation when credentials fail before remote dispatch", async () => {
+    const value = fixture();
+    try {
+      value.credentials.getCredential.mockRejectedValueOnce(new Error("refresh failed"));
+      const result = await value.service.execute("user-1", "workspace-1", {
+        argv: ["true"],
+        cwd: ".",
+        stdin: { kind: "inline", bytes: new Uint8Array() },
+        timeoutMs: 1_000,
+      });
+      expect(result).toMatchObject({
+        operation: {
+          state: "cancelled",
+          lastOutcome: "credential_unavailable_before_dispatch",
+          remoteCleanupPending: 0,
+        },
+        result: null,
+      });
+      expect(value.transport.executeCalls).not.toHaveBeenCalled();
+    } finally {
+      value.sqlite.close();
+    }
+  });
+
+  test("retries remote finalization without changing a durable terminal result", async () => {
+    const value = fixture();
+    try {
+      value.transport.throwFinalize = true;
+      const result = await value.service.execute("user-1", "workspace-1", {
+        argv: ["true"],
+        cwd: ".",
+        stdin: { kind: "inline", bytes: new Uint8Array() },
+        timeoutMs: 1_000,
+      });
+      expect(result.operation).toMatchObject({ state: "succeeded", remoteCleanupPending: 1 });
+
+      value.advance(policy.cleanupDeadlineMs + 1);
+      await expect(value.service.reconcileOnce("user-1")).resolves.toBe(true);
+      expect(value.repository.getOwned("user-1", result.operation.id)?.remoteCleanupPending).toBe(
+        1,
+      );
+      expect(value.transport.finalizeCalls).toHaveBeenCalledTimes(1);
+
+      value.sqlite
+        .prepare(
+          "UPDATE workspaceConnection SET credentialGeneration = 2 WHERE id = 'connection-1'",
+        )
+        .run();
+      expect(
+        new WorkspaceResourceRepository(value.sqlite).rebindAuthorization({
+          userId: "user-1",
+          resourceId: "workspace-1",
+          resourceGeneration: 1,
+          expectedAuthorizationGeneration: 1,
+          authorizationGeneration: 2,
+          now: now + policy.cleanupDeadlineMs + 2,
+        }),
+      ).toBe(true);
+      expect(
+        value.repository.getOwned("user-1", result.operation.id)?.authorizationGeneration,
+      ).toBe(2);
+      value.transport.throwFinalize = false;
+      await expect(value.service.reconcileOnce("user-1")).resolves.toBe(true);
+      expect(value.repository.getOwned("user-1", result.operation.id)).toMatchObject({
+        state: "succeeded",
+        remoteCleanupPending: 0,
+      });
+      expect(value.transport.finalizeCalls).toHaveBeenCalledTimes(2);
+    } finally {
+      value.sqlite.close();
+    }
+  });
+
+  test("keeps a background-observed terminal result available until its bounded cleanup deadline", async () => {
+    const value = fixture();
+    try {
+      value.transport.executeResult = { state: "running" };
+      const started = await value.service.execute("user-1", "workspace-1", {
+        argv: ["printf", "result"],
+        cwd: ".",
+        stdin: { kind: "inline", bytes: new Uint8Array() },
+        timeoutMs: 5_000,
+      });
+      value.transport.executeResult = {
+        state: "succeeded",
+        stdout: "background result",
+        stderr: "background warning",
+        exitCode: 0,
+      };
+
+      await expect(value.service.reconcileOnce("user-1")).resolves.toBe(true);
+      expect(value.repository.getOwned("user-1", started.operation.id)).toMatchObject({
+        state: "succeeded",
+        remoteCleanupPending: 1,
+      });
+      expect(value.transport.finalizeCalls).not.toHaveBeenCalled();
+      await expect(value.service.reconcileOnce("user-1")).resolves.toBe(false);
+      await expect(value.service.reconcile("user-1", started.operation.id)).resolves.toEqual({
+        state: "succeeded",
+        stdout: "background result",
+        stderr: "background warning",
+        exitCode: 0,
+      });
+      expect(value.transport.finalizeCalls).not.toHaveBeenCalled();
+
+      value.advance(policy.cleanupDeadlineMs + 1);
+      await expect(value.service.reconcileOnce("user-1")).resolves.toBe(true);
+      expect(value.repository.getOwned("user-1", started.operation.id)?.remoteCleanupPending).toBe(
+        0,
+      );
+      expect(value.transport.finalizeCalls).toHaveBeenCalledTimes(1);
+    } finally {
+      value.sqlite.close();
+    }
+  });
+
+  test("expires a crash-abandoned pre-dispatch reservation without connector contact", async () => {
+    const value = fixture();
+    try {
+      const reserved = value.repository.reserve({
+        userId: "user-1",
+        resourceId: "workspace-1",
+        inputBytes: 0,
+        stdoutLimitBytes: 1024,
+        stderrLimitBytes: 512,
+        deadlineAt: now + 1_000,
+        policy,
+        now,
+      });
+      expect(reserved.operation).toMatchObject({ state: "reserved" });
+      await expect(
+        value.service.execute("user-1", "workspace-1", {
+          argv: ["true"],
+          cwd: ".",
+          stdin: { kind: "inline", bytes: new Uint8Array() },
+          timeoutMs: 1_000,
+        }),
+      ).rejects.toMatchObject({ code: "WORKSPACE_OPERATION_BUSY" });
+
+      value.advance(1_001);
+      await expect(value.service.reconcileOnce("user-1")).resolves.toBe(true);
+      expect(value.repository.getOwned("user-1", reserved.operation!.id)).toMatchObject({
+        state: "cancelled",
+        lastOutcome: "reservation_expired_before_dispatch",
+        remoteCleanupPending: 0,
+      });
+      const replacement = value.repository.reserve({
+        userId: "user-1",
+        resourceId: "workspace-1",
+        inputBytes: 0,
+        stdoutLimitBytes: 1024,
+        stderrLimitBytes: 512,
+        deadlineAt: now + 2_000,
+        policy,
+        now: now + 1_001,
+      });
+      expect(replacement.outcome).toBe("reserved");
+      expect(value.credentials.getCredential).not.toHaveBeenCalled();
+      expect(value.transport.executeCalls).not.toHaveBeenCalled();
+      expect(value.transport.cancelCalls).not.toHaveBeenCalled();
+    } finally {
+      value.sqlite.close();
+    }
+  });
+
+  test("records durable dispatch intent before the connector can start remote work", async () => {
+    const value = fixture();
+    try {
+      let observed: ReturnType<WorkspaceOperationRepository["getOwned"]> = null;
+      value.transport.executeResult = { state: "running" };
+      value.transport.executeObservation = () => {
+        observed = value.repository.listOwned("user-1", "workspace-1")[0] ?? null;
+      };
+      const result = await value.service.execute("user-1", "workspace-1", {
+        argv: ["sleep", "1"],
+        cwd: ".",
+        stdin: { kind: "inline", bytes: new Uint8Array() },
+        timeoutMs: 1_000,
+      });
+      expect(observed).toMatchObject({
+        state: "reconcile_pending",
+        lastOutcome: "dispatch_submitted",
+        claimId: expect.any(String),
+        claimExpiresAt: now + 60_000,
+      });
+      expect(result.operation).toMatchObject({ state: "running", claimId: null });
+    } finally {
+      value.sqlite.close();
+    }
+  });
+
+  test("reconciles the exact dispatch marker after a process crash and claim expiry", async () => {
+    const value = fixture();
+    try {
+      const reserved = value.repository.reserve({
+        userId: "user-1",
+        resourceId: "workspace-1",
+        inputBytes: 0,
+        stdoutLimitBytes: 1024,
+        stderrLimitBytes: 512,
+        deadlineAt: now + 30_000,
+        policy,
+        now,
+      });
+      expect(reserved.operation).toBeDefined();
+      expect(
+        value.repository.beginDispatch(
+          "user-1",
+          reserved.operation!.id,
+          reserved.operation!.resourceGeneration,
+          "crashed-process-claim",
+          now + 5_000,
+          now,
+        ),
+      ).toBe(true);
+
+      let restartedNow = now;
+      const restartedTransport = new FakeTransport();
+      const restarted = new WorkspaceOperationService({
+        repository: value.repository,
+        transport: restartedTransport,
+        credentials: value.credentials,
+        policy: () => policy,
+        now: () => restartedNow,
+      });
+      await expect(restarted.reconcileOnce("user-1")).resolves.toBe(false);
+      expect(restartedTransport.inspectCalls).not.toHaveBeenCalled();
+
+      restartedNow = now + 5_001;
+      await expect(restarted.reconcileOnce("user-1")).resolves.toBe(true);
+      expect(restartedTransport.lastInspectedOperation?.remoteMarker).toBe(
+        reserved.operation!.remoteMarker,
+      );
+      expect(value.repository.getOwned("user-1", reserved.operation!.id)).toMatchObject({
+        state: "succeeded",
+        outputBytes: Buffer.byteLength("ok"),
+        claimId: null,
+        claimExpiresAt: null,
+        resultExpiresAt: restartedNow + policy.cleanupDeadlineMs,
+      });
+      expect(value.repository.listOwned("user-1", "workspace-1")).toHaveLength(1);
+    } finally {
+      value.sqlite.close();
+    }
+  });
+
+  test("rejects an unbounded workspace-relative cwd before reservation", async () => {
+    const value = fixture();
+    try {
+      await expect(
+        value.service.execute("user-1", "workspace-1", {
+          argv: ["true"],
+          cwd: "a".repeat(4097),
+          stdin: { kind: "inline", bytes: new Uint8Array() },
+          timeoutMs: 1_000,
+        }),
+      ).rejects.toMatchObject({ code: "WORKSPACE_RESOURCE_INVALID" });
+      expect(value.repository.listOwned("user-1", "workspace-1")).toEqual([]);
+    } finally {
+      value.sqlite.close();
+    }
+  });
+
+  test("rejects cross-tenant workspace access before credential or transport contact", async () => {
+    const value = fixture();
+    try {
+      await expect(
+        value.service.execute("user-2", "workspace-1", {
+          argv: ["true"],
+          cwd: ".",
+          stdin: { kind: "inline", bytes: new Uint8Array() },
+          timeoutMs: 1_000,
+        }),
+      ).rejects.toMatchObject({ code: "WORKSPACE_NOT_FOUND" });
+      expect(value.credentials.getCredential).not.toHaveBeenCalled();
+      expect(value.transport.executeCalls).not.toHaveBeenCalled();
+    } finally {
+      value.sqlite.close();
+    }
+  });
+
+  test("keeps ambiguous remote work charged and fenced until it is inspected or stopped", async () => {
+    const value = fixture();
+    try {
+      value.transport.throwExecute = true;
+      const first = await value.service.execute("user-1", "workspace-1", {
+        argv: ["long-running-command"],
+        cwd: ".",
+        stdin: { kind: "inline", bytes: new Uint8Array() },
+        timeoutMs: 5_000,
+      });
+      expect(first.operation.state).toBe("reconcile_pending");
+      await expect(
+        value.service.execute("user-1", "workspace-1", {
+          argv: ["true"],
+          cwd: ".",
+          stdin: { kind: "inline", bytes: new Uint8Array() },
+          timeoutMs: 1_000,
+        }),
+      ).rejects.toMatchObject({ code: "WORKSPACE_OPERATION_BUSY" });
+
+      const resourceRepository = new WorkspaceResourceRepository(value.sqlite);
+      const stopped = resourceRepository.requestStop("user-1", "workspace-1", now + 1);
+      expect(stopped).toMatchObject({ state: "stop_pending", generation: 2 });
+      expect(value.repository.getOwned("user-1", first.operation.id)?.state).toBe("cancel_pending");
+    } finally {
+      value.sqlite.close();
+    }
+  });
+
+  test("allows the official tunnel to restore an externally stopped workspace only under current running authority", async () => {
+    const value = fixture();
+    try {
+      value.sqlite
+        .prepare(
+          `UPDATE workspaceResource SET observedState = 'stopped',
+           lastOutcome = 'provider_observed_stopped' WHERE id = 'workspace-1'`,
+        )
+        .run();
+      const result = await value.service.execute("user-1", "workspace-1", {
+        argv: ["true"],
+        cwd: ".",
+        stdin: { kind: "inline", bytes: new Uint8Array() },
+        timeoutMs: 1_000,
+      });
+      expect(result.operation.state).toBe("succeeded");
+      expect(
+        value.sqlite
+          .prepare(
+            "SELECT observedState, lastOutcome FROM workspaceResource WHERE id = 'workspace-1'",
+          )
+          .get(),
+      ).toEqual({ observedState: "running", lastOutcome: "connector_observed_running" });
+    } finally {
+      value.sqlite.close();
+    }
+  });
+
+  test("blocks a desired-stopped workspace before credential or connector contact", async () => {
+    const value = fixture();
+    try {
+      value.sqlite
+        .prepare(
+          `UPDATE workspaceResource SET state = 'stopped', desiredState = 'stopped',
+           observedState = 'stopped' WHERE id = 'workspace-1'`,
+        )
+        .run();
+      await expect(
+        value.service.execute("user-1", "workspace-1", {
+          argv: ["true"],
+          cwd: ".",
+          stdin: { kind: "inline", bytes: new Uint8Array() },
+          timeoutMs: 1_000,
+        }),
+      ).rejects.toMatchObject({ code: "WORKSPACE_NOT_RUNNING" });
+      expect(value.credentials.getCredential).not.toHaveBeenCalled();
+      expect(value.transport.executeCalls).not.toHaveBeenCalled();
+    } finally {
+      value.sqlite.close();
+    }
+  });
+
+  test("fences dispatch when the kill switch wins after reservation", async () => {
+    const value = fixture();
+    try {
+      const resourceRepository = new WorkspaceResourceRepository(value.sqlite);
+      const service = new WorkspaceOperationService({
+        repository: value.repository,
+        transport: value.transport,
+        credentials: value.credentials,
+        policy: () => policy,
+        now: () => now,
+        audit: (event) => {
+          if (event.action === "reserve") {
+            resourceRepository.setControl({
+              scope: "global",
+              disabled: true,
+              reason: "incident",
+              updatedBy: null,
+              now,
+              cleanupDeadlineAt: now + 30_000,
+            });
+          }
+        },
+      });
+      await expect(
+        service.execute("user-1", "workspace-1", {
+          argv: ["true"],
+          cwd: ".",
+          stdin: { kind: "inline", bytes: new Uint8Array() },
+          timeoutMs: 1_000,
+        }),
+      ).resolves.toMatchObject({ operation: { state: "cancel_pending" }, result: null });
+      expect(value.credentials.getCredential).not.toHaveBeenCalled();
+      expect(value.transport.executeCalls).not.toHaveBeenCalled();
+    } finally {
+      value.sqlite.close();
+    }
+  });
+
+  test("does not call cancellation terminal until the remote foreground group is absent", async () => {
+    const value = fixture();
+    try {
+      value.transport.executeResult = { state: "running" };
+      const running = await value.service.execute("user-1", "workspace-1", {
+        argv: ["sleep", "30"],
+        cwd: ".",
+        stdin: { kind: "inline", bytes: new Uint8Array() },
+        timeoutMs: 30_000,
+      });
+      expect(running.operation.state).toBe("running");
+      const pending = await value.service.cancel("user-1", running.operation.id);
+      expect(pending.operation.state).toBe("cancel_pending");
+
+      value.transport.cancelResult = {
+        state: "cancelled",
+        stdout: "",
+        stderr: "",
+        exitCode: null,
+      };
+      const terminal = await value.service.cancel("user-1", running.operation.id);
+      expect(terminal.operation.state).toBe("cancelled");
+      expect(terminal.result?.state).toBe("cancelled");
+      expect(value.transport.cancelCalls).toHaveBeenCalledTimes(2);
+    } finally {
+      value.sqlite.close();
+    }
+  });
+
+  test("fences a successful result when a concurrent stop advances the workspace generation", async () => {
+    const value = fixture();
+    try {
+      let releaseExecute!: () => void;
+      let observeExecute!: () => void;
+      const enteredExecute = new Promise<void>((resolve) => {
+        observeExecute = resolve;
+      });
+      value.transport.executeObservation = observeExecute;
+      value.transport.executeGate = new Promise<void>((resolve) => {
+        releaseExecute = resolve;
+      });
+      const executing = value.service.execute("user-1", "workspace-1", {
+        argv: ["true"],
+        cwd: ".",
+        stdin: { kind: "inline", bytes: new Uint8Array() },
+        timeoutMs: 5_000,
+      });
+      await enteredExecute;
+      new WorkspaceResourceRepository(value.sqlite).requestStop("user-1", "workspace-1", now + 1);
+      releaseExecute();
+      await expect(executing).resolves.toMatchObject({
+        operation: { state: "cancelled", remoteCleanupPending: 1 },
+        result: { state: "cancelled" },
+      });
+      expect(value.transport.finalizeCalls).not.toHaveBeenCalled();
+      await expect(
+        value.service.reconcile(
+          "user-1",
+          value.repository.listOwned("user-1", "workspace-1")[0]!.id,
+        ),
+      ).rejects.toMatchObject({ code: "WORKSPACE_GENERATION_CONFLICT" });
+      expect(value.transport.inspectCalls).not.toHaveBeenCalled();
+    } finally {
+      value.sqlite.close();
+    }
+  });
+});

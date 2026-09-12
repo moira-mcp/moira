@@ -262,7 +262,9 @@ interface IGraphStorage {
 ### MCP Tools (short names)
 
 `list`, `start`, `step`, `manage`, `session`, `settings`, `token`, `notes`,
-`artifacts`, `communication`, `lock`, `help`. The HTTP transport is
+`artifacts`, `communication`, `lock`, `help`, plus the `workspace_*` cloud-workspace
+tools (lifecycle, exec, files, native upload/download; see `docs/WORKSPACES.md`).
+The HTTP transport is
 `StreamableHTTPServerTransport` (stateless). See `docs/SYSTEM.md` for the full
 tool signatures and request/response shapes, and `packages/mcp-server/src/server.ts`
 for the registrations.

@@ -21,6 +21,20 @@ export { AuditRepository } from "./repositories/audit-repository.js";
 export { GlobalSettingsRepository } from "./repositories/global-settings-repository.js";
 export { UserRepository } from "./repositories/user-repository.js";
 export { AccountApprovalRepository } from "./repositories/account-approval-repository.js";
+export {
+  WorkspaceConnectionRepository,
+  digestWorkspaceAuthorizationValue,
+  type ConnectedWorkspaceInput,
+  type StoredWorkspaceCredential,
+  type StoredWorkspaceRevocation,
+} from "../workspaces/connection-repository.js";
+export {
+  WorkspaceResourceRepository,
+  digestWorkspaceCapability,
+  type ReserveWorkspaceResult,
+} from "../workspaces/resource-repository.js";
+export { WorkspaceOperationRepository } from "../workspaces/operation-repository.js";
+export { WorkspaceTransferRepository } from "../workspaces/transfer-repository.js";
 export type { AccountApprovalTransitionResult } from "./repositories/account-approval-repository.js";
 export {
   WorkflowReconciliationRepository,

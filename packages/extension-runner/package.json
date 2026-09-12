@@ -16,7 +16,7 @@
     "@mcp-moira/extension-sdk": "*",
     "@mcp-moira/workflow-engine": "*",
     "ajv": "^8.17.1",
-    "tsx": "^4.20.6"
+    "tsx": "^4.23.13"
   },
   "private": true
 }

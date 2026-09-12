@@ -17,6 +17,10 @@ import {
   resolveToolDescription,
   renderToolReference,
 } from "../../../packages/mcp-server/src/tools/tool-definitions.js";
+import {
+  workspaceDownloadRequestSchema,
+  workspaceExecRequestSchema,
+} from "../../../packages/mcp-server/src/tools/tool-schemas.js";
 import { registerTools } from "../../../packages/mcp-server/src/tools/register-tools.js";
 import { TOOL_BINDINGS } from "../../../packages/mcp-server/src/tools/tool-bindings.js";
 
@@ -96,7 +100,154 @@ describe("MCP tool definitions", () => {
       "notes",
       "artifacts",
       "lock",
+      "workspace_list",
+      "workspace_create",
+      "workspace_get",
+      "workspace_start",
+      "workspace_stop",
+      "workspace_delete",
+      "workspace_exec",
+      "workspace_stat",
+      "workspace_search",
+      "workspace_read",
+      "workspace_write",
+      "workspace_apply_patch",
+      "workspace_upload",
+      "workspace_download",
     ]);
+  });
+
+  it("publishes closed workspace schemas without chat, session, auth, or provider controls", () => {
+    const definition = (name: string) =>
+      TOOL_DEFINITIONS.find((candidate) => candidate.name === name)!;
+    const forbidden = [
+      "chat_id",
+      "session_id",
+      "user_id",
+      "oauth_state",
+      "provider_token",
+      "ssh_key",
+      "capability",
+    ];
+    for (const name of MCP_TOOL_NAMES.filter((candidate) => candidate.startsWith("workspace_"))) {
+      const serializedSchema = JSON.stringify(getToolJsonSchema(definition(name)));
+      for (const field of forbidden) expect(serializedSchema).not.toContain(`"${field}"`);
+    }
+
+    expect(
+      definition("workspace_delete").schema.safeParse({
+        workspace_id: "00000000-0000-4000-8000-000000000000",
+        expected_generation: 2,
+      }).success,
+    ).toBe(false);
+    // The published exec schema is one flat root object: every form's fields are visible,
+    // only the shared identity is required, and the strict request union decides the form.
+    const publishedExec = getToolJsonSchema(definition("workspace_exec")) as {
+      type: string;
+      required: string[];
+      properties: Record<string, unknown>;
+    };
+    expect(publishedExec.type).toBe("object");
+    expect(publishedExec.required).toEqual(["workspace_id"]);
+    expect(Object.keys(publishedExec.properties).sort()).toEqual([
+      "argv",
+      "cwd",
+      "max_stderr_bytes",
+      "max_stdout_bytes",
+      "operation_id",
+      "stdin_file",
+      "stdin_text",
+      "timeout_seconds",
+      "workspace_id",
+    ]);
+    expect(
+      workspaceExecRequestSchema.safeParse({
+        workspace_id: "00000000-0000-4000-8000-000000000000",
+        argv: ["node", "script.js"],
+        timeout_seconds: 30,
+        stdin_file: {
+          file_id: "sediment://file_00000000000000000000000000000000",
+          download_url: "https://oaiusercontent.com/file",
+          file_name: "input.bin",
+          mime_type: "application/octet-stream",
+        },
+      }).success,
+    ).toBe(true);
+    expect(
+      workspaceExecRequestSchema.safeParse({
+        workspace_id: "00000000-0000-4000-8000-000000000000",
+        argv: ["node", "script.js"],
+        timeout_seconds: 30,
+        stdin_text: "input",
+        stdin_file: {
+          file_id: "sediment://file_123",
+          download_url: "https://oaiusercontent.com/file",
+        },
+      }).success,
+    ).toBe(false);
+    expect(
+      workspaceExecRequestSchema.safeParse({
+        workspace_id: "00000000-0000-4000-8000-000000000000",
+        operation_id: "00000000-0000-4000-8000-000000000001",
+        argv: ["npm", "test"],
+        timeout_seconds: 30,
+      }).success,
+    ).toBe(false);
+    expect(
+      definition("workspace_exec").schema.safeParse({
+        workspace_id: "00000000-0000-4000-8000-000000000000",
+        chat_id: "c1",
+      }).success,
+    ).toBe(false);
+  });
+
+  it("requires bounded output metadata for download recovery and rejects mixing it with a new path", () => {
+    const download = workspaceDownloadRequestSchema;
+    const resume = {
+      workspace_id: "00000000-0000-4000-8000-000000000000",
+      operation_id: "00000000-0000-4000-8000-000000000001",
+      file_name: "result.bin",
+      mime_type: "application/octet-stream",
+    };
+    expect(download.safeParse(resume).success).toBe(true);
+    expect(download.safeParse({ ...resume, path: "new.bin" }).success).toBe(false);
+    expect(download.safeParse({ ...resume, max_bytes: 0 }).success).toBe(false);
+    expect(download.safeParse({ ...resume, file_name: "../result.bin" }).success).toBe(false);
+    const publishedDownload = getToolJsonSchema(
+      TOOL_DEFINITIONS.find((definition) => definition.name === "workspace_download")!,
+    ) as { required: string[] };
+    expect(publishedDownload.required.slice().sort()).toEqual([
+      "file_name",
+      "mime_type",
+      "workspace_id",
+    ]);
+  });
+
+  it("publishes native file metadata and optional file details at the top-level MCP boundary", async () => {
+    const published = await inspectPublishedContract("native file handoff");
+    for (const [name, field] of [
+      ["workspace_exec", "stdin_file"],
+      ["workspace_upload", "file"],
+    ]) {
+      const tool = published.tools.find((candidate) => candidate.name === name)!;
+      expect(tool._meta).toEqual({ "openai/fileParams": [field] });
+      const schema = dereferenceLocalJsonSchema(tool.inputSchema) as {
+        properties: Record<string, { required: string[]; properties: Record<string, unknown> }>;
+      };
+      expect(schema.properties[field].required.slice().sort()).toEqual(["download_url", "file_id"]);
+      expect(schema.properties[field].properties).toEqual(
+        expect.objectContaining({
+          file_name: expect.any(Object),
+          mime_type: expect.any(Object),
+        }),
+      );
+    }
+    const changed = TOOL_DEFINITIONS.map((definition) => ({ ...definition, _meta: undefined }));
+    expect(computeContractRevision(getToolContractProjection(changed))).not.toBe(
+      MCP_TOOLS_REVISION,
+    );
+    expect(renderToolReference("en")).toContain('"openai/fileParams"');
+    expect(renderToolReference("ru")).toContain('"stdin_file"');
   });
 
   it("publishes a strict communication contract without authority controls", () => {

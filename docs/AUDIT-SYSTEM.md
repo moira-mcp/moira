@@ -29,6 +29,9 @@ Persistent audit trail for:
 - `WorkflowService` - workflow CRUD with automatic audit
 - `ExecutionService` - execution lifecycle with automatic audit
 - `SettingsService` - database-backed settings management with automatic audit
+- `WorkspaceConnectionService` - website-owned GitHub connection, refresh and revocation audit
+- `WorkspaceResourceService` - persistent workspace creation, lifecycle and reconciliation audit
+- `WorkspaceOperationService` - direct-operation reservation, reconciliation and terminal audit
 - `DatabaseRepository` - routes manifest-declared extension settings to their separate value store and writes equivalent audit events without recording secret plaintext
 - Services obtain the source from the AsyncLocalStorage context automatically
 
@@ -156,13 +159,16 @@ Route/Tool → Repository → Database (audit lost!)
 
 ### Available Services
 
-| Service                | Factory Function              | Operations                                             |
-| ---------------------- | ----------------------------- | ------------------------------------------------------ |
-| WorkflowService        | `getWorkflowService()`        | save, softDelete, restore, hardDelete                  |
-| ExecutionService       | `getExecutionService()`       | start, step, complete, fail, cancel, delete            |
-| SettingsService        | `getSettingsService()`        | set, delete, createDefinition, deleteDefinition        |
-| GlobalSettingsService  | `getGlobalSettingsService()`  | setValue                                               |
-| WorkflowSharingService | `getWorkflowSharingService()` | createInvite, acceptInvite, revokeInvite, revokeAccess |
+| Service                    | Factory Function                  | Operations                                                         |
+| -------------------------- | --------------------------------- | ------------------------------------------------------------------ |
+| WorkflowService            | `getWorkflowService()`            | save, softDelete, restore, hardDelete                              |
+| ExecutionService           | `getExecutionService()`           | start, step, complete, fail, cancel, delete                        |
+| SettingsService            | `getSettingsService()`            | set, delete, createDefinition, deleteDefinition                    |
+| GlobalSettingsService      | `getGlobalSettingsService()`      | setValue                                                           |
+| WorkflowSharingService     | `getWorkflowSharingService()`     | createInvite, acceptInvite, revokeInvite, revokeAccess             |
+| WorkspaceConnectionService | `getWorkspaceConnectionService()` | start/complete authorization, refresh failure, disconnect/recovery |
+| WorkspaceResourceService   | `getWorkspaceResourceService()`   | create, reconcile, start, stop, delete                             |
+| WorkspaceOperationService  | `getWorkspaceOperationService()`  | execute, reconcile, cancel, finalize                               |
 
 ### Code Example
 
@@ -212,6 +218,51 @@ await workflowRepo.save(graph, userId, visibility); // Audit NOT logged!
 - `OAUTH_CONSENT_UPDATE` - OAuth consent updated (scope changes)
 
 **Logged via:** REST API (`/api/oauth/consent`)
+
+### Workspace Events
+
+Connection actions:
+
+- `WORKSPACE_CONNECTION_START` - website authorization started
+- `WORKSPACE_CONNECTION_COMPLETE` - GitHub identity and installation binding completed
+- `WORKSPACE_CONNECTION_REFRESH_FAILED` - credential refresh failed closed
+- `WORKSPACE_CONNECTION_DISCONNECT` - remote revoke completed, remains pending, or externally revoked unreadable state was confirmed
+
+**Logged via:** `WorkspaceConnectionService`
+
+Persistent resource actions:
+
+- `WORKSPACE_RESOURCE_CREATE` - exact created resource passed ownership and connector checks
+- `WORKSPACE_RESOURCE_CREATE_PENDING` - submitted create requires exact reconciliation
+- `WORKSPACE_RESOURCE_CREATE_REJECTED` - create or adoption failed closed
+- `WORKSPACE_RESOURCE_CLEANUP` - exact disposable resource was verified absent
+- `WORKSPACE_RESOURCE_START` - persistent resource reached running state
+- `WORKSPACE_RESOURCE_STOP` - persistent resource reached stopped state
+- `WORKSPACE_RESOURCE_DELETE` - explicit deletion reached exact provider absence
+
+**Logged via:** `WorkspaceResourceService`
+
+Direct-operation actions:
+
+- `WORKSPACE_OPERATION_RESERVE` - operation capacity and byte/time limits were reserved
+- `WORKSPACE_OPERATION_RECONCILE` - an uncertain remote outcome requires inspection
+- `WORKSPACE_OPERATION_TERMINAL` - operation reached a terminal state
+
+**Logged via:** `WorkspaceOperationService`
+
+Administrator control actions:
+
+- `WORKSPACE_CONTROL_UPDATE` - a global or provider kill switch was enabled or disabled; metadata holds the scope, flag, reason and the number of persistent workspaces asked to stop
+
+**Logged via:** `WorkspaceResourceService.setControl`
+
+Connection metadata is limited to provider and outcome. Resource metadata adds
+state and selected machine limits. Operation metadata contains only the opaque
+workspace ID, provider, state, input/output byte counts and exit code. Actors and
+opaque resource IDs use the ordinary audit fields. OAuth code/state, web-session
+tokens, repositories or source content, argv, cwd, stdin, stdout, stderr,
+provider credentials, SSH configuration, client secrets and vault material are
+forbidden audit payloads.
 
 ### Workflow Events
 
@@ -1022,6 +1073,7 @@ GET /api/admin/audit-log
 | `/api/executions/*`       | requireAuth       | User execution operations       |
 | `/api/user/*`             | requireAuth       | User profile operations         |
 | `/api/settings/*`         | requireAuth       | User settings                   |
+| `/api/integrations/*`     | requireAuth       | User-owned provider connections |
 | `/api/admin/*`            | requireAuth+Admin | Admin operations                |
 | `/api/stats/*`            | requireAuth       | User statistics                 |
 
@@ -1076,6 +1128,9 @@ Every action type has call sites in the codebase, logged via the source noted be
 | Auth events           | ✅ Via Better Auth hooks                    |
 | User profile          | ✅ Via REST API                             |
 | OAuth consent         | ✅ Via REST API                             |
+| Workspace connection  | ✅ Via WorkspaceConnectionService           |
+| Workspace resources   | ✅ Via WorkspaceResourceService             |
+| Workspace operations  | ✅ Via WorkspaceOperationService            |
 | Workflow              | ✅ Via WorkflowService                      |
 | Workflow sharing      | ✅ Via WorkflowSharingService               |
 | Execution             | ✅ Via ExecutionService + MCPEngine         |

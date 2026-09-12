@@ -487,6 +487,109 @@ delivery without returning secrets or destinations. An unknown or removed channe
 
 Authentication: Required
 
+## Workspace Connection API
+
+Website-only GitHub App authorization and connection management. These routes
+are mounted under `/api/integrations` behind `requireAuth`; they are separate
+from Better Auth social login and are not MCP operations. Every response uses
+`Cache-Control: no-store` and `Referrer-Policy: no-referrer`.
+
+The sanitized connection view has this shape:
+
+```typescript
+interface WorkspaceConnectionView {
+  state:
+    | "disabled"
+    | "configuration_error"
+    | "connection_required"
+    | "connecting"
+    | "installation_required"
+    | "connected"
+    | "refresh_failed"
+    | "revocation_pending"
+    | "disconnected";
+  reason: string | null;
+  settingsUrl: string;
+  installationUrl: string | null;
+  account: { id: string; login: string } | null;
+  installations: Array<{
+    externalInstallationId: string;
+    repositorySelection: "all" | "selected";
+  }>;
+  repositories: Array<{
+    externalRepositoryId: string;
+    fullName: string;
+    private: boolean;
+  }>;
+  canConnect: boolean;
+  canDisconnect: boolean;
+}
+```
+
+The view never contains provider tokens, client/vault secrets, OAuth state,
+connection IDs or revocation IDs.
+
+### GET /api/integrations/github
+
+Returns `{ success: true, data: WorkspaceConnectionView }` for the authenticated
+user. Missing complete server configuration is represented as `disabled` or
+`configuration_error`; it does not contact GitHub.
+
+Authentication: Required
+
+### GET /api/integrations/github/start
+
+Creates one ten-minute, single-use state bound to the current user and web
+session, then returns a `303` redirect to GitHub. A newer start invalidates that
+user's older unconsumed state. Missing/invalid server configuration returns
+`503` with `WORKSPACE_NOT_CONFIGURED`. Unreadable stored credentials and an
+untracked refresh successor return their typed safe recovery errors and cannot
+start authorization.
+
+Authentication: Required
+
+### GET /api/integrations/github/callback
+
+Consumes the exact user/session-bound `state`, exchanges `code` server-side,
+verifies the numeric GitHub user and personal installation/repository grants,
+then returns a `303` redirect to the same-origin Settings page. The redirect
+contains only `github=connected`, `github=installation_required`, or
+`github=authorization_failed`. Code, state and provider errors are never
+reflected in the response; nginx also omits this callback from access logs.
+
+Authentication: Required
+
+### DELETE /api/integrations/github
+
+Makes the connection unusable before provider I/O, retries every exact pending
+token revocation, revokes the active GitHub App grant, and returns the sanitized
+view. A transient provider failure leaves `revocation_pending`; it never restores
+local authority.
+
+Authentication: Required
+
+### DELETE /api/integrations/github/external-revocation
+
+Recovery for an encrypted credential that Moira can no longer decrypt, or for a
+submitted refresh whose successor could be neither retained nor revoked. First
+revoke the entire Moira GitHub App grant in GitHub, then send:
+
+```json
+{ "confirmed": true }
+```
+
+Only an eligible recovery state owned by the authenticated user is accepted. A
+successful confirmation deletes that user's blocked active/pending ciphertext
+and grants. When the configured vault key can read every envelope again, a stale
+unreadable marker is cleared and this endpoint rejects confirmation. The user
+can then use ordinary Reconnect or Disconnect; both paths revoke the readable
+predecessor exactly.
+
+Authentication: Required
+
+See `docs/WORKSPACES.md` for configuration, encryption, refresh and recovery
+contracts.
+
 ## Notes API
 
 User notes management with authentication. All operations scoped to authenticated user.
@@ -1021,6 +1124,127 @@ Errors:
 - 401: Invalid, expired, or already used token
 
 Authentication: Via token (no session required)
+
+## Workspace Management API
+
+Website management of the user's persistent cloud workspaces. These routes are
+mounted under `/api/integrations/github/workspaces` behind `requireAuth`, use the same
+domain services as the MCP `workspace_*` tools, and return `Cache-Control: no-store`
+and `Referrer-Policy: no-referrer`. Responses contain the sanitized workspace summary
+(opaque `workspace_id`, provider, repository, ref, machine, state, retention policy,
+desired/observed state, generation, timestamps) and never provider resource names,
+markers, claims, capabilities or credentials.
+
+### GET /api/integrations/github/workspaces
+
+Returns the instance readiness view, the connection view, approved repositories and
+the user's workspaces.
+
+```typescript
+{
+  success: true;
+  data: {
+    readiness: WorkspaceReadinessView;
+    connection: WorkspaceConnectionView;
+    repositories: Array<{ repository_id: string; name: string; private: boolean }>;
+    workspaces: WorkspaceSummaryView[];
+  }
+}
+```
+
+### POST /api/integrations/github/workspaces
+
+Body: `{ "repository_id": string, "ref": string }`. Returns `201` with the sanitized
+workspace, which may still be pending. `400` for malformed input; `503`
+`WORKSPACE_NOT_CONFIGURED` with `settings_url` when the feature is not configured.
+
+### GET /api/integrations/github/workspaces/:workspaceId
+
+Returns one owned workspace and up to twenty recent metadata-only operations
+(`operation_id`, kind, state, byte counts, exit code, deadline, result expiry,
+timestamps). Unknown, malformed and foreign IDs return `404 WORKSPACE_NOT_FOUND`.
+
+### POST /api/integrations/github/workspaces/:workspaceId/start | /stop
+
+Records the desired running or stopped state and returns the workspace with
+`data_preserved: true`. Stop keeps the repository data.
+
+### DELETE /api/integrations/github/workspaces/:workspaceId
+
+Body: `{ "confirm_delete": true, "expected_generation": number }`. Without both the
+route returns `400 WORKSPACE_DELETE_CONFIRMATION_REQUIRED` and calls no service. A
+stale generation returns `409 WORKSPACE_GENERATION_CONFLICT`. Success returns the
+workspace in its delete-pending state with `data_preserved: false`.
+
+Error mapping for every route: `WORKSPACE_GENERATION_CONFLICT`,
+`WORKSPACE_NOT_RUNNING`, `WORKSPACE_CREATE_PENDING` and
+`WORKSPACE_AUTHORIZATION_REQUIRED` → 409; `WORKSPACE_POLICY_LIMIT` and
+`WORKSPACE_OPERATION_BUSY` → 429; `WORKSPACE_PROVIDER_DISABLED` and
+`WORKSPACE_PROVIDER_UNAVAILABLE` → 503; `WORKSPACE_RESOURCE_INVALID` → 400. Messages
+are fixed safe texts; provider detail is never returned.
+
+Authentication: Required
+
+### GET /api/admin/workspaces
+
+Administrator readiness and kill switches. Mounted behind the admin namespace guard.
+
+```typescript
+{
+  success: true;
+  data: {
+    readiness: WorkspaceReadinessView;
+    controls: Array<{
+      scope: "global" | `provider:${string}`;
+      disabled: boolean;
+      reason: string | null;
+      updated_at: number | null;
+    }>;
+  }
+}
+```
+
+### PUT /api/admin/workspaces/controls/:scope
+
+Body: `{ "disabled": boolean, "reason"?: string }` (reason at most 500 characters).
+Scope is `global` or `provider:github-codespaces`. Disabling refuses new workspace
+creation, start and agent operations and requests stop for persistent workspaces; it
+never deletes data. Returns the updated readiness and controls. `400` for an invalid
+body or a scope the provider does not manage; `503 WORKSPACE_NOT_CONFIGURED` while
+the feature is not configured. Every change is audited as
+`WORKSPACE_CONTROL_UPDATE`.
+
+Authentication: Required (administrator)
+
+## Workspace Transfer Download API
+
+### GET /api/workspaces/transfers/:token
+
+Deliver one private workspace file published by the MCP `workspace_download` tool. The tool
+returns this URL to the agent as an MCP `resource_link`; the token in the path is the only
+authorization, so the URL must not be logged or shared.
+
+Success returns the exact stored bytes as an attachment with the published MIME type and file
+name and these headers:
+
+```http
+Cache-Control: private, no-store, max-age=0
+X-Content-Type-Options: nosniff
+X-Robots-Tag: noindex, nofollow, noarchive
+Referrer-Policy: no-referrer
+```
+
+The capability is consumed after complete or interrupted delivery, so a second request, an
+expired capability, a malformed token and an unknown token all return
+`404 { "error": "workspace_transfer_not_found" }`. Objects expire after
+`WORKSPACE_TRANSFER_TTL_MINUTES` and are limited by the transfer quotas described in
+`docs/WORKSPACES.md`.
+
+The route runs in the MCP process; both nginx variants proxy the `/api/workspaces/transfers/`
+prefix directly to it without buffering or temporary files and with access/error logging
+disabled. The route is rate-limited.
+
+Authentication: One-use capability token in the path
 
 ## Communication Attachment API
 
@@ -2211,6 +2435,7 @@ Response:
     systemHealth: {
       backendStatus: "healthy" | "degraded";
       databaseSize: number;
+      workspaces: WorkspaceReadinessView; // shared cloud-workspace readiness decision
       workflowReconciliation: {
         status: "ok" | "error";
         code: string;
@@ -2253,6 +2478,7 @@ Response:
     systemHealth: {
       backendStatus: "healthy" | "degraded";
       databaseSize: number;
+      workspaces: WorkspaceReadinessView; // shared cloud-workspace readiness decision
       workflowReconciliation: {
         status: "ok" | "error";
         code: string;
@@ -3880,6 +4106,11 @@ HTTP status codes:
 - 404: Not Found (resource doesn't exist)
 - 429: Too Many Requests (rate limited)
 - 500: Internal Server Error
+
+For routes whose URL carries a temporary credential, including the GitHub App
+callback, `requestContext.query` and `requestContext.params` are empty and the
+path is sanitized. Callback code/state are never copied into a generic error
+response.
 
 ## Static Artifacts Serving
 

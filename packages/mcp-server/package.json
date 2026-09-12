@@ -17,7 +17,8 @@
   "scripts": {},
   "dependencies": {
     "@mcp-moira/workflow-engine": "*",
-    "@mcp-moira/shared": "*"
+    "@mcp-moira/shared": "*",
+    "@mcp-moira/web-backend": "*"
   },
   "devDependencies": {},
   "private": true

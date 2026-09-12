@@ -8,6 +8,12 @@
 
 import axios, { AxiosInstance, AxiosResponse, AxiosError } from "axios";
 import type { ExecutionProgress } from "@mcp-moira/workflow-engine/progress-visual";
+import type {
+  WorkspaceConnectionView,
+  WorkspaceControlView,
+  WorkspaceReadinessView,
+  WorkspaceSummaryView,
+} from "@mcp-moira/shared";
 import {
   ApiResponse,
   ApiErrorCode,
@@ -24,6 +30,7 @@ import {
   AdminStatsResponse,
   AdminSystemStatusResponse,
   NodeTypeCatalog,
+  WorkspaceManagementView,
 } from "../types";
 
 /**
@@ -477,6 +484,90 @@ export class MoiraApiClient {
       }
       throw new ApiClientError("Failed to update user settings", ApiErrorCode.INTERNAL_ERROR);
     }
+  }
+
+  async getGitHubWorkspaceConnection(): Promise<WorkspaceConnectionView> {
+    const response =
+      await this.client.get<ApiResponse<WorkspaceConnectionView>>("/integrations/github");
+    return response.data.data!;
+  }
+
+  async disconnectGitHubWorkspace(): Promise<WorkspaceConnectionView> {
+    const response =
+      await this.client.delete<ApiResponse<WorkspaceConnectionView>>("/integrations/github");
+    return response.data.data!;
+  }
+
+  async confirmGitHubExternalRevocation(): Promise<WorkspaceConnectionView> {
+    const response = await this.client.delete<ApiResponse<WorkspaceConnectionView>>(
+      "/integrations/github/external-revocation",
+      { data: { confirmed: true } },
+    );
+    return response.data.data!;
+  }
+
+  async getGitHubWorkspaces(): Promise<WorkspaceManagementView> {
+    const response = await this.client.get<ApiResponse<WorkspaceManagementView>>(
+      "/integrations/github/workspaces",
+    );
+    return response.data.data!;
+  }
+
+  async createGitHubWorkspace(input: {
+    repository_id: string;
+    ref: string;
+  }): Promise<WorkspaceSummaryView> {
+    const response = await this.client.post<ApiResponse<{ workspace: WorkspaceSummaryView }>>(
+      "/integrations/github/workspaces",
+      input,
+    );
+    return response.data.data!.workspace;
+  }
+
+  async startGitHubWorkspace(workspaceId: string): Promise<WorkspaceSummaryView> {
+    const response = await this.client.post<ApiResponse<{ workspace: WorkspaceSummaryView }>>(
+      `/integrations/github/workspaces/${encodeURIComponent(workspaceId)}/start`,
+    );
+    return response.data.data!.workspace;
+  }
+
+  async stopGitHubWorkspace(workspaceId: string): Promise<WorkspaceSummaryView> {
+    const response = await this.client.post<ApiResponse<{ workspace: WorkspaceSummaryView }>>(
+      `/integrations/github/workspaces/${encodeURIComponent(workspaceId)}/stop`,
+    );
+    return response.data.data!.workspace;
+  }
+
+  async deleteGitHubWorkspace(
+    workspaceId: string,
+    expectedGeneration: number,
+  ): Promise<WorkspaceSummaryView> {
+    const response = await this.client.delete<ApiResponse<{ workspace: WorkspaceSummaryView }>>(
+      `/integrations/github/workspaces/${encodeURIComponent(workspaceId)}`,
+      { data: { confirm_delete: true, expected_generation: expectedGeneration } },
+    );
+    return response.data.data!.workspace;
+  }
+
+  async getAdminWorkspaces(): Promise<{
+    readiness: WorkspaceReadinessView;
+    controls: WorkspaceControlView[];
+  }> {
+    const response =
+      await this.client.get<
+        ApiResponse<{ readiness: WorkspaceReadinessView; controls: WorkspaceControlView[] }>
+      >("/admin/workspaces");
+    return response.data.data!;
+  }
+
+  async setAdminWorkspaceControl(
+    scope: string,
+    input: { disabled: boolean; reason: string | null },
+  ): Promise<{ readiness: WorkspaceReadinessView; controls: WorkspaceControlView[] }> {
+    const response = await this.client.put<
+      ApiResponse<{ readiness: WorkspaceReadinessView; controls: WorkspaceControlView[] }>
+    >(`/admin/workspaces/controls/${encodeURIComponent(scope)}`, input);
+    return response.data.data!;
   }
 
   /**
@@ -1419,6 +1510,8 @@ export class MoiraApiClient {
     currentNodeId: string | null;
     waitingForInputNodeId: string | null;
     revision: number;
+    /** Compare-and-swap tokens for metadata writes; `context` guards PUT /context. */
+    metadataRevisions: { parent: string; context: string; reminders: string };
     context: {
       variables: Record<string, unknown>;
       nodeStates: Record<string, unknown>;
@@ -1444,6 +1537,7 @@ export class MoiraApiClient {
           currentNodeId: string | null;
           waitingForInputNodeId: string | null;
           revision: number;
+          metadataRevisions: { parent: string; context: string; reminders: string };
           context: {
             variables: Record<string, unknown>;
             nodeStates: Record<string, unknown>;
@@ -1493,19 +1587,21 @@ export class MoiraApiClient {
   /**
    * Update one path inside an owner execution's policy-enabled declared variable without
    * overwriting siblings. The server enforces current waiting-node policy, complete top-level
-   * registry schema and expected revision. Path is relative to `variables`.
+   * registry schema, the expected step revision and the expected context revision (the
+   * compare-and-swap token from `metadataRevisions.context`). Path is relative to `variables`.
    */
   async updateExecutionContextPath(
     executionId: string,
     variablePath: Array<string | number>,
     value: unknown,
     expectedRevision: number,
+    expectedContextRevision: string,
   ): Promise<boolean> {
     try {
       type UpdateContextResponse = { updated: boolean };
       const response = await this.client.put<ApiResponse<UpdateContextResponse>>(
         `/executions/${executionId}/context`,
-        { variablePath, value, expectedRevision },
+        { variablePath, value, expectedRevision, expectedContextRevision },
       );
       return response.data.data!.updated;
     } catch (error) {

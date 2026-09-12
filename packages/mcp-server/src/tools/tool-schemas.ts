@@ -516,3 +516,266 @@ export const communicationSchema = z
       .optional(),
   })
   .strict();
+
+const workspaceIdSchema = z.string().uuid().describe("Persistent workspace ID");
+const workspacePathSchema = z.string().min(1).max(4096).describe("Repository-relative path");
+const workspaceSha256Schema = z.string().regex(/^[a-f0-9]{64}$/);
+const workspaceMimeTypeSchema = z
+  .string()
+  .max(127)
+  .regex(/^[a-z0-9][a-z0-9!#$&^_.+-]*\/[a-z0-9][a-z0-9!#$&^_.+-]*$/i);
+const workspaceFileNameSchema = z
+  .string()
+  .min(1)
+  .max(255)
+  .refine(
+    (value) =>
+      !value.includes("/") &&
+      !value.includes("\\") &&
+      [...value].every((character) => {
+        const code = character.charCodeAt(0);
+        return code >= 32 && code !== 127;
+      }),
+    "Filename must not contain paths or control characters",
+  );
+
+export const workspaceExpectedSchema = z
+  .object({
+    exists: z.boolean().describe("Whether the target must already exist"),
+    size_bytes: z.number().int().min(0).optional(),
+    sha256: workspaceSha256Schema.optional(),
+  })
+  .strict();
+
+export const workspaceNativeFileSchema = z
+  .object({
+    file_id: z
+      .string()
+      .max(512)
+      .regex(/^(?:sediment:\/\/)?file_[A-Za-z0-9]+$/),
+    download_url: z.string().url(),
+    file_name: workspaceFileNameSchema.optional(),
+    mime_type: workspaceMimeTypeSchema.optional(),
+    size_bytes: z
+      .number()
+      .int()
+      .min(0)
+      .max(4 * 1024 * 1024)
+      .optional(),
+  })
+  .strict()
+  .describe("Native ChatGPT file reference; pass the attachment reference without base64");
+
+export const workspaceListSchema = z.object({}).strict();
+
+export const workspaceCreateSchema = z
+  .object({
+    repository_id: z.string().min(1).max(255),
+    ref: z.string().min(1).max(255),
+  })
+  .strict();
+
+export const workspaceGetSchema = z.object({ workspace_id: workspaceIdSchema }).strict();
+export const workspaceStartSchema = workspaceGetSchema;
+export const workspaceStopSchema = workspaceGetSchema;
+
+export const workspaceDeleteSchema = z
+  .object({
+    workspace_id: workspaceIdSchema,
+    expected_generation: z.number().int().min(1),
+    confirm_delete: z.literal(true).describe("Required explicit destructive confirmation"),
+  })
+  .strict();
+
+const workspaceOperationResumeSchema = z
+  .object({
+    workspace_id: workspaceIdSchema,
+    operation_id: z.string().uuid().describe("Pending operation ID returned by this tool"),
+  })
+  .strict();
+
+const workspaceExecStartSchema = z
+  .object({
+    workspace_id: workspaceIdSchema,
+    argv: z
+      .array(
+        z
+          .string()
+          .min(1)
+          .max(16 * 1024),
+      )
+      .min(1)
+      .max(128),
+    cwd: z.string().max(4096).default("."),
+    timeout_seconds: z.number().int().min(1).max(900).default(300),
+    max_stdout_bytes: z
+      .number()
+      .int()
+      .min(1)
+      .max(8 * 1024 * 1024)
+      .optional(),
+    max_stderr_bytes: z
+      .number()
+      .int()
+      .min(1)
+      .max(8 * 1024 * 1024)
+      .optional(),
+  })
+  .strict();
+
+export const workspaceExecRequestSchema = z.union([
+  workspaceExecStartSchema.extend({ stdin_text: z.string().optional() }),
+  workspaceExecStartSchema.extend({ stdin_file: workspaceNativeFileSchema }),
+  workspaceOperationResumeSchema,
+]);
+
+export const workspaceStatRequestSchema = z.union([
+  z.object({ workspace_id: workspaceIdSchema, path: workspacePathSchema }).strict(),
+  workspaceOperationResumeSchema,
+]);
+
+export const workspaceSearchRequestSchema = z.union([
+  z
+    .object({
+      workspace_id: workspaceIdSchema,
+      path: workspacePathSchema,
+      query: z.string().min(1).max(4096),
+      mode: z.enum(["literal", "regex"]).default("literal"),
+      max_matches: z.number().int().min(1).max(1000).default(100),
+      max_bytes: z
+        .number()
+        .int()
+        .min(1)
+        .max(1024 * 1024)
+        .default(64 * 1024),
+    })
+    .strict(),
+  workspaceOperationResumeSchema,
+]);
+
+export const workspaceReadRequestSchema = z.union([
+  z
+    .object({
+      workspace_id: workspaceIdSchema,
+      path: workspacePathSchema,
+      offset: z.number().int().min(0).default(0),
+      length: z
+        .number()
+        .int()
+        .min(1)
+        .max(4 * 1024 * 1024)
+        .default(64 * 1024),
+    })
+    .strict(),
+  workspaceOperationResumeSchema,
+]);
+
+export const workspaceWriteRequestSchema = z.union([
+  z
+    .object({
+      workspace_id: workspaceIdSchema,
+      path: workspacePathSchema,
+      text: z.string(),
+      expected: workspaceExpectedSchema,
+    })
+    .strict(),
+  workspaceOperationResumeSchema,
+]);
+
+export const workspaceApplyPatchRequestSchema = z.union([
+  z
+    .object({
+      workspace_id: workspaceIdSchema,
+      files: z
+        .array(
+          z
+            .object({
+              path: workspacePathSchema,
+              expected: workspaceExpectedSchema,
+              edits: z
+                .array(
+                  z
+                    .object({
+                      start: z.number().int().min(0),
+                      end: z.number().int().min(0),
+                      text: z.string(),
+                    })
+                    .strict(),
+                )
+                .min(1)
+                .max(4096),
+            })
+            .strict(),
+        )
+        .min(1)
+        .max(64),
+    })
+    .strict(),
+  workspaceOperationResumeSchema,
+]);
+
+export const workspaceUploadRequestSchema = z.union([
+  z
+    .object({
+      workspace_id: workspaceIdSchema,
+      path: workspacePathSchema,
+      file: workspaceNativeFileSchema,
+      expected: workspaceExpectedSchema,
+    })
+    .strict(),
+  workspaceOperationResumeSchema,
+]);
+
+const workspaceDownloadStartSchema = z
+  .object({
+    workspace_id: workspaceIdSchema,
+    path: workspacePathSchema,
+    max_bytes: z
+      .number()
+      .int()
+      .min(1)
+      .max(4 * 1024 * 1024)
+      .default(4 * 1024 * 1024),
+    file_name: workspaceFileNameSchema,
+    mime_type: workspaceMimeTypeSchema,
+  })
+  .strict();
+
+export const workspaceDownloadRequestSchema = z.union([
+  workspaceDownloadStartSchema,
+  workspaceOperationResumeSchema.extend({
+    file_name: workspaceFileNameSchema,
+    mime_type: workspaceMimeTypeSchema,
+  }),
+]);
+
+/**
+ * Published root-object projection of a workspace request union. MCP clients that
+ * cannot read a root `anyOf` discover one flat object: a field is required only when
+ * every form requires it, and the strict request union is applied again at dispatch.
+ */
+function publishedWorkspaceSchema<Options extends [z.AnyZodObject, ...z.AnyZodObject[]]>(
+  request: z.ZodUnion<Options>,
+) {
+  const shape: Record<string, z.ZodTypeAny> = {};
+  const options = request.options as z.AnyZodObject[];
+  for (const option of options) {
+    for (const [key, field] of Object.entries(option.shape as Record<string, z.ZodTypeAny>)) {
+      if (shape[key]) continue;
+      const everywhere = options.every(
+        (candidate) => candidate.shape[key] && !(candidate.shape[key] as z.ZodTypeAny).isOptional(),
+      );
+      shape[key] = everywhere ? field : field.optional();
+    }
+  }
+  return z.object(shape).strict();
+}
+
+export const workspaceExecSchema = publishedWorkspaceSchema(workspaceExecRequestSchema);
+export const workspaceStatSchema = publishedWorkspaceSchema(workspaceStatRequestSchema);
+export const workspaceSearchSchema = publishedWorkspaceSchema(workspaceSearchRequestSchema);
+export const workspaceReadSchema = publishedWorkspaceSchema(workspaceReadRequestSchema);
+export const workspaceWriteSchema = publishedWorkspaceSchema(workspaceWriteRequestSchema);
+export const workspaceApplyPatchSchema = publishedWorkspaceSchema(workspaceApplyPatchRequestSchema);
+export const workspaceUploadSchema = publishedWorkspaceSchema(workspaceUploadRequestSchema);
+export const workspaceDownloadSchema = publishedWorkspaceSchema(workspaceDownloadRequestSchema);
