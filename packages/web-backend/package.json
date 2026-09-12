@@ -12,7 +12,7 @@
   "dependencies": {
     "@mcp-moira/shared": "*",
     "@mcp-moira/workflow-engine": "*",
-    "multer": "^2.2.0"
+    "multer": "^2.3.0"
   },
   "devDependencies": {
     "@types/multer": "^2.2.0"
