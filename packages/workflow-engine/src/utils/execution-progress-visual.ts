@@ -7,6 +7,7 @@ import type {
   ProgressFactTone,
 } from "./execution-progress-contract.js";
 import type { ProcessProjection, ProcessTransition } from "./process-derivation.js";
+import { progressTextWidth, wrapProgressTextToWidth } from "./execution-progress-text.js";
 export type {
   ExecutionBlockStatus,
   ExecutionProgress,
@@ -49,10 +50,27 @@ export interface ProgressVisualFact {
   labelLines: string[];
   valueLines: string[];
 }
+/** An axis-aligned box in image pixels. */
+export interface ProgressVisualBox {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+/** The repeat-count badge beside a repeated block's state mark. */
+export interface ProgressVisualBadge extends ProgressVisualBox {
+  text: string;
+}
 export interface ProgressVisualNode {
   id: string;
   label: string;
   labelLines: string[];
+  /** The state mark (✓ ◐ ● – ○) and where it is drawn; the title starts at `titleX`. */
+  mark: string;
+  markX: number;
+  titleX: number;
+  /** `×N` for a repeated block, placed beside the mark and clear of the title. */
+  badge: ProgressVisualBadge | null;
   lines: ProgressVisualLine[];
   state: ExecutionProgressState;
   status: ExecutionBlockStatus;
@@ -79,6 +97,8 @@ export interface ProgressVisualEdge {
   labelX: number;
   labelY: number;
   labelAnchor: "start" | "middle" | "end";
+  /** The label's box; null when the edge carries no gutter or connector label. */
+  labelBox: ProgressVisualBox | null;
   /** A return to an earlier block (or to itself), drawn dashed with the transition label. */
   cycle: boolean;
 }
@@ -113,6 +133,13 @@ const CARD_PADDING_Y = 18;
 const CARD_FIXED_HEIGHT = 42;
 const FACT_GAP = 12;
 const FACT_MIN_WIDTH = 180;
+const MARK_FONT = 18;
+const TITLE_FONT = 14;
+const BADGE_FONT = 11;
+const BADGE_HEIGHT = 16;
+const EDGE_LABEL_FONT = 11;
+const EDGE_LABEL_LINE = 14;
+const LABEL_GAP = 4;
 export const PROGRESS_IMAGE_MAX_WIDTH = 4096;
 export const PROGRESS_IMAGE_MIN_WIDTH = 480;
 export const PROGRESS_VISUAL_MIN_WIDTH = 320;
@@ -297,6 +324,50 @@ function contentLines(
   return lines;
 }
 
+/** The mark for a block status; the repeat count is a badge of its own, not part of the mark. */
+function progressStatusMark(status: ExecutionBlockStatus): string {
+  return status === "repeated" || status === "done"
+    ? "✓"
+    : status === "waiting"
+      ? "◐"
+      : status === "active"
+        ? "●"
+        : status === "skipped"
+          ? "–"
+          : "○";
+}
+
+/**
+ * A block's header row: the mark, the optional count badge beside it and the title after both,
+ * wrapped to the width that remains. The badge's `y` is relative to the block top until the
+ * block is placed.
+ */
+function blockHeader(
+  status: ExecutionBlockStatus,
+  iterations: number,
+  label: string,
+  x: number,
+  width: number,
+): Pick<ProgressVisualNode, "mark" | "markX" | "titleX" | "badge" | "labelLines"> {
+  const mark = progressStatusMark(status);
+  const markX = x + 14;
+  let titleX = Math.max(x + 38, markX + progressTextWidth(mark, MARK_FONT, "bold") + 8);
+  let badge: ProgressVisualBadge | null = null;
+  if (status === "repeated") {
+    const text = `×${iterations}`;
+    const badgeWidth = progressTextWidth(text, BADGE_FONT, "semibold") + 10;
+    badge = { text, x: titleX - 2, y: 14, width: badgeWidth, height: BADGE_HEIGHT };
+    titleX = badge.x + badgeWidth + 8;
+  }
+  const labelLines = wrapProgressTextToWidth(
+    label,
+    Math.max(40, width - (titleX - x) - 14),
+    TITLE_FONT,
+    "bold",
+  );
+  return { mark, markX, titleX, badge, labelLines: labelLines.length ? labelLines : [label] };
+}
+
 export function buildExecutionProgressVisualModel(
   progress: ExecutionProgress,
   options: ProgressVisualOptions = {},
@@ -381,20 +452,22 @@ export function buildExecutionProgressVisualModel(
   }
   const maxCardCharacters = Math.max(16, Math.floor((cardWidth - 34) / 8.2));
   const nodes = shownNodes.map((node, index): ProgressVisualNode => {
-    const labelLines = wrapProgressText(node.label, maxCardCharacters);
+    const x = PADDING_X + (index % actualColumns) * (cardWidth + CARD_GAP_X);
+    const header = blockHeader(node.status, node.iterations, node.label, x, cardWidth);
+    const { labelLines } = header;
     const collapsed = visible.collapsed.has(node.id);
     const lines = collapsed ? [] : contentLines(node.content, maxCardCharacters);
     return {
       id: node.id,
       label: node.label,
-      labelLines,
+      ...header,
       lines,
       state: node.state,
       status: node.status,
       iterations: node.iterations,
       collapsed,
       row: Math.floor(index / actualColumns),
-      x: PADDING_X + (index % actualColumns) * (cardWidth + CARD_GAP_X),
+      x,
       y: 0,
       width: cardWidth,
       height: collapsed
@@ -417,7 +490,10 @@ export function buildExecutionProgressVisualModel(
   for (let row = 0; row < rowHeights.length; row++) {
     rowTops[row] = rowY;
     nodes.forEach((node) => {
-      if (node.row === row) node.y = rowY;
+      if (node.row === row) {
+        node.y = rowY;
+        if (node.badge) node.badge.y += rowY;
+      }
     });
     rowY += rowHeights[row] + CARD_GAP_Y;
   }
@@ -471,6 +547,7 @@ export function buildExecutionProgressVisualModel(
       labelX: 0,
       labelY: 0,
       labelAnchor: "middle",
+      labelBox: null,
       cycle: false,
     });
   }
@@ -604,45 +681,124 @@ function layoutProcessColumn(
   for (const arc of skips) if (arc.hub) arc.lane = bundles.get(arc.target)!.lane;
   const leftLanes = assignLanes(arcs.filter((arc) => arc.cycle));
 
-  const gutterFor = (lanes: number) => (lanes ? LANE_BASE + lanes * LANE_STEP + 150 : 24);
-  const leftGutter = Math.max(PADDING_X, gutterFor(leftLanes));
-  const rightGutter = Math.max(PADDING_X, gutterFor(rightLanes));
+  // Gutter labels: every arc that is neither an adjacent connector nor a hub bundle. Each side's
+  // gutter holds its lanes plus a label area sized by the widest label (bounded), and the column
+  // keeps its minimum width by shrinking the label areas rather than overflowing the viewport;
+  // labels wrap to whatever the area leaves them.
+  const labelWidthOf = (label: string) => progressTextWidth(label, EDGE_LABEL_FONT, "semibold");
+  const gutterArcs = arcs.filter((arc) => !arc.hub && (arc.cycle || arc.to !== arc.from + 1));
+  const leftArcs = gutterArcs.filter((arc) => arc.cycle);
+  const rightArcs = gutterArcs.filter((arc) => !arc.cycle);
+  const lanesPart = (lanes: number) => (lanes ? LANE_BASE + lanes * LANE_STEP : 0);
+  // A side's label area never drops below its widest word, so labels wrap between words and
+  // never split one.
+  const widestWordOf = (side: ProcessArc[]) =>
+    Math.max(0, ...side.flatMap((a) => a.label.split(/\s+/u).map(labelWidthOf)));
+  const labelSpaceOf = (side: ProcessArc[]) =>
+    side.length
+      ? Math.min(240, Math.max(120, Math.max(...side.map((a) => labelWidthOf(a.label))) + 8))
+      : 0;
+  const leftFloor = leftArcs.length ? Math.max(72, widestWordOf(leftArcs) + 8) : 0;
+  const rightFloor = rightArcs.length ? Math.max(72, widestWordOf(rightArcs) + 8) : 0;
+  let leftLabelSpace = Math.max(labelSpaceOf(leftArcs), leftFloor);
+  let rightLabelSpace = Math.max(labelSpaceOf(rightArcs), rightFloor);
+  const gutterOf = (lanes: number, labelSpace: number) =>
+    Math.max(PADDING_X, lanesPart(lanes) + labelSpace + (labelSpace ? 12 : 0));
+  const overBudget = () =>
+    gutterOf(leftLanes, leftLabelSpace) + gutterOf(rightLanes, rightLabelSpace) + COLUMN_MIN_WIDTH >
+    width;
+  if (overBudget()) {
+    const cut = Math.ceil(
+      (gutterOf(leftLanes, leftLabelSpace) +
+        gutterOf(rightLanes, rightLabelSpace) +
+        COLUMN_MIN_WIDTH -
+        width) /
+        2,
+    );
+    if (leftLabelSpace) leftLabelSpace = Math.max(leftFloor, leftLabelSpace - cut);
+    if (rightLabelSpace) rightLabelSpace = Math.max(rightFloor, rightLabelSpace - cut);
+  }
+  // When the viewport cannot hold the lanes, the column and both label areas, a side's labels
+  // move inside their source blocks (as the hub labels always are): first the forward skips on
+  // the right, then the returns on the left. The arcs stay drawn; nothing is truncated.
+  let rightInline = false;
+  let leftInline = false;
+  if (overBudget() && rightLabelSpace) {
+    rightInline = true;
+    rightLabelSpace = 0;
+  }
+  if (overBudget() && leftLabelSpace) {
+    leftInline = true;
+    leftLabelSpace = 0;
+  }
+  for (const arc of gutterArcs) {
+    const inlined = arc.cycle ? leftInline : rightInline;
+    if (!inlined) continue;
+    inline.set(arc.source, [
+      ...(inline.get(arc.source) ?? []),
+      `${arc.cycle ? "↩ " : ""}${arc.label} → ${blockLabel.get(arc.target) ?? arc.target}`,
+    ]);
+  }
+  const leftGutter = gutterOf(leftLanes, leftLabelSpace);
+  const rightGutter = gutterOf(rightLanes, rightLabelSpace);
   const columnWidth = Math.max(
     COLUMN_MIN_WIDTH,
     Math.min(COLUMN_MAX_WIDTH, width - leftGutter - rightGutter),
   );
-  const columnX = Math.max(PADDING_X, Math.floor((width - columnWidth) / 2));
-  const labelCharacters = Math.max(16, Math.floor((columnWidth - 60) / 8.2));
+  const columnX =
+    leftGutter + Math.max(0, Math.floor((width - leftGutter - rightGutter - columnWidth) / 2));
   // Gutter labels sit beyond the outermost lane of their side, never across a lane line.
   const leftOuter = columnX - LANE_BASE - Math.max(0, leftLanes - 1) * LANE_STEP;
   const rightOuter = columnX + columnWidth + LANE_BASE + Math.max(0, rightLanes - 1) * LANE_STEP;
-  const gutterCharacters = Math.max(
-    12,
-    Math.floor((Math.min(leftOuter, width - rightOuter) - 24) / 6.4),
-  );
+  const leftArea = { x0: PADDING_X / 2, x1: leftOuter - 8 };
+  const rightArea = { x0: rightOuter + 8, x1: width - PADDING_X / 2 };
+  const areaWidth = (area: { x0: number; x1: number }) => Math.max(48, area.x1 - area.x0);
+
+  // Adjacent connectors carry their label beside the line, inside the gap between the two
+  // blocks; a label that needs more lines than the gap holds widens that gap.
+  const connectorLabelWidth = Math.max(60, Math.floor(columnWidth / 2) - 14);
+  const gapAfter = new Map<string, number>();
+  const connectorLines = new Map<string, string[]>();
+  for (const arc of arcs) {
+    if (arc.cycle || arc.hub || arc.to !== arc.from + 1) continue;
+    const lines = wrapProgressTextToWidth(
+      arc.label,
+      Math.max(connectorLabelWidth, widestWordOf([arc])),
+      EDGE_LABEL_FONT,
+      "semibold",
+    );
+    connectorLines.set(`${arc.source}>${arc.target}`, lines);
+    const needed = lines.length * EDGE_LABEL_LINE + 16;
+    gapAfter.set(arc.source, Math.max(gapAfter.get(arc.source) ?? COLUMN_GAP_Y, needed));
+  }
 
   let y = nodesTop;
   const nodes: ProgressVisualNode[] = visible.nodes.map((node, i): ProgressVisualNode => {
     const collapsed = visible.collapsed.has(node.id);
-    const labelLines = wrapProgressText(node.label, labelCharacters);
+    const header = blockHeader(node.status, node.iterations, node.label, columnX, columnWidth);
+    const { labelLines } = header;
+    const inlineWidth = Math.max(60, columnWidth - 36);
     const lines: ProgressVisualLine[] = collapsed
       ? []
       : (inline.get(node.id) ?? []).flatMap((text) =>
-          wrapProgressText(text, labelCharacters).map((line, lineIndex): ProgressVisualLine => ({
-            text: line,
-            kind: "next",
-            marker: lineIndex === 0,
-          })),
+          wrapProgressTextToWidth(text, inlineWidth, 12).map(
+            (line, lineIndex): ProgressVisualLine => ({
+              text: line,
+              kind: "next",
+              marker: lineIndex === 0,
+            }),
+          ),
         );
     const height =
       CARD_PADDING_Y +
       CARD_FIXED_HEIGHT +
       Math.max(0, labelLines.length - 1) * LABEL_LINE_HEIGHT +
       lines.length * TEXT_LINE_HEIGHT;
+    if (header.badge) header.badge.y += y;
     const placed: ProgressVisualNode = {
       id: node.id,
       label: node.label,
-      labelLines,
+      ...header,
       lines,
       state: node.state,
       status: node.status,
@@ -655,35 +811,48 @@ function layoutProcessColumn(
       height,
       focusNodeId: node.focusNodeId,
     };
-    y += height + COLUMN_GAP_Y;
+    y += height + (gapAfter.get(node.id) ?? COLUMN_GAP_Y);
     return placed;
   });
   const byId = new Map(nodes.map((node) => [node.id, node]));
   const edges: ProgressVisualEdge[] = [];
-  // Arc labels sit at the arc's source end, stacked when several arcs leave one block on one side.
-  const leaving = new Map<string, number>();
+  // Gutter labels are placed after every arc is known: each starts centred on its arc's start
+  // and may slide along the arc's vertical run; the labels of one side are then stacked in
+  // vertical order so no two overlap, whichever block their arcs leave.
+  interface PendingLabel {
+    edge: ProgressVisualEdge;
+    right: boolean;
+    top: number;
+    lo: number;
+    hi: number;
+    width: number;
+    height: number;
+    order: number;
+  }
+  const pending: PendingLabel[] = [];
   for (const arc of arcs) {
     const source = byId.get(arc.source)!;
     const target = byId.get(arc.target)!;
     const adjacent = !arc.cycle && arc.to === arc.from + 1;
-    // A hub connector carries its label inside the source block (the "next" line), not in the gutter.
-    const labelLines = arc.hub
-      ? []
-      : wrapProgressText(arc.label, adjacent ? labelCharacters : gutterCharacters).slice(0, 2);
     if (adjacent) {
+      const lines = connectorLines.get(`${arc.source}>${arc.target}`) ?? [];
       const x = source.x + source.width / 2;
       const y1 = source.y + source.height;
       const y2 = target.y;
+      const boxHeight = lines.length * EDGE_LABEL_LINE;
+      const top = y1 + Math.max(2, (y2 - y1 - boxHeight) / 2);
+      const boxWidth = Math.max(0, ...lines.map(labelWidthOf));
       edges.push({
         source: arc.source,
         target: arc.target,
         direction: "forward",
         path: `M ${x} ${y1} L ${x} ${y2}`,
         label: arc.label,
-        labelLines,
+        labelLines: lines,
         labelX: x + 10,
-        labelY: y1 + (y2 - y1) / 2 + 4 - (labelLines.length - 1) * 7,
+        labelY: top + EDGE_LABEL_FONT,
         labelAnchor: "start",
+        labelBox: lines.length ? { x: x + 10, y: top, width: boxWidth, height: boxHeight } : null,
         cycle: false,
       });
       continue;
@@ -699,23 +868,70 @@ function layoutProcessColumn(
     const endY = self ? target.y + (target.height * 2) / 3 : target.y + target.height / 2;
     const startX = right ? source.x + source.width : source.x;
     const endX = right ? target.x + target.width : target.x;
-    const sideKey = `${arc.source}:${right ? "r" : "l"}`;
-    const stack = leaving.get(sideKey) ?? 0;
-    if (!arc.hub) leaving.set(sideKey, stack + 1);
-    edges.push({
+    const area = right ? rightArea : leftArea;
+    // A hub connector carries its label inside the source block (the "next" line), not in the
+    // gutter; so does every arc of a side whose labels moved inline.
+    const inlined = arc.hub || (right ? rightInline : leftInline);
+    const lines = inlined
+      ? []
+      : wrapProgressTextToWidth(arc.label, areaWidth(area), EDGE_LABEL_FONT, "semibold");
+    const edge: ProgressVisualEdge = {
       source: arc.source,
       target: arc.target,
       direction: right ? "forward" : "backward",
       path: `M ${startX} ${startY} L ${laneX} ${startY} L ${laneX} ${endY} L ${endX} ${endY}`,
       label: arc.label,
-      labelLines,
-      labelX: right ? rightOuter + 8 : leftOuter - 8,
-      labelY: startY - 6 - stack * (labelLines.length * 14 + 4),
+      labelLines: lines,
+      labelX: right ? area.x0 : area.x1,
+      labelY: startY,
       labelAnchor: right ? "start" : "end",
+      labelBox: null,
       cycle: arc.cycle,
+    };
+    edges.push(edge);
+    if (!lines.length) continue;
+    const boxHeight = lines.length * EDGE_LABEL_LINE + 2;
+    const lo = Math.min(startY, endY);
+    const hi = Math.max(startY, endY) - boxHeight;
+    const centred = startY - boxHeight / 2;
+    pending.push({
+      edge,
+      right,
+      top: hi >= lo ? Math.min(Math.max(centred, lo), hi) : centred,
+      lo,
+      hi,
+      width: Math.max(0, ...lines.map(labelWidthOf)),
+      height: boxHeight,
+      order: arc.from,
     });
   }
-  const height = Math.max(nodesTop + 96, y - COLUMN_GAP_Y + PADDING_BOTTOM);
+  for (const side of [false, true]) {
+    const labels = pending
+      .filter((label) => label.right === side)
+      .sort((a, b) => a.top - b.top || a.order - b.order);
+    let floor = -Infinity;
+    for (const label of labels) {
+      const top = Math.max(label.top, floor);
+      const area = side ? rightArea : leftArea;
+      label.edge.labelBox = {
+        x: side ? area.x0 : area.x1 - label.width,
+        y: top,
+        width: label.width,
+        height: label.height,
+      };
+      label.edge.labelY = top + EDGE_LABEL_FONT;
+      floor = top + label.height + LABEL_GAP;
+    }
+  }
+  const lowestLabel = Math.max(
+    0,
+    ...edges.map((edge) => (edge.labelBox ? edge.labelBox.y + edge.labelBox.height : 0)),
+  );
+  const height = Math.max(
+    nodesTop + 96,
+    y - COLUMN_GAP_Y + PADDING_BOTTOM,
+    lowestLabel + PADDING_BOTTOM,
+  );
   return {
     taskTitle: header.taskTitle,
     taskTitleLines: header.taskTitleLines,

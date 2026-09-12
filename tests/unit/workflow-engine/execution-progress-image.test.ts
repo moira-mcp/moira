@@ -482,9 +482,16 @@ describe("execution progress visual model and PNG", () => {
       state: "current",
       iterations: 1,
     };
-    const svg = renderProgressVisualSvg(buildExecutionProgressVisualModel(statuses));
+    const model = buildExecutionProgressVisualModel(statuses);
+    const svg = renderProgressVisualSvg(model);
     expect(svg).toContain("Repeated ×3: Stage 0");
-    expect(svg).toContain("✓×3");
+    // The count is a badge beside the mark, not part of it; the title starts after the badge.
+    const repeated = model.nodes[0];
+    expect(repeated.mark).toBe("✓");
+    expect(repeated.badge).toMatchObject({ text: "×3" });
+    expect(repeated.titleX).toBeGreaterThan(repeated.badge!.x + repeated.badge!.width);
+    expect(svg).toContain(">×3</text>");
+    expect(svg).not.toContain("✓×3");
     expect(svg).toContain("Skipped: Review");
     expect(svg).toContain("Waiting: Stage 2");
     expect(svg).toContain("◐");

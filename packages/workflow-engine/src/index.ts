@@ -89,8 +89,11 @@ export type {
   ProgressVisualNode,
   ProgressVisualEdge,
   ProgressVisualModel,
+  ProgressVisualBox,
+  ProgressVisualBadge,
 } from "./utils/execution-progress-visual.js";
 export * from "./utils/execution-progress-renderer.js";
+export * from "./utils/execution-progress-text.js";
 export * from "./utils/execution-progress-image.js";
 export { ContextMapper } from "./utils/context-mapper.js";
 export { ContextHelpers } from "./utils/context-helpers.js";

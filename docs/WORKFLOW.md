@@ -520,7 +520,15 @@ bounded light/dark PNG behind a short-lived, revision-bound, single-use URL; `vi
 renders the aggregated block view instead (blocks in process order with the process's labelled
 transitions and dashed returns; transitions into a hub block share one bundled connector per hub
 in the right gutter, labelled inside the source block), and `hide` / `collapse` leave named blocks
-out or reduce them to a chip (see `docs/API.md`). A
+out or reduce them to a chip (see `docs/API.md`). The model measures its text with its own
+metric (`progressTextWidth`, a per-glyph-class width for the rendered face that errs wide) and places
+every label and badge as a box that overlaps nothing: a block's title starts after its state
+mark and, for a repeated block, after a small `×N` count badge; gutter labels of one side are
+stacked in vertical order beside the outermost lane, wrapped to the gutter's label area and
+never split inside a word; a connector's label sits in the gap between its two blocks, which
+widens when the label needs more lines; when a viewport cannot hold the lanes, the column and
+both label areas, the forward skips' labels move inside their source blocks (as hub labels
+are), then the returns' labels (prefixed `↩`), and the arcs stay drawn. A
 `user-notification` node can set `attachProgressImage: true`; it must belong to a block
 and sends the rendered PNG through the current user's configured channels with its normal message.
 The deprecated `telegram-notification` compatibility node retains the same progress attachment.

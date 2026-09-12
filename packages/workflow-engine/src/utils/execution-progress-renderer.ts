@@ -126,18 +126,6 @@ export function renderProgressVisualSvg(model: ProgressVisualModel): string {
           : node.state === "completed"
             ? palette.success
             : palette.border;
-      const mark =
-        node.status === "repeated"
-          ? `✓×${node.iterations}`
-          : node.status === "done"
-            ? "✓"
-            : node.status === "waiting"
-              ? "◐"
-              : node.status === "active"
-                ? "●"
-                : node.status === "skipped"
-                  ? "–"
-                  : "○";
       const state =
         node.status === "repeated"
           ? `Repeated ×${node.iterations}`
@@ -153,11 +141,15 @@ export function renderProgressVisualSvg(model: ProgressVisualModel): string {
       const labelY = node.y + 26;
       const label = textLines(
         node.labelLines,
-        node.x + 38,
+        node.titleX,
         labelY,
         20,
         `fill="${palette.text}" font-size="14" font-weight="700"`,
       );
+      // The repeat count is a secondary badge beside the mark, never part of the title.
+      const badge = node.badge
+        ? `<rect x="${node.badge.x}" y="${node.badge.y}" width="${node.badge.width}" height="${node.badge.height}" rx="8" fill="${palette.background}" stroke="${palette.border}" stroke-width="1"/><text x="${node.badge.x + 5}" y="${node.badge.y + 12}" fill="${palette.muted}" font-size="11" font-weight="600">${escapeXml(node.badge.text)}</text>`
+        : "";
       let lineY = labelY + Math.max(1, node.labelLines.length) * 20 + 12;
       const content = node.lines
         .map((line) => {
@@ -184,7 +176,7 @@ export function renderProgressVisualSvg(model: ProgressVisualModel): string {
           return rendered;
         })
         .join("");
-      return `<g${node.collapsed ? ' data-collapsed="true"' : ""}><title>${escapeXml(`${state}: ${node.label}`)}</title><rect x="${node.x}" y="${node.y}" width="${node.width}" height="${node.height}" rx="${node.collapsed ? node.height / 2 : 16}" fill="${fill}" stroke="${stroke}" stroke-width="${node.state === "current" ? 4 : 2}"${node.collapsed ? ' stroke-dasharray="4 4"' : ""}/><text x="${node.x + 14}" y="${node.y + 27}" fill="${stroke}" font-size="18" font-weight="700">${mark}</text>${label}${content}</g>`;
+      return `<g${node.collapsed ? ' data-collapsed="true"' : ""}><title>${escapeXml(`${state}: ${node.label}`)}</title><rect x="${node.x}" y="${node.y}" width="${node.width}" height="${node.height}" rx="${node.collapsed ? node.height / 2 : 16}" fill="${fill}" stroke="${stroke}" stroke-width="${node.state === "current" ? 4 : 2}"${node.collapsed ? ' stroke-dasharray="4 4"' : ""}/><text x="${node.markX}" y="${node.y + 27}" fill="${stroke}" font-size="18" font-weight="700">${node.mark}</text>${badge}${label}${content}</g>`;
     })
     .join("");
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${model.width}" height="${model.height}" viewBox="0 0 ${model.width} ${model.height}" font-family="DejaVu Sans, sans-serif"><rect width="100%" height="100%" fill="${palette.background}"/>${header.join("")}${facts}${edges}${nodes}</svg>`;
