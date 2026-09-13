@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { settleAfterDispatch } from "./settle-after-dispatch.js";
 import { requireWorkspaceTransportAvailable } from "./transport-availability.js";
 import type {
   WorkspaceFileOperationResponse,
@@ -190,6 +191,8 @@ export class WorkspaceFileService {
       transport: WorkspaceFileTransport;
       policy: () => WorkspaceResourcePolicy;
       now?: () => number;
+      /** Injected so a settle window costs no real time in tests. */
+      delay?: (milliseconds: number) => Promise<void>;
       transfers?: Pick<
         WorkspaceTransferService,
         | "ingest"
@@ -512,10 +515,16 @@ export class WorkspaceFileService {
           operation.resourceGeneration,
           this.now(),
         );
-        return {
-          operation: this.dependencies.repository.getOwned(userId, operation.id)!,
-          result: null,
-        };
+        const settled = await settleAfterDispatch(this.dependencies.delay, async () => {
+          const response = await this.reconcile(userId, operation.id);
+          return response.result === null ? null : response;
+        });
+        return (
+          settled ?? {
+            operation: this.dependencies.repository.getOwned(userId, operation.id)!,
+            result: null,
+          }
+        );
       }
       if (result.action !== request.action) {
         throw new Error("Workspace file transport returned a mismatched result");

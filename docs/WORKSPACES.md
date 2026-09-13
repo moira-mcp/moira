@@ -127,6 +127,14 @@ inside the selected repository. It keeps its opaque marker, process-group facts
 and bounded result outside the repository. The result preserves separate stdout
 and stderr, terminal state and exit code.
 
+A dispatched command is durable and resumable as soon as the connector accepts it,
+and the dispatch call then waits briefly for the outcome: a command that finishes
+inside that bounded window returns its terminal result from the same call, and one
+that does not returns the running envelope whose operation ID resumes it. The wait
+only inspects, so a command still reaches the connector exactly once however its
+result is collected, and it does not change the operation deadline or any bound.
+File operations share this dispatch and behave the same way.
+
 Before connector contact, SQLite reserves the authenticated tenant, workspace
 and authorization generations, per-user and global concurrency, input bytes,
 independent stdout/stderr bounds and deadline. SQLite stores only

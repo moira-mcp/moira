@@ -1,4 +1,5 @@
 import { WorkspaceOperationRepository } from "./operation-repository.js";
+import { settleAfterDispatch } from "./settle-after-dispatch.js";
 import { requireWorkspaceTransportAvailable } from "./transport-availability.js";
 import type {
   WorkspaceExecRequest,
@@ -130,6 +131,8 @@ export class WorkspaceOperationService {
       transport: WorkspaceOperationTransport & Partial<WorkspaceFileTransport>;
       policy: () => WorkspaceResourcePolicy;
       now?: () => number;
+      /** Injected so a settle window costs no real time in tests. */
+      delay?: (milliseconds: number) => Promise<void>;
       audit?: (event: WorkspaceOperationAuditEvent) => Promise<void> | void;
       transfers?: Pick<WorkspaceTransferService, "ingest" | "claimInput" | "release" | "consume">;
       nativeFetcher?: WorkspaceNativeReferenceFetcher;
@@ -295,6 +298,7 @@ export class WorkspaceOperationService {
   ): Promise<WorkspaceOperationResponse> {
     const { policy, stdoutLimitBytes, stderrLimitBytes, operation, workspace } = prepared;
     let terminalResult: WorkspaceOperationResult | null = null;
+    let terminalEmitted = false;
     let remoteContacted = false;
     let claimedInput: WorkspaceTransferRecord | null = null;
     let preDispatchOutcome = "credential_unavailable_before_dispatch";
@@ -375,6 +379,11 @@ export class WorkspaceOperationService {
           operation.resourceGeneration,
           this.now(),
         );
+        terminalResult = await settleAfterDispatch(this.dependencies.delay, () =>
+          this.reconcile(userId, operation.id),
+        );
+        // Whichever path stored the outcome has already emitted its terminal event.
+        terminalEmitted = terminalResult !== null;
       } else {
         terminalResult = this.complete(userId, operation, result);
       }
@@ -399,7 +408,7 @@ export class WorkspaceOperationService {
       }
     }
     const current = this.dependencies.repository.getOwned(userId, operation.id)!;
-    if (terminalResult) await this.emit("terminal", current);
+    if (terminalResult && !terminalEmitted) await this.emit("terminal", current);
     return {
       operation: current,
       result: terminalResult,

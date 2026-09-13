@@ -104,17 +104,48 @@ function fixture() {
   const repository = new WorkspaceOperationRepository(sqlite);
   const transport = new FakeFileTransport();
   const credentials = { getCredential: jest.fn(async () => "ghu_access") };
+  // The settle window is exercised for its attempts, not for real elapsed time.
+  const settleDelays: number[] = [];
   const service = new WorkspaceFileService({
     repository,
     transport,
     credentials,
     policy: () => policy,
     now: () => now,
+    delay: async (milliseconds) => {
+      settleDelays.push(milliseconds);
+    },
   });
-  return { sqlite, repository, transport, credentials, service };
+  return { sqlite, repository, settleDelays, transport, credentials, service };
 }
 
 describe("durable workspace file operations", () => {
+  test("returns a file result that lands during the settle window", async () => {
+    const value = fixture();
+    try {
+      const terminal = value.transport.result;
+      // A file supervisor that answers "running" leaves its outcome for the next inspection.
+      value.transport.result = { state: "running" } as unknown as typeof terminal;
+      value.transport.inspectFile = async () => {
+        value.transport.inspectCalls();
+        return terminal;
+      };
+      const dispatched = await value.service.execute("user-1", "workspace-1", {
+        action: "write",
+        path: "src/file.bin",
+        bytes: Buffer.from("abc"),
+        expected: { exists: false },
+      });
+
+      expect(dispatched.operation.state).toBe("succeeded");
+      expect(dispatched.result).toEqual(terminal);
+      expect(value.transport.executeCalls).toHaveBeenCalledTimes(1);
+      expect(value.settleDelays).toEqual([150]);
+    } finally {
+      value.sqlite.close();
+    }
+  });
+
   test("rejects unavailable connector before credentials on file dispatch and result recovery", async () => {
     const value = fixture();
     const request = {

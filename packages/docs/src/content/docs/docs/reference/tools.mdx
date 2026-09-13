@@ -131,9 +131,10 @@ timeout (`timeout_seconds`, default 300) and optional per-stream output limits, 
 `exit_code`. Supply at most one stdin form: `stdin_text` for UTF-8 text or `stdin_file` for a native
 ChatGPT file reference; the file's bytes reach the process without base64 in the conversation.
 Failed, timed-out and cancelled commands and rejected file edits are returned as tool errors that
-keep `operation_id` and the available output. A result whose `state` is not terminal is not a
-success: call the same tool again with only `workspace_id` and `operation_id` to obtain the stored
-outcome without running the command or mutation twice.
+keep `operation_id` and the available output. A command that finishes quickly returns its terminal
+result from the same call that started it; one that is still running returns a non-terminal
+`state`, which is not a success. Call the same tool again with only `workspace_id` and
+`operation_id` to obtain the stored outcome without running the command or mutation twice.
 
 `workspace_read` returns UTF-8 text with `offset`, `total_size` and `sha256`; `length` defaults to
 64 KiB, and `workspace_search` defaults to 100 matches within 64 KiB of results, so naming only the

@@ -12,6 +12,7 @@ import {
   WorkspaceResourceRepository,
   WorkspaceTransferRepository,
   WorkspaceTransferService,
+  type WorkspaceOperationAuditEvent,
   type WorkspaceOperationResult,
   type WorkspaceOperationTransport,
   type WorkspaceResourcePolicy,
@@ -55,7 +56,10 @@ class FakeTransport implements WorkspaceOperationTransport {
     state: "running",
   };
   throwExecute = false;
+  throwInspect = false;
   throwFinalize = false;
+  /** Defaults to the execute outcome; set when a test needs inspect to differ from dispatch. */
+  inspectResult: WorkspaceOperationResult | { state: "running" } | null = null;
   lastWorkspace: Parameters<WorkspaceOperationTransport["execute"]>[1] | null = null;
   lastRequest: Parameters<WorkspaceOperationTransport["execute"]>[3] | null = null;
   executeGate: Promise<void> | null = null;
@@ -90,8 +94,9 @@ class FakeTransport implements WorkspaceOperationTransport {
   ) {
     this.inspectCalls();
     this.lastInspectedOperation = operation;
+    if (this.throwInspect) throw new Error("ssh response lost");
     if (this.inspectObservation) await this.inspectObservation();
-    return this.executeResult;
+    return this.inspectResult ?? this.executeResult;
   }
 
   async cancel() {
@@ -137,17 +142,28 @@ function fixture() {
   const repository = new WorkspaceOperationRepository(sqlite);
   const transport = new FakeTransport();
   const credentials = { getCredential: jest.fn(async () => "ghu_access") };
+  const audits: WorkspaceOperationAuditEvent[] = [];
   let currentNow = now;
+  // The settle window is exercised for its attempts, not for real elapsed time.
+  const settleDelays: number[] = [];
   const service = new WorkspaceOperationService({
     repository,
     transport,
     credentials,
     policy: () => policy,
     now: () => currentNow,
+    delay: async (milliseconds) => {
+      settleDelays.push(milliseconds);
+    },
+    audit: (event) => {
+      audits.push(event);
+    },
   });
   return {
     sqlite,
     repository,
+    audits,
+    settleDelays,
     transport,
     credentials,
     service,
@@ -269,6 +285,98 @@ describe("durable direct workspace operations", () => {
       }
     },
   );
+
+  test("returns the result of a command that finishes during the settle window", async () => {
+    const value = fixture();
+    try {
+      // The connector always answers "running" for an exec; the outcome appears moments later.
+      value.transport.executeResult = { state: "running" };
+      value.transport.inspectResult = {
+        state: "succeeded",
+        stdout: "immediate",
+        stderr: "",
+        exitCode: 0,
+      };
+      const dispatched = await value.service.execute("user-1", "workspace-1", {
+        argv: ["printf", "immediate"],
+        cwd: ".",
+        stdin: { kind: "inline", bytes: new Uint8Array() },
+        timeoutMs: 5_000,
+      });
+
+      expect(dispatched.operation.state).toBe("succeeded");
+      expect(dispatched.result).toEqual({
+        state: "succeeded",
+        stdout: "immediate",
+        stderr: "",
+        exitCode: 0,
+      });
+      expect(value.transport.executeCalls).toHaveBeenCalledTimes(1);
+      expect(value.transport.inspectCalls).toHaveBeenCalledTimes(1);
+      expect(value.settleDelays).toEqual([150]);
+      expect(
+        value.audits.filter((event) => event.action === "terminal" && event.state === "succeeded"),
+      ).toHaveLength(1);
+    } finally {
+      value.sqlite.close();
+    }
+  });
+
+  test("keeps a resumable running envelope for a command that outlives the settle window", async () => {
+    const value = fixture();
+    try {
+      value.transport.executeResult = { state: "running" };
+      value.transport.inspectResult = { state: "running" };
+      const dispatched = await value.service.execute("user-1", "workspace-1", {
+        argv: ["sleep", "30"],
+        cwd: ".",
+        stdin: { kind: "inline", bytes: new Uint8Array() },
+        timeoutMs: 60_000,
+      });
+
+      expect(dispatched.operation.state).toBe("running");
+      expect(dispatched.result).toBeNull();
+      // Bounded: the window makes a fixed small number of attempts and then gives up.
+      expect(value.settleDelays).toEqual([150, 350, 750]);
+
+      value.transport.inspectResult = {
+        state: "succeeded",
+        stdout: "late",
+        stderr: "",
+        exitCode: 0,
+      };
+      await expect(
+        value.service.reconcile("user-1", dispatched.operation.id),
+      ).resolves.toMatchObject({ state: "succeeded", stdout: "late" });
+      expect(value.transport.executeCalls).toHaveBeenCalledTimes(1);
+    } finally {
+      value.sqlite.close();
+    }
+  });
+
+  test("falls back to the running envelope when the settle window itself fails", async () => {
+    const value = fixture();
+    try {
+      value.transport.executeResult = { state: "running" };
+      value.transport.throwInspect = true;
+      const dispatched = await value.service.execute("user-1", "workspace-1", {
+        argv: ["printf", "unknown"],
+        cwd: ".",
+        stdin: { kind: "inline", bytes: new Uint8Array() },
+        timeoutMs: 5_000,
+      });
+
+      expect(dispatched.result).toBeNull();
+      // A failed inspection means the outcome is unknown, not lost: the operation stays
+      // resumable and the background reconciler will reach it.
+      expect(value.repository.getOwned("user-1", dispatched.operation.id)).toMatchObject({
+        state: "reconcile_pending",
+      });
+      expect(value.transport.executeCalls).toHaveBeenCalledTimes(1);
+    } finally {
+      value.sqlite.close();
+    }
+  });
 
   test("admits every operation submitted within one day", async () => {
     const value = fixture();
