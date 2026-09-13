@@ -234,6 +234,11 @@ it terminally. Accepted bytes exist only in the bounded request buffer and are r
 The nginx `location = /api/communication/attachments` routes raw bodies to this MCP handler with
 request buffering disabled rather than through the web backend's broad `/api/` proxy.
 
+Every tool is registered through one wrapper. A failure that escapes the tool is recorded with the
+tool name, classified as the project classifies failures at a boundary, and only then converted into
+the sanitized agent-facing message, so a suppressed message is never the only trace of a failure.
+The `reconciliation` tool answers its own failures and records them the same way.
+
 The `workspace_*` tools follow the same registry path. `manage-workspaces.ts` is a presentation
 adapter over the exported `@mcp-moira/web-backend/services` composition (never the web server or
 routes): the tenant comes from the request context, results are projected field by field, known

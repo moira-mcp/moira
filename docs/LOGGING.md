@@ -351,7 +351,12 @@ logger.info("Operation started"); // inputData NOT included
 
 **Coverage:**
 
-- MCP Server: All tool calls via the `/mcp` endpoint
+- MCP Server: All tool calls via the `/mcp` endpoint, including a failure that escapes a tool. The
+  registration wrapper records it with the tool name before the agent-facing message is sanitized,
+  so a message the sanitizer suppresses still leaves a diagnosis. The level follows the
+  classification above: an operational failure is a warning, anything unexpected is an error, which
+  is also what decides whether the record carries the input snapshot. The `reconciliation` tool
+  answers its own failures and records them the same way.
 - Web Backend: All POST/PUT/PATCH requests via `inputContextMiddleware`
 - Workflow Engine: All step executions via `executeStep()`
 
