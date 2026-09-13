@@ -1293,19 +1293,28 @@ function capture(executable, argv) {
 const RUNNER = String.raw`
 const {spawn}=require("node:child_process");
 const {access,readFile,rename,writeFile}=require("node:fs/promises");
+const startTimeOf=async(path)=>{try{const value=await readFile(path,'utf8');const field=value.slice(value.lastIndexOf(') ')+2).split(' ')[19]??null;return /^[0-9]+$/.test(field)?field:null}catch{return null}};
 (async()=>{let raw="";for await(const chunk of process.stdin)raw+=chunk;const input=JSON.parse(raw);const out=[];const err=[];let stdoutBytes=0;let stderrBytes=0;let terminal=false;let outputExceeded=false;let timedOut=false;
-let runnerStartTime=null;if(process.platform==="linux"){const value=await readFile('/proc/self/stat','utf8');runnerStartTime=value.slice(value.lastIndexOf(') ')+2).split(' ')[19]??null;if(!/^[0-9]+$/.test(runnerStartTime))throw new Error("invalid runner start time")}
+let runnerStartTime=null;if(process.platform==="linux"){runnerStartTime=await startTimeOf('/proc/self/stat');if(runnerStartTime===null)throw new Error("invalid runner start time")}
 await writeFile(input.runnerPidPath,JSON.stringify({pid:process.pid,startTime:runnerStartTime}),{mode:0o600});
 const child=spawn(input.argv[0],input.argv.slice(1),{cwd:input.cwd,env:process.env,detached:true,stdio:["pipe","pipe","pipe"]});
-let startTime=null;if(process.platform==="linux"){try{const value=await readFile('/proc/'+child.pid+'/stat','utf8');startTime=value.slice(value.lastIndexOf(') ')+2).split(' ')[19]??null;if(!/^[0-9]+$/.test(startTime))throw new Error("invalid process start time")}catch(error){try{process.kill(-child.pid,"SIGKILL")}catch{}throw error}}
-await writeFile(input.pidPath,JSON.stringify({pid:child.pid,startTime}),{mode:0o600});
 const collect=(target,stream)=>(chunk)=>{if(stream==="stdout")stdoutBytes+=chunk.length;else stderrBytes+=chunk.length;const limit=stream==="stdout"?input.maxStdoutBytes:input.maxStderrBytes;if((stream==="stdout"?stdoutBytes:stderrBytes)>limit){outputExceeded=true;try{process.kill(-child.pid,"SIGKILL")}catch{}}else target.push(Buffer.from(chunk));};
-child.stdout.on("data",collect(out,"stdout"));child.stderr.on("data",collect(err,"stderr"));child.stdin.end(Buffer.from(input.stdin,"base64"));
+// Output collection, exit observation and pipe-error tolerance are installed before any
+// await: a command that exits immediately must not close before the runner is listening,
+// and writing its stdin after it exited must not abort the runner without a result.
+child.stdout.on("data",collect(out,"stdout"));child.stderr.on("data",collect(err,"stderr"));
+child.on("error",()=>{});for(const stream of [child.stdin,child.stdout,child.stderr])stream.on("error",()=>{});
 const timer=setTimeout(()=>{if(terminal)return;timedOut=true;try{process.kill(-child.pid,"SIGKILL")}catch{}},input.timeoutMs);timer.unref();
-child.once("close",async(code,signal)=>{terminal=true;clearTimeout(timer);let cancelled=false;try{await access(input.cancelPath);cancelled=true}catch{}
+const closed=new Promise((resolveClose)=>child.once("close",(code)=>{terminal=true;clearTimeout(timer);resolveClose(code)}));
+try{child.stdin.end(Buffer.from(input.stdin,"base64"))}catch{}
+// A start time is unreadable only once the child is gone; the published result is then the
+// authority, and an unverifiable identity is never reported as a live process.
+const startTime=process.platform==="linux"?await startTimeOf('/proc/'+child.pid+'/stat'):null;
+await writeFile(input.pidPath,JSON.stringify({pid:child.pid,startTime}),{mode:0o600});
+const code=await closed;let cancelled=false;try{await access(input.cancelPath);cancelled=true}catch{}
 const state=cancelled?"cancelled":outputExceeded?"failed":timedOut?"timed_out":code===0?"succeeded":"failed";
 const stderr=outputExceeded?Buffer.from("output limit exceeded"):Buffer.concat(err);
-await writeFile(input.resultTempPath,JSON.stringify({state,stdout:Buffer.concat(out).toString("base64"),stderr:stderr.toString("base64"),exitCode:Number.isInteger(code)?code:null}),{mode:0o600});await rename(input.resultTempPath,input.resultPath);});
+await writeFile(input.resultTempPath,JSON.stringify({state,stdout:Buffer.concat(out).toString("base64"),stderr:stderr.toString("base64"),exitCode:Number.isInteger(code)?code:null}),{mode:0o600});await rename(input.resultTempPath,input.resultPath);
 })().catch(async()=>{process.exitCode=1});`;
 
 async function execute(request) {
@@ -1340,16 +1349,28 @@ async function execute(request) {
     }),
   );
   runner.unref();
-  for (let attempt = 0; attempt < 20; attempt++) {
+  // Dispatch is proven by the child's identity or by a result the runner already published;
+  // a command that outlives neither is not silently left running.
+  for (let attempt = 0; attempt < 80; attempt++) {
+    if (await dispatched(pidPath, resultPath)) break;
+    await new Promise((resolveValue) => setTimeout(resolveValue, 25));
+  }
+  if (!(await dispatched(pidPath, resultPath))) {
+    await access(pidPath, constants.R_OK);
+  }
+  return { state: "running" };
+}
+
+async function dispatched(pidPath, resultPath) {
+  for (const path of [pidPath, resultPath]) {
     try {
-      await access(pidPath, constants.R_OK);
-      break;
+      await access(path, constants.R_OK);
+      return true;
     } catch {
-      await new Promise((resolveValue) => setTimeout(resolveValue, 25));
+      // The next evidence path is checked before the caller waits again.
     }
   }
-  await access(pidPath, constants.R_OK);
-  return { state: "running" };
+  return false;
 }
 
 async function readResult(directory) {
@@ -1379,6 +1400,9 @@ async function linuxStartTime(pid) {
 
 async function processExists(identity) {
   const { pid, startTime } = identity;
+  // Recorded without a start time on Linux: the process was already gone when its identity
+  // was published, so it is never reported as live and its result file is the authority.
+  if (process.platform === "linux" && startTime === null) return false;
   try {
     process.kill(pid, 0);
     return startTime === null || (await linuxStartTime(pid)) === startTime;
@@ -1391,9 +1415,6 @@ async function readProcessIdentity(directory, fileName = "pid") {
   const value = JSON.parse(await readFile(join(directory, fileName), "utf8"));
   if (!Number.isSafeInteger(value.pid) || value.pid <= 1)
     fail("invalid operation process identity");
-  if (process.platform === "linux" && value.startTime === null) {
-    fail("operation process start time is required on Linux");
-  }
   if (value.startTime !== null && !/^[0-9]+$/.test(value.startTime)) {
     fail("invalid operation process start time");
   }

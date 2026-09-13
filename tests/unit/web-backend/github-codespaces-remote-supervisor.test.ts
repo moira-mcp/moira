@@ -968,6 +968,33 @@ if (process.env.MOIRA_TEST_HOLD_FILE_RUNNER === "1") {
     ).resolves.toEqual({ state: "absent" });
   });
 
+  test("publishes the result of a command that exits before its stdin is written", async () => {
+    const value = fixture();
+    const remoteMarker = `moira-op-${"6".repeat(32)}`;
+    // /bin/echo exits without reading stdin, so a large payload reaches a closed pipe while
+    // the runner is still recording the child's identity.
+    await expect(
+      request(value.environment, {
+        action: "execute",
+        version: 1,
+        remoteMarker,
+        repositoryFullName: "owner/repository",
+        argv: ["/bin/echo", "fast"],
+        cwd: ".",
+        stdin: Buffer.from("x".repeat(256 * 1024)).toString("base64"),
+        timeoutMs: 5_000,
+        maxStdoutBytes: 4096,
+        maxStderrBytes: 4096,
+      }),
+    ).resolves.toEqual({ state: "running" });
+    await expect(inspectUntilTerminal(value.environment, remoteMarker)).resolves.toEqual({
+      state: "succeeded",
+      stdout: "fast\n",
+      stderr: "",
+      exitCode: 0,
+    });
+  });
+
   test("reports cancellation only after the foreground process group is absent", async () => {
     const value = fixture();
     const remoteMarker = `moira-op-${"2".repeat(32)}`;
