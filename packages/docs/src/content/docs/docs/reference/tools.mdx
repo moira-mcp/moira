@@ -139,7 +139,9 @@ result from the same call that started it; one that is still running returns a n
 
 `workspace_read` returns UTF-8 text with `offset`, `total_size` and `sha256`; `length` defaults to
 64 KiB, and `workspace_search` defaults to 100 matches within 64 KiB of results, so naming only the
-workspace, path and query is a complete call. A non-text range returns
+workspace, path and query is a complete call. Search covers repository content and skips the
+repository's own `.git` directory, and it refuses a search rooted at or inside that directory; a
+file there is still readable by its exact path. A non-text range returns
 `WORKSPACE_BINARY_READ_REQUIRES_DOWNLOAD`. A call that matches no request form returns
 `WORKSPACE_REQUEST_INVALID` naming the missing or invalid fields. `workspace_write` replaces a file atomically
 under an `expected` precondition (`exists`, optional `size_bytes` and `sha256`), and

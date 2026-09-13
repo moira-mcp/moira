@@ -39,6 +39,11 @@ const FILE_ACTIONS = new Set([
 const MAX_FILE_BYTES = 4 * 1024 * 1024;
 const MAX_FILE_PATH_BYTES = 4096;
 const SEARCH_DEADLINE_MS = 5_000;
+/**
+ * Version-control internals are not repository content: searching them returns pack files, refs
+ * and reflogs that bury the caller's actual matches. They stay readable by exact path.
+ */
+const UNSEARCHABLE_DIRECTORY = ".git";
 const STATE_ROOT = process.env.MOIRA_OPERATION_STATE_DIR
   ? resolve(process.env.MOIRA_OPERATION_STATE_DIR)
   : join(homedir(), ".local", "state", "moira", "operations");
@@ -1026,6 +1031,14 @@ async function executeFileRequest(root, request, marker, directory) {
   const base = await inspectPath(root, request.path, true);
   if (!base.stat.isDirectory()) fail("search root must be a directory");
   if (
+    base.relative === UNSEARCHABLE_DIRECTORY ||
+    base.relative.startsWith(`${UNSEARCHABLE_DIRECTORY}/`) ||
+    base.relative.includes(`/${UNSEARCHABLE_DIRECTORY}/`) ||
+    base.relative.endsWith(`/${UNSEARCHABLE_DIRECTORY}`)
+  ) {
+    fail("search root is not searchable");
+  }
+  if (
     typeof request.query !== "string" ||
     !request.query ||
     !["literal", "regex"].includes(request.mode) ||
@@ -1072,6 +1085,8 @@ async function executeFileRequest(root, request, marker, directory) {
         continue;
       }
       if (value.isSymbolicLink()) continue;
+      // Skipping a directory is not truncation: the bounds still mean what they meant.
+      if (value.isDirectory() && entry.name === UNSEARCHABLE_DIRECTORY) continue;
       if (value.isDirectory()) {
         let child;
         try {

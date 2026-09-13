@@ -235,6 +235,114 @@ describe("direct Codespace operation supervisor", () => {
     expect(writeResult.value.current.sha256).toMatch(/^[a-f0-9]{64}$/);
   });
 
+  test("searches repository content without descending into version-control internals", async () => {
+    const value = fixture();
+    // The fixture repository is a real one, so .git already holds refs, config and logs.
+    writeFileSync(join(value.repository, ".git", "description"), "needle in the git directory\n");
+    writeFileSync(join(value.repository, ".gitignore"), "needle in an ordinary dot-file\n");
+
+    const onlyInsideGit = (await request(value.environment, {
+      action: "file-execute",
+      version: 1,
+      remoteMarker: `moira-op-${"7a".repeat(16)}`,
+      repositoryFullName: "owner/repository",
+      request: {
+        action: "search",
+        path: ".",
+        query: "needle in the git directory",
+        mode: "literal",
+        maxMatches: 10,
+        maxBytes: 4096,
+      },
+    })) as { value: { matches: unknown[]; truncated: boolean } };
+    // No match, and skipping a directory is not a truncated result.
+    expect(onlyInsideGit.value).toEqual({ action: "search", matches: [], truncated: false });
+
+    writeFileSync(join(value.repository, "notes.txt"), "shared needle\n");
+    writeFileSync(join(value.repository, ".git", "shared.txt"), "shared needle\n");
+    const insideAndOutside = (await request(value.environment, {
+      action: "file-execute",
+      version: 1,
+      remoteMarker: `moira-op-${"7b".repeat(16)}`,
+      repositoryFullName: "owner/repository",
+      request: {
+        action: "search",
+        path: ".",
+        query: "shared needle",
+        mode: "literal",
+        maxMatches: 10,
+        maxBytes: 4096,
+      },
+    })) as { value: { matches: Array<{ path: string }> } };
+    expect(insideAndOutside.value.matches).toEqual([
+      { path: "notes.txt", line: 1, column: 1, preview: "shared needle" },
+    ]);
+
+    const ordinaryDotFile = (await request(value.environment, {
+      action: "file-execute",
+      version: 1,
+      remoteMarker: `moira-op-${"7c".repeat(16)}`,
+      repositoryFullName: "owner/repository",
+      request: {
+        action: "search",
+        path: ".",
+        query: "ordinary dot-file",
+        mode: "literal",
+        maxMatches: 10,
+        maxBytes: 4096,
+      },
+    })) as { value: { matches: Array<{ path: string }> } };
+    expect(ordinaryDotFile.value.matches).toEqual([
+      { path: ".gitignore", line: 1, column: 14, preview: "needle in an ordinary dot-file" },
+    ]);
+
+    const rootedAtGit = (await request(value.environment, {
+      action: "file-execute",
+      version: 1,
+      remoteMarker: `moira-op-${"7d".repeat(16)}`,
+      repositoryFullName: "owner/repository",
+      request: {
+        action: "search",
+        path: ".git",
+        query: "needle",
+        mode: "literal",
+        maxMatches: 10,
+        maxBytes: 4096,
+      },
+    })) as { state: string };
+    expect(rootedAtGit.state).toBe("failed");
+
+    // The directory must exist, or the refusal would be indistinguishable from a missing path.
+    mkdirSync(join(value.repository, ".git", "logs"), { recursive: true });
+    writeFileSync(join(value.repository, ".git", "logs", "HEAD"), "needle in a reflog\n");
+    const rootedInsideGit = (await request(value.environment, {
+      action: "file-execute",
+      version: 1,
+      remoteMarker: `moira-op-${"7f".repeat(16)}`,
+      repositoryFullName: "owner/repository",
+      request: {
+        action: "search",
+        path: ".git/logs",
+        query: "needle",
+        mode: "literal",
+        maxMatches: 10,
+        maxBytes: 4096,
+      },
+    })) as { state: string };
+    expect(rootedInsideGit.state).toBe("failed");
+
+    // A file inside the git directory is still readable when the caller names it exactly.
+    const readInsideGit = (await request(value.environment, {
+      action: "file-execute",
+      version: 1,
+      remoteMarker: `moira-op-${"7e".repeat(16)}`,
+      repositoryFullName: "owner/repository",
+      request: { action: "read", path: ".git/description", offset: 0, length: 64 },
+    })) as { state: string; value: { bytesBase64: string } };
+    expect(readInsideGit.state).toBe("succeeded");
+    expect(Buffer.from(readInsideGit.value.bytesBase64, "base64").toString()).toContain("needle");
+  });
+
   test("terminates catastrophic regex matching at the search deadline", async () => {
     const value = fixture();
     mkdirSync(join(value.repository, "regex"));

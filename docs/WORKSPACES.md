@@ -179,7 +179,11 @@ sockets and devices are rejected.
 
 Read returns an explicit byte offset, total size, content digest and a bounded byte
 range. Search is bounded by scanned/result bytes, match count and remote time and does
-not traverse links or special files. Regular expressions execute in a terminable worker;
+not traverse links or special files. It also skips the repository's own `.git`
+directory wherever it meets one and refuses a search rooted at or inside it; those
+files stay readable, writable and inspectable by exact path. Skipping is not
+truncation: `truncated` still reports only that a bound stopped the walk.
+Regular expressions execute in a terminable worker;
 a match that reaches the search deadline returns a truncated result instead of blocking
 the supervisor event loop. The result-byte ceiling covers the complete serialized search
 envelope, including its action, match separators and `truncated` state. A typed file
