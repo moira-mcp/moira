@@ -488,22 +488,14 @@ export class WorkspaceOperationService {
       );
       if (result.state === "running") return null;
       if (result.state === "absent") {
-        const terminal = this.complete(userId, operation, {
+        return await this.completeObserved(userId, operation, {
           state: cancel ? "cancelled" : "failed",
           stdout: "",
           stderr: "",
           exitCode: null,
         });
-        if (terminal) {
-          await this.emit("terminal", this.dependencies.repository.getOwned(userId, operation.id)!);
-        }
-        return terminal;
       }
-      const terminal = this.complete(userId, operation, result);
-      if (terminal) {
-        await this.emit("terminal", this.dependencies.repository.getOwned(userId, operation.id)!);
-      }
-      return terminal;
+      return await this.completeObserved(userId, operation, result);
     } catch (error) {
       if (error instanceof WorkspaceResourceError) throw error;
       this.dependencies.repository.markReconcilePending(
@@ -677,6 +669,26 @@ export class WorkspaceOperationService {
   stop(): void {
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
+  }
+
+  /**
+   * Store an observed remote outcome. The background reconciler can complete the same row
+   * between this caller's read and its write; the row is then already terminal with the
+   * identical outcome, so the observed result is projected against it instead of being
+   * dropped, which would otherwise report a terminal operation with no output.
+   */
+  private async completeObserved(
+    userId: string,
+    operation: WorkspaceOperationRecord,
+    result: WorkspaceOperationResult,
+  ): Promise<WorkspaceOperationResult | null> {
+    const terminal = this.complete(userId, operation, result);
+    if (terminal) {
+      await this.emit("terminal", this.dependencies.repository.getOwned(userId, operation.id)!);
+      return terminal;
+    }
+    const current = this.dependencies.repository.getOwned(userId, operation.id);
+    return current ? this.projectRetainedResult(current, result) : null;
   }
 
   private complete(

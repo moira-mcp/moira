@@ -61,6 +61,8 @@ class FakeTransport implements WorkspaceOperationTransport {
   lastRequest: Parameters<WorkspaceOperationTransport["execute"]>[3] | null = null;
   executeGate: Promise<void> | null = null;
   executeObservation: (() => void) | null = null;
+  /** Runs inside inspect so a test can interleave a concurrent reconcile. */
+  inspectObservation: (() => Promise<unknown>) | null = null;
   lastInspectedOperation: Parameters<WorkspaceOperationTransport["inspect"]>[2] | null = null;
   readonly executeCalls = jest.fn();
   readonly inspectCalls = jest.fn();
@@ -89,6 +91,7 @@ class FakeTransport implements WorkspaceOperationTransport {
   ) {
     this.inspectCalls();
     this.lastInspectedOperation = operation;
+    if (this.inspectObservation) await this.inspectObservation();
     return this.executeResult;
   }
 
@@ -850,6 +853,49 @@ describe("durable direct workspace operations", () => {
         remoteCleanupPending: 0,
       });
       expect(value.transport.finalizeCalls).toHaveBeenCalledTimes(2);
+    } finally {
+      value.sqlite.close();
+    }
+  });
+
+  test("returns the observed output when a concurrent reconcile completes the same operation first", async () => {
+    const value = fixture();
+    try {
+      value.transport.executeResult = { state: "running" };
+      const started = await value.service.execute("user-1", "workspace-1", {
+        argv: ["printf", "result"],
+        cwd: ".",
+        stdin: { kind: "inline", bytes: new Uint8Array() },
+        timeoutMs: 5_000,
+      });
+      value.transport.executeResult = {
+        state: "succeeded",
+        stdout: "raced result",
+        stderr: "",
+        exitCode: 0,
+      };
+
+      // The background reconciler stores the identical outcome while this caller is still
+      // inspecting, so the caller's own write finds the row already terminal.
+      let background: Promise<boolean> | null = null;
+      value.transport.inspectObservation = () => {
+        value.transport.inspectObservation = null;
+        background = value.service.reconcileOnce("user-1");
+        return background;
+      };
+
+      await expect(value.service.reconcile("user-1", started.operation.id)).resolves.toEqual({
+        state: "succeeded",
+        stdout: "raced result",
+        stderr: "",
+        exitCode: 0,
+      });
+      await expect(background!).resolves.toBe(true);
+      expect(value.repository.getOwned("user-1", started.operation.id)).toMatchObject({
+        state: "succeeded",
+        outputBytes: "raced result".length,
+        remoteCleanupPending: 1,
+      });
     } finally {
       value.sqlite.close();
     }
