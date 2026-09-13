@@ -26,7 +26,6 @@ const policy: WorkspaceResourcePolicy = {
   maxStorageBytes: 32 * 1024 ** 3,
   maxActivePerUser: 2,
   maxActiveGlobal: 10,
-  maxOperationsPerDay: 10,
   createThrottleMs: 0,
   remoteTtlMs: 60_000,
   createDeadlineMs: 30_000,
@@ -271,7 +270,26 @@ describe("durable direct workspace operations", () => {
     },
   );
 
-  test("rejects policy-disabled result access and distinguishes daily quota from busy capacity", async () => {
+  test("admits every operation submitted within one day", async () => {
+    const value = fixture();
+    try {
+      for (let submitted = 0; submitted < 40; submitted++) {
+        const result = await value.service.execute("user-1", "workspace-1", {
+          argv: ["printf", String(submitted)],
+          cwd: ".",
+          stdin: { kind: "inline", bytes: new Uint8Array() },
+          timeoutMs: 1000,
+        });
+        expect(result.operation.state).toBe("succeeded");
+      }
+      // Accounting that survives the removed budget counts provider cleanups, not submissions.
+      expect(value.sqlite.prepare("SELECT * FROM workspacePolicyUsage").all()).toEqual([]);
+    } finally {
+      value.sqlite.close();
+    }
+  });
+
+  test("rejects result access while the provider is disabled", async () => {
     const value = fixture();
     try {
       const started = await value.service.execute("user-1", "workspace-1", {
@@ -291,17 +309,6 @@ describe("durable direct workspace operations", () => {
       await expect(disabled.reconcile("user-1", started.operation.id)).rejects.toMatchObject({
         code: "WORKSPACE_PROVIDER_DISABLED",
       });
-      value.sqlite
-        .prepare("UPDATE workspacePolicyUsage SET submittedOperations = ?")
-        .run(policy.maxOperationsPerDay);
-      await expect(
-        value.service.execute("user-1", "workspace-1", {
-          argv: ["true"],
-          cwd: ".",
-          stdin: { kind: "inline", bytes: new Uint8Array() },
-          timeoutMs: 1000,
-        }),
-      ).rejects.toMatchObject({ code: "WORKSPACE_POLICY_LIMIT" });
       expect(value.credentials.getCredential).not.toHaveBeenCalled();
       expect(value.transport.inspectCalls).not.toHaveBeenCalled();
     } finally {

@@ -90,7 +90,6 @@ export interface WorkspaceResourcePolicy {
   maxStorageBytes: number;
   maxActivePerUser: number;
   maxActiveGlobal: number;
-  maxOperationsPerDay: number;
   createThrottleMs: number;
   remoteTtlMs: number;
   persistentRetentionMs?: number;

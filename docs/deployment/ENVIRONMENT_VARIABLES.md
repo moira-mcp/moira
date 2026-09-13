@@ -167,36 +167,35 @@ the GitHub App, vault and policy variables are configured:
 docker compose --profile workspaces up -d
 ```
 
-| Variable                                       | Default | Requirement or meaning                                        |
-| ---------------------------------------------- | ------: | ------------------------------------------------------------- |
-| `WORKSPACE_CODESPACES_ENABLED`                 | `false` | Enables resource creation and direct operations               |
-| `WORKSPACE_MAX_CPU_CORES`                      |       4 | Maximum selected Linux machine CPU cores                      |
-| `WORKSPACE_MAX_MEMORY_GB`                      |       8 | Maximum selected machine memory                               |
-| `WORKSPACE_MAX_STORAGE_GB`                     |      32 | Maximum selected machine storage                              |
-| `WORKSPACE_MAX_ACTIVE_PER_USER`                |       1 | Active resource reservations per user; maximum 64             |
-| `WORKSPACE_MAX_ACTIVE_GLOBAL`                  |       4 | Instance-wide active resource reservations; maximum 1024      |
-| `WORKSPACE_MAX_OPERATIONS_PER_DAY`             |     200 | Submitted lifecycle/direct operations per user/day; max 10000 |
-| `WORKSPACE_CREATE_THROTTLE_SECONDS`            |      60 | Minimum interval between creation reservations                |
-| `WORKSPACE_REMOTE_TTL_MINUTES`                 |     120 | Codespaces idle timeout requested at creation; minimum 5      |
-| `WORKSPACE_PERSISTENT_RETENTION_DAYS`          |      30 | Provider retention requested for stopped workspaces; max 30   |
-| `WORKSPACE_CREATE_DEADLINE_MINUTES`            |      15 | Create reconciliation deadline                                |
-| `WORKSPACE_CLEANUP_DEADLINE_MINUTES`           |      15 | Lifecycle cleanup deadline and result retention               |
-| `WORKSPACE_CLAIM_LEASE_SECONDS`                |      30 | Cross-process reconciliation claim lease                      |
-| `WORKSPACE_RECONCILE_INTERVAL_SECONDS`         |      30 | Background reconciliation interval                            |
-| `WORKSPACE_MAX_CONCURRENT_OPERATIONS_PER_USER` |       2 | Concurrent direct operations per user; maximum 32             |
-| `WORKSPACE_MAX_CONCURRENT_OPERATIONS_GLOBAL`   |      20 | Instance-wide concurrent direct operations; maximum 256       |
-| `WORKSPACE_MAX_OPERATION_INPUT_KB`             |    1024 | Direct-operation stdin; maximum 4096 KiB                      |
-| `WORKSPACE_MAX_OPERATION_STDOUT_KB`            |    1024 | Stdout per operation; maximum 8192 KiB                        |
-| `WORKSPACE_MAX_OPERATION_STDERR_KB`            |     256 | Stderr per operation; maximum 8192 KiB                        |
-| `WORKSPACE_MAX_OPERATION_SECONDS`              |     900 | Direct-operation duration; maximum 900 seconds                |
-| `WORKSPACE_MAX_TRANSFER_FILE_MB`               |       4 | File/native payload ceiling; maximum 4 MiB                    |
-| `WORKSPACE_MAX_TRANSFER_TOTAL_MB_PER_USER`     |     100 | Live private-transfer bytes per user; maximum 1024 MiB        |
-| `WORKSPACE_MAX_TRANSFER_TOTAL_MB_GLOBAL`       |    1024 | Instance live private-transfer bytes; maximum 16384 MiB       |
-| `WORKSPACE_MAX_TRANSFER_OBJECTS_PER_USER`      |      10 | Live private-transfer objects per user; maximum 100           |
-| `WORKSPACE_MAX_TRANSFER_OBJECTS_GLOBAL`        |    1000 | Instance live private-transfer objects; maximum 10000         |
-| `WORKSPACE_MAX_TRANSFER_INFLIGHT_MB_PER_USER`  |      40 | Reserved/claimed bytes per user; maximum 256 MiB              |
-| `WORKSPACE_MAX_TRANSFER_INFLIGHT_MB_GLOBAL`    |     256 | Instance reserved/claimed bytes; maximum 4096 MiB             |
-| `WORKSPACE_TRANSFER_TTL_MINUTES`               |      10 | Private object/capability lifetime; maximum 60 minutes        |
+| Variable                                       | Default | Requirement or meaning                                      |
+| ---------------------------------------------- | ------: | ----------------------------------------------------------- |
+| `WORKSPACE_CODESPACES_ENABLED`                 | `false` | Enables resource creation and direct operations             |
+| `WORKSPACE_MAX_CPU_CORES`                      |       4 | Maximum selected Linux machine CPU cores                    |
+| `WORKSPACE_MAX_MEMORY_GB`                      |       8 | Maximum selected machine memory                             |
+| `WORKSPACE_MAX_STORAGE_GB`                     |      32 | Maximum selected machine storage                            |
+| `WORKSPACE_MAX_ACTIVE_PER_USER`                |       1 | Active resource reservations per user; maximum 64           |
+| `WORKSPACE_MAX_ACTIVE_GLOBAL`                  |       4 | Instance-wide active resource reservations; maximum 1024    |
+| `WORKSPACE_CREATE_THROTTLE_SECONDS`            |      60 | Minimum interval between creation reservations              |
+| `WORKSPACE_REMOTE_TTL_MINUTES`                 |     120 | Codespaces idle timeout requested at creation; minimum 5    |
+| `WORKSPACE_PERSISTENT_RETENTION_DAYS`          |      30 | Provider retention requested for stopped workspaces; max 30 |
+| `WORKSPACE_CREATE_DEADLINE_MINUTES`            |      15 | Create reconciliation deadline                              |
+| `WORKSPACE_CLEANUP_DEADLINE_MINUTES`           |      15 | Lifecycle cleanup deadline and result retention             |
+| `WORKSPACE_CLAIM_LEASE_SECONDS`                |      30 | Cross-process reconciliation claim lease                    |
+| `WORKSPACE_RECONCILE_INTERVAL_SECONDS`         |      30 | Background reconciliation interval                          |
+| `WORKSPACE_MAX_CONCURRENT_OPERATIONS_PER_USER` |       2 | Concurrent direct operations per user; maximum 32           |
+| `WORKSPACE_MAX_CONCURRENT_OPERATIONS_GLOBAL`   |      20 | Instance-wide concurrent direct operations; maximum 256     |
+| `WORKSPACE_MAX_OPERATION_INPUT_KB`             |    1024 | Direct-operation stdin; maximum 4096 KiB                    |
+| `WORKSPACE_MAX_OPERATION_STDOUT_KB`            |    1024 | Stdout per operation; maximum 8192 KiB                      |
+| `WORKSPACE_MAX_OPERATION_STDERR_KB`            |     256 | Stderr per operation; maximum 8192 KiB                      |
+| `WORKSPACE_MAX_OPERATION_SECONDS`              |     900 | Direct-operation duration; maximum 900 seconds              |
+| `WORKSPACE_MAX_TRANSFER_FILE_MB`               |       4 | File/native payload ceiling; maximum 4 MiB                  |
+| `WORKSPACE_MAX_TRANSFER_TOTAL_MB_PER_USER`     |     100 | Live private-transfer bytes per user; maximum 1024 MiB      |
+| `WORKSPACE_MAX_TRANSFER_TOTAL_MB_GLOBAL`       |    1024 | Instance live private-transfer bytes; maximum 16384 MiB     |
+| `WORKSPACE_MAX_TRANSFER_OBJECTS_PER_USER`      |      10 | Live private-transfer objects per user; maximum 100         |
+| `WORKSPACE_MAX_TRANSFER_OBJECTS_GLOBAL`        |    1000 | Instance live private-transfer objects; maximum 10000       |
+| `WORKSPACE_MAX_TRANSFER_INFLIGHT_MB_PER_USER`  |      40 | Reserved/claimed bytes per user; maximum 256 MiB            |
+| `WORKSPACE_MAX_TRANSFER_INFLIGHT_MB_GLOBAL`    |     256 | Instance reserved/claimed bytes; maximum 4096 MiB           |
+| `WORKSPACE_TRANSFER_TTL_MINUTES`               |      10 | Private object/capability lifetime; maximum 60 minutes      |
 
 The global active-resource limit must be at least the per-user limit. The same
 constraint applies to global and per-user operation concurrency. A transfer aggregate
@@ -457,7 +456,6 @@ WORKSPACE_MAX_MEMORY_GB=8
 WORKSPACE_MAX_STORAGE_GB=32
 WORKSPACE_MAX_ACTIVE_PER_USER=1
 WORKSPACE_MAX_ACTIVE_GLOBAL=4
-WORKSPACE_MAX_OPERATIONS_PER_DAY=200
 WORKSPACE_CREATE_THROTTLE_SECONDS=60
 WORKSPACE_REMOTE_TTL_MINUTES=120
 WORKSPACE_PERSISTENT_RETENTION_DAYS=30

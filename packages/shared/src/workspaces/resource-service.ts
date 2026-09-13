@@ -651,18 +651,7 @@ export class WorkspaceResourceService {
       );
     }
     this.requireCurrentLifecycleAuthority(userId, resourceId);
-    const requested = this.dependencies.repository.requestStart(
-      userId,
-      resourceId,
-      policy,
-      this.now(),
-    );
-    if (requested === "limit") {
-      throw new WorkspaceResourceError(
-        "WORKSPACE_POLICY_LIMIT",
-        "Daily workspace operation budget reached",
-      );
-    }
+    const requested = this.dependencies.repository.requestStart(userId, resourceId, this.now());
     if (requested === "disabled") {
       throw new WorkspaceResourceError(
         "WORKSPACE_PROVIDER_DISABLED",

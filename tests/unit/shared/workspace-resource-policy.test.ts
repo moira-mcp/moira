@@ -6,6 +6,11 @@ function policy(values: Record<string, string> = {}) {
 }
 
 describe("workspace resource policy", () => {
+  test("has no per-day operation budget and ignores the removed variable", () => {
+    expect(policy()).not.toHaveProperty("maxOperationsPerDay");
+    expect(policy({ WORKSPACE_MAX_OPERATIONS_PER_DAY: "1" })).toEqual(policy());
+  });
+
   test("is disabled by default with finite hard ceilings", () => {
     expect(policy()).toMatchObject({
       enabled: false,
@@ -14,7 +19,6 @@ describe("workspace resource policy", () => {
       maxStorageBytes: 32 * 1024 ** 3,
       maxActivePerUser: 1,
       maxActiveGlobal: 4,
-      maxOperationsPerDay: 200,
       persistentRetentionMs: 30 * 24 * 60 * 60_000,
       maxConcurrentOperationsPerUser: 2,
       maxConcurrentOperationsGlobal: 20,

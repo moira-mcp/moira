@@ -337,7 +337,7 @@ export const workspaceLifecycleCapability = sqliteTable("workspaceLifecycleCapab
   createdAt: integer("createdAt", { mode: "timestamp_ms" }).notNull(),
 });
 
-/** Submitted operations are charged once per UTC day and are never refunded. */
+/** Required provider cleanups are counted once per UTC day for operator accounting. */
 export const workspacePolicyUsage = sqliteTable(
   "workspacePolicyUsage",
   {
@@ -346,7 +346,6 @@ export const workspacePolicyUsage = sqliteTable(
       .references(() => user.id, { onDelete: "cascade" }),
     provider: text("provider").notNull(),
     utcDay: text("utcDay").notNull(),
-    submittedOperations: integer("submittedOperations").notNull().default(0),
     requiredCleanupOperations: integer("requiredCleanupOperations").notNull().default(0),
     updatedAt: integer("updatedAt", { mode: "timestamp_ms" }).notNull(),
   },

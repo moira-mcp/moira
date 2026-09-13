@@ -250,7 +250,6 @@ export class WorkspaceResourceRepository {
         input.now,
       );
       if (capacity) return capacity;
-      const day = utcDay(input.now);
 
       const id = randomUUID();
       const capability = randomBytes(32).toString("base64url");
@@ -300,15 +299,6 @@ export class WorkspaceResourceRepository {
            VALUES (?, ?, ?, ?)`,
         )
         .run(id, input.userId, digestWorkspaceCapability(capability), input.now);
-      this.sqlite
-        .prepare(
-          `INSERT INTO workspacePolicyUsage
-           (userId, provider, utcDay, submittedOperations, requiredCleanupOperations, updatedAt)
-           VALUES (?, ?, ?, 1, 0, ?)
-           ON CONFLICT(userId, provider, utcDay) DO UPDATE SET
-             submittedOperations = submittedOperations + 1, updatedAt = excluded.updatedAt`,
-        )
-        .run(input.userId, input.provider, day, input.now);
       return {
         outcome: "reserved",
         resource: this.requireById(id),
@@ -353,15 +343,7 @@ export class WorkspaceResourceRepository {
     if (last && last.createdAt > now - policy.createThrottleMs) {
       return { outcome: "limit", reason: "Workspace create throttle reached" };
     }
-    const usage = this.sqlite
-      .prepare(
-        `SELECT submittedOperations FROM workspacePolicyUsage
-      WHERE userId = ? AND provider = ? AND utcDay = ?`,
-      )
-      .get(userId, provider, utcDay(now)) as { submittedOperations: number } | undefined;
-    return (usage?.submittedOperations ?? 0) >= policy.maxOperationsPerDay
-      ? { outcome: "limit", reason: "Daily workspace operation budget reached" }
-      : null;
+    return null;
   }
 
   private requireById(id: string): WorkspaceResourceRecord {
@@ -761,9 +743,8 @@ export class WorkspaceResourceRepository {
   requestStart(
     userId: string,
     resourceId: string,
-    policy: WorkspaceResourcePolicy,
     now: number,
-  ): WorkspaceResourceRecord | "disabled" | "limit" | null {
+  ): WorkspaceResourceRecord | "disabled" | null {
     const transaction = this.sqlite.transaction(() => {
       const current = this.getOwned(userId, resourceId);
       if (
@@ -781,13 +762,6 @@ export class WorkspaceResourceRepository {
       }
       if (!current.providerResourceName) return null;
       if (this.isDisabled(current.provider)) return "disabled";
-      const usage = this.sqlite
-        .prepare(
-          `SELECT submittedOperations FROM workspacePolicyUsage
-           WHERE userId = ? AND provider = ? AND utcDay = ?`,
-        )
-        .get(userId, current.provider, utcDay(now)) as { submittedOperations: number } | undefined;
-      if ((usage?.submittedOperations ?? 0) >= policy.maxOperationsPerDay) return "limit";
       const changed = this.sqlite
         .prepare(
           `UPDATE workspaceResource SET desiredState = 'running', state = 'start_pending',
@@ -1102,9 +1076,8 @@ export class WorkspaceResourceRepository {
     this.sqlite
       .prepare(
         `INSERT INTO workspacePolicyUsage
-         (userId, provider, utcDay, submittedOperations, requiredCleanupOperations, updatedAt)
-         VALUES (?, ?, ?, 1, ?, ?) ON CONFLICT(userId, provider, utcDay) DO UPDATE SET
-         submittedOperations = submittedOperations + 1,
+         (userId, provider, utcDay, requiredCleanupOperations, updatedAt)
+         VALUES (?, ?, ?, ?, ?) ON CONFLICT(userId, provider, utcDay) DO UPDATE SET
          requiredCleanupOperations = requiredCleanupOperations + excluded.requiredCleanupOperations,
          updatedAt = excluded.updatedAt`,
       )
@@ -1251,10 +1224,9 @@ export class WorkspaceResourceRepository {
       this.sqlite
         .prepare(
           `INSERT INTO workspacePolicyUsage
-           (userId, provider, utcDay, submittedOperations, requiredCleanupOperations, updatedAt)
-           VALUES (?, ?, ?, 1, 1, ?)
+           (userId, provider, utcDay, requiredCleanupOperations, updatedAt)
+           VALUES (?, ?, ?, 1, ?)
            ON CONFLICT(userId, provider, utcDay) DO UPDATE SET
-             submittedOperations = submittedOperations + 1,
              requiredCleanupOperations = requiredCleanupOperations + 1,
              updatedAt = excluded.updatedAt`,
         )

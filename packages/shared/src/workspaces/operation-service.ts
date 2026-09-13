@@ -264,13 +264,11 @@ export class WorkspaceOperationService {
       const code =
         reservation.outcome === "not_found"
           ? "WORKSPACE_NOT_FOUND"
-          : reservation.outcome === "limit"
-            ? "WORKSPACE_POLICY_LIMIT"
-            : reservation.outcome === "busy"
-              ? "WORKSPACE_OPERATION_BUSY"
-              : reservation.outcome === "disabled"
-                ? "WORKSPACE_PROVIDER_DISABLED"
-                : "WORKSPACE_NOT_RUNNING";
+          : reservation.outcome === "busy"
+            ? "WORKSPACE_OPERATION_BUSY"
+            : reservation.outcome === "disabled"
+              ? "WORKSPACE_PROVIDER_DISABLED"
+              : "WORKSPACE_NOT_RUNNING";
       throw new WorkspaceResourceError(code, "Workspace operation cannot be started");
     }
     const { operation, workspace } = reservation;

@@ -26,7 +26,6 @@ const policy: WorkspaceResourcePolicy = {
   maxStorageBytes: 32 * 1024 ** 3,
   maxActivePerUser: 2,
   maxActiveGlobal: 10,
-  maxOperationsPerDay: 20,
   createThrottleMs: 0,
   remoteTtlMs: 60_000,
   createDeadlineMs: 30_000,

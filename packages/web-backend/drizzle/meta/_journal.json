@@ -225,6 +225,13 @@
       "when": 1788944640000,
       "tag": "0030_workspace_transfers",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "6",
+      "when": 1788944700000,
+      "tag": "0031_workspace_daily_budget_removal",
+      "breakpoints": true
     }
   ]
 }

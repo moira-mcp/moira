@@ -115,7 +115,7 @@ workspace. A request contains an argv array, a workspace-relative working
 directory, bounded stdin and a timeout. Arguments are data and are never
 interpolated into a shell program. Stdin is either inline bytes or a tenant-bound
 private transfer reference with an exact declared size and MIME type. A native
-reference request reserves the authenticated running workspace and operation budget
+reference request reserves the authenticated running workspace and an operation slot
 before source fetch. The resulting private object is claimed before credential lookup,
 consumed immediately after durable dispatch intent and materialized as exact binary
 connector input without model-context base64. `WorkspaceOperationService.executeNativeReference()`
@@ -128,8 +128,8 @@ and bounded result outside the repository. The result preserves separate stdout
 and stderr, terminal state and exit code.
 
 Before connector contact, SQLite reserves the authenticated tenant, workspace
-and authorization generations, daily usage, per-user and global concurrency,
-input bytes, independent stdout/stderr bounds and deadline. SQLite stores only
+and authorization generations, per-user and global concurrency, input bytes,
+independent stdout/stderr bounds and deadline. SQLite stores only
 operation metadata. It does not store argv, cwd, stdin, stdout, stderr, provider
 tokens or SSH configuration.
 
@@ -470,7 +470,6 @@ not supplied:
 | `WORKSPACE_MAX_STORAGE_GB`                     |      32 | Maximum selected machine storage                             |
 | `WORKSPACE_MAX_ACTIVE_PER_USER`                |       1 | Active resource reservations per user                        |
 | `WORKSPACE_MAX_ACTIVE_GLOBAL`                  |       4 | Active resource reservations across the instance             |
-| `WORKSPACE_MAX_OPERATIONS_PER_DAY`             |     200 | Submitted lifecycle and direct operations per user/UTC day   |
 | `WORKSPACE_CREATE_THROTTLE_SECONDS`            |      60 | Minimum interval between creation reservations               |
 | `WORKSPACE_REMOTE_TTL_MINUTES`                 |     120 | Codespaces idle timeout requested at creation                |
 | `WORKSPACE_PERSISTENT_RETENTION_DAYS`          |      30 | Codespaces stopped-workspace retention requested at creation |

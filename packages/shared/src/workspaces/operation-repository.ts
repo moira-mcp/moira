@@ -28,7 +28,7 @@ function truncateUtf8(value: string, maximumBytes: number): string {
 }
 
 interface ReserveOperationResult {
-  outcome: "reserved" | "not_found" | "not_running" | "disabled" | "busy" | "limit";
+  outcome: "reserved" | "not_found" | "not_running" | "disabled" | "busy";
   operation?: WorkspaceOperationRecord;
   workspace?: WorkspaceResourceRecord;
 }
@@ -113,17 +113,6 @@ export class WorkspaceOperationRepository {
       ) {
         return { outcome: "busy" } as ReserveOperationResult;
       }
-      const utcDay = new Date(input.now).toISOString().slice(0, 10);
-      const usage = this.sqlite
-        .prepare(
-          `SELECT submittedOperations FROM workspacePolicyUsage
-           WHERE userId = ? AND provider = ? AND utcDay = ?`,
-        )
-        .get(input.userId, workspace.provider, utcDay) as
-        { submittedOperations: number } | undefined;
-      if ((usage?.submittedOperations ?? 0) >= input.policy.maxOperationsPerDay) {
-        return { outcome: "limit" } as ReserveOperationResult;
-      }
       const id = randomUUID();
       const remoteMarker = `moira-op-${randomBytes(16).toString("hex")}`;
       this.sqlite
@@ -152,14 +141,6 @@ export class WorkspaceOperationRepository {
           input.now,
           input.now,
         );
-      this.sqlite
-        .prepare(
-          `INSERT INTO workspacePolicyUsage
-           (userId, provider, utcDay, submittedOperations, requiredCleanupOperations, updatedAt)
-           VALUES (?, ?, ?, 1, 0, ?) ON CONFLICT(userId, provider, utcDay) DO UPDATE SET
-           submittedOperations = submittedOperations + 1, updatedAt = excluded.updatedAt`,
-        )
-        .run(input.userId, workspace.provider, utcDay, input.now);
       return {
         outcome: "reserved",
         operation: this.requireOwned(input.userId, id),

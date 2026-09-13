@@ -37,7 +37,6 @@ const policy: WorkspaceResourcePolicy = {
   maxStorageBytes: 32 * 1024 ** 3,
   maxActivePerUser: 1,
   maxActiveGlobal: 2,
-  maxOperationsPerDay: 1,
   createThrottleMs: 0,
   remoteTtlMs: 60_000,
   createDeadlineMs: 30_000,
@@ -63,6 +62,8 @@ class FakeProvider implements WorkspaceProviderAdapter {
   connectorAvailable = true;
   healthAvailable = true;
   createOutcome: "accepted" | "background" | "rejected" = "accepted";
+  /** A real provider names each resource uniquely; tests that create twice set this. */
+  resourceName = "silver-space-123";
   readonly healthCalls = jest.fn();
   readonly machineCalls = jest.fn();
   readonly createCalls = jest.fn();
@@ -105,7 +106,7 @@ class FakeProvider implements WorkspaceProviderAdapter {
     this.createCalls();
     this.createObservation?.();
     this.resource = {
-      name: "silver-space-123",
+      name: this.resourceName,
       displayName: input.operationMarker,
       ownerId: "101",
       billableOwnerId: this.returnedBillableOwnerId,
@@ -238,7 +239,7 @@ function fixture(policyOverrides: Partial<WorkspaceResourcePolicy> = {}) {
 
 describe("durable persistent workspace lifecycle", () => {
   test("binds the same core lifecycle to a non-GitHub provider without installation concepts", async () => {
-    const value = fixture({ maxOperationsPerDay: 10 });
+    const value = fixture();
     try {
       value.sqlite.prepare("UPDATE workspaceConnection SET provider = 'managed-cloud'").run();
       value.sqlite
@@ -308,7 +309,6 @@ describe("durable persistent workspace lifecycle", () => {
         .run(now);
       const concurrentPolicy = {
         ...policy,
-        maxOperationsPerDay: 10,
         createThrottleMs: 0,
       };
       const makeService = (sqlite: Database.Database) => {
@@ -346,7 +346,7 @@ describe("durable persistent workspace lifecycle", () => {
   });
 
   test("rejects a repository grant generation replaced before durable reservation", async () => {
-    const value = fixture({ maxOperationsPerDay: 10 });
+    const value = fixture();
     try {
       value.provider.machineObservation = () => {
         value.sqlite
@@ -380,7 +380,7 @@ describe("durable persistent workspace lifecycle", () => {
   ])(
     "maps a provider HTTP %s before reservation to the typed %s error without an internal failure",
     async (status, code) => {
-      const value = fixture({ maxOperationsPerDay: 10 });
+      const value = fixture();
       try {
         value.provider.machineObservation = () => {
           throw Object.assign(new Error(`GitHub API request failed (HTTP ${status})`), { status });
@@ -403,7 +403,7 @@ describe("durable persistent workspace lifecycle", () => {
   );
 
   test("rejects a repository grant removed before durable reservation", async () => {
-    const value = fixture({ maxOperationsPerDay: 10 });
+    const value = fixture();
     try {
       value.provider.machineObservation = () => {
         value.sqlite
@@ -424,7 +424,7 @@ describe("durable persistent workspace lifecycle", () => {
   });
 
   test("cancels an unsubmitted persistent create before disconnect", async () => {
-    const value = fixture({ maxOperationsPerDay: 10 });
+    const value = fixture();
     try {
       const reserved = value.repository.reserveCreate({
         userId: "user-1",
@@ -453,7 +453,7 @@ describe("durable persistent workspace lifecycle", () => {
   });
 
   test("lets stop win while a submitted create has not returned its provider identity", async () => {
-    const value = fixture({ maxOperationsPerDay: 10 });
+    const value = fixture();
     try {
       let releaseCreate!: () => void;
       let observeCreate!: () => void;
@@ -485,7 +485,7 @@ describe("durable persistent workspace lifecycle", () => {
   });
 
   test("records a provider-deleted persistent workspace as absent instead of retrying stop", async () => {
-    const value = fixture({ maxOperationsPerDay: 10 });
+    const value = fixture();
     try {
       const created = await value.service.create("user-1", "301", "refs/heads/main");
       value.provider.resource = null;
@@ -503,25 +503,15 @@ describe("durable persistent workspace lifecycle", () => {
   });
 
   test("does not advance lifecycle generation for repeated pending start or delete intent", async () => {
-    const value = fixture({ maxOperationsPerDay: 10 });
+    const value = fixture();
     try {
       const created = await value.service.create("user-1", "301", "refs/heads/main");
       await value.service.stopWorkspace("user-1", created.resource.id);
 
-      const firstStart = value.repository.requestStart(
-        "user-1",
-        created.resource.id,
-        value.policy,
-        now + 1,
-      );
+      const firstStart = value.repository.requestStart("user-1", created.resource.id, now + 1);
       if (!firstStart || typeof firstStart === "string") throw new Error("start was not reserved");
       expect(firstStart).toMatchObject({ state: "start_pending" });
-      const repeatedStart = value.repository.requestStart(
-        "user-1",
-        created.resource.id,
-        value.policy,
-        now + 2,
-      );
+      const repeatedStart = value.repository.requestStart("user-1", created.resource.id, now + 2);
       if (!repeatedStart || typeof repeatedStart === "string")
         throw new Error("pending start disappeared");
       expect(repeatedStart).toMatchObject({ generation: firstStart.generation });
@@ -560,17 +550,13 @@ describe("durable persistent workspace lifecycle", () => {
   });
 
   test("persists workspace data across stop/start and deletes only on an explicit delete", async () => {
-    const value = fixture({ maxOperationsPerDay: 10 });
+    const value = fixture();
     try {
       value.provider.createObservation = () => {
         expect(value.sqlite.prepare("SELECT state FROM workspaceResource").get()).toEqual({
           state: "create_submitted",
         });
-        expect(
-          value.sqlite.prepare("SELECT submittedOperations FROM workspacePolicyUsage").get(),
-        ).toEqual({
-          submittedOperations: 1,
-        });
+        expect(value.sqlite.prepare("SELECT * FROM workspacePolicyUsage").all()).toEqual([]);
         const capability = value.sqlite
           .prepare("SELECT capabilityHash FROM workspaceLifecycleCapability")
           .get() as { capabilityHash: string };
@@ -625,12 +611,8 @@ describe("durable persistent workspace lifecycle", () => {
       expect(value.repository.getOwned("user-1", created.resource.id)?.state).toBe("deleted");
       expect(value.provider.deleteCalls).toHaveBeenCalledTimes(1);
       expect(
-        value.sqlite
-          .prepare(
-            "SELECT submittedOperations, requiredCleanupOperations FROM workspacePolicyUsage",
-          )
-          .get(),
-      ).toEqual({ submittedOperations: 4, requiredCleanupOperations: 0 });
+        value.sqlite.prepare("SELECT requiredCleanupOperations FROM workspacePolicyUsage").get(),
+      ).toEqual({ requiredCleanupOperations: 0 });
       expect(
         value.sqlite
           .prepare("SELECT kind FROM workspaceProviderMutation ORDER BY createdAt, kind")
@@ -747,7 +729,7 @@ describe("durable persistent workspace lifecycle", () => {
   });
 
   test("prevents another tenant from listing, getting, stopping or deleting a workspace", async () => {
-    const value = fixture({ maxOperationsPerDay: 10 });
+    const value = fixture();
     try {
       const created = await value.service.create("user-1", "301", "refs/heads/main");
       expect(value.service.listResources("user-2")).toEqual([]);
@@ -774,7 +756,7 @@ describe("durable persistent workspace lifecycle", () => {
   ] as const)(
     "reauthorization rebinds only after exact verification for %s",
     async (_name, changeAccount, removeGrant, expectedRebound) => {
-      const value = fixture({ maxOperationsPerDay: 10 });
+      const value = fixture();
       try {
         const created = await value.service.create("user-1", "301", "refs/heads/main");
         value.sqlite
@@ -804,7 +786,7 @@ describe("durable persistent workspace lifecycle", () => {
   );
 
   test("lets a concurrent stop generation win over an in-flight start", async () => {
-    const value = fixture({ maxOperationsPerDay: 10 });
+    const value = fixture();
     try {
       const created = await value.service.create("user-1", "301", "refs/heads/main");
       await value.service.stopWorkspace("user-1", created.resource.id);
@@ -859,7 +841,7 @@ describe("durable persistent workspace lifecycle", () => {
   });
 
   test("reclaims an expired claim once across competing reconcilers", async () => {
-    const value = fixture({ maxOperationsPerDay: 10 });
+    const value = fixture();
     try {
       value.provider.loseCreateResponse = true;
       const pending = await value.service.create("user-1", "301", "refs/heads/main");
@@ -908,12 +890,8 @@ describe("durable persistent workspace lifecycle", () => {
         state: "stop_pending",
       });
       expect(
-        value.sqlite
-          .prepare(
-            "SELECT submittedOperations, requiredCleanupOperations FROM workspacePolicyUsage",
-          )
-          .get(),
-      ).toEqual({ submittedOperations: 2, requiredCleanupOperations: 1 });
+        value.sqlite.prepare("SELECT requiredCleanupOperations FROM workspacePolicyUsage").get(),
+      ).toEqual({ requiredCleanupOperations: 1 });
     } finally {
       value.sqlite.close();
     }
@@ -962,8 +940,8 @@ describe("durable persistent workspace lifecycle", () => {
     }
   });
 
-  test("keeps required cleanup non-deniable and blocks later create on the daily operation budget", async () => {
-    const value = fixture();
+  test("admits a later create on the same day as a delete", async () => {
+    const value = fixture({ createThrottleMs: 0 });
     try {
       const created = await value.service.create("user-1", "301", "refs/heads/main");
       await value.service.deleteWorkspace(
@@ -971,11 +949,15 @@ describe("durable persistent workspace lifecycle", () => {
         created.resource.id,
         created.resource.generation,
       );
-      await expect(value.service.create("user-1", "301", "refs/heads/main")).rejects.toMatchObject({
-        code: "WORKSPACE_POLICY_LIMIT",
-      });
-      expect(value.provider.createCalls).toHaveBeenCalledTimes(1);
+      value.provider.resourceName = "silver-space-456";
+      const again = await value.service.create("user-1", "301", "refs/heads/main");
+      expect(again.resource.state).toBe("usable");
+      expect(value.provider.createCalls).toHaveBeenCalledTimes(2);
       expect(value.repository.getOwned("user-1", created.resource.id)?.state).toBe("deleted");
+      // The day's row survives for cleanup accounting; a confirmed delete requires none.
+      expect(
+        value.sqlite.prepare("SELECT requiredCleanupOperations FROM workspacePolicyUsage").get(),
+      ).toEqual({ requiredCleanupOperations: 0 });
     } finally {
       value.sqlite.close();
     }
@@ -983,7 +965,6 @@ describe("durable persistent workspace lifecycle", () => {
 
   test("distinguishes create throttle, per-user concurrency and global concurrency", async () => {
     const throttled = fixture({
-      maxOperationsPerDay: 10,
       maxActivePerUser: 2,
       createThrottleMs: 60_000,
     });
@@ -1000,7 +981,7 @@ describe("durable persistent workspace lifecycle", () => {
       throttled.sqlite.close();
     }
 
-    const perUser = fixture({ maxOperationsPerDay: 10 });
+    const perUser = fixture();
     try {
       await perUser.service.create("user-1", "301", "refs/heads/main");
       await expect(
@@ -1011,7 +992,6 @@ describe("durable persistent workspace lifecycle", () => {
     }
 
     const global = fixture({
-      maxOperationsPerDay: 10,
       maxActivePerUser: 2,
       maxActiveGlobal: 1,
     });
@@ -1054,7 +1034,7 @@ describe("durable persistent workspace lifecycle", () => {
   });
 
   test("competing cleanup reconcilers submit one exact stop/delete sequence", async () => {
-    const value = fixture({ maxOperationsPerDay: 10 });
+    const value = fixture();
     try {
       const created = await value.service.create("user-1", "301", "refs/heads/main");
       value.sqlite
@@ -1083,7 +1063,7 @@ describe("durable persistent workspace lifecycle", () => {
   });
 
   test("stops every persistent workspace before connection revocation may continue", async () => {
-    const value = fixture({ maxOperationsPerDay: 10 });
+    const value = fixture();
     try {
       const created = await value.service.create("user-1", "301", "refs/heads/main");
       await value.createService().cleanupBeforeDisconnect("user-1");
@@ -1217,7 +1197,7 @@ describe("durable persistent workspace lifecycle", () => {
   });
 
   test("records multiple exact discovery matches as ambiguous without broad cleanup", async () => {
-    const value = fixture({ maxOperationsPerDay: 10 });
+    const value = fixture();
     try {
       value.provider.loseCreateResponse = true;
       const pending = await value.service.create("user-1", "301", "refs/heads/main");
