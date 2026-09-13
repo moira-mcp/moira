@@ -39,8 +39,6 @@ const BUSY_STATES: ReadonlySet<WorkspaceSummaryView["state"]> = new Set([
   "ambiguous",
 ]);
 
-const FINAL_STATES: ReadonlySet<WorkspaceSummaryView["state"]> = new Set(["deleted", "rejected"]);
-
 function stateVariant(
   state: WorkspaceSummaryView["state"],
 ): "default" | "secondary" | "destructive" | "outline" {
@@ -63,29 +61,36 @@ export const GitHubWorkspaceManagement: React.FC = () => {
   // The element that opened the destructive dialog; focus returns to it after closing.
   const deleteTriggerRef = useRef<HTMLButtonElement | null>(null);
 
-  const load = useCallback(async () => {
-    try {
-      setLoading(true);
-      setLoadError(false);
-      const next = await apiClient.getGitHubWorkspaces();
-      setView(next);
-      setRepositoryId((current) =>
-        current && next.repositories.some((repository) => repository.repository_id === current)
-          ? current
-          : (next.repositories[0]?.repository_id ?? ""),
-      );
-    } catch {
-      setLoadError(true);
-      toast.error(t("pages.settings.workspaces.loadFailed"));
-    } finally {
-      setLoading(false);
-    }
-  }, [t]);
+  const load = useCallback(
+    async ({ silent = false }: { silent?: boolean } = {}) => {
+      try {
+        if (!silent) setLoading(true);
+        setLoadError(false);
+        const next = await apiClient.getGitHubWorkspaces();
+        setView(next);
+        setRepositoryId((current) =>
+          current && next.repositories.some((repository) => repository.repository_id === current)
+            ? current
+            : (next.repositories[0]?.repository_id ?? ""),
+        );
+      } catch {
+        setLoadError(true);
+        toast.error(t("pages.settings.workspaces.loadFailed"));
+      } finally {
+        if (!silent) setLoading(false);
+      }
+    },
+    [t],
+  );
 
   useEffect(() => {
     void load();
   }, [load]);
 
+  /**
+   * A lifecycle response echoes one workspace, including a finished one the listing no longer
+   * offers. Show it at once, then take the server's listing as the authority on what remains.
+   */
   const replaceWorkspace = (workspace: WorkspaceSummaryView) => {
     setView((current) => {
       if (!current) return current;
@@ -101,6 +106,7 @@ export const GitHubWorkspaceManagement: React.FC = () => {
           : [...current.workspaces, workspace],
       };
     });
+    void load({ silent: true });
   };
 
   const failureMessage = (error: unknown): string => {
@@ -198,7 +204,6 @@ export const GitHubWorkspaceManagement: React.FC = () => {
   const ready = readiness.state === "ready";
   const connected = connection.state === "connected";
   const canCreate = ready && connected && repositories.length > 0;
-  const visibleWorkspaces = workspaces.filter((workspace) => !FINAL_STATES.has(workspace.state));
   const formatDate = (value: number) => new Date(value).toLocaleString(i18n.language);
 
   return (
@@ -321,13 +326,13 @@ export const GitHubWorkspaceManagement: React.FC = () => {
           </Button>
         </div>
 
-        {visibleWorkspaces.length === 0 ? (
+        {workspaces.length === 0 ? (
           <p className="text-sm text-muted-foreground" data-testid="github-workspace-empty">
             {t("pages.settings.workspaces.empty")}
           </p>
         ) : (
           <ul className="space-y-2" data-testid="github-workspace-list">
-            {visibleWorkspaces.map((workspace) => {
+            {workspaces.map((workspace) => {
               const busy =
                 BUSY_STATES.has(workspace.state) || busyWorkspace === workspace.workspace_id;
               return (

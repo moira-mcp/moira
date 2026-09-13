@@ -122,7 +122,8 @@ same-origin `settings_url` for the user to complete setup, and nothing is provis
 Every call names a `workspace_id` obtained from `workspace_list` or `workspace_create`. Ownership
 is checked server-side, so an unknown or foreign ID returns the generic `WORKSPACE_NOT_FOUND`
 result. A workspace is not tied to a chat or session: reuse the same `workspace_id` from any
-client. `workspace_stop` preserves the repository data (`data_preserved: true`);
+client. `workspace_list` offers only workspaces that can still be used; a deleted or rejected one
+is absent from it while `workspace_get` still answers for its `workspace_id`. `workspace_stop` preserves the repository data (`data_preserved: true`);
 `workspace_delete` is destructive and requires `confirm_delete: true` with the workspace's current
 `generation`, so a stale call cannot delete a changed workspace.
 

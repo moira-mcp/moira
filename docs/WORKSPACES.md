@@ -259,6 +259,8 @@ resume call carrying only `workspace_id` and `operation_id`, and a complete new
 request are the only accepted shapes. `workspace_list` returns the sanitized connection readiness (with the
 same-origin Settings URL), approved repository targets and the user's workspace
 summaries; it is the discovery path for `repository_id` and reusable `workspace_id`.
+Deleted and rejected workspaces are finished and accept no operation, so they are
+absent from that listing and from the website's, which reads the same service method.
 `workspace_get` returns one owned summary; an unknown or foreign ID returns the
 generic `WORKSPACE_NOT_FOUND` result. Summaries omit connection and authorization
 generations, external owner/billing IDs, operation markers, provider resource names,
@@ -324,7 +326,7 @@ with identical tenant, generation and confirmation authority:
 
 | Method   | Path                  | Behavior                                                                                       |
 | -------- | --------------------- | ---------------------------------------------------------------------------------------------- |
-| `GET`    | `/`                   | Readiness, connection view, approved repositories and sanitized workspace summaries            |
+| `GET`    | `/`                   | Readiness, connection view, approved repositories and summaries of workspaces still in use     |
 | `POST`   | `/`                   | Create for `repository_id` and `ref`; returns the sanitized (possibly pending) workspace       |
 | `GET`    | `/:workspaceId`       | One owned workspace plus its recent metadata-only operations                                   |
 | `POST`   | `/:workspaceId/start` | Records desired running state; `data_preserved: true`                                          |

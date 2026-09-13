@@ -207,6 +207,61 @@ test("workspaces are created, stopped and deleted with confirmation from Setting
   await testInfo.attach("workspace-management-narrow", { body: narrow, contentType: "image/png" });
 });
 
+test("a workspace the server finished disappears from the card", async ({ page }) => {
+  await loginAsAdmin(page);
+  // The server answers a delete it can confirm at once with state "deleted" and then stops
+  // listing that workspace, so the card must not keep the row its response echoed.
+  let workspaces: WorkspaceSummaryView[] = [workspace()];
+  await page.route("**/api/integrations/github", (route) =>
+    route.fulfill({ json: { success: true, data: connection } }),
+  );
+  await page.route("**/api/integrations/github/workspaces**", async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    if (request.method() === "GET" && url.pathname.endsWith("/workspaces")) {
+      await route.fulfill({
+        json: {
+          success: true,
+          data: {
+            readiness,
+            connection,
+            repositories: [{ repository_id: "101", name: "witqq/private-project", private: true }],
+            workspaces,
+          },
+        },
+      });
+      return;
+    }
+    if (request.method() === "DELETE") {
+      const deleted = workspace({
+        state: "deleted",
+        desired_state: "deleted",
+        observed_state: "absent",
+        generation: 4,
+      });
+      workspaces = [];
+      await route.fulfill({
+        json: { success: true, data: { workspace: deleted, data_preserved: false } },
+      });
+      return;
+    }
+    await route.fulfill({ status: 404, json: { success: false } });
+  });
+
+  await page.goto(`${baseUrl}/settings?lang=en#integrations-github`);
+  const management = page.getByTestId("github-workspace-management");
+  await management.scrollIntoViewIfNeeded();
+  await expect(page.getByTestId(`github-workspace-state-${WORKSPACE_ID}`)).toBeVisible();
+
+  await page.getByTestId(`github-workspace-delete-${WORKSPACE_ID}`).click();
+  const dialog = page.getByRole("alertdialog");
+  await dialog.getByRole("button", { name: "Delete", exact: true }).click();
+  await expect(dialog).toBeHidden();
+
+  await expect(page.getByTestId(`github-workspace-state-${WORKSPACE_ID}`)).toBeHidden();
+  await expect(management).toContainText("No workspaces yet");
+});
+
 test("disabled and administrator-stopped instances explain themselves in both languages", async ({
   page,
 }) => {

@@ -667,6 +667,18 @@ describe("ChatGPT-compatible workspace MCP with real domain services", () => {
       workspace: { state: "deleted" },
     });
     expect(fixture.provider.current).toBeNull();
+    // A deleted workspace is unusable, so discovery stops offering it while a direct
+    // lookup by its identifier still answers.
+    expect(
+      (
+        (await second.call("workspace_list", {})).structuredContent as {
+          workspaces: Array<{ workspace_id: string }>;
+        }
+      ).workspaces,
+    ).toEqual([]);
+    expect((await second.call("workspace_get", args)).structuredContent).toMatchObject({
+      workspace: { state: "deleted" },
+    });
   });
 
   it("recovers lost write and exec responses from reopened SQLite without redispatch or foreign access", async () => {

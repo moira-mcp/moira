@@ -59,6 +59,12 @@ export interface WorkspaceControlAuditEvent {
 
 const PROVIDER_CLOCK_SKEW_MS = 5 * 60_000;
 
+/** States a workspace never leaves: it holds no provider resource and accepts no operation. */
+const FINISHED_RESOURCE_STATES: ReadonlySet<WorkspaceResourceRecord["state"]> = new Set([
+  "deleted",
+  "rejected",
+]);
+
 function containsControlCharacter(value: string): boolean {
   return [...value].some((character) => {
     const codePoint = character.codePointAt(0)!;
@@ -289,7 +295,19 @@ export class WorkspaceResourceService {
     );
   }
 
+  /**
+   * Workspaces a caller can still act on. A deleted or rejected workspace is finished and cannot
+   * be started, used or recovered, so listing it only invites an agent to address an identifier
+   * that will refuse every operation. Fetching one by its identifier still works.
+   */
   listResources(userId: string): WorkspaceResourceRecord[] {
+    return this.listAllResources(userId).filter(
+      (resource) => !FINISHED_RESOURCE_STATES.has(resource.state),
+    );
+  }
+
+  /** Every owned record, including finished ones, for lifecycle work that must see them. */
+  private listAllResources(userId: string): WorkspaceResourceRecord[] {
     return this.dependencies.repository.listOwned(userId, this.dependencies.providerId);
   }
 
@@ -741,7 +759,7 @@ export class WorkspaceResourceService {
       this.dependencies.providerId,
       this.now(),
     );
-    const maximumPasses = this.listResources(userId).length + 1;
+    const maximumPasses = this.listAllResources(userId).length + 1;
     for (let pass = 0; pass < maximumPasses; pass++) {
       if (!(await this.reconcileOnce(userId))) break;
     }

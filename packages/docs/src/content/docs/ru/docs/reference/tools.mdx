@@ -125,7 +125,9 @@ curl -X POST "${uploadUrl}" -F "workflow=@your-workflow.json"
 Каждый вызов указывает `workspace_id`, полученный из `workspace_list` или `workspace_create`.
 Владение проверяется на сервере, поэтому неизвестный или чужой ID возвращает общий результат
 `WORKSPACE_NOT_FOUND`. Пространство не привязано к чату или сессии: используйте один `workspace_id`
-из любого клиента. `workspace_stop` сохраняет данные репозитория (`data_preserved: true`);
+из любого клиента. `workspace_list` предлагает только пространства, которыми ещё можно
+пользоваться: удалённого или отклонённого в списке нет, но `workspace_get` по-прежнему отвечает по
+его `workspace_id`. `workspace_stop` сохраняет данные репозитория (`data_preserved: true`);
 `workspace_delete` разрушителен и требует `confirm_delete: true` вместе с текущим `generation`
 пространства, поэтому устаревший вызов не удалит изменившееся пространство.
 

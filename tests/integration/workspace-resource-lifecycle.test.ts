@@ -441,7 +441,9 @@ describe("durable persistent workspace lifecycle", () => {
       expect(reserved.outcome).toBe("reserved");
 
       await expect(value.service.cleanupBeforeDisconnect("user-1")).resolves.toBeUndefined();
-      expect(value.service.listResources("user-1")[0]).toMatchObject({
+      // A finished workspace leaves the caller-facing listing but keeps its stored record.
+      expect(value.service.listResources("user-1")).toEqual([]);
+      expect(value.repository.listOwned("user-1", WORKSPACE_PROVIDER_GITHUB)[0]).toMatchObject({
         state: "rejected",
         desiredState: "deleted",
         observedState: "absent",
@@ -934,6 +936,61 @@ describe("durable persistent workspace lifecycle", () => {
       expect(value.tokenCalls).not.toHaveBeenCalled();
       expect(value.sqlite.prepare("SELECT COUNT(*) count FROM workspaceResource").get()).toEqual({
         count: 0,
+      });
+    } finally {
+      value.sqlite.close();
+    }
+  });
+
+  test("lists only workspaces a caller can still act on", async () => {
+    const value = fixture({ createThrottleMs: 0, maxActivePerUser: 4, maxActiveGlobal: 4 });
+    try {
+      const deleted = await value.service.create("user-1", "301", "refs/heads/main");
+      await value.service.deleteWorkspace(
+        "user-1",
+        deleted.resource.id,
+        deleted.resource.generation,
+      );
+
+      value.provider.resourceName = "silver-space-456";
+      const stopped = await value.service.create("user-1", "301", "refs/heads/other");
+      await value.service.stopWorkspace("user-1", stopped.resource.id);
+
+      value.provider.resourceName = "silver-space-789";
+      value.provider.createOutcome = "rejected";
+      await expect(value.service.create("user-1", "301", "refs/heads/third")).rejects.toMatchObject(
+        {
+          code: "WORKSPACE_CREATE_REJECTED",
+        },
+      );
+      value.provider.createOutcome = "accepted";
+
+      value.provider.resourceName = "silver-space-101";
+      value.provider.createOutcome = "background";
+      const pending = await value.service.create("user-1", "301", "refs/heads/fourth");
+      expect(pending.resource.state).toBe("create_submitted");
+
+      const stored = value.repository.listOwned("user-1", WORKSPACE_PROVIDER_GITHUB);
+      expect(stored.map((resource) => resource.state).sort()).toEqual([
+        "create_submitted",
+        "deleted",
+        "rejected",
+        "stopped",
+      ]);
+      // Only the workspace that can still be started, used or deleted is offered to a caller.
+      expect(
+        value.service
+          .listResources("user-1")
+          .map((resource) => ({ id: resource.id, state: resource.state }))
+          .sort((left, right) => left.state.localeCompare(right.state)),
+      ).toEqual([
+        { id: pending.resource.id, state: "create_submitted" },
+        { id: stopped.resource.id, state: "stopped" },
+      ]);
+      // A finished workspace stays reachable by its own identifier.
+      expect(value.service.getWorkspace("user-1", deleted.resource.id)).toMatchObject({
+        id: deleted.resource.id,
+        state: "deleted",
       });
     } finally {
       value.sqlite.close();
