@@ -20,6 +20,7 @@ import { requestContext } from "../../../packages/mcp-server/src/core/request-co
 const USER_ID = "user-a";
 const WORKSPACE_ID = "00000000-0000-4000-8000-000000000001";
 const OPERATION_ID = "00000000-0000-4000-8000-000000000002";
+const OTHER_WORKSPACE_ID = "00000000-0000-4000-8000-000000000003";
 
 function workspace(overrides: Partial<WorkspaceResourceRecord> = {}): WorkspaceResourceRecord {
   return {
@@ -155,13 +156,29 @@ function services(overrides: Partial<WorkspaceToolServices> = {}): WorkspaceTool
     operation: {
       get: jest.fn(() => null),
       reconcile: jest.fn(async () => null),
+      readOutput: jest.fn(async () => ({
+        stream: "stdout" as const,
+        offset: 4,
+        totalBytes: 12,
+        bytes: Buffer.from("retained"),
+      })),
       execute: jest.fn(async () => ({
         operation: operation("exec"),
-        result: { state: "succeeded" as const, stdout: "ok\n", stderr: "", exitCode: 0 },
+        result: execResult({
+          state: "succeeded" as const,
+          stdout: "ok\n",
+          stderr: "",
+          exitCode: 0,
+        }),
       })),
       executeNativeReference: jest.fn(async () => ({
         operation: operation("exec"),
-        result: { state: "succeeded" as const, stdout: "native\n", stderr: "", exitCode: 0 },
+        result: execResult({
+          state: "succeeded" as const,
+          stdout: "native\n",
+          stderr: "",
+          exitCode: 0,
+        }),
       })),
     },
     file: {
@@ -205,6 +222,23 @@ function services(overrides: Partial<WorkspaceToolServices> = {}): WorkspaceTool
     },
     ...overrides,
   } as unknown as WorkspaceToolServices;
+}
+
+/** A terminal exec result as the service reports it, payload plus complete retained sizes. */
+function execResult(value: {
+  state: "succeeded" | "failed" | "cancelled" | "timed_out";
+  stdout: string;
+  stderr: string;
+  exitCode: number | null;
+  stdoutTotalBytes?: number;
+  outputLimitExceeded?: boolean;
+}) {
+  return {
+    ...value,
+    stdoutTotalBytes: value.stdoutTotalBytes ?? Buffer.byteLength(value.stdout),
+    stderrTotalBytes: Buffer.byteLength(value.stderr),
+    outputLimitExceeded: value.outputLimitExceeded ?? false,
+  };
 }
 
 function data(result: Awaited<ReturnType<typeof executeWorkspaceTool>>) {
@@ -370,7 +404,12 @@ describe("workspace MCP adapter", () => {
     const execute = jest.fn();
     const reconcile = jest.fn(async () => {
       current = { ...operation("exec"), state: "succeeded" as const };
-      return { state: "succeeded" as const, stdout: "recovered\n", stderr: "", exitCode: 0 };
+      return execResult({
+        state: "succeeded" as const,
+        stdout: "recovered\n",
+        stderr: "",
+        exitCode: 0,
+      });
     });
     const base = services();
     const dependencies = services({
@@ -414,7 +453,7 @@ describe("workspace MCP adapter", () => {
             ...base.operation!,
             execute: jest.fn(async () => ({
               operation: { ...operation("exec"), state, exitCode: 1 },
-              result: { state, stdout: "", stderr: "test failed", exitCode: 1 },
+              result: execResult({ state, stdout: "", stderr: "test failed", exitCode: 1 }),
             })),
           },
         }),
@@ -662,6 +701,125 @@ describe("workspace MCP adapter", () => {
     } finally {
       restore();
     }
+  });
+
+  it("carries a truncated payload's complete size and reads a retained range without dispatching", async () => {
+    const base = services();
+    const noisy = services({
+      operation: {
+        ...base.operation!,
+        execute: jest.fn(async () => ({
+          operation: { ...operation("exec"), state: "failed" as const, exitCode: 7 },
+          result: execResult({
+            state: "failed" as const,
+            stdout: "first bytes",
+            stderr: "real failure",
+            exitCode: 7,
+            stdoutTotalBytes: 900_000,
+          }),
+        })),
+      },
+    });
+    const executed = await executeWorkspaceTool(
+      "workspace_exec",
+      { workspace_id: WORKSPACE_ID, argv: ["build"], cwd: ".", timeout_seconds: 60 },
+      USER_ID,
+      noisy,
+    );
+    // The command's own exit code and standard error survive; the payload says what it omitted.
+    expect(data(executed).result).toMatchObject({
+      exit_code: 7,
+      stderr: "real failure",
+      stdout_total_bytes: 900_000,
+      stdout_truncated: true,
+      stderr_truncated: false,
+      output_limit_exceeded: false,
+    });
+
+    const owning = services({
+      operation: { ...base.operation!, get: jest.fn(() => operation("exec")) },
+    });
+    const ranged = await executeWorkspaceTool(
+      "workspace_read",
+      // Parsed the way the transport parses it, so the published range default is exercised.
+      parseWorkspaceToolParams("workspace_read", {
+        workspace_id: WORKSPACE_ID,
+        operation_id: OPERATION_ID,
+        stream: "stdout",
+        offset: 4,
+      }),
+      USER_ID,
+      owning,
+    );
+    expect(data(ranged)).toEqual({
+      output: {
+        operation_id: OPERATION_ID,
+        stream: "stdout",
+        offset: 4,
+        total_bytes: 12,
+        text: "retained",
+        truncated: false,
+      },
+    });
+    expect(owning.operation!.readOutput).toHaveBeenCalledWith(USER_ID, OPERATION_ID, {
+      stream: "stdout",
+      offset: 4,
+      length: 64 * 1024,
+    });
+
+    // Naming a workspace the command does not belong to is refused, not silently answered.
+    const foreignWorkspace = services({
+      operation: {
+        ...base.operation!,
+        get: jest.fn(() => ({ ...operation("exec"), resourceId: OTHER_WORKSPACE_ID })),
+        readOutput: jest.fn(async () => {
+          throw new Error("a mismatched workspace must be refused before the service is reached");
+        }),
+      },
+    });
+    const mismatched = await executeWorkspaceTool(
+      "workspace_read",
+      parseWorkspaceToolParams("workspace_read", {
+        workspace_id: WORKSPACE_ID,
+        operation_id: OPERATION_ID,
+        stream: "stdout",
+      }),
+      USER_ID,
+      foreignWorkspace,
+    );
+    expect((data(mismatched) as { error: { code: string } }).error.code).toBe(
+      "WORKSPACE_NOT_FOUND",
+    );
+    expect(foreignWorkspace.operation!.readOutput).not.toHaveBeenCalled();
+    // Reading retained output is not a file operation and dispatches none.
+    expect(owning.file!.execute).not.toHaveBeenCalled();
+
+    const stopped = services({
+      operation: {
+        ...base.operation!,
+        execute: jest.fn(async () => ({
+          operation: { ...operation("exec"), state: "failed" as const, exitCode: null },
+          result: execResult({
+            state: "failed" as const,
+            stdout: "partial",
+            stderr: "",
+            exitCode: null,
+            stdoutTotalBytes: 64 * 1024 * 1024,
+            outputLimitExceeded: true,
+          }),
+        })),
+      },
+    });
+    const halted = await executeWorkspaceTool(
+      "workspace_exec",
+      { workspace_id: WORKSPACE_ID, argv: ["flood"], cwd: ".", timeout_seconds: 60 },
+      USER_ID,
+      stopped,
+    );
+    // A command stopped by the retained ceiling says so instead of reading as its own failure.
+    expect((data(halted) as { error: { code: string } }).error.code).toBe(
+      "WORKSPACE_OPERATION_OUTPUT_LIMIT",
+    );
   });
 
   it("tells a refused caller which ceiling stopped it and stays generic without a detail", async () => {

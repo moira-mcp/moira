@@ -13,6 +13,8 @@ import {
   WorkspaceTransferRepository,
   WorkspaceTransferService,
   type WorkspaceOperationAuditEvent,
+  type WorkspaceOperationOutputRequest,
+  type WorkspaceOperationOutputResult,
   type WorkspaceOperationResult,
   type WorkspaceOperationTransport,
   type WorkspaceResourcePolicy,
@@ -38,20 +40,45 @@ const policy: WorkspaceResourcePolicy = {
   maxOperationInputBytes: 1024,
   maxOperationStdoutBytes: 1024,
   maxOperationStderrBytes: 512,
+  maxRetainedOutputBytes: 32 * 1024 * 1024,
   maxOperationMs: 60_000,
 };
+
+/**
+ * A terminal exec result as the transport reports it: the payload, plus the complete size of each
+ * retained stream. Tests that do not exercise truncation let the payload be the whole stream.
+ */
+function execResult(value: {
+  state: WorkspaceOperationResult["state"];
+  stdout: string;
+  stderr: string;
+  exitCode: number | null;
+  stdoutTotalBytes?: number;
+  stderrTotalBytes?: number;
+  outputLimitExceeded?: boolean;
+}): WorkspaceOperationResult {
+  return {
+    state: value.state,
+    stdout: value.stdout,
+    stderr: value.stderr,
+    exitCode: value.exitCode,
+    stdoutTotalBytes: value.stdoutTotalBytes ?? Buffer.byteLength(value.stdout),
+    stderrTotalBytes: value.stderrTotalBytes ?? Buffer.byteLength(value.stderr),
+    outputLimitExceeded: value.outputLimitExceeded ?? false,
+  };
+}
 
 class FakeTransport implements WorkspaceOperationTransport {
   available = true;
   async health() {
     return { ok: this.available, reason: null };
   }
-  executeResult: WorkspaceOperationResult | { state: "running" } = {
+  executeResult: WorkspaceOperationResult | { state: "running" } = execResult({
     state: "succeeded",
     stdout: "ok",
     stderr: "",
     exitCode: 0,
-  };
+  });
   cancelResult: WorkspaceOperationResult | { state: "running" } | { state: "absent" } = {
     state: "running",
   };
@@ -102,6 +129,28 @@ class FakeTransport implements WorkspaceOperationTransport {
   async cancel() {
     this.cancelCalls();
     return this.cancelResult;
+  }
+
+  outputResult: WorkspaceOperationOutputResult | { state: "absent" } = {
+    stream: "stdout",
+    offset: 0,
+    totalBytes: 0,
+    bytes: Buffer.alloc(0),
+  };
+  lastOutputOperation: string | null = null;
+  lastOutputRequest: WorkspaceOperationOutputRequest | null = null;
+  readonly readOutputCalls = jest.fn();
+
+  async readOutput(
+    _credential: string,
+    _workspace: Parameters<WorkspaceOperationTransport["readOutput"]>[1],
+    operation: Parameters<WorkspaceOperationTransport["readOutput"]>[2],
+    request: WorkspaceOperationOutputRequest,
+  ) {
+    this.readOutputCalls();
+    this.lastOutputOperation = operation.id;
+    this.lastOutputRequest = request;
+    return this.outputResult;
   }
 
   async finalize() {
@@ -286,17 +335,97 @@ describe("durable direct workspace operations", () => {
     },
   );
 
+  test("reports a truncated payload with its complete size and serves any retained range", async () => {
+    const value = fixture();
+    try {
+      // The command printed far more than one answer may carry, and finished on its own terms.
+      value.transport.executeResult = execResult({
+        state: "failed",
+        stdout: "first bytes",
+        stderr: "real failure",
+        exitCode: 7,
+        stdoutTotalBytes: 900_000,
+      });
+      const dispatched = await value.service.execute("user-1", "workspace-1", {
+        argv: ["build"],
+        cwd: ".",
+        stdin: { kind: "inline", bytes: new Uint8Array() },
+        timeoutMs: 5_000,
+      });
+      expect(dispatched.result).toMatchObject({
+        exitCode: 7,
+        stderr: "real failure",
+        stdoutTotalBytes: 900_000,
+        outputLimitExceeded: false,
+      });
+      // The recorded size is the whole stream, not the part the answer carried.
+      expect(value.service.get("user-1", dispatched.operation.id)?.outputBytes).toBe(
+        900_000 + "real failure".length,
+      );
+      // The retained ceiling travelled with the dispatch; the payload bound did not become one.
+      expect(value.transport.lastRequest?.maxRetainedBytes).toBe(policy.maxRetainedOutputBytes);
+
+      value.transport.outputResult = {
+        stream: "stdout",
+        offset: 899_990,
+        totalBytes: 900_000,
+        bytes: Buffer.from("last bytes"),
+      };
+      await expect(
+        value.service.readOutput("user-1", dispatched.operation.id, {
+          stream: "stdout",
+          offset: 899_990,
+          length: 64,
+        }),
+      ).resolves.toMatchObject({ totalBytes: 900_000, bytes: Buffer.from("last bytes") });
+      expect(value.transport.lastOutputOperation).toBe(dispatched.operation.id);
+      expect(value.transport.readOutputCalls).toHaveBeenCalledTimes(1);
+
+      // An unavailable connector is refused as that, before any credential is fetched.
+      value.transport.available = false;
+      await expect(
+        value.service.readOutput("user-1", dispatched.operation.id, {
+          stream: "stdout",
+          offset: 0,
+          length: 64,
+        }),
+      ).rejects.toMatchObject({ code: "WORKSPACE_PROVIDER_UNAVAILABLE" });
+      expect(value.transport.readOutputCalls).toHaveBeenCalledTimes(1);
+      value.transport.available = true;
+
+      // Another user's operation is not readable, and output that cleanup already removed is
+      // reported as expired rather than as an empty stream.
+      await expect(
+        value.service.readOutput("user-2", dispatched.operation.id, {
+          stream: "stdout",
+          offset: 0,
+          length: 64,
+        }),
+      ).rejects.toMatchObject({ code: "WORKSPACE_NOT_FOUND" });
+      value.transport.outputResult = { state: "absent" };
+      await expect(
+        value.service.readOutput("user-1", dispatched.operation.id, {
+          stream: "stdout",
+          offset: 0,
+          length: 64,
+        }),
+      ).rejects.toMatchObject({ code: "WORKSPACE_RESULT_EXPIRED" });
+    } finally {
+      value.sqlite.close();
+    }
+  });
+
   test("returns the result of a command that finishes during the settle window", async () => {
     const value = fixture();
     try {
       // The connector always answers "running" for an exec; the outcome appears moments later.
       value.transport.executeResult = { state: "running" };
-      value.transport.inspectResult = {
+      value.transport.inspectResult = execResult({
         state: "succeeded",
         stdout: "immediate",
         stderr: "",
         exitCode: 0,
-      };
+      });
       const dispatched = await value.service.execute("user-1", "workspace-1", {
         argv: ["printf", "immediate"],
         cwd: ".",
@@ -305,12 +434,14 @@ describe("durable direct workspace operations", () => {
       });
 
       expect(dispatched.operation.state).toBe("succeeded");
-      expect(dispatched.result).toEqual({
-        state: "succeeded",
-        stdout: "immediate",
-        stderr: "",
-        exitCode: 0,
-      });
+      expect(dispatched.result).toEqual(
+        execResult({
+          state: "succeeded",
+          stdout: "immediate",
+          stderr: "",
+          exitCode: 0,
+        }),
+      );
       expect(value.transport.executeCalls).toHaveBeenCalledTimes(1);
       expect(value.transport.inspectCalls).toHaveBeenCalledTimes(1);
       expect(value.settleDelays).toEqual([150]);
@@ -339,12 +470,12 @@ describe("durable direct workspace operations", () => {
       // Bounded: the window makes a fixed small number of attempts and then gives up.
       expect(value.settleDelays).toEqual([150, 350, 750]);
 
-      value.transport.inspectResult = {
+      value.transport.inspectResult = execResult({
         state: "succeeded",
         stdout: "late",
         stderr: "",
         exitCode: 0,
-      };
+      });
       await expect(
         value.service.reconcile("user-1", dispatched.operation.id),
       ).resolves.toMatchObject({ state: "succeeded", stdout: "late" });
@@ -846,12 +977,12 @@ describe("durable direct workspace operations", () => {
   test("preserves argv boundaries and exact exit 23 without persisting command or stdin", async () => {
     const value = fixture();
     try {
-      value.transport.executeResult = {
+      value.transport.executeResult = execResult({
         state: "failed",
         stdout: "partial output",
         stderr: "expected failure",
         exitCode: 23,
-      };
+      });
       const stdin = new TextEncoder().encode("opaque input");
       const operation = await value.service.execute("user-1", "workspace-1", {
         argv: ["printf", "%s", "argument with spaces;$(false)"],
@@ -865,12 +996,14 @@ describe("durable direct workspace operations", () => {
         outputBytes: Buffer.byteLength("partial output") + Buffer.byteLength("expected failure"),
         inputBytes: stdin.byteLength,
       });
-      expect(operation.result).toEqual({
-        state: "failed",
-        stdout: "partial output",
-        stderr: "expected failure",
-        exitCode: 23,
-      });
+      expect(operation.result).toEqual(
+        execResult({
+          state: "failed",
+          stdout: "partial output",
+          stderr: "expected failure",
+          exitCode: 23,
+        }),
+      );
       expect(value.transport.lastWorkspace?.machine).toEqual({
         name: "basic",
         displayName: "Basic",
@@ -983,12 +1116,12 @@ describe("durable direct workspace operations", () => {
         stdin: { kind: "inline", bytes: new Uint8Array() },
         timeoutMs: 5_000,
       });
-      value.transport.executeResult = {
+      value.transport.executeResult = execResult({
         state: "succeeded",
         stdout: "raced result",
         stderr: "",
         exitCode: 0,
-      };
+      });
 
       // The background reconciler stores the identical outcome while this caller is still
       // inspecting, so the caller's own write finds the row already terminal.
@@ -999,12 +1132,14 @@ describe("durable direct workspace operations", () => {
         return background;
       };
 
-      await expect(value.service.reconcile("user-1", started.operation.id)).resolves.toEqual({
-        state: "succeeded",
-        stdout: "raced result",
-        stderr: "",
-        exitCode: 0,
-      });
+      await expect(value.service.reconcile("user-1", started.operation.id)).resolves.toEqual(
+        execResult({
+          state: "succeeded",
+          stdout: "raced result",
+          stderr: "",
+          exitCode: 0,
+        }),
+      );
       await expect(background!).resolves.toBe(true);
       expect(value.repository.getOwned("user-1", started.operation.id)).toMatchObject({
         state: "succeeded",
@@ -1026,12 +1161,12 @@ describe("durable direct workspace operations", () => {
         stdin: { kind: "inline", bytes: new Uint8Array() },
         timeoutMs: 5_000,
       });
-      value.transport.executeResult = {
+      value.transport.executeResult = execResult({
         state: "succeeded",
         stdout: "background result",
         stderr: "background warning",
         exitCode: 0,
-      };
+      });
 
       await expect(value.service.reconcileOnce("user-1")).resolves.toBe(true);
       expect(value.repository.getOwned("user-1", started.operation.id)).toMatchObject({
@@ -1040,12 +1175,14 @@ describe("durable direct workspace operations", () => {
       });
       expect(value.transport.finalizeCalls).not.toHaveBeenCalled();
       await expect(value.service.reconcileOnce("user-1")).resolves.toBe(false);
-      await expect(value.service.reconcile("user-1", started.operation.id)).resolves.toEqual({
-        state: "succeeded",
-        stdout: "background result",
-        stderr: "background warning",
-        exitCode: 0,
-      });
+      await expect(value.service.reconcile("user-1", started.operation.id)).resolves.toEqual(
+        execResult({
+          state: "succeeded",
+          stdout: "background result",
+          stderr: "background warning",
+          exitCode: 0,
+        }),
+      );
       expect(value.transport.finalizeCalls).not.toHaveBeenCalled();
 
       value.advance(policy.cleanupDeadlineMs + 1);
@@ -1357,12 +1494,12 @@ describe("durable direct workspace operations", () => {
       const pending = await value.service.cancel("user-1", running.operation.id);
       expect(pending.operation.state).toBe("cancel_pending");
 
-      value.transport.cancelResult = {
+      value.transport.cancelResult = execResult({
         state: "cancelled",
         stdout: "",
         stderr: "",
         exitCode: null,
-      };
+      });
       const terminal = await value.service.cancel("user-1", running.operation.id);
       expect(terminal.operation.state).toBe("cancelled");
       expect(terminal.result?.state).toBe("cancelled");

@@ -100,8 +100,11 @@ export interface WorkspaceResourcePolicy {
   maxConcurrentOperationsPerUser?: number;
   maxConcurrentOperationsGlobal?: number;
   maxOperationInputBytes?: number;
+  /** Response payload bounds. They bound what a call returns, never how long a command runs. */
   maxOperationStdoutBytes?: number;
   maxOperationStderrBytes?: number;
+  /** Disk a single command's retained output may occupy in the workspace before it is stopped. */
+  maxRetainedOutputBytes?: number;
   maxOperationMs?: number;
   maxTransferFileBytes?: number;
   maxTransferBytesPerUser?: number;
@@ -210,15 +213,37 @@ export interface WorkspaceExecRequest {
   cwd: string;
   stdin: WorkspaceByteSource;
   timeoutMs: number;
+  /** Response payload bounds; the command is not stopped for reaching them. */
   maxStdoutBytes?: number;
   maxStderrBytes?: number;
+  /** Retained-output ceiling, resolved from policy before dispatch. */
+  maxRetainedBytes?: number;
 }
 
 export interface WorkspaceOperationResult {
   state: "succeeded" | "failed" | "cancelled" | "timed_out";
+  /** Response payload: the beginning of the stream, bounded by the operation's payload limit. */
   stdout: string;
   stderr: string;
   exitCode: number | null;
+  /** Complete size of each retained stream, whatever the payload above carries. */
+  stdoutTotalBytes: number;
+  stderrTotalBytes: number;
+  /** True when the workspace's retained-output ceiling stopped the command. */
+  outputLimitExceeded: boolean;
+}
+
+export interface WorkspaceOperationOutputRequest {
+  stream: "stdout" | "stderr";
+  offset: number;
+  length: number;
+}
+
+export interface WorkspaceOperationOutputResult {
+  stream: "stdout" | "stderr";
+  offset: number;
+  totalBytes: number;
+  bytes: Buffer;
 }
 
 export interface WorkspaceOperationResponse {
@@ -252,6 +277,17 @@ export interface WorkspaceOperationTransport extends WorkspaceTransportAvailabil
     workspace: WorkspaceResourceRecord,
     operation: WorkspaceOperationRecord,
   ): Promise<void>;
+  /**
+   * Reads a range of a command's retained output. The retained streams live beside the operation's
+   * remote result and are removed by the same finalize, so a range is readable exactly as long as
+   * the result is.
+   */
+  readOutput(
+    credential: string,
+    workspace: WorkspaceResourceRecord,
+    operation: WorkspaceOperationRecord,
+    request: WorkspaceOperationOutputRequest,
+  ): Promise<WorkspaceOperationOutputResult | { state: "absent" }>;
 }
 
 export interface WorkspaceFileVersion {

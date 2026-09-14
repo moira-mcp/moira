@@ -25,6 +25,7 @@ describe("workspace resource policy", () => {
       maxOperationInputBytes: 1024 * 1024,
       maxOperationStdoutBytes: 1024 * 1024,
       maxOperationStderrBytes: 256 * 1024,
+      maxRetainedOutputBytes: 64 * 1024 * 1024,
       maxOperationMs: 900_000,
       maxTransferFileBytes: 4 * 1024 ** 2,
       maxTransferBytesPerUser: 100 * 1024 ** 2,
@@ -65,6 +66,12 @@ describe("workspace resource policy", () => {
     expect(() => policy({ WORKSPACE_MAX_OPERATION_INPUT_KB: "4097" })).toThrow(/between/);
     expect(() => policy({ WORKSPACE_MAX_OPERATION_STDOUT_KB: "8193" })).toThrow(/between/);
     expect(() => policy({ WORKSPACE_MAX_OPERATION_SECONDS: "901" })).toThrow(/between/);
+    // A command's retained output is disk, not an answer: it must leave room for the payload the
+    // answer carries, and it is far larger than that payload by default.
+    expect(policy().maxRetainedOutputBytes).toBeGreaterThan(policy().maxOperationStdoutBytes!);
+    expect(() =>
+      policy({ WORKSPACE_MAX_RETAINED_OUTPUT_MB: "1", WORKSPACE_MAX_OPERATION_STDOUT_KB: "2048" }),
+    ).toThrow(/cannot be lower than a configured response payload bound/);
     expect(() => policy({ WORKSPACE_MAX_TRANSFER_FILE_MB: "5" })).toThrow(/between/);
     expect(() => policy({ WORKSPACE_MAX_TRANSFER_OBJECTS_PER_USER: "101" })).toThrow(/between/);
     expect(() => policy({ WORKSPACE_TRANSFER_TTL_MINUTES: "61" })).toThrow(/between/);

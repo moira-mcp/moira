@@ -687,18 +687,27 @@ export const workspaceSearchRequestSchema = z.union([
   workspaceOperationResumeSchema,
 ]);
 
+const workspaceReadRangeSchema = z.object({
+  offset: z.number().int().min(0).default(0),
+  length: z
+    .number()
+    .int()
+    .min(1)
+    .max(4 * 1024 * 1024)
+    .default(64 * 1024),
+});
+
 export const workspaceReadRequestSchema = z.union([
-  z
-    .object({
+  workspaceReadRangeSchema
+    .extend({ workspace_id: workspaceIdSchema, path: workspacePathSchema })
+    .strict(),
+  // Retained command output: the same range read addressed to a command instead of a file. It is
+  // matched before the resume form, which carries no stream.
+  workspaceReadRangeSchema
+    .extend({
       workspace_id: workspaceIdSchema,
-      path: workspacePathSchema,
-      offset: z.number().int().min(0).default(0),
-      length: z
-        .number()
-        .int()
-        .min(1)
-        .max(4 * 1024 * 1024)
-        .default(64 * 1024),
+      operation_id: z.string().uuid().describe("Command operation whose retained output is read"),
+      stream: z.enum(["stdout", "stderr"]),
     })
     .strict(),
   workspaceOperationResumeSchema,

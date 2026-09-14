@@ -176,7 +176,7 @@ export interface WorkspaceToolServices {
   > | null;
   operation: Pick<
     WorkspaceOperationService,
-    "execute" | "executeNativeReference" | "get" | "reconcile"
+    "execute" | "executeNativeReference" | "get" | "reconcile" | "readOutput"
   > | null;
   file: Pick<
     WorkspaceFileService,
@@ -219,6 +219,8 @@ const SAFE_ERROR_MESSAGES: Record<string, string> = {
     "The requested range is not UTF-8 text; use workspace_download for binary bytes.",
   WORKSPACE_OPERATION_PENDING: "The workspace operation has not reached a terminal result.",
   WORKSPACE_OPERATION_FAILED: "The workspace command failed; inspect its output and exit code.",
+  WORKSPACE_OPERATION_OUTPUT_LIMIT:
+    "The command was stopped because its retained output reached the workspace ceiling; its output up to that point remains readable.",
   WORKSPACE_OPERATION_CANCELLED: "The workspace operation was cancelled.",
   WORKSPACE_OPERATION_TIMED_OUT: "The workspace operation reached its execution deadline.",
   WORKSPACE_FILE_REJECTED:
@@ -292,6 +294,13 @@ function projectExecResult(result: NonNullable<WorkspaceOperationResponse["resul
     stdout: result.stdout,
     stderr: result.stderr,
     exit_code: result.exitCode,
+    // The payload above is the beginning of each stream; the complete streams stay in the
+    // workspace and are read by range with workspace_read and this operation's identifier.
+    stdout_total_bytes: result.stdoutTotalBytes,
+    stderr_total_bytes: result.stderrTotalBytes,
+    stdout_truncated: Buffer.byteLength(result.stdout) < result.stdoutTotalBytes,
+    stderr_truncated: Buffer.byteLength(result.stderr) < result.stderrTotalBytes,
+    output_limit_exceeded: result.outputLimitExceeded,
   };
 }
 
@@ -589,6 +598,34 @@ export async function executeWorkspaceTool<Name extends WorkspaceToolName>(
       return errorResult("WORKSPACE_NOT_CONFIGURED", ready.settingsUrl);
     }
 
+    if (name === "workspace_read" && "stream" in params) {
+      const input = params as Extract<
+        WorkspaceToolParams["workspace_read"],
+        { stream: "stdout" | "stderr" }
+      >;
+      // The workspace is named in the request, so a mismatch is refused here exactly as the resume
+      // path refuses one, rather than silently answering about another workspace's command.
+      const owning = services.operation.get(userId, input.operation_id);
+      if (!owning || owning.resourceId !== input.workspace_id || owning.kind !== "exec") {
+        return errorResult("WORKSPACE_NOT_FOUND");
+      }
+      const output = await services.operation.readOutput(userId, input.operation_id, {
+        stream: input.stream,
+        offset: input.offset,
+        length: input.length,
+      });
+      return jsonResult({
+        output: {
+          operation_id: input.operation_id,
+          stream: output.stream,
+          offset: output.offset,
+          total_bytes: output.totalBytes,
+          text: output.bytes.toString("utf8"),
+          truncated: output.offset + output.bytes.length < output.totalBytes,
+        },
+      });
+    }
+
     if ("operation_id" in params) {
       const resumableKind: Partial<Record<WorkspaceToolName, WorkspaceOperationRecord["kind"]>> = {
         workspace_exec: "exec",
@@ -635,6 +672,7 @@ export async function executeWorkspaceTool<Name extends WorkspaceToolName>(
         return operationResult(
           projectOperation({ operation, result }),
           result ? projectExecResult(result) : null,
+          result?.outputLimitExceeded ? "WORKSPACE_OPERATION_OUTPUT_LIMIT" : undefined,
         );
       }
       const response = await services.file.reconcile(userId, params.operation_id);
@@ -708,6 +746,7 @@ export async function executeWorkspaceTool<Name extends WorkspaceToolName>(
         return operationResult(
           projectOperation(response),
           response.result ? projectExecResult(response.result) : null,
+          response.result?.outputLimitExceeded ? "WORKSPACE_OPERATION_OUTPUT_LIMIT" : undefined,
         );
       }
       case "workspace_stat":

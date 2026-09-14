@@ -24,6 +24,14 @@ import { Worker } from "node:worker_threads";
 const VERSION = 1;
 const MAX_CONTROL_BYTES = 8 * 1024 * 1024;
 const MAX_RESULT_BYTES = 8 * 1024 * 1024;
+// Complete output is retained beside the result, so a range read is bounded like a file read and
+// the retained streams themselves are bounded by what the caller declares, never by the payload.
+const MAX_RETAINED_OUTPUT_BYTES = 4 * 1024 * 1024 * 1024;
+const MAX_OUTPUT_RANGE_BYTES = 4 * 1024 * 1024;
+const OUTPUT_STREAMS = new Map([
+  ["stdout", "stdout.log"],
+  ["stderr", "stderr.log"],
+]);
 const MARKER = /^moira-op-[a-f0-9]{32}$/;
 const REPOSITORY = /^[A-Za-z0-9_.-]{1,100}\/([A-Za-z0-9_.-]{1,100})$/;
 const TERMINAL = new Set(["succeeded", "failed", "cancelled", "timed_out"]);
@@ -112,7 +120,10 @@ function validateExecution(request) {
     request.maxStdoutBytes > MAX_RESULT_BYTES ||
     !Number.isSafeInteger(request.maxStderrBytes) ||
     request.maxStderrBytes < 1 ||
-    request.maxStderrBytes > MAX_RESULT_BYTES
+    request.maxStderrBytes > MAX_RESULT_BYTES ||
+    !Number.isSafeInteger(request.maxRetainedBytes) ||
+    request.maxRetainedBytes < Math.max(request.maxStdoutBytes, request.maxStderrBytes) ||
+    request.maxRetainedBytes > MAX_RETAINED_OUTPUT_BYTES
   ) {
     fail("invalid execution request");
   }
@@ -1307,17 +1318,31 @@ function capture(executable, argv) {
 
 const RUNNER = String.raw`
 const {spawn}=require("node:child_process");
+const {createWriteStream}=require("node:fs");
 const {access,readFile,rename,writeFile}=require("node:fs/promises");
 const startTimeOf=async(path)=>{try{const value=await readFile(path,'utf8');const field=value.slice(value.lastIndexOf(') ')+2).split(' ')[19]??null;return /^[0-9]+$/.test(field)?field:null}catch{return null}};
-(async()=>{let raw="";for await(const chunk of process.stdin)raw+=chunk;const input=JSON.parse(raw);const out=[];const err=[];let stdoutBytes=0;let stderrBytes=0;let terminal=false;let outputExceeded=false;let timedOut=false;
+(async()=>{let raw="";for await(const chunk of process.stdin)raw+=chunk;const input=JSON.parse(raw);
+// The payload prefix is what a response may carry; the file beside it keeps the complete stream.
+// Only the retained ceiling stops the command, so an ordinary noisy command keeps its own exit
+// code and its own standard error.
+const prefix={stdout:[],stderr:[]};const prefixBytes={stdout:0,stderr:0};const total={stdout:0,stderr:0};
+const sink={stdout:createWriteStream(input.stdoutPath,{mode:0o600}),stderr:createWriteStream(input.stderrPath,{mode:0o600})};
+for(const stream of ["stdout","stderr"])sink[stream].on("error",()=>{});
+let terminal=false;let retainedExceeded=false;let timedOut=false;
 let runnerStartTime=null;if(process.platform==="linux"){runnerStartTime=await startTimeOf('/proc/self/stat');if(runnerStartTime===null)throw new Error("invalid runner start time")}
 await writeFile(input.runnerPidPath,JSON.stringify({pid:process.pid,startTime:runnerStartTime}),{mode:0o600});
 const child=spawn(input.argv[0],input.argv.slice(1),{cwd:input.cwd,env:process.env,detached:true,stdio:["pipe","pipe","pipe"]});
-const collect=(target,stream)=>(chunk)=>{if(stream==="stdout")stdoutBytes+=chunk.length;else stderrBytes+=chunk.length;const limit=stream==="stdout"?input.maxStdoutBytes:input.maxStderrBytes;if((stream==="stdout"?stdoutBytes:stderrBytes)>limit){outputExceeded=true;try{process.kill(-child.pid,"SIGKILL")}catch{}}else target.push(Buffer.from(chunk));};
+const payloadLimit=(stream)=>stream==="stdout"?input.maxStdoutBytes:input.maxStderrBytes;
+const collect=(stream)=>(chunk)=>{if(retainedExceeded)return;const buffer=Buffer.from(chunk);
+const room=input.maxRetainedBytes-total[stream];const kept=buffer.length>room?buffer.subarray(0,room):buffer;
+if(kept.length>0){total[stream]+=kept.length;sink[stream].write(kept);
+const headroom=payloadLimit(stream)-prefixBytes[stream];
+if(headroom>0){const head=kept.length>headroom?kept.subarray(0,headroom):kept;prefix[stream].push(head);prefixBytes[stream]+=head.length}}
+if(buffer.length>room){retainedExceeded=true;try{process.kill(-child.pid,"SIGKILL")}catch{}}};
 // Output collection, exit observation and pipe-error tolerance are installed before any
 // await: a command that exits immediately must not close before the runner is listening,
 // and writing its stdin after it exited must not abort the runner without a result.
-child.stdout.on("data",collect(out,"stdout"));child.stderr.on("data",collect(err,"stderr"));
+child.stdout.on("data",collect("stdout"));child.stderr.on("data",collect("stderr"));
 child.on("error",()=>{});for(const stream of [child.stdin,child.stdout,child.stderr])stream.on("error",()=>{});
 const timer=setTimeout(()=>{if(terminal)return;timedOut=true;try{process.kill(-child.pid,"SIGKILL")}catch{}},input.timeoutMs);timer.unref();
 const closed=new Promise((resolveClose)=>child.once("close",(code)=>{terminal=true;clearTimeout(timer);resolveClose(code)}));
@@ -1327,9 +1352,10 @@ try{child.stdin.end(Buffer.from(input.stdin,"base64"))}catch{}
 const startTime=process.platform==="linux"?await startTimeOf('/proc/'+child.pid+'/stat'):null;
 await writeFile(input.pidPath,JSON.stringify({pid:child.pid,startTime}),{mode:0o600});
 const code=await closed;let cancelled=false;try{await access(input.cancelPath);cancelled=true}catch{}
-const state=cancelled?"cancelled":outputExceeded?"failed":timedOut?"timed_out":code===0?"succeeded":"failed";
-const stderr=outputExceeded?Buffer.from("output limit exceeded"):Buffer.concat(err);
-await writeFile(input.resultTempPath,JSON.stringify({state,stdout:Buffer.concat(out).toString("base64"),stderr:stderr.toString("base64"),exitCode:Number.isInteger(code)?code:null}),{mode:0o600});await rename(input.resultTempPath,input.resultPath);
+// The retained streams must be complete on disk before the result announces their size.
+await Promise.all(["stdout","stderr"].map((stream)=>new Promise((done)=>{sink[stream].end(done)})));
+const state=cancelled?"cancelled":timedOut?"timed_out":retainedExceeded?"failed":code===0?"succeeded":"failed";
+await writeFile(input.resultTempPath,JSON.stringify({state,stdout:Buffer.concat(prefix.stdout).toString("base64"),stderr:Buffer.concat(prefix.stderr).toString("base64"),exitCode:Number.isInteger(code)?code:null,stdoutBytes:total.stdout,stderrBytes:total.stderr,outputLimitExceeded:retainedExceeded}),{mode:0o600});await rename(input.resultTempPath,input.resultPath);
 })().catch(async()=>{process.exitCode=1});`;
 
 async function execute(request) {
@@ -1340,6 +1366,8 @@ async function execute(request) {
   await mkdir(directory, { mode: 0o700 });
   const pidPath = join(directory, "pid");
   const runnerPidPath = join(directory, "runner-pid");
+  const stdoutPath = join(directory, OUTPUT_STREAMS.get("stdout"));
+  const stderrPath = join(directory, OUTPUT_STREAMS.get("stderr"));
   const resultPath = join(directory, "result.json");
   const resultTempPath = join(directory, "result.tmp");
   const cancelPath = join(directory, "cancel-requested");
@@ -1356,8 +1384,11 @@ async function execute(request) {
       timeoutMs: request.timeoutMs,
       maxStdoutBytes: request.maxStdoutBytes,
       maxStderrBytes: request.maxStderrBytes,
+      maxRetainedBytes: request.maxRetainedBytes,
       pidPath,
       runnerPidPath,
+      stdoutPath,
+      stderrPath,
       resultPath,
       resultTempPath,
       cancelPath,
@@ -1397,6 +1428,9 @@ async function readResult(directory) {
       stdoutBase64: value.stdout,
       stderrBase64: value.stderr,
       exitCode: Number.isInteger(value.exitCode) ? value.exitCode : null,
+      stdoutBytes: Number.isSafeInteger(value.stdoutBytes) ? value.stdoutBytes : 0,
+      stderrBytes: Number.isSafeInteger(value.stderrBytes) ? value.stderrBytes : 0,
+      outputLimitExceeded: value.outputLimitExceeded === true,
     };
   } catch (error) {
     if (error?.code !== "ENOENT") throw error;
@@ -1462,6 +1496,9 @@ async function inspect(request) {
       stdoutBase64: "",
       stderrBase64: Buffer.from("operation supervisor exited without a result").toString("base64"),
       exitCode: null,
+      stdoutBytes: 0,
+      stderrBytes: 0,
+      outputLimitExceeded: false,
     };
   } catch (error) {
     if (error?.code === "ENOENT") return { state: "absent" };
@@ -1491,9 +1528,76 @@ async function cancel(request) {
   }
   await new Promise((resolveValue) => setTimeout(resolveValue, 100));
   if (await processExists(identity)) return { state: "running" };
-  const result = { state: "cancelled", stdoutBase64: "", stderrBase64: "", exitCode: null };
-  await writeFile(join(directory, "result.json"), JSON.stringify(result), { mode: 0o600 });
+  const result = {
+    state: "cancelled",
+    stdoutBase64: "",
+    stderrBase64: "",
+    exitCode: null,
+    stdoutBytes: await retainedSize(directory, "stdout"),
+    stderrBytes: await retainedSize(directory, "stderr"),
+    outputLimitExceeded: false,
+  };
+  // A cancelled command still produced whatever it printed; the published result names those
+  // sizes so the retained streams stay readable by range until cleanup removes them.
+  await writeFile(
+    join(directory, "result.json"),
+    JSON.stringify({
+      state: result.state,
+      stdout: "",
+      stderr: "",
+      exitCode: null,
+      stdoutBytes: result.stdoutBytes,
+      stderrBytes: result.stderrBytes,
+      outputLimitExceeded: false,
+    }),
+    { mode: 0o600 },
+  );
   return result;
+}
+
+async function retainedSize(directory, stream) {
+  try {
+    const value = await stat(join(directory, OUTPUT_STREAMS.get(stream)));
+    return value.isFile() ? value.size : 0;
+  } catch {
+    return 0;
+  }
+}
+
+async function readOutput(request) {
+  const directory = validateBase(request);
+  const fileName = OUTPUT_STREAMS.get(request.stream);
+  if (
+    !fileName ||
+    !Number.isSafeInteger(request.offset) ||
+    request.offset < 0 ||
+    !Number.isSafeInteger(request.length) ||
+    request.length < 1 ||
+    request.length > MAX_OUTPUT_RANGE_BYTES
+  ) {
+    fail("invalid output range");
+  }
+  let handle = null;
+  try {
+    handle = await open(join(directory, fileName), "r");
+    const totalBytes = (await handle.stat()).size;
+    // A read that starts at or past the end is answered with no bytes and the true size, which is
+    // how a caller learns where the stream currently ends without an error.
+    const bytes = Buffer.alloc(Math.max(0, Math.min(request.length, totalBytes - request.offset)));
+    if (bytes.length > 0) await handle.read(bytes, 0, bytes.length, request.offset);
+    return {
+      action: "output",
+      stream: request.stream,
+      offset: request.offset,
+      totalBytes,
+      bytesBase64: bytes.toString("base64"),
+    };
+  } catch (error) {
+    if (error?.code === "ENOENT") return { state: "absent" };
+    throw error;
+  } finally {
+    await handle?.close();
+  }
 }
 
 async function finalize(request) {
@@ -1509,6 +1613,7 @@ export async function runRequest(request) {
   if (request.action === "inspect") return inspect(request);
   if (request.action === "cancel") return cancel(request);
   if (request.action === "finalize") return finalize(request);
+  if (request.action === "output") return readOutput(request);
   if (request.action === "file-execute") return fileExecute(request);
   if (request.action === "file-inspect") return fileInspect(request);
   fail("unsupported supervisor action");

@@ -3,6 +3,8 @@ import { settleAfterDispatch } from "./settle-after-dispatch.js";
 import { requireWorkspaceTransportAvailable } from "./transport-availability.js";
 import type {
   WorkspaceExecRequest,
+  WorkspaceOperationOutputRequest,
+  WorkspaceOperationOutputResult,
   WorkspaceOperationRecord,
   WorkspaceOperationResponse,
   WorkspaceOperationResult,
@@ -25,7 +27,21 @@ import type {
 const CONNECTOR_MAX_INPUT_BYTES = 4 * 1024 * 1024;
 const CONNECTOR_MAX_OUTPUT_BYTES = 8 * 1024 * 1024;
 const CONNECTOR_MAX_TIMEOUT_MS = 15 * 60_000;
+const CONNECTOR_MAX_RETAINED_OUTPUT_BYTES = 4 * 1024 * 1024 * 1024;
+const MAX_OUTPUT_RANGE_BYTES = 4 * 1024 * 1024;
+const DEFAULT_RETAINED_OUTPUT_BYTES = 64 * 1024 * 1024;
 const MAX_WORKSPACE_CWD_BYTES = 4096;
+
+/**
+ * The disk one command's retained output may occupy in the workspace. It is the only output bound
+ * that stops a command; the payload bounds only decide how much of it a single answer carries.
+ */
+function retainedOutputBytes(policy: WorkspaceResourcePolicy): number {
+  return Math.min(
+    policy.maxRetainedOutputBytes ?? DEFAULT_RETAINED_OUTPUT_BYTES,
+    CONNECTOR_MAX_RETAINED_OUTPUT_BYTES,
+  );
+}
 
 function isTerminalOperationState(
   state: WorkspaceOperationRecord["state"],
@@ -233,6 +249,66 @@ export class WorkspaceOperationService {
     return (this.dependencies.now ?? Date.now)();
   }
 
+  /**
+   * Reads a range of a command's retained output. The read carries no operation of its own: it is a
+   * bounded control request fenced by the same ownership, generation and authorization rules as any
+   * other call against the operation, and the bytes disappear when the operation's remote outcome is
+   * cleaned up.
+   */
+  async readOutput(
+    userId: string,
+    operationId: string,
+    request: WorkspaceOperationOutputRequest,
+  ): Promise<WorkspaceOperationOutputResult> {
+    if (
+      !["stdout", "stderr"].includes(request.stream) ||
+      !Number.isSafeInteger(request.offset) ||
+      request.offset < 0 ||
+      !Number.isSafeInteger(request.length) ||
+      request.length < 1 ||
+      request.length > MAX_OUTPUT_RANGE_BYTES
+    ) {
+      throw new WorkspaceResourceError("WORKSPACE_POLICY_LIMIT", "Output range is invalid");
+    }
+    const { operation, workspace } = this.dependencies.repository.requireResultContext(
+      userId,
+      operationId,
+      this.dependencies.policy(),
+      this.now(),
+    );
+    if (operation.kind !== "exec") {
+      throw new WorkspaceResourceError(
+        "WORKSPACE_RESOURCE_INVALID",
+        "Only a command operation retains output",
+      );
+    }
+    await requireWorkspaceTransportAvailable(this.dependencies.transport);
+    const credential = await this.dependencies.credentials.getCredential(
+      userId,
+      operation.provider,
+    );
+    const result = await this.dependencies.transport.readOutput(
+      credential,
+      workspace,
+      operation,
+      request,
+    );
+    // Authority is proven again after the awaits, the way every other result-bearing call does.
+    this.dependencies.repository.requireResultContext(
+      userId,
+      operationId,
+      this.dependencies.policy(),
+      this.now(),
+    );
+    if ("state" in result) {
+      throw new WorkspaceResourceError(
+        "WORKSPACE_RESULT_EXPIRED",
+        "Retained operation output is no longer available",
+      );
+    }
+    return result;
+  }
+
   list(userId: string, workspaceId: string): WorkspaceOperationRecord[] {
     return this.dependencies.repository.listOwned(userId, workspaceId);
   }
@@ -365,6 +441,7 @@ export class WorkspaceOperationService {
         ...materializedRequest,
         maxStdoutBytes: stdoutLimitBytes,
         maxStderrBytes: stderrLimitBytes,
+        maxRetainedBytes: retainedOutputBytes(policy),
       });
       this.dependencies.repository.recordConnectorRunning(
         userId,
@@ -500,6 +577,9 @@ export class WorkspaceOperationService {
           stdout: "",
           stderr: "",
           exitCode: null,
+          stdoutTotalBytes: 0,
+          stderrTotalBytes: 0,
+          outputLimitExceeded: false,
         });
       }
       return await this.completeObserved(userId, operation, result);
@@ -626,6 +706,9 @@ export class WorkspaceOperationService {
           stdout: "",
           stderr: "",
           exitCode: null,
+          stdoutTotalBytes: 0,
+          stderrTotalBytes: 0,
+          outputLimitExceeded: false,
         });
         if (terminal) {
           await this.emit(
@@ -724,14 +807,14 @@ export class WorkspaceOperationService {
     const stateMatches =
       result.state === operation.state ||
       (operation.state === "cancelled" && result.state === "succeeded");
-    const stdoutBytes = Buffer.byteLength(result.stdout);
-    const stderrBytes = Buffer.byteLength(result.stderr);
+    // The stored byte count is the complete retained size, so a re-observed result must agree with
+    // it while its payload stays within the response bounds.
     if (
       !stateMatches ||
       result.exitCode !== operation.exitCode ||
-      stdoutBytes > operation.stdoutLimitBytes ||
-      stderrBytes > operation.stderrLimitBytes ||
-      stdoutBytes + stderrBytes !== operation.outputBytes
+      Buffer.byteLength(result.stdout) > operation.stdoutLimitBytes ||
+      Buffer.byteLength(result.stderr) > operation.stderrLimitBytes ||
+      result.stdoutTotalBytes + result.stderrTotalBytes !== operation.outputBytes
     ) {
       return null;
     }

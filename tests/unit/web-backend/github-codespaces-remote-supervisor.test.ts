@@ -1056,6 +1056,7 @@ if (process.env.MOIRA_TEST_HOLD_FILE_RUNNER === "1") {
         timeoutMs: 5_000,
         maxStdoutBytes: 4096,
         maxStderrBytes: 4096,
+        maxRetainedBytes: 1024 * 1024,
       }),
     ).resolves.toEqual({ state: "running" });
     const terminal = {
@@ -1063,6 +1064,9 @@ if (process.env.MOIRA_TEST_HOLD_FILE_RUNNER === "1") {
       stdout: "argument with spaces;$(false)|native stdin",
       stderr: "err",
       exitCode,
+      stdoutBytes: "argument with spaces;$(false)|native stdin".length,
+      stderrBytes: 3,
+      outputLimitExceeded: false,
     };
     await expect(inspectUntilTerminal(value.environment, remoteMarker)).resolves.toEqual(terminal);
     await expect(
@@ -1093,6 +1097,7 @@ if (process.env.MOIRA_TEST_HOLD_FILE_RUNNER === "1") {
         timeoutMs: 5_000,
         maxStdoutBytes: 4096,
         maxStderrBytes: 4096,
+        maxRetainedBytes: 1024 * 1024,
       }),
     ).resolves.toEqual({ state: "running" });
     await expect(inspectUntilTerminal(value.environment, remoteMarker)).resolves.toEqual({
@@ -1100,7 +1105,101 @@ if (process.env.MOIRA_TEST_HOLD_FILE_RUNNER === "1") {
       stdout: "fast\n",
       stderr: "",
       exitCode: 0,
+      stdoutBytes: 5,
+      stderrBytes: 0,
+      outputLimitExceeded: false,
     });
+  });
+
+  test("keeps a noisy command's own outcome and every byte it printed", async () => {
+    const value = fixture();
+    const remoteMarker = `moira-op-${"7".repeat(32)}`;
+    // Far more than the response payload may carry, ending with a marker that only a reader of
+    // the last bytes can see, and then an exit code and standard error of the command's own.
+    const script =
+      "for(let i=0;i<200;i++)process.stdout.write('x'.repeat(1024));" +
+      "process.stdout.write('TAIL');process.stderr.write('real failure');process.exitCode=7";
+    await request(value.environment, {
+      action: "execute",
+      version: 1,
+      remoteMarker,
+      repositoryFullName: "owner/repository",
+      argv: [process.execPath, "-e", script],
+      cwd: ".",
+      stdin: "",
+      timeoutMs: 10_000,
+      maxStdoutBytes: 4096,
+      maxStderrBytes: 4096,
+      maxRetainedBytes: 1024 * 1024,
+    });
+    const terminal = (await inspectUntilTerminal(value.environment, remoteMarker)) as Record<
+      string,
+      unknown
+    >;
+    const totalStdout = 200 * 1024 + 4;
+    expect(terminal).toMatchObject({
+      state: "failed",
+      exitCode: 7,
+      stderr: "real failure",
+      stdoutBytes: totalStdout,
+      outputLimitExceeded: false,
+    });
+    // The payload is a bounded prefix of the real stream, not a replacement for it.
+    expect(Buffer.byteLength(terminal.stdout as string)).toBe(4096);
+
+    const tail = (await request(value.environment, {
+      action: "output",
+      version: 1,
+      remoteMarker,
+      stream: "stdout",
+      offset: totalStdout - 4,
+      length: 64,
+    })) as { totalBytes: number; bytesBase64: string; offset: number; stream: string };
+    expect(tail).toMatchObject({
+      stream: "stdout",
+      offset: totalStdout - 4,
+      totalBytes: totalStdout,
+    });
+    expect(Buffer.from(tail.bytesBase64, "base64").toString("utf8")).toBe("TAIL");
+
+    const middle = (await request(value.environment, {
+      action: "output",
+      version: 1,
+      remoteMarker,
+      stream: "stdout",
+      offset: 4096,
+      length: 8,
+    })) as { bytesBase64: string };
+    expect(Buffer.from(middle.bytesBase64, "base64").toString("utf8")).toBe("x".repeat(8));
+
+    // A read that starts at the end answers with no bytes and the current size, so a caller can
+    // find the end of a stream without provoking an error.
+    for (const offset of [12, 4096]) {
+      const past = (await request(value.environment, {
+        action: "output",
+        version: 1,
+        remoteMarker,
+        stream: "stderr",
+        offset,
+        length: 64,
+      })) as { totalBytes: number; bytesBase64: string };
+      expect(past).toMatchObject({ totalBytes: 12, bytesBase64: "" });
+    }
+
+    await expect(
+      request(value.environment, { action: "finalize", version: 1, remoteMarker }),
+    ).resolves.toEqual({ state: "absent" });
+    // Cleanup removes the retained streams with the result they belong to.
+    await expect(
+      request(value.environment, {
+        action: "output",
+        version: 1,
+        remoteMarker,
+        stream: "stdout",
+        offset: 0,
+        length: 8,
+      }),
+    ).resolves.toEqual({ state: "absent" });
   });
 
   test("reports cancellation only after the foreground process group is absent", async () => {
@@ -1123,6 +1222,7 @@ if (process.env.MOIRA_TEST_HOLD_FILE_RUNNER === "1") {
       timeoutMs: 30_000,
       maxStdoutBytes: 4096,
       maxStderrBytes: 4096,
+      maxRetainedBytes: 1024 * 1024,
     });
     for (let attempt = 0; attempt < 40 && !existsSync(effectPath); attempt++) {
       await new Promise((resolveWait) => setTimeout(resolveWait, 10));
@@ -1176,15 +1276,24 @@ if (process.env.MOIRA_TEST_HOLD_FILE_RUNNER === "1") {
       stdout: "",
       stderr: "operation supervisor exited without a result",
       exitCode: null,
+      stdoutBytes: 0,
+      stderrBytes: 0,
+      outputLimitExceeded: false,
     });
   });
 
   test.each([
-    ["output", "setInterval(()=>process.stdout.write('x'.repeat(1024)),0)", 5_000, 64, "failed"],
-    ["timeout", "setInterval(()=>{},1000)", 50, 4096, "timed_out"],
+    [
+      "retained output",
+      "setInterval(()=>process.stdout.write('x'.repeat(1024)),0)",
+      5_000,
+      16 * 1024,
+      "failed",
+    ],
+    ["timeout", "setInterval(()=>{},1000)", 50, 1024 * 1024, "timed_out"],
   ] as const)(
     "enforces the %s bound on the remote foreground group",
-    async (_name, script, timeoutMs, outputLimitBytes, expectedState) => {
+    async (_name, script, timeoutMs, retainedLimitBytes, expectedState) => {
       const value = fixture();
       const remoteMarker = `moira-op-${expectedState === "failed" ? "3" : "4".repeat(32)}`.padEnd(
         "moira-op-".length + 32,
@@ -1199,11 +1308,18 @@ if (process.env.MOIRA_TEST_HOLD_FILE_RUNNER === "1") {
         cwd: ".",
         stdin: "",
         timeoutMs,
-        maxStdoutBytes: outputLimitBytes,
-        maxStderrBytes: 4096,
+        maxStdoutBytes: 64,
+        maxStderrBytes: 64,
+        maxRetainedBytes: retainedLimitBytes,
       });
       const result = await inspectUntilTerminal(value.environment, remoteMarker);
       expect(result.state).toBe(expectedState);
+      // Only the retained ceiling stops a command for its volume, and it says so instead of
+      // presenting itself as the command's own failure.
+      expect(result.outputLimitExceeded).toBe(expectedState === "failed");
+      if (expectedState === "failed") {
+        expect(result.stdoutBytes).toBe(retainedLimitBytes);
+      }
     },
   );
 });

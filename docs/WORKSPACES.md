@@ -149,12 +149,31 @@ terminal or absent state, or an explicit workspace stop/delete terminates the
 provider environment. A reservation abandoned before dispatch expires without
 connector contact; dispatch intent is durable before a remote command can start.
 
+A command's complete standard output and standard error are written into its own
+remote operation directory as it runs. The per-stream response limits bound only
+what an answer carries; they neither stop the command nor replace its standard
+error. One bound does stop a command: `WORKSPACE_MAX_RETAINED_OUTPUT_MB` is the
+disk a single command's retained output may occupy in the workspace, and passing
+it kills the foreground process group and is reported as reaching that ceiling
+rather than as the command's own failure.
+
 When background reconciliation observes a terminal command, it records only
 bounded result metadata in SQLite and retains the remote stdout/stderr file for
 the configured cleanup window. Caller reconciliation can read the same result
 repeatedly during that window. Only after the window expires may background
 cleanup finalize the remote operation directory; failed finalization remains a
 durable, idempotently retried obligation.
+
+A terminal result reports the complete size of each stream next to its bounded
+payload, so a caller knows what the answer omitted. Any range of a retained
+stream is read with `workspace_read` by naming the command's `operation_id` and
+`stream` instead of a path. That read is a bounded control request rather than a
+new operation: it creates no operation record, is fenced by the same ownership,
+resource-generation and authorization rules as every other call against that
+operation, requires the named workspace to own that command, and returns
+`WORKSPACE_RESULT_EXPIRED` once cleanup has removed the streams with the result.
+A read that starts at or past the end of a stream returns no bytes and the
+stream's current size, which is how a caller finds where a stream ends.
 
 The fixed connector ceilings are 4 MiB of raw input, 8 MiB for each output
 stream and 15 minutes per command. Runtime policy may lower these ceilings but
@@ -291,8 +310,8 @@ required, while `file_name`, `mime_type` and `size_bytes` are optional. Native i
 goes directly through the one-call native execution path and is never staged through
 the public upload tool; neither the file ID nor the temporary URL is echoed back.
 
-`workspace_read` returns UTF-8 text with offset, total size and SHA-256; `length`
-defaults to 64 KiB, and `workspace_search` defaults to 100 matches within 64 KiB of
+`workspace_read` returns UTF-8 text with offset, total size and, for a repository
+file, SHA-256; `length` defaults to 64 KiB, and `workspace_search` defaults to 100 matches within 64 KiB of
 result bytes, so a call that names only the workspace, path and query is complete.
 A range that is not valid UTF-8 returns `WORKSPACE_BINARY_READ_REQUIRES_DOWNLOAD`
 instead of base64. `workspace_write` replaces a file atomically from UTF-8 text under an explicit
@@ -500,8 +519,9 @@ not supplied:
 | `WORKSPACE_MAX_CONCURRENT_OPERATIONS_PER_USER` |       2 | Direct operations per user                                   |
 | `WORKSPACE_MAX_CONCURRENT_OPERATIONS_GLOBAL`   |      20 | Direct operations across the instance                        |
 | `WORKSPACE_MAX_OPERATION_INPUT_KB`             |    1024 | Maximum direct-operation stdin                               |
-| `WORKSPACE_MAX_OPERATION_STDOUT_KB`            |    1024 | Maximum stdout                                               |
-| `WORKSPACE_MAX_OPERATION_STDERR_KB`            |     256 | Maximum stderr                                               |
+| `WORKSPACE_MAX_OPERATION_STDOUT_KB`            |    1024 | Stdout carried by one answer                                 |
+| `WORKSPACE_MAX_OPERATION_STDERR_KB`            |     256 | Stderr carried by one answer                                 |
+| `WORKSPACE_MAX_RETAINED_OUTPUT_MB`             |      64 | Retained output per stream before a command is stopped       |
 | `WORKSPACE_MAX_OPERATION_SECONDS`              |     900 | Maximum direct-operation duration                            |
 | `WORKSPACE_MAX_TRANSFER_FILE_MB`               |       4 | Maximum native or file payload; maximum 4 MiB                |
 | `WORKSPACE_MAX_TRANSFER_TOTAL_MB_PER_USER`     |     100 | Live private-transfer bytes per user                         |

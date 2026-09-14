@@ -459,7 +459,8 @@ export class WorkspaceOperationRepository {
       )
       .run(
         terminalState,
-        Buffer.byteLength(stdout) + Buffer.byteLength(stderr),
+        // The recorded size is the command's complete output, not the part this answer carried.
+        result.stdoutTotalBytes + result.stderrTotalBytes,
         result.exitCode,
         resultExpiresAt,
         now,

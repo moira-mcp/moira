@@ -129,7 +129,12 @@ is absent from it while `workspace_get` still answers for its `workspace_id`. `w
 
 `workspace_exec` runs argv as data (no shell interpolation) in a repository-relative `cwd` with a
 timeout (`timeout_seconds`, default 300) and optional per-stream output limits, and returns bounded `stdout`, `stderr` and the exact
-`exit_code`. Supply at most one stdin form: `stdin_text` for UTF-8 text or `stdin_file` for a native
+`exit_code`. Those limits bound the answer, not the command: a command that prints more keeps
+running, keeps its own exit code and keeps its own `stderr`, and the result reports each stream's
+complete size and whether the payload was truncated. The whole output stays in the workspace until
+the operation is cleaned up, and any range of it is read with `workspace_read`. A command is stopped
+for its volume only if its retained output reaches the workspace ceiling, which is reported as that
+rather than as the command's own failure. Supply at most one stdin form: `stdin_text` for UTF-8 text or `stdin_file` for a native
 ChatGPT file reference; the file's bytes reach the process without base64 in the conversation.
 Failed, timed-out and cancelled commands and rejected file edits are returned as tool errors that
 keep `operation_id` and the available output. A command that finishes quickly returns its terminal
@@ -137,7 +142,10 @@ result from the same call that started it; one that is still running returns a n
 `state`, which is not a success. Call the same tool again with only `workspace_id` and
 `operation_id` to obtain the stored outcome without running the command or mutation twice.
 
-`workspace_read` returns UTF-8 text with `offset`, `total_size` and `sha256`; `length` defaults to
+`workspace_read` returns UTF-8 text with `offset` and `total_size`, plus `sha256` for a repository
+file; give `path` for a file, or `operation_id` and `stream` for a command's retained `stdout` or
+`stderr`, naming the workspace that command belongs to. A read that starts at or past the end of a
+stream returns no text and the stream's current size. `length` defaults to
 64 KiB, and `workspace_search` defaults to 100 matches within 64 KiB of results, so naming only the
 workspace, path and query is a complete call. Search covers repository content and skips the
 repository's own `.git` directory, and it refuses a search rooted at or inside that directory; a

@@ -4,6 +4,8 @@ import type {
   WorkspaceFileRequest,
   WorkspaceFileResult,
   WorkspaceFileTransport,
+  WorkspaceOperationOutputRequest,
+  WorkspaceOperationOutputResult,
   WorkspaceOperationRecord,
   WorkspaceOperationResult,
   WorkspaceOperationTransport,
@@ -180,6 +182,7 @@ export class GitHubCodespacesConnector
       timeoutMs: request.timeoutMs,
       maxStdoutBytes: request.maxStdoutBytes,
       maxStderrBytes: request.maxStderrBytes,
+      maxRetainedBytes: request.maxRetainedBytes,
     });
     if (result.state === "absent") throw new Error("Remote operation was not created");
     return result;
@@ -220,6 +223,43 @@ export class GitHubCodespacesConnector
       remoteMarker: operation.remoteMarker,
     });
     if (result.state !== "absent") throw new Error("Remote operation cleanup is incomplete");
+  }
+
+  async readOutput(
+    credential: string,
+    workspace: WorkspaceResourceRecord,
+    operation: WorkspaceOperationRecord,
+    request: WorkspaceOperationOutputRequest,
+  ): Promise<WorkspaceOperationOutputResult | { state: "absent" }> {
+    const value = await this.submitOperationJob(credential, workspace, operation, {
+      action: "output",
+      version: 1,
+      remoteMarker: operation.remoteMarker,
+      stream: request.stream,
+      offset: request.offset,
+      length: request.length,
+    });
+    if (value.state === "absent" && hasExactKeys(value, ["state"])) return { state: "absent" };
+    const bytes =
+      typeof value.bytesBase64 === "string" ? Buffer.from(value.bytesBase64, "base64") : null;
+    if (
+      !hasExactKeys(value, ["action", "stream", "offset", "totalBytes", "bytesBase64"]) ||
+      value.action !== "output" ||
+      value.stream !== request.stream ||
+      value.offset !== request.offset ||
+      !bytes ||
+      bytes.toString("base64") !== value.bytesBase64 ||
+      !nonnegativeInteger(value.totalBytes) ||
+      bytes.length > Math.min(request.length, Math.max(0, value.totalBytes - request.offset))
+    ) {
+      throw new Error("Codespace operation transport returned an invalid output range");
+    }
+    return {
+      stream: request.stream,
+      offset: request.offset,
+      totalBytes: value.totalBytes,
+      bytes,
+    };
   }
 
   async executeFile(
@@ -541,12 +581,17 @@ export class GitHubCodespacesConnector
           deleted === summary.deletedBytes;
   }
 
-  private async operationJob(
+  /**
+   * Submits one operation job and returns its decoded envelope. Every operation job is framed here,
+   * so the client budget always matches the sidecar's, which allows the job's own timeout plus the
+   * time it needs to open a session into the Codespace.
+   */
+  private async submitOperationJob(
     credential: string,
     workspace: WorkspaceResourceRecord,
     operation: WorkspaceOperationRecord,
     job: Record<string, unknown>,
-  ): Promise<WorkspaceOperationResult | { state: "running" } | { state: "absent" }> {
+  ): Promise<Record<string, unknown>> {
     if (!workspace.providerResourceName || workspace.id !== operation.resourceId) {
       throw new Error("Invalid workspace operation identity");
     }
@@ -564,14 +609,26 @@ export class GitHubCodespacesConnector
     if (typeof result.value !== "string" || result.value.includes(credential)) {
       throw new Error("Codespace operation transport is unavailable");
     }
-    const value = JSON.parse(result.value) as Record<string, unknown>;
+    return JSON.parse(result.value) as Record<string, unknown>;
+  }
+
+  private async operationJob(
+    credential: string,
+    workspace: WorkspaceResourceRecord,
+    operation: WorkspaceOperationRecord,
+    job: Record<string, unknown>,
+  ): Promise<WorkspaceOperationResult | { state: "running" } | { state: "absent" }> {
+    const value = await this.submitOperationJob(credential, workspace, operation, job);
     if (value.state === "running" || value.state === "absent") return { state: value.state };
     if (
       typeof value.state !== "string" ||
       !TERMINAL_OPERATION_STATES.has(value.state) ||
       typeof value.stdoutBase64 !== "string" ||
       typeof value.stderrBase64 !== "string" ||
-      !(value.exitCode === null || Number.isInteger(value.exitCode))
+      !(value.exitCode === null || Number.isInteger(value.exitCode)) ||
+      !nonnegativeInteger(value.stdoutBytes) ||
+      !nonnegativeInteger(value.stderrBytes) ||
+      typeof value.outputLimitExceeded !== "boolean"
     ) {
       throw new Error("Codespace operation transport returned an invalid result");
     }
@@ -581,7 +638,9 @@ export class GitHubCodespacesConnector
       stdout.toString("base64") !== value.stdoutBase64 ||
       stderr.toString("base64") !== value.stderrBase64 ||
       stdout.length > operation.stdoutLimitBytes ||
-      stderr.length > operation.stderrLimitBytes
+      stderr.length > operation.stderrLimitBytes ||
+      stdout.length > (value.stdoutBytes as number) ||
+      stderr.length > (value.stderrBytes as number)
     ) {
       throw new Error("Codespace operation transport exceeded its result contract");
     }
@@ -590,6 +649,9 @@ export class GitHubCodespacesConnector
       stdout: stdout.toString("utf8"),
       stderr: stderr.toString("utf8"),
       exitCode: value.exitCode as number | null,
+      stdoutTotalBytes: value.stdoutBytes as number,
+      stderrTotalBytes: value.stderrBytes as number,
+      outputLimitExceeded: value.outputLimitExceeded as boolean,
     };
   }
 

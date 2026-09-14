@@ -185,8 +185,9 @@ docker compose --profile workspaces up -d
 | `WORKSPACE_MAX_CONCURRENT_OPERATIONS_PER_USER` |       2 | Concurrent direct operations per user; maximum 32           |
 | `WORKSPACE_MAX_CONCURRENT_OPERATIONS_GLOBAL`   |      20 | Instance-wide concurrent direct operations; maximum 256     |
 | `WORKSPACE_MAX_OPERATION_INPUT_KB`             |    1024 | Direct-operation stdin; maximum 4096 KiB                    |
-| `WORKSPACE_MAX_OPERATION_STDOUT_KB`            |    1024 | Stdout per operation; maximum 8192 KiB                      |
-| `WORKSPACE_MAX_OPERATION_STDERR_KB`            |     256 | Stderr per operation; maximum 8192 KiB                      |
+| `WORKSPACE_MAX_OPERATION_STDOUT_KB`            |    1024 | Stdout carried by one answer; maximum 8192 KiB              |
+| `WORKSPACE_MAX_OPERATION_STDERR_KB`            |     256 | Stderr carried by one answer; maximum 8192 KiB              |
+| `WORKSPACE_MAX_RETAINED_OUTPUT_MB`             |      64 | Retained output per stream, in the workspace; maximum 4096  |
 | `WORKSPACE_MAX_OPERATION_SECONDS`              |     900 | Direct-operation duration; maximum 900 seconds              |
 | `WORKSPACE_MAX_TRANSFER_FILE_MB`               |       4 | File/native payload ceiling; maximum 4 MiB                  |
 | `WORKSPACE_MAX_TRANSFER_TOTAL_MB_PER_USER`     |     100 | Live private-transfer bytes per user; maximum 1024 MiB      |
@@ -468,6 +469,7 @@ WORKSPACE_MAX_CONCURRENT_OPERATIONS_GLOBAL=20
 WORKSPACE_MAX_OPERATION_INPUT_KB=1024
 WORKSPACE_MAX_OPERATION_STDOUT_KB=1024
 WORKSPACE_MAX_OPERATION_STDERR_KB=256
+WORKSPACE_MAX_RETAINED_OUTPUT_MB=64
 WORKSPACE_MAX_OPERATION_SECONDS=900
 WORKSPACE_MAX_TRANSFER_FILE_MB=4
 WORKSPACE_MAX_TRANSFER_TOTAL_MB_PER_USER=100

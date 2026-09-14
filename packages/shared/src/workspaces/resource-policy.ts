@@ -81,6 +81,35 @@ export function evaluateWorkspaceResourcePolicy(
     1,
     4096,
   );
+  // The response payload bound and the retained-output ceiling are different jobs: the first bounds
+  // one answer, the second bounds the workspace disk a command may fill before it is stopped. A
+  // retained ceiling below a payload bound would make the payload unreachable.
+  const retainedOutputBytes = scaledInteger(
+    "WORKSPACE_MAX_RETAINED_OUTPUT_MB",
+    64,
+    1024 ** 2,
+    1,
+    4096,
+  );
+  const maxOperationStdoutBytes = scaledInteger(
+    "WORKSPACE_MAX_OPERATION_STDOUT_KB",
+    1024,
+    1024,
+    1,
+    8192,
+  );
+  const maxOperationStderrBytes = scaledInteger(
+    "WORKSPACE_MAX_OPERATION_STDERR_KB",
+    256,
+    1024,
+    1,
+    8192,
+  );
+  if (retainedOutputBytes < Math.max(maxOperationStdoutBytes, maxOperationStderrBytes)) {
+    throw new Error(
+      "WORKSPACE_MAX_RETAINED_OUTPUT_MB cannot be lower than a configured response payload bound",
+    );
+  }
   if (maxActiveGlobal < maxActivePerUser) {
     throw new Error(
       "WORKSPACE_MAX_ACTIVE_GLOBAL cannot be lower than WORKSPACE_MAX_ACTIVE_PER_USER",
@@ -121,14 +150,9 @@ export function evaluateWorkspaceResourcePolicy(
     maxConcurrentOperationsPerUser,
     maxConcurrentOperationsGlobal,
     maxOperationInputBytes: scaledInteger("WORKSPACE_MAX_OPERATION_INPUT_KB", 1024, 1024, 1, 4096),
-    maxOperationStdoutBytes: scaledInteger(
-      "WORKSPACE_MAX_OPERATION_STDOUT_KB",
-      1024,
-      1024,
-      1,
-      8192,
-    ),
-    maxOperationStderrBytes: scaledInteger("WORKSPACE_MAX_OPERATION_STDERR_KB", 256, 1024, 1, 8192),
+    maxOperationStdoutBytes,
+    maxOperationStderrBytes,
+    maxRetainedOutputBytes: retainedOutputBytes,
     maxOperationMs: scaledInteger("WORKSPACE_MAX_OPERATION_SECONDS", 900, 1000, 1, 900),
     maxTransferFileBytes,
     maxTransferBytesPerUser,
