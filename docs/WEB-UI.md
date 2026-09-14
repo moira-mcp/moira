@@ -1269,25 +1269,40 @@ The graph is the process view's detailed layer, not a separate rendering:
   lays each block's steps out with ELK layered (model order, in-block forward edges only) and stacks
   the block groups in process order — top to bottom, or left to right for Horizontal — with the
   steps no block owns in one flat set after the groups. Card heights are estimated
-  (`estimateStepHeight`) for the first pass; `GraphMeasuredHeights` (mounted inside the viewport,
+  (`estimateStepHeight`, which turns the evidence and the chips a card carries — its connections
+  plus, generously, every edge arriving at it — into rows) for the first pass; `GraphMeasuredHeights` (mounted inside the viewport,
   reading React Flow's store) reports the measured heights, and a second pass with them runs when
   any differs from its estimate, so cards never overlap. A block's box grows by a corridor under
-  its cards (to their right in a row) holding one lane per routed edge.
+  its cards (to their right in a row) holding one lane per routed edge, and by an entry side wide
+  enough for the approach columns of the edges arriving at it.
 - **Routing** (`routeLinks`, pure): a forward link inside a block is drawn straight (smooth step).
   Everything else is a `GraphRoute` (stub, lane waypoints, side): a return inside a block leaves its
   source, runs along the block's bottom corridor and enters its target from before it; a link into
   a later block runs in the gap after its source's block; a return to an earlier block runs in the
-  gap, climbs the margin before the groups (`GRAPH_MARGIN`) and comes in through the target block's
-  corridor. Lanes sharing a corridor are offset by `LANE_STEP`. `GraphEdgeView` draws a routed edge
-  as a rounded polyline (`routedPoints`, `roundedPath`) with its label on the first lane run.
+  gap, climbs the margin before the groups and comes in through the target block's corridor. Every
+  corridor is sized before the groups are placed for the lanes it must hold (`laneCounts`,
+  `corridorSize`): `GRAPH_MARGIN` and `GROUP_GAP` are floors, the margin grows with the returns and
+  a block's entry side holds the approach columns of its arrivals. Lanes sharing a corridor are
+  offset by `LANE_STEP` and centred in the room reserved for them. `GraphEdgeView` draws a routed
+  edge as a rounded polyline (`routedPoints`, `roundedPath`); its label is shown while it is lit,
+  on the first lane run.
 - **Rendering** (`components/workflow/graphNodes.tsx`): every node type is registered to
   `StepNodeView` (the shared `StepCard` with hidden handles; the per-type registration keeps React
   Flow's `react-flow__node-<type>` classes), `block-group` to `BlockGroupView` (the shared status
   surface, `data-graph-group`, `data-block-id`), and one `graph` edge type. Groups sit at z-index
   −1 and cards at 2; edges carry 0, which React Flow adds to their nodes' level, so the edge layer
-  shares the cards' level and paints first — above the groups, below the cards. Forward edges keep a label pill; external ones are muted; returns are
-  dashed in the primary colour, unlabelled at rest and lit with their label through the transition
-  focus context when the source card's connection chip or the edge is hovered.
+  shares the cards' level and paints first — above the groups, below the cards. A line is drawn at
+  rest only where it runs straight from card to card, and it keeps its label pill. Every edge that
+  needs a corridor — a return, a link into another block, a link ELK laid backwards — is not drawn
+  at rest: it is named in both cards, by the connection chip in its source and by an arrival chip
+  (`data-arrival`, dashed, with the source's block when it is another block) in its target, and it
+  is drawn with its label while either chip, either card or the edge itself is hovered, everything
+  else dimming meanwhile. A drawn line carries a halo in the page colour, so a crossing reads as
+  one line passing over another, and every arrowhead keeps one size (`markerUnits="userSpaceOnUse"`)
+  whatever the line's width. Every edge that is drawn leaves and arrives at its own handle, and every
+  arrival at one card turns up to it in its own approach column (`APPROACH_COLUMNS` of them per
+  column of cards, the cards of one column starting at different ones), so no two lines merge. Clicking an arrival chip brings the card at the other end into view.
+  Hovering a card lights every connection it takes part in and rings the cards at their far end.
 - **Viewport**: the graph mounts through `DiagramViewport` (`kind="graph"`). The opening placement
   uses `useOpeningPlacement`: a `focusRequest` (node id + token) or a run's `currentNodeId` fits
   the view to that node; a definition opens readable on its first block at `GRAPH_OPENING_ZOOM`.

@@ -1,9 +1,11 @@
 /**
- * The technical graph's pieces: a step node (the shared step card with handles), a block group
- * node (the tinted container a block's steps sit in, named and numbered like the process views),
- * and one edge component for every connection — forward inside a block with its label, forward
- * into another block muted, a return dashed in the primary colour and unlabelled at rest, lit with
- * its label when its source card's chip or the edge is hovered.
+ * The technical graph's pieces: a step node (the shared step card, one handle per connection on
+ * each side, its arrivals named as chips), a block group node (the tinted container a block's
+ * steps sit in, named and numbered like the process views), and one edge component for every
+ * connection. A line is drawn at rest only where it runs straight from card to card, with its
+ * label; an edge that needs a corridor is named by chips in both cards instead and is drawn, with
+ * its label, while it is lit — by hovering either chip, either card or the edge itself, which
+ * dims everything else.
  */
 
 import React, { useEffect } from "react";
@@ -25,6 +27,7 @@ import { StepCard } from "../run/StepCard";
 import { STATUS_STYLE } from "../run/status";
 import { isLit, useTransitionFocus } from "../run/focus";
 import type { GraphLink, GraphStep } from "../run/graphModel";
+import type { StepArrival } from "../run/model";
 import type { ExecutionBlockStatus } from "../run/model";
 import { GRAPH_CARD_WIDTH, type GraphRoute } from "./graphLayout";
 
@@ -33,7 +36,20 @@ export type StepNodeData = Record<string, unknown> & {
   current: boolean;
   error: boolean;
   horizontal: boolean;
+  /** Ids of the links leaving this card, in order; each gets its own handle along the card edge. */
+  outSlots: string[];
+  /** Ids of the links entering this card, in order; each gets its own handle. */
+  inSlots: string[];
+  /** Edges arriving here that are named in the card instead of drawn at rest. */
+  arrivals: StepArrival[];
+  /** Brings the card at the other end of an arrival into view. */
+  onFocusStep?: (id: string) => void;
 };
+
+/** Where the `index`-th of `count` handles sits along a card's edge, as a CSS percentage. */
+export function handleOffset(index: number, count: number): string {
+  return `${((index + 1) / (count + 1)) * 100}%`;
+}
 export type StepNode = Node<StepNodeData>;
 
 export type BlockGroupData = {
@@ -46,6 +62,11 @@ export type BlockGroupNode = Node<BlockGroupData, "block-group">;
 
 export type GraphEdgeData = {
   link: GraphLink;
+  /**
+   * The edge is named by chips in both cards and drawn only on demand: at rest a long line
+   * through a corridor cannot be told from its neighbours, so it is not drawn at all.
+   */
+  chipped?: boolean;
   /** Set when the edge is routed around the cards; absent when it runs straight to its target. */
   route?: GraphRoute;
   /** Whether the cards' handles sit on their left and right (blocks stacked top to bottom). */
@@ -110,39 +131,64 @@ export type GraphEdge = Edge<GraphEdgeData, "graph">;
 
 export function StepNodeView({ data, selected }: NodeProps<StepNode>): React.JSX.Element {
   const focus = useTransitionFocus();
-  const { graph, current, error, horizontal } = data;
+  const { graph, current, error, horizontal, outSlots, inSlots, arrivals, onFocusStep } = data;
+  const links = [...outSlots, ...inSlots];
+  // Hovering the card lights every connection it takes part in, and the cards at their far end.
+  const near = focus.hovered !== null && links.some((id) => focus.hovered!.has(id));
   return (
     <div
       style={{ width: GRAPH_CARD_WIDTH }}
+      onMouseEnter={() => links.length > 0 && focus.setHovered(links)}
+      onMouseLeave={() => focus.setHovered(null)}
       className={cn(
-        "rounded-lg",
+        "rounded-lg transition-shadow",
+        near && "ring-2 ring-primary/60",
         selected && "ring-2 ring-ring",
         error && "ring-2 ring-destructive",
       )}
       data-graph-node={graph.id}
     >
-      <Handle
-        type="target"
-        position={horizontal ? Position.Left : Position.Top}
-        id="input"
-        className="!opacity-0"
-      />
+      {(inSlots.length > 0 ? inSlots : ["input"]).map((slot, index) => (
+        <Handle
+          key={slot}
+          type="target"
+          position={horizontal ? Position.Left : Position.Top}
+          id={slot === "input" ? "input" : `in:${slot}`}
+          className="!opacity-0"
+          style={
+            horizontal
+              ? { top: handleOffset(index, inSlots.length || 1) }
+              : { left: handleOffset(index, inSlots.length || 1) }
+          }
+        />
+      ))}
       <ul className="list-none">
         <StepCard
           step={graph.step}
           current={current}
           connections={graph.connections}
+          arrivals={arrivals}
+          onArrival={(arrival) => onFocusStep?.(arrival.sourceId)}
+          onArrivalHover={(arrival) => focus.setHovered(arrival ? [arrival.linkId] : null)}
           onConnectionHover={(connection) =>
             focus.setHovered(connection ? [`${graph.id}.${connection.label}`] : null)
           }
         />
       </ul>
-      <Handle
-        type="source"
-        position={horizontal ? Position.Right : Position.Bottom}
-        id="output"
-        className="!opacity-0"
-      />
+      {(outSlots.length > 0 ? outSlots : ["output"]).map((slot, index) => (
+        <Handle
+          key={slot}
+          type="source"
+          position={horizontal ? Position.Right : Position.Bottom}
+          id={slot === "output" ? "output" : `out:${slot}`}
+          className="!opacity-0"
+          style={
+            horizontal
+              ? { top: handleOffset(index, outSlots.length || 1) }
+              : { left: handleOffset(index, outSlots.length || 1) }
+          }
+        />
+      ))}
     </div>
   );
 }
@@ -175,7 +221,7 @@ export function GraphEdgeView({
 }: EdgeProps<GraphEdge>): React.JSX.Element | null {
   const focus = useTransitionFocus();
   if (!data) return null;
-  const { link, route, horizontal } = data;
+  const { link, route, horizontal, chipped } = data;
   const isReturn = link.kind === "return";
   const lit = isLit(focus, link.id, link.source);
   let path: string;
@@ -198,7 +244,17 @@ export function GraphEdgeView({
       borderRadius: 12,
     });
   }
-  const showLabel = link.kind === "forward" || lit;
+  // While something is hovered, everything else recedes, so one path can be followed across the
+  // whole graph instead of being read out of a bundle of equally dark lines.
+  const dim = focus.hovered !== null && !lit;
+  // A chipped edge exists in the graph but is drawn only while it is lit.
+  const hidden = chipped && !lit;
+  // A label is drawn at rest only where its line runs straight from card to card. A routed edge
+  // runs through a corridor other lines cross, so its label would be cut by them and stack on its
+  // neighbours' labels; its target is already named by the connection chip inside its source
+  // card, and the label itself appears when the edge or either of its cards is hovered.
+  const showLabel = (link.kind === "forward" && !route && !chipped) || (lit && !dim);
+  if (hidden) return null;
   return (
     <>
       <g
@@ -207,23 +263,42 @@ export function GraphEdgeView({
         style={{ cursor: "default" }}
       >
         <title>{link.label}</title>
+        {/* A halo in the page colour under the line: where two edges cross, the one drawn later
+            interrupts the other, so the crossing reads as over and under instead of a junction. */}
+        <path
+          d={path}
+          fill="none"
+          stroke="var(--background)"
+          strokeWidth={lit ? 8 : 6}
+          strokeOpacity={dim ? 0 : 0.9}
+          strokeLinecap="round"
+        />
         <BaseEdge
           id={id}
           path={path}
           interactionWidth={14}
           markerEnd={
             lit
-              ? "url(#graph-arrow-return)"
+              ? "url(#graph-arrow-lit)"
               : isReturn
                 ? "url(#graph-arrow-return-muted)"
                 : "url(#graph-arrow)"
           }
           style={{
             stroke: lit || isReturn ? "var(--primary)" : "var(--muted-foreground)",
-            strokeWidth: lit ? 2 : 1.5,
-            strokeOpacity: lit ? 1 : isReturn ? 0.55 : link.kind === "external" ? 0.4 : 0.5,
+            strokeWidth: lit ? 2.5 : 1.5,
+            strokeOpacity: dim
+              ? 0.12
+              : lit
+                ? 1
+                : isReturn
+                  ? 0.55
+                  : link.kind === "external"
+                    ? 0.4
+                    : 0.5,
             strokeDasharray: isReturn ? "6 5" : undefined,
           }}
+          data-dimmed={dim ? "true" : undefined}
           data-edge-kind={link.kind}
           data-transition={link.id}
           data-focused={lit ? "true" : undefined}
@@ -297,8 +372,11 @@ export function GraphDefs(): React.JSX.Element {
       viewBox="0 0 10 10"
       refX="9"
       refY="5"
-      markerWidth="7"
-      markerHeight="7"
+      markerWidth="9"
+      markerHeight="9"
+      // Without this the arrowhead scales with the line's width, so a lit edge grows a head twice
+      // the size of its neighbours'.
+      markerUnits="userSpaceOnUse"
       orient="auto-start-reverse"
     >
       <path d="M 0 0 L 10 5 L 0 10 z" fill={fill} fillOpacity={opacity} />
@@ -308,7 +386,7 @@ export function GraphDefs(): React.JSX.Element {
     <svg aria-hidden="true">
       <defs>
         {marker("graph-arrow", "var(--muted-foreground)", 0.5)}
-        {marker("graph-arrow-return", "var(--primary)")}
+        {marker("graph-arrow-lit", "var(--primary)")}
         {marker("graph-arrow-return-muted", "var(--primary)", 0.5)}
       </defs>
     </svg>

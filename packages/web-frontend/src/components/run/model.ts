@@ -146,6 +146,19 @@ export interface StepConnection {
   targetName: string;
 }
 
+/** An edge arriving at a step that the graph names in the card instead of drawing as a line. */
+export interface StepArrival {
+  /** The link's id, which the focus context lights. */
+  linkId: string;
+  sourceId: string;
+  sourceName: string;
+  /** The block the source belongs to, when it is another block. */
+  sourceBlockName: string | null;
+  label: string;
+  /** A transition back to an earlier block or to its own block. */
+  isReturn: boolean;
+}
+
 /**
  * The connections of a step as the cards show them: the same classification on the run page's
  * block panel, the flow page's split view and the technical graph, so a step reads the same

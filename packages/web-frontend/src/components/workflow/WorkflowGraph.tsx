@@ -36,6 +36,7 @@ import { useOpeningPlacement } from "../diagram/placement";
 
 import { graphModel, definitionBlocks } from "../run/graphModel";
 import { GRAPH_MARGIN, layoutGraph } from "./graphLayout";
+import type { StepArrival } from "../run/model";
 import {
   BlockGroupView,
   GraphDefs,
@@ -45,6 +46,7 @@ import {
   type BlockGroupNode,
   type GraphEdge,
   type StepNode,
+  type StepNodeData,
 } from "./graphNodes";
 import { TransitionFocusProvider } from "../run/focus";
 import type { RunBlock } from "../run/model";
@@ -206,6 +208,8 @@ export const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
   const [measuredHeights, setMeasuredHeights] = useState<Map<string, number> | null>(null);
   const [layoutGeneration, setLayoutGeneration] = useState(0);
   const laidHeightsRef = useRef<Map<string, number>>(new Map());
+  // The room the current layout left before the first group; the opening view keeps a third of it.
+  const marginRef = useRef<number>(GRAPH_MARGIN);
   const placementKey = `${layoutGeneration}|${
     focusRequest
       ? `node:${focusRequest.token}:${focusRequest.nodeId}`
@@ -227,8 +231,8 @@ export const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
       const zoom = Math.max(GRAPH_OPENING_ZOOM, instance.getZoom());
       // The margin before the first group holds the return lanes; a third of it stays in view.
       void instance.setViewport({
-        x: GRAPH_OPENING_EDGE - (first.x - GRAPH_MARGIN / 3) * zoom,
-        y: GRAPH_OPENING_EDGE - (first.y - GRAPH_MARGIN / 3) * zoom,
+        x: GRAPH_OPENING_EDGE - (first.x - marginRef.current / 3) * zoom,
+        y: GRAPH_OPENING_EDGE - (first.y - marginRef.current / 3) * zoom,
         zoom,
       });
     });
@@ -238,6 +242,10 @@ export const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
     Edge,
     string
   >(placeViewport, placementKey);
+  /** Brings a step into view: what an arrival chip does when the reader clicks the far end. */
+  const focusStep = useCallback((id: string) => {
+    void instanceRef.current?.fitView({ nodes: [{ id }], padding: 0.5, maxZoom: 1, duration: 400 });
+  }, []);
   const handleMeasured = useCallback((heights: Map<string, number>) => {
     // Cards taller or shorter than laid out: lay out again with what the browser measured.
     let differs = false;
@@ -421,9 +429,57 @@ export const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
           };
         });
         const stepById = new Map(model.steps.map((s) => [s.id, s]));
+        // One handle per connection on each side of a card: every edge leaves and arrives at its
+        // own point, so two edges between the same pair of cards never lie on top of each other.
+        const outSlots = new Map<string, string[]>();
+        const inSlots = new Map<string, string[]>();
+        for (const link of model.links) {
+          outSlots.set(link.source, [...(outSlots.get(link.source) ?? []), link.id]);
+          inSlots.set(link.target, [...(inSlots.get(link.target) ?? []), link.id]);
+        }
+        // An edge that needs a corridor is not drawn at rest: it is named by a chip in its source
+        // card (its connection) and by one in its target card (its arrival), and appears as a line
+        // while either chip or either card is hovered.
+        const blockNameOf = new Map(graphBlocks.map((b) => [b.id, b.name]));
+        const blockOfStep = new Map(
+          graphBlocks.flatMap((b) => b.nodeIds.map((id) => [id, b.id] as const)),
+        );
+        const arrivalsOf = new Map<string, StepArrival[]>();
+        for (const link of model.links) {
+          if (!layout.routes[link.id]) continue;
+          const sourceBlock = blockOfStep.get(link.source);
+          const targetBlock = blockOfStep.get(link.target);
+          const step = stepById.get(link.source);
+          arrivalsOf.set(link.target, [
+            ...(arrivalsOf.get(link.target) ?? []),
+            {
+              linkId: link.id,
+              sourceId: link.source,
+              sourceName: step?.step.displayName ?? link.source,
+              sourceBlockName:
+                sourceBlock && sourceBlock !== targetBlock
+                  ? (blockNameOf.get(sourceBlock) ?? null)
+                  : null,
+              label: link.label,
+              isReturn: link.kind === "return",
+            },
+          ]);
+        }
         const stepNodes: StepNode[] = layout.steps.map((laid) => {
           const source = transformed.get(laid.id);
           const graph = stepById.get(laid.id)!;
+          const data: StepNodeData = {
+            ...(source?.data as Record<string, unknown> | undefined),
+            graph,
+            current: false,
+            error: false,
+            // Steps run across the stacking direction inside a group (see graphLayout).
+            horizontal: graphBlocks.length > 0 ? !horizontal : horizontal,
+            outSlots: outSlots.get(laid.id) ?? [],
+            inSlots: inSlots.get(laid.id) ?? [],
+            arrivals: arrivalsOf.get(laid.id) ?? [],
+            onFocusStep: focusStep,
+          };
           return {
             id: laid.id,
             type: source?.type ?? "fallback",
@@ -437,22 +493,15 @@ export const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
             draggable: false,
             // Above the edges, which run above the group surfaces.
             zIndex: 2,
-            data: {
-              ...(source?.data ?? {}),
-              graph,
-              current: false,
-              error: false,
-              // Steps run across the stacking direction inside a group (see graphLayout).
-              horizontal: graphBlocks.length > 0 ? !horizontal : horizontal,
-            },
+            data,
           };
         });
         const graphEdges: GraphEdge[] = model.links.map((link) => ({
           id: link.id,
           source: link.source,
           target: link.target,
-          sourceHandle: "output",
-          targetHandle: "input",
+          sourceHandle: `out:${link.id}`,
+          targetHandle: `in:${link.id}`,
           type: "graph",
           selectable: false,
           focusable: false,
@@ -462,9 +511,11 @@ export const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
           data: {
             link,
             route: layout.routes[link.id],
+            chipped: Boolean(layout.routes[link.id]),
             horizontal: graphBlocks.length > 0 ? !horizontal : horizontal,
           },
         }));
+        marginRef.current = layout.margin;
         groupsRef.current = layout.groups.map((g) => ({ id: g.id, x: g.x, y: g.y }));
         setLaidNodes([...groupNodes, ...stepNodes]);
         setEdges(graphEdges);
@@ -488,7 +539,14 @@ export const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [visualizationData, model, graphBlocks, currentLayoutOptions.direction, measuredHeights]);
+  }, [
+    visualizationData,
+    model,
+    graphBlocks,
+    currentLayoutOptions.direction,
+    measuredHeights,
+    focusStep,
+  ]);
 
   /**
    * Handle node click - notify external sidebar via onNodeSelect, or open sheet as fallback

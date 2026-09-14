@@ -67,7 +67,8 @@ badge on **Variables** or **Locks** means a step is waiting for your answer or a
   definition on the same cards as the Block tab (block by block, the steps the run has visited
   marked completed, the current one marked), the node graph (step cards grouped by block, the
   run's block statuses as tints, the current step marked and in view when the tab opens, the fit
-  and direction controls in the zoom cluster), and lock history.
+  and direction controls in the zoom cluster, and every long or returning connection named by
+  chips in both cards instead of drawn), and lock history.
 
 ## Answering a waiting step
 

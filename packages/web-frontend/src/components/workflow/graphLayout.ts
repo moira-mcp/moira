@@ -10,20 +10,93 @@
 import type { GraphModel } from "../run/graphModel";
 
 export const GRAPH_CARD_WIDTH = 320;
-/** Room left before the first group along the card axis, where cross-block return lanes run. */
+/** Least room before the first group along the card axis, where cross-block return lanes run. */
 export const GRAPH_MARGIN = 48;
 const GRAPH_GROUP_PADDING = 16;
+/**
+ * Extra room inside a group on the side the edges arrive from, so an arrowhead lands in open
+ * space instead of on the group's border, where several of them crowd the same few pixels.
+ */
+const GRAPH_GROUP_ENTRY = 34;
+/** Distance between the approach columns of two edges arriving at the same column of cards. */
+const APPROACH_STEP = 9;
+/** At most this many approach columns per column of cards, so they stay inside their gap. */
+export const APPROACH_COLUMNS = 4;
+/** Distance between two return lanes in the margin, which holds one lane per return. */
+const MARGIN_LANE_STEP = 8;
 const GRAPH_GROUP_HEADER = 36;
 const NODE_GAP = 20;
-const LAYER_GAP = 48;
+const LAYER_GAP = 76;
 const GROUP_GAP = 56;
 /** Distance between two edge lanes sharing a corridor. */
 const LANE_STEP = 12;
-/** How far an edge leaves its source card before turning, and stops before its target card. */
-const EDGE_STUB = 12;
-const EDGE_APPROACH = 8;
+/**
+ * How far an edge leaves its source card before it turns, and how far before its target card its
+ * approach column runs: far enough that a line never turns flush against a card's edge.
+ */
+const EDGE_STUB = 24;
+const EDGE_APPROACH = 24;
 /** Where a block's first corridor lane runs, measured from the block's far edge. */
 const CORRIDOR_INSET = 14;
+/** Space kept between the outermost lane of a corridor and whatever bounds the corridor. */
+const LANE_CLEARANCE = 10;
+
+/**
+ * How many lanes every corridor must hold, counted before the groups are placed so that each
+ * corridor is given the room its lanes need: a block's own corridor (its backward links inside
+ * the block and the returns arriving into it), the gap after a block (every link leaving it for
+ * another block) and the margin before the first block (every return to an earlier block).
+ */
+export interface LaneCounts {
+  bottom: Map<string, number>;
+  gap: Map<string, number>;
+  margin: number;
+  /** Per block, the most routed edges any one of its cards receives: its approach columns. */
+  approach: Map<string, number>;
+}
+
+export function laneCounts(
+  links: ReadonlyArray<{ source: string; target: string; kind: string }>,
+  groupOf: ReadonlyMap<string, string>,
+  groupIndex: ReadonlyMap<string, number>,
+  backwardInside: (link: { source: string; target: string }) => boolean,
+): LaneCounts {
+  const bottom = new Map<string, number>();
+  const gap = new Map<string, number>();
+  const arrivals = new Map<string, number>();
+  let margin = 0;
+  const bump = (map: Map<string, number>, key: string) => map.set(key, (map.get(key) ?? 0) + 1);
+  for (const link of links) {
+    const sg = groupOf.get(link.source);
+    const tg = groupOf.get(link.target);
+    if (!sg || !tg) continue;
+    if (sg === tg) {
+      if (link.kind === "return" || backwardInside(link)) {
+        bump(bottom, sg);
+        bump(arrivals, link.target);
+      }
+    } else if (groupIndex.get(tg)! > groupIndex.get(sg)!) {
+      bump(gap, sg);
+      bump(arrivals, link.target);
+    } else {
+      bump(gap, sg);
+      bump(bottom, tg);
+      bump(arrivals, link.target);
+      margin += 1;
+    }
+  }
+  const approach = new Map<string, number>();
+  for (const [id, count] of arrivals) {
+    const g = groupOf.get(id);
+    if (g) approach.set(g, Math.max(approach.get(g) ?? 0, count));
+  }
+  return { bottom, gap, margin, approach };
+}
+
+/** The room a corridor of `lanes` lanes needs. */
+export function corridorSize(lanes: number, least: number): number {
+  return lanes > 0 ? Math.max(least, (lanes - 1) * LANE_STEP + 2 * LANE_CLEARANCE) : least;
+}
 
 export interface LaidGroup {
   id: string;
@@ -62,6 +135,8 @@ export interface GraphLayout {
   steps: LaidStep[];
   /** Routes by link id for the links that are not drawn straight. */
   routes: Record<string, GraphRoute>;
+  /** The room actually left before the first group, which the return lanes run in. */
+  margin: number;
 }
 
 interface Box {
@@ -86,6 +161,8 @@ export function routeLinks(
   groups: ReadonlyArray<LaidGroup>,
   groupOf: ReadonlyMap<string, string>,
   cardDirection: "DOWN" | "RIGHT",
+  /** The room left before the first group, which the return lanes share. */
+  margin: number = GRAPH_MARGIN,
 ): Record<string, GraphRoute> {
   const down = cardDirection === "RIGHT";
   const box = (r: { x: number; y: number; width: number; height: number }): Box =>
@@ -115,25 +192,62 @@ export function routeLinks(
     map.set(key, n + 1);
     return n;
   };
+  // How many lanes every gap and the margin end up holding, so each set can be centred in the
+  // room the layout reserved for it instead of running on from its first lane.
+  const gapTotal = new Map<string, number>();
+  let marginTotal = 0;
+  for (const link of routed) {
+    const sg = groupOf.get(link.source);
+    const tg = groupOf.get(link.target);
+    if (!sg || !tg || sg === tg) continue;
+    gapTotal.set(sg, (gapTotal.get(sg) ?? 0) + 1);
+    if (groupIndex.get(tg)! < groupIndex.get(sg)!) marginTotal += 1;
+  }
+  /** The b coordinate of lane `index` of `total`, centred in the gap after group `id`. */
+  const gapLane = (id: string, from: number, index: number, total: number): number => {
+    const next = groups[groupIndex.get(id)! + 1];
+    const to = next ? box(next).b0 : from + GROUP_GAP;
+    const span = (total - 1) * LANE_STEP;
+    return from + Math.max(LANE_CLEARANCE, (to - from - span) / 2) + index * LANE_STEP;
+  };
   const routes: Record<string, GraphRoute> = {};
+  // Every edge arriving at one card turns up to it in its own column, so several arrivals do not
+  // climb the same line and pile their arrowheads on one point. Cards of one column start at
+  // different columns, because their approaches share the run from the corridor up to their row.
+  const arrivals = new Map<string, number>();
+  const cardOffset = new Map<string, number>();
+  const columnCards = new Map<string, number>();
   for (const link of routed) {
     const s = box(steps.get(link.source)!);
     const t = box(steps.get(link.target)!);
     const sg = groupOf.get(link.source);
     const tg = groupOf.get(link.target);
     const stub = s.a1 + EDGE_STUB;
-    const side = t.a0 - EDGE_APPROACH;
+    // The column is chosen from the arrival's index within its own card, so a card's arrivals
+    // never share one, and from an offset given to the card inside its column of cards, so two
+    // cards of one column do not start at the same line.
+    const column = String(Math.round(t.a0));
+    if (!cardOffset.has(link.target)) {
+      cardOffset.set(link.target, nextLane(columnCards, column) % APPROACH_COLUMNS);
+    }
+    const index =
+      (nextLane(arrivals, link.target) + cardOffset.get(link.target)!) % APPROACH_COLUMNS;
+    const side = t.a0 - EDGE_APPROACH - index * APPROACH_STEP;
     const sBox = sg ? groupBox.get(sg) : undefined;
     const tBox = tg ? groupBox.get(tg) : undefined;
     if (sBox && sg === tg) {
       const laneB = sBox.b1 - CORRIDOR_INSET - nextLane(bottomLanes, sg!) * LANE_STEP;
       routes[link.id] = { stub, lane: [point(stub, laneB), point(side, laneB)], side };
     } else if (sBox && tBox && groupIndex.get(tg!)! > groupIndex.get(sg!)!) {
-      const laneB = sBox.b1 + GROUP_GAP / 2 + nextLane(gapLanes, sg!) * LANE_STEP;
+      const laneB = gapLane(sg!, sBox.b1, nextLane(gapLanes, sg!), gapTotal.get(sg!) ?? 1);
       routes[link.id] = { stub, lane: [point(stub, laneB), point(side, laneB)], side };
     } else if (sBox && tBox) {
-      const laneS = sBox.b1 + GROUP_GAP / 2 + nextLane(gapLanes, sg!) * LANE_STEP;
-      const outer = GRAPH_MARGIN - LANE_STEP * (marginLanes + 1);
+      const laneS = gapLane(sg!, sBox.b1, nextLane(gapLanes, sg!), gapTotal.get(sg!) ?? 1);
+      // Return lanes share the margin before the first group, spread inside it rather than
+      // marching off the canvas once there are more returns than the margin was sized for.
+      const span = (marginTotal - 1) * MARGIN_LANE_STEP;
+      const first = Math.max(LANE_CLEARANCE, (margin - span) / 2);
+      const outer = first + marginLanes * MARGIN_LANE_STEP;
       marginLanes += 1;
       const laneT = tBox.b1 - CORRIDOR_INSET - nextLane(bottomLanes, tg!) * LANE_STEP;
       routes[link.id] = {
@@ -149,27 +263,6 @@ export function routeLinks(
   return routes;
 }
 
-/** How many lanes a block's bottom corridor must hold: its own routed links and the returns into it. */
-function corridorLanes(
-  links: ReadonlyArray<{ source: string; target: string; kind: string }>,
-  groupOf: ReadonlyMap<string, string>,
-  groupIndex: ReadonlyMap<string, number>,
-  backwardInside: (link: { source: string; target: string }) => boolean,
-): Map<string, number> {
-  const lanes = new Map<string, number>();
-  for (const link of links) {
-    const sg = groupOf.get(link.source);
-    const tg = groupOf.get(link.target);
-    if (!sg || !tg) continue;
-    if (sg === tg) {
-      if (link.kind === "return" || backwardInside(link)) lanes.set(sg, (lanes.get(sg) ?? 0) + 1);
-    } else if (groupIndex.get(tg)! < groupIndex.get(sg)!) {
-      lanes.set(tg, (lanes.get(tg) ?? 0) + 1);
-    }
-  }
-  return lanes;
-}
-
 /**
  * A card's height from what it shows: the title row, the summary's wrapped lines, the evidence
  * chips (about one and a half per row of the body beside the badge column) and the connection
@@ -180,10 +273,13 @@ export function estimateStepHeight(step: {
   summary: string;
   evidence: readonly unknown[];
   connectionCount: number;
+  /** Edges the card names instead of drawing; they take chip rows of their own. */
+  arrivalCount?: number;
 }): number {
   const summaryLines = step.summary ? Math.min(4, Math.ceil(step.summary.length / 30)) : 0;
   const evidenceRows = step.evidence.length ? Math.ceil(step.evidence.length / 1.5) + 0.5 : 0;
-  const chipRows = step.connectionCount ? Math.ceil(step.connectionCount / 1.5) : 0;
+  const chips = step.connectionCount + (step.arrivalCount ?? 0);
+  const chipRows = chips ? Math.ceil(chips / 1.5) : 0;
   return 52 + summaryLines * 20 + evidenceRows * 22 + chipRows * 26;
 }
 
@@ -196,6 +292,12 @@ export async function layoutGraph(
   const { default: ELK } = await import("elkjs/lib/elk.bundled.js");
   const elk = new ELK();
   const stepById = new Map(model.steps.map((s) => [s.id, s]));
+  // A card also holds a chip for every edge arriving at it that the graph names instead of
+  // drawing; the estimate counts them, or the first pass lays the cards out too short.
+  const arrivalCounts = new Map<string, number>();
+  for (const link of model.links) {
+    arrivalCounts.set(link.target, (arrivalCounts.get(link.target) ?? 0) + 1);
+  }
   const sizeOf = (id: string) => {
     const step = stepById.get(id)!;
     return {
@@ -206,6 +308,7 @@ export async function layoutGraph(
           summary: step.step.summary,
           evidence: step.step.evidence,
           connectionCount: step.connections.length,
+          arrivalCount: arrivalCounts.get(id) ?? 0,
         }),
     };
   };
@@ -281,12 +384,25 @@ export async function layoutGraph(
   const groupIndex = new Map(model.blocks.map((b, i) => [b.id, i]));
   const relative = new Map<string, LaidStep>();
   inners.forEach((inner) => inner.steps.forEach((step) => relative.set(step.id, step)));
-  const lanes = corridorLanes(model.links, groupOf, groupIndex, (link) => {
+  const plan = laneCounts(model.links, groupOf, groupIndex, (link) => {
     const s = relative.get(link.source);
     const t = relative.get(link.target);
     if (!s || !t) return false;
     return innerDirection === "RIGHT" ? t.x <= s.x : t.y <= s.y;
   });
+  const lanes = plan.bottom;
+  // Every corridor is given the room its lanes need before anything is placed: the margin before
+  // the first group holds the returns, the gap after a group holds the links leaving it.
+  const margin =
+    plan.margin > 0
+      ? Math.max(GRAPH_MARGIN, (plan.margin - 1) * MARGIN_LANE_STEP + 2 * LANE_CLEARANCE)
+      : GRAPH_MARGIN;
+  // A block that receives routed edges holds their approach columns on its entry side; a block
+  // that receives none stays narrow.
+  const entryOf = (blockId: string): number =>
+    (plan.approach.get(blockId) ?? 0) > 0
+      ? EDGE_APPROACH + (APPROACH_COLUMNS - 1) * APPROACH_STEP + LANE_CLEARANCE
+      : GRAPH_GROUP_ENTRY;
   const groups: LaidGroup[] = [];
   const steps: LaidStep[] = [];
   let cursor = 24;
@@ -297,27 +413,36 @@ export async function layoutGraph(
       const corridor = laneCount
         ? laneCount * LANE_STEP + CORRIDOR_INSET - GRAPH_GROUP_PADDING / 2
         : 0;
-      const width = inner.width + 2 * GRAPH_GROUP_PADDING + (direction === "RIGHT" ? corridor : 0);
+      // Edges arrive along the card axis: from the left when the cards run right, from the top
+      // when they run down. That side gets the entry padding.
+      const entry = entryOf(set.blockId);
+      const entryLeft = direction === "DOWN" ? entry : GRAPH_GROUP_PADDING;
+      const entryTop = direction === "DOWN" ? GRAPH_GROUP_PADDING : entry;
+      const width =
+        inner.width + entryLeft + GRAPH_GROUP_PADDING + (direction === "RIGHT" ? corridor : 0);
       const height =
         inner.height +
-        2 * GRAPH_GROUP_PADDING +
+        entryTop +
+        GRAPH_GROUP_PADDING +
         GRAPH_GROUP_HEADER +
         (direction === "DOWN" ? corridor : 0);
-      const x = direction === "DOWN" ? GRAPH_MARGIN : cursor;
-      const y = direction === "DOWN" ? cursor : GRAPH_MARGIN;
+      const x = direction === "DOWN" ? margin : cursor;
+      const y = direction === "DOWN" ? cursor : margin;
       groups.push({ id: set.blockId, x, y, width, height });
       for (const step of inner.steps) {
         steps.push({
           ...step,
-          x: step.x + GRAPH_GROUP_PADDING,
-          y: step.y + GRAPH_GROUP_PADDING + GRAPH_GROUP_HEADER,
+          x: step.x + entryLeft,
+          y: step.y + entryTop + GRAPH_GROUP_HEADER,
           parentId: set.blockId,
         });
       }
-      cursor += (direction === "DOWN" ? height : width) + GROUP_GAP;
+      cursor +=
+        (direction === "DOWN" ? height : width) +
+        corridorSize(plan.gap.get(set.blockId) ?? 0, GROUP_GAP);
     } else {
-      const x = direction === "DOWN" ? GRAPH_MARGIN : cursor;
-      const y = direction === "DOWN" ? cursor : GRAPH_MARGIN;
+      const x = direction === "DOWN" ? margin : cursor;
+      const y = direction === "DOWN" ? cursor : margin;
       for (const step of inner.steps) steps.push({ ...step, x: step.x + x, y: step.y + y });
       cursor += (direction === "DOWN" ? inner.height : inner.width) + GROUP_GAP;
     }
@@ -340,6 +465,7 @@ export async function layoutGraph(
   return {
     groups,
     steps,
-    routes: routeLinks(model.links, absolute, groups, groupOf, innerDirection),
+    routes: routeLinks(model.links, absolute, groups, groupOf, innerDirection, margin),
+    margin,
   };
 }

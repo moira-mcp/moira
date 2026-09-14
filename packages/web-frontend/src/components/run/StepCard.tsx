@@ -4,16 +4,17 @@
  * geometry — an optional position column, a type badge column of one width and height, and a
  * body whose title and first line start at the same x and y in every card — so a list of steps
  * reads as one grid. The body carries the first sentence of the directive, the evidence the step
- * returns, its connections as chips that wrap inside the body, and slots for what a surface adds
+ * returns, the edges arriving at it that its surface names rather than draws (the graph's arrival
+ * chips), its connections as chips that wrap inside the body, and slots for what a surface adds
  * (the split view's owner select, diagnostics and editor; the run page's "current" marker).
  */
 
 import React from "react";
 import { useTranslation } from "react-i18next";
-import { ArrowDownRight, ArrowUpRight } from "lucide-react";
+import { ArrowDownRight, ArrowUpRight, CornerLeftDown, RotateCcw } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { NodeTypeTag } from "./nodeTypeStyle";
-import type { StepConnection, StepInfo } from "./model";
+import type { StepArrival, StepConnection, StepInfo } from "./model";
 
 export function StepCardList({
   children,
@@ -46,6 +47,9 @@ export function StepCard({
   current = false,
   highlighted = false,
   connections = [],
+  arrivals = [],
+  onArrival,
+  onArrivalHover,
   onConnection,
   onConnectionHover,
   onSelect,
@@ -62,6 +66,10 @@ export function StepCard({
   current?: boolean;
   highlighted?: boolean;
   connections?: StepConnection[];
+  /** Edges arriving here that the surface names instead of drawing; shown as chips before them. */
+  arrivals?: StepArrival[];
+  onArrival?: (arrival: StepArrival) => void;
+  onArrivalHover?: (arrival: StepArrival | null) => void;
   onConnection?: (connection: StepConnection) => void;
   /** Hovering a connection chip (or leaving it): the graph lights the matching edge. */
   onConnectionHover?: (connection: StepConnection | null) => void;
@@ -146,6 +154,40 @@ export function StepCard({
                 </span>
               ))}
             </p>
+          )}
+          {arrivals.length > 0 && (
+            <div className="mt-1.5 flex flex-wrap gap-1" data-step-arrivals="">
+              {arrivals.map((arrival) => (
+                <button
+                  key={arrival.linkId}
+                  type="button"
+                  data-arrival={arrival.linkId}
+                  title={`${arrival.sourceName} · ${arrival.label}`}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onArrival?.(arrival);
+                  }}
+                  onMouseEnter={onArrivalHover ? () => onArrivalHover(arrival) : undefined}
+                  onMouseLeave={onArrivalHover ? () => onArrivalHover(null) : undefined}
+                  className={cn(
+                    "inline-flex max-w-full items-center gap-1 rounded-md border border-dashed px-1.5 py-0.5 text-[10px] leading-4 transition hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                    arrival.isReturn
+                      ? "border-primary/40 text-primary"
+                      : "border-border text-muted-foreground",
+                  )}
+                >
+                  {arrival.isReturn ? (
+                    <RotateCcw className="size-3 shrink-0" aria-hidden="true" />
+                  ) : (
+                    <CornerLeftDown className="size-3 shrink-0" aria-hidden="true" />
+                  )}
+                  <span className="truncate opacity-80">{arrival.sourceName}</span>
+                  {arrival.sourceBlockName && (
+                    <span className="shrink-0 font-medium">{arrival.sourceBlockName}</span>
+                  )}
+                </button>
+              ))}
+            </div>
           )}
           {connections.length > 0 && (
             <div className="mt-1.5 flex flex-wrap gap-1" data-step-connections="">

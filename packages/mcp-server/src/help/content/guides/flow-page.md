@@ -34,9 +34,12 @@ The tabs above the picture switch how the same definition is shown; the choice i
   the steps that implement it in the order they run, with their connections. Chips lead to the
   block a connection leaves for; the finder above answers "which block is this step in".
 - **Graph** — every workflow node as a step card, grouped by block in process order, with the
-  same connection chips as the split view. Loops are dashed lines that run below a block's cards
-  and show their label when you hover the chip (or the line); links into another block run in the
-  gap between blocks. The picture opens on the first block; in the zoom cluster the fit control
+  same connection chips as the split view. A line is drawn where it runs straight from card to
+  card. A loop, a link into another block and anything else that would cross the picture is named
+  instead of drawn: the source card's connection chip says where it goes, and the target card
+  gains an arrival chip saying where it comes from and from which block. Hovering either chip, or
+  either card, draws that line with its label and dims the rest; clicking an arrival chip brings
+  the card at the other end into view. The picture opens on the first block; in the zoom cluster the fit control
   shows the whole graph and Vertical and Horizontal change the direction. The sidebar shows a selected node's definition,
   and clicking a step in the block panel opens the graph on that node.
 

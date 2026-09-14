@@ -1,9 +1,11 @@
 /**
  * The technical graph as the detailed layer of the process view: on the flow page's graph mode
- * every workflow node is a step card inside a block group, the groups follow process order, the
- * derived cycle edges are dashed return edges without a label at rest that light up with their
- * label when the source card's chip is hovered, the layout controls and the sidebar keep working,
- * and the run page's Graph tab groups by the run's blocks with the current node marked.
+ * every workflow node is a step card inside a block group, the groups follow process order, a
+ * derived cycle edge is not drawn at rest but named by a connection chip in its source card and
+ * an arrival chip in its target, appears dashed with its label while either chip is hovered and
+ * brings the far card into view when the arrival chip is clicked, the layout controls and the
+ * sidebar keep working, and the run page's Graph tab groups by the run's blocks with the current
+ * node marked.
  */
 
 import { test, expect } from "./fixtures.js";
@@ -88,21 +90,26 @@ test("the flow page's graph mode draws step cards in block groups with on-demand
   expect(groupZ).toBeLessThan(edgeZ);
   // At the cards' level the edge layer paints first, so equal is below.
   expect(edgeZ).toBeLessThanOrEqual(cardZ);
-  // Return edges: the derived cycle edges, dashed, unlabelled at rest.
-  const returns = page.locator('.react-flow__edge [data-edge-kind="return"]');
-  expect(await returns.count()).toBeGreaterThanOrEqual(cycleEdges.size);
-  for (const id of cycleEdges) {
-    await expect(
-      page.locator(`.react-flow__edge [data-transition="${id}"][data-edge-kind="return"]`),
-    ).toHaveCount(1);
-  }
+  // A return is not drawn at rest: a long line through a corridor cannot be told from its
+  // neighbours, so it is named in both cards instead — a connection chip in its source and an
+  // arrival chip in its target — and drawn only while one of them is hovered.
+  await expect(page.locator('.react-flow__edge [data-edge-kind="return"]')).toHaveCount(0);
   await expect(page.locator('[data-edge-label="return"]')).toHaveCount(0);
-  // The definition opens on its first block; the fit-view control gives the overview back, and
-  // hovering the source card's chip there lights the return edge and shows its label.
-  await page.getByTestId("graph-fit-view").click();
   const [first] = [...cycleEdges];
   const [sourceId, ...labelParts] = first.split(".");
   const label = labelParts.join(".");
+  const targetId = (
+    workflow.nodes.find((n) => n.id === sourceId)!.connections as Record<string, string>
+  )[label];
+  await expect(
+    page.locator(`[data-graph-node="${sourceId}"] [data-connection="${label}"]`),
+  ).toHaveCount(1);
+  await expect(
+    page.locator(`[data-graph-node="${targetId}"] [data-arrival="${first}"]`),
+  ).toHaveCount(1);
+  // The definition opens on its first block; the fit-view control gives the overview back, and
+  // hovering either chip draws the return with its label and lights it.
+  await page.getByTestId("graph-fit-view").click();
   const chip = page.locator(`[data-graph-node="${sourceId}"] [data-connection="${label}"]`);
   await chip.hover();
   await expect(page.locator(`[data-edge-label="return"][data-transition="${first}"]`)).toHaveCount(
@@ -111,6 +118,30 @@ test("the flow page's graph mode draws step cards in block groups with on-demand
   await expect(page.locator(`[data-transition="${first}"][data-focused="true"]`)).toHaveCount(1);
   await page.mouse.move(0, 0);
   await expect(page.locator('[data-edge-label="return"]')).toHaveCount(0);
+  await expect(page.locator('.react-flow__edge [data-edge-kind="return"]')).toHaveCount(0);
+  // The arrival chip in the target card draws the same return.
+  await page.locator(`[data-graph-node="${targetId}"] [data-arrival="${first}"]`).hover();
+  await expect(page.locator(`[data-transition="${first}"][data-focused="true"]`)).toHaveCount(1);
+  await page.mouse.move(0, 0);
+  // Clicking that chip takes the view to the card at the other end: the reader follows the
+  // connection without a line to trace. The overview is the starting point, where every card is
+  // already inside the box, so what the click must change is the view itself — it closes on that
+  // one card, which shows as a zoom no overview has and as that card at the centre.
+  const offCentre = async (id: string) => {
+    const box = (await page.locator(".react-flow").boundingBox())!;
+    const card = await page.locator(`[data-graph-node="${id}"]`).boundingBox();
+    if (!card) return Number.POSITIVE_INFINITY;
+    return Math.hypot(
+      card.x + card.width / 2 - (box.x + box.width / 2),
+      card.y + card.height / 2 - (box.y + box.height / 2),
+    );
+  };
+  await page.getByTestId("graph-fit-view").click();
+  await expect.poll(zoomOf, { timeout: 5000 }).toBeLessThan(0.9);
+  const centredBefore = await offCentre(sourceId);
+  await page.locator(`[data-graph-node="${targetId}"] [data-arrival="${first}"]`).click();
+  await expect.poll(zoomOf, { timeout: 5000 }).toBeGreaterThan(0.9);
+  expect(await offCentre(sourceId)).toBeLessThan(Math.min(centredBefore / 2, 80));
   // Forward edges inside a block keep their label.
   await expect(page.locator('[data-edge-label="forward"]').first()).toBeVisible();
   // Controls and the sidebar keep working.
