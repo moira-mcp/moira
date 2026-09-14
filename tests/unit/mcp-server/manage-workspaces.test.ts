@@ -664,6 +664,51 @@ describe("workspace MCP adapter", () => {
     }
   });
 
+  it("tells a refused caller which ceiling stopped it and stays generic without a detail", async () => {
+    const base = services();
+    const named = services({
+      resource: {
+        ...base.resource!,
+        create: jest.fn(async () => {
+          throw new WorkspaceResourceError(
+            "WORKSPACE_POLICY_LIMIT",
+            "Workspace per-user concurrency limit reached",
+            "You already hold 4 active workspaces, which is the per-user ceiling.",
+          );
+        }),
+      },
+    });
+    const refused = await executeWorkspaceTool(
+      "workspace_create",
+      { repository_id: "42", ref: "main" },
+      USER_ID,
+      named,
+    );
+    const refusedError = (data(refused) as { error: { code: string; message: string } }).error;
+    expect(refusedError.code).toBe("WORKSPACE_POLICY_LIMIT");
+    expect(refusedError.message).toContain("per-user ceiling");
+
+    const unnamed = services({
+      resource: {
+        ...base.resource!,
+        create: jest.fn(async () => {
+          throw new WorkspaceResourceError("WORKSPACE_POLICY_LIMIT", "operator-only sentence");
+        }),
+      },
+    });
+    const generic = await executeWorkspaceTool(
+      "workspace_create",
+      { repository_id: "42", ref: "main" },
+      USER_ID,
+      unnamed,
+    );
+    const genericError = (data(generic) as { error: { message: string } }).error;
+    expect(genericError.message).not.toContain("operator-only sentence");
+    expect(genericError.message).toBe(
+      "A workspace quota, concurrency, size or time limit was reached.",
+    );
+  });
+
   it("returns bounded setup, foreign-workspace, and binary-read errors", async () => {
     const disconnected = services({
       connection: {

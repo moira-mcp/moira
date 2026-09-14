@@ -399,9 +399,16 @@ export interface WorkspaceTransferRecord {
 }
 
 export class WorkspaceResourceError extends Error {
+  /**
+   * `message` stays the operator-facing sentence that reaches logs and audit. `detail` is the
+   * optional agent-safe addition: the refusing code decides what a caller may be told about its
+   * own refusal, so no transport has to classify an error it did not raise. A detail carries no
+   * workspace, user, repository or other caller identity.
+   */
   constructor(
     public readonly code: WorkspaceResourceErrorCode,
     message: string,
+    public readonly detail?: string,
   ) {
     super(message);
     this.name = "WorkspaceResourceError";

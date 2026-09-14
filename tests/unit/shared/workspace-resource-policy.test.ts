@@ -17,8 +17,8 @@ describe("workspace resource policy", () => {
       maxCpuCores: 4,
       maxMemoryBytes: 8 * 1024 ** 3,
       maxStorageBytes: 32 * 1024 ** 3,
-      maxActivePerUser: 1,
-      maxActiveGlobal: 4,
+      maxActivePerUser: 4,
+      maxActiveGlobal: 16,
       persistentRetentionMs: 30 * 24 * 60 * 60_000,
       maxConcurrentOperationsPerUser: 2,
       maxConcurrentOperationsGlobal: 20,
@@ -53,6 +53,8 @@ describe("workspace resource policy", () => {
     expect(() =>
       policy({ WORKSPACE_MAX_ACTIVE_PER_USER: "3", WORKSPACE_MAX_ACTIVE_GLOBAL: "2" }),
     ).toThrow(/cannot be lower/);
+    // One user must not be able to take the whole instance by default.
+    expect(policy().maxActiveGlobal).toBeGreaterThan(policy().maxActivePerUser);
     expect(() =>
       policy({
         WORKSPACE_MAX_CONCURRENT_OPERATIONS_PER_USER: "3",

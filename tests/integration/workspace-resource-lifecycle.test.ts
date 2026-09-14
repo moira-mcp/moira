@@ -12,6 +12,7 @@ import {
   WorkspaceResourceError,
   WorkspaceResourceRepository,
   WorkspaceResourceService,
+  evaluateWorkspaceResourcePolicy,
   type WorkspaceCreateProviderResult,
   type WorkspaceMachine,
   type WorkspaceProviderAdapter,
@@ -1020,6 +1021,37 @@ describe("durable persistent workspace lifecycle", () => {
     }
   });
 
+  test("lets one user hold several workspaces under the shipped ceilings", async () => {
+    // The shipped ceilings are the subject: a value that was merely raised but still refuses the
+    // second workspace, or a refusal that repeats the generic quota sentence, fails here.
+    const shipped = evaluateWorkspaceResourcePolicy(() => undefined);
+    const value = fixture({
+      maxActivePerUser: shipped.maxActivePerUser,
+      maxActiveGlobal: shipped.maxActiveGlobal,
+      createThrottleMs: 0,
+    });
+    try {
+      expect(shipped.maxActivePerUser).toBeGreaterThan(1);
+      for (let index = 0; index < shipped.maxActivePerUser; index += 1) {
+        value.provider.resourceName = `silver-space-${index}`;
+        const created = await value.service.create("user-1", "301", `refs/heads/task-${index}`);
+        expect(created.resource.state).toBe("usable");
+      }
+      expect(value.service.listResources("user-1")).toHaveLength(shipped.maxActivePerUser);
+
+      value.provider.resourceName = "silver-space-over";
+      await expect(
+        value.service.create("user-1", "301", "refs/heads/one-too-many"),
+      ).rejects.toMatchObject({
+        code: "WORKSPACE_POLICY_LIMIT",
+        detail: expect.stringContaining(String(shipped.maxActivePerUser)),
+      });
+      expect(value.provider.createCalls).toHaveBeenCalledTimes(shipped.maxActivePerUser);
+    } finally {
+      value.sqlite.close();
+    }
+  });
+
   test("distinguishes create throttle, per-user concurrency and global concurrency", async () => {
     const throttled = fixture({
       maxActivePerUser: 2,
@@ -1033,7 +1065,10 @@ describe("durable persistent workspace lifecycle", () => {
       throttled.provider.createOutcome = "accepted";
       await expect(
         throttled.service.create("user-1", "301", "refs/heads/main"),
-      ).rejects.toMatchObject({ code: "WORKSPACE_POLICY_LIMIT" });
+      ).rejects.toMatchObject({
+        code: "WORKSPACE_POLICY_LIMIT",
+        detail: expect.stringContaining("throttled"),
+      });
     } finally {
       throttled.sqlite.close();
     }
@@ -1043,7 +1078,10 @@ describe("durable persistent workspace lifecycle", () => {
       await perUser.service.create("user-1", "301", "refs/heads/main");
       await expect(
         perUser.service.create("user-1", "301", "refs/heads/other"),
-      ).rejects.toMatchObject({ code: "WORKSPACE_POLICY_LIMIT" });
+      ).rejects.toMatchObject({
+        code: "WORKSPACE_POLICY_LIMIT",
+        detail: expect.stringContaining("per-user ceiling"),
+      });
     } finally {
       perUser.sqlite.close();
     }
@@ -1054,9 +1092,16 @@ describe("durable persistent workspace lifecycle", () => {
     });
     try {
       await global.service.create("user-1", "301", "refs/heads/main");
-      await expect(global.service.create("user-2", "302", "refs/heads/main")).rejects.toMatchObject(
-        { code: "WORKSPACE_POLICY_LIMIT" },
+      const instanceRefusal = await global.service.create("user-2", "302", "refs/heads/main").then(
+        () => null,
+        (error: WorkspaceResourceError) => error,
       );
+      expect(instanceRefusal).toMatchObject({
+        code: "WORKSPACE_POLICY_LIMIT",
+        detail: expect.stringContaining("instance"),
+      });
+      // The refused caller learns that the instance is full, never who occupies it.
+      expect(instanceRefusal?.detail).not.toMatch(/user-1|301|owner\/repository/);
     } finally {
       global.sqlite.close();
     }

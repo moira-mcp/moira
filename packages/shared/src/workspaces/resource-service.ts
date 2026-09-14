@@ -389,7 +389,9 @@ export class WorkspaceResourceService {
       policy,
       this.now(),
     );
-    if (capacity) throw new WorkspaceResourceError("WORKSPACE_POLICY_LIMIT", capacity.reason);
+    if (capacity) {
+      throw new WorkspaceResourceError("WORKSPACE_POLICY_LIMIT", capacity.reason, capacity.detail);
+    }
     const health = await provider.health();
     if (health.state !== "available") {
       throw new WorkspaceResourceError(
@@ -442,6 +444,7 @@ export class WorkspaceResourceService {
           ? "WORKSPACE_PROVIDER_DISABLED"
           : "WORKSPACE_POLICY_LIMIT",
         reservation.reason,
+        reservation.outcome === "limit" ? reservation.detail : undefined,
       );
     }
     const initial = reservation.resource;

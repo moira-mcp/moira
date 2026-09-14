@@ -33,8 +33,12 @@ export function evaluateWorkspaceResourcePolicy(
   if (enabledValue !== undefined && !["true", "false"].includes(enabledValue)) {
     throw new Error("WORKSPACE_CODESPACES_ENABLED must be true or false");
   }
-  const maxActivePerUser = integer("WORKSPACE_MAX_ACTIVE_PER_USER", 1, 1, 64);
-  const maxActiveGlobal = integer("WORKSPACE_MAX_ACTIVE_GLOBAL", 4, 1, 1024);
+  // Moira holds nothing per workspace: the connector opens a fresh socket request per call and
+  // keeps no session, so these ceilings bound provider cost rather than a local resource. The
+  // shipped per-user value lets one person carry several tasks at once; the instance value is a
+  // multiple of it, so a single user cannot exhaust the instance alone.
+  const maxActivePerUser = integer("WORKSPACE_MAX_ACTIVE_PER_USER", 4, 1, 64);
+  const maxActiveGlobal = integer("WORKSPACE_MAX_ACTIVE_GLOBAL", 16, 1, 1024);
   const maxConcurrentOperationsPerUser = integer(
     "WORKSPACE_MAX_CONCURRENT_OPERATIONS_PER_USER",
     2,

@@ -815,6 +815,9 @@ export async function executeWorkspaceTool<Name extends WorkspaceToolName>(
           "WORKSPACE_CREATE_PENDING",
           "WORKSPACE_NOT_RUNNING",
         ].includes(error.code),
+        // Only the refusing code decides what the caller may be told; the boundary forwards the
+        // bounded detail it already declared safe and never derives one from the error code.
+        error instanceof WorkspaceResourceError ? error.detail : undefined,
       );
     }
     reportUnexpectedFailure(name, error);

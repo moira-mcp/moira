@@ -97,7 +97,12 @@ export function createWorkspaceManagementRoutes(
       recordWorkspaceRejection(error.code);
       res.status(RESOURCE_ERROR_STATUS[error.code] ?? 500).json({
         success: false,
-        error: { code: error.code, message: publicMessage(error.code) },
+        error: {
+          code: error.code,
+          message: error.detail
+            ? `${publicMessage(error.code)}. ${error.detail}`
+            : publicMessage(error.code),
+        },
       });
       return true;
     }

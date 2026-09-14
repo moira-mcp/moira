@@ -303,7 +303,13 @@ the content-free summary. `workspace_download` returns the private transfer as a
 
 Known connection, workspace, state, policy and provider failures become bounded tool
 errors with `code`, safe `message` and `retryable`; setup and authorization failures
-add only the same-origin `settings_url`. Input that matches no strict request form
+add only the same-origin `settings_url`. A refusal that knows a bounded fact the caller
+may act on adds it to that message: a creation refused by `WORKSPACE_POLICY_LIMIT` names
+whether the per-user active ceiling, the instance-wide active ceiling or the creation
+throttle stopped it, and that ceiling's configured value. The addition never names a
+user, workspace or repository, so a caller refused by instance capacity learns only that
+the instance is full. The website management API adds the same sentence to its own
+message for the same refusals. Input that matches no strict request form
 returns `WORKSPACE_REQUEST_INVALID` whose message names the offending field paths
 and the generic schema issue (for example `expected: Required`), never the
 submitted values. Unexpected failures return the generic
@@ -482,8 +488,8 @@ not supplied:
 | `WORKSPACE_MAX_CPU_CORES`                      |       4 | Maximum selected Linux machine CPU cores                     |
 | `WORKSPACE_MAX_MEMORY_GB`                      |       8 | Maximum selected machine memory                              |
 | `WORKSPACE_MAX_STORAGE_GB`                     |      32 | Maximum selected machine storage                             |
-| `WORKSPACE_MAX_ACTIVE_PER_USER`                |       1 | Active resource reservations per user                        |
-| `WORKSPACE_MAX_ACTIVE_GLOBAL`                  |       4 | Active resource reservations across the instance             |
+| `WORKSPACE_MAX_ACTIVE_PER_USER`                |       4 | Active resource reservations per user                        |
+| `WORKSPACE_MAX_ACTIVE_GLOBAL`                  |      16 | Active resource reservations across the instance             |
 | `WORKSPACE_CREATE_THROTTLE_SECONDS`            |      60 | Minimum interval between creation reservations               |
 | `WORKSPACE_REMOTE_TTL_MINUTES`                 |     120 | Codespaces idle timeout requested at creation                |
 | `WORKSPACE_PERSISTENT_RETENTION_DAYS`          |      30 | Codespaces stopped-workspace retention requested at creation |

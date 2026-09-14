@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, test } from "@jest/globals";
+import { evaluateWorkspaceResourcePolicy } from "@mcp-moira/shared";
 
 const secretNames = ["WORKSPACE_GITHUB_APP_CLIENT_SECRET", "WORKSPACE_CREDENTIAL_VAULT_KEY"];
 const allNames = [
@@ -56,6 +57,22 @@ describe("GitHub workspace deployment configuration", () => {
     }
     expect(source).not.toMatch(/WORKSPACE_GITHUB_APP_CLIENT_SECRET=[A-Za-z0-9_-]{8,}/);
     expect(source).not.toMatch(/WORKSPACE_CREDENTIAL_VAULT_KEY=[0-9a-f]{64}/i);
+  });
+
+  test("ships the same workspace policy whether or not the operator supplies a value", () => {
+    // Compose declares every workspace variable explicitly, so an absent key reaches the container
+    // as the file's own fallback and the code default is never consulted. A fallback that drifts
+    // from the code default silently ships a different policy than the one documented.
+    const source = readFileSync(resolve(process.cwd(), "docker-compose.yml"), "utf8");
+    const fallbacks = new Map<string, string>();
+    for (const name of allNames) {
+      const declaration = new RegExp(`- ${name}=\\$\\{${name}(:-([^}]*))?\\}`).exec(source);
+      expect(declaration).not.toBeNull();
+      fallbacks.set(name, declaration?.[2] ?? "");
+    }
+    expect(evaluateWorkspaceResourcePolicy((name) => fallbacks.get(name))).toEqual(
+      evaluateWorkspaceResourcePolicy(() => undefined),
+    );
   });
 
   test("pins the reviewed GitHub CLI and OpenSSH runtime dependencies", () => {

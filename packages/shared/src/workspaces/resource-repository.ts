@@ -64,9 +64,20 @@ function mapRow(row: ResourceRow): WorkspaceResourceRecord {
   };
 }
 
+/**
+ * A creation refusal that a caller may be told about in full: it names the ceiling that stopped it
+ * and that ceiling's value, and nothing about who else holds the instance's capacity.
+ */
+export interface WorkspaceCreateCapacityRefusal {
+  outcome: "limit";
+  reason: string;
+  detail: string;
+}
+
 export type ReserveWorkspaceResult =
   | { outcome: "reserved"; resource: WorkspaceResourceRecord; capability: string }
-  | { outcome: "disabled" | "limit" | "not_approved"; reason: string };
+  | WorkspaceCreateCapacityRefusal
+  | { outcome: "disabled" | "not_approved"; reason: string };
 
 export class WorkspaceResourceRepository {
   constructor(private readonly sqlite: Database.Database) {}
@@ -313,7 +324,7 @@ export class WorkspaceResourceRepository {
     provider: string,
     policy: WorkspaceResourcePolicy,
     now: number,
-  ): { outcome: "limit"; reason: string } | null {
+  ): WorkspaceCreateCapacityRefusal | null {
     const activeSql = placeholders(ACTIVE_STATES);
     const userActive = (
       this.sqlite
@@ -331,8 +342,19 @@ export class WorkspaceResourceRepository {
         )
         .get(provider, ...ACTIVE_STATES) as { count: number }
     ).count;
-    if (userActive >= policy.maxActivePerUser || globalActive >= policy.maxActiveGlobal) {
-      return { outcome: "limit", reason: "Workspace concurrency limit reached" };
+    if (userActive >= policy.maxActivePerUser) {
+      return {
+        outcome: "limit",
+        reason: "Workspace per-user concurrency limit reached",
+        detail: `You already hold ${policy.maxActivePerUser} active workspaces, which is the per-user ceiling. Delete one before creating another.`,
+      };
+    }
+    if (globalActive >= policy.maxActiveGlobal) {
+      return {
+        outcome: "limit",
+        reason: "Workspace instance concurrency limit reached",
+        detail: `This Moira instance is at its ceiling of ${policy.maxActiveGlobal} active workspaces. Retry once capacity frees up.`,
+      };
     }
     const last = this.sqlite
       .prepare(
@@ -341,7 +363,11 @@ export class WorkspaceResourceRepository {
       )
       .get(userId, provider) as { createdAt: number } | undefined;
     if (last && last.createdAt > now - policy.createThrottleMs) {
-      return { outcome: "limit", reason: "Workspace create throttle reached" };
+      return {
+        outcome: "limit",
+        reason: "Workspace create throttle reached",
+        detail: `Workspace creation is throttled to one every ${Math.ceil(policy.createThrottleMs / 1000)} seconds. Wait before creating another.`,
+      };
     }
     return null;
   }

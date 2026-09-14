@@ -153,7 +153,10 @@ HTTPS link expires automatically and is never repeated in the JSON result.
 The agent runs as the ordinary Codespace user with that environment's repository, network and
 configured secrets. Moira bounds its own concurrency, input/output size, time and quotas and
 protects the Moira server and other users; it does not sandbox the workspace from the agent its
-owner authorized.
+owner authorized. A user may hold several workspaces at once, and a creation refused by a ceiling
+says which one refused it: your own active-workspace ceiling, the instance-wide one, or the interval
+between creations. The refusal names that ceiling's configured value and never names another user or
+their workspaces.
 
 ### Runtime help
 

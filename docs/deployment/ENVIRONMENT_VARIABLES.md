@@ -173,8 +173,8 @@ docker compose --profile workspaces up -d
 | `WORKSPACE_MAX_CPU_CORES`                      |       4 | Maximum selected Linux machine CPU cores                    |
 | `WORKSPACE_MAX_MEMORY_GB`                      |       8 | Maximum selected machine memory                             |
 | `WORKSPACE_MAX_STORAGE_GB`                     |      32 | Maximum selected machine storage                            |
-| `WORKSPACE_MAX_ACTIVE_PER_USER`                |       1 | Active resource reservations per user; maximum 64           |
-| `WORKSPACE_MAX_ACTIVE_GLOBAL`                  |       4 | Instance-wide active resource reservations; maximum 1024    |
+| `WORKSPACE_MAX_ACTIVE_PER_USER`                |       4 | Active resource reservations per user; maximum 64           |
+| `WORKSPACE_MAX_ACTIVE_GLOBAL`                  |      16 | Instance-wide active resource reservations; maximum 1024    |
 | `WORKSPACE_CREATE_THROTTLE_SECONDS`            |      60 | Minimum interval between creation reservations              |
 | `WORKSPACE_REMOTE_TTL_MINUTES`                 |     120 | Codespaces idle timeout requested at creation; minimum 5    |
 | `WORKSPACE_PERSISTENT_RETENTION_DAYS`          |      30 | Provider retention requested for stopped workspaces; max 30 |
@@ -454,8 +454,8 @@ WORKSPACE_CODESPACES_ENABLED=true
 WORKSPACE_MAX_CPU_CORES=4
 WORKSPACE_MAX_MEMORY_GB=8
 WORKSPACE_MAX_STORAGE_GB=32
-WORKSPACE_MAX_ACTIVE_PER_USER=1
-WORKSPACE_MAX_ACTIVE_GLOBAL=4
+WORKSPACE_MAX_ACTIVE_PER_USER=4
+WORKSPACE_MAX_ACTIVE_GLOBAL=16
 WORKSPACE_CREATE_THROTTLE_SECONDS=60
 WORKSPACE_REMOTE_TTL_MINUTES=120
 WORKSPACE_PERSISTENT_RETENTION_DAYS=30
