@@ -159,7 +159,13 @@ workspace's current life: after the workspace stops and starts again, naming it 
 `WORKSPACE_SESSION_UNAVAILABLE` and a new session must be opened, as it does for a session that was
 never opened. What a session stores stays in the workspace and is never returned. Stop either kind by calling the tool
 with only `workspace_id`, `operation_id` and `cancel: true`. A command stops with its workspace, so a
-long one needs a workspace whose idle lifetime outlasts it. Supply at most one stdin form: `stdin_text` for UTF-8 text or `stdin_file` for a native
+long one needs a workspace whose idle lifetime outlasts it. A workspace that went to sleep does not
+have to be started first: the call that needs it starts it and then runs, within a bounded wait. If it
+does not finish starting in time the call returns `WORKSPACE_START_TIMEOUT`, which names that wait and
+asks you to retry; a workspace that cannot start at all is refused by what it is. A command whose
+workspace restarted under it is reported as `WORKSPACE_OPERATION_INTERRUPTED`, with
+`interrupted_by_restart` on the operation, rather than as a failure of its own: the files it had
+already written are still there, it produced no result, and running it again is the remedy. Supply at most one stdin form: `stdin_text` for UTF-8 text or `stdin_file` for a native
 ChatGPT file reference; the file's bytes reach the process without base64 in the conversation.
 Failed, timed-out and cancelled commands and rejected file edits are returned as tool errors that
 keep `operation_id` and the available output. A command that finishes quickly returns its terminal

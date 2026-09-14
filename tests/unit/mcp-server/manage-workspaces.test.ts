@@ -469,6 +469,43 @@ describe("workspace MCP adapter", () => {
     },
   );
 
+  it("tells a command lost to a workspace restart apart from one that failed on its own", async () => {
+    let current: WorkspaceOperationRecord = { ...operation("exec"), state: "running" };
+    const base = services();
+    const response = await executeWorkspaceTool(
+      "workspace_exec",
+      { workspace_id: WORKSPACE_ID, operation_id: OPERATION_ID },
+      USER_ID,
+      services({
+        operation: {
+          ...base.operation!,
+          get: jest.fn(() => current),
+          reconcile: jest.fn(async () => {
+            current = {
+              ...operation("exec"),
+              state: "failed" as const,
+              exitCode: null,
+              lastOutcome: "workspace_restarted",
+            };
+            return execResult({ state: "failed", stdout: "", stderr: "", exitCode: null });
+          }),
+        },
+      }),
+    );
+
+    // The required state: the agent can branch on a restart. The wrong state that looks the same is
+    // an ordinary failure with empty output, which is what a caller saw before and what would point
+    // it at output that never existed.
+    expect(response).toMatchObject({
+      isError: true,
+      structuredContent: {
+        operation: { operation_id: OPERATION_ID, state: "failed", interrupted_by_restart: true },
+        error: { code: "WORKSPACE_OPERATION_INTERRUPTED", retryable: false },
+      },
+    });
+    expect(JSON.stringify(data(response))).toContain("restarted");
+  });
+
   it("reports a rejected file edit as an error, retaining the durable operation", async () => {
     const base = services();
     const response = await executeWorkspaceTool(

@@ -625,6 +625,34 @@ describe("GitHub Codespaces connector boundary", () => {
     }
   });
 
+  test("carries an operation lost to a restart as its own state and refuses it on dispatch", async () => {
+    const connector = new GitHubCodespacesConnector(
+      requestHarness(() => ({ value: JSON.stringify({ state: "interrupted" }) })).requestImpl,
+    );
+
+    // An inspection may legitimately learn that the workspace restarted under the command.
+    await expect(connector.inspect("ghu_topsecret", workspace, operation)).resolves.toEqual({
+      state: "interrupted",
+    });
+    await expect(connector.cancel("ghu_topsecret", workspace, operation)).resolves.toEqual({
+      state: "interrupted",
+    });
+
+    // A dispatch cannot: an operation that was just created cannot belong to an earlier life, so
+    // that answer is a broken remote side rather than a state the caller should see.
+    await expect(
+      connector.execute("ghu_topsecret", workspace, operation, {
+        argv: ["true"],
+        cwd: ".",
+        stdin: { kind: "inline", bytes: new Uint8Array() },
+        timeoutMs: 5_000,
+        maxStdoutBytes: 4096,
+        maxStderrBytes: 4096,
+        maxRetainedBytes: 1024 * 1024,
+      }),
+    ).rejects.toThrow(/was not created/);
+  });
+
   test("rejects a malformed remote terminal envelope", async () => {
     const harness = requestHarness(() => ({
       value: JSON.stringify({

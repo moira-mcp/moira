@@ -212,6 +212,8 @@ const SAFE_ERROR_MESSAGES: Record<string, string> = {
   WORKSPACE_CREATE_REJECTED: "Workspace creation was rejected.",
   WORKSPACE_CREATE_PENDING: "Workspace creation or cleanup is still pending.",
   WORKSPACE_NOT_RUNNING: "The workspace is not ready and running.",
+  WORKSPACE_START_TIMEOUT:
+    "The workspace was started for this call but is still starting; retry the same call shortly.",
   WORKSPACE_GENERATION_CONFLICT:
     "The workspace or its authorization changed; refresh workspace state before continuing.",
   WORKSPACE_RESOURCE_INVALID: "The workspace input or current authorization is invalid.",
@@ -221,6 +223,8 @@ const SAFE_ERROR_MESSAGES: Record<string, string> = {
     "The requested range is not UTF-8 text; use workspace_download for binary bytes.",
   WORKSPACE_OPERATION_PENDING: "The workspace operation has not reached a terminal result.",
   WORKSPACE_OPERATION_FAILED: "The workspace command failed; inspect its output and exit code.",
+  WORKSPACE_OPERATION_INTERRUPTED:
+    "The workspace restarted while this command was running, so its process did not survive and it produced no result. The files it had already written are still there; run the command again.",
   WORKSPACE_OPERATION_OUTPUT_LIMIT:
     "The command was stopped because its retained output reached the workspace ceiling; its output up to that point remains readable.",
   WORKSPACE_OPERATION_CANCELLED: "The workspace operation was cancelled.",
@@ -275,9 +279,17 @@ function projectWorkspace(workspace: WorkspaceResourceRecord): Record<string, un
   return { ...projectWorkspaceSummary(workspace) };
 }
 
+/** An operation whose life ended with the workspace it ran in, rather than with its own command. */
+function interruptedByRestart(operation: WorkspaceOperationRecord): boolean {
+  return operation.state === "failed" && operation.lastOutcome === "workspace_restarted";
+}
+
 function projectOperation(response: WorkspaceOperationResponse | WorkspaceFileOperationResponse) {
   const { operation } = response;
   return {
+    // A command that ended because its workspace restarted is not a command that failed; the caller
+    // has to be able to tell them apart to decide whether running it again is safe.
+    ...(interruptedByRestart(operation) ? { interrupted_by_restart: true } : {}),
     operation_id: operation.id,
     workspace_id: operation.resourceId,
     kind: operation.kind,
@@ -317,9 +329,11 @@ function operationResult(
   const code =
     projectionError ??
     (operation.state === "failed"
-      ? operation.kind === "exec"
-        ? "WORKSPACE_OPERATION_FAILED"
-        : "WORKSPACE_FILE_REJECTED"
+      ? operation.interrupted_by_restart
+        ? "WORKSPACE_OPERATION_INTERRUPTED"
+        : operation.kind === "exec"
+          ? "WORKSPACE_OPERATION_FAILED"
+          : "WORKSPACE_FILE_REJECTED"
       : operation.state === "cancelled"
         ? "WORKSPACE_OPERATION_CANCELLED"
         : operation.state === "timed_out"

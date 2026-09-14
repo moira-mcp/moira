@@ -92,6 +92,8 @@ export interface WorkspaceResourcePolicy {
   maxActiveGlobal: number;
   createThrottleMs: number;
   remoteTtlMs: number;
+  /** How long an operation may wait for a stopped workspace it started to become usable. */
+  startWaitMs: number;
   persistentRetentionMs?: number;
   createDeadlineMs: number;
   cleanupDeadlineMs: number;
@@ -159,6 +161,7 @@ export type WorkspaceResourceErrorCode =
   | "WORKSPACE_CREATE_REJECTED"
   | "WORKSPACE_CREATE_PENDING"
   | "WORKSPACE_NOT_RUNNING"
+  | "WORKSPACE_START_TIMEOUT"
   | "WORKSPACE_GENERATION_CONFLICT"
   | "WORKSPACE_RESOURCE_INVALID"
   | "WORKSPACE_NOT_FOUND";
@@ -294,12 +297,20 @@ export interface WorkspaceOperationTransport extends WorkspaceTransportAvailabil
     credential: string,
     workspace: WorkspaceResourceRecord,
     operation: WorkspaceOperationRecord,
-  ): Promise<WorkspaceOperationResult | { state: "running" } | { state: "absent" }>;
+  ): Promise<
+    | WorkspaceOperationResult
+    | { state: "running" }
+    | { state: "absent" }
+    /** The operation belongs to an earlier life of the workspace: it was lost to a restart. */
+    | { state: "interrupted" }
+  >;
   cancel(
     credential: string,
     workspace: WorkspaceResourceRecord,
     operation: WorkspaceOperationRecord,
-  ): Promise<WorkspaceOperationResult | { state: "running" } | { state: "absent" }>;
+  ): Promise<
+    WorkspaceOperationResult | { state: "running" } | { state: "absent" } | { state: "interrupted" }
+  >;
   finalize(
     credential: string,
     workspace: WorkspaceResourceRecord,

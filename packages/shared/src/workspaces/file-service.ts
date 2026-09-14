@@ -22,6 +22,7 @@ import type {
   WorkspaceTransferReservation,
   WorkspaceTransferService,
 } from "./transfer-service.js";
+import { startOnUse, type WorkspaceLifecycleStarter } from "./start-on-use.js";
 
 const MAX_PATH_BYTES = 4096;
 const MAX_SEARCH_QUERY_BYTES = 4096;
@@ -204,6 +205,8 @@ export class WorkspaceFileService {
         | "discard"
       >;
       nativeFetcher?: WorkspaceNativeReferenceFetcher;
+      /** Starts a workspace that is asleep so the file operation about to reach it does not fail. */
+      lifecycle?: WorkspaceLifecycleStarter;
       audit?: (event: WorkspaceOperationAuditEvent) => Promise<void> | void;
     },
   ) {}
@@ -414,17 +417,23 @@ export class WorkspaceFileService {
     const policy = this.dependencies.policy();
     const inputBytes = validateRequest(request, policy, inputBytesOverride);
     const outputLimit = this.outputLimit(request, policy);
-    const now = this.now();
-    const reservation = this.dependencies.repository.reserve({
+    // The clock is read inside the reservation, so a second attempt after waking the workspace
+    // carries the time it actually happened rather than the time the first attempt was made.
+    const reserveOnce = () =>
+      this.dependencies.repository.reserve({
+        userId,
+        resourceId: workspaceId,
+        kind: kind(request),
+        inputBytes,
+        stdoutLimitBytes: outputLimit,
+        stderrLimitBytes: 1,
+        deadlineAt: this.now() + Math.min(policy.maxOperationMs ?? 15 * 60_000, 15 * 60_000),
+        policy,
+        now: this.now(),
+      });
+    const reservation = await startOnUse(reserveOnce, this.dependencies.lifecycle, {
       userId,
-      resourceId: workspaceId,
-      kind: kind(request),
-      inputBytes,
-      stdoutLimitBytes: outputLimit,
-      stderrLimitBytes: 1,
-      deadlineAt: now + Math.min(policy.maxOperationMs ?? 15 * 60_000, 15 * 60_000),
-      policy,
-      now,
+      workspaceId,
     });
     if (reservation.outcome !== "reserved" || !reservation.operation || !reservation.workspace) {
       const code =

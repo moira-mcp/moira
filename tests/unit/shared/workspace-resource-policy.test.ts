@@ -28,6 +28,7 @@ describe("workspace resource policy", () => {
       maxRetainedOutputBytes: 64 * 1024 * 1024,
       maxOperationMs: 900_000,
       maxBackgroundOperationMs: 4 * 60 * 60_000,
+      startWaitMs: 180_000,
       maxTransferFileBytes: 4 * 1024 ** 2,
       maxTransferBytesPerUser: 100 * 1024 ** 2,
       maxTransferBytesGlobal: 1024 * 1024 ** 2,
@@ -47,6 +48,11 @@ describe("workspace resource policy", () => {
         WORKSPACE_REMOTE_TTL_MINUTES: "30",
       }),
     ).toMatchObject({ enabled: true, maxMemoryBytes: 4 * 1024 ** 3, remoteTtlMs: 1_800_000 });
+    // The wait for a workspace to start is seconds in configuration and milliseconds in policy, and
+    // it is bounded on both sides so no deployment can make a caller wait without end or not at all.
+    expect(policy({ WORKSPACE_START_WAIT_SECONDS: "45" })).toMatchObject({ startWaitMs: 45_000 });
+    expect(() => policy({ WORKSPACE_START_WAIT_SECONDS: "4" })).toThrow(/between/);
+    expect(() => policy({ WORKSPACE_START_WAIT_SECONDS: "901" })).toThrow(/between/);
     expect(() => policy({ WORKSPACE_CODESPACES_ENABLED: "yes" })).toThrow(/true or false/);
     expect(() => policy({ WORKSPACE_MAX_CPU_CORES: "0" })).toThrow(/between/);
     expect(() => policy({ WORKSPACE_MAX_MEMORY_GB: String(Number.MAX_SAFE_INTEGER) })).toThrow(

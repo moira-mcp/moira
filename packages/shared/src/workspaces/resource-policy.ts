@@ -118,6 +118,10 @@ export function evaluateWorkspaceResourcePolicy(
     1,
     24,
   );
+  // A workspace that fell asleep is started by the operation that needs it, and that operation waits
+  // rather than failing. The wait is bounded so a caller is never held indefinitely by a provider
+  // that is slow or stuck; its shipped value is the time a Codespace normally needs to resume.
+  const startWaitMs = scaledInteger("WORKSPACE_START_WAIT_SECONDS", 180, 1000, 5, 900);
   if (retainedOutputBytes < Math.max(maxOperationStdoutBytes, maxOperationStderrBytes)) {
     throw new Error(
       "WORKSPACE_MAX_RETAINED_OUTPUT_MB cannot be lower than a configured response payload bound",
@@ -160,6 +164,7 @@ export function evaluateWorkspaceResourcePolicy(
     cleanupDeadlineMs: scaledInteger("WORKSPACE_CLEANUP_DEADLINE_MINUTES", 15, 60_000),
     claimLeaseMs: scaledInteger("WORKSPACE_CLAIM_LEASE_SECONDS", 30, 1000),
     reconcileIntervalMs: scaledInteger("WORKSPACE_RECONCILE_INTERVAL_SECONDS", 30, 1000),
+    startWaitMs,
     maxConcurrentOperationsPerUser,
     maxConcurrentOperationsGlobal,
     maxOperationInputBytes: scaledInteger("WORKSPACE_MAX_OPERATION_INPUT_KB", 1024, 1024, 1, 4096),

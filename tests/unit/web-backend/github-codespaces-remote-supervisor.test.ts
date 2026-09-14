@@ -1458,6 +1458,54 @@ if (process.env.MOIRA_TEST_HOLD_FILE_RUNNER === "1") {
     });
   });
 
+  test("names a command whose workspace restarted under it, and not one that failed inside this life", async () => {
+    const value = fixture();
+    const marker = (character: string) => `moira-op-${character.repeat(32)}`;
+    const firstLife = { ...value.environment, MOIRA_ENVIRONMENT_ID: "life-one" };
+    const secondLife = { ...value.environment, MOIRA_ENVIRONMENT_ID: "life-two" };
+    const start = (remoteMarker: string) =>
+      request(firstLife, {
+        action: "execute",
+        version: 1,
+        remoteMarker,
+        repositoryFullName: "owner/repository",
+        argv: [process.execPath, "-e", "setTimeout(() => {}, 300000)"],
+        stdin: "",
+        timeoutMs: 300_000,
+        maxStdoutBytes: 1024,
+        maxStderrBytes: 1024,
+        maxRetainedBytes: 1024 * 1024,
+      });
+
+    await expect(start(marker("d"))).resolves.toEqual({ state: "running" });
+    // A restart leaves the operation's files and identity behind and takes every process with it.
+    const directory = join(value.stateRoot, marker("d"));
+    const identity = JSON.parse(readFileSync(join(directory, "pid"), "utf8")) as { pid: number };
+    const runner = JSON.parse(readFileSync(join(directory, "runner-pid"), "utf8")) as {
+      pid: number;
+    };
+    for (const pid of [identity.pid, runner.pid]) {
+      try {
+        process.kill(-pid, "SIGKILL");
+      } catch {
+        process.kill(pid, "SIGKILL");
+      }
+    }
+    await new Promise((resolveWait) => setTimeout(resolveWait, 200));
+
+    // The required state: the same absence of a result means a restart in a later life and a
+    // supervisor that failed inside this one. The recorded life is what separates them.
+    await expect(
+      request(secondLife, { action: "inspect", version: 1, remoteMarker: marker("d") }),
+    ).resolves.toEqual({ state: "interrupted" });
+    await expect(
+      request(firstLife, { action: "inspect", version: 1, remoteMarker: marker("d") }),
+    ).resolves.toMatchObject({
+      state: "failed",
+      stderr: "operation supervisor exited without a result",
+    });
+  });
+
   test("counts only the sessions this life can use and lets a dead one free its slot", async () => {
     const value = fixture();
     const life = (id: string) => ({ ...value.environment, MOIRA_ENVIRONMENT_ID: id });

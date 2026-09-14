@@ -23,6 +23,7 @@ import type {
   WorkspaceTransferHandle,
   WorkspaceTransferService,
 } from "./transfer-service.js";
+import { startOnUse, type WorkspaceLifecycleStarter } from "./start-on-use.js";
 
 const CONNECTOR_MAX_INPUT_BYTES = 4 * 1024 * 1024;
 const CONNECTOR_MAX_OUTPUT_BYTES = 8 * 1024 * 1024;
@@ -250,6 +251,11 @@ export class WorkspaceOperationService {
       audit?: (event: WorkspaceOperationAuditEvent) => Promise<void> | void;
       transfers?: Pick<WorkspaceTransferService, "ingest" | "claimInput" | "release" | "consume">;
       nativeFetcher?: WorkspaceNativeReferenceFetcher;
+      /**
+       * Starts a workspace that is asleep so the work about to reach it does not fail. Absent where
+       * no lifecycle authority is wired, in which case a stopped workspace is refused as before.
+       */
+      lifecycle?: WorkspaceLifecycleStarter;
     },
   ) {}
 
@@ -430,15 +436,20 @@ export class WorkspaceOperationService {
       request,
       policy,
     );
-    const reservation = this.dependencies.repository.reserve({
+    const reserveOnce = () =>
+      this.dependencies.repository.reserve({
+        userId,
+        resourceId: workspaceId,
+        inputBytes,
+        stdoutLimitBytes,
+        stderrLimitBytes,
+        deadlineAt: this.now() + Math.min(timeoutMs, RESERVATION_DEADLINE_MS),
+        policy,
+        now: this.now(),
+      });
+    const reservation = await startOnUse(reserveOnce, this.dependencies.lifecycle, {
       userId,
-      resourceId: workspaceId,
-      inputBytes,
-      stdoutLimitBytes,
-      stderrLimitBytes,
-      deadlineAt: this.now() + Math.min(timeoutMs, RESERVATION_DEADLINE_MS),
-      policy,
-      now: this.now(),
+      workspaceId,
     });
     if (reservation.outcome !== "reserved" || !reservation.operation || !reservation.workspace) {
       const code =
@@ -708,7 +719,9 @@ export class WorkspaceOperationService {
           this.now(),
         );
         if (retained.state === "running") return null;
-        if (retained.state === "absent") {
+        if (retained.state === "absent" || retained.state === "interrupted") {
+          // Nothing of this operation survives in the workspace, either because it was cleaned up
+          // or because the workspace restarted; its stored result is already the whole truth.
           this.dependencies.repository.markRemoteFinalized(userId, operation.id, this.now());
           return null;
         }
@@ -724,6 +737,15 @@ export class WorkspaceOperationService {
         this.now(),
       );
       if (result.state === "running") return null;
+      if (result.state === "interrupted") {
+        // The workspace restarted under the command: its files survived, its process did not.
+        return await this.completeObserved(
+          userId,
+          operation,
+          terminalWithoutCommand("failed"),
+          "workspace_restarted",
+        );
+      }
       if (result.state === "absent") {
         return await this.completeObserved(
           userId,
@@ -849,11 +871,14 @@ export class WorkspaceOperationService {
           shouldCancel ? "remote_cancel_pending" : "remote_running",
           this.now(),
         );
-      } else if (result.state === "absent") {
+      } else if (result.state === "interrupted" || result.state === "absent") {
         const terminal = this.complete(
           operation.userId,
           operation,
-          terminalWithoutCommand(shouldCancel ? "cancelled" : "failed"),
+          terminalWithoutCommand(
+            result.state === "interrupted" ? "failed" : shouldCancel ? "cancelled" : "failed",
+          ),
+          result.state === "interrupted" ? "workspace_restarted" : undefined,
         );
         if (terminal) {
           await this.emit(
@@ -916,8 +941,9 @@ export class WorkspaceOperationService {
     userId: string,
     operation: WorkspaceOperationRecord,
     result: WorkspaceOperationResult,
+    lastOutcome?: string,
   ): Promise<WorkspaceOperationResult | null> {
-    const terminal = this.complete(userId, operation, result);
+    const terminal = this.complete(userId, operation, result, lastOutcome);
     if (terminal) {
       await this.emit("terminal", this.dependencies.repository.getOwned(userId, operation.id)!);
       return terminal;

@@ -182,6 +182,7 @@ docker compose --profile workspaces up -d
 | `WORKSPACE_CLEANUP_DEADLINE_MINUTES`           |      15 | Lifecycle cleanup deadline and result retention             |
 | `WORKSPACE_CLAIM_LEASE_SECONDS`                |      30 | Cross-process reconciliation claim lease                    |
 | `WORKSPACE_RECONCILE_INTERVAL_SECONDS`         |      30 | Background reconciliation interval                          |
+| `WORKSPACE_START_WAIT_SECONDS`                 |     180 | Wait for a workspace an operation started; 5 to 900         |
 | `WORKSPACE_MAX_CONCURRENT_OPERATIONS_PER_USER` |       8 | Concurrent direct operations per user; maximum 32           |
 | `WORKSPACE_MAX_CONCURRENT_OPERATIONS_GLOBAL`   |      32 | Instance-wide concurrent direct operations; maximum 256     |
 | `WORKSPACE_MAX_OPERATION_INPUT_KB`             |    1024 | Direct-operation stdin; maximum 4096 KiB                    |
@@ -465,6 +466,7 @@ WORKSPACE_CREATE_DEADLINE_MINUTES=15
 WORKSPACE_CLEANUP_DEADLINE_MINUTES=15
 WORKSPACE_CLAIM_LEASE_SECONDS=30
 WORKSPACE_RECONCILE_INTERVAL_SECONDS=30
+WORKSPACE_START_WAIT_SECONDS=180
 WORKSPACE_MAX_CONCURRENT_OPERATIONS_PER_USER=8
 WORKSPACE_MAX_CONCURRENT_OPERATIONS_GLOBAL=32
 WORKSPACE_MAX_OPERATION_INPUT_KB=1024

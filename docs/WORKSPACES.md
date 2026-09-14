@@ -85,6 +85,15 @@ desired and observed state, retention policy and lifecycle generation.
 - Start records desired running state before provider contact. While that
   generation remains current, the official GitHub CLI may restore a Codespace
   that stopped outside Moira.
+- An operation addressed to a workspace that is not running starts it and then
+  runs, so work does not fail because the workspace idled out between two calls.
+  The wait for that start is bounded by `WORKSPACE_START_WAIT_SECONDS`; exceeding
+  it is `WORKSPACE_START_TIMEOUT`, which names the wait and asks the caller to
+  retry once the workspace has finished starting. A workspace that cannot start —
+  deleted, rejected or being deleted — is refused by that condition without the
+  provider being asked to start it, and a start never bypasses a concurrency,
+  kind or generation check: the reservation that follows is the same one as
+  before. Explicitly starting a workspace remains available and unchanged.
 - Stop records desired stopped state, advances the generation, cancels or
   reconciles older operations and stops the exact Codespace. It preserves the
   workspace and repository data.
@@ -191,6 +200,17 @@ that never dispatches is reaped within fifteen minutes whatever it asked for. It
 stopped by resuming it with a cancellation request. A command that outlives the
 workspace's idle lifetime stops with the workspace, so the two values belong
 together.
+
+A workspace restart takes every process with it and leaves the operation files
+behind. The workspace records the life of the environment each command is
+dispatched in, and an inspection that finds no result, no live process and a
+different life reports the operation as interrupted; the operation becomes
+terminal with `workspace_restarted` recorded as why it ended, which is distinct
+both from a cancellation the caller asked for and from a command that failed on
+its own. The caller sees that distinction: the operation carries
+`interrupted_by_restart` and the answer is `WORKSPACE_OPERATION_INTERRUPTED`
+rather than the generic command failure. A file operation is not reported this way: it is replayed from its
+journal instead, which is what keeps an interrupted write recoverable.
 
 The fixed connector ceilings are 4 MiB of raw input, 8 MiB for each output
 stream and 15 minutes for a bounded command; a background command's own timer may
@@ -581,6 +601,7 @@ not supplied:
 | `WORKSPACE_CLEANUP_DEADLINE_MINUTES`           |      15 | Lifecycle cleanup deadline and terminal-result retention     |
 | `WORKSPACE_CLAIM_LEASE_SECONDS`                |      30 | Cross-process reconciliation claim lease                     |
 | `WORKSPACE_RECONCILE_INTERVAL_SECONDS`         |      30 | Background reconciliation interval                           |
+| `WORKSPACE_START_WAIT_SECONDS`                 |     180 | Wait for a workspace an operation started; 5 to 900          |
 | `WORKSPACE_MAX_CONCURRENT_OPERATIONS_PER_USER` |       8 | Direct operations per user                                   |
 | `WORKSPACE_MAX_CONCURRENT_OPERATIONS_GLOBAL`   |      32 | Direct operations across the instance                        |
 | `WORKSPACE_MAX_OPERATION_INPUT_KB`             |    1024 | Maximum direct-operation stdin                               |

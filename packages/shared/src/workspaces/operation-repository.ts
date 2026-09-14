@@ -27,7 +27,7 @@ function truncateUtf8(value: string, maximumBytes: number): string {
   return "";
 }
 
-interface ReserveOperationResult {
+export interface ReserveOperationResult {
   outcome: "reserved" | "not_found" | "not_running" | "disabled" | "busy";
   operation?: WorkspaceOperationRecord;
   workspace?: WorkspaceResourceRecord;

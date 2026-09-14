@@ -195,7 +195,9 @@ export class GitHubCodespacesConnector
       maxStderrBytes: request.maxStderrBytes,
       maxRetainedBytes: request.maxRetainedBytes,
     });
-    if (result.state === "absent") throw new Error("Remote operation was not created");
+    if (result.state === "absent" || result.state === "interrupted") {
+      throw new Error("Remote operation was not created");
+    }
     return result;
   }
 
@@ -203,7 +205,9 @@ export class GitHubCodespacesConnector
     credential: string,
     workspace: WorkspaceResourceRecord,
     operation: WorkspaceOperationRecord,
-  ): Promise<WorkspaceOperationResult | { state: "running" } | { state: "absent" }> {
+  ): Promise<
+    WorkspaceOperationResult | { state: "running" } | { state: "absent" } | { state: "interrupted" }
+  > {
     // Only a dispatch can be refused for its session; an inspection of an existing operation
     // cannot, so that answer is not part of this contract.
     const result = await this.operationJob(credential, workspace, operation, {
@@ -221,7 +225,9 @@ export class GitHubCodespacesConnector
     credential: string,
     workspace: WorkspaceResourceRecord,
     operation: WorkspaceOperationRecord,
-  ): Promise<WorkspaceOperationResult | { state: "running" } | { state: "absent" }> {
+  ): Promise<
+    WorkspaceOperationResult | { state: "running" } | { state: "absent" } | { state: "interrupted" }
+  > {
     const result = await this.operationJob(credential, workspace, operation, {
       action: "cancel",
       version: 1,
@@ -644,6 +650,7 @@ export class GitHubCodespacesConnector
     | WorkspaceOperationResult
     | { state: "running" }
     | { state: "absent" }
+    | { state: "interrupted" }
     | { state: "session_unavailable" }
     | { state: "session_limit"; limit: "context" | "sessions" }
   > {
@@ -651,9 +658,12 @@ export class GitHubCodespacesConnector
     if (
       value.state === "running" ||
       value.state === "absent" ||
+      value.state === "interrupted" ||
       value.state === "session_unavailable"
     ) {
-      return { state: value.state as "running" | "absent" | "session_unavailable" };
+      return {
+        state: value.state as "running" | "absent" | "interrupted" | "session_unavailable",
+      };
     }
     if (value.state === "session_limit") {
       const limit = value.limit === "sessions" ? "sessions" : "context";

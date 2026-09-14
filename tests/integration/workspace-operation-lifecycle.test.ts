@@ -12,6 +12,7 @@ import {
   WorkspaceResourceRepository,
   WorkspaceTransferRepository,
   WorkspaceTransferService,
+  WorkspaceResourceError,
   type WorkspaceOperationAuditEvent,
   type WorkspaceOperationOutputRequest,
   type WorkspaceOperationOutputResult,
@@ -35,6 +36,7 @@ const policy: WorkspaceResourcePolicy = {
   cleanupDeadlineMs: 30_000,
   claimLeaseMs: 5_000,
   reconcileIntervalMs: 60_000,
+  startWaitMs: 60_000,
   maxConcurrentOperationsPerUser: 1,
   maxConcurrentOperationsGlobal: 2,
   maxOperationInputBytes: 1024,
@@ -87,7 +89,8 @@ class FakeTransport implements WorkspaceOperationTransport {
   throwInspect = false;
   throwFinalize = false;
   /** Defaults to the execute outcome; set when a test needs inspect to differ from dispatch. */
-  inspectResult: WorkspaceOperationResult | { state: "running" } | null = null;
+  inspectResult: WorkspaceOperationResult | { state: "running" } | { state: "interrupted" } | null =
+    null;
   lastWorkspace: Parameters<WorkspaceOperationTransport["execute"]>[1] | null = null;
   lastRequest: Parameters<WorkspaceOperationTransport["execute"]>[3] | null = null;
   executeGate: Promise<void> | null = null;
@@ -196,10 +199,28 @@ function fixture() {
   let currentNow = now;
   // The settle window is exercised for its attempts, not for real elapsed time.
   const settleDelays: number[] = [];
+  // The lifecycle authority an operation borrows to wake a sleeping workspace. The fake wakes it by
+  // the same state change the real service converges to, and counts what the operation asked for.
+  const lifecycle = {
+    calls: [] as string[],
+    refusal: null as WorkspaceResourceError | null,
+    ensureRunning: jest.fn(async (userId: string, workspaceId: string) => {
+      lifecycle.calls.push(workspaceId);
+      if (lifecycle.refusal) throw lifecycle.refusal;
+      sqlite
+        .prepare(
+          `UPDATE workspaceResource SET state = 'usable', desiredState = 'running',
+           observedState = 'running' WHERE id = ? AND userId = ?`,
+        )
+        .run(workspaceId, userId);
+      return new WorkspaceResourceRepository(sqlite).getOwned(userId, workspaceId)!;
+    }),
+  };
   const service = new WorkspaceOperationService({
     repository,
     transport,
     credentials,
+    lifecycle,
     policy: () => policy,
     now: () => currentNow,
     delay: async (milliseconds) => {
@@ -217,6 +238,7 @@ function fixture() {
     transport,
     credentials,
     service,
+    lifecycle,
     advance: (milliseconds: number) => {
       currentNow += milliseconds;
     },
@@ -1698,30 +1720,6 @@ describe("durable direct workspace operations", () => {
     }
   });
 
-  test("blocks a desired-stopped workspace before credential or connector contact", async () => {
-    const value = fixture();
-    try {
-      value.sqlite
-        .prepare(
-          `UPDATE workspaceResource SET state = 'stopped', desiredState = 'stopped',
-           observedState = 'stopped' WHERE id = 'workspace-1'`,
-        )
-        .run();
-      await expect(
-        value.service.execute("user-1", "workspace-1", {
-          argv: ["true"],
-          cwd: ".",
-          stdin: { kind: "inline", bytes: new Uint8Array() },
-          timeoutMs: 1_000,
-        }),
-      ).rejects.toMatchObject({ code: "WORKSPACE_NOT_RUNNING" });
-      expect(value.credentials.getCredential).not.toHaveBeenCalled();
-      expect(value.transport.executeCalls).not.toHaveBeenCalled();
-    } finally {
-      value.sqlite.close();
-    }
-  });
-
   test("fences dispatch when the kill switch wins after reservation", async () => {
     const value = fixture();
     try {
@@ -1822,6 +1820,93 @@ describe("durable direct workspace operations", () => {
         ),
       ).rejects.toMatchObject({ code: "WORKSPACE_GENERATION_CONFLICT" });
       expect(value.transport.inspectCalls).not.toHaveBeenCalled();
+    } finally {
+      value.sqlite.close();
+    }
+  });
+
+  test("starts a sleeping workspace for the command that needs it and refuses when it cannot", async () => {
+    const value = fixture();
+    const command = {
+      argv: ["pwd"],
+      cwd: ".",
+      stdin: { kind: "inline" as const, bytes: new Uint8Array() },
+      timeoutMs: 1000,
+    };
+    try {
+      const sleep = () =>
+        value.sqlite
+          .prepare("UPDATE workspaceResource SET state = 'stopped', desiredState = 'stopped'")
+          .run();
+
+      // Without a lifecycle authority the same sleeping workspace refuses, which is what separates
+      // "the command woke it" from "it was awake all along".
+      sleep();
+      const withoutLifecycle = new WorkspaceOperationService({
+        repository: value.repository,
+        transport: value.transport,
+        credentials: value.credentials,
+        policy: () => policy,
+      });
+      await expect(
+        withoutLifecycle.execute("user-1", "workspace-1", command),
+      ).rejects.toMatchObject({ code: "WORKSPACE_NOT_RUNNING" });
+      expect(value.credentials.getCredential).not.toHaveBeenCalled();
+      expect(value.transport.executeCalls).not.toHaveBeenCalled();
+
+      const response = await value.service.execute("user-1", "workspace-1", command);
+
+      expect(response.result).toMatchObject({ state: "succeeded" });
+      expect(value.lifecycle.calls).toEqual(["workspace-1"]);
+      expect(value.transport.executeCalls).toHaveBeenCalledTimes(1);
+      expect(
+        value.sqlite.prepare("SELECT state FROM workspaceResource WHERE id = 'workspace-1'").get(),
+      ).toEqual({ state: "usable" });
+
+      // A workspace that is awake is not woken again for the next command.
+      await value.service.execute("user-1", "workspace-1", command);
+      expect(value.lifecycle.calls).toEqual(["workspace-1"]);
+
+      // A workspace that does not become usable in time refuses with that, and the refusal holds no
+      // capacity: no operation row is left behind for it.
+      sleep();
+      const before = value.repository.listOwned("user-1", "workspace-1").length;
+      value.lifecycle.refusal = new WorkspaceResourceError(
+        "WORKSPACE_START_TIMEOUT",
+        "Workspace did not become usable in time",
+        "The workspace was started but was not usable within 180 seconds",
+      );
+      await expect(value.service.execute("user-1", "workspace-1", command)).rejects.toMatchObject({
+        code: "WORKSPACE_START_TIMEOUT",
+      });
+      expect(value.repository.listOwned("user-1", "workspace-1").length).toBe(before);
+    } finally {
+      value.sqlite.close();
+    }
+  });
+
+  test("names a command lost to a workspace restart instead of reporting its own failure", async () => {
+    const value = fixture();
+    try {
+      value.transport.executeResult = { state: "running" };
+      const response = await value.service.execute("user-1", "workspace-1", {
+        argv: ["sleep", "300"],
+        cwd: ".",
+        stdin: { kind: "inline" as const, bytes: new Uint8Array() },
+        background: true,
+      });
+      const operationId = response.operation.id;
+
+      // The workspace restarted: the operation's directory survived, its process did not.
+      value.transport.inspectResult = { state: "interrupted" };
+      const result = await value.service.reconcile("user-1", operationId);
+
+      expect(result).toMatchObject({ state: "failed", exitCode: null });
+      const stored = value.service.get("user-1", operationId)!;
+      expect(stored.state).toBe("failed");
+      // The recorded reason is what a later read uses to tell a restart from a cancellation the
+      // caller asked for and from a command that failed on its own.
+      expect(stored.lastOutcome).toBe("workspace_restarted");
     } finally {
       value.sqlite.close();
     }

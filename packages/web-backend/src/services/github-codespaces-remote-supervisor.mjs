@@ -1594,6 +1594,10 @@ async function execute(request) {
   const cwd = await verifyRepository({ ...request, cwd: session.cwd }, repositoryName);
   await mkdir(dirname(directory), { recursive: true, mode: 0o700 });
   await mkdir(directory, { mode: 0o700 });
+  // The life of the environment the command runs in, so a later inspection can tell a command whose
+  // workspace restarted underneath it from a supervisor that exited without publishing a result.
+  const life = await environmentIdentity();
+  if (life) await writeFile(join(directory, "environment"), life, { mode: 0o600 });
   const pidPath = join(directory, "pid");
   const runnerPidPath = join(directory, "runner-pid");
   const stdoutPath = join(directory, OUTPUT_STREAMS.get("stdout"));
@@ -1743,6 +1747,21 @@ async function readOptionalProcessIdentity(directory, fileName) {
   }
 }
 
+/**
+ * Whether this operation belongs to an earlier life of the environment. A command's processes do not
+ * survive a workspace restart while its state directory does, so a recorded life that is not the
+ * current one is what separates a restart from a supervisor that failed inside this life.
+ */
+async function lostWithEnvironment(directory) {
+  const recorded = await readFile(join(directory, "environment"), "utf8").catch((error) => {
+    if (error?.code === "ENOENT") return null;
+    throw error;
+  });
+  if (!recorded) return false;
+  const current = await environmentIdentity();
+  return Boolean(current) && recorded.trim() !== current;
+}
+
 async function inspect(request) {
   const directory = validateBase(request);
   try {
@@ -1755,6 +1774,7 @@ async function inspect(request) {
     if (runnerIdentity && (await processExists(runnerIdentity))) return { state: "running" };
     const publishedAfterRunnerExit = await readResult(directory);
     if (publishedAfterRunnerExit) return publishedAfterRunnerExit;
+    if (await lostWithEnvironment(directory)) return { state: "interrupted" };
     return {
       state: "failed",
       stdoutBase64: "",
