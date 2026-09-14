@@ -1202,6 +1202,33 @@ if (process.env.MOIRA_TEST_HOLD_FILE_RUNNER === "1") {
     ).resolves.toEqual({ state: "absent" });
   });
 
+  test("accepts a command whose own timer outlives any request", async () => {
+    const value = fixture();
+    const remoteMarker = `moira-op-${"8".repeat(32)}`;
+    // Three hours is far past the bound a single request could wait for; the command itself is
+    // short, so the test observes admission and collection rather than elapsed time.
+    await expect(
+      request(value.environment, {
+        action: "execute",
+        version: 1,
+        remoteMarker,
+        repositoryFullName: "owner/repository",
+        argv: ["/bin/echo", "long"],
+        cwd: ".",
+        stdin: "",
+        timeoutMs: 3 * 60 * 60_000,
+        maxStdoutBytes: 4096,
+        maxStderrBytes: 4096,
+        maxRetainedBytes: 1024 * 1024,
+      }),
+    ).resolves.toEqual({ state: "running" });
+    await expect(inspectUntilTerminal(value.environment, remoteMarker)).resolves.toMatchObject({
+      state: "succeeded",
+      stdout: "long\n",
+      exitCode: 0,
+    });
+  });
+
   test("reports cancellation only after the foreground process group is absent", async () => {
     const value = fixture();
     const remoteMarker = `moira-op-${"2".repeat(32)}`;

@@ -27,6 +27,12 @@ import type {
 const CONNECTOR_MAX_INPUT_BYTES = 4 * 1024 * 1024;
 const CONNECTOR_MAX_OUTPUT_BYTES = 8 * 1024 * 1024;
 const CONNECTOR_MAX_TIMEOUT_MS = 15 * 60_000;
+const CONNECTOR_MAX_BACKGROUND_TIMEOUT_MS = 24 * 60 * 60_000;
+const DEFAULT_BACKGROUND_TIMEOUT_MS = 4 * 60 * 60_000;
+const DEFAULT_BOUNDED_TIMEOUT_MS = 300_000;
+// A reservation that is never dispatched is reaped on this deadline, whatever the command's own
+// lifetime would have been.
+const RESERVATION_DEADLINE_MS = 15 * 60_000;
 const CONNECTOR_MAX_RETAINED_OUTPUT_BYTES = 4 * 1024 * 1024 * 1024;
 const MAX_OUTPUT_RANGE_BYTES = 4 * 1024 * 1024;
 const DEFAULT_RETAINED_OUTPUT_BYTES = 64 * 1024 * 1024;
@@ -67,7 +73,12 @@ export interface WorkspaceOperationAuditEvent {
 function validateRequest(
   request: WorkspaceExecRequest,
   policy: WorkspaceResourcePolicy,
-): { inputBytes: number; stdoutLimitBytes: number; stderrLimitBytes: number } {
+): {
+  inputBytes: number;
+  stdoutLimitBytes: number;
+  stderrLimitBytes: number;
+  timeoutMs: number;
+} {
   if (
     request.argv.length === 0 ||
     request.argv.length > 128 ||
@@ -107,14 +118,27 @@ function validateRequest(
   ) {
     throw new WorkspaceResourceError("WORKSPACE_POLICY_LIMIT", "Operation input exceeds its limit");
   }
-  if (
-    request.timeoutMs < 1 ||
-    request.timeoutMs >
-      Math.min(policy.maxOperationMs ?? CONNECTOR_MAX_TIMEOUT_MS, CONNECTOR_MAX_TIMEOUT_MS)
-  ) {
+  // A bounded command is killed at its timeout inside one request's horizon; a background command
+  // is bounded by a workspace-side lifetime instead. The two ceilings are different numbers for
+  // different jobs, and the refusal says which one the caller met.
+  const ceilingMs = request.background
+    ? Math.min(
+        policy.maxBackgroundOperationMs ?? DEFAULT_BACKGROUND_TIMEOUT_MS,
+        CONNECTOR_MAX_BACKGROUND_TIMEOUT_MS,
+      )
+    : Math.min(policy.maxOperationMs ?? CONNECTOR_MAX_TIMEOUT_MS, CONNECTOR_MAX_TIMEOUT_MS);
+  // A caller that names no duration gets the one its mode implies: a bounded command's ordinary
+  // default, a background command its whole ceiling. Otherwise background would mean "returns
+  // immediately and is killed in five minutes".
+  const timeoutMs =
+    request.timeoutMs ?? (request.background ? ceilingMs : DEFAULT_BOUNDED_TIMEOUT_MS);
+  if (timeoutMs < 1 || timeoutMs > ceilingMs) {
     throw new WorkspaceResourceError(
       "WORKSPACE_POLICY_LIMIT",
       "Operation timeout exceeds its limit",
+      request.background
+        ? `A background command may run for at most ${Math.floor(ceilingMs / 3_600_000)} hours.`
+        : `A command may run for at most ${Math.floor(ceilingMs / 1000)} seconds; start it in the background to run longer.`,
     );
   }
   const stdoutLimitBytes = request.maxStdoutBytes ?? policy.maxOperationStdoutBytes ?? 1024 * 1024;
@@ -134,7 +158,7 @@ function validateRequest(
       "Operation output exceeds its limit",
     );
   }
-  return { inputBytes, stdoutLimitBytes, stderrLimitBytes };
+  return { inputBytes, stdoutLimitBytes, stderrLimitBytes, timeoutMs };
 }
 
 export class WorkspaceOperationService {
@@ -328,14 +352,17 @@ export class WorkspaceOperationService {
 
   private async reserve(userId: string, workspaceId: string, request: WorkspaceExecRequest) {
     const policy = this.dependencies.policy();
-    const { inputBytes, stdoutLimitBytes, stderrLimitBytes } = validateRequest(request, policy);
+    const { inputBytes, stdoutLimitBytes, stderrLimitBytes, timeoutMs } = validateRequest(
+      request,
+      policy,
+    );
     const reservation = this.dependencies.repository.reserve({
       userId,
       resourceId: workspaceId,
       inputBytes,
       stdoutLimitBytes,
       stderrLimitBytes,
-      deadlineAt: this.now() + request.timeoutMs,
+      deadlineAt: this.now() + Math.min(timeoutMs, RESERVATION_DEADLINE_MS),
       policy,
       now: this.now(),
     });
@@ -364,7 +391,7 @@ export class WorkspaceOperationService {
       await this.emit("terminal", this.dependencies.repository.getOwned(userId, operation.id)!);
       throw error;
     }
-    return { policy, stdoutLimitBytes, stderrLimitBytes, operation, workspace };
+    return { policy, stdoutLimitBytes, stderrLimitBytes, timeoutMs, operation, workspace };
   }
 
   private async executePrepared(
@@ -372,7 +399,14 @@ export class WorkspaceOperationService {
     request: WorkspaceExecRequest,
     prepared: Awaited<ReturnType<WorkspaceOperationService["reserve"]>>,
   ): Promise<WorkspaceOperationResponse> {
-    const { policy, stdoutLimitBytes, stderrLimitBytes, operation, workspace } = prepared;
+    const {
+      policy,
+      stdoutLimitBytes,
+      stderrLimitBytes,
+      timeoutMs: resolvedTimeoutMs,
+      operation,
+      workspace,
+    } = prepared;
     let terminalResult: WorkspaceOperationResult | null = null;
     let terminalEmitted = false;
     let remoteContacted = false;
@@ -426,6 +460,9 @@ export class WorkspaceOperationService {
           randomUUID(),
           dispatchNow + Math.max(policy.claimLeaseMs, 60_000),
           dispatchNow,
+          // The command's own lifetime starts when it actually starts, so an undispatched
+          // reservation is reaped on the short deadline it was reserved with.
+          dispatchNow + resolvedTimeoutMs,
         )
       ) {
         if (claimedInput) this.dependencies.transfers?.release(claimedInput);
@@ -439,6 +476,7 @@ export class WorkspaceOperationService {
       if (claimedInput) await this.dependencies.transfers!.consume(claimedInput);
       const result = await this.dependencies.transport.execute(credential, workspace, operation, {
         ...materializedRequest,
+        timeoutMs: resolvedTimeoutMs,
         maxStdoutBytes: stdoutLimitBytes,
         maxStderrBytes: stderrLimitBytes,
         maxRetainedBytes: retainedOutputBytes(policy),
@@ -456,9 +494,13 @@ export class WorkspaceOperationService {
           operation.resourceGeneration,
           this.now(),
         );
-        terminalResult = await settleAfterDispatch(this.dependencies.delay, () =>
-          this.reconcile(userId, operation.id),
-        );
+        // A background command is expected to outlive this call, so waiting for it to settle would
+        // only delay the running answer the caller asked for.
+        terminalResult = request.background
+          ? null
+          : await settleAfterDispatch(this.dependencies.delay, () =>
+              this.reconcile(userId, operation.id),
+            );
         // Whichever path stored the outcome has already emitted its terminal event.
         terminalEmitted = terminalResult !== null;
       } else {
@@ -794,9 +836,19 @@ export class WorkspaceOperationService {
       result,
       operation.stdoutLimitBytes,
       operation.stderrLimitBytes,
-      now + this.dependencies.policy().cleanupDeadlineMs,
+      now + this.resultRetentionMs(operation),
       now,
     );
+  }
+
+  /**
+   * A result stays collectible at least as long as the command was allowed to take. A command that
+   * may run for hours cannot be one whose outcome disappears minutes after it ends, and an ordinary
+   * bounded command keeps the cleanup window it always had.
+   */
+  private resultRetentionMs(operation: WorkspaceOperationRecord): number {
+    const cleanupDeadlineMs = this.dependencies.policy().cleanupDeadlineMs;
+    return Math.max(cleanupDeadlineMs, operation.deadlineAt - operation.createdAt);
   }
 
   private projectRetainedResult(

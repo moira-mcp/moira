@@ -159,7 +159,10 @@ rather than as the command's own failure.
 
 When background reconciliation observes a terminal command, it records only
 bounded result metadata in SQLite and retains the remote stdout/stderr file for
-the configured cleanup window. Caller reconciliation can read the same result
+the configured cleanup window, or for as long as the command itself was allowed
+to run when that is longer. A result therefore stays collectible for at least the
+command's own permitted duration, which is what makes an unattended background
+command safe to collect late. Caller reconciliation can read the same result
 repeatedly during that window. Only after the window expires may background
 cleanup finalize the remote operation directory; failed finalization remains a
 durable, idempotently retried obligation.
@@ -175,8 +178,24 @@ operation, requires the named workspace to own that command, and returns
 A read that starts at or past the end of a stream returns no bytes and the
 stream's current size, which is how a caller finds where a stream ends.
 
+A command may also be started in the background. It is the same operation, the
+same single dispatch and the same resume path; only its ceiling and its deadline
+differ. It is admitted against `WORKSPACE_MAX_BACKGROUND_OPERATION_HOURS` instead
+of `WORKSPACE_MAX_OPERATION_SECONDS`, its deadline is that lifetime so background
+reconciliation observes it rather than cancelling it, and the dispatching call
+returns as soon as the remote runner is proven alive, without the settle window a
+bounded command uses. A caller that names no duration receives the one its mode
+implies: 300 seconds for a bounded command, the whole ceiling for a background
+one. The lifetime is granted when the command starts running, so a reservation
+that never dispatches is reaped within fifteen minutes whatever it asked for. Its output is readable by range while it runs, and it is
+stopped by resuming it with a cancellation request. A command that outlives the
+workspace's idle lifetime stops with the workspace, so the two values belong
+together.
+
 The fixed connector ceilings are 4 MiB of raw input, 8 MiB for each output
-stream and 15 minutes per command. Runtime policy may lower these ceilings but
+stream and 15 minutes for a bounded command; a background command's own timer may
+run up to a day. A remote job request is bounded separately and never waits for a
+command to end. Runtime policy may lower these ceilings but
 cannot raise them. An argv contains 1–128 non-empty arguments; each argument is
 at most 16 KiB, and the relative cwd is at most 4096 bytes.
 
@@ -299,10 +318,11 @@ action result. Failed, cancelled and timed-out commands and rejected file edits 
 returned as tool errors (`isError: true`) that keep the operation identity and any
 bounded output. A pending or `reconcile_pending` envelope is not a success: calling
 the same tool again with only `workspace_id` and `operation_id` reconciles that
-operation without dispatching a second command, write, upload or download.
+operation without dispatching a second command, write, upload or download. The
+same resume call with `cancel: true` stops a command instead of reporting it.
 
 `workspace_exec` accepts argv as data, a repository-relative `cwd`,
-`timeout_seconds` (default 300), optional per-stream output limits and exactly one optional stdin
+`timeout_seconds` (default 300), `background`, optional per-stream output limits and exactly one optional stdin
 form: `stdin_text` (UTF-8) or `stdin_file`, a native ChatGPT file reference. The
 registry publishes `_meta["openai/fileParams"]` for `stdin_file` and for
 `workspace_upload.file`; inside a reference only `file_id` and `download_url` are
@@ -516,13 +536,14 @@ not supplied:
 | `WORKSPACE_CLEANUP_DEADLINE_MINUTES`           |      15 | Lifecycle cleanup deadline and terminal-result retention     |
 | `WORKSPACE_CLAIM_LEASE_SECONDS`                |      30 | Cross-process reconciliation claim lease                     |
 | `WORKSPACE_RECONCILE_INTERVAL_SECONDS`         |      30 | Background reconciliation interval                           |
-| `WORKSPACE_MAX_CONCURRENT_OPERATIONS_PER_USER` |       2 | Direct operations per user                                   |
-| `WORKSPACE_MAX_CONCURRENT_OPERATIONS_GLOBAL`   |      20 | Direct operations across the instance                        |
+| `WORKSPACE_MAX_CONCURRENT_OPERATIONS_PER_USER` |       8 | Direct operations per user                                   |
+| `WORKSPACE_MAX_CONCURRENT_OPERATIONS_GLOBAL`   |      32 | Direct operations across the instance                        |
 | `WORKSPACE_MAX_OPERATION_INPUT_KB`             |    1024 | Maximum direct-operation stdin                               |
 | `WORKSPACE_MAX_OPERATION_STDOUT_KB`            |    1024 | Stdout carried by one answer                                 |
 | `WORKSPACE_MAX_OPERATION_STDERR_KB`            |     256 | Stderr carried by one answer                                 |
 | `WORKSPACE_MAX_RETAINED_OUTPUT_MB`             |      64 | Retained output per stream before a command is stopped       |
-| `WORKSPACE_MAX_OPERATION_SECONDS`              |     900 | Maximum direct-operation duration                            |
+| `WORKSPACE_MAX_OPERATION_SECONDS`              |     900 | Maximum bounded-command duration                             |
+| `WORKSPACE_MAX_BACKGROUND_OPERATION_HOURS`     |       4 | Maximum background-command duration                          |
 | `WORKSPACE_MAX_TRANSFER_FILE_MB`               |       4 | Maximum native or file payload; maximum 4 MiB                |
 | `WORKSPACE_MAX_TRANSFER_TOTAL_MB_PER_USER`     |     100 | Live private-transfer bytes per user                         |
 | `WORKSPACE_MAX_TRANSFER_TOTAL_MB_GLOBAL`       |    1024 | Live private-transfer bytes across the instance              |

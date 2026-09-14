@@ -30,6 +30,7 @@ const FILE_RESULT_ACTIONS = new Set([
   "apply_patch",
   "download",
 ]);
+const MAX_JOB_WAIT_MS = 15 * 60_000;
 const MAX_FILE_BYTES = 4 * 1024 * 1024;
 const MAX_FILE_PATH_BYTES = 4096;
 const MAX_PATCH_SUMMARY_BYTES = 4 * 1024;
@@ -604,7 +605,9 @@ export class GitHubCodespacesConnector
         resourceName: workspace.providerResourceName,
         job,
       },
-      Number(job.timeoutMs ?? this.requestTimeoutMs) + 120_000,
+      // A dispatch returns as soon as the remote runner is proven alive, so the budget covers the
+      // session and the handshake, never the command's own lifetime.
+      Math.min(Number(job.timeoutMs ?? this.requestTimeoutMs), MAX_JOB_WAIT_MS) + 120_000,
     )) as { value?: string };
     if (typeof result.value !== "string" || result.value.includes(credential)) {
       throw new Error("Codespace operation transport is unavailable");

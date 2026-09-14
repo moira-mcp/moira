@@ -134,7 +134,14 @@ running, keeps its own exit code and keeps its own `stderr`, and the result repo
 complete size and whether the payload was truncated. The whole output stays in the workspace until
 the operation is cleaned up, and any range of it is read with `workspace_read`. A command is stopped
 for its volume only if its retained output reaches the workspace ceiling, which is reported as that
-rather than as the command's own failure. Supply at most one stdin form: `stdin_text` for UTF-8 text or `stdin_file` for a native
+rather than as the command's own failure. For work that outlives one request, such as a full build or
+test suite, pass `background: true`: the call returns a running operation at once, the command keeps
+running in the workspace under a much larger ceiling, its output is readable by range while it runs,
+and its result is collected later with the same `operation_id`, which stays collectible for at least
+as long as the command was allowed to run. Omitting `timeout_seconds` gives a bounded command 300
+seconds and a background command its whole ceiling. Stop either kind by calling the tool
+with only `workspace_id`, `operation_id` and `cancel: true`. A command stops with its workspace, so a
+long one needs a workspace whose idle lifetime outlasts it. Supply at most one stdin form: `stdin_text` for UTF-8 text or `stdin_file` for a native
 ChatGPT file reference; the file's bytes reach the process without base64 in the conversation.
 Failed, timed-out and cancelled commands and rejected file edits are returned as tool errors that
 keep `operation_id` and the available output. A command that finishes quickly returns its terminal

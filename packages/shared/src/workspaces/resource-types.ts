@@ -106,6 +106,8 @@ export interface WorkspaceResourcePolicy {
   /** Disk a single command's retained output may occupy in the workspace before it is stopped. */
   maxRetainedOutputBytes?: number;
   maxOperationMs?: number;
+  /** How long a command started in the background may run in the workspace. */
+  maxBackgroundOperationMs?: number;
   maxTransferFileBytes?: number;
   maxTransferBytesPerUser?: number;
   maxTransferBytesGlobal?: number;
@@ -212,12 +214,18 @@ export interface WorkspaceExecRequest {
   argv: readonly string[];
   cwd: string;
   stdin: WorkspaceByteSource;
-  timeoutMs: number;
+  /** Absent means the mode's own default: an ordinary bounded duration, or the background ceiling. */
+  timeoutMs?: number;
   /** Response payload bounds; the command is not stopped for reaching them. */
   maxStdoutBytes?: number;
   maxStderrBytes?: number;
   /** Retained-output ceiling, resolved from policy before dispatch. */
   maxRetainedBytes?: number;
+  /**
+   * Starts the command so that it keeps running past any single request. It is the same operation,
+   * collected later by its own identity; only its ceiling and its deadline differ.
+   */
+  background?: boolean;
 }
 
 export interface WorkspaceOperationResult {

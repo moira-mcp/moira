@@ -972,7 +972,8 @@ describe("workspace MCP adapter", () => {
     });
     expect(
       parseWorkspaceToolParams("workspace_exec", { workspace_id: WORKSPACE_ID, argv: ["ls"] }),
-    ).toEqual({ workspace_id: WORKSPACE_ID, argv: ["ls"], cwd: ".", timeout_seconds: 300 });
+      // A bounded command names no duration: the service applies the default its mode implies.
+    ).toEqual({ workspace_id: WORKSPACE_ID, argv: ["ls"], cwd: ".", background: false });
     expect(
       parseWorkspaceToolParams("workspace_download", {
         workspace_id: WORKSPACE_ID,

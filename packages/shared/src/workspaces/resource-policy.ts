@@ -39,15 +39,17 @@ export function evaluateWorkspaceResourcePolicy(
   // multiple of it, so a single user cannot exhaust the instance alone.
   const maxActivePerUser = integer("WORKSPACE_MAX_ACTIVE_PER_USER", 4, 1, 64);
   const maxActiveGlobal = integer("WORKSPACE_MAX_ACTIVE_GLOBAL", 16, 1, 1024);
+  // A command started in the background holds its slot for as long as it runs, so the shipped
+  // per-user ceiling has to leave room for ordinary work beside one or two long commands.
   const maxConcurrentOperationsPerUser = integer(
     "WORKSPACE_MAX_CONCURRENT_OPERATIONS_PER_USER",
-    2,
+    8,
     1,
     32,
   );
   const maxConcurrentOperationsGlobal = integer(
     "WORKSPACE_MAX_CONCURRENT_OPERATIONS_GLOBAL",
-    20,
+    32,
     1,
     256,
   );
@@ -105,6 +107,17 @@ export function evaluateWorkspaceResourcePolicy(
     1,
     8192,
   );
+  // A command started in the background is bounded by its own ceiling, which is a workspace-side
+  // lifetime rather than a response deadline and is therefore expressed in hours. Its shipped value
+  // matches the longest idle lifetime a workspace can be given, since a command stops with its
+  // workspace; its minimum of one hour already exceeds any bounded-command ceiling.
+  const backgroundOperationMs = scaledInteger(
+    "WORKSPACE_MAX_BACKGROUND_OPERATION_HOURS",
+    4,
+    3_600_000,
+    1,
+    24,
+  );
   if (retainedOutputBytes < Math.max(maxOperationStdoutBytes, maxOperationStderrBytes)) {
     throw new Error(
       "WORKSPACE_MAX_RETAINED_OUTPUT_MB cannot be lower than a configured response payload bound",
@@ -154,6 +167,7 @@ export function evaluateWorkspaceResourcePolicy(
     maxOperationStderrBytes,
     maxRetainedOutputBytes: retainedOutputBytes,
     maxOperationMs: scaledInteger("WORKSPACE_MAX_OPERATION_SECONDS", 900, 1000, 1, 900),
+    maxBackgroundOperationMs: backgroundOperationMs,
     maxTransferFileBytes,
     maxTransferBytesPerUser,
     maxTransferBytesGlobal,

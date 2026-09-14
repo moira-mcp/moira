@@ -641,7 +641,19 @@ const workspaceExecStartSchema = z
       .min(1)
       .max(128),
     cwd: z.string().max(4096).default("."),
-    timeout_seconds: z.number().int().min(1).max(900).default(300),
+    // Absent means the mode's own default: an ordinary bounded duration, or the whole background
+    // ceiling. The upper value is that ceiling; a bounded command is refused above its own, smaller
+    // one with a message naming it.
+    timeout_seconds: z
+      .number()
+      .int()
+      .min(1)
+      .max(24 * 60 * 60)
+      .optional(),
+    background: z
+      .boolean()
+      .default(false)
+      .describe("Keep the command running past this request; collect it later by operation_id"),
     max_stdout_bytes: z
       .number()
       .int()
@@ -660,7 +672,9 @@ const workspaceExecStartSchema = z
 export const workspaceExecRequestSchema = z.union([
   workspaceExecStartSchema.extend({ stdin_text: z.string().optional() }),
   workspaceExecStartSchema.extend({ stdin_file: workspaceNativeFileSchema }),
-  workspaceOperationResumeSchema,
+  // Resuming a command also stops one: the same operation identity, asked to end instead of to
+  // report. A background command is stopped this way.
+  workspaceOperationResumeSchema.extend({ cancel: z.boolean().default(false) }),
 ]);
 
 export const workspaceStatRequestSchema = z.union([

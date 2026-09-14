@@ -176,7 +176,7 @@ export interface WorkspaceToolServices {
   > | null;
   operation: Pick<
     WorkspaceOperationService,
-    "execute" | "executeNativeReference" | "get" | "reconcile" | "readOutput"
+    "execute" | "executeNativeReference" | "get" | "reconcile" | "readOutput" | "cancel"
   > | null;
   file: Pick<
     WorkspaceFileService,
@@ -666,6 +666,17 @@ export async function executeWorkspaceTool<Name extends WorkspaceToolName>(
           : operationResult(operation, null);
       }
       if (name === "workspace_exec") {
+        const input = params as Extract<
+          WorkspaceToolParams["workspace_exec"],
+          { operation_id: string }
+        >;
+        if (input.cancel) {
+          const cancelled = await services.operation.cancel(userId, input.operation_id);
+          return operationResult(
+            projectOperation(cancelled),
+            cancelled.result ? projectExecResult(cancelled.result) : null,
+          );
+        }
         const result = await services.operation.reconcile(userId, params.operation_id);
         const operation = services.operation.get(userId, params.operation_id);
         if (!operation) return errorResult("WORKSPACE_NOT_FOUND");
@@ -720,13 +731,17 @@ export async function executeWorkspaceTool<Name extends WorkspaceToolName>(
         const request = {
           argv: input.argv,
           cwd: input.cwd,
-          timeoutMs: input.timeout_seconds * 1000,
+          // Absent stays absent: the service applies the default the requested mode implies.
+          ...(input.timeout_seconds !== undefined
+            ? { timeoutMs: input.timeout_seconds * 1000 }
+            : {}),
           ...(input.max_stdout_bytes !== undefined
             ? { maxStdoutBytes: input.max_stdout_bytes }
             : {}),
           ...(input.max_stderr_bytes !== undefined
             ? { maxStderrBytes: input.max_stderr_bytes }
             : {}),
+          background: input.background,
         };
         const response =
           "stdin_file" in input

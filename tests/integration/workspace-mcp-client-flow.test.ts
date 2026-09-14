@@ -66,6 +66,7 @@ const policy: WorkspaceResourcePolicy = {
   maxConcurrentOperationsPerUser: 2,
   maxConcurrentOperationsGlobal: 4,
   maxOperationMs: 60_000,
+  maxBackgroundOperationMs: 4 * 60 * 60_000,
   maxTransferFileBytes: 4 * 1024 ** 2,
 };
 
@@ -679,6 +680,75 @@ describe("ChatGPT-compatible workspace MCP with real domain services", () => {
     expect((await second.call("workspace_get", args)).structuredContent).toMatchObject({
       workspace: { state: "deleted" },
     });
+  });
+
+  it("runs a command past the call that started it, watches it, and stops one on request", async () => {
+    const { fixture, mcp } = await setup();
+    const workspaceId = await createWorkspace(mcp);
+    const args = { workspace_id: workspaceId };
+    const markerPath = join(fixture.repositoryPath, "background-done.txt");
+
+    const started = await mcp.call("workspace_exec", {
+      ...args,
+      argv: [
+        process.execPath,
+        "-e",
+        "process.stdout.write('progress\\n');setTimeout(()=>{require('node:fs').writeFileSync('background-done.txt','done');process.stdout.write('finished\\n')},400)",
+      ],
+      cwd: ".",
+      // Far past anything a single call could wait for; the command is short so the test is fast.
+      timeout_seconds: 3 * 60 * 60,
+      background: true,
+    });
+    // The call returns while the command is still running, with no result and no waiting.
+    expect(operation(started).state).toBe("running");
+    expect(started.structuredContent).toMatchObject({ result: null });
+    const operationId = operation(started).operation_id;
+
+    // Its output is readable while it runs, by the command's own identity.
+    let progress = "";
+    for (let attempt = 0; attempt < 80 && !progress.includes("progress"); attempt++) {
+      const range = await mcp.call("workspace_read", {
+        ...args,
+        operation_id: operationId,
+        stream: "stdout",
+        offset: 0,
+        length: 1024,
+      });
+      progress = (range.structuredContent as { output: { text: string } }).output.text;
+      if (!progress.includes("progress")) {
+        await new Promise((resolveWait) => setTimeout(resolveWait, 25));
+      }
+    }
+    expect(progress).toContain("progress");
+
+    const collected = await finish(
+      mcp,
+      "workspace_exec",
+      workspaceId,
+      await mcp.call("workspace_exec", { ...args, operation_id: operationId }),
+    );
+    expect(collected.structuredContent).toMatchObject({
+      result: { state: "succeeded", stdout: "progress\nfinished\n", exit_code: 0 },
+    });
+    expect(readFileSync(markerPath, "utf8")).toBe("done");
+    // One dispatch, however many times it was collected.
+    expect(fixture.jobs.filter((job) => job.action === "execute")).toHaveLength(1);
+
+    const running = await mcp.call("workspace_exec", {
+      ...args,
+      argv: [process.execPath, "-e", "setInterval(()=>{},1000)"],
+      cwd: ".",
+      timeout_seconds: 3 * 60 * 60,
+      background: true,
+    });
+    expect(operation(running).state).toBe("running");
+    const stopped = await mcp.call("workspace_exec", {
+      ...args,
+      operation_id: operation(running).operation_id,
+      cancel: true,
+    });
+    expect(operation(stopped).state).toBe("cancelled");
   });
 
   it("recovers lost write and exec responses from reopened SQLite without redispatch or foreign access", async () => {

@@ -20,13 +20,14 @@ describe("workspace resource policy", () => {
       maxActivePerUser: 4,
       maxActiveGlobal: 16,
       persistentRetentionMs: 30 * 24 * 60 * 60_000,
-      maxConcurrentOperationsPerUser: 2,
-      maxConcurrentOperationsGlobal: 20,
+      maxConcurrentOperationsPerUser: 8,
+      maxConcurrentOperationsGlobal: 32,
       maxOperationInputBytes: 1024 * 1024,
       maxOperationStdoutBytes: 1024 * 1024,
       maxOperationStderrBytes: 256 * 1024,
       maxRetainedOutputBytes: 64 * 1024 * 1024,
       maxOperationMs: 900_000,
+      maxBackgroundOperationMs: 4 * 60 * 60_000,
       maxTransferFileBytes: 4 * 1024 ** 2,
       maxTransferBytesPerUser: 100 * 1024 ** 2,
       maxTransferBytesGlobal: 1024 * 1024 ** 2,
@@ -66,6 +67,13 @@ describe("workspace resource policy", () => {
     expect(() => policy({ WORKSPACE_MAX_OPERATION_INPUT_KB: "4097" })).toThrow(/between/);
     expect(() => policy({ WORKSPACE_MAX_OPERATION_STDOUT_KB: "8193" })).toThrow(/between/);
     expect(() => policy({ WORKSPACE_MAX_OPERATION_SECONDS: "901" })).toThrow(/between/);
+    // A background ceiling is expressed in hours and its smallest accepted value already exceeds
+    // the largest bounded-command ceiling, so the two cannot be configured into conflict.
+    expect(policy({ WORKSPACE_MAX_BACKGROUND_OPERATION_HOURS: "1" }).maxBackgroundOperationMs).toBe(
+      3_600_000,
+    );
+    expect(() => policy({ WORKSPACE_MAX_BACKGROUND_OPERATION_HOURS: "0" })).toThrow(/between/);
+    expect(() => policy({ WORKSPACE_MAX_BACKGROUND_OPERATION_HOURS: "25" })).toThrow(/between/);
     // A command's retained output is disk, not an answer: it must leave room for the payload the
     // answer carries, and it is far larger than that payload by default.
     expect(policy().maxRetainedOutputBytes).toBeGreaterThan(policy().maxOperationStdoutBytes!);
