@@ -128,6 +128,36 @@ describe("progress image grants", () => {
     expect(await service.redeem("opaque")).toBeNull();
   });
 
+  test("stores the view and resolves hide/collapse to blocks; unknown ids are refused before a token exists", async () => {
+    const f = fixture();
+    const service = new ProgressImageService(f.repository, f.tokens, () => "https://moira.test");
+    const minted = await service.mint("execution", "owner", {
+      view: "process",
+      hide: ["work"],
+      collapse: ["work", "work"],
+    });
+    expect(minted.options).toMatchObject({ view: "process", hide: ["work"], collapse: ["work"] });
+    expect(JSON.parse(f.currentGrant()!.optionsJson!).options).toMatchObject({
+      view: "process",
+      hide: ["work"],
+      collapse: ["work"],
+    });
+
+    const fresh = fixture();
+    const refusing = new ProgressImageService(fresh.repository, fresh.tokens);
+    await expect(refusing.mint("execution", "owner", { hide: ["nowhere"] })).rejects.toThrow(
+      /hide names no block or node.*nowhere/,
+    );
+    expect(fresh.currentGrant()).toBeNull();
+    await expect(
+      new ProgressImageService(fixture().repository, fixture().tokens).mint(
+        "execution",
+        "owner",
+        {},
+      ),
+    ).resolves.toMatchObject({ options: { view: "cards", hide: [], collapse: [] } });
+  });
+
   test("does not consume a grant when rendering fails and rejects stale revision", async () => {
     const f = fixture();
     const failing = new ProgressImageService(

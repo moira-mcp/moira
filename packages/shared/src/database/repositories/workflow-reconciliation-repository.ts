@@ -697,7 +697,8 @@ export class WorkflowReconciliationRepository {
         const result = this.sqlite
           .prepare(
             `UPDATE workflow SET slug = ?, name = ?, description = ?, version = ?, graph = ?,
-             visibility = ?, deleted = 1, deletedAt = ?, deletedBy = ?, updatedAt = ?
+             visibility = ?, deleted = 1, deletedAt = ?, deletedBy = ?, updatedAt = ?,
+             revision = revision + 1
              WHERE id = ? AND userId = ?`,
           )
           .run(
@@ -730,7 +731,8 @@ export class WorkflowReconciliationRepository {
         .prepare(
           `UPDATE workflow SET slug = ?, name = ?, description = ?, version = ?, graph = ?,
              visibility = ?, deleted = 0, deletedAt = NULL, deletedBy = NULL,
-             isValid = ?, validationErrors = ?, validatedAt = ?, updatedAt = ?
+             isValid = ?, validationErrors = ?, validatedAt = ?, updatedAt = ?,
+             revision = revision + 1
            WHERE id = ? AND userId = ?`,
         )
         .run(
@@ -756,8 +758,8 @@ export class WorkflowReconciliationRepository {
       .prepare(
         `INSERT INTO workflow
           (id, userId, slug, name, description, version, graph, visibility, deleted,
-           createdAt, updatedAt, isValid, validationErrors, validatedAt)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)`,
+           createdAt, updatedAt, revision, isValid, validationErrors, validatedAt)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, 0, ?, ?, ?)`,
       )
       .run(
         workflowId,

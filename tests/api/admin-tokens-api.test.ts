@@ -4,25 +4,26 @@
  */
 
 import { describe, test, expect, beforeAll } from "@jest/globals";
-import { getTestBaseUrl, getAdminCredentials } from "../utils/test-config.js";
+import { getTestBaseUrl } from "../utils/test-config.js";
+import {
+  createTestUserViaApi,
+  formatSessionCookie,
+  getAdminSessionCookie,
+  signInUser,
+} from "../utils/mcp-auth.js";
 
 const BASE_URL = getTestBaseUrl();
-const ADMIN_CREDENTIALS = getAdminCredentials();
 
 const TEST_USER_A = {
   email: `admin-tokens-a-${Date.now()}@example.com`,
   password: "TestPass123!",
   name: "Token User A",
-  acceptedTermsAt: new Date().toISOString(),
-  acceptedNotRussianResidentAt: new Date().toISOString(),
 };
 
 const TEST_USER_B = {
   email: `admin-tokens-b-${Date.now()}@example.com`,
   password: "TestPass123!",
   name: "Token User B",
-  acceptedTermsAt: new Date().toISOString(),
-  acceptedNotRussianResidentAt: new Date().toISOString(),
 };
 
 let adminCookie: string;
@@ -37,58 +38,17 @@ let tokenIdB1: string; // user B token
 async function createAndVerifyUser(
   userData: typeof TEST_USER_A,
 ): Promise<{ userId: string; cookie: string }> {
-  const signUpRes = await fetch(`${BASE_URL}/api/auth/sign-up/email`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(userData),
-  });
-  const signUpData = (await signUpRes.json()) as any;
-  if (!signUpData?.user) {
-    throw new Error(`Failed to create user: ${JSON.stringify(signUpData)}`);
-  }
-
-  const verifyResponse = await fetch(
-    `${BASE_URL}/api/admin/users/${signUpData.user.id}/verify-email`,
-    {
-      method: "POST",
-      headers: { Cookie: adminCookie },
-    },
+  const { userId } = await createTestUserViaApi(
+    BASE_URL,
+    userData.email,
+    userData.password,
+    userData.name,
   );
-  if (verifyResponse.status !== 200) {
-    throw new Error(`Failed to verify user email: ${verifyResponse.status}`);
-  }
-
-  const featuresResponse = await fetch(`${BASE_URL}/api/features`);
-  const features = (await featuresResponse.json()) as {
-    data: { features: { accountApproval: boolean } };
-  };
-  if (features.data.features.accountApproval) {
-    const approvalResponse = await fetch(
-      `${BASE_URL}/api/admin/users/${signUpData.user.id}/approve`,
-      {
-        method: "POST",
-        headers: { Cookie: adminCookie },
-      },
-    );
-    if (approvalResponse.status !== 200) {
-      throw new Error(`Failed to approve user: ${approvalResponse.status}`);
-    }
-  }
-
-  const loginRes = await fetch(`${BASE_URL}/api/auth/sign-in/email`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email: userData.email, password: userData.password }),
-  });
-  const cookie = loginRes.headers.get("set-cookie") || "";
-  if (loginRes.status !== 200 || !cookie) {
-    throw new Error(`Failed to sign in admitted user: ${loginRes.status}`);
-  }
-
-  return {
-    userId: signUpData.user.id,
-    cookie,
-  };
+  const cookie = formatSessionCookie(
+    BASE_URL,
+    await signInUser(BASE_URL, userData.email, userData.password),
+  );
+  return { userId, cookie };
 }
 
 async function createToken(cookie: string, name: string, expiresIn?: string): Promise<string> {
@@ -105,13 +65,7 @@ async function createToken(cookie: string, name: string, expiresIn?: string): Pr
 }
 
 beforeAll(async () => {
-  // Login as admin first (needed for user verification)
-  const adminLoginRes = await fetch(`${BASE_URL}/api/auth/sign-in/email`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(ADMIN_CREDENTIALS),
-  });
-  adminCookie = adminLoginRes.headers.get("set-cookie") || "";
+  adminCookie = formatSessionCookie(BASE_URL, await getAdminSessionCookie(BASE_URL));
 
   // Create test users
   const userA = await createAndVerifyUser(TEST_USER_A);

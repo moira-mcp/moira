@@ -40,11 +40,21 @@ frontend/src/
 │   │   ├── AppSidebar.tsx       # Config-driven sidebar with shadcn/ui
 │   │   ├── UserMenu.tsx         # User dropdown (theme, language, logout)
 │   │   └── WorkflowViewerPlaceholder.tsx  # Workflow detail page container
-│   ├── nodes/                   # React Flow node components
-│   │   └── CompactNode.tsx      # Unified compact node (~120x40px) for all types
 │   ├── execution/              # Execution display components
-│   │   ├── ExecutionInspector.tsx    # Unified inspector with DI (fetchExecution prop, editable flag)
+│   │   ├── ExecutionInspector.tsx    # Run page with DI (fetchExecution prop, editable/canAnswer flags)
 │   │   └── ExecutionErrorHistory.tsx # Error log with collapsible entries, error badges
+│   ├── flow/                    # Flow page: the definition as a process, edited in place
+│   │   ├── editing.tsx / model.ts / modes.ts        # Edit set (apply, export diff), run-less projection, modes
+│   │   ├── SplitView.tsx / RegistryPanel.tsx        # Blocks against their steps; the variable registry
+│   │   └── EditControls.tsx                         # In-place editors (block text, transitions, owner, node text)
+│   ├── run/                     # Run page: the execution as a process
+│   │   ├── LanesView.tsx / CanvasView.tsx / OutlineView.tsx / RouteView.tsx  # The four modes
+│   │   ├── BlockDetailPanel.tsx / VariablesPanel.tsx / StepList.tsx        # Panel tabs
+│   │   ├── variableRows.ts / variableTree.tsx                              # Variables grouping model; shared rows, groups, tree, leaf editor
+│   │   ├── StepCard.tsx / TabBadge.tsx                                      # One step card for every list; the panel badge
+│   │   ├── RunCursor.tsx / Walkthrough.tsx / Guidance.tsx / status.tsx      # Cursor, guide, notes, status vocabulary
+│   │   ├── model.ts / route.ts / arcs.ts / layout.ts                        # Pure view helpers; ELK layout
+│   │   └── modes.ts / nodeTypeStyle.tsx
 │   └── workflow/                # Workflow management
 │       ├── WorkflowExplorer.tsx # Workflow list with FilterBar + DataListView + useDebounce
 │       ├── WorkflowGraph.tsx    # React Flow visualization with layout controls
@@ -61,6 +71,7 @@ frontend/src/
 ├── pages/
 │   ├── Dashboard.tsx            # Home page with stat cards, Quick Start, recent ExecutionCards
 │   ├── Workflows.tsx            # Workflow explorer + viewer
+│   ├── FlowPage.tsx             # Flow page: the workflow definition as a process, edit mode for owners
 │   ├── Executions.tsx           # Execution history (ExecutionCard list/grid)
 │   ├── ExecutionInspectorPage.tsx   # User execution inspector wrapper
 │   ├── Settings.tsx             # User settings (single scrollable page)
@@ -94,14 +105,14 @@ frontend/src/
 │   ├── AuthProvider.tsx         # Better Auth UI provider
 │   └── better-auth-client.ts    # Auth client config
 ├── hooks/
+│   ├── useResource.ts           # Page-local data store with last-good retention
 │   ├── useWorkflowData.ts       # Workflow API integration
 │   ├── useNotes.ts              # Notes API integration
 │   └── useTheme.ts              # Theme management
 ├── services/
 │   └── api-client.ts            # HTTP client
 └── utils/
-    ├── node-factory.ts          # React Flow node registry
-    └── layout-algorithm.ts      # Dagre layout
+    └── workflow-transformer.ts  # Per-node presentation data for the graph
 ```
 
 ## Design Token System
@@ -154,7 +165,9 @@ Higher-level composable components in `src/components/`:
 | ServerPagination  | `ServerPagination.tsx`  | Server-side pagination (total-based or cursor-based), matches DataTable style                       |
 | EmptyState        | `empty-state.tsx`       | Centered icon + title + description + action CTA                                                    |
 | InlineError       | `inline-error.tsx`      | Alert destructive with optional retry                                                               |
-| PageLoader        | `page-loader.tsx`       | Skeleton stat cards + table rows placeholder                                                        |
+| PageLoader        | `page-loader.tsx`       | Skeleton stat cards + table rows placeholder; only before a page's first data                       |
+| RouteSkeleton     | `route-skeleton.tsx`    | In-layout skeleton while a lazily loaded page's code arrives                                        |
+| DiagramSkeleton   | `route-skeleton.tsx`    | Quiet surface while the technical graph chunk arrives (flow and run pages)                          |
 | ConfirmDialog     | `confirm-dialog.tsx`    | AlertDialog wrapper with async onConfirm, loading state, ReactNode description                      |
 
 DataTable subcomponents: `column-header.tsx` (sortable headers), `pagination.tsx` (page nav + i18n props + aria-labels), `toolbar.tsx` (search + reset).
@@ -195,6 +208,7 @@ Application routes:
 ```
 / (protected)                      - Dashboard (home page)
 /workflows (protected)             - Workflow explorer + viewer
+/workflows/:id (protected)         - Flow page (FlowPage.tsx); also /workflows/:handle/:slug
 /executions (protected)            - Execution history
 /artifacts (protected)             - User artifacts management
 /settings (protected)              - User settings (single scrollable page with all sections)
@@ -202,7 +216,7 @@ Application routes:
 /admin/users (protected)           - User management (PageShell + DataListView + UserCard)
 /admin/users/:id (protected)       - User detail and security management
 /admin/executions (protected)      - Admin executions monitoring (PageShell + DataListView + ExecutionCard)
-/admin/executions/:id (protected)  - Admin execution inspector
+/admin/executions/:id (protected)  - Admin run page (same component as /executions/:id)
 /admin/audit-log (protected)       - Audit log viewer (PageShell + AuditLogCard + total-based pagination)
 /admin/settings (protected)        - Unified settings (Definitions, Values, Maintenance tabs)
 /admin/admin-settings (protected)  - Redirects to /admin/settings
@@ -363,9 +377,64 @@ Execution history at `/executions` with filtering, sorting, and pagination.
 
 Yellow alert banner displayed above the execution list when locked executions exist. Shows count ("N locked execution(s)") with individual items listing workflow name and lock duration. Items collapse to 3 by default with expand/collapse toggle. User page shows own locked executions; admin page shows all locked executions with user email. Component: `LockedExecutionsWidget.tsx`, props: `admin` (boolean), `refreshKey` (number).
 
-### ExecutionInspector Component
+### Flow page (FlowPage component)
 
-Unified execution detail component used by both user and admin views via dependency injection.
+`/workflows/:id` and `/workflows/:handle/:slug` show one workflow definition as the process it
+declares (`pages/FlowPage.tsx`).
+
+**Data:** the workflow detail (`apiClient.getWorkflow`, whose `fileInfo.revision` is the
+definition revision the page saves against) and the saved definition's derived process
+(`apiClient.getWorkflowProcess`), both held in `useResource` stores (the detail through
+`useWorkflowDetail`, the process keyed by workflow id and refreshed when the revision changes): a
+refetch keeps the current value on screen with a "Refreshing…" indicator (`flow-pending`, in the
+header row or the no-process bar), the page loader appears only before the first data of a
+workflow (a move to another workflow through breadcrumbs or a subgraph link is a first load and
+shows nothing of the previous one), and a failed refetch keeps the content and reports once
+through a toast. While the page holds unsaved edits it re-derives the process in
+the browser with the engine's `deriveProcess` (the `@mcp-moira/workflow-engine/process` subpath),
+so the diagnostics it shows are the ones the server's validation would raise. The modes render a
+run-less projection (`components/flow/model.ts`: every block pending, no route, no cursor, no run
+title) through the run page's mode components; the page's context (`EditingProvider` with
+`definition`) makes the shared status chips and icons, the run's no-content sentences and the run
+mode notes disappear, and the modes read their notes from `pages.flowPage.modeGuide`. Derivation
+diagnostics are also shown on the offending block or step (`DiagnosticBadge`), and the registry
+panel edits a whole declaration as JSON Schema besides its type, description and default.
+
+**URL state:** `view` (`outline | canvas | lanes | split | graph`, default outline; `graph` is the
+only mode of a workflow without `progress`), `block`, `guide` (walkthrough step), `edit` (`1` turns
+on edit mode; ignored for non-owners).
+
+**Layout:** the toolbar (back, name and version, edit toggle with its hint for owners, the owner
+actions: copy for public flows, visibility, share, delete); a header row with the mode tabs and
+"Explain this page"; the edit panel while editing (the edit count, which is the export diff's
+entry count so a value typed back to what is stored is not an edit; discard, which clears every
+recorded edit; save; the loaded revision; the export diff as flow-file path / before / after;
+the server's refusal message); the process diagnostics inline; the mode filling the main area; a
+panel beside it (under it on a phone) with the **Block** tab (`BlockDetailPanel`, a step click opens the graph mode on that node) and the
+**Variables** tab (`RegistryPanel`: the registry on the shared variable rows — name, type badge
+and default in the row, description and the whole declaration as JSON Schema in the opened row;
+in edit mode the type select, default input, description and schema editors sit in the same
+places, a row's control removes the entry and a form below declares one). The graph mode mounts `WorkflowGraph` (its `focusRequest`
+prop brings a chosen node into view) with its controls beside `WorkflowSidebar`, as the former
+workflow detail page did.
+
+**Editing** (`components/flow/editing.tsx`): the edit set covers block label and summary,
+connection labels with a loop's cause and exit, node ownership, node text (directive, completion
+condition, message, expressions) and registry entries; `applyEdits` yields the edited definition,
+`exportDiff` the changed flow-file entries. Editors: `BlockNameEditor` / `BlockSummaryEditor`
+(outline and split), `TransitionEditor` (outline), `OwnerSelect` and `NodeTextEditor` (split),
+`RegistryPanel` (variables tab; a default and a whole declaration are parsed as JSON before they
+are applied). The save calls
+`apiClient.updateWorkflow(id, edited, fileInfo.revision)` (`PUT /api/workflows/:id`); a 409 shows
+the conflict text and a 400 the server's message, both keeping the edits; a success clears them and
+reloads the detail and then the process for the new revision, the previous picture staying mounted
+through both. The walkthrough (`Walkthrough`, generic over the page's modes) explains block,
+step, evidence, loop, editing and the modes.
+
+### Run page (ExecutionInspector component)
+
+The execution page shows one run as the process its workflow declares. One component serves the
+user and admin routes through dependency injection.
 
 **Routes:**
 
@@ -378,7 +447,8 @@ Unified execution detail component used by both user and admin views via depende
 interface ExecutionInspectorProps {
   executionId: string;
   fetchExecution: (id: string) => Promise<ExecutionData>;
-  editable?: boolean;
+  editable?: boolean; // context editing (per-path saves)
+  canAnswer?: boolean; // answering the waiting step; defaults to editable
   backRoute: string;
   showOwnerInfo?: boolean;
 }
@@ -386,48 +456,189 @@ interface ExecutionInspectorProps {
 
 **Dependency Injection:**
 
-- User view: `fetchExecution` → `apiClient.getExecution`, `editable` → true (context saved via `apiClient.updateExecutionContextPath`)
-- Admin view: `fetchExecution` → `apiClient.getAdminExecution`, `editable` omitted (read-only), `showOwnerInfo` → true
+- User view: `fetchExecution` → `apiClient.getExecution`, `editable` → true (context saved via
+  `apiClient.updateExecutionContextPath` with the detail's `metadataRevisions.context`)
+- Admin view: `fetchExecution` → `apiClient.getAdminExecution`, `editable` omitted (read-only
+  context), `canAnswer` → true, `showOwnerInfo` → true
+
+**Data:** the execution detail, the workflow definition (step text and input schemas for the
+block panel, editable variable list for the Variables panel) and the run projection from
+`apiClient.getExecutionProgress(id, at?)`. Every run fact — block statuses, pass counts, the
+route, the variables — comes from the projection; the page derives none of it. When a route cursor
+is set the page keeps the whole-run projection (for the scrubber) and fetches the projection at
+the cursor for the modes.
+
+**URL state:** `view` (`lanes | canvas | outline | route`, default lanes), `block` (selected
+block), `at` (route cursor, a visit sequence number), `guide` (walkthrough step). Unknown values
+fall back to defaults; navigation compares against the live URL so a duplicate change pushes no
+history entry.
 
 **Layout:**
 
-- Compact toolbar (single line): back button, execution ID (copy), workflow name, status badge, current node (clickable), action buttons
-- Left panel (50%): Workflow graph visualization with lazy loading via React.lazy + Suspense
-- Right panel (50%): Tabbed panel with Context, Errors, and Steps tabs
+- Compact toolbar (single line): back button, execution ID (copy), workflow name, status badge,
+  current node (focuses the node graph), owner info (admin), lock button (user view, running
+  executions), refresh (spins, `data-pending="true"`, while an
+  execution or progress request is in flight), error badge. A refresh that fails keeps the run on
+  screen and reports through a toast; a progress refetch that fails keeps the projection already on
+  screen (the "unavailable" banner is a first-load state only). The Locks tab holds its history in a
+  `useResource` store: opening it again refreshes behind the list (`locks-panel` with
+  `data-pending`), the spinner (`locks-loading`) shows only before the first list.
+- With a process view: a header row with the mode tabs, the route cursor (when a route is
+  recorded), the status legend and the "Explain this page" button; the mode fills the remaining
+  width and height. Without one (a workflow without `progress`): the technical node graph fills
+  the main area.
+- Panel (beside the run on `lg` and wider, stacked under it below, capped at 38 vh on a phone) with
+  tabs: **Block** (default when a process view exists), **Variables**, **Errors**,
+  **Steps**, **Graph** (the technical node graph, present only with a process view) and **Locks**.
 
-**Toolbar Elements:**
+**Modes** (`components/run/`):
 
-- Back button with tooltip
-- Execution ID (8 chars, click to copy with visual feedback)
-- Workflow name with Tooltip for full ID
-- Status badge with icon (includes "🔒 Locked" badge when execution is locked)
-- Current node button (focuses graph on node via fitView)
-- Owner info (admin view only, truncated with Tooltip)
-- Lock button (user view only, visible when execution is "running" — opens lock dialog)
-- Fullscreen button (opens expanded context modal)
-- Refresh button
+- `LanesView` — task header (title, goal, facts), the rail of blocks in process order with the
+  current block pinned ("you are here"), pass counts as secondary text, struck-through skipped blocks, return
+  arcs beneath the rail nested by span (`arcs.ts`), and the selected block's run content. Every
+  connector away from the rail — returns, forward links that skip a block — is thin and muted with
+  no label at rest; the source lane names each one in a chip (`chips.ts`: `laneChipsOf` =
+  `returnsOf` + `skipsOf`, `canvasChipsOf` adds `hubExitsOf`). Transitions of one kind into one
+  target fold into one chip carrying every label and every connector key (`keys`; a hub bundle has
+  one key, the source's first transition into the hub); `TransitionChipView` in `focus.tsx` renders
+  `↩ n name` (`×k` when it folds k transitions) / `↗ n name` with the labels, and a single return's
+  cause and exit, as the tooltip; `data-connector-count` is the number of connectors the chip
+  lights, which equals `k` except for a hub bundle (k labels, one bundled edge). Hovering a chip lights every connector it folds; hovering a
+  connector lights that one. Pills of connectors lit together take one row each beyond the
+  outermost of them (`pillRows` in `arcs.ts`, `PILL_ROW`), so a folded chip or a selected lane
+  never stacks pills, and the arc and link bands reserve a row for every pill the source with the
+  most connectors can light (`arcsHeight`, `linksHeight`), so the column stays inside the rail; on the canvas every parallel forward transition and every self-loop of a
+  block has its own line and label row (`PARALLEL_STEP`). Chips stack in a column inside the
+  lane card and every card is as tall as the block with the most chips (`laneCardHeight`,
+  `LANE_CHIP_ROW`), so no chip spills out.
+  `TransitionFocusProvider` holds the lit transition: hovering a chip or a connector lights it
+  (`data-focused="true"`) and renders its label pill (`data-arc-label`, `data-link-label`); the
+  block the reader selected (`selectedBlockId`) keeps all of its connectors lit while nothing is
+  hovered. The
+  horizontal rail is a React Flow instance on the shared `DiagramViewport` (`LanesRail`): lane cards
+  are fixed nodes in one row (`laneLayout.ts`: positions, the link band above, the arc band below,
+  the viewport height), return arcs and forward links are custom edges over the same geometry, and
+  the rail opens at full size on the first lane (definition) or centred on the current lane (run)
+  and pans and zooms instead of scrolling the page; on a phone (the `useIsMobile` hook) it becomes
+  a vertical stepper with the same chips. Forward transitions that skip a block are thin muted
+  links above the rail (`buildLinks`, `linkGeometry`); hubs receive them like any block. The arc
+  and link bands are one line per nesting depth (`ARC_STEP`, `LINK_STEP`, with `ARC_TAIL` and
+  `LINK_TAIL` for the arrowhead and a lit pill).
+- `runBlocks` (`run/model.ts`) joins the process blocks with the run's projection; a rendered
+  summary that equals the block's description or its name (an untemplated `content.summary`, or
+  one that renders to the label) is dropped so the views show it once, under the title.
+- `CanvasView` — React Flow over an ELK layered layout (`layout.ts`, `elkjs` loaded on first use):
+  forward edges between blocks adjacent in process order as elbows with label pills (several
+  transitions between one pair take their own line and label row, `PARALLEL_STEP`; from
+  `PARALLEL_CHIP_MIN` transitions the pills give way to one "forward" chip in the source block,
+  `parallelForwardsOf` in `chips.ts`, that names the target and the count and lights the bundle
+  on hover; the gap between ranks is at least `MIN_RANK_SEP` and grows to the widest label pill
+  drawn at rest plus clearance, `rankSeparation`, with the pill capped at `LABEL_MAX_WIDTH` by the
+  layout metric and the renderer alike, so no pill runs under the next card), forward edges
+  that skip a block above and cycles as dashed lanes below, both thin and muted with no pill at
+  rest; a transition into a hub block (many
+  sources) is a muted bundled edge (`kind: "hub"`, one per source and hub, routed through the
+  inter-rank gaps and a channel per hub into one port on the hub's left edge, `hubPort`). Every
+  cycle, skip and hub exit is a chip in its source block (the shared `chips.ts` model and
+  `TransitionChipView`), and the same `TransitionFocusProvider` lights the edge (`data-focused`)
+  and renders its pill (`data-edge-label`) on hover or for the selected block; the block height
+  estimate (`estimateBlockHeight`) reserves a row per two chips, counted with `canvasChipsOf`. Mounts through `DiagramViewport` and opens at the fitted zoom
+  (never below three quarters) on the first block with the block row in the upper third, or
+  centred on the current block on a run.
+- `OutlineView` — numbered sections with status, description, run content, block writes at the
+  cursor, transitions in words with cycle cause and exit, and expandable steps (`StepList`).
+- `RouteView` — the whole route grouped into stretches per block (`route.ts`), return markers,
+  per-block visit counts at the cursor, exit labels from transitions, adjustment visits with their
+  actor; clicking a visit sets the cursor; visits after the cursor are dimmed.
+
+**Diagram substrate** (`components/diagram/`): `DiagramViewport` wraps `ReactFlowProvider` +
+`ReactFlow` with the one interaction policy every diagram shares (`interaction.ts`,
+`diagramInteractionProps(kind)`: a plain wheel pans freely, `zoomOnScroll` off, pinch zooms, drag
+pans, nodes fixed, page scroll prevented under the pointer, an opening fit clamped to a readable
+zoom per kind — canvas three quarters to full size, lanes full size, graph down to its floor), one
+zoom/fit control cluster, and an `onReady` callback that fires after an explicit fit so a diagram
+can place its opening viewport; `placement.ts` (`useOpeningPlacement`) places once on ready and
+again only when the followed block or lane changes, never on a plain refetch. The canvas, the
+lanes rail and the technical `WorkflowGraph` all mount through it. Block cards carry no shadow
+(border, fill and ring carry state); floating surfaces keep theirs. Scroll containers of the
+process pages use the `scrollbar-thin` utility (`styles/globals.css`), a thin theme-coloured
+scrollbar in both themes.
+
+The panel's tab strip (`run-panel-tabs`) is the shadcn tabs' `line` variant with `flex-wrap`:
+content-sized triggers with a `title` from `pages.runPage.tabHints.*`, wrapping to a second row on
+a narrow panel instead of scrolling; counters and warnings are `TabBadge` (`components/run/TabBadge.tsx`:
+a count or a `!`, `role="status"` with an accessible label; `errors-count-badge`,
+`variables-waiting-badge`, `locks-active-badge`).
+
+**Step cards:** every list of steps — the block panel and the outline (`StepList`), the flow
+page's split view — renders `StepCard` (`components/run/StepCard.tsx`): a card on one grid with an
+optional position column, a type badge of one width and height (`NodeTypeTag` with `fixed`,
+`data-step-badge`), and a body whose title (`data-step-title`) and first line start at the same
+point in every card; evidence chips and connection chips (`stepConnections` in `model.ts`:
+internal → the sibling step, external → the owning block's name, `data-edge-kind`) wrap inside the
+body; slots take the split view's owner select, diagnostics and editor and the run page's
+"current" marker. Pass counts are secondary text everywhere (`PassCount` in `status.tsx`: `×n` in
+muted small type on the lane card's phase line, the canvas card's footer, the outline's contents
+list, the block panel's facts line `block-detail-facts` and the route mode's segment headers
+`segment-entry`); the status chip carries none, and the route mode's figures are one muted summary
+line (`route-summary`).
+
+**Panels:** `BlockDetailPanel` (status, description, run content, a facts line with the step count,
+pass count and visits, transitions, steps as cards with the
+evidence fields each schema demands — declared `globalInputs` merged from the variable registry —
+and a click that focuses the node graph); `VariablesPanel` (the one variables surface, see
+below, with the **answer form** for the waiting step: fields from the step's input schema with
+enum selects, booleans, numbers, JSON textareas, submit gated on required fields, the server's
+refusal shown inline); `ExecutionErrorHistory`; `StepProgression`; the lazily loaded
+`WorkflowGraph` with a stable init callback and a focus request that fits the view to a node.
+
+**Answering the waiting step:** `apiClient.answerExecutionStep(id, input, expectedRevision)` calls
+`POST /api/executions/:id/answer`; the page reloads the execution and the projection afterwards
+whether the answer was accepted or refused, because a rejected answer is still an engine step that
+advances the revision.
+
+**Walkthrough** (`Walkthrough.tsx`): six anchored steps (process, agent, evidence, loop, route,
+explore), each with a selector per mode and a fallback mode, the current block and panel tab it
+needs; the highlight is a ring on the target element. **Guidance** callouts introduce every mode
+and panel; on a phone they fold to their title.
 
 **Lock Dialog:**
 
 Two-phase dialog (input → result). Input phase: reason text field (required), Lock/Cancel buttons. Result phase: shows lockId and the PIN for sharing with MCP agents — this is the only place the PIN is shown, as it is stored hashed and not retrievable afterward. Submit enabled when reason is non-empty and not in loading state. Enter key submits.
 
-**Tabbed Right Panel:**
+**Variables tab:** `VariablesPanel` (`components/run/VariablesPanel.tsx`) is the run page's one
+variables surface; it is always present and is the default tab when the run has no process view.
+Rows come from the pure grouping model `variableRows` (`components/run/variableRows.ts`): the
+declared variables (every registry name plus any undeclared top-level context key) in name order
+with the registry description, the server's editability (`editableVariableNames`, the policy at
+the current node), and — when the run has a process view — the projection's history and
+adjusted mark; the value shown is the projection's while a cursor is set (a note says so) and the
+context's otherwise, and an edit always targets the context. A node's outputs form a group under
+its node id; a global the node wrote is one declared row and is hidden from the node's group; a
+scope holding only such globals is no group. The panel shows, in order: the answer form when the
+run waits and the page may answer; a tree-aware filter (name / value / both) with the fullscreen
+button; the **Global variables** group and the **Node outputs** group, both collapsible
+(`variables-group-<id>`, `data-open`) with a secondary count; the adjustment count as secondary
+text. A row (`VariableRow` in `variableTree.tsx`: one grid for name, value and trailing controls)
+shows a leaf as an input in edit mode with dirty-gated save and cancel and a modal for long text,
+or as read-only text; objects and arrays open as a tree of rows with alphabetically sorted keys,
+editable per path. The secondary history count opens the list of changes (seq, writing node,
+value, adjusted) under the row. Saves go through `apiClient.updateExecutionContextPath` with the
+execution's step revision and context revision, then the execution and projection reload;
+read-only when `editable` is not set (the admin view). Test ids: `context-filter-input`,
+`context-filter-field-*`, `context-var-<path>`, `context-node-toggle-<path>`,
+`context-var-input|save|cancel|expand|modal-textarea-<path>`, `variable-history-<name>`,
+`data-history-of`, `variables-cursor-note`, `context-fullscreen-button`.
 
-Three tabs via shadcn `Tabs` component (four in admin view):
+**Errors tab:** ExecutionErrorHistory component showing execution errors with timestamps, collapsible entries, error type badges.
 
-- **Context** (default): `ContextVariableEditor` — a compact variable tree grouped into exactly two sections with count badges, alphabetically ordered: "Global variables" (declared in the workflow `variableRegistry`, readable by bare name) and "Node outputs" (per-node-id local scopes, referenced as `node-id.name`). Under the explicit output-scope model every context value is one of these two, so there is no undeclared/"appeared during execution" group. A global that a node wrote also lives in that node's local scope; it is shown once under Global and hidden from the node's tree (so a promoted global is never duplicated). A node-local scope whose only contents are globals the node wrote (e.g. the start node's seeded scope) renders empty after de-duplication and is omitted. A text filter (key / value / both) is tree-aware: a nested match is shown together with its ancestor path. The description (resolved from the `variableRegistry`, shown for globals) appears as a tooltip on the name. Object/array values render as an expandable tree with alphabetically sorted keys; leaf values are editable at any nesting level. Leaf fields are always in edit mode; Save/Cancel are present but enabled only after a change (dirty state); empty values render at normal height with a placeholder. Long/multiline strings show an expand button that opens a modal multi-line editor. Editing is per-path: only the value at the edited path is sent via `apiClient.updateExecutionContextPath`, then the view reloads authoritative server state. Editable when the `editable` prop is true; read-only in admin view. Fullscreen button opens a Dialog modal hosting the same editor.
-- **Errors**: ExecutionErrorHistory component showing execution errors with timestamps, collapsible entries, error type badges.
-- **Steps**: StepProgression component showing workflow nodes with completed/current/pending states. Clickable nodes focus the workflow graph.
-- **Locks**: Lock history cards showing all lock records (active/unlocked). Each card displays reason, node ID, status badge, timestamps (created/unlocked). Badge with count indicator on tab when locks exist.
-  - **Admin view**: "Unlock" button on active locks for admin override.
-  - **User view (owner)**: "Unlock" button for owner's own locks (no PIN required in web UI). The PIN is shown only once in the Lock Dialog result phase at creation time; lock history cards do not display it.
+**Steps tab:** `StepProgression` lists the definition's nodes on the Block tab's `StepCard`s (`StepCardList`), ordered by the process blocks' node order and then the rest, each marked done when the shown route (up to the cursor) visited it (`data-step-done`) or current; clicking a card focuses the node in the graph.
 
-**Context Fullscreen Modal:**
+**Locks tab:** Lock history cards showing all lock records (active/unlocked). Each card displays reason, node ID, status badge, timestamps (created/unlocked). Badge with count indicator on tab when locks exist. "Unlock" on active locks: admin override in the admin view, the owner's own unlock (no PIN) in the user view. The PIN is shown only once in the Lock Dialog result phase at creation time; lock history cards do not display it.
 
-- Opens via Maximize2 button in Context tab
-- Wide modal: `w-[90vw] max-w-5xl min-w-[800px]`
-- Hosts the same `ContextVariableEditor` (per-path save inside the tree)
-- Read-only mode when `editable` is not set (admin view)
+**Variables fullscreen:** the fullscreen button in the panel's filter bar opens a wide Dialog
+(`w-[90vw] sm:max-w-5xl`) hosting the same `VariablesPanel` with the same props (no guidance, no
+second fullscreen button); read-only when `editable` is not set.
 
 **ExecutionErrorHistory Component:**
 
@@ -440,19 +651,16 @@ Three tabs via shadcn `Tabs` component (four in admin view):
 
 **Implementation:**
 
-- `components/execution/ExecutionInspector.tsx` - unified component
+- `components/execution/ExecutionInspector.tsx` - the page (toolbar, panel, dialogs, graph wrapper)
+- `components/run/` - modes, panels, cursor, walkthrough, pure view helpers and layout
 - `pages/ExecutionInspectorPage.tsx` - user view wrapper
 - `pages/AdminExecutionInspectorPage.tsx` - admin view wrapper
 - `components/execution/ExecutionErrorHistory.tsx` - error history display
 
 **Error Node Highlighting:**
 
-WorkflowGraph receives `errorNodeIds` prop computed from execution errors. CompactNode displays error styling:
-
-- Red border (`border-red-500`)
-- Red ring highlight (`ring-red-500`)
-- Red background tint (`bg-red-500/20`)
-- AlertCircle icon
+WorkflowGraph receives `errorNodeIds` prop computed from execution errors; a step card whose
+node is in it carries a destructive ring (`ring-destructive`) around the card.
 
 ### Artifacts Page
 
@@ -639,14 +847,14 @@ Implementation: `pages/InviteAccept.tsx`
 
 **Shared Access Indicators:**
 
-WorkflowCard and WorkflowDetail show "Shared" badge when `accessType === "shared"`:
+WorkflowCard and FlowPage show "Shared" badge when `accessType === "shared"`:
 
 - Purple badge with Users icon
 - Indicates workflow was shared via invite link
 
 **Ownership Check:**
 
-`WorkflowDetail` uses `fileInfo.accessType === "owner"` to determine ownership. Delete and visibility buttons are only shown for owned workflows.
+`FlowPage` uses `fileInfo.accessType === "owner"` to determine ownership. Delete, visibility and edit mode are only shown for owned workflows.
 
 ### Workflow Card Layout
 
@@ -836,7 +1044,8 @@ Supports `embedded` prop for rendering without header inside `AdminSettingsUnifi
 GET    /api/health                     // Backend status (requires auth)
 GET    /api/status                     // System status (requires auth)
 GET    /api/workflows                  // List all workflows with visibility
-GET    /api/workflows/:id              // Get workflow detail
+GET    /api/workflows/:id              // Get workflow detail (fileInfo.revision = definition revision)
+PUT    /api/workflows/:id              // Replace an owned definition against expectedRevision
 GET    /api/workflows/:id/raw          // Get raw workflow JSON
 POST   /api/workflows/:id/validate     // Validate workflow
 ```
@@ -1046,46 +1255,70 @@ interface WorkflowViewerProps {
 }
 ```
 
-## React Flow Features
+## The technical node graph (`WorkflowGraph`)
 
-### Available Components
+The graph is the process view's detailed layer, not a separate rendering:
 
-- **Background**: Grid pattern with configurable gap and color
-- **Controls**: Zoom controls and fit view functionality
-- **MiniMap**: Node overview with custom node colors
-- **Node Types**: Unified CompactNode component (~120x40px) for all node types with color-coded borders and smart edge routing
-
-### Layout Controls
-
-```typescript
-// Layout algorithm options
-interface LayoutOptions {
-  direction: "TB" | "BT" | "LR" | "RL";
-  spacing: number;
-  algorithm: "dagre" | "manual" | "force";
-}
-```
-
-### Canvas Control Buttons
-
-WorkflowGraph provides layout control buttons at bottom-left:
-
-- **Fit View**: Centers and fits all nodes in viewport
-- **Vertical**: Applies top-to-bottom (TB) dagre layout
-- **Horizontal**: Applies left-to-right (LR) dagre layout
-
-```typescript
-// WorkflowGraph control buttons
-<Button onClick={handleFitView}>Fit View</Button>
-<Button onClick={() => changeLayout({ direction: "TB" })}>Vertical</Button>
-<Button onClick={() => changeLayout({ direction: "LR" })}>Horizontal</Button>
-```
-
-Implementation uses ReactFlowProvider wrapper pattern with useReactFlow() hook for fitView API access.
+- **Model** (`components/run/graphModel.ts`): `graphModel(workflow, blocks)` builds one `GraphStep`
+  per workflow node (the same `StepInfo` and `stepConnections` the split view uses, owned by the
+  block the derivation names) and one `GraphLink` per connection, classified `forward` (inside a
+  block), `external` (into a later block) or `return` (a derived cycle transition's edge, or into
+  an earlier block). `definitionBlocks(workflow)` derives run-less blocks in the browser when a
+  caller passes none; both pages pass their own `blocks` so a run's groups carry status.
+- **Layout** (`components/workflow/graphLayout.ts`): `layoutGraph(model, direction, measuredHeights?)`
+  lays each block's steps out with ELK layered (model order, in-block forward edges only) and stacks
+  the block groups in process order — top to bottom, or left to right for Horizontal — with the
+  steps no block owns in one flat set after the groups. Card heights are estimated
+  (`estimateStepHeight`, which turns the evidence and the chips a card carries — its connections
+  plus, generously, every edge arriving at it — into rows) for the first pass; `GraphMeasuredHeights` (mounted inside the viewport,
+  reading React Flow's store) reports the measured heights, and a second pass with them runs when
+  any differs from its estimate, so cards never overlap. A block's box grows by a corridor under
+  its cards (to their right in a row) holding one lane per routed edge, and by an entry side wide
+  enough for the approach columns of the edges arriving at it.
+- **Routing** (`routeLinks`, pure): a forward link inside a block is drawn straight (smooth step).
+  Everything else is a `GraphRoute` (stub, lane waypoints, side): a return inside a block leaves its
+  source, runs along the block's bottom corridor and enters its target from before it; a link into
+  a later block runs in the gap after its source's block; a return to an earlier block runs in the
+  gap, climbs the margin before the groups and comes in through the target block's corridor. Every
+  corridor is sized before the groups are placed for the lanes it must hold (`laneCounts`,
+  `corridorSize`): `GRAPH_MARGIN` and `GROUP_GAP` are floors, the margin grows with the returns and
+  a block's entry side holds the approach columns of its arrivals. Lanes sharing a corridor are offset by
+  `LANE_STEP` (`MARGIN_LANE_STEP` in the margin, which holds one lane per return) and centred in
+  the room reserved for them. `GraphEdgeView` draws a routed
+  edge as a rounded polyline (`routedPoints`, `roundedPath`); its label is shown while it is lit,
+  on the first lane run.
+- **Rendering** (`components/workflow/graphNodes.tsx`): every node type is registered to
+  `StepNodeView` (the shared `StepCard` with hidden handles; the per-type registration keeps React
+  Flow's `react-flow__node-<type>` classes), `block-group` to `BlockGroupView` (the shared status
+  surface, `data-graph-group`, `data-block-id`), and one `graph` edge type. Groups sit at z-index
+  −1 and cards at 2; edges carry 0, which React Flow adds to their nodes' level, so the edge layer
+  shares the cards' level and paints first — above the groups, below the cards. A line is drawn at
+  rest only where it runs straight from card to card, and it keeps its label pill. Every edge that
+  needs a corridor — a return, a link into another block, a link ELK laid backwards — is not drawn
+  at rest: it is named in both cards, by the connection chip in its source and by an arrival chip
+  (`data-arrival`, dashed, with the source's block when it is another block) in its target, and it
+  is drawn with its label while either chip, either card or the edge itself is hovered, everything
+  else dimming meanwhile. A drawn line carries a halo in the page colour, so a crossing reads as
+  one line passing over another, and every arrowhead keeps one size (`markerUnits="userSpaceOnUse"`)
+  whatever the line's width. Every edge that is drawn leaves and arrives at its own handle, and an
+  arrival turns up to its card in an approach column of its own: a column of cards holds
+  `APPROACH_COLUMNS` of them, each card's arrivals take different ones and the cards of a column
+  start at different ones, so lines merge only where a card receives more arrivals than there are
+  columns, and even then they still arrive at their own handles. Clicking an arrival chip brings the card at the other end into view.
+  Hovering a card lights every connection it takes part in and rings the cards at their far end.
+- **Viewport**: the graph mounts through `DiagramViewport` (`kind="graph"`). The opening placement
+  uses `useOpeningPlacement`: a `focusRequest` (node id + token) or a run's `currentNodeId` fits
+  the view to that node; a definition opens readable on its first block at `GRAPH_OPENING_ZOOM`.
+  The placement key includes the layout generation, so it is applied again after the measured
+  second pass. A direction change refits to the whole graph. The layout controls (Fit View,
+  Vertical, Horizontal; `data-testid="graph-layout-controls"`) are `ControlButton`s inside the
+  zoom cluster (`DiagramViewport`'s `controlButtons` slot), so the cluster is one column and covers
+  no card; the minimap renders after an idle callback and not on a phone (`useIsMobile`), where
+  it would cover the graph. The run canvas hides its minimap the same way.
 
 ### Node Selection System
 
-- **Persistent Sidebar**: `WorkflowSidebar` component (side-by-side with graph). Shows workflow info when no node selected, node details on selection. Used in `WorkflowDetail` page.
+- **Persistent Sidebar**: `WorkflowSidebar` component (side-by-side with graph). Shows workflow info when no node selected, node details on selection. Used in the flow page's graph mode.
 - **Legacy Sheet**: `NodeDetailSheet` (Sheet overlay). Used in execution views (`ExecutionInspector`, `WorkflowVisualizationPage`) where `onNodeSelect` is not provided.
 - **WorkflowGraph** accepts optional `onNodeSelect` callback. When provided, Sheet is disabled and node clicks route to external sidebar.
 
@@ -1111,6 +1344,23 @@ useAsyncErrorBoundary(): (error: Error) => void
 
 ## State Management
 
+### Page-local data store (`useResource`)
+
+```typescript
+useResource<T>(key: string | null, fetcher: (key: string) => Promise<T>, describeError?): {
+  data: T | undefined;      // last successful value; kept while a refetch is pending
+  dataKey: string | null;   // the key `data` belongs to
+  pending: boolean;         // a fetch is in flight (first load or refetch)
+  error: string | null;     // last failure, cleared by the next success; `data` is kept
+  refresh: () => Promise<void>;
+}
+```
+
+Fetches when `key` changes and on `refresh()`; a response from an older request that resolves
+after a newer one is dropped; a `null` key clears the value. A page shows its full-page loader only
+while `data` is undefined and `pending` is true; every later fetch renders the previous value with
+a local pending indicator. The fetcher is read through a ref, so it may close over page state.
+
 ### Workflow Data Hook
 
 ```typescript
@@ -1118,6 +1368,16 @@ useAsyncErrorBoundary(): (error: Error) => void
 useWorkflowApp(): {
   selectedWorkflow: string | null;
   selectWorkflow: (id: string) => void;
+}
+
+// Workflow detail (built on useResource)
+useWorkflowDetail(id?: string): {
+  workflow: WorkflowDetailResponse | null;
+  loading: boolean;   // first load of this id only
+  pending: boolean;   // any fetch in flight
+  current: boolean;   // the held workflow is the requested id
+  error: string | null;
+  refreshWorkflow: () => Promise<void>;
 }
 
 // Workflow list data
@@ -1207,7 +1467,11 @@ Avoid hardcoded colors:
 - **aria-labels**: Required on all icon-only buttons (e.g., delete, clear, close)
 - **aria-live regions**: `assertive` on error displays (AuthErrorDisplay, ErrorBoundary), `polite` on loading states
 - **Keyboard navigation**: All interactive elements reachable via Tab/Enter/Space/Escape
-- **Code splitting**: Heavy pages use `React.lazy()` with Suspense fallback in `App.tsx`
+- **Code splitting**: Heavy pages use `React.lazy()`; the Suspense boundary sits inside
+  `MainAppLayout` and `AdminLayout` around the outlet with `RouteSkeleton` as the fallback, so the
+  sidebar stays while a page's code arrives (an in-app navigation is a router transition and keeps
+  the current page until the next one can render; the skeleton shows on a direct load). The outer
+  boundary in `App.tsx` uses the same fallback.
 
 ### Responsive Design
 
@@ -1310,7 +1574,7 @@ src/
     },
     "executionInspector": {
       "loading", "notFound", "backToExecutions", "execution", "workflow", "selected", "current", "clearSelection",
-      "context": { "title", "saving", "fullscreen", "close", "editor", "editingNote" }
+      "context": { "save", "saveFailed", "filterPlaceholder", "filterField", "empty", "noMatches", "globalSection", "nodeLocalSection", "emptyValue", "editLong" }
     },
     "settings": {
       "title", "loading", "required", "enable", "saveChanges", "saving", "cancel", "noSettings", "saveSuccess", "saveFailed", "fixErrors",
@@ -1524,110 +1788,12 @@ export class MoiraApiClient {
 export const apiClient = new MoiraApiClient("");
 ```
 
-## React Flow Integration
+## The workflow transformer
 
-### Node Factory System
-
-```typescript
-// WorkflowGraph.tsx - All node types use CompactNode
-const nodeTypes = {
-  start: CompactNode,
-  "agent-directive": CompactNode,
-  agentDirective: CompactNode,
-  condition: CompactNode,
-  "telegram-notification": CompactNode,
-  "user-notification": CompactNode,
-  telegram: CompactNode,
-  subgraph: CompactNode,
-  expression: CompactNode,
-  end: CompactNode,
-  "read-note": CompactNode, // Notes system - cyan styling
-  "write-note": CompactNode, // Notes system - teal styling
-  "upsert-note": CompactNode, // Notes system - sky styling
-  fallback: CompactNode, // Unknown types - stone/gray styling, warning status
-};
-
-// Node styling by type (defined in react-flow-types.ts DEFAULT_NODE_STYLES)
-// Note nodes: read-note (cyan), write-note (teal), upsert-note (sky)
-// Fallback: stone/gray for unknown node types, displays with HelpCircle icon
-
-// Edge types - SmartStepEdge uses A* pathfinding
-const edgeTypes = {
-  smart: SmartStepEdge, // @tisoap/react-flow-smart-edge
-};
-```
-
-### Layout Engine
-
-```typescript
-// utils/layout-algorithm.ts
-export class LayoutEngine {
-  static applyDagreLayout(
-    nodes: MoiraReactFlowNode[],
-    edges: MoiraReactFlowEdge[],
-    options: LayoutOptions = DEFAULT_LAYOUT_OPTIONS,
-  ): { nodes: MoiraReactFlowNode[]; edges: MoiraReactFlowEdge[] };
-
-  static calculateViewport(nodes: MoiraReactFlowNode[], width: number, height: number);
-}
-```
-
-### Performance Optimizations
-
-WorkflowGraph uses several optimization techniques for smooth operation on complex workflows:
-
-**CompactNode Memoization:**
-
-```typescript
-// CompactNode.tsx - React.memo with custom comparison
-function arePropsEqual(prevProps: CompactNodeProps, nextProps: CompactNodeProps): boolean {
-  return (
-    prevProps.selected === nextProps.selected &&
-    prevProps.data.nodeId === nextProps.data.nodeId &&
-    prevProps.data.nodeType === nextProps.data.nodeType &&
-    prevProps.data.label === nextProps.data.label &&
-    prevProps.data.validationStatus === nextProps.data.validationStatus &&
-    prevProps.data.isCurrent === nextProps.data.isCurrent &&
-    prevProps.data.isError === nextProps.data.isError &&
-    prevProps.data.layoutDirection === nextProps.data.layoutDirection
-  );
-}
-const CompactNode = React.memo(CompactNodeInner, arePropsEqual);
-```
-
-**Layout Throttle:**
-
-```typescript
-// WorkflowGraph.tsx - 100ms throttle on layout changes
-const layoutThrottleRef = useRef<NodeJS.Timeout | null>(null);
-const LAYOUT_THROTTLE_MS = 100;
-
-const changeLayout = useCallback(
-  (options: LayoutOptions) => {
-    if (layoutThrottleRef.current) return; // Skip if pending
-    layoutThrottleRef.current = setTimeout(() => {
-      layoutThrottleRef.current = null;
-    }, LAYOUT_THROTTLE_MS);
-    // ... layout calculation
-  },
-  [nodes, edges],
-);
-```
-
-**Delayed MiniMap Render:**
-
-```typescript
-// WorkflowGraph.tsx - requestIdleCallback for MiniMap
-useEffect(() => {
-  if (showMinimap && !showMiniMapDelayed) {
-    if ("requestIdleCallback" in window) {
-      window.requestIdleCallback(() => setShowMiniMapDelayed(true), { timeout: 500 });
-    } else {
-      setTimeout(() => setShowMiniMapDelayed(true), 200);
-    }
-  }
-}, [showMinimap, showMiniMapDelayed]);
-```
+`utils/workflow-transformer.ts` turns a definition into per-node presentation data (validation
+status, catalog styling from `DEFAULT_NODE_STYLES`, extension names) that the technical graph
+merges into its step nodes; it is the only consumer of that palette. There is no separate node
+renderer, node registry or dagre layout module: every page draws the graph described above.
 
 ## Configuration Files
 
@@ -1654,47 +1820,6 @@ useEffect(() => {
 // API requests use same-origin (empty base URL), proxied by nginx to backend
 ```
 
-## Workflow Visualization
-
-### React Flow Setup
-
-```typescript
-// Professional React Flow configuration
-<ReactFlow
-  nodes={nodes}
-  edges={edges}
-  nodeTypes={nodeTypes}
-  connectionMode={ConnectionMode.Strict}
-  minZoom={0.1}
-  maxZoom={2}
-  deleteKeyCode={null}
-  multiSelectionKeyCode={null}
->
-  <Background gap={20} size={1} color="#E5E7EB" />
-  <Controls position="top-right" showZoom={true} showFitView={true} />
-  <MiniMap position="bottom-right" nodeStrokeWidth={2} />
-</ReactFlow>
-```
-
-### Layout Controls
-
-```typescript
-// Layout control buttons
-const fitView = useCallback(() => {
-  const optimalViewport = LayoutEngine.calculateViewport(nodes, 800, 600);
-  setViewport(optimalViewport);
-}, [nodes]);
-
-const changeLayout = useCallback(
-  async (newLayoutOptions: LayoutOptions) => {
-    const layoutResult = LayoutEngine.applyDagreLayout(nodes, edges, newLayoutOptions);
-    setNodes(layoutResult.nodes);
-    setEdges(layoutResult.edges as Edge[]);
-  },
-  [nodes, edges],
-);
-```
-
 ## Animations
 
 ### Page Transitions
@@ -1708,7 +1833,7 @@ Page-level wrapper animations are **not used** on `AnimatedPage` (a `h-full` wra
 - CSS classes: `animate-in fade-in slide-in-from-bottom-3 duration-300 fill-mode-both`
 - Fade from transparent + slide up 12px over 300ms
 - Applied to: Dashboard, Settings, AdminDashboard, AdminAnalytics, AdminSettings, AdminUserDetail, UserManagement, DeletedWorkflows, OperationalDashboard
-- **Not applied to WorkflowDetail** — React Flow requires immediate full opacity to measure container dimensions
+- **Not applied to the flow page's graph mode** — React Flow requires immediate full opacity to measure container dimensions
 
 Usage: replace outermost `<div>` with `<FadeIn className="...">` in page content return (after loading guard).
 
@@ -1752,11 +1877,10 @@ frontend/
 │   │   ├── auth/                # Authentication components (Login, Register, ProtectedRoute)
 │   │   ├── layout/              # Layout components (AppHeader, AppFooter, WorkflowViewerPlaceholder)
 │   │   ├── workflow/            # Workflow components (WorkflowExplorer, WorkflowCard)
-│   │   └── nodes/               # ReactFlow node components (CompactNode - unified for all types)
 │   ├── contexts/                # ThemeProvider for dark mode
 │   ├── hooks/                   # useWorkflowData, useLayoutState, use-mobile
 │   ├── services/                # api-client.ts HTTP communication
-│   ├── utils/                   # node-factory.ts, layout-algorithm.ts
+│   ├── utils/                   # workflow-transformer.ts
 │   ├── lib/                     # utils.ts for cn() className utility
 │   └── styles/                  # globals.css (Tailwind v4 + semantic tokens)
 ├── components.json              # shadcn/ui configuration

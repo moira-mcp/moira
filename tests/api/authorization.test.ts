@@ -218,11 +218,10 @@ describe("API Authorization", () => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email: "test@test.com", password: "test" }),
       });
-      // 401 with INVALID_EMAIL_OR_PASSWORD is OK (credential validation, not session required)
+      // 401 here is credential validation, not "session required"
+      expect(response.status).toBe(401);
       const json = (await response.json()) as { code?: string };
-      if (response.status === 401) {
-        expect(json.code).toBe("INVALID_EMAIL_OR_PASSWORD");
-      }
+      expect(json.code).toBe("INVALID_EMAIL_OR_PASSWORD");
     });
 
     test("GET /api/auth/session is accessible without auth", async () => {
@@ -250,11 +249,10 @@ describe("API Authorization", () => {
       const response = await fetch(`${BASE_URL}/api/public/workflows/upload/invalid-token`, {
         method: "POST",
       });
-      // 401 with "Invalid, expired, or already used token" is OK (token validation, not session)
-      const json = (await response.json()) as { error?: string };
-      if (response.status === 401) {
-        expect(json.error.message).toContain("token");
-      }
+      // 401 here is token validation ("Invalid, expired, or already used token"), not session
+      expect(response.status).toBe(401);
+      const json = (await response.json()) as { error: { message: string } };
+      expect(json.error.message).toContain("token");
     });
   });
 });

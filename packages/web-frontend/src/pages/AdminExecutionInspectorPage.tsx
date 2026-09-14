@@ -22,6 +22,7 @@ export const AdminExecutionInspectorPage: React.FC = () => {
       fetchExecution={apiClient.getAdminExecution.bind(apiClient)}
       backRoute={ROUTES.ADMIN_EXECUTIONS}
       showOwnerInfo
+      canAnswer
     />
   );
 };

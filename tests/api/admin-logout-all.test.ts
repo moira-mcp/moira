@@ -10,28 +10,28 @@
  */
 
 import { describe, test, expect, beforeEach } from "@jest/globals";
-import { getTestBaseUrl, getAdminCredentials } from "../utils/test-config.js";
+import { getTestBaseUrl } from "../utils/test-config.js";
+import {
+  createTestUserViaApi,
+  formatSessionCookie,
+  getAdminSessionCookie,
+  signInUser,
+} from "../utils/mcp-auth.js";
 
 const BASE_URL = getTestBaseUrl();
-const ADMIN_CREDENTIALS = getAdminCredentials();
+
+/** Create an admitted user and return its session cookie header. */
+async function createSignedInUser(email: string, password: string, name: string): Promise<string> {
+  await createTestUserViaApi(BASE_URL, email, password, name);
+  return formatSessionCookie(BASE_URL, await signInUser(BASE_URL, email, password));
+}
 
 describe.skip("Admin Logout All Users API", () => {
   let adminCookie: string;
 
-  // Helper to get fresh admin session
-  async function loginAsAdmin(): Promise<string> {
-    const adminLoginRes = await fetch(`${BASE_URL}/api/auth/sign-in/email`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(ADMIN_CREDENTIALS),
-    });
-    return adminLoginRes.headers.get("set-cookie") || "";
-  }
-
   beforeEach(async () => {
     // Get fresh admin session before each test
-    adminCookie = await loginAsAdmin();
-    expect(adminCookie).toBeTruthy();
+    adminCookie = formatSessionCookie(BASE_URL, await getAdminSessionCookie(BASE_URL));
   });
 
   describe("DELETE /api/admin/sessions/all", () => {
@@ -47,36 +47,7 @@ describe.skip("Admin Logout All Users API", () => {
       const userEmail = `logout-nonadmin-${Date.now()}@example.com`;
       const userPassword = "LogoutTest123!";
 
-      const signUpRes = await fetch(`${BASE_URL}/api/auth/sign-up/email`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          email: userEmail,
-          password: userPassword,
-          name: "Non Admin Test",
-          acceptedTermsAt: new Date().toISOString(),
-          acceptedNotRussianResidentAt: new Date().toISOString(),
-        }),
-      });
-      const signUpData = (await signUpRes.json()) as { user: { id: string } };
-      const userId = signUpData.user.id;
-
-      // Verify email
-      await fetch(`${BASE_URL}/api/admin/users/${userId}/verify-email`, {
-        method: "POST",
-        headers: { Cookie: adminCookie },
-      });
-
-      // Login as user
-      const userLoginRes = await fetch(`${BASE_URL}/api/auth/sign-in/email`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          email: userEmail,
-          password: userPassword,
-        }),
-      });
-      const userCookie = userLoginRes.headers.get("set-cookie") || "";
+      const userCookie = await createSignedInUser(userEmail, userPassword, "Non Admin Test");
 
       // Try to access admin endpoint
       const response = await fetch(`${BASE_URL}/api/admin/sessions/all`, {
@@ -91,40 +62,7 @@ describe.skip("Admin Logout All Users API", () => {
       const userEmail = `logout-test-${Date.now()}@example.com`;
       const userPassword = "LogoutTest123!";
 
-      const signUpRes = await fetch(`${BASE_URL}/api/auth/sign-up/email`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          email: userEmail,
-          password: userPassword,
-          name: "Logout Test User",
-          acceptedTermsAt: new Date().toISOString(),
-          acceptedNotRussianResidentAt: new Date().toISOString(),
-        }),
-      });
-      expect(signUpRes.status).toBe(200);
-      const signUpData = (await signUpRes.json()) as { user: { id: string } };
-      const userId = signUpData.user.id;
-      expect(userId).toBeTruthy();
-
-      // Verify email
-      const verifyRes = await fetch(`${BASE_URL}/api/admin/users/${userId}/verify-email`, {
-        method: "POST",
-        headers: { Cookie: adminCookie },
-      });
-      expect(verifyRes.status).toBe(200);
-
-      // Login as user
-      const userLoginRes = await fetch(`${BASE_URL}/api/auth/sign-in/email`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          email: userEmail,
-          password: userPassword,
-        }),
-      });
-      expect(userLoginRes.status).toBe(200);
-      const userCookie = userLoginRes.headers.get("set-cookie") || "";
+      const userCookie = await createSignedInUser(userEmail, userPassword, "Logout Test User");
 
       // Verify user session works before logout
       const beforeCheck = await fetch(`${BASE_URL}/api/user/me`, {

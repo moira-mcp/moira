@@ -16,6 +16,7 @@ import {
 
 import { apiClient, ApiErrorUtils } from "../services/api-client";
 import { useSession } from "../auth/better-auth-client";
+import { useResource } from "./useResource";
 
 /**
  * Hook for managing workflow list data with server-side filtering and pagination
@@ -81,66 +82,33 @@ export function useWorkflowList() {
 }
 
 /**
- * Hook for managing individual workflow data
+ * Hook for managing individual workflow data.
+ *
+ * Keeps the last loaded workflow while a refetch is pending (a save, a retry, a refresh), so a
+ * page never has to blank its content: `loading` is true only before the first data of a
+ * workflow, `pending` whenever a fetch is in flight, and an error leaves the last workflow in
+ * place beside its message.
  */
 export function useWorkflowDetail(workflowId?: string) {
-  const [workflow, setWorkflow] = useState<WorkflowDetailResponse | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [lastUpdated, setLastUpdated] = useState<number | null>(null);
-
-  const loadWorkflow = useCallback(
-    async (
-      targetId: string,
-      options?: {
-        includeValidation?: boolean;
-        layoutOptions?: {
-          algorithm?: "dagre" | "manual" | "force";
-          direction?: "TB" | "BT" | "LR" | "RL";
-        };
-      },
-    ) => {
-      setLoading(true);
-      setError(null);
-
-      try {
-        const response = await apiClient.getWorkflow(targetId, options);
-        setWorkflow(response);
-        setLastUpdated(Date.now());
-      } catch (err) {
-        const message = ApiErrorUtils.getUserFriendlyMessage(err);
-        setError(message);
-        console.error("Failed to load workflow:", err);
-      } finally {
-        setLoading(false);
-      }
+  const resource = useResource<WorkflowDetailResponse>(
+    workflowId ?? null,
+    (id) => apiClient.getWorkflow(id),
+    (err) => {
+      console.error("Failed to load workflow:", err);
+      return ApiErrorUtils.getUserFriendlyMessage(err);
     },
-    [],
   );
-
-  const refreshWorkflow = useCallback(() => {
-    if (workflowId) {
-      loadWorkflow(workflowId);
-    }
-  }, [workflowId, loadWorkflow]);
-
-  // Auto-load when id changes
-  useEffect(() => {
-    if (workflowId) {
-      loadWorkflow(workflowId);
-    } else {
-      setWorkflow(null);
-      setError(null);
-    }
-  }, [workflowId, loadWorkflow]);
-
+  const workflow = resource.data ?? null;
   return {
     workflow,
-    loading,
-    error,
-    lastUpdated,
-    loadWorkflow,
-    refreshWorkflow,
+    /** The first load of a workflow: nothing to show yet, or another workflow's data still held. */
+    loading: resource.pending && (workflow === null || resource.dataKey !== (workflowId ?? null)),
+    /** Any fetch in flight, including a refetch that keeps the current workflow on screen. */
+    pending: resource.pending,
+    /** The held workflow is the requested one (false while a change of id is pending or failed). */
+    current: workflow !== null && resource.dataKey === (workflowId ?? null),
+    error: resource.error,
+    refreshWorkflow: resource.refresh,
   };
 }
 

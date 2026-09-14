@@ -5,6 +5,7 @@
 
 import { randomUUID } from "crypto";
 import { WorkflowExecution, isStartNode, isTeleportNode } from "../types/index.js";
+import type { ExecutionVisit } from "../types/base-types.js";
 import {
   IGraphExecutor,
   WorkflowGraph,
@@ -18,6 +19,7 @@ import type {
   NotificationMessage,
 } from "../services/agent-message-queue.js";
 import { GraphExecutionEngine } from "./graph-execution-engine.js";
+import { appendEngineVisits } from "../utils/execution-visits.js";
 import {
   createLogger,
   WorkflowLogger,
@@ -180,6 +182,11 @@ export class UniversalGraphExecutor implements IGraphExecutor {
         lease: ExecutionAttemptLease;
       };
       createPresentation?: boolean;
+      /**
+       * The input was supplied from outside the flow (a person answering the waiting step on
+       * the run page); an accepted answer is recorded as an adjustment visit with this actor.
+       */
+      answeredBy?: NonNullable<ExecutionVisit["actor"]>;
       onAttemptOutcome?: (outcome: "original" | "safe_replay") => void;
     },
   ): Promise<string> {
@@ -356,6 +363,7 @@ export class UniversalGraphExecutor implements IGraphExecutor {
 
       // Update execution with results from stateless engine
       execution.globalContext = executionResult.context;
+      appendEngineVisits(execution, executionResult.visits ?? [], teleportTo, mutation?.answeredBy);
       if (executionResult.nextNodeId !== undefined) {
         execution.currentNodeId = executionResult.nextNodeId;
       }
@@ -477,7 +485,9 @@ export class UniversalGraphExecutor implements IGraphExecutor {
       } else {
         await this.repository.saveExecution(execution);
         if (nextAttempt) {
-          await this.repository.createPresentedExecutionAttempt({
+          // A step run without a claimed attempt (an answer from the run page) moves the run
+          // past whatever the agent was shown: that presentation is superseded, not replayed.
+          await this.repository.supersedePresentedExecutionAttempt({
             ...nextAttempt,
             executionRevision: execution.revision,
           });

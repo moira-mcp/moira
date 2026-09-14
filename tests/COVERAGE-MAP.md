@@ -46,9 +46,10 @@ level headings classify the tracked test paths listed beneath them.
 **e2e**
 
 - `tests/e2e/admin-analytics.spec.ts`
-- `tests/e2e/admin-execution-errors.spec.ts`
-- `tests/e2e/execution-progress-ui.spec.ts` — real execution inspector desktop/mobile progress states, repair arc, long labels, technical-node focus, tab preservation and no-progress compatibility with inspected screenshots
-- `tests/e2e/sdf-progress-ui.spec.ts` — one bounded real SDF path from MCP start through a successfully consumed PNG progress-image token to the execution inspector's visible current Intake projection; exhaustive phase semantics remain unit-owned
+- `tests/e2e/admin-execution-errors.spec.ts` — the admin execution page: error history of another user's execution and its variables panel
+- `tests/e2e/flow-page.spec.ts` — the flow page on Quick Task: the definition as a process (outline default with seven sections, canvas with a cycle edge, lanes (a React Flow rail) with return arcs and no run status or run sentence (definition mode note), split with the node finder, the technical graph with its controls and sidebar, a block-panel step opening the graph), the walkthrough landing on split for step and evidence, a non-owner without edit mode; an owner's edit session on a private copy (a renamed block, a relabelled return, a moved routing node reported as an `unlabeled-edge` diagnostic that disables the save until moved back, an edited directive, expression, registry default and whole registry declaration as JSON Schema, the inline diagnostic on the moved step, the export listing exactly the five changed flow-file entries, a save that persists, advances the revision to 1 and re-derives on reload); a save refused on a stale revision (409, edits kept, text asks to reload) and on an invalid definition (400, edits kept); and a phone-width page with vertical lanes, the panel under the picture and no horizontal overflow
+- `tests/e2e/execution-progress-ui.spec.ts` — the run page on a real Quick Task run with a repair loop: lanes statuses with the pass count and return arc, block-detail steps with expected evidence, deep-linked block selection and technical-graph focus (two steps, two viewport transforms), the route cursor dimming later visits and changing the lanes, the answered variable's history opened under its row and its value read at the start visit and without a cursor, canvas and outline loop rendering, the walkthrough in the URL, answering the waiting step from the page (required fields gating submit, a schema-invalid answer refused with the step's message, the accepted answer moving the lanes and recorded as the person's adjustment on the route, the agent's stale attempt), the variables table keeping its names inside the panel with long values, the loading state, and a phone-width page kept usable (folded mode note, picture height kept, no horizontal scroll) when the projection fails or the workflow has no process view
+- `tests/e2e/sdf-progress-ui.spec.ts` — one bounded real SDF path from MCP start through a successfully consumed PNG progress-image token to the run page's waiting Intake lane and the answer form for the intake step; exhaustive phase semantics remain unit-owned
 - `tests/e2e/admin-executions.spec.ts`
 - `tests/e2e/admin-user-security.spec.ts`
 - `tests/e2e/operational-dashboard.spec.ts`
@@ -163,7 +164,7 @@ level headings classify the tracked test paths listed beneath them.
 
 **integration**
 
-- `tests/integration/agent-message-enhancement.test.ts`
+- `tests/integration/agent-message-enhancement.test.ts` — formatted agent messages via MCPEngine over the integration DB: first directive with task, criteria and input schema, next directive after input, a full simple-linear cycle to completion
 
 ### context
 
@@ -173,7 +174,7 @@ level headings classify the tracked test paths listed beneath them.
 - `tests/unit/mcp-server/prompt-context.test.ts`
 - `tests/unit/shared/logging/service-context-propagation.test.ts`
 - `tests/unit/shared/logging/service-logger-error-context.test.ts`
-- `tests/unit/web-frontend/context-variable-model.test.ts`
+- `tests/unit/web-frontend/context-variable-model.test.ts` — the variables surfaces' lookups: declared global names from the registry, node ids as node-local scopes, registry descriptions
 
 **integration**
 
@@ -187,7 +188,7 @@ level headings classify the tracked test paths listed beneath them.
 
 **e2e**
 
-- `tests/e2e/context-variable-editor.spec.ts`
+- `tests/e2e/context-variable-editor.spec.ts` — the run page's variables panel on a seeded execution: two collapsible groups (declared variables, node outputs) and no undeclared group, a promoted global shown once, the registry description as a tooltip, the tree-aware filter, per-path nested save verified in SQLite, the long-text modal, an empty value as a full-height field, the declared group collapsing and an in-place edit of a policy-enabled string shown again after a reload
 
 ### deployment-mode
 
@@ -256,7 +257,8 @@ level headings classify the tracked test paths listed beneath them.
 
 **integration**
 
-- `tests/integration/error-logging-flow.test.ts` — durable validation/system-error history, idempotent cancellation, and the distinct persisted progress projections of real cancellation versus normal graph completion
+- `tests/integration/error-logging-flow.test.ts` — durable validation/system-error history, idempotent cancellation, and the run projection of a real cancellation on an open wait (the block stays the frontier, the last visit stays open)
+- `tests/integration/execution-visits-persistence.test.ts` — the route log persisted with the execution row through the migrated database repository: save/get round trip growing with the revision, an adjustment visit appended in the same guarded context write, a stale context revision appending nothing, and empty or malformed legacy rows reading back as an empty log
 - `tests/integration/subgraph-error-scenarios.test.ts` — root/child/grandchild error provenance, durable root ownership, authored recovery edges, and persisted root/one/nested retry exhaustion without mutation replay
 
 **api**
@@ -283,9 +285,9 @@ level headings classify the tracked test paths listed beneath them.
 
 **integration**
 
-- `tests/integration/execution-attempt-persistence-migration.test.ts` — additive attempt-storage migration, durable step/start receipts, forced transactional claim rollback, restart-stable unknown-start attachment, revision- and blocking-row-bound atomic cancellation, fenced ownership across SQLite connections, post-eviction no-create behavior, and independent preparation/receipt age/count retention
+- `tests/integration/execution-attempt-persistence-migration.test.ts` — additive attempt-storage migration, durable step/start receipts, forced transactional claim rollback, restart-stable unknown-start attachment, revision- and blocking-row-bound atomic cancellation, fenced ownership across SQLite connections, post-eviction no-create behavior, and independent preparation/receipt age/count retention; a presentation superseded by an outside answer (stale claim, executing guard, eviction with old receipts)
 - `tests/integration/replay-safe-start-attempts.test.ts` — no-effect preparation, execute-only ordinary/lock preflight, intentional distinct starts, concurrent external-effect coalescing, exact replay without lifecycle metric duplication, foreign non-disclosure, independent digest/version/access binding, start heartbeat reconciliation, stable changed-precondition receipt, expiry rejection, and owner-visible/revision-bound outcome-unknown recovery
-- `tests/integration/replay-safe-step-attempts.test.ts` — exact replay, legacy missing-attempt adoption, revision-only stale presentation recovery, metadata-stable step generations, cancellation semantics, conflicting/foreign binding rejection, coalesced external effects, fenced leases, atomic completion/current presentation, materialize/teleport behavior, retention, and terminal metrics
+- `tests/integration/replay-safe-step-attempts.test.ts` — exact replay, legacy missing-attempt adoption, revision-only stale presentation recovery, metadata-stable step generations, cancellation semantics, conflicting/foreign binding rejection, coalesced external effects, fenced leases, atomic completion/current presentation, materialize/teleport behavior, retention, and terminal metrics; an answer from outside the flow superseding the agent's presentation (stale attempt, current_step presenting the new node, refusal while an attempt executes)
 - `tests/integration/replay-safe-step-audit.test.ts` — bounded content-free audit and Prometheus classifications for all applicable step/start outcomes, actual start-boundary identical `ATTEMPT_PROCESSING` retry guidance without a user stop, and proof that a start replay creates no duplicate execution-start business audit transition
 - `tests/integration/replay-safe-step-mcp-boundary.test.ts` — public parsing, exact replay, and automatic `current_step` recovery for stale, conflicting, and expired step attempts without a user stop, stale-input replay, or execution mutation
 - `tests/integration/execution-filters.test.ts`
@@ -296,7 +298,7 @@ level headings classify the tracked test paths listed beneath them.
 
 **api**
 
-- `tests/api/executions-errors-api.test.ts`
+- `tests/api/executions-errors-api.test.ts` — `GET /api/executions` `errorCount` and `GET /api/executions/:id` `errors[]` for an execution that recorded one input-schema validation error (type `validation`, node id of the rejecting step)
 
 **mcp-tools**
 
@@ -307,7 +309,7 @@ level headings classify the tracked test paths listed beneath them.
 
 **e2e**
 
-- `tests/e2e/execution-inspector-ux.spec.ts`
+- `tests/e2e/execution-inspector-ux.spec.ts` — the run page keeps the inspector's toolbar (id copy, status, refresh), the variables tab (no separate context tab) with its fullscreen panel at least twice the docked panel's width, the errors/steps/locks tabs, the technical node graph one click away opening with the current step's card inside the graph's box, the fit control giving the overview and the toolbar's current-node button bringing the card back, the panel beside the run on desktop and under it on a phone, where neither the run canvas nor the technical graph draws a minimap; the admin variant (owner info, waiting process view, read-only context, answer form) on instances with the multi-user admin capability
 - `tests/e2e/executions-navigation.spec.ts`
 - `tests/e2e/executions-page.spec.ts`
 
@@ -371,7 +373,7 @@ level headings classify the tracked test paths listed beneath them.
 
 **mcp-tools**
 
-- `tests/mcp-tools/workflow-upload-visibility.test.ts`
+- `tests/mcp-tools/workflow-upload-visibility.test.ts` — upload visibility public/private/default via `test.each`, plus an invalid value → 400
 
 ### github-collaboration
 
@@ -396,7 +398,7 @@ level headings classify the tracked test paths listed beneath them.
 
 **unit**
 
-- `tests/unit/mcp-server/get-help-mdx.test.ts` — MCP-owned non-tools corpus matches public topic identities and EN/RU metadata/imports, resolves every real topic composition, advertises the special typed `tools` topic and alias in the shared catalog, uses canonical registry-selected client configuration/token/deeplink generation, imports system instructions, removes presentation syntax, preserves aliases/errors, and renders direct typed tools
+- `tests/unit/mcp-server/get-help-mdx.test.ts` — MCP-owned non-tools corpus matches public topic identities and EN/RU metadata/imports (the process-view concept topic included), resolves every real topic composition and the process/run/blocks aliases, advertises the special typed `tools` topic and alias in the shared catalog, uses canonical registry-selected client configuration/token/deeplink generation, imports system instructions, removes presentation syntax, preserves aliases/errors, and renders direct typed tools; the process-view help topics (concepts workflows/process-view, guides editing-workflows/flow-page/run-page, EN and RU) carry none of the retired terms (milestone, display connection, user-visible or observable waiting node)
 
 **integration**
 
@@ -448,7 +450,7 @@ level headings classify the tracked test paths listed beneath them.
 
 **integration**
 
-- `tests/integration/input-enhancement.test.ts`
+- `tests/integration/input-enhancement.test.ts` — `parseInputData` at the `executeStep` tool boundary: JSON-string and object inputs advance; nested, primitive, malformed and null inputs receive schema feedback and stay on the same node
 
 **mcp-tools**
 
@@ -475,14 +477,35 @@ level headings classify the tracked test paths listed beneath them.
 - `tests/unit/mcp-server/communication-attachment-route.test.ts` — configured MCP text delegation, exact attachment bytes, provider-attempt race and terminal failure, plus pre-buffer length/MIME/body/in-flight refusal with retryable claim release
 - `tests/integration/docs-tool-contract-rendering.test.ts` — actual EN/RU public routes render every identity, localized fact, action, schema, result, example, and CodeBlock directly from the MCP contract model
 - `tests/unit/scripts/static-tool-description-migration.test.ts` — exact retirement of database-backed default/agent/model descriptions plus nullable persistent-token revision migration with existing identity/hash preservation
-- `tests/unit/mcp-server/progress-authoring-schema.test.ts` — MCP manage rich-progress goal/facts/content acceptance plus strict unknown-field and bound rejection
+- `tests/unit/mcp-server/progress-authoring-schema.test.ts` — MCP manage rich-progress goal/facts/content acceptance, the mandatory block description (`content.summary`), plus strict unknown-field and bound rejection
 
+- `tests/unit/workflow-cli/workflow-derive.test.ts` — `derive` output of the annotated Quick Task (blocks, labelled transitions, explained returns, no diagnostics), diagnostics of an incompletely annotated flow, the no-progress message, and determinism
 - `tests/unit/workflow-cli/workflow-schema.test.ts` — deterministic complete workflow control-flow schemas: locale-independent canonical edge/mapping order, basic blocks, conditions, many independent cycles, separate start/teleport/disconnected reachability, dangling edges, current node data-flow declarations including batch write-note and materialize registry reads, complete ordered progress topology and structured content with backward display edges and many-to-one primary mappings, context references, deep iterative traversal, terminal-control-safe structural tokens, non-mutation, and duplicate-ID rejection
-- `tests/unit/scripts/workflow-tool-identity.test.ts` — set-name and set-slug: exact replacement, kebab-case validation, catalog-entry warning, version bump, and no collateral change to slug/owner/description/nodes
+- `tests/unit/scripts/workflow-tool-identity.test.ts` — set-name and set-slug: exact replacement, kebab-case validation, catalog-entry warning, version bump, and no collateral change to slug/owner/description/nodes, plus `--force`/`--no-version-bump` keeping the version without leaking into the stored name or description
+- `tests/unit/scripts/workflow-tool-process.test.ts` — block-contract authoring commands through the real CLI: set-label (forward and explained return), clear-label, set-block, add-block with placement, edit-block with field removal, remaining-diagnostics report, version bump versus `--no-version-bump`/`--force`, and refusal of unknown nodes, keys, blocks, duplicate ids, empty summaries and half-explained returns without touching the file
 - `tests/unit/scripts/workflow-tool-progress.test.ts` — static rich progress graph set/clear, node mapping and active-only label/content set/clear/scope, portable and legacy notification attachment set/clear, malformed input, and wrong-node-type rejection
-- `tests/unit/workflow-engine/execution-progress.test.ts` — rich progress task/goal/facts/content projection, active merge and exact context-revision replacement, pending-outcome suppression, mapped terminal completion frontiers with legacy fallback, nested template-reference and injection protection, definition and post-interpolation output bounds with explicit overflow failure, mapping/scope rules, immutability, completion/cancellation, and label-only compatibility
-- `tests/unit/workflow-engine/execution-progress-image.test.ts` — shared rich visual model, full-text wrapping, deterministic multi-row and loop/cross-row edges, SVG escaping, semantic content in PNG, byte determinism, theme/state differences, and image metadata bounds
-- `tests/unit/web-frontend/execution-progress-strip.test.tsx` — always-visible task/goal/facts/stage content, textual state and current-step accessibility, mapped-node focus, and readable non-actionable milestones without hover
+- `tests/unit/workflow-engine/execution-progress.test.ts` — run projection from the recorded route: task/goal/facts/content rendering, active merge and exact context-revision replacement, pending/skipped outcome suppression, repeated blocks with pass counts and loop markers, completion with nothing unvisited done, a cancellation on an open wait kept as the frontier, route-less executions inferring nothing, variables with history and adjustment marks, a bypassed and an unrun block skipped, a route cursor projecting the run as it stood at a visit (cut route, active block, values written up to it, registry defaults for later writes, whole route at or beyond the last visit), injection protection, output bounds with explicit overflow failure, mapping/scope validation rules, and immutability; a fact over an unset variable omitted from the projection instead of rendering the undefined marker; an adjusted visit carrying an exit key closing the wait it sits on while an open adjustment leaves the run waiting
+- `tests/unit/workflow-engine/wmf-process-contract.test.ts` — the bundled Workflow Management Flow teaches and demands the process block contract: its materialised progress reference states every rule (the every-block-connected rule included), every diagnostic code (`unconnected-block` included), CLI command and run status, the `no-start` diagnostic of `derive`, the two skipped-block rules, the accepted-but-unused legacy display order and the `progress.nodes` cap, and none of the retired model; the six design/review/build gates name the contract and the reference, the quality repair step completes a process-view repair only with `derive` clean, and both design repair owners read it
+- `tests/unit/workflow-engine/execution-visits.test.ts` — per-visit variable diff (globals by name, node-local outputs as node.field, value not identity), appending engine visits (numbering, open wait continued on resume also beneath stacked adjustment visits, repeated invalid input leaving it open, teleport exit also after an adjustment, adjustment visits never continued or closed), the in-flight visit copy notification nodes render from, and the adjustment visit shape
+- `tests/unit/workflow-engine/process-derivation.test.ts` — process derivation from the authored graph: the annotated Quick Task and Software Development Flow reproduce their block, transition, return and hub counts in authored order with no diagnostics; synthetic graphs for forward/return classification, returns to a lower-index block, hubs, and every diagnostic (unowned node, unknown block, empty description, unlabelled boundary edge, unexplained return, outcome template duplicated or unowned); validator enforcement of the same rules as errors and the no-progress exemption; a block with no transition to or from another block (a self-return alone does not count) is the `unconnected-block` diagnostic and a validation error, silent on the six annotated flows
+- `tests/unit/workflow-engine/execution-progress-image.test.ts` — shared rich visual model, full-text wrapping, deterministic multi-row and loop/cross-row edges, SVG escaping, semantic content in PNG, byte determinism, theme/state differences, and image metadata bounds; every derived transition into a hub is a drawn connector in the process view, sources into one hub sharing one bundled lane and one port, labelled inside the source
+- `tests/unit/workflow-engine/execution-progress-geometry.test.ts` — the progress image places every label and badge without overlap: on the six annotated flows at 720 and 1280 px, in both views, with blocks repeated twelve times, every label box is inside the image and disjoint from other labels, blocks and other arcs' lane runs, every repeat badge sits between the mark and the title inside its block, every label carries its whole text, the model is deterministic; the text metric orders glyph widths and weights and width wrapping never truncates
+- `tests/unit/web-frontend/flow-editing.test.ts` — the flow page's edit model on Quick Task: block, transition, ownership, node-text and registry edits applied without mutating the input; the export diff naming exactly the changed flow-file entries and omitting no-op edits; a moved routing node surfacing as a derivation diagnostic before any save; the run-less projection (title, goal, every block pending) and the split mode's step ordering from the entry node
+- `tests/unit/web-frontend/run-route-model.test.ts` — run page view helpers: process blocks joined with their run state (a rendered summary that repeats the block's description or name is dropped, a templated one kept), a block's writes at the cursor, route stretches with return markers, per-block counts under a cursor, cursor clamping, exit labels from transitions, lanes arcs nested by span, and step descriptions (first sentence, expected evidence, routing nodes) from a workflow definition
+- `tests/unit/web-frontend/run-answer-form.test.tsx` — the answer form's typed parsing: numbers, booleans and JSON objects or arrays by declared type, strings passed through, empty drafts omitted, malformed JSON rejected
+- `tests/unit/web-frontend/run-layout.test.ts` — canvas layout of the six annotated bundled flows through ELK: no overlapping blocks, every transition drawn as an edge (a hub target as a bundled hub edge into one port plus a chip in the source, never crossing a block), forward edges never pointing backwards, deterministic placement, hubs after their sources, and parallel forward transitions between one pair of adjacent blocks on distinct paths and label rows, and every forward label pill drawn at rest inside its gap clear of both blocks (the gap grows to the widest pill)
+- `tests/unit/web-frontend/run-lanes-links.test.ts` — the lanes rail's forward connectors: exactly the non-adjacent forward transitions of the six flows, hubs linked from every skipping source, nesting depth by span and path endpoints
+- `tests/unit/web-frontend/run-lanes-phone.test.tsx` — the phone lanes stepper renders every non-adjacent forward transition and every return as a chip naming its target with the label (and a return's cause) as the tooltip, and draws no connector SVG or arc
+- `tests/unit/web-frontend/run-transition-chips.test.ts` — the chip model shared by lanes, canvas and the phone stepper over the six annotated flows: the canvas chip keys equal the keys of the laid-out cycle, skip and hub edges and the lane chip keys equal the rail's arc and link keys, each side unique; a source with several transitions into one hub gets one chip carrying every label; three or more adjacent forward transitions into one block fold into one forward chip on the canvas (fewer get none, lanes never show one) and the canvas edge keys include such bundles; the SDF lists all of its returns; a chip's title carries the label and a return's cause and exit
+- `tests/unit/web-frontend/step-card-model.test.tsx` — the step card's shared facts: on Quick Task and SDF every connection of every step is classified internal (points at the sibling step) or external (names the owning block, which contains the target), in authored order; a node without connections yields none; the panel tab badge shows a count with its accessible label, a warning mark, or nothing
+- `tests/unit/web-frontend/graph-model.test.ts` — the technical graph's model on four annotated flows: one graph step per workflow node in node order with the same StepInfo as `stepsOf`, owned by the block the derivation names and carrying `stepConnections`; one link per connection with a known target; every derived cycle edge is a return link and every return link is a cycle edge or leads to an earlier block; forward links never go back, external ones cross a block; without a process view nothing is grouped and every link is forward
+- `tests/unit/web-frontend/graph-routing.test.ts` — the technical graph's edge routing on a hand-laid pair of blocks: a forward link inside a block is drawn straight; a return inside a block runs through the block's bottom corridor (below its cards, inside its box) and enters before its target; two returns sharing a corridor take different lanes; a link into a later block runs in the gap after its source's block; a return to an earlier block climbs the margin before the groups and comes in through the target block's corridor; a row of blocks transposes the geometry; the routed polyline starts at the source handle, ends at the target handle and rounds every corner; and, on the full layout of all six annotated flows in both directions, no lane segment crosses a card, no point leaves the canvas, every lane keeps its clearance from the cards and the blocks' borders, and the busiest cards' arrivals take their own approach columns up to the declared limit
+- `tests/unit/web-frontend/variable-rows.test.ts` — the variables panel's grouping model: declared rows in name order from the registry and the context with description, policy editability and projection history; a cursor shows the projection's value while the context stays the edit target; a global a node wrote is one declared row and not an output; a node scope holding only such globals is no group; an undeclared key is still a row; no history without a projection
+- `tests/unit/web-frontend/run-lanes-layout.test.ts` — the horizontal lanes rail's flow-coordinate layout: lane cards in one row at fixed equal spacing below the links band, lane centres in the middle of each card, the row pushed down by the links band and the height extended by the arcs band, arc and link geometry landing in their bands, the viewport height as the geometry plus the fit padding with a floor for the zoom controls, the chip-aware card height, and the rows lit label pills take (one each beyond the outermost lit connector), with the bands reserving those rows so a revealed column stays inside the rail
+- `tests/unit/web-frontend/diagram-viewport.test.ts` — the shared diagram interaction policy for canvas, lanes and graph: a plain wheel pans freely and never zooms, pinch zooms, drag pans, nodes are not draggable, the page does not scroll under the pointer, the view opens fitted, and the per-kind zoom range
+- `tests/unit/web-frontend/diagram-placement.test.tsx` — the shared opening placement hook: places once the substrate is ready, again only when the followed key changes, never on a same-key re-render, and waits for ready when the key changes early
+- `tests/unit/web-frontend/workflow-detail-hook.test.tsx` — the workflow detail hook on the store: a refetch of the same id keeps the workflow current with `pending` set and `loading` clear; a change of id is a first load (`loading` true, `current` false) until the new workflow arrives
+- `tests/unit/web-frontend/use-resource.test.tsx` — the page-local data store behind navigation without flicker: a pending refetch keeps the previous value and reports pending, a failed refetch keeps the value and exposes the error until the next success, a key change keeps the old value until the new key resolves, a stale response never overwrites a newer one, and a null key clears
 - `tests/unit/scripts/workflow-tool-variables.test.ts` — incl. registry-backed globals, metadata, file-backed arguments, source diagnostics, fail-fast validation, atomic replace/sync, End projection/path qualification, and inert-retry migration
 - `tests/unit/services/mcp-text-service.test.ts`
 
@@ -578,8 +601,8 @@ level headings classify the tracked test paths listed beneath them.
 
 **api**
 
-- `tests/api/admin-lock-management.test.ts`
-- `tests/api/user-lock-management.test.ts` — owner/foreign lock access and PIN validation boundaries plus owner-only one-time human PIN creation compatibility
+- `tests/api/admin-lock-management.test.ts` — admin lock endpoints (`hasActiveLock` in the list, `activeLock` in the detail, `/locks`, `/locks/:lockId/unlock`) against an MCP-started execution locked through the owner lock route: shapes, exact 404s, admin override unlock once then 400
+- `tests/api/user-lock-management.test.ts` — owner, non-owner and admin access to `/locks` and `/validate-pin` (401 non-owner, 404 unknown execution, 400 missing PIN), locked-status filters and owner-only PIN creation, all against an admin-owned execution created in setup
 
 **e2e**
 
@@ -770,7 +793,6 @@ level headings classify the tracked test paths listed beneath them.
 
 **unit**
 
-- `tests/unit/web-frontend/compact-node.test.tsx` — same-node refresh of materialize tooltip, validation text and subgraph callback; English and Russian missing-extension, unavailable-registry and unknown-type tooltip explanations
 - `tests/unit/web-frontend/backend-health.test.ts` — a reconciliation-degraded backend remains operable/connected while a hard health error disconnects
 - `tests/unit/web-frontend/admin-reconciliation-status.test.tsx` — self-host administrator dashboard makes no disabled analytics request and renders managed-workflow conflict identity, classification, all candidate references, WMF instruction, and clear state
 - `tests/unit/web-frontend/quick-start-card.test.ts` — i18n completeness, config/deeplink generation, setupType consistency, + resolveMcpUrl deployment-mode gating: self-host runtime, self-host baked fallback, saas baked, null mode baked
@@ -784,7 +806,7 @@ level headings classify the tracked test paths listed beneath them.
 - `tests/e2e/sidebar.spec.ts`
 - `tests/e2e/theme-integration.spec.ts`
 - `tests/e2e/theme-loading-state.spec.ts`
-- `tests/e2e/verify-step24.spec.ts` — navigation, dashboard statistics, and execution-card behavior
+- `tests/e2e/verify-step24.spec.ts` — navigation, dashboard statistics, execution-card behavior, and beta-banner placement and dismissal
 - `tests/e2e/visual-regression.spec.ts` — light/dark screenshots of the principal application pages
 
 ### workflow-engine
@@ -801,24 +823,41 @@ level headings classify the tracked test paths listed beneath them.
 - `tests/unit/shared/workflow-catalog.test.ts` — catalog identity/ownership metadata is excluded from the executable graph; readWorkflowCatalogs multi-dir merge: union, later-dir-wins precedence on (owner,slug) collision, per-owner duplicate slugs preserved, missing/empty dirs skipped, single-dir == readWorkflowCatalog; getWorkflowsDirs config: default, WORKFLOWS_DIR fallback, colon-separated WORKFLOWS_DIRS, empty-segment drop
 - `tests/unit/shared/managed-resource-reconciler.test.ts` — closed three-way classification for first install/adoption, unchanged, user-only, upstream-only, converged, conflict, soft/hard deletion, removal, and tombstone reintroduction
 - `tests/unit/shared/workflow-reconciliation-bundle.test.ts` — path-safe atomic local candidate publication including interrupted final publication cleanup, same-handle no-follow digest-bound conflict reconstruction, database-free multi-conflict choice accumulation, merged-file binding, stale-choice preservation, exclusive locking, every branch-specific instruction family, pending/candidate symlink plus oversized/tampered-file rejection, durable applied markers, idempotent pending/retired post-commit states, and startup cleanup of exact retired UUID directories with live-pending preservation plus unsafe/partial-failure rejection
-- `tests/unit/web-frontend/workflow-transformer.test.ts` — including materialize registration on the shared CompactNode, factory output, frontend validation boundaries, content-free file summary data, success/error edge styling, and no fallback warning
+- `tests/unit/web-frontend/workflow-transformer.test.ts` — materialize transformed with content-free file summary data, success/error edge styling and no fallback warning; note nodes; fallback nodes
 - `tests/unit/workflow-engine/variable-resolver.test.ts`
 - `tests/unit/workflow-engine/workflow-schema-keywords.test.ts` — ordered unique-reference plans, deep evidence-prefix correlation, protected plan prefixes, non-mutating blocked responses, global-input inlining, and GraphValidator keyword registration
 - `tests/unit/workflow-engine/execution-parent-revision.test.ts` — workflow-step revision rejects stale full saves and previous-generation context writes; an independent parent revision rejects stale same-generation parent snapshots; valid same-owner attach, replace, detach and idempotent repetition leave the step generation unchanged; database integration additionally proves concurrent inverse changes cannot commit a cycle
 - `tests/unit/workflow-engine/execution-reminders.test.ts` — standalone/child completion-only reminder delivery without consuming step revision, independent collection-revision conflicts, literal template-like text, no intermediate leakage, idempotent add, targeted update/cancel and sibling preservation
-- `tests/unit/workflow-engine/execution-progress.test.ts` — static progress schema/semantic validation, template rendering, index-derived loop/replan state, completion-vs-cancellation persistence shape, many-to-one focus metadata and projection immutability
-- `tests/unit/workflow-engine/sdf-execution-progress.test.ts` — real bundled SDF progress topology and concrete current/completed state, label, revision and version projection across every forward phase plus feedback-repair and replan loops
-- `tests/unit/workflow-engine/execution-progress-image.test.ts` — shared horizontal visual model, forward/backward geometry, deterministic light/dark PNG bytes, state differences, bounds and image decoding
+- `tests/unit/workflow-engine/execution-progress.test.ts` — static progress schema/semantic validation plus the route-based run projection rules listed above
+- `tests/unit/workflow-engine/sdf-execution-progress.test.ts` — real bundled fifteen-block SDF projected from shortest authored routes: active block, label, revision and version per waiting node, only route-visited blocks done, a teleported replan with its teleport exit, completion with nothing unvisited done, and a route-less execution reporting only its current block
+- `tests/unit/workflow-engine/execution-progress-image.test.ts` — shared horizontal visual model carrying block statuses, forward/backward geometry, deterministic light/dark PNG bytes, state differences, bounds and image decoding; the export views: block/node id resolution, a hidden block removed with its transitions collapsed onto where it led (display chain and process transitions, labels joined), the process view drawing labelled transitions and a dashed loop with its cause while the cards view draws none, a collapsed block as a label-only chip, overlapping returns on nested lanes with hub transitions written inside their source, and the process view byte-deterministic and distinct from the cards view; a collapsed chip as a pill of its own height and a self-return drawn as a visible bracket
+- `tests/unit/workflow-engine/execution-progress-geometry.test.ts` — label and badge boxes of the progress image never overlap on the six flows at two widths; metric and width wrapping
 - `tests/unit/workflow-engine/execution-progress-wrapper.test.ts` — public workflow/execution image API metadata and byte parity, null no-progress behavior, render failure propagation, and input immutability
-- `tests/unit/workflow-engine/progress-image-service.test.ts` — normalized step-revision/context-revision/version/options-bound grants, successful single use, render-failure non-consumption and stale-state denial
+- `tests/unit/workflow-engine/progress-image-service.test.ts` — normalized step-revision/context-revision/version/options-bound grants (view, hide and collapse resolved to block ids and stored; an unknown id refused before any token exists), successful single use, render-failure non-consumption and stale-state denial
 - `tests/unit/workflow-engine/telegram-client-photo.test.ts` — reusable MIME-aware Telegram multipart photo/document transport with exact bytes, caption/options, empty/oversized photo pre-allocation rejection, and token/destination/content log redaction
 - `tests/unit/workflow-engine/user-communication.test.ts` — mutable shared channel registry, least-authority configuration/payload boundary, mixed Telegram/second-channel fan-out, channel-scoped test delivery through shared limits, sanitized aggregate outcomes, skipped-capability routing, absent-user isolation, portable progress attachments, workflow/direct shared provider budgets with independent providers, concurrent bounded availability, bounded-key rate/concurrency budgets, deadlines, quotas, and long attachment text
 - `tests/unit/web-backend/notifications-route.test.ts` — metadata and same-user readiness projection without secret values, extension trusted-state visibility, body-free selected-channel testing through the common service, browser authority refusal and unknown-channel denial
+- `tests/unit/web-backend/workflow-process.test.ts` — `GET /api/workflows/:id/process` response: the same derivation the CLI prints, diagnostics carried for a contract-violating flow, and a null process without `progress`
 - `tests/unit/web-backend/execution-progress-image.test.ts` — progress image reservation completion on response finish and release on close/write failure
-- `tests/unit/web-frontend/execution-progress-strip.test.tsx` — shared-model progress states/back edge, current accessibility and deterministic technical-node focus callbacks
+- `tests/unit/web-frontend/run-route-model.test.ts` — run page view helpers over the projection (blocks, stretches, counts, cursor, arcs, steps)
+- `tests/unit/web-frontend/run-answer-form.test.tsx` — typed answer parsing and empty-field omission of the run page's answer form
+- `tests/unit/web-frontend/run-layout.test.ts` — deterministic non-overlapping ELK canvas layout of every annotated bundled flow
+- `tests/unit/web-frontend/run-lanes-links.test.ts` — lanes forward connectors over the annotated flows
+- `tests/unit/web-frontend/run-lanes-phone.test.tsx` — phone stepper forward and return chips
+- `tests/unit/web-frontend/run-transition-chips.test.ts` — shared chip model: chip keys equal the canvas and rail connector keys; hub bundles; titles
+- `tests/unit/web-frontend/step-card-model.test.tsx` — step connections classified per block (internal sibling / owning block) on Quick Task and SDF; the panel tab badge (count, warning, nothing)
+- `tests/unit/web-frontend/graph-model.test.ts` — the technical graph's model equals the process-view step model: steps, owners, connections, return links (derived cycle edges or into an earlier block), flat without a process
+- `tests/unit/web-frontend/graph-routing.test.ts` — the technical graph's edge routing: straight forward links, in-block returns in the block's corridor, cross-block links in the gap, returns to earlier blocks along the margin, distinct lanes, transposed rows; on every bundled flow in both directions no lane crosses a card or leaves the canvas, lanes keep clear of cards and block borders, and arrivals at one card take their own approach columns
+- `tests/unit/web-frontend/variable-rows.test.ts` — the variables panel's grouping model: declared rows, cursor values, per-node outputs without promoted globals, no history without a projection
+- `tests/unit/web-frontend/run-lanes-layout.test.ts` — horizontal lanes rail layout and viewport height
+- `tests/unit/web-frontend/diagram-viewport.test.ts` — shared diagram gesture policy and zoom ranges
+- `tests/unit/web-frontend/diagram-placement.test.tsx` — shared opening placement hook
+- `tests/unit/web-frontend/use-resource.test.tsx` — last-good data store (pending, error, stale response, key change)
+- `tests/unit/web-frontend/workflow-detail-hook.test.tsx` — detail hook: refetch keeps the workflow current and pending; a new id is a first load
 - `tests/api/execution-parent-api.test.ts` — authenticated HTTP parent attach, idempotent repetition, replacement, detach, detail projection, unchanged step revision, and stale parent-target conflict against executions created through the public MCP start surface
 - `tests/api/execution-reminders-api.test.ts` — authenticated HTTP reminder add/idempotent retry/filter/update/cancel with unchanged step revision and collection-revision continuity against an execution created through public MCP start
-- `tests/mcp-tools/execution-variables.test.ts` — MCP/HTTP runtime ownership, filters (including false/current/other branches), unknown versus unset, effective editability/denial reasons, schema-valid top-level and inspector-path mutation with unchanged step revision and stale context-token rejection, unchanged sibling/node state on path rejection, audit redaction, definition discovery and HTTP policy authoring/invalid-policy reporting; progress create/edit preservation, strict rejection without mutation of forbidden progress/node/connection fields, transport identity, owner/administrator/foreign access, and absent-definition errors
+- `tests/mcp-tools/execution-answer.test.ts` — answering a waiting step from the run page on a real Quick Task run: refusals for a non-owner, a stale revision, a malformed body and schema-invalid input with the run untouched; the owner's accepted answer continuing the route and recorded as an adjustment visit by the user; the agent's outstanding attempt rejected as stale and recovered through `session current_step`; the route cursor on `session progress` and the HTTP projection with an invalid cursor refused; an administrator answering another user's run; and a completed run refusing
+- `tests/mcp-tools/execution-variables.test.ts` — MCP/HTTP runtime ownership, filters (including false/current/other branches), unknown versus unset, effective editability/denial reasons, schema-valid top-level and inspector-path mutation with unchanged step revision and stale context-token rejection, unchanged sibling/node state on path rejection, audit redaction, definition discovery and HTTP policy authoring/invalid-policy reporting; progress create/edit preservation, strict rejection without mutation of forbidden progress/node/connection fields, transport identity of the run projection (recorded route through start and step, adjustment visits by the agent and the web user, adjusted variable history), owner/administrator/foreign access, and absent-definition errors
 - `tests/unit/workflow-engine/registry-converter.test.ts`
 - `tests/unit/workflow-engine/node-output-scope.test.ts` — incl. whole-descriptor inlining: enum/items/pattern/properties + end-to-end rejection
 - `tests/unit/workflow-engine/strict-schema-validation.test.ts` — recursive strict JSON Schema normalization
@@ -829,7 +868,7 @@ level headings classify the tracked test paths listed beneath them.
 
 - `tests/integration/workflow-file-tokens.test.ts` — upload/download lifecycle, five-minute materialize TTL boundary, reusable materialize HTTP authorization with user/execution/node/context binding and transition rejection, real SQLite grant-failure normalization, and step-revision/context-revision/version-bound progress-image grants with atomic one-use claims
 - `tests/integration/agent-response-contract.test.ts`
-- `tests/integration/workflow-catalog-loader.test.ts` — owner/visibility mapping and three-way visibility changes, baseline adoption/divergence, distinct previous/current/incoming candidate content and canonical digests, upstream/user/two-sided changes, semver regression and same-version divergent content, catalog-wide preflight, user soft/hard deletion, upstream removal/tombstone/reintroduction and lifecycle resolution, conflict recovery across declared previous-slug migration for every selection route, required inspected revisions, durable resolution context, cross-snapshot staged portability that recomputes the actual incoming catalog on a fresh target while applying safe additions/updates and preserving unrelated target data, runtime validation of serialized staged artifacts, source/catalog/conflict-set/revision fail-closed behavior, local image CLI status/diff/get/validate/choose/apply with invalid merged-file rejection, catalog/target drift retention without partial mutation, no database mutation before complete apply, and committed-state bundle retirement semantics, lightweight summaries that do not parse malformed candidate bodies, multi-directory overlays, real SQLite rollback on a later apply failure, stale workflow/conflict/baseline guards across graph/visibility/lifecycle/alias changes, competing resolutions, real catalog evidence replacement, baseline creation/update/rename races, malformed baseline failure, explicit recovery, structured MCP response, administrator resolution, and SaaS CLI failure on a copied database without source mutation
+- `tests/integration/workflow-catalog-loader.test.ts` — the definition revision advanced by a bundled update and kept by an unchanged re-run; owner/visibility mapping and three-way visibility changes, baseline adoption/divergence, distinct previous/current/incoming candidate content and canonical digests, upstream/user/two-sided changes, semver regression and same-version divergent content, catalog-wide preflight, user soft/hard deletion, upstream removal/tombstone/reintroduction and lifecycle resolution, conflict recovery across declared previous-slug migration for every selection route, required inspected revisions, durable resolution context, cross-snapshot staged portability that recomputes the actual incoming catalog on a fresh target while applying safe additions/updates and preserving unrelated target data, runtime validation of serialized staged artifacts, source/catalog/conflict-set/revision fail-closed behavior, local image CLI status/diff/get/validate/choose/apply with invalid merged-file rejection, catalog/target drift retention without partial mutation, no database mutation before complete apply, and committed-state bundle retirement semantics, lightweight summaries that do not parse malformed candidate bodies, multi-directory overlays, real SQLite rollback on a later apply failure, stale workflow/conflict/baseline guards across graph/visibility/lifecycle/alias changes, competing resolutions, real catalog evidence replacement, baseline creation/update/rename races, malformed baseline failure, explicit recovery, structured MCP response, administrator resolution, and SaaS CLI failure on a copied database without source mutation
 - `tests/integration/mcp-reconciliation-notice.test.ts` — real in-memory MCP initialization and ordinary registered tool call both expose the graph-free managed-workflow reconciliation notice
 - `tests/integration/database/workflow-privacy-defaults.test.ts`
 - `tests/integration/manage-workflow-actions.test.ts`
@@ -840,6 +879,7 @@ level headings classify the tracked test paths listed beneath them.
 - `tests/integration/subgraph-performance.test.ts`
 - `tests/integration/subgraph-sequential.test.ts`
 - `tests/integration/workflow-mutation-service.test.ts`
+- `tests/integration/workflow-revision.test.ts` — the workflow definition revision: migration `0026_workflow_revision` gives existing rows 0 (rolled back and re-applied on a file database); the shared repository save starts a new workflow at 0, advances on every graph update and not on a visibility write, and the revision is read by `getFullInfo` and `list`
 - `tests/integration/workflow-outputs.test.ts`
 - `tests/integration/workflow-pagination.test.ts`
 - `tests/integration/teleport-execution.test.ts` — teleport execution, validation, context preservation, and response hints
@@ -862,6 +902,7 @@ level headings classify the tracked test paths listed beneath them.
 - `tests/workflow/engine/node-handlers.test.ts` — including strict empty/nested/missing End projection, runtime-input rejection, and engine-owned system context-path resolution
 - `tests/workflow/engine/node-type-validation.test.ts`
 - `tests/workflow/engine/materialize-node.test.ts` — materialize schema/source-default contract, handler directive summary including the conditional non-preferred context fallback offered after the primary command and success criteria that accept delivery by either route, expected/unexpected preparation failures, isolated re-presentation that cannot traverse an error connection, shell encoding, current-registry rendering, tar output, path safety, collision detection, and exact resource boundaries
+- `tests/workflow/engine/execution-route.test.ts` — bundled flows driven through the stateful executor and their recorded route: Quick Task to the third of five units after a plan repair (exact visit sequence, changes, revision growth, repeated review, waiting execution, loop markers, variable history, PNG from the same projection), an autonomous run skipping plan approval, an SDF run aborted at the health check with nothing later done, a completed Todo List run with a teleport exit, and a route-less execution inferring nothing; a wait answered from outside the flow (rejected input changing nothing, an accepted answer continuing the route with an adjustment visit carrying the actor and the values it wrote, the variable history and block statuses reflecting it)
 - `tests/workflow/engine/note-handlers.test.ts`
 - `tests/workflow/engine/note-node-validation.test.ts`
 - `tests/workflow/engine/path-resolver.test.ts`
@@ -871,7 +912,7 @@ level headings classify the tracked test paths listed beneath them.
 - `tests/workflow/engine/schema-validator-agent-format.test.ts` — including exact context-derived artifact paths that resolve the engine-owned execution identity and reject a schema-valid foreign workspace
 - `tests/workflow/engine/subgraph-delegation.test.ts`
 - `tests/workflow/engine/subgraph-handler-simple.test.ts` — including discriminated child-failure provenance
-- `tests/workflow/engine/subgraph-handler.test.ts`
+- `tests/workflow/engine/subgraph-handler.test.ts` — subgraph delegation, mappings and missing-workflow errors; delegation at `_subgraphDepth` 100 still pauses (MAX_DEPTH is logged, not enforced)
 - `tests/workflow/engine/subgraph-validation.test.ts`
 - `tests/workflow/engine/system-reminder-priority.test.ts`
 - `tests/workflow/engine/telegram-services.test.ts`
@@ -885,12 +926,15 @@ level headings classify the tracked test paths listed beneath them.
 - `tests/api/workflow-copy.test.ts`
 - `tests/api/workflow-list-performance.test.ts`
 - `tests/api/workflow-visibility-patch.test.ts`
+- `tests/api/workflow-update.test.ts` — `PUT /api/workflows/:id`: the GET carries `fileInfo.revision`, a matching `expectedRevision` saves, advances the revision, keeps the visibility and returns the new revision with the derived process; a create with `overwrite` advances it like any graph write (the pre-overwrite revision is then refused); a stale revision is refused with 409 and `currentRevision`, an invalid graph and a missing `expectedRevision` with 400, none touching the stored definition
 - `tests/api/workflows-privacy.test.ts`
 
 **mcp-tools**
 
 - `tests/mcp-tools/materialize-fallback.test.ts` — live authenticated MCP delivery of materialize file bodies into the tool response while the node is presented, refusal after the execution advances, and the published `materialize` session action; cross-user scoping is asserted at the unit and integration levels instead of a third time here
+- `tests/mcp-tools/progress-image-views.test.ts` — the export parameters on a real SDF run through MCP and HTTP: cards, process and hidden-block tokens rendering three distinct decodable PNGs (the hidden-block image shorter), node ids stored as their blocks, unknown ids and an invalid view refused at mint, a second use of a token refused, a token minted before the intake step is answered refused after it while a fresh one renders
 - `tests/mcp-tools/workflow-crud.test.ts`
+- `tests/mcp-tools/workflow-revision.test.ts` — the definition revision across the agent and page paths: `manage get` and `edit` carry it, `edit` with a stale `expectedRevision` is refused naming the stored revision and without one still saves, a token file upload over the workflow and `set-variable` advance it so a page save carrying the pre-mutation revision is refused with 409, a stranger's save is refused (404 while private, 403 once public) and `set-visibility` leaves the revision alone
 - `tests/mcp-tools/workflow-documentation.test.ts` — live authenticated MCP-owned help catalog with canonical special-`tools` discoverability, presentation-model-derived client/quickstart/agent-instruction content, configured endpoint and authentication guidance, ordinary topic semantics, Markdown shape, unknown-topic guidance, and direct typed tools detail
 - `tests/mcp-tools/workflow-ownership.test.ts`
 - `tests/mcp-tools/workflow-pagination.test.ts`
@@ -898,7 +942,12 @@ level headings classify the tracked test paths listed beneath them.
 
 **e2e**
 
-- `tests/e2e/workflow-canvas-controls.spec.ts`
+- `tests/e2e/flow-page.spec.ts` — the flow page replacing the workflow detail page (see the execution domain row for the full scope); the kept workflow-page specs below exercise its graph mode and owner actions unchanged; returns readable on demand: no arc or cycle label at rest, hovering a return chip lights one connector with its label, a `block` deep link keeps the selected block's connectors lit
+- `tests/e2e/workflow-canvas-controls.spec.ts` — the technical graph's layout buttons (fit view, vertical, horizontal) sit inside the React Flow zoom cluster in one column
+- `tests/e2e/diagram-gestures.spec.ts` — flow page canvas, lanes and graph modes open fitted; a plain wheel over the diagram pans it (translation changes, scale unchanged), a ctrl-wheel zooms it (scale changes), and a wheel over the side panel leaves the diagram transform untouched; the opening fit keeps a readable scale (canvas at least three quarters, the rail at full size) with the first block's card inside the diagram
+- `tests/e2e/navigation-flicker.spec.ts` — navigation never blanks the page: a lazy section chunk loads behind an in-layout skeleton with the sidebar kept; the run page keeps its projection and toolbar through a held progress refetch, a mode switch and a cursor move with the first-load banner never returning; the flow page keeps its modes strip and diagram through the detail and process refetches after a save, showing a slim pending indicator and never the page loader; a progress refetch answered 500 keeps the run page projection without the unavailable banner, a detail refetch answered 500 keeps the flow page content beside an error toast, the Locks tab keeps its list through a held refetch on reopening, and an execution refresh answered 500 keeps the run page beside an error toast
+- `tests/e2e/step-cards.spec.ts` — step cards on one grid: on the flow page's split view of the densest SDF block and on the run page's block panel the type badges share one box and one left edge, titles share one left edge and start on the badge's line, a card with transition chips keeps its title edge and external chips are present; the run page's current step is marked; the Steps tab lists the definition on the same cards with the start node first, done marks from the route and one current step; the panel tab strip has no horizontal overflow at 1440 and 400 px and every tab carries a hint; the status chip carries no pass count
+- `tests/e2e/graph-mode.spec.ts` — the technical graph as the process view's detailed layer: on Quick Task's graph mode every workflow node is a step card, one group per block in process order top to bottom, every derived cycle edge named in both cards (a connection chip in its source, an arrival chip in its target) and not drawn at rest, appearing dashed with its label when either chip is hovered (after the fit control gives the overview back, the definition having opened on its first block), a click on the arrival chip taking the view to the far card (a zoom the overview does not have, that card centred), labels kept on the straight forward edges, Horizontal/Vertical/Fit View and the sidebar working, the definition opening at a zoom of at least 0.7 with the first group's header inside the graph's box, group nodes stacked below edges and edges not above cards; on the Software Development Flow's 130 cards no two card boxes intersect after the measured layout pass; on a run's Graph tab the groups carry the run's block status and the current step is marked
 - `tests/e2e/workflow-card-compact.spec.ts`
 - `tests/e2e/workflow-copy-button.spec.ts`
 - `tests/e2e/workflow-delete-restore.spec.ts`

@@ -7,6 +7,7 @@
 import { WorkflowGraph } from "./core-interfaces.js";
 import {
   WorkflowExecution,
+  type ExecutionVisit,
   type ReminderMutation,
   type ReminderMutationResult,
 } from "../types/base-types.js";
@@ -85,6 +86,8 @@ export interface WorkflowInfo {
   size: number;
   createdAt: number;
   updatedAt: number;
+  /** Definition revision; advanced by every stored write of the graph. */
+  revision: number;
   workflow: WorkflowGraph;
   // Cached validation info (Issue #463)
   validation: ValidationCache;
@@ -269,11 +272,17 @@ export interface IDataRepository {
     mutation: ReminderMutation,
   ): Promise<ReminderMutationResult>;
 
+  /**
+   * Merge variables/node states into the execution context under both revision guards. An
+   * optional `visit` is appended to the execution's route log in the same write, so a runtime
+   * adjustment is recorded exactly when its value lands.
+   */
   updateExecutionContext(
     executionId: string,
     context: { variables?: Record<string, unknown>; nodeStates?: Record<string, unknown> },
     expectedRevision: number,
     expectedContextRevision: string,
+    visit?: Omit<ExecutionVisit, "seq">,
   ): Promise<boolean>;
 
   prepareStartExecutionAttempt(attempt: PreparedStartExecutionAttempt): Promise<void>;
@@ -301,6 +310,11 @@ export interface IDataRepository {
   ensureCurrentPresentedExecutionAttempt(
     attempt: PresentedExecutionAttempt,
   ): Promise<ExecutionAttempt>;
+  /**
+   * Replace the execution's current presentation with `attempt`: a presented attempt is marked
+   * `superseded` and linked to the new one; an executing or outcome-unknown attempt refuses.
+   */
+  supersedePresentedExecutionAttempt(attempt: PresentedExecutionAttempt): Promise<void>;
   getExecutionAttempt(attemptId: string): Promise<ExecutionAttempt | null>;
   updatePresentedExecutionAttemptResponse(
     attemptId: string,

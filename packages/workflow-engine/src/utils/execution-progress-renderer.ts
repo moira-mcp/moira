@@ -1,5 +1,5 @@
 import sharp from "sharp";
-import type { ExecutionProgress } from "./execution-progress.js";
+import type { ExecutionProgress } from "./execution-progress-contract.js";
 import {
   buildExecutionProgressVisualModel,
   type ProgressVisualModel,
@@ -103,10 +103,14 @@ export function renderProgressVisualSvg(model: ProgressVisualModel): string {
     })
     .join("");
   const edges = model.edges
-    .map(
-      (edge) =>
-        `<path d="${edge.path}" fill="none" stroke="${edge.direction === "backward" ? palette.accent : palette.border}" stroke-width="3" stroke-linecap="round"${edge.direction === "backward" ? ' stroke-dasharray="7 6"' : ""}/>`,
-    )
+    .map((edge) => {
+      const loop = edge.cycle || edge.direction === "backward";
+      const path = `<path d="${edge.path}" fill="none" stroke="${loop ? palette.accent : palette.border}" stroke-width="3" stroke-linecap="round"${loop ? ' stroke-dasharray="7 6"' : ""}/>`;
+      if (!edge.labelLines.length) return path;
+      const anchor = edge.labelAnchor;
+      const label = `<text x="${edge.labelX}" y="${edge.labelY}" text-anchor="${anchor}" fill="${loop ? palette.accent : palette.muted}" font-size="11" font-weight="600">${edge.labelLines.map((line, index) => `<tspan x="${edge.labelX}" dy="${index === 0 ? 0 : 14}">${escapeXml(line)}</tspan>`).join("")}</text>`;
+      return path + label;
+    })
     .join("");
   const nodes = model.nodes
     .map((node) => {
@@ -122,17 +126,30 @@ export function renderProgressVisualSvg(model: ProgressVisualModel): string {
           : node.state === "completed"
             ? palette.success
             : palette.border;
-      const mark = node.state === "completed" ? "✓" : node.state === "current" ? "●" : "○";
       const state =
-        node.state === "completed" ? "Completed" : node.state === "current" ? "Current" : "Pending";
+        node.status === "repeated"
+          ? `Repeated ×${node.iterations}`
+          : node.status === "done"
+            ? "Completed"
+            : node.status === "waiting"
+              ? "Waiting"
+              : node.status === "active"
+                ? "Current"
+                : node.status === "skipped"
+                  ? "Skipped"
+                  : "Pending";
       const labelY = node.y + 26;
       const label = textLines(
         node.labelLines,
-        node.x + 38,
+        node.titleX,
         labelY,
         20,
         `fill="${palette.text}" font-size="14" font-weight="700"`,
       );
+      // The repeat count is a secondary badge beside the mark, never part of the title.
+      const badge = node.badge
+        ? `<rect x="${node.badge.x}" y="${node.badge.y}" width="${node.badge.width}" height="${node.badge.height}" rx="8" fill="${palette.background}" stroke="${palette.border}" stroke-width="1"/><text x="${node.badge.x + 5}" y="${node.badge.y + 12}" fill="${palette.muted}" font-size="11" font-weight="600">${escapeXml(node.badge.text)}</text>`
+        : "";
       let lineY = labelY + Math.max(1, node.labelLines.length) * 20 + 12;
       const content = node.lines
         .map((line) => {
@@ -159,7 +176,7 @@ export function renderProgressVisualSvg(model: ProgressVisualModel): string {
           return rendered;
         })
         .join("");
-      return `<g><title>${escapeXml(`${state}: ${node.label}`)}</title><rect x="${node.x}" y="${node.y}" width="${node.width}" height="${node.height}" rx="16" fill="${fill}" stroke="${stroke}" stroke-width="${node.state === "current" ? 4 : 2}"/><text x="${node.x + 14}" y="${node.y + 27}" fill="${stroke}" font-size="18" font-weight="700">${mark}</text>${label}${content}</g>`;
+      return `<g${node.collapsed ? ' data-collapsed="true"' : ""}><title>${escapeXml(`${state}: ${node.label}`)}</title><rect x="${node.x}" y="${node.y}" width="${node.width}" height="${node.height}" rx="${node.collapsed ? node.height / 2 : 16}" fill="${fill}" stroke="${stroke}" stroke-width="${node.state === "current" ? 4 : 2}"${node.collapsed ? ' stroke-dasharray="4 4"' : ""}/><text x="${node.markX}" y="${node.y + 27}" fill="${stroke}" font-size="18" font-weight="700">${node.mark}</text>${badge}${label}${content}</g>`;
     })
     .join("");
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${model.width}" height="${model.height}" viewBox="0 0 ${model.width} ${model.height}" font-family="DejaVu Sans, sans-serif"><rect width="100%" height="100%" fill="${palette.background}"/>${header.join("")}${facts}${edges}${nodes}</svg>`;

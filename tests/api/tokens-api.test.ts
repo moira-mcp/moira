@@ -4,25 +4,21 @@
  */
 
 import { describe, test, expect, beforeAll } from "@jest/globals";
-import { getTestBaseUrl, getAdminCredentials } from "../utils/test-config.js";
+import { getTestBaseUrl } from "../utils/test-config.js";
+import { createTestUserViaApi, formatSessionCookie, signInUser } from "../utils/mcp-auth.js";
 
 const BASE_URL = getTestBaseUrl();
-const ADMIN_CREDENTIALS = getAdminCredentials();
 
 const TEST_USER = {
   email: `tokens-api-test-${Date.now()}@example.com`,
   password: "TestPass123!",
   name: "Token Test User",
-  acceptedTermsAt: new Date().toISOString(),
-  acceptedNotRussianResidentAt: new Date().toISOString(),
 };
 
 const TEST_USER_2 = {
   email: `tokens-api-test2-${Date.now()}@example.com`,
   password: "TestPass123!",
   name: "Token Test User 2",
-  acceptedTermsAt: new Date().toISOString(),
-  acceptedNotRussianResidentAt: new Date().toISOString(),
 };
 
 let authCookie: string;
@@ -32,38 +28,17 @@ let testUserId: string;
 async function createAndVerifyUser(
   userData: typeof TEST_USER,
 ): Promise<{ userId: string; cookie: string }> {
-  const signUpRes = await fetch(`${BASE_URL}/api/auth/sign-up/email`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(userData),
-  });
-  const signUpData = (await signUpRes.json()) as any;
-  if (!signUpData?.user) {
-    throw new Error(`Failed to create user: ${JSON.stringify(signUpData)}`);
-  }
-
-  const adminLoginRes = await fetch(`${BASE_URL}/api/auth/sign-in/email`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(ADMIN_CREDENTIALS),
-  });
-  const adminCookies = adminLoginRes.headers.get("set-cookie");
-
-  await fetch(`${BASE_URL}/api/admin/users/${signUpData.user.id}/verify-email`, {
-    method: "POST",
-    headers: { Cookie: adminCookies || "" },
-  });
-
-  const loginRes = await fetch(`${BASE_URL}/api/auth/sign-in/email`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email: userData.email, password: userData.password }),
-  });
-
-  return {
-    userId: signUpData.user.id,
-    cookie: loginRes.headers.get("set-cookie") || "",
-  };
+  const { userId } = await createTestUserViaApi(
+    BASE_URL,
+    userData.email,
+    userData.password,
+    userData.name,
+  );
+  const cookie = formatSessionCookie(
+    BASE_URL,
+    await signInUser(BASE_URL, userData.email, userData.password),
+  );
+  return { userId, cookie };
 }
 
 beforeAll(async () => {

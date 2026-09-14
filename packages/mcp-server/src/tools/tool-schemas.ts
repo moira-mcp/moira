@@ -138,6 +138,14 @@ export const manageWorkflowSchema = z.object({
     })
     .optional()
     .describe("Changes to apply for edit action"),
+  expectedRevision: z
+    .number()
+    .int()
+    .min(0)
+    .optional()
+    .describe(
+      "edit only: the workflow revision the changes were prepared against (from get); the edit is refused when the stored revision differs",
+    ),
   includeNodes: z.boolean().optional().describe("Include full node definitions in get response"),
   includeValidation: z.boolean().optional().describe("Include validation results in response"),
   offset: z.number().optional().describe("Pagination offset for node listing"),
@@ -284,6 +292,32 @@ export const getSessionInfoHandlerSchema = z.object({
   variableValue: z.unknown().optional(),
   theme: z.enum(["light", "dark"]).optional(),
   viewportWidth: z.number().int().min(480).max(4096).optional(),
+  view: z
+    .enum(["cards", "process"])
+    .optional()
+    .describe(
+      "progress-image-token: cards (default) draws every block as a content card; process draws the aggregated block view with labelled transitions and loops",
+    ),
+  hide: z
+    .array(z.string().min(1).max(200))
+    .max(100)
+    .optional()
+    .describe(
+      "progress-image-token: block ids or authored node ids (resolved to their block) left out of the image; their transitions collapse",
+    ),
+  collapse: z
+    .array(z.string().min(1).max(200))
+    .max(100)
+    .optional()
+    .describe("progress-image-token: block ids or authored node ids drawn as a label-only chip"),
+  at: z
+    .number()
+    .int()
+    .min(0)
+    .optional()
+    .describe(
+      "Route cursor for progress: project the run as of this visit sequence number (the route is cut there, variables carry the values written up to it)",
+    ),
   // Parameters for execution_context action
   variables: z
     .array(z.string())

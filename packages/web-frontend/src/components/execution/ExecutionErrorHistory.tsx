@@ -143,7 +143,7 @@ export function ExecutionErrorHistory({ errors, className }: ExecutionErrorHisto
                   <div className="mt-0.5 text-muted-foreground">
                     {getErrorTypeIcon(error.errorType)}
                   </div>
-                  <div className="flex-1 text-left">
+                  <div className="min-w-0 flex-1 text-left">
                     <div className="flex items-center gap-2 flex-wrap">
                       <Badge variant={getErrorTypeBadgeVariant(error.errorType)}>
                         {t(
@@ -156,7 +156,7 @@ export function ExecutionErrorHistory({ errors, className }: ExecutionErrorHisto
                         {formatRelativeTime(error.timestamp)}
                       </span>
                     </div>
-                    <p className="mt-1 text-sm font-medium whitespace-pre-wrap break-words">
+                    <p className="mt-1 text-sm font-medium whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
                       {error.message}
                     </p>
                     <p className="mt-1 text-xs text-muted-foreground">
@@ -232,7 +232,7 @@ export function ExecutionErrorHistory({ errors, className }: ExecutionErrorHisto
                         <Code className="h-3 w-3" />
                         {t("components.executionErrors.input", "Input")}:
                       </span>
-                      <pre className="mt-1 p-2 bg-muted rounded text-xs font-mono overflow-x-auto max-h-32">
+                      <pre className="scrollbar-thin mt-1 p-2 bg-muted rounded text-xs font-mono overflow-x-auto max-h-32">
                         {typeof error.input === "string"
                           ? error.input
                           : JSON.stringify(error.input, null, 2)}

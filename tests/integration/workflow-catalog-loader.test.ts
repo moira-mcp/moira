@@ -222,6 +222,20 @@ describe("Workflow Catalog Loader Integration", () => {
     expect(updated?.metadata?.version).toBe("1.1.0");
   });
 
+  test("advances the definition revision on a bundled update and keeps it on an unchanged re-run", async () => {
+    const slug = `loader-revision-${Date.now()}`;
+    await installCatalogEntries([entry(OWNER_A, slug, "1.0.0")], deps);
+    const id = (await deps.workflowRepo.resolveSlug(slug, OWNER_A))!;
+    const revision = async () => (await deps.workflowRepo.getFullInfo(id, OWNER_A))?.revision;
+    expect(await revision()).toBe(0);
+
+    await installCatalogEntries([entry(OWNER_A, slug, "1.0.0")], deps);
+    expect(await revision()).toBe(0);
+
+    await installCatalogEntries([entry(OWNER_A, slug, "1.1.0")], deps);
+    expect(await revision()).toBe(1);
+  });
+
   test("preserves a user-only visibility change and applies upstream visibility", async () => {
     const stamp = Date.now();
     const userSlug = `loader-user-visibility-${stamp}`;

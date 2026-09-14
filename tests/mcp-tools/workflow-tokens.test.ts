@@ -22,11 +22,30 @@ const BASE_URL = getTestBaseUrl();
 describe("MCP Workflow Token Tools E2E", () => {
   let client: Client;
   let cleanup: () => Promise<void>;
+  let downloadWorkflowId: string;
 
   beforeAll(async () => {
     const mcpClient = await createAuthenticatedMCPClient();
     client = mcpClient.client;
     cleanup = mcpClient.cleanup;
+
+    // Dedicated workflow so the download-token test never depends on catalog contents
+    const created = await callMCPTool(client, "manage", {
+      action: "create",
+      workflow: {
+        metadata: {
+          name: "Token Download Source",
+          version: "1.0.0",
+          description: "Workflow for the download token test",
+        },
+        nodes: [
+          { type: "start", id: "start", connections: { default: "end" } },
+          { type: "end", id: "end" },
+        ],
+      },
+    });
+    expect(created).toHaveProperty("success", true);
+    downloadWorkflowId = created.workflowId;
   });
 
   afterAll(async () => {
@@ -51,19 +70,9 @@ describe("MCP Workflow Token Tools E2E", () => {
   });
 
   test("create_workflow_token download action generates valid token", async () => {
-    // Get a workflow ID first
-    const listResult = await callMCPTool(client, "list", {});
-    const workflows = listResult.workflows || listResult;
-    if (!workflows || workflows.length === 0) {
-      console.warn("No workflows available, skipping download token test");
-      return;
-    }
-
-    const workflowId = workflows[0].id;
-
     const rawResult = await callMCPTool<string>(client, "token", {
       action: "download",
-      workflowId,
+      workflowId: downloadWorkflowId,
       ttlMinutes: 60,
     });
 

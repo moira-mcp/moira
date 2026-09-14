@@ -23,6 +23,9 @@ describe("communication attachment grant migration", () => {
       migrate(drizzle(sqlite), { migrationsFolder: MIGRATIONS });
       sqlite.exec(`DROP TABLE ${ATTEMPT_TABLE}`);
       sqlite.exec(`DROP TABLE ${TABLE}`);
+      // The route-log column arrived later still; an old database has none.
+      sqlite.exec("ALTER TABLE workflowExecution DROP COLUMN visits");
+      sqlite.exec("ALTER TABLE workflow DROP COLUMN revision");
       sqlite
         .prepare("DELETE FROM __drizzle_migrations WHERE created_at >= ?")
         .run(migrationTimestamp);

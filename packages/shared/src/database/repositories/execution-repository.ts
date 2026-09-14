@@ -65,6 +65,7 @@ export class ExecutionRepository {
     const errorsJson =
       execution.errors && execution.errors.length > 0 ? JSON.stringify(execution.errors) : null;
     const remindersJson = JSON.stringify(execution.reminders ?? []);
+    const visitsJson = JSON.stringify(execution.visits ?? []);
 
     if (existing.length > 0) {
       // Update (note can be updated via execution_note magic variable)
@@ -83,6 +84,7 @@ export class ExecutionRepository {
           completedAt,
           revision: expectedRevision + 1,
           reminders: remindersJson,
+          visits: visitsJson,
         })
         .where(
           and(
@@ -115,6 +117,7 @@ export class ExecutionRepository {
         parentExecutionId: execution.parentExecutionId || null,
         revision: execution.revision,
         reminders: remindersJson,
+        visits: visitsJson,
         createdAt,
         updatedAt,
         completedAt,
@@ -158,6 +161,14 @@ export class ExecutionRepository {
       reminders = [];
     }
 
+    let visits: WorkflowExecution["visits"] = [];
+    try {
+      visits = JSON.parse(row.visits) as WorkflowExecution["visits"];
+      if (!Array.isArray(visits)) visits = [];
+    } catch {
+      visits = [];
+    }
+
     // Parse context JSON defensively: a single malformed row must not crash listing
     // of all executions (e.g. analytics that map over every execution).
     let globalContext: WorkflowExecution["globalContext"];
@@ -186,6 +197,7 @@ export class ExecutionRepository {
       parentExecutionId: row.parentExecutionId ?? undefined,
       revision: row.revision,
       reminders,
+      visits,
       createdAt: row.createdAt ? (row.createdAt as Date).getTime() : Date.now(),
       updatedAt: row.updatedAt ? (row.updatedAt as Date).getTime() : Date.now(),
       completedAt: row.completedAt ? (row.completedAt as Date).getTime() : undefined,
@@ -458,6 +470,7 @@ export class ExecutionRepository {
     context: { variables?: Record<string, unknown>; nodeStates?: Record<string, unknown> },
     expectedRevision: number,
     expectedContextRevision: string,
+    visit?: Omit<NonNullable<WorkflowExecution["visits"]>[number], "seq">,
   ): Promise<boolean> {
     // First get current execution to merge context
     const execution = await this.get(executionId);
@@ -500,10 +513,18 @@ export class ExecutionRepository {
       throw new Error(`Execution context size ${sizeMB}MB exceeds maximum ${maxMB}MB limit`);
     }
 
+    // The route log gains the adjustment in the same guarded write as the context it changed.
+    const visits = visit
+      ? JSON.stringify([
+          ...(execution.visits ?? []),
+          { seq: (execution.visits ?? []).length, ...visit },
+        ])
+      : undefined;
     const result = await this.db
       .update(workflowExecution)
       .set({
         context: JSON.stringify(updatedContext),
+        ...(visits !== undefined ? { visits } : {}),
         updatedAt: new Date(),
       })
       .where(

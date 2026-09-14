@@ -13,57 +13,81 @@ A workflow may declare an optional top-level `progress` graph for a concise user
 definition may include a template-enabled title, goal, bounded generic facts, and ordered nodes.
 Nodes contain `id`, template-enabled `label`, optional structured plain-text `content` (`summary`,
 `details`, `outcome`, and `next`), and an optional static `connections.default` used for drawing.
-User-visible waiting nodes in the primary graph select a milestone with
-`progressNodeId`.
 
-A waiting node may also declare template-enabled `progressActiveLabel`. It replaces the displayed
-label only while that exact primary node is current, letting a workflow show truthful unit,
-iteration, validation, or repair detail without changing stable inactive milestone labels. It
-requires a valid mapping and never affects routing or stored state.
+The progress graph is the workflow's process view: its nodes are **blocks**, and their array order
+is the process order. When `progress` is present, every node of the primary graph — routing nodes
+included — declares the block it belongs to through `progressNodeId`; every block carries a
+description in `content.summary`; and every connection that leaves a block, or returns to an
+earlier block or to its own block, carries a `connectionLabels` entry keyed like `connections`:
+a plain label, or `{ "label": …, "cycle": { "cause": …, "exit": … } }` for a return. Transitions,
+loops and hub blocks are derived from the primary graph and never authored twice; the display-only
+`connections.default` is ignored by that derivation. An outcome template (`{{progress_*_outcome}}`)
+sits on exactly one block, which owns a node that writes the variable. Validation reports every
+violation as an error with a stable code — `unowned-node`, `unknown-block`, `empty-block`,
+`empty-description`, `unlabeled-edge`, `unexplained-cycle`, `outcome-duplicate`,
+`outcome-unowned`, `unconnected-block` — and `moira-workflow <file> derive` or `GET /api/workflows/:id/process` shows
+the derived blocks with the same diagnostics.
 
-The execution note is projected as the task title. A waiting node may declare
-`progressActiveContent` with the same structured fields. Its fields replace matching milestone
-content only while that exact node is current; omitted fields keep their stable base values. Nested
+A node that pauses the run (an `agent-directive` step or another pausing node type) may also
+declare template-enabled `progressActiveLabel`. It replaces its block's displayed label only while
+that exact node is current, letting a workflow show truthful unit, iteration, validation, or repair
+detail without changing the block's stable label. It requires the node to belong to a block and
+never affects routing or stored state.
+
+The execution note is projected as the task title. The same node may declare
+`progressActiveContent` with the same structured fields. Its fields replace the matching content
+of its block only while that exact node is current; omitted fields keep their stable base values. Nested
 strings use the normal variable registry and template protection. Progress stores no presentation
 history, so replacing revision-bound context replaces the next projection instead of retaining
 stale values from an earlier plan.
 Resolved text is checked against the same bounds after interpolation. Oversized runtime data fails
 the projection explicitly rather than being silently truncated into a misleading summary.
 
-Progress array order defines state: milestones before the active one are completed, the active one
-is current, and later ones are pending. Returning to an earlier milestone through repair, a loop, or
-replan automatically reopens it. Connections never route execution, and progress has no variables,
-conditions, stored status, history, or cursor.
+Block status comes from the execution's recorded route, never from block order. Every execution
+records one visit per node it runs — the node, the connection it left through (`teleport` for a
+jump), the variables it changed, and whether it paused — and `session({ action: "progress" })`
+projects that route onto the process: the block of the last visit is `active`, or `waiting` when
+the run pauses there; a visited block is `done`, or `repeated` with the number of passes through
+its working steps; a block whose work never ran or that the run bypassed is `skipped`; the rest
+are `pending`. Returning to an earlier block through repair, a loop, or replan makes it active
+again and counts another pass. Nothing unvisited is ever reported done, and an execution created
+before routes were recorded reports only its current block as active with `routeRecorded: false`.
+The same projection lists the route with loop markers and every variable with its history;
+values set from outside the flow appear as adjustments with their actor. Connections never route
+execution.
 
-When `progress` is present, every user-visible waiting node (`agent-directive`, `teleport`, `lock`,
-`materialize`, and `subgraph`) must map to an existing milestone. Multiple primary nodes may map to
-one milestone. The currently active primary node is the focus target for its milestone; other
-milestones focus their first mapped primary node in workflow order. A completed execution shows all
-milestones through its last persisted mapped waiting node as complete and leaves later milestones
-pending. Completion after a final mapped responsibility therefore completes every milestone, while
-any terminal with an earlier mapped frontier leaves later milestones pending. Older completion
-records without a usable mapped frontier retain the all-completed fallback. Pending milestones keep
-summary, details, and next guidance but hide `outcome`, so an older revision or unit result cannot
-appear current during an engine-owned transition.
+When `progress` is present, every primary node maps to an existing block, as described above.
+Multiple primary nodes may map to one block. The currently active primary node is the focus target
+for its block; other blocks focus their first mapped primary node in workflow order. Pending and
+skipped blocks keep summary, details, and next guidance but hide `outcome`, so an older revision
+or unit result cannot appear current during an engine-owned transition.
 
 The engine exposes one shared content-rich visual model and a bounded light/dark PNG renderer. The
 model keeps the complete task, goal, facts, completed outcomes, current activity, details and next
-action visible without hover. Text wraps without truncation and milestones pack into deterministic
+action visible without hover. Text wraps without truncation and blocks pack into deterministic
 left-to-right rows when one row does not fit.
 Agents request a short-lived, revision-bound, single-use download URL through `session
-progress-image-token`; the binary does not pass through MCP. A `user-notification` node may set
-`attachProgressImage: true` and use its normal message as the image caption. Such a node must map to
-an existing progress milestone. The deprecated `telegram-notification` compatibility node supports
+progress-image-token`; the binary does not pass through MCP. The token takes optional `theme`
+(`light|dark`), `viewportWidth` (480–4096), `view` — `cards` (the default content grid) or
+`process` (the aggregated block view: blocks in process order with labelled transitions, returns
+as dashed arcs with the transition label, hub transitions written inside their source, as the run
+page's lanes show them; a loop's cause and exit are on the run page, not in the image) — and `hide` / `collapse`: block ids or authored node ids (a node names its block)
+left out of the image with their transitions collapsed onto the neighbours, or drawn as a
+label-only chip. Unknown ids are refused when the token is minted. A `user-notification` node may set
+`attachProgressImage: true` and use its normal message as the image caption. Such a node must belong to
+an existing block. The deprecated `telegram-notification` compatibility node supports
 the same attachment for existing provider-specific workflows.
 
 Engine integrations with a workflow and execution use `renderExecutionProgressImage(...)`. It
 returns `null` when progress is absent, otherwise the PNG buffer, MIME type, dimensions, workflow
 version, and execution revision; rendering failures stay errors.
 
-On execution pages this same model appears above the technical graph and detail tabs. Actionable
-milestones can focus their mapped technical node; unmapped milestones remain readable non-controls.
-The visible card and PNG contain the same essential information. Workflows without progress keep the
-standard inspector unchanged.
+The flow page (see the _Reading and editing a flow_ guide) shows the derived process of the
+definition itself and lets its owner edit it in place. On the run page (see the _Reading a run_
+guide) the same projection is shown as lanes, a canvas,
+an outline and the route, with a block panel that drills into each block's steps and focuses the
+technical node graph. The page and the PNG contain the same essential information. A workflow
+without progress shows the technical node graph and the variables panel instead.
 
 Every workflow consists of:
 

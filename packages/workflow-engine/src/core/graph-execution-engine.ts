@@ -47,6 +47,7 @@ import { IExtensionRunnerClient } from "../extensions/extension-runner-client.js
 import { isExtensionNode } from "../types/graph-nodes.js";
 import { GraphTemplateProcessor } from "../templates/graph-template-processor.js";
 import { SchemaValidator } from "../utils/schema-validator.js";
+import { diffVariables, snapshotVariables, type EngineVisit } from "../utils/execution-visits.js";
 
 import {
   IGraphExecutionEngine,
@@ -234,6 +235,8 @@ export class GraphExecutionEngine implements IGraphExecutionEngine {
     let userInputConsumed = false; // Track if userInput has been consumed
     const updatedContext = { ...context }; // Copy context to avoid mutations
     const visitedNodes: string[] = []; // Track visited nodes for testing
+    const visits: EngineVisit[] = []; // Route log entries of this cycle
+    const nodeIds = new Set(graph.nodes.map((node) => node.id));
 
     while (currentNodeId) {
       const currentNode = graph.nodes.find((n) => n.id === currentNodeId);
@@ -247,6 +250,15 @@ export class GraphExecutionEngine implements IGraphExecutionEngine {
 
       // Track visited node
       visitedNodes.push(currentNodeId);
+      const variablesBefore = snapshotVariables(updatedContext.variables);
+      const recordVisit = (exitKey: string | null, waited: boolean): void => {
+        visits.push({
+          nodeId: currentNode.id,
+          exitKey,
+          changes: diffVariables(variablesBefore, updatedContext.variables, nodeIds),
+          waited,
+        });
+      };
 
       this.logger.debug("Executing node", {
         executionId: context.executionId.slice(0, 8),
@@ -426,11 +438,13 @@ export class GraphExecutionEngine implements IGraphExecutionEngine {
         );
 
         // Return pause instead of error - execution stays running
+        recordVisit(null, true);
         return {
           action: "pause",
           context: updatedContext,
           nextNodeId: currentNode.id,
           visitedNodes,
+          visits,
         };
       }
 
@@ -542,8 +556,11 @@ export class GraphExecutionEngine implements IGraphExecutionEngine {
         nodeInput,
       );
       if (actionResult) {
+        // A pause (input wait, or an error the agent must retry) leaves the visit open; a
+        // completion closes it without an exit.
+        recordVisit(null, actionResult.action === "pause");
         // Add visitedNodes to result before returning
-        return { ...actionResult, visitedNodes };
+        return { ...actionResult, visitedNodes, visits };
       }
 
       // Continue case - find next node
@@ -561,6 +578,7 @@ export class GraphExecutionEngine implements IGraphExecutionEngine {
             },
           );
         }
+        recordVisit(nodeResult.outputPath!, false);
         currentNodeId = nextNodeId;
       }
     }

@@ -33,7 +33,11 @@ import {
 import { IDataRepository, WorkflowInfo, SettingDefinition } from "../interfaces/data-repository.js";
 import { WorkflowGraph } from "../interfaces/core-interfaces.js";
 import { WorkflowExecution } from "../types/base-types.js";
-import type { ReminderMutation, ReminderMutationResult } from "../types/base-types.js";
+import type {
+  ExecutionVisit,
+  ReminderMutation,
+  ReminderMutationResult,
+} from "../types/base-types.js";
 import type {
   CompleteExecutionAttemptInput,
   ClaimStartExecutionAttemptInput,
@@ -320,12 +324,14 @@ export class DatabaseRepository implements IDataRepository {
     context: { variables?: Record<string, unknown>; nodeStates?: Record<string, unknown> },
     expectedRevision: number,
     expectedContextRevision: string,
+    visit?: Omit<ExecutionVisit, "seq">,
   ): Promise<boolean> {
     return await this.executionRepo.updateContext(
       executionId,
       context,
       expectedRevision,
       expectedContextRevision,
+      visit,
     );
   }
 
@@ -337,6 +343,10 @@ export class DatabaseRepository implements IDataRepository {
     attempt: PresentedExecutionAttempt,
   ): Promise<ExecutionAttempt> {
     return this.executionAttemptRepo.ensureCurrentPresented(attempt);
+  }
+
+  async supersedePresentedExecutionAttempt(attempt: PresentedExecutionAttempt): Promise<void> {
+    this.executionAttemptRepo.supersedePresented(attempt);
   }
 
   async prepareStartExecutionAttempt(attempt: PreparedStartExecutionAttempt): Promise<void> {

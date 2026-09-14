@@ -159,7 +159,7 @@ describe("SubgraphNodeHandler", () => {
       ).rejects.toThrow("Workflow 'missing-workflow' not found");
     });
 
-    test("should enforce maximum depth limit", async () => {
+    test("delegates at MAX_DEPTH because the handler does not enforce a depth limit", async () => {
       const subgraphNode: SubgraphNode = {
         type: "subgraph",
         id: "test-subgraph",
@@ -203,13 +203,9 @@ describe("SubgraphNodeHandler", () => {
         engine,
       );
 
-      // Real handler may not enforce depth limit at 100, check actual behavior
-      if (result.action === "continue") {
-        expect(result.outputPath).toBe("error-handler");
-      } else {
-        expect(result.action).toBe("pause");
-        expect(result.data?.subprocess).toBe(true);
-      }
+      // SubgraphNodeHandler.MAX_DEPTH is only logged, never enforced: delegation still starts
+      expect(result.action).toBe("pause");
+      expect(result.data?.subprocess).toBe(true);
     });
   });
 
@@ -531,28 +527,6 @@ describe("SubgraphNodeHandler", () => {
       expect(result.action).toBe("pause");
       expect(result.data?.subprocess).toBe(true);
       expect(typeof result.data?.childExecutionId).toBe("string");
-    });
-
-    test("should enforce maximum depth limit", async () => {
-      const subgraphNode: SubgraphNode = {
-        type: "subgraph",
-        id: "test-subgraph",
-        graphId: "child-workflow",
-        inputMapping: {},
-        outputMapping: {},
-        connections: { success: "next", error: "error-handler" },
-      };
-
-      const context = ContextHelpers.createTestContext();
-      context._subgraphDepth = 100; // At maximum depth
-
-      // Use real storage (no workflow saved)
-      const storage = new InMemoryRepository();
-      const engine = new GraphExecutionEngine(storage);
-
-      await expect(
-        handler.execute(subgraphNode, context, new AgentMessageQueue(), storage, engine),
-      ).rejects.toThrow("Workflow 'child-workflow' not found");
     });
   });
 

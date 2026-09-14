@@ -56,11 +56,11 @@ export interface NodeExecutionResult {
 export interface BaseNode {
   type: string;
   id: string;
-  /** User-facing progress milestone activated while this primary node is current. */
+  /** The progress block this node belongs to; the block is active while the node is current. */
   progressNodeId?: string;
   /** Template-enabled label used only while this exact primary node is current. */
   progressActiveLabel?: string;
-  /** Template-enabled presentation merged into the active progress milestone. */
+  /** Template-enabled presentation merged into the node's block while the node is current. */
   progressActiveContent?: ProgressContentTemplate;
   metadata?: {
     displayName?: string;
@@ -73,7 +73,12 @@ export interface BaseNode {
   hooks?: NodeHooks;
   timeout?: number;
   connections?: Record<string, string>; // outputPath -> nextNodeId
+  /** Human labels for connections, keyed like `connections`; used by the aggregated process view. */
+  connectionLabels?: Record<string, ConnectionLabel>;
 }
+
+/** A connection label: plain text, or text plus an explanation of the return it represents. */
+export type ConnectionLabel = string | { label: string; cycle?: { cause: string; exit: string } };
 
 export interface ProgressContentTemplate {
   summary?: string;
@@ -97,11 +102,30 @@ export interface WorkflowExecution {
   parentExecutionId?: string | null; // Links to parent execution for continuation
   revision: number; // Workflow-step generation; metadata targets use independent revisions
   reminders?: ExecutionReminder[]; // Durable caller follow-ups returned at completion
+  visits?: ExecutionVisit[]; // Append-only route log written by the executor on every node transition
   createdAt: number;
   updatedAt: number;
   completedAt?: number;
   error?: string; // DEPRECATED: kept for migration, use errors array instead
   errors?: ExecutionError[]; // Persistent error log (Issue #386)
+}
+
+/** Who produced a runtime adjustment: the agent through MCP, or a person through the web UI. */
+export type ExecutionVisitActorRole = "agent" | "user";
+
+/**
+ * One entry of an execution's route log: the node that ran, the connection it left through
+ * (`null` while it waits or at completion; `"teleport"` when a jump left it), the variables it
+ * changed, whether it paused for input, and — for a runtime adjustment — the actor.
+ */
+export interface ExecutionVisit {
+  seq: number;
+  nodeId: string;
+  exitKey: string | null;
+  changes: Record<string, unknown>;
+  waited?: boolean;
+  adjusted?: boolean;
+  actor?: { role: ExecutionVisitActorRole; userId: string };
 }
 
 export interface ExecutionReminder {

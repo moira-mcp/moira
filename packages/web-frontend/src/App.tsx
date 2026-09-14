@@ -28,11 +28,10 @@ import { Settings } from "./pages/Settings";
 import { TestError } from "./pages/TestError";
 import { InviteAcceptPage } from "./pages/InviteAccept";
 import { APP_PREFIX, ROUTES } from "./constants/routes";
+import { RouteSkeleton } from "./components/route-skeleton";
 
 // Lazy-loaded heavy pages
-const WorkflowDetail = lazy(() =>
-  import("./pages/WorkflowDetail").then((m) => ({ default: m.WorkflowDetail })),
-);
+const FlowPage = lazy(() => import("./pages/FlowPage").then((m) => ({ default: m.FlowPage })));
 const Executions = lazy(() =>
   import("./pages/Executions").then((m) => ({ default: m.Executions })),
 );
@@ -82,19 +81,18 @@ const OperationalDashboard = lazy(() =>
   import("./pages/OperationalDashboard").then((m) => ({ default: m.OperationalDashboard })),
 );
 
-// Import global styles
-import "./styles/node-styles.css";
-
 // Import i18n configuration
 import "./i18n";
 
 /**
  * Main Application Component
- * Dashboard-centric layout with sidebar navigation
+ * Dashboard-centric layout with sidebar navigation. Lazily loaded pages inside the layouts are
+ * caught by the layouts' own Suspense boundaries (the sidebar stays while a page's code
+ * arrives); this outer boundary only covers a chunk loaded outside any layout.
  */
 const App: React.FC = () => {
   return (
-    <Suspense fallback={<div aria-live="polite">loading...</div>}>
+    <Suspense fallback={<RouteSkeleton />}>
       <BrowserRouter>
         <ThemeProvider>
           <FeaturesProvider>
@@ -143,8 +141,8 @@ const App: React.FC = () => {
                 >
                   <Route index element={<Dashboard />} />
                   <Route path="workflows" element={<Workflows />} />
-                  <Route path="workflows/:handle/:slug" element={<WorkflowDetail />} />
-                  <Route path="workflows/:id" element={<WorkflowDetail />} />
+                  <Route path="workflows/:handle/:slug" element={<FlowPage />} />
+                  <Route path="workflows/:id" element={<FlowPage />} />
                   <Route path="executions" element={<Executions />} />
                   <Route path="executions/:id" element={<ExecutionInspectorPage />} />
                   <Route path="notes" element={<Notes />} />

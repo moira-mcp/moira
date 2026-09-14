@@ -1,27 +1,28 @@
 /**
- * Unified Execution Inspector Component
- * View and optionally edit execution state
- * Uses dependency injection through props for flexibility
+ * Run page — one execution shown as a process.
  *
- * Differences between user/admin views are passed via props, not modes.
- *
- * UX Redesign (Step 28):
- * - Tabbed right panel: Context (default), Errors, Steps
- * - Context visible inline by default without modal
- * - JSON editor with syntax highlighting and folding
- * - Optional fullscreen modal for context editing
- * - Compact 1-line toolbar
- * - Lazy loading for WorkflowGraph
+ * The page keeps the inspector's contract (props injected by the user and admin wrappers, the
+ * compact toolbar, context editing, errors, steps, locks) and puts the run in front: the modes
+ * (lanes by default, canvas, outline, route) fill the viewport on the left, a panel on the right
+ * carries the selected block's detail, the run's variables with the runtime adjustments, and the
+ * inspector's tabs. Everything about the run comes from the server's projection; the page never
+ * derives block statuses or the route itself. State is deep-linkable: `view`, `block`, `at`,
+ * `guide`. A workflow without a process view falls back to the technical node graph.
  */
 
 import React, { useState, useEffect, useCallback, useMemo, Suspense, useRef } from "react";
-import { useNavigate } from "react-router-dom";
+import { toast } from "sonner";
+import { useResource } from "../../hooks/useResource";
+import { DiagramSkeleton } from "../route-skeleton";
+import { TabBadge } from "../run/TabBadge";
+
+/** One tab of the panel strip: content-sized, underline when active, never stretched. */
+const TAB_CLASS = "h-8 flex-none gap-1.5 px-2 text-xs";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { apiClient } from "../../services/api-client";
-import { ContextVariableEditor } from "./ContextVariableEditor";
 import type { WorkflowGraph as WorkflowGraphType } from "../../types";
 import type { ExecutionProgress } from "@mcp-moira/workflow-engine/progress-visual";
-import { ExecutionProgressStrip } from "./ExecutionProgressStrip";
 import {
   ExecutionErrorHistory,
   type ExecutionErrorEntry,
@@ -30,15 +31,17 @@ import {
 import {
   ArrowLeft,
   RefreshCw,
-  FileJson,
   Play,
   AlertTriangle,
   Check,
+  Compass,
   Loader2,
-  Maximize2,
   ListChecks,
   Lock,
   Unlock,
+  Boxes,
+  Variable,
+  Workflow,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -53,13 +56,40 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Card } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { cn } from "@/lib/utils";
+import { MODES, resolveMode, type RunViewMode } from "../run/modes";
+import { LanesView } from "../run/LanesView";
+import { CanvasView } from "../run/CanvasView";
+import { OutlineView } from "../run/OutlineView";
+import { RouteView } from "../run/RouteView";
+import { BlockDetailPanel } from "../run/BlockDetailPanel";
+import { VariablesPanel } from "../run/VariablesPanel";
+import { RunCursor } from "../run/RunCursor";
+import { StatusLegend } from "../run/status";
+import { Walkthrough, type PanelTab } from "../run/Walkthrough";
+import { currentBlockId, runBlocks, stepsOf, waitingStep, type RunViewProps } from "../run/model";
+import { StepCard, StepCardList } from "../run/StepCard";
+import type { RunBlock } from "../run/model";
+import { clampCursor } from "../run/route";
 
-// Lazy load WorkflowGraph for better initial page load
+// Lazy load the technical graph for better initial page load
 const WorkflowGraph = React.lazy(() =>
   import("../workflow/WorkflowGraph").then((module) => ({
     default: module.WorkflowGraph,
   })),
 );
+
+const VIEW_PARAM = "view";
+const BLOCK_PARAM = "block";
+const AT_PARAM = "at";
+const GUIDE_PARAM = "guide";
+
+const MODE_COMPONENTS: Record<RunViewMode, React.ComponentType<RunViewProps>> = {
+  lanes: LanesView,
+  canvas: CanvasView,
+  outline: OutlineView,
+  route: RouteView,
+};
 
 // Base execution data - common fields
 export interface ExecutionData {
@@ -71,6 +101,8 @@ export interface ExecutionData {
   currentNodeId: string | null;
   waitingForInputNodeId: string | null;
   revision: number;
+  /** Target-specific revisions of the detail response; the context one guards per-path saves. */
+  metadataRevisions?: { parent: string; context: string; reminders: string };
   context: {
     variables: Record<string, unknown>;
     nodeStates: Record<string, unknown>;
@@ -90,6 +122,11 @@ export interface ExecutionInspectorProps {
   fetchExecution: (id: string) => Promise<ExecutionData>;
   /** When true, context variables are editable (per-path save via the API). */
   editable?: boolean;
+  /**
+   * When true, the page may answer the step the run waits for (the execution's owner, or an
+   * administrator on the admin page). Defaults to `editable`.
+   */
+  canAnswer?: boolean;
   // UI configuration
   backRoute: string;
   showOwnerInfo?: boolean;
@@ -99,11 +136,13 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
   executionId,
   fetchExecution,
   editable = false,
+  canAnswer,
   backRoute,
   showOwnerInfo = false,
 }) => {
   const navigate = useNavigate();
   const { t } = useTranslation();
+  const [searchParams, setSearchParams] = useSearchParams();
 
   const [execution, setExecution] = useState<ExecutionData | null>(null);
   const [workflow, setWorkflow] = useState<{
@@ -118,19 +157,24 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  /** The whole run's projection. */
   const [progress, setProgress] = useState<ExecutionProgress | null>(null);
+  /** The projection at the route cursor, when one is set. */
+  const [cursorProgress, setCursorProgress] = useState<ExecutionProgress | null>(null);
   const [progressError, setProgressError] = useState(false);
   const [progressLoading, setProgressLoading] = useState(false);
   const [editableVariableNames, setEditableVariableNames] = useState<ReadonlySet<string>>(
     new Set(),
   );
   const progressRequestRef = useRef(0);
+  const cursorRequestRef = useRef(0);
 
-  // Context editing state (per-variable save is handled inside ContextVariableEditor)
-  const [contextFullscreen, setContextFullscreen] = useState(false);
+  // The variables panel opened as a dialog (the same panel, more room).
+  const [variablesFullscreen, setVariablesFullscreen] = useState(false);
 
-  // Tab state
-  const [activeTab, setActiveTab] = useState("context");
+  // Panel tab: the block detail once the run has a process view, the variables otherwise.
+  const [chosenTab, setChosenTab] = useState<PanelTab | null>(null);
+  const activeTab: PanelTab = chosenTab ?? (progress ? "block" : "variables");
 
   // Lock management state
   interface LockRecord {
@@ -142,16 +186,17 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
     createdAt: string;
     unlockedAt: string | null;
   }
-  const [locks, setLocks] = useState<LockRecord[]>([]);
-  const [locksLoading, setLocksLoading] = useState(false);
+  // The lock history is wanted once the tab has been opened; switching away and back refreshes it
+  // behind the list already shown.
+  const [locksWanted, setLocksWanted] = useState(false);
   const [unlocking, setUnlocking] = useState<string | null>(null);
   const [lockDialogOpen, setLockDialogOpen] = useState(false);
   const [lockReason, setLockReason] = useState("");
   const [locking, setLocking] = useState(false);
   const [lockResult, setLockResult] = useState<{ lockId: string; pin: string } | null>(null);
 
-  // For focus on node functionality
-  const workflowGraphRef = useRef<{ focusOnNode: (nodeId: string) => void } | null>(null);
+  // Technical node graph focus: the node to bring into view once the graph is mounted.
+  const [focusRequest, setFocusRequest] = useState<{ nodeId: string; token: number } | null>(null);
 
   // Copy to clipboard state
   const [copied, setCopied] = useState(false);
@@ -166,10 +211,8 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
         setProgressError(false);
       }
     } catch {
-      if (request === progressRequestRef.current) {
-        setProgress(null);
-        setProgressError(true);
-      }
+      // A failed refetch keeps the projection already on screen; only a first load has none.
+      if (request === progressRequestRef.current) setProgressError(true);
     } finally {
       if (request === progressRequestRef.current) setProgressLoading(false);
     }
@@ -178,7 +221,6 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
   // Extract error node IDs from errors array for graph highlighting
   const errorNodeIds = useMemo(() => {
     if (!execution?.errors) return [];
-    // Get unique node IDs that have errors
     const nodeIds = new Set(execution.errors.map((e) => e.nodeId));
     return Array.from(nodeIds);
   }, [execution?.errors]);
@@ -211,7 +253,10 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
         void loadProgress(execData.executionId);
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : t("common.errors.failedToLoad");
-        setError(message);
+        // A failed refresh keeps the run on screen and says so once; only a first load has
+        // nothing to keep.
+        if (isRefresh) toast.error(message);
+        else setError(message);
       } finally {
         setLoading(false);
         setRefreshing(false);
@@ -228,25 +273,89 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
     loadExecution(true);
   }, [loadExecution]);
 
-  // Load locks for both admin and user views
-  const loadLocks = useCallback(async () => {
-    setLocksLoading(true);
-    try {
-      const data = showOwnerInfo
-        ? await apiClient.getExecutionLocks(executionId)
-        : await apiClient.getUserExecutionLocks(executionId);
-      setLocks(data.locks);
-    } catch {
-      setLocks([]);
-    } finally {
-      setLocksLoading(false);
-    }
-  }, [executionId, showOwnerInfo]);
+  // --- URL state: mode, selected block, cursor, guide.
+  const mode = resolveMode(searchParams.get(VIEW_PARAM));
+  const blocks = useMemo(() => (progress ? runBlocks(progress) : []), [progress]);
+  const current = useMemo(() => currentBlockId(blocks), [blocks]);
+  const blockParam = searchParams.get(BLOCK_PARAM);
+  const selectedBlockId = blocks.some((b) => b.id === blockParam) ? blockParam : null;
+  const shownBlockId = selectedBlockId ?? current ?? blocks[0]?.id ?? null;
+  const cursor = useMemo(
+    () => (progress ? clampCursor(searchParams.get(AT_PARAM), progress.route) : null),
+    [progress, searchParams],
+  );
+  const guideStep = Number(searchParams.get(GUIDE_PARAM)) || 0;
 
+  const update = useCallback(
+    (patch: Record<string, string | null>) => {
+      // Radix tabs report a value on focus and again on click, both before React re-renders, so
+      // the hook's `searchParams` is stale for the second call. Compare against the live URL:
+      // a duplicate navigation would push a second history entry and make Back appear inert.
+      const live = new URLSearchParams(window.location.search);
+      const next = new URLSearchParams(live);
+      for (const [key, value] of Object.entries(patch)) {
+        if (value === null || value === undefined) next.delete(key);
+        else next.set(key, value);
+      }
+      if (next.toString() === live.toString()) return;
+      setSearchParams(next);
+    },
+    [setSearchParams],
+  );
+
+  // The projection at the cursor comes from the server too; the whole run stays loaded for the
+  // scrubber's range and for the modes once the cursor is cleared.
   useEffect(() => {
-    if (activeTab === "locks") {
-      loadLocks();
+    if (!execution || cursor === null) {
+      setCursorProgress(null);
+      return;
     }
+    const request = ++cursorRequestRef.current;
+    void apiClient
+      .getExecutionProgress(execution.executionId, cursor)
+      .then((next) => {
+        if (request === cursorRequestRef.current) setCursorProgress(next);
+      })
+      .catch(() => {
+        if (request === cursorRequestRef.current) setCursorProgress(null);
+      });
+  }, [execution, cursor, progress]);
+
+  const shownProgress = cursor !== null && cursorProgress ? cursorProgress : progress;
+  const shownBlocks = useMemo(
+    () => (shownProgress ? runBlocks(shownProgress) : []),
+    [shownProgress],
+  );
+  const shownBlock = shownBlocks.find((b) => b.id === shownBlockId) ?? null;
+  // The step the shown projection is at (the cursor's projection ends at the cursor's visit).
+  const shownCurrentNodeId =
+    shownBlocks.find((b) => b.id === currentBlockId(shownBlocks))?.currentNodeId ??
+    execution?.currentNodeId ??
+    null;
+  // The nodes the shown route has visited (the cursor's projection carries the route up to it).
+  const visitedNodeIds = useMemo(
+    () => new Set((shownProgress?.route ?? []).map((visit) => visit.nodeId)),
+    [shownProgress],
+  );
+
+  // Lock history for both admin and user views, kept while a refetch is pending.
+  const lockHistory = useResource<LockRecord[]>(
+    locksWanted ? `${executionId}:${showOwnerInfo ? "admin" : "owner"}` : null,
+    async () =>
+      (showOwnerInfo
+        ? await apiClient.getExecutionLocks(executionId)
+        : await apiClient.getUserExecutionLocks(executionId)
+      ).locks,
+  );
+  const locks = lockHistory.data ?? [];
+  const locksLoading = lockHistory.data === undefined && lockHistory.pending;
+  const loadLocks = lockHistory.refresh;
+  const locksHeldRef = useRef(false);
+  locksHeldRef.current = lockHistory.data !== undefined;
+  useEffect(() => {
+    if (activeTab !== "locks") return;
+    setLocksWanted(true);
+    if (locksHeldRef.current) void loadLocks();
   }, [activeTab, loadLocks]);
 
   const handleAdminUnlock = useCallback(
@@ -300,19 +409,21 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
   }, [executionId, lockReason, loadExecution, loadLocks, activeTab]);
 
   const handleNodeClick = useCallback((_event: React.MouseEvent, _node: { id: string }) => {
-    // No longer need to track selectedNodeId for display
     // Node details are shown via NodeDetailSheet in WorkflowGraph
   }, []);
 
-  const handleCurrentNodeClick = useCallback(() => {
-    if (execution?.currentNodeId && workflowGraphRef.current) {
-      workflowGraphRef.current.focusOnNode(execution.currentNodeId);
-    }
-  }, [execution?.currentNodeId]);
+  /** Bring a node into view on the technical graph (the graph panel when a process view exists). */
+  const focusNode = useCallback(
+    (nodeId: string) => {
+      if (progress) setChosenTab("graph");
+      setFocusRequest((previous) => ({ nodeId, token: (previous?.token ?? 0) + 1 }));
+    },
+    [progress],
+  );
 
-  const handleProgressFocus = useCallback((nodeId: string) => {
-    workflowGraphRef.current?.focusOnNode(nodeId);
-  }, []);
+  const handleCurrentNodeClick = useCallback(() => {
+    if (execution?.currentNodeId) focusNode(execution.currentNodeId);
+  }, [execution?.currentNodeId, focusNode]);
 
   const handleCopyExecutionId = useCallback(async () => {
     if (execution?.executionId) {
@@ -323,29 +434,23 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
   }, [execution?.executionId]);
 
   const canEdit = editable;
+  const answerable = canAnswer ?? editable;
 
   // Per-path save: update a value at any nesting path without overwriting the rest of the
   // object or other variables. After a successful save, refresh ONLY the execution context
-  // (not the workflow) to reflect authoritative server state.
-  //
-  // We deliberately avoid loadExecution(true) here: that also re-fetches the workflow graph,
-  // which is unchanged by a context edit. Coupling the two means a transient workflow-fetch
-  // failure (or its re-render) tears down the editor subtree while the save's PUT is still
-  // settling, aborting the in-flight request (net::ERR_ABORTED). Refreshing just the execution
-  // keeps the graph mounted and the save atomic from the UI's perspective.
+  // (not the workflow) to reflect authoritative server state, so a transient workflow-fetch
+  // failure never tears down the editor while the save's PUT is still settling.
   const handleSavePath = useCallback(
     async (path: Array<string | number>, value: unknown): Promise<boolean> => {
-      if (!editable || !execution) return false;
+      if (!editable || !execution || !execution.metadataRevisions) return false;
       const success = await apiClient.updateExecutionContextPath(
         execution.executionId,
         path,
         value,
         execution.revision,
+        execution.metadataRevisions.context,
       );
       if (success) {
-        // Refresh execution state only. On a transient fetch error, keep the current
-        // inspector mounted rather than surfacing a full-page error — the save itself
-        // already succeeded server-side.
         try {
           const execData = await fetchExecution(execution.executionId);
           setExecution(execData);
@@ -358,6 +463,48 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
     },
     [editable, execution, fetchExecution, loadProgress],
   );
+
+  /** Answer the waiting step; resolves to null on success or the server's refusal message. */
+  const handleAnswer = useCallback(
+    async (input: Record<string, unknown>): Promise<string | null> => {
+      if (!execution) return t("pages.runPage.answer.notLoaded");
+      let failure: string | null = null;
+      try {
+        await apiClient.answerExecutionStep(execution.executionId, input, execution.revision);
+      } catch (caught) {
+        failure = caught instanceof Error ? caught.message : String(caught);
+      }
+      // A rejected answer still ran a step (the rejection is logged on the execution and bumps
+      // its revision), and a conflict means the run moved: reload either way so the next attempt
+      // is written against the current revision.
+      try {
+        const execData = await fetchExecution(execution.executionId);
+        setExecution(execData);
+        await loadProgress(execData.executionId);
+      } catch {
+        /* keep the current state; the next refresh shows the server's */
+      }
+      return failure;
+    },
+    [execution, fetchExecution, loadProgress, t],
+  );
+
+  const waiting = useMemo(
+    () =>
+      execution &&
+      execution.status === "running" &&
+      execution.waitingForInputNodeId &&
+      execution.waitingForInputNodeId === execution.currentNodeId
+        ? waitingStep(workflow?.workflow, execution.waitingForInputNodeId)
+        : null,
+    [execution, workflow],
+  );
+  const waitingBlockName = useMemo(
+    () => blocks.find((b) => b.nodeIds.includes(waiting?.id ?? ""))?.name ?? null,
+    [blocks, waiting],
+  );
+
+  const onPanel = useCallback((tab: PanelTab) => setChosenTab(tab), []);
 
   const getCurrentNode = () => {
     if (!execution?.currentNodeId || !workflow?.workflow?.nodes) return null;
@@ -421,12 +568,28 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
   }
 
   const errorsCount = execution.errors?.length ?? 0;
+  const ModeView = MODE_COMPONENTS[mode];
+  const technicalGraph = (
+    <Suspense fallback={<DiagramSkeleton />}>
+      <WorkflowGraph
+        workflow={workflow.workflow}
+        validation={workflow.validation}
+        blocks={blocks}
+        currentNodeId={execution.currentNodeId}
+        errorNodeIds={errorNodeIds}
+        onNodeClick={handleNodeClick}
+        showControls={true}
+        showMinimap={false}
+        showNodeDetails={true}
+        focusRequest={focusRequest}
+      />
+    </Suspense>
+  );
 
   return (
-    <div className="h-full flex flex-col">
+    <div className="h-full flex flex-col" data-testid="run-page">
       {/* Compact Toolbar - 1 line */}
       <div className="border-b bg-card px-4 py-2 flex items-center gap-3">
-        {/* Back button */}
         <Tooltip>
           <TooltipTrigger asChild>
             <Button variant="ghost" size="sm" onClick={() => navigate(backRoute)}>
@@ -436,7 +599,6 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
           <TooltipContent>{t("pages.executionInspector.backToExecutions")}</TooltipContent>
         </Tooltip>
 
-        {/* Execution ID with copy */}
         <div className="flex items-center gap-1.5">
           <Tooltip>
             <TooltipTrigger asChild>
@@ -458,7 +620,6 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
 
         <span className="text-muted-foreground">•</span>
 
-        {/* Workflow name */}
         <Tooltip>
           <TooltipTrigger asChild>
             <span className="text-sm font-medium truncate max-w-[200px] cursor-default">
@@ -468,21 +629,19 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
           <TooltipContent>{execution.workflowName || execution.workflowId}</TooltipContent>
         </Tooltip>
 
-        {/* Status badge */}
         <Badge variant={getStatusBadgeVariant(execution.status)} className="gap-1">
           {getStatusIcon(execution.status)}
           {t(`common.status.${execution.status}`)}
         </Badge>
 
-        {/* Current node - clickable to focus */}
         {currentNode && (
           <>
-            <span className="text-muted-foreground">•</span>
+            <span className="text-muted-foreground hidden sm:inline">•</span>
             <Tooltip>
               <TooltipTrigger asChild>
                 <button
                   onClick={handleCurrentNodeClick}
-                  className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-primary/10 hover:bg-primary/20 transition-colors"
+                  className="hidden sm:flex items-center gap-1.5 px-2 py-1 rounded-md bg-primary/10 hover:bg-primary/20 transition-colors"
                 >
                   <Play className="h-3 w-3 text-primary" />
                   <span className="text-sm font-medium text-primary truncate max-w-[150px]">
@@ -495,10 +654,8 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
           </>
         )}
 
-        {/* Spacer */}
         <div className="flex-1" />
 
-        {/* Owner info (admin view) - compact */}
         {showOwnerInfo && (execution.userEmail || execution.userName) && (
           <Tooltip>
             <TooltipTrigger asChild>
@@ -513,9 +670,7 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
           </Tooltip>
         )}
 
-        {/* Action buttons */}
         <div className="flex items-center gap-1">
-          {/* Lock button — only for running executions without active lock, non-admin view */}
           {!showOwnerInfo && execution.status === "running" && (
             <Tooltip>
               <TooltipTrigger asChild>
@@ -534,41 +689,28 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
             </Tooltip>
           )}
 
-          {/* Fullscreen context button — visible when on context tab */}
-          {activeTab === "context" && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setContextFullscreen(true)}
-                  data-testid="context-fullscreen-button"
-                >
-                  <Maximize2 className="h-4 w-4" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>{t("pages.executionInspector.toolbar.fullscreen")}</TooltipContent>
-            </Tooltip>
-          )}
-
-          {/* Refresh button */}
           <Tooltip>
             <TooltipTrigger asChild>
-              <Button variant="outline" size="sm" onClick={handleRefresh} disabled={refreshing}>
-                <RefreshCw className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleRefresh}
+                disabled={refreshing}
+                data-pending={refreshing || progressLoading ? "true" : undefined}
+              >
+                <RefreshCw
+                  className={`h-4 w-4 ${refreshing || progressLoading ? "animate-spin" : ""}`}
+                />
               </Button>
             </TooltipTrigger>
             <TooltipContent>{t("pages.executionInspector.toolbar.refresh")}</TooltipContent>
           </Tooltip>
 
-          {/* Errors badge */}
           {errorsCount > 0 && <ErrorCountBadge count={errorsCount} />}
         </div>
       </div>
 
-      {progress ? (
-        <ExecutionProgressStrip progress={progress} onFocusNode={handleProgressFocus} />
-      ) : progressLoading ? (
+      {!progress && progressLoading ? (
         <div
           className="border-b bg-muted/20 px-4 py-3 text-xs text-muted-foreground"
           role="status"
@@ -576,107 +718,247 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
         >
           {t("pages.executionInspector.progress.loading")}
         </div>
-      ) : progressError ? (
+      ) : !progress && progressError ? (
         <div className="border-b bg-destructive/5 px-4 py-2 text-xs text-destructive" role="status">
           {t("pages.executionInspector.progress.error")}
         </div>
       ) : null}
 
-      {/* Main content */}
-      <div className="flex-1 flex overflow-hidden">
-        {/* Workflow visualization - left side */}
-        <div className="w-1/2 border-r">
-          <Suspense
-            fallback={
-              <div className="flex items-center justify-center h-full bg-muted/20">
-                <div className="text-muted-foreground">{t("components.workflowGraph.loading")}</div>
-              </div>
-            }
-          >
-            <WorkflowGraphWithRef
-              ref={workflowGraphRef}
-              workflow={workflow.workflow}
-              validation={workflow.validation}
-              currentNodeId={execution.currentNodeId}
-              errorNodeIds={errorNodeIds}
-              onNodeClick={handleNodeClick}
-              showControls={true}
-              showMinimap={false}
-              showNodeDetails={true}
-            />
-          </Suspense>
-        </div>
-
-        {/* Right panel — Tabbed: Context (default), Errors, Steps */}
-        <div className="w-1/2 flex flex-col bg-card overflow-hidden">
-          <Tabs value={activeTab} onValueChange={setActiveTab} className="flex flex-col h-full">
-            <TabsList className="w-full justify-start rounded-none border-b bg-muted/30 px-2 h-10">
-              <TabsTrigger value="context" className="gap-1.5 text-xs">
-                <FileJson className="h-3.5 w-3.5" />
-                {t("pages.executionInspector.tabs.context")}
-              </TabsTrigger>
-              <TabsTrigger value="errors" className="gap-1.5 text-xs">
-                <AlertTriangle className="h-3.5 w-3.5" />
-                {t("pages.executionInspector.tabs.errors")}
-                {errorsCount > 0 && (
-                  <Badge variant="destructive" className="ml-1 h-5 px-1.5 text-[10px]">
-                    {errorsCount}
-                  </Badge>
+      {/* Main content: the run on the left, the panel on the right (stacked on a phone). */}
+      <div className="flex-1 min-h-0 flex flex-col lg:flex-row overflow-hidden">
+        <section
+          className="flex-1 min-w-0 min-h-0 flex flex-col overflow-hidden"
+          data-view={progress ? mode : "graph"}
+          {...(progress ? { "data-testid": "execution-progress" } : {})}
+          aria-label={t("pages.runPage.title")}
+        >
+          {progress && shownProgress ? (
+            <>
+              <div
+                className="border-b bg-card px-3 py-1.5 flex flex-wrap items-center gap-2"
+                data-testid="run-header"
+              >
+                <Tabs value={mode} onValueChange={(value) => update({ [VIEW_PARAM]: value })}>
+                  <TabsList
+                    aria-label={t("pages.runPage.modeLabel")}
+                    className="h-8"
+                    data-testid="run-modes"
+                  >
+                    {MODES.map((definition) => {
+                      const Icon = definition.icon;
+                      return (
+                        <TabsTrigger
+                          key={definition.id}
+                          value={definition.id}
+                          data-mode={definition.id}
+                          className="gap-1 text-xs"
+                        >
+                          <Icon className="h-3.5 w-3.5" aria-hidden="true" />
+                          {t(`pages.runPage.modes.${definition.id}`)}
+                        </TabsTrigger>
+                      );
+                    })}
+                  </TabsList>
+                </Tabs>
+                {progress.routeRecorded && (
+                  <RunCursor
+                    route={progress.route}
+                    cursor={cursor}
+                    onSetCursor={(at) => update({ [AT_PARAM]: at === null ? null : String(at) })}
+                  />
                 )}
+                <div className="flex-1" />
+                <StatusLegend className="hidden xl:flex" />
+                <button
+                  type="button"
+                  onClick={() => update({ [GUIDE_PARAM]: "1" })}
+                  className="inline-flex items-center gap-1.5 rounded-lg border bg-primary/5 px-2.5 py-1 text-xs font-medium text-primary hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  data-testid="guide-open"
+                >
+                  <Compass className="size-3.5" aria-hidden="true" />
+                  {t("pages.runPage.guide.open")}
+                </button>
+              </div>
+              <div className="flex-1 min-h-0">
+                <ModeView
+                  progress={shownProgress}
+                  blocks={shownBlocks}
+                  route={progress.route}
+                  workflow={workflow.workflow}
+                  selectedBlockId={selectedBlockId}
+                  onSelectBlock={(id) => {
+                    update({ [BLOCK_PARAM]: id });
+                    if (id && chosenTab !== null && chosenTab !== "block") setChosenTab("block");
+                  }}
+                  cursor={cursor}
+                  onSetCursor={(at) => update({ [AT_PARAM]: at === null ? null : String(at) })}
+                />
+              </div>
+            </>
+          ) : (
+            <div className="flex-1 min-h-0">{technicalGraph}</div>
+          )}
+        </section>
+
+        {/* Right panel */}
+        <aside
+          className={cn(
+            "flex flex-col bg-card overflow-hidden border-t lg:border-t-0 lg:border-l",
+            "max-h-[38vh] lg:max-h-none lg:w-[400px] xl:w-[460px] shrink-0",
+          )}
+          data-testid="run-panel"
+        >
+          <Tabs
+            value={activeTab}
+            onValueChange={(value) => setChosenTab(value as PanelTab)}
+            className="flex flex-col h-full"
+          >
+            {/* The panel strip: underline tabs that wrap on a narrow panel instead of scrolling;
+                each tab says what it holds, and counters and warnings are one badge. The list's
+                height must follow the wrapped rows (the tabs variant fixes it at one row, hence
+                the important override), so the second row never paints over the content. */}
+            <TabsList
+              variant="line"
+              className="!h-auto w-full flex-wrap justify-start gap-x-0 gap-y-1 rounded-none border-b bg-card px-2 py-1"
+              data-testid="run-panel-tabs"
+            >
+              {progress && (
+                <TabsTrigger
+                  value="block"
+                  className={TAB_CLASS}
+                  title={t("pages.runPage.tabHints.block")}
+                >
+                  <Boxes className="size-3.5" />
+                  {t("pages.runPage.tabs.block")}
+                </TabsTrigger>
+              )}
+              <TabsTrigger
+                value="variables"
+                className={TAB_CLASS}
+                title={t("pages.runPage.tabHints.variables")}
+              >
+                <Variable className="size-3.5" />
+                {t("pages.runPage.tabs.variables")}
+                <TabBadge
+                  warning={Boolean(answerable && waiting)}
+                  tone="warning"
+                  label={t("pages.runPage.tabHints.variablesWaiting")}
+                  testId="variables-waiting-badge"
+                />
               </TabsTrigger>
-              <TabsTrigger value="steps" className="gap-1.5 text-xs">
-                <ListChecks className="h-3.5 w-3.5" />
+              <TabsTrigger
+                value="errors"
+                className={TAB_CLASS}
+                title={t("pages.runPage.tabHints.errors")}
+              >
+                <AlertTriangle className="size-3.5" />
+                {t("pages.executionInspector.tabs.errors")}
+                <TabBadge
+                  count={errorsCount}
+                  tone="danger"
+                  label={t("pages.runPage.tabHints.errorCount", { count: errorsCount })}
+                  testId="errors-count-badge"
+                />
+              </TabsTrigger>
+              <TabsTrigger
+                value="steps"
+                className={TAB_CLASS}
+                title={t("pages.runPage.tabHints.steps")}
+              >
+                <ListChecks className="size-3.5" />
                 {t("pages.executionInspector.tabs.steps")}
               </TabsTrigger>
-              <TabsTrigger value="locks" className="gap-1.5 text-xs">
-                <Lock className="h-3.5 w-3.5" />
+              {progress && (
+                <TabsTrigger
+                  value="graph"
+                  className={TAB_CLASS}
+                  title={t("pages.runPage.tabHints.graph")}
+                >
+                  <Workflow className="size-3.5" />
+                  {t("pages.runPage.tabs.graph")}
+                </TabsTrigger>
+              )}
+              <TabsTrigger
+                value="locks"
+                className={TAB_CLASS}
+                title={t("pages.runPage.tabHints.locks")}
+              >
+                <Lock className="size-3.5" />
                 {t("pages.executionInspector.tabs.locks")}
-                {locks.some((l) => l.status === "active") && (
-                  <Badge
-                    variant="secondary"
-                    className="ml-1 h-5 px-1.5 text-[10px] bg-yellow-500/20 text-yellow-600"
-                  >
-                    !
-                  </Badge>
-                )}
+                <TabBadge
+                  warning={locks.some((l) => l.status === "active")}
+                  tone="warning"
+                  label={t("pages.runPage.tabHints.lockActive")}
+                  testId="locks-active-badge"
+                />
               </TabsTrigger>
             </TabsList>
 
-            {/* Context tab */}
-            <TabsContent value="context" className="flex-1 flex flex-col overflow-hidden m-0">
-              <div className="flex-1 overflow-auto p-3">
-                <ContextVariableEditor
-                  variables={execution?.context?.variables || {}}
-                  workflow={workflow?.workflow}
-                  onSavePath={canEdit ? handleSavePath : undefined}
-                  editableRootNames={editableVariableNames}
+            {progress && (
+              <TabsContent value="block" className="scrollbar-thin flex-1 overflow-auto m-0">
+                <BlockDetailPanel
+                  block={shownBlock}
+                  blocks={shownBlocks}
+                  workflow={workflow.workflow}
+                  onSelectBlock={(id) => update({ [BLOCK_PARAM]: id })}
+                  onFocusNode={focusNode}
                 />
-              </div>
-            </TabsContent>
+              </TabsContent>
+            )}
 
-            {/* Errors tab */}
-            <TabsContent value="errors" className="flex-1 overflow-auto m-0 p-4">
-              <ExecutionErrorHistory errors={execution.errors ?? []} />
-            </TabsContent>
-
-            {/* Steps tab — step progression */}
-            <TabsContent value="steps" className="flex-1 overflow-auto m-0 p-4">
-              <StepProgression
-                workflow={workflow.workflow}
-                currentNodeId={execution.currentNodeId}
-                nodeStates={execution.context?.nodeStates}
-                onNodeClick={(nodeId) => {
-                  if (workflowGraphRef.current) {
-                    workflowGraphRef.current.focusOnNode(nodeId);
-                  }
-                }}
+            <TabsContent value="variables" className="scrollbar-thin flex-1 overflow-auto m-0">
+              <VariablesPanel
+                progress={shownProgress}
+                cursor={cursor}
+                context={execution?.context?.variables}
+                workflow={workflow?.workflow}
+                waiting={waiting}
+                waitingBlockName={waitingBlockName}
+                canAdjust={answerable}
+                editableVariableNames={editableVariableNames}
+                onAnswer={handleAnswer}
+                onSavePath={canEdit ? handleSavePath : undefined}
+                onFullscreen={() => setVariablesFullscreen(true)}
               />
             </TabsContent>
 
-            {/* Locks tab */}
-            <TabsContent value="locks" className="flex-1 overflow-auto m-0 p-4">
+            <TabsContent value="errors" className="scrollbar-thin flex-1 overflow-auto m-0 p-4">
+              <ExecutionErrorHistory errors={execution.errors ?? []} />
+            </TabsContent>
+
+            <TabsContent value="steps" className="scrollbar-thin flex-1 overflow-auto m-0 p-4">
+              <StepProgression
+                workflow={workflow.workflow}
+                blocks={shownBlocks}
+                currentNodeId={shownCurrentNodeId}
+                visitedNodeIds={visitedNodeIds}
+                onNodeClick={focusNode}
+              />
+            </TabsContent>
+
+            {progress && (
+              <TabsContent value="graph" className="flex-1 overflow-hidden m-0">
+                <div className="h-full min-h-[320px]">{technicalGraph}</div>
+              </TabsContent>
+            )}
+
+            <TabsContent
+              value="locks"
+              className="scrollbar-thin flex-1 overflow-auto m-0 p-4"
+              data-testid="locks-panel"
+              data-pending={lockHistory.pending ? "true" : undefined}
+            >
+              {lockHistory.error && (
+                <div
+                  className="mb-3 text-xs text-destructive"
+                  role="alert"
+                  data-testid="locks-error"
+                >
+                  {lockHistory.error}
+                </div>
+              )}
               {locksLoading ? (
-                <div className="flex items-center justify-center py-8">
+                <div className="flex items-center justify-center py-8" data-testid="locks-loading">
                   <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
                 </div>
               ) : locks.length === 0 ? (
@@ -713,27 +995,15 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
                           >
                             {lock.status}
                           </Badge>
-                          {lock.status === "active" && showOwnerInfo && (
+                          {lock.status === "active" && (
                             <Button
                               size="sm"
                               variant="outline"
-                              onClick={() => handleAdminUnlock(lock.id)}
-                              disabled={unlocking === lock.id}
-                              className="h-7 text-xs"
-                            >
-                              {unlocking === lock.id ? (
-                                <Loader2 className="h-3 w-3 mr-1 animate-spin" />
-                              ) : (
-                                <Unlock className="h-3 w-3 mr-1" />
-                              )}
-                              {t("pages.executionInspector.locks.unlock")}
-                            </Button>
-                          )}
-                          {lock.status === "active" && !showOwnerInfo && (
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => handleOwnerUnlock(lock.id)}
+                              onClick={() =>
+                                showOwnerInfo
+                                  ? handleAdminUnlock(lock.id)
+                                  : handleOwnerUnlock(lock.id)
+                              }
                               disabled={unlocking === lock.id}
                               className="h-7 text-xs"
                             >
@@ -765,19 +1035,19 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
               )}
             </TabsContent>
           </Tabs>
-        </div>
+        </aside>
       </div>
 
-      {/* Context Fullscreen Modal */}
-      <Dialog open={contextFullscreen} onOpenChange={setContextFullscreen}>
-        <DialogContent className="w-[90vw] max-w-5xl min-w-[800px] max-h-[90vh] flex flex-col p-0 gap-0 overflow-hidden">
-          <DialogHeader className="px-6 py-4 border-b bg-muted/30">
+      {/* The variables panel with more room: the same panel in a dialog */}
+      <Dialog open={variablesFullscreen} onOpenChange={setVariablesFullscreen}>
+        <DialogContent className="flex max-h-[90vh] w-[90vw] flex-col gap-0 overflow-hidden p-0 sm:max-w-5xl">
+          <DialogHeader className="border-b bg-muted/30 px-6 py-4">
             <DialogTitle className="flex items-center gap-3">
-              <div className="p-2 rounded-md bg-primary/10">
-                <FileJson className="h-5 w-5 text-primary" />
+              <div className="rounded-md bg-primary/10 p-2">
+                <Variable className="h-5 w-5 text-primary" />
               </div>
               <div className="flex flex-col gap-1">
-                <span>{t("pages.executionInspector.context.title")}</span>
+                <span>{t("pages.runPage.tabs.variables")}</span>
                 <span className="text-xs font-normal text-muted-foreground">
                   {execution.workflowName || execution.workflowId} •{" "}
                   {execution.executionId.substring(0, 8)}
@@ -785,13 +1055,18 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
               </div>
             </DialogTitle>
           </DialogHeader>
-
-          <div className="flex-1 overflow-auto p-4 bg-background">
-            <ContextVariableEditor
-              variables={execution?.context?.variables || {}}
+          <div className="scrollbar-thin flex-1 overflow-auto bg-background">
+            <VariablesPanel
+              progress={shownProgress}
+              cursor={cursor}
+              context={execution?.context?.variables}
               workflow={workflow?.workflow}
+              waiting={waiting}
+              waitingBlockName={waitingBlockName}
+              canAdjust={answerable}
+              editableVariableNames={editableVariableNames}
+              onAnswer={handleAnswer}
               onSavePath={canEdit ? handleSavePath : undefined}
-              editableRootNames={editableVariableNames}
             />
           </div>
         </DialogContent>
@@ -880,143 +1155,84 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
           )}
         </DialogContent>
       </Dialog>
+
+      {progress && (
+        <Walkthrough
+          step={guideStep}
+          mode={mode}
+          currentBlockId={current}
+          routeRecorded={progress.routeRecorded}
+          onNavigate={update}
+          onPanel={onPanel}
+        />
+      )}
     </div>
   );
 };
 
 /**
- * Step Progression component — shows workflow nodes as a step list
- * with current/completed/pending states
+ * The Steps tab: every node of the definition in authored order as the shared step card, marked
+ * completed, current or pending from the run; a click focuses the node on the technical graph.
  */
 interface StepProgressionProps {
   workflow: WorkflowGraphType;
+  /** The run's blocks in process order; steps are listed block by block, the rest after. */
+  blocks: RunBlock[];
   currentNodeId: string | null;
-  nodeStates?: Record<string, unknown>;
+  /** Node ids the recorded route has visited (up to the cursor); their cards carry a done mark. */
+  visitedNodeIds: ReadonlySet<string>;
   onNodeClick: (nodeId: string) => void;
 }
 
 const StepProgression: React.FC<StepProgressionProps> = ({
   workflow,
+  blocks,
   currentNodeId,
-  nodeStates,
+  visitedNodeIds,
   onNodeClick,
 }) => {
   const { t } = useTranslation();
-
-  if (!workflow?.nodes?.length) {
+  const steps = useMemo(() => {
+    const ordered = blocks.flatMap((block) => block.nodeIds);
+    const owned = new Set(ordered);
+    const rest = (workflow?.nodes ?? []).map((node) => node.id).filter((id) => !owned.has(id));
+    return stepsOf(workflow, [...ordered, ...rest]);
+  }, [workflow, blocks]);
+  if (!steps.length) {
     return (
-      <div className="text-sm text-muted-foreground text-center py-8">
+      <div className="py-8 text-center text-sm text-muted-foreground">
         {t("pages.executionInspector.steps.noSteps")}
       </div>
     );
   }
-
-  const getNodeStatus = (nodeId: string): "completed" | "current" | "pending" => {
-    if (nodeId === currentNodeId) return "current";
-    if (nodeStates && nodeId in nodeStates) return "completed";
-    return "pending";
-  };
-
   return (
-    <div className="space-y-1">
-      {workflow.nodes.map((node, index) => {
-        const status = getNodeStatus(node.id);
-        const label = node.metadata?.displayName || node.id;
-        const nodeType = node.type || "action";
-
+    <StepCardList testId="steps-list" ariaLabel={t("pages.executionInspector.tabs.steps")}>
+      {steps.map((step, index) => {
+        const current = step.id === currentNodeId;
+        const completed = !current && visitedNodeIds.has(step.id);
         return (
-          <button
-            key={node.id}
-            onClick={() => onNodeClick(node.id)}
-            className={`w-full flex items-center gap-3 px-3 py-2 rounded-md text-left transition-colors hover:bg-muted/50 ${
-              status === "current" ? "bg-primary/10 border border-primary/20" : ""
-            }`}
-          >
-            {/* Step number / status indicator */}
-            <div
-              className={`flex-shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-xs font-medium ${
-                status === "completed"
-                  ? "bg-chart-2/20 text-chart-2"
-                  : status === "current"
-                    ? "bg-primary/20 text-primary"
-                    : "bg-muted text-muted-foreground"
-              }`}
-            >
-              {status === "completed" ? <Check className="h-3.5 w-3.5" /> : index + 1}
-            </div>
-
-            {/* Node info */}
-            <div className="flex-1 min-w-0">
-              <div
-                className={`text-sm truncate ${
-                  status === "current"
-                    ? "font-medium text-primary"
-                    : status === "completed"
-                      ? "text-foreground"
-                      : "text-muted-foreground"
-                }`}
-              >
-                {label}
-              </div>
-              <div className="text-[10px] text-muted-foreground">{nodeType}</div>
-            </div>
-
-            {/* Status badge for current */}
-            {status === "current" && (
-              <Badge variant="secondary" className="text-[10px] h-5">
-                {t("pages.executionInspector.steps.current")}
-              </Badge>
-            )}
-          </button>
+          <StepCard
+            key={step.id}
+            step={step}
+            position={index + 1}
+            current={current}
+            onSelect={() => onNodeClick(step.id)}
+            selectTitle={t("pages.runPage.blockDetail.focusStep")}
+            afterTitle={
+              completed ? (
+                <span
+                  className="inline-flex items-center gap-1 text-[11px] font-medium text-success"
+                  data-step-done=""
+                  title={t("pages.runPage.status.done")}
+                >
+                  <Check className="size-3.5" aria-hidden="true" />
+                  {t("pages.runPage.status.done")}
+                </span>
+              ) : undefined
+            }
+          />
         );
       })}
-    </div>
+    </StepCardList>
   );
 };
-
-/**
- * Wrapper component to expose focusOnNode via ref
- * This bridges the gap between ExecutionInspector and WorkflowGraph's internal ReactFlow instance
- */
-interface WorkflowGraphWithRefProps {
-  workflow: WorkflowGraphType;
-  validation?: {
-    isValid: boolean;
-    globalErrors: string[];
-    globalWarnings: string[];
-    nodeValidation: Record<string, { isValid: boolean; errors: string[]; warnings: string[] }>;
-  };
-  currentNodeId?: string | null;
-  errorNodeIds?: string[];
-  onNodeClick?: (event: React.MouseEvent, node: { id: string }) => void;
-  showControls?: boolean;
-  showMinimap?: boolean;
-  showNodeDetails?: boolean;
-}
-
-const WorkflowGraphWithRef = React.forwardRef<
-  { focusOnNode: (nodeId: string) => void },
-  WorkflowGraphWithRefProps
->(function WorkflowGraphWithRef(props, ref) {
-  const [reactFlowInstance, setReactFlowInstance] = useState<{
-    fitView: (options?: { nodes?: { id: string }[]; padding?: number; duration?: number }) => void;
-  } | null>(null);
-
-  React.useImperativeHandle(
-    ref,
-    () => ({
-      focusOnNode: (nodeId: string) => {
-        if (reactFlowInstance) {
-          reactFlowInstance.fitView({
-            nodes: [{ id: nodeId }],
-            padding: 0.5,
-            duration: 300,
-          });
-        }
-      },
-    }),
-    [reactFlowInstance],
-  );
-
-  return <WorkflowGraph {...props} onInit={(instance) => setReactFlowInstance(instance)} />;
-});

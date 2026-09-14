@@ -11,37 +11,15 @@
  */
 
 import { test, expect } from "./fixtures.js";
-import { createTestUser } from "./helpers/auth-helper.js";
+import { createTestUser, getSessionCookieHeader } from "./helpers/auth-helper.js";
 import { getTestBaseUrl, getTestFetchUrl } from "../utils/test-config.js";
+import { DEFAULT_ADMIN_CREDENTIALS } from "../utils/mcp-auth.js";
 
 const BASE_URL = getTestBaseUrl();
 const FETCH_URL = getTestFetchUrl();
 
-// Store session cookie for API calls
+// `Cookie` header value of the test user's session for API calls
 let sessionCookie = "";
-
-/**
- * Login via HTTP and get session cookie
- */
-async function loginViaHttp(email: string, password: string): Promise<string> {
-  const response = await fetch(`${FETCH_URL}/api/auth/sign-in/email`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email, password, rememberMe: true }),
-  });
-
-  if (!response.ok) {
-    const error = await response.text();
-    throw new Error(`Login failed: ${response.status} ${error}`);
-  }
-
-  const setCookieHeader = response.headers.get("set-cookie");
-  const match = setCookieHeader?.match(/(?:__Secure-)?better-auth\.session_token=([^;]+)/);
-  if (!match) {
-    throw new Error("No session cookie in sign-in response");
-  }
-  return match[1];
-}
 
 const testUserCredentials = {
   email: "",
@@ -66,7 +44,10 @@ test.describe("Artifact Security", () => {
     }
 
     // Get session cookie for API calls
-    sessionCookie = await loginViaHttp(testUserCredentials.email, testUserCredentials.password);
+    sessionCookie = await getSessionCookieHeader(
+      testUserCredentials.email,
+      testUserCredentials.password,
+    );
   });
 
   test.afterAll(async () => {
@@ -76,7 +57,7 @@ test.describe("Artifact Security", () => {
         await fetch(`${FETCH_URL}/api/artifacts/${uuid}`, {
           method: "DELETE",
           headers: {
-            Cookie: `better-auth.session_token=${sessionCookie}`,
+            Cookie: sessionCookie,
           },
         });
       } catch {
@@ -116,7 +97,7 @@ test.describe("Artifact Security", () => {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Cookie: `better-auth.session_token=${sessionCookie}`,
+        Cookie: sessionCookie,
       },
       body: JSON.stringify({ name, content }),
     });
@@ -316,8 +297,7 @@ test.describe("Artifact Security", () => {
     expect((await fetch(`${wrapperFetchUrl}?ack=1`)).status).toBe(200);
 
     // Admin takes it down via API
-    const { DEFAULT_ADMIN_CREDENTIALS } = await import("../utils/mcp-auth.js");
-    const adminCookie = await loginViaHttp(
+    const adminCookie = await getSessionCookieHeader(
       DEFAULT_ADMIN_CREDENTIALS.email,
       DEFAULT_ADMIN_CREDENTIALS.password,
     );
@@ -326,7 +306,7 @@ test.describe("Artifact Security", () => {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Cookie: `better-auth.session_token=${adminCookie}`,
+        Cookie: adminCookie,
       },
       body: JSON.stringify({ reason: "e2e abuse test" }),
     });

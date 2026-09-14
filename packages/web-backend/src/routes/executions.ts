@@ -7,8 +7,10 @@ import { Router, Request, Response } from "express";
 import { asyncHandler, createApiError } from "../middleware/error-middleware.js";
 import {
   DatabaseRepository,
+  UniversalGraphExecutor,
   WorkflowExecution,
-  projectExecutionProgress,
+  adjustmentVisit,
+  projectExecutionRun,
   ProgressImageService,
   prepareExecutionVariablePathWrite,
   prepareExecutionVariableWrite,
@@ -16,6 +18,7 @@ import {
 } from "@mcp-moira/workflow-engine";
 import { AuthenticatedRequest } from "../types/express-types.js";
 import {
+  ConflictError,
   getLockService,
   mapLegacyStatusArray,
   LegacyExecutionStatus,
@@ -32,6 +35,26 @@ const router = Router();
 // Create repository instance (uses shared database singleton)
 const repository = new DatabaseRepository();
 const progressImages = new ProgressImageService(repository);
+// The engine the run page answers a waiting step through: the same executor the MCP server runs
+// agent steps with, over the same repository, so an answer is an ordinary engine step. It is
+// built on first use, not at module load: the executor captures the process's extension
+// registry when constructed, and this process activates its extensions during start, after the
+// route modules are imported. An executor built earlier would refuse every custom node the
+// validator accepts.
+let executor: UniversalGraphExecutor | undefined;
+function getExecutor(): UniversalGraphExecutor {
+  executor ??= new UniversalGraphExecutor(repository);
+  return executor;
+}
+
+/** The optional route cursor of a projection request: a non-negative integer, or nothing. */
+function parseCursor(raw: unknown): number | undefined {
+  if (raw === undefined) return undefined;
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value < 0)
+    throw createApiError.validationFailed("at must be a non-negative integer visit number");
+  return value;
+}
 
 router.post(
   "/:id/progress-image-token",
@@ -50,9 +73,24 @@ router.post(
         req.body.viewportWidth > 4096)
     )
       throw createApiError.validationFailed("viewportWidth must be an integer from 480 to 4096");
+    if (req.body?.view !== undefined && !["cards", "process"].includes(req.body.view))
+      throw createApiError.validationFailed("view must be cards or process");
+    for (const field of ["hide", "collapse"] as const) {
+      const value = req.body?.[field];
+      if (value === undefined) continue;
+      if (
+        !Array.isArray(value) ||
+        value.length > 100 ||
+        value.some((id) => typeof id !== "string" || !id.trim() || id.length > 200)
+      )
+        throw createApiError.validationFailed(`${field} must be an array of block or node ids`);
+    }
     const grant = await progressImages.mint(execution.executionId, execution.userId, {
       theme: req.body?.theme,
       viewportWidth: req.body?.viewportWidth,
+      view: req.body?.view,
+      hide: req.body?.hide,
+      collapse: req.body?.collapse,
     });
     res.json({ success: true, data: grant, timestamp: new Date().toISOString() });
   }),
@@ -70,9 +108,113 @@ router.get(
     }
     const graph = await repository.getWorkflowGraph(execution.workflowId, execution.userId);
     if (!graph) throw createApiError.notFound("Workflow not found");
-    const progress = projectExecutionProgress(graph, execution);
+    const progress = projectExecutionRun(graph, execution, { at: parseCursor(req.query.at) });
     if (!progress) throw createApiError.notFound("Workflow has no progress graph");
     res.json({ success: true, data: progress, timestamp: new Date().toISOString() });
+  }),
+);
+
+/**
+ * POST /api/executions/:id/answer
+ * Answer the step a running execution is waiting for, from the run page: the body carries the
+ * step's input and the execution revision the answer was written against. The execution's owner
+ * or an administrator may answer; the execution must be running, unlocked, waiting on its current
+ * node and at the expected revision. The answer runs as an ordinary engine step, so the input is
+ * validated against the step's schema and the route continues; the accepted answer is recorded as
+ * an adjustment visit with the acting user. An agent still holding the previous step attempt is
+ * told it is stale and reads `session current_step`.
+ */
+router.post(
+  "/:id/answer",
+  asyncHandler(async (req: Request, res: Response) => {
+    const { id: executionId } = req.params;
+    const authenticatedRequest = req as AuthenticatedRequest;
+    const userId = authenticatedRequest.userId;
+    const isAdmin = authenticatedRequest.userInfo?.isAdmin ?? false;
+    const { input, expectedRevision } = req.body ?? {};
+    if (!Number.isInteger(expectedRevision))
+      throw createApiError.validationFailed("integer expectedRevision is required", {
+        executionId,
+      });
+    if (input === undefined || input === null || typeof input !== "object" || Array.isArray(input))
+      throw createApiError.validationFailed("input must be an object", { executionId });
+
+    const execution = await repository.getExecution(executionId);
+    if (!execution) throw createApiError.notFound(`Execution '${executionId}' not found`);
+    if (!isAdmin && execution.userId !== userId)
+      throw createApiError.forbidden("Access denied - not your execution", { executionId });
+    if (execution.status !== "running")
+      throw createApiError.badRequest(
+        `Cannot answer - execution is ${execution.status}. Only running executions accept an answer.`,
+        { executionId, status: execution.status },
+      );
+    if (!execution.currentNodeId || execution.waitingForInputNodeId !== execution.currentNodeId)
+      throw createApiError.badRequest("The execution is not waiting for input", {
+        executionId,
+      });
+    if (execution.revision !== expectedRevision)
+      throw new ConflictError("The execution has advanced; reload and answer again", {
+        executionId,
+        expectedRevision,
+        currentRevision: execution.revision,
+      });
+    const activeLock = await getLockService().getActiveLock(executionId);
+    if (activeLock)
+      throw createApiError.badRequest(
+        `Execution is locked (reason: "${activeLock.reason}"); unlock it before answering`,
+        { executionId, lockId: activeLock.id },
+      );
+    const agentAttempt = await repository.getCurrentExecutionAttempt(executionId, execution.userId);
+    if (agentAttempt && agentAttempt.state !== "presented")
+      throw new ConflictError(
+        "An agent step is in progress on this execution; wait for it to finish before answering",
+        { executionId, attemptId: agentAttempt.attemptId, state: agentAttempt.state },
+      );
+
+    const nodeId = execution.currentNodeId;
+    const errorsBefore = execution.errors?.length ?? 0;
+    // The next step is presented as an agent step would present it, so the agent's outstanding
+    // attempt is stale and `session current_step` hands out the attempt for the new node.
+    await getExecutor().executeStep(executionId, input, undefined, {
+      userId: execution.userId,
+      answeredBy: { role: "user", userId },
+      createPresentation: true,
+    });
+    const after = (await repository.getExecution(executionId))!;
+    const rejected =
+      after.currentNodeId === nodeId &&
+      after.waitingForInputNodeId === nodeId &&
+      (after.errors?.length ?? 0) > errorsBefore;
+    await logAuditEventDirect(repository, {
+      userId,
+      action: rejected ? AuditAction.EXECUTION_STEP_FAIL : AuditAction.EXECUTION_STEP,
+      resource: "execution",
+      resourceId: executionId,
+      source: "api",
+      metadata: {
+        action: "answer-wait",
+        nodeId,
+        revision: after.revision,
+        ...(isAdmin && execution.userId !== userId ? { onBehalfOf: execution.userId } : {}),
+      },
+    });
+    if (rejected) {
+      const last = after.errors![after.errors!.length - 1];
+      throw createApiError.validationFailed(last.message, { executionId, nodeId });
+    }
+    const graph = await repository.getWorkflowGraph(after.workflowId, after.userId);
+    res.json({
+      success: true,
+      data: {
+        executionId,
+        revision: after.revision,
+        status: after.status,
+        currentNodeId: after.currentNodeId,
+        waitingForInputNodeId: after.waitingForInputNodeId,
+        progress: graph ? projectExecutionRun(graph, after) : null,
+      },
+      timestamp: new Date().toISOString(),
+    });
   }),
 );
 
@@ -412,6 +554,11 @@ router.put(
       { variables: { [req.params.name]: updated.globalContext.variables[req.params.name] } },
       req.body.expectedRevision,
       req.body.expectedContextRevision,
+      adjustmentVisit(
+        execution,
+        { [req.params.name]: updated.globalContext.variables[req.params.name] },
+        { role: "user", userId },
+      ),
     );
     await logAuditEventDirect(repository, {
       userId,
@@ -554,6 +701,13 @@ router.put(
         },
         expectedRevision,
         expectedContextRevision,
+        adjustmentVisit(
+          execution,
+          {
+            [String(variablePath[0])]: updated.globalContext.variables[String(variablePath[0])],
+          },
+          { role: "user", userId },
+        ),
       );
       const variablePathText = variablePath
         .map((segment, index) =>

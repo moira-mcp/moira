@@ -4,72 +4,29 @@
  */
 
 import { describe, test, expect, beforeAll } from "@jest/globals";
-import { getTestBaseUrl, getAdminCredentials } from "../utils/test-config.js";
+import { getTestBaseUrl } from "../utils/test-config.js";
+import {
+  createTestUserViaApi,
+  formatSessionCookie,
+  getAdminSessionCookie,
+  signInUser,
+} from "../utils/mcp-auth.js";
 
 const BASE_URL = getTestBaseUrl();
-const ADMIN_CREDENTIALS = getAdminCredentials();
 const TEST_USER = {
   email: `settings-api-test-${Date.now()}@example.com`,
   password: "TestPass123!",
   name: "Settings Test User",
-  acceptedTermsAt: new Date().toISOString(),
-  acceptedNotRussianResidentAt: new Date().toISOString(),
 };
 
 let authCookie: string;
-let testUserId: string;
 
 beforeAll(async () => {
-  // Create test user
-  const signUpRes = await fetch(`${BASE_URL}/api/auth/sign-up/email`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(TEST_USER),
-  });
-  const signUpData = (await signUpRes.json()) as any;
-  if (!signUpData || !signUpData.user) {
-    throw new Error(`Failed to create test user: ${JSON.stringify(signUpData)}`);
-  }
-  testUserId = signUpData.user.id;
-
-  // Login as admin to verify email
-  const adminLoginRes = await fetch(`${BASE_URL}/api/auth/sign-in/email`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(ADMIN_CREDENTIALS),
-  });
-  const adminCookies = adminLoginRes.headers.get("set-cookie");
-
-  // Verify test user email
-  await fetch(`${BASE_URL}/api/admin/users/${testUserId}/verify-email`, {
-    method: "POST",
-    headers: { Cookie: adminCookies || "" },
-  });
-
-  const featuresRes = await fetch(`${BASE_URL}/api/features`);
-  const features = (await featuresRes.json()) as {
-    data: { features: { accountApproval: boolean } };
-  };
-  if (features.data.features.accountApproval) {
-    const approvalRes = await fetch(`${BASE_URL}/api/admin/users/${testUserId}/approve`, {
-      method: "POST",
-      headers: { Cookie: adminCookies || "" },
-    });
-    expect(approvalRes.status).toBe(200);
-  }
-
-  // Login as test user to get auth cookie
-  const loginRes = await fetch(`${BASE_URL}/api/auth/sign-in/email`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      email: TEST_USER.email,
-      password: TEST_USER.password,
-    }),
-  });
-
-  const cookies = loginRes.headers.get("set-cookie");
-  authCookie = cookies || "";
+  await createTestUserViaApi(BASE_URL, TEST_USER.email, TEST_USER.password, TEST_USER.name);
+  authCookie = formatSessionCookie(
+    BASE_URL,
+    await signInUser(BASE_URL, TEST_USER.email, TEST_USER.password),
+  );
 });
 
 describe("Settings API", () => {
@@ -263,13 +220,7 @@ describe("Settings Definitions adminOnly Filtering", () => {
   const adminOnlyKey = `test.admin_only_setting_${Date.now()}`;
 
   beforeAll(async () => {
-    // Login as admin
-    const loginRes = await fetch(`${BASE_URL}/api/auth/sign-in/email`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(ADMIN_CREDENTIALS),
-    });
-    adminCookie = loginRes.headers.get("set-cookie") || "";
+    adminCookie = formatSessionCookie(BASE_URL, await getAdminSessionCookie(BASE_URL));
 
     // Create adminOnly definition for testing
     await fetch(`${BASE_URL}/api/admin/settings/definitions`, {
@@ -457,15 +408,7 @@ describe("Admin Settings API", () => {
   const testKey = `test.admin_setting_${Date.now()}`;
 
   beforeAll(async () => {
-    // Login as admin user (created by migration with isAdmin=1)
-    const loginRes = await fetch(`${BASE_URL}/api/auth/sign-in/email`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(ADMIN_CREDENTIALS),
-    });
-
-    const cookies = loginRes.headers.get("set-cookie");
-    adminCookie = cookies || "";
+    adminCookie = formatSessionCookie(BASE_URL, await getAdminSessionCookie(BASE_URL));
   });
 
   test("Non-admin cannot create definition", async () => {

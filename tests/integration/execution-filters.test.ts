@@ -171,46 +171,24 @@ describe("Execution Filters and Pagination", () => {
     const id3 = await executor.startWorkflow(workflow, undefined, TEST_USER_ID, "Third");
     createdExecutionIds.push(id1, id2, id3);
 
-    // Sort by createdAt desc (newest first)
+    // Scope to this workflow so the three executions are the whole result set
     const descResult = await repository.listExecutionsWithFilters({
       userId: TEST_USER_ID,
+      workflowId: workflow.id,
       sort: "createdAt",
       sortOrder: "desc",
     });
+    // Newest first: Third, Second, First
+    expect(descResult.executions.map((e) => e.executionId)).toEqual([id3, id2, id1]);
 
-    const descIds = descResult.executions
-      .filter((e) => createdExecutionIds.includes(e.executionId))
-      .map((e) => e.executionId);
-
-    // Third should come before Second, Second before First
-    const idx1 = descIds.indexOf(id1);
-    const idx2 = descIds.indexOf(id2);
-    const idx3 = descIds.indexOf(id3);
-
-    if (idx1 !== -1 && idx2 !== -1 && idx3 !== -1) {
-      expect(idx3).toBeLessThan(idx2);
-      expect(idx2).toBeLessThan(idx1);
-    }
-
-    // Sort by createdAt asc (oldest first)
     const ascResult = await repository.listExecutionsWithFilters({
       userId: TEST_USER_ID,
+      workflowId: workflow.id,
       sort: "createdAt",
       sortOrder: "asc",
     });
-
-    const ascIds = ascResult.executions
-      .filter((e) => createdExecutionIds.includes(e.executionId))
-      .map((e) => e.executionId);
-
-    const ascIdx1 = ascIds.indexOf(id1);
-    const ascIdx2 = ascIds.indexOf(id2);
-    const ascIdx3 = ascIds.indexOf(id3);
-
-    if (ascIdx1 !== -1 && ascIdx2 !== -1 && ascIdx3 !== -1) {
-      expect(ascIdx1).toBeLessThan(ascIdx2);
-      expect(ascIdx2).toBeLessThan(ascIdx3);
-    }
+    // Oldest first: First, Second, Third
+    expect(ascResult.executions.map((e) => e.executionId)).toEqual([id1, id2, id3]);
   });
 
   test("should paginate executions with limit and offset", async () => {

@@ -6,69 +6,36 @@
  */
 
 import { describe, test, expect, beforeAll } from "@jest/globals";
-import { getTestBaseUrl, getAdminCredentials } from "../utils/test-config.js";
+import { getTestBaseUrl } from "../utils/test-config.js";
+import {
+  createTestUserViaApi,
+  formatSessionCookie,
+  getAdminSessionCookie,
+  signInUser,
+} from "../utils/mcp-auth.js";
 
 const BASE_URL = getTestBaseUrl();
-const ADMIN_CREDENTIALS = getAdminCredentials();
 
 let adminCookie: string;
 let normalUserCookie: string;
-let normalUserEmail: string;
 
 describe("Admin Analytics API", () => {
   beforeAll(async () => {
-    // Login as admin
-    const adminLoginRes = await fetch(`${BASE_URL}/api/auth/sign-in/email`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(ADMIN_CREDENTIALS),
-    });
-    const adminCookies = adminLoginRes.headers.get("set-cookie");
-    adminCookie = adminCookies || "";
+    adminCookie = formatSessionCookie(BASE_URL, await getAdminSessionCookie(BASE_URL));
 
     // Create and login as normal user for access denial tests
-    normalUserEmail = `analytics-test-${Date.now()}@example.com`;
+    const normalUserEmail = `analytics-test-${Date.now()}@example.com`;
     const normalUserPassword = "TestPassword123!";
-
-    await fetch(`${BASE_URL}/api/auth/sign-up/email`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        email: normalUserEmail,
-        password: normalUserPassword,
-        name: "Analytics Test User",
-        acceptedTermsAt: new Date().toISOString(),
-        acceptedNotRussianResidentAt: new Date().toISOString(),
-      }),
-    });
-
-    // Get user ID from admin list to verify email
-    const usersRes = await fetch(
-      `${BASE_URL}/api/admin/users?search=${encodeURIComponent(normalUserEmail)}&limit=10`,
-      {
-        headers: { Cookie: adminCookie },
-      },
+    await createTestUserViaApi(
+      BASE_URL,
+      normalUserEmail,
+      normalUserPassword,
+      "Analytics Test User",
     );
-    const usersData = (await usersRes.json()) as any;
-    const testUser = usersData.data.users.find((u: any) => u.email === normalUserEmail);
-    if (testUser) {
-      await fetch(`${BASE_URL}/api/admin/users/${testUser.id}/verify-email`, {
-        method: "POST",
-        headers: { Cookie: adminCookie },
-      });
-    }
-
-    // Login as normal user
-    const normalLoginRes = await fetch(`${BASE_URL}/api/auth/sign-in/email`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        email: normalUserEmail,
-        password: normalUserPassword,
-      }),
-    });
-    const normalCookies = normalLoginRes.headers.get("set-cookie");
-    normalUserCookie = normalCookies || "";
+    normalUserCookie = formatSessionCookie(
+      BASE_URL,
+      await signInUser(BASE_URL, normalUserEmail, normalUserPassword),
+    );
   });
 
   describe("GET /api/admin/analytics/overview", () => {

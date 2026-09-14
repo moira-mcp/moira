@@ -1,7 +1,13 @@
 import type { WorkflowExecution } from "./base-types.js";
 
 export type ExecutionAttemptOperation = "step" | "start";
-export type ExecutionAttemptState = "presented" | "executing" | "completed" | "outcome_unknown";
+/**
+ * `superseded`: a presented step attempt the run moved past without the agent submitting it —
+ * a person answered the waiting step on the run page. It is kept for the agent to meet as
+ * stale; the presentation for the new node is linked through `nextAttemptId`.
+ */
+export type ExecutionAttemptState =
+  "presented" | "executing" | "completed" | "outcome_unknown" | "superseded";
 
 export interface ReconciledExecutionAttemptCounts {
   start: number;

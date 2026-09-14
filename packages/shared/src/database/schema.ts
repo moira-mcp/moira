@@ -157,6 +157,9 @@ export const workflow = sqliteTable(
     deletedBy: text("deletedBy").references(() => user.id),
     createdAt: integer("createdAt", { mode: "timestamp_ms" }).notNull(),
     updatedAt: integer("updatedAt", { mode: "timestamp_ms" }).notNull(),
+    // Definition revision: advanced by every write of `graph` (repository save and
+    // reconciliation apply). Clients save against it with `expectedRevision`.
+    revision: integer("revision").notNull().default(0),
     // Validation cache columns (Issue #463)
     // null = unknown (not yet validated), true = valid, false = invalid
     isValid: integer("isValid", { mode: "boolean" }),
@@ -247,6 +250,7 @@ export const workflowExecution = sqliteTable("workflowExecution", {
   parentExecutionId: text("parentExecutionId"), // Links to parent execution for continuation
   revision: integer("revision").notNull().default(0), // Workflow-step generation
   reminders: text("reminders").notNull().default("[]"), // JSON ExecutionReminder[]
+  visits: text("visits").notNull().default("[]"), // JSON ExecutionVisit[]: the append-only route log
   createdAt: integer("createdAt", { mode: "timestamp_ms" }),
   updatedAt: integer("updatedAt", { mode: "timestamp_ms" }),
   completedAt: integer("completedAt", { mode: "timestamp_ms" }),

@@ -5,7 +5,7 @@ import {
   GraphValidator,
   InMemoryRepository,
   MaterializeHandler,
-  projectExecutionProgress,
+  projectExecutionRun,
   type WorkflowExecution,
   type WorkflowGraph,
 } from "@mcp-moira/workflow-engine";
@@ -336,7 +336,7 @@ describe("todo-list minimal sequential checklist", () => {
       progress_checklist_outcome: "2 ordered tasks ready",
       progress_execution_outcome: "First task verified",
     };
-    const activeTask = projectExecutionProgress(
+    const activeTask = projectExecutionRun(
       workflow,
       progressExecution("execute-task", "running", "execute-task", executionVariables),
     );
@@ -351,7 +351,7 @@ describe("todo-list minimal sequential checklist", () => {
       },
     });
 
-    const activeRevision = projectExecutionProgress(
+    const activeRevision = projectExecutionRun(
       workflow,
       progressExecution("teleport-revise-tasks", "running", "teleport-revise-tasks", {
         progress_checklist_outcome: "2 ordered tasks ready",
@@ -368,13 +368,18 @@ describe("todo-list minimal sequential checklist", () => {
       },
     });
 
+    // These executions carry no route log, so completion infers nothing: no block is done.
     for (const waitingNode of ["execute-task", "teleport-revise-tasks"]) {
-      expect(
-        projectExecutionProgress(
-          workflow,
-          progressExecution(null, "completed", waitingNode, executionVariables),
-        )?.nodes.map(({ state }) => state),
-      ).toEqual(["completed", "completed", "completed"]);
+      const completed = projectExecutionRun(
+        workflow,
+        progressExecution(null, "completed", waitingNode, executionVariables),
+      );
+      expect(completed?.routeRecorded).toBe(false);
+      expect(completed?.nodes.map(({ status }) => status)).toEqual([
+        "pending",
+        "pending",
+        "pending",
+      ]);
     }
 
     const primaryState = JSON.stringify(

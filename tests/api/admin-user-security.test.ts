@@ -7,67 +7,36 @@
  */
 
 import { describe, test, expect, beforeAll, afterAll } from "@jest/globals";
-import { getTestBaseUrl, getAdminCredentials } from "../utils/test-config.js";
+import { getTestBaseUrl } from "../utils/test-config.js";
+import {
+  createTestUserViaApi,
+  formatSessionCookie,
+  getAdminSessionCookie,
+  signInUser,
+} from "../utils/mcp-auth.js";
 
 const BASE_URL = getTestBaseUrl();
-const ADMIN_CREDENTIALS = getAdminCredentials();
 
 let adminCookie: string;
 let testUserId: string;
 let testUserEmail: string;
-let testSessionId: string;
-let testOAuthClientId: string;
+const TEST_USER_PASSWORD = "TestUser123!";
 
 beforeAll(async () => {
-  // Login as admin
-  const adminLoginRes = await fetch(`${BASE_URL}/api/auth/sign-in/email`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(ADMIN_CREDENTIALS),
-  });
-  adminCookie = adminLoginRes.headers.get("set-cookie") || "";
+  adminCookie = formatSessionCookie(BASE_URL, await getAdminSessionCookie(BASE_URL));
 
-  // Create test user
   testUserEmail = `admin-security-test-${Date.now()}@example.com`;
-  const signUpRes = await fetch(`${BASE_URL}/api/auth/sign-up/email`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      email: testUserEmail,
-      password: "TestUser123!",
-      name: "Admin Security Test User",
-      acceptedTermsAt: new Date().toISOString(),
-      acceptedNotRussianResidentAt: new Date().toISOString(),
-    }),
-  });
-  const signUpData = (await signUpRes.json()) as any;
-  testUserId = signUpData.user.id;
+  testUserId = (
+    await createTestUserViaApi(
+      BASE_URL,
+      testUserEmail,
+      TEST_USER_PASSWORD,
+      "Admin Security Test User",
+    )
+  ).userId;
 
-  // Verify test user email
-  await fetch(`${BASE_URL}/api/admin/users/${testUserId}/verify-email`, {
-    method: "POST",
-    headers: { Cookie: adminCookie },
-  });
-
-  // Login as test user to create session
-  const testUserLoginRes = await fetch(`${BASE_URL}/api/auth/sign-in/email`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      email: signUpData.user.email,
-      password: "TestUser123!",
-    }),
-  });
-  expect(testUserLoginRes.status).toBe(200);
-
-  // Get test user sessions
-  const sessionsRes = await fetch(`${BASE_URL}/api/admin/users/${testUserId}/sessions`, {
-    headers: { Cookie: adminCookie },
-  });
-  const sessionsData = (await sessionsRes.json()) as any;
-  if (sessionsData.data.length > 0) {
-    testSessionId = sessionsData.data[0].id;
-  }
+  // Sign in as the test user so it has at least one session to list
+  await signInUser(BASE_URL, testUserEmail, TEST_USER_PASSWORD);
 });
 
 afterAll(async () => {
@@ -91,16 +60,15 @@ describe("Admin Session Management", () => {
       const json = (await res.json()) as any;
       expect(json.success).toBe(true);
       expect(Array.isArray(json.data)).toBe(true);
+      expect(json.data.length).toBeGreaterThan(0);
 
-      if (json.data.length > 0) {
-        const session = json.data[0];
-        expect(session).toHaveProperty("id");
-        expect(session).toHaveProperty("token");
-        expect(session).toHaveProperty("ipAddress");
-        expect(session).toHaveProperty("userAgent");
-        expect(session).toHaveProperty("createdAt");
-        expect(session).toHaveProperty("expiresAt");
-      }
+      const session = json.data[0];
+      expect(session).toHaveProperty("id");
+      expect(session).toHaveProperty("token");
+      expect(session).toHaveProperty("ipAddress");
+      expect(session).toHaveProperty("userAgent");
+      expect(session).toHaveProperty("createdAt");
+      expect(session).toHaveProperty("expiresAt");
     });
 
     test("returns 404 for non-existent user", async () => {
@@ -123,15 +91,7 @@ describe("Admin Session Management", () => {
   describe("DELETE /api/admin/users/:id/sessions/:sessionId", () => {
     test("revokes individual session", async () => {
       // Create second session for test user
-      const loginRes = await fetch(`${BASE_URL}/api/auth/sign-in/email`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          email: testUserEmail,
-          password: "TestUser123!",
-        }),
-      });
-      expect(loginRes.status).toBe(200);
+      await signInUser(BASE_URL, testUserEmail, TEST_USER_PASSWORD);
 
       // Get sessions
       const sessionsRes = await fetch(`${BASE_URL}/api/admin/users/${testUserId}/sessions`, {
@@ -186,14 +146,7 @@ describe("Admin Session Management", () => {
     test("revokes all sessions for user", async () => {
       // Create multiple sessions for test user
       for (let i = 0; i < 2; i++) {
-        await fetch(`${BASE_URL}/api/auth/sign-in/email`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            email: testUserEmail,
-            password: "TestUser123!",
-          }),
-        });
+        await signInUser(BASE_URL, testUserEmail, TEST_USER_PASSWORD);
       }
 
       // Get initial session count

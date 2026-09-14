@@ -23,9 +23,31 @@ export interface StructuredCondition {
   value?: ConditionValue;
 }
 
+/** A connection label as authored: plain text, or text plus the return it explains. */
+export type ConnectionLabel = string | { label: string; cycle?: { cause: string; exit: string } };
+
+/** One process block as authored in `progress.nodes`. */
+export interface WorkflowProgressNode {
+  id: string;
+  label: string;
+  connections?: { default?: string };
+  content?: { summary?: string; details?: string[]; outcome?: string; next?: string };
+}
+
+export interface WorkflowProgress {
+  title?: string;
+  goal?: string;
+  facts?: Array<{ label: string; value: string; tone?: string }>;
+  nodes: WorkflowProgressNode[];
+}
+
 export interface BaseNode {
   type: string;
   id: string;
+  /** The process block this node belongs to (`progress.nodes[].id`). */
+  progressNodeId?: string;
+  /** Human labels for connections, keyed like `connections`. */
+  connectionLabels?: Record<string, ConnectionLabel>;
   metadata?: {
     displayName?: string;
     description?: string;
@@ -207,6 +229,8 @@ export interface RegistryVariable {
   type: "string" | "number" | "boolean" | "object" | "array" | "null";
   description: string;
   default?: unknown;
+  /** Any other JSON Schema keyword (enum, items, properties, pattern…) the declaration carries. */
+  [keyword: string]: unknown;
 }
 
 export interface WorkflowGraph {
@@ -216,6 +240,10 @@ export interface WorkflowGraph {
   variables?: Record<string, WorkflowVariable>;
   /** Declared global variables, keyed by name (single source of truth). */
   variableRegistry?: Record<string, RegistryVariable>;
+  /** The process definition: blocks in process order with their descriptions. */
+  progress?: WorkflowProgress;
+  systemReminder?: string;
+  runtimePolicy?: Record<string, unknown>;
 }
 
 export interface ExecutionContext {
@@ -321,6 +349,8 @@ export interface WorkflowFileInfo {
   metadata: WorkflowMetadata;
   validation: ValidationResult;
   lastModified: number;
+  /** Definition revision; every stored write of the graph advances it. Saves send it back as `expectedRevision`. */
+  revision: number;
   fileSize: number;
 }
 

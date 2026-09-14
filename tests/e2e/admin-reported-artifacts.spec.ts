@@ -5,26 +5,11 @@
  */
 
 import { test, expect } from "./fixtures.js";
-import { loginAsAdmin, createTestUser } from "./helpers/auth-helper.js";
+import { loginAsAdmin, createTestUser, getSessionCookieHeader } from "./helpers/auth-helper.js";
 import { getTestBaseUrl, getTestFetchUrl } from "../utils/test-config.js";
 
 const BASE_URL = getTestBaseUrl();
 const FETCH_URL = getTestFetchUrl();
-
-async function getSessionCookie(email: string, password: string): Promise<string> {
-  const response = await fetch(`${FETCH_URL}/api/auth/sign-in/email`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email, password }),
-  });
-  const setCookie = response.headers.get("set-cookie");
-  if (!setCookie) throw new Error("No session cookie returned");
-  const match = setCookie.match(/(?:__Secure-)?better-auth\.session_token=([^;]+)/);
-  if (!match) throw new Error("Could not extract session cookie");
-  const isSecure = FETCH_URL.startsWith("https://");
-  const cookieName = isSecure ? "__Secure-better-auth.session_token" : "better-auth.session_token";
-  return `${cookieName}=${match[1]}`;
-}
 
 async function createArtifact(
   cookie: string,
@@ -55,7 +40,7 @@ test.describe("Admin Reported Artifacts Page", () => {
     email = `reported-${Date.now()}-${Math.random().toString(36).slice(2, 7)}@example.com`;
     const created = await createTestUser(email, password, "Reported Owner", true);
     if (!created.success) throw new Error(`user create failed: ${created.error}`);
-    cookie = await getSessionCookie(email, password);
+    cookie = await getSessionCookieHeader(email, password);
     ({ uuid, origin } = await createArtifact(cookie, "abuse-ui.html"));
     // File a report so the artifact appears in the reported list (POST — the
     // report endpoint rejects GET to prevent report-bombing via prefetch/img).

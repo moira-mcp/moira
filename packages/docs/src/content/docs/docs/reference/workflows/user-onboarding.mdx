@@ -21,3 +21,7 @@ The user selects an exact qualified `owner/slug` or the create/edit path through
 When the selected workflow contains a lock node, execute requires a valid Telegram bot token and chat ID for the current user before it creates the child execution. Its stable setup receipt has no Process ID and leaves the handoff incomplete. Onboarding does not configure settings or start a substitute workflow; it prepares the exact selection again only after the relevant external state changes. Defer performs no external mutation.
 
 Onboarding creates no durable artifacts and does not configure settings, publish, deploy, mutate production, or continue the child's substantive work. Users who already know their goal should start the matching workflow directly.
+
+## Execution progress
+
+The execution card shows the run as three blocks: Welcome (greet the user and learn what they want to do) → Choose (point to a matching workflow or suggest creating one) → Launch (start the chosen workflow now or finish). An unclear answer returns to Welcome until the user makes a valid choice. The blocks are derived from the executable graph and add no routes.

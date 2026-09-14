@@ -13,6 +13,7 @@ import {
 import { WorkflowGraph } from "../interfaces/core-interfaces.js";
 import {
   WorkflowExecution,
+  type ExecutionVisit,
   type ReminderMutation,
   type ReminderMutationResult,
 } from "../types/base-types.js";
@@ -53,6 +54,7 @@ export class InMemoryRepository implements IDataRepository {
       visibility: "public" | "private";
       createdAt: number;
       updatedAt: number;
+      revision: number;
     }
   >();
   private executions = new Map<string, WorkflowExecution>();
@@ -84,6 +86,7 @@ export class InMemoryRepository implements IDataRepository {
           size: JSON.stringify(data.graph).length,
           createdAt: data.createdAt,
           updatedAt: data.updatedAt,
+          revision: data.revision,
           workflow: data.graph,
           // In-memory uses unknown validation status (not cached)
           validation: { status: "unknown", errors: [], validatedAt: null },
@@ -131,6 +134,7 @@ export class InMemoryRepository implements IDataRepository {
         size: JSON.stringify(data.graph).length,
         createdAt: data.createdAt,
         updatedAt: data.updatedAt,
+        revision: data.revision,
         workflow: data.graph,
         // In-memory uses unknown validation status (not cached)
         validation: { status: "unknown", errors: [], validatedAt: null },
@@ -234,6 +238,7 @@ export class InMemoryRepository implements IDataRepository {
       size: JSON.stringify(data.graph).length,
       createdAt: data.createdAt,
       updatedAt: data.updatedAt,
+      revision: data.revision,
       workflow: data.graph,
       // In-memory uses unknown validation status (not cached)
       validation: { status: "unknown", errors: [], validatedAt: null },
@@ -257,6 +262,7 @@ export class InMemoryRepository implements IDataRepository {
       visibility,
       createdAt: existing?.createdAt || now,
       updatedAt: now,
+      revision: existing ? existing.revision + 1 : 0,
     });
 
     this.logger.debug("Workflow saved in memory", {
@@ -586,6 +592,7 @@ export class InMemoryRepository implements IDataRepository {
     context: { variables?: Record<string, unknown>; nodeStates?: Record<string, unknown> },
     expectedRevision: number,
     expectedContextRevision: string,
+    visit?: Omit<ExecutionVisit, "seq">,
   ): Promise<boolean> {
     const execution = this.executions.get(executionId);
     if (!execution) {
@@ -617,6 +624,10 @@ export class InMemoryRepository implements IDataRepository {
         ...context.nodeStates,
       };
     }
+    if (visit) {
+      const visits = (execution.visits ??= []);
+      visits.push({ seq: visits.length, ...structuredClone(visit) });
+    }
     execution.updatedAt = Date.now();
     return true;
   }
@@ -639,6 +650,33 @@ export class InMemoryRepository implements IDataRepository {
       updatedAt: attempt.createdAt,
       completedAt: null,
     });
+  }
+
+  async supersedePresentedExecutionAttempt(next: PresentedExecutionAttempt): Promise<void> {
+    const current = [...this.executionAttempts.values()]
+      .filter(
+        (attempt) =>
+          attempt.executionId === next.executionId &&
+          attempt.userId === next.userId &&
+          attempt.operation === "step" &&
+          ["presented", "executing", "outcome_unknown"].includes(attempt.state),
+      )
+      .sort((left, right) => right.createdAt - left.createdAt)[0];
+    if (current && current.state !== "presented") {
+      throw new ConflictError(
+        "An agent step is in progress on this execution; wait for it to finish before answering",
+        { executionId: next.executionId, attemptId: current.attemptId, state: current.state },
+      );
+    }
+    if (current) {
+      Object.assign(current, {
+        state: "superseded",
+        nextAttemptId: next.attemptId,
+        completedAt: next.createdAt,
+        updatedAt: next.createdAt,
+      });
+    }
+    await this.createPresentedExecutionAttempt(next);
   }
 
   async ensureCurrentPresentedExecutionAttempt(
@@ -918,6 +956,7 @@ export class InMemoryRepository implements IDataRepository {
     if (!attempt || attempt.operation !== "step" || attempt.userId !== input.userId)
       return { kind: "invalid" };
     if (attempt.executionId !== input.executionId) return { kind: "stale" };
+    if (attempt.state === "superseded") return { kind: "stale" };
     if (attempt.inputFingerprint && attempt.inputFingerprint !== input.inputFingerprint)
       return { kind: "conflict" };
     if (attempt.state === "completed" && attempt.response !== null)

@@ -125,14 +125,21 @@ describe("TelegramNotificationHandler Error Handling", () => {
   test("renders and sends attached workflow progress through photo transport", async () => {
     const sent: Array<{ photo: Uint8Array; caption?: string }> = [];
     const distinctive = Buffer.from("wrapper-image");
-    handler = new TelegramNotificationHandler(async (_workflow, execution) => ({
-      buffer: distinctive,
-      mimeType: "image/png",
-      width: 640,
-      height: 224,
-      workflowVersion: "1.0.0",
-      executionRevision: execution.revision,
-    }));
+    const renderedFor: Array<{ currentNodeId: string | null; lastVisitNode?: string }> = [];
+    handler = new TelegramNotificationHandler(async (_workflow, execution) => {
+      renderedFor.push({
+        currentNodeId: execution.currentNodeId,
+        lastVisitNode: execution.visits?.at(-1)?.nodeId,
+      });
+      return {
+        buffer: distinctive,
+        mimeType: "image/png",
+        width: 640,
+        height: 224,
+        workflowVersion: "1.0.0",
+        executionRevision: execution.revision,
+      };
+    });
     setTestClientFactory(
       () =>
         ({
@@ -178,6 +185,10 @@ describe("TelegramNotificationHandler Error Handling", () => {
     expect(sent).toHaveLength(1);
     expect(Buffer.from(sent[0].photo).equals(distinctive)).toBe(true);
     expect(sent[0].caption).toContain("Test notification: completed");
+    // Rendered as of the notification node inside the current cycle, not of the persisted wait.
+    expect(renderedFor).toEqual([
+      { currentNodeId: "test-telegram-node", lastVisitNode: "test-telegram-node" },
+    ]);
 
     setTestClientFactory(
       () =>

@@ -8,28 +8,17 @@
 
 import { describe, test, expect, beforeAll, afterAll } from "@jest/globals";
 import fetch from "node-fetch";
-import { getTestBaseUrl, getAdminCredentials } from "../utils/test-config.js";
+import { getTestBaseUrl } from "../utils/test-config.js";
+import { formatSessionCookie, getAdminSessionCookie } from "../utils/mcp-auth.js";
 
 const BASE_URL = getTestBaseUrl();
-const ADMIN_CREDENTIALS = getAdminCredentials();
 
 describe("Workflow List Performance (Issue #463)", () => {
   let authCookie: string;
   const createdWorkflows: string[] = [];
 
   beforeAll(async () => {
-    // Sign in and get session cookie
-    const signinResponse = await fetch(`${BASE_URL}/api/auth/sign-in/email`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(ADMIN_CREDENTIALS),
-    });
-
-    const cookies = signinResponse.headers.get("set-cookie");
-    if (!cookies) {
-      throw new Error("No session cookie received from sign-in");
-    }
-    authCookie = cookies;
+    authCookie = formatSessionCookie(BASE_URL, await getAdminSessionCookie(BASE_URL));
   });
 
   afterAll(async () => {

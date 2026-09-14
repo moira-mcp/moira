@@ -34,10 +34,6 @@ test.describe("Auth UX Quality", () => {
 
     await page.waitForURL(`${BASE_URL}/registration-success`, { timeout: 10000 });
 
-    // Get verification URL from API (simulating email click)
-    // The URL should contain callbackURL=/ (Web UI root)
-    const response = await page.request.get(`${BASE_URL}/api/auth/session`);
-
     // Verify email via API
     await verifyUserEmail(FETCH_URL, testEmail);
 
@@ -64,17 +60,15 @@ test.describe("Auth UX Quality", () => {
       { timeout: 10000 },
     );
 
-    // Verify we're in the Web UI at root
+    // Verify we're in the Web UI at root: the app dashboard, not the landing page. A fresh
+    // user must accept the beta agreement modal first; while it is open the page behind it
+    // is hidden from the accessibility tree.
     const currentPath = new URL(page.url()).pathname;
     expect(currentPath).toBe("/");
-
-    // Landing page has specific content - verify we're NOT there
-    await expect(page.locator("text=MCP Moira"))
-      .not.toBeVisible({ timeout: 2000 })
-      .catch(() => {
-        // If MCP Moira text is visible, check it's the app header, not landing
-        // Landing page would have hero section
-      });
+    await page.getByRole("button", { name: "Accept and Continue" }).click();
+    await expect(page.getByRole("heading", { name: "Dashboard", exact: true })).toBeVisible({
+      timeout: 10000,
+    });
   });
 
   test("Login error block has same width as form card", async ({ page }) => {
@@ -141,30 +135,5 @@ test.describe("Auth UX Quality", () => {
 
     // Error should be cleared after typing
     await expect(errorBlock).not.toBeVisible({ timeout: 2000 });
-  });
-
-  test("Email verification URL contains a root-relative callbackURL", async ({ page }) => {
-    const testEmail = `callback-check-${Date.now()}@example.com`;
-    const testPassword = "TestPass123!";
-
-    // Register user via API (use page.request to go through browser context on PC)
-    const registerResponse = await page.request.post(`${BASE_URL}/api/auth/sign-up/email`, {
-      data: {
-        email: testEmail,
-        password: testPassword,
-        name: "Callback Test",
-        acceptedTermsAt: new Date().toISOString(),
-        acceptedNotRussianResidentAt: new Date().toISOString(),
-      },
-    });
-    expect(registerResponse.ok()).toBeTruthy();
-
-    // Check verification email URL in logs via Docker
-    // This test verifies the backend generates correct callbackURL
-    await page.waitForTimeout(1000); // Wait for email to be processed
-
-    // The verification URL should be generated with a root-relative callbackURL
-    // (Web UI at root). We verify this by checking the actual redirect behavior
-    // (the URL pattern is tested in the redirect test above).
   });
 });

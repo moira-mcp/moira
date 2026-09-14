@@ -64,12 +64,22 @@ describe("runtime execution variables", () => {
         progress: {
           title: "Runtime progress",
           nodes: [
-            { id: "first", label: "First", connections: { default: "second" } },
-            { id: "second", label: "Second", connections: { default: "first" } },
+            {
+              id: "first",
+              label: "First",
+              content: { summary: "Wait for the first step" },
+              connections: { default: "second" },
+            },
+            {
+              id: "second",
+              label: "Second",
+              content: { summary: "Do the other step" },
+              connections: { default: "first" },
+            },
           ],
         },
         nodes: [
-          { id: "start", type: "start", connections: { default: "task" } },
+          { id: "start", type: "start", progressNodeId: "first", connections: { default: "task" } },
           {
             id: "task",
             type: "agent-directive",
@@ -78,6 +88,7 @@ describe("runtime execution variables", () => {
             completionCondition: "Done",
             inputSchema: { type: "object", properties: {}, additionalProperties: false },
             connections: { success: "other" },
+            connectionLabels: { success: "task done" },
           },
           {
             id: "other",
@@ -88,7 +99,7 @@ describe("runtime execution variables", () => {
             inputSchema: { type: "object", properties: {}, additionalProperties: false },
             connections: { success: "end" },
           },
-          { id: "end", type: "end" },
+          { id: "end", type: "end", progressNodeId: "second" },
         ],
       },
     });
@@ -100,8 +111,18 @@ describe("runtime execution variables", () => {
         progress: {
           title: "Edited runtime progress",
           nodes: [
-            { id: "first", label: "First", connections: { default: "second" } },
-            { id: "second", label: "Second", connections: { default: "first" } },
+            {
+              id: "first",
+              label: "First",
+              content: { summary: "Wait for the first step" },
+              connections: { default: "second" },
+            },
+            {
+              id: "second",
+              label: "Second",
+              content: { summary: "Do the other step" },
+              connections: { default: "first" },
+            },
           ],
         },
       },
@@ -478,9 +499,11 @@ describe("runtime execution variables", () => {
         runtimePolicy: {
           externalVariableWrites: { settings: { allowedNodeIds: ["task"] } },
         },
-        progress: { nodes: [{ id: "work", label: "Foreign work" }] },
+        progress: {
+          nodes: [{ id: "work", label: "Foreign work", content: { summary: "Foreign work" } }],
+        },
         nodes: [
-          { id: "start", type: "start", connections: { default: "task" } },
+          { id: "start", type: "start", progressNodeId: "work", connections: { default: "task" } },
           {
             id: "task",
             type: "agent-directive",
@@ -489,7 +512,7 @@ describe("runtime execution variables", () => {
             completionCondition: "Done",
             connections: { success: "end" },
           },
-          { id: "end", type: "end" },
+          { id: "end", type: "end", progressNodeId: "work" },
         ],
       },
     });
@@ -657,11 +680,53 @@ describe("runtime execution variables", () => {
       title: "Edited runtime progress",
       activeNodeId: "first",
       workflowVersion: "1.0.0",
+      routeRecorded: true,
+      source: "trace",
     });
     expect(sessionProgress.nodes).toEqual([
-      expect.objectContaining({ id: "first", state: "current", focusNodeId: "task" }),
-      expect.objectContaining({ id: "second", state: "pending", focusNodeId: "other" }),
+      expect.objectContaining({
+        id: "first",
+        state: "current",
+        status: "waiting",
+        focusNodeId: "task",
+        currentNodeId: "task",
+      }),
+      expect.objectContaining({
+        id: "second",
+        state: "pending",
+        status: "pending",
+        focusNodeId: "other",
+      }),
     ]);
+    // The route the server recorded through start and step: the start node exited, the task
+    // waits; the earlier set-variable calls appear as adjustments by the agent on that wait.
+    type RouteEntry = {
+      nodeId: string;
+      exitKey: string | null;
+      adjusted?: boolean;
+      actor?: { role: string; userId: string };
+      changed: string[];
+    };
+    const route = sessionProgress.route as RouteEntry[];
+    expect(
+      route.filter((entry) => !entry.adjusted).map((entry) => `${entry.nodeId}:${entry.exitKey}`),
+    ).toEqual(["start:default", "task:null"]);
+    const adjustments = route.filter((entry) => entry.adjusted);
+    expect(adjustments.length).toBeGreaterThan(0);
+    for (const entry of adjustments) {
+      expect(entry).toMatchObject({ nodeId: "task", exitKey: null });
+      expect(["agent", "user"]).toContain(entry.actor?.role);
+      expect(entry.changed.length).toBeGreaterThan(0);
+    }
+    // Both adjustment paths ran above: the MCP set-variable action (agent) and the HTTP route (user).
+    expect(new Set(adjustments.map((entry) => entry.actor?.role))).toEqual(
+      new Set(["agent", "user"]),
+    );
+    const editable = sessionProgress.variables.find(
+      (variable: { name: string }) => variable.name === "editable_value",
+    );
+    expect(editable).toMatchObject({ adjusted: true });
+    expect(editable.history.at(-1)).toMatchObject({ nodeId: "task", adjusted: true });
 
     const httpResponse = await fetch(`${getTestBaseUrl()}/api/executions/${executionId}/progress`, {
       headers: { Cookie: `better-auth.session_token=${cookie}` },

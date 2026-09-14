@@ -1,7 +1,7 @@
 import { describe, expect, test } from "@jest/globals";
 import {
   createExecutionProgressImageRenderer,
-  projectExecutionProgress,
+  projectExecutionRun,
   renderExecutionProgressImage,
   renderExecutionProgressPng,
   type WorkflowExecution,
@@ -56,7 +56,7 @@ describe("public execution progress image wrapper", () => {
     const graphBefore = structuredClone(graph);
     const runBefore = structuredClone(run);
     const rendered = await renderExecutionProgressImage(graph, run, { viewportWidth: 640 });
-    const progress = projectExecutionProgress(graph, run)!;
+    const progress = projectExecutionRun(graph, run)!;
     const lowerLevel = await renderExecutionProgressPng(progress, { viewportWidth: 640 });
 
     expect(rendered).toMatchObject({

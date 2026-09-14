@@ -70,21 +70,30 @@ export { detectCycles } from "./validation/cycle-detector.js";
 export * from "./utils/schema-validator.js";
 export * from "./utils/registry-value-validator.js";
 export * from "./utils/execution-variable-policy.js";
-export * from "./utils/execution-progress.js";
+export * from "./utils/execution-run-projection.js";
+export * from "./utils/execution-visits.js";
+export * from "./utils/process-derivation.js";
 export {
+  applyProgressVisibility,
   buildExecutionProgressVisualModel,
   normalizeProgressVisualOptions,
+  resolveProgressBlockIds,
   PROGRESS_IMAGE_MAX_WIDTH,
   PROGRESS_IMAGE_MIN_WIDTH,
 } from "./utils/execution-progress-visual.js";
 export type {
   ProgressTheme,
+  ProgressView,
   ProgressVisualOptions,
+  VisibleTransition,
   ProgressVisualNode,
   ProgressVisualEdge,
   ProgressVisualModel,
+  ProgressVisualBox,
+  ProgressVisualBadge,
 } from "./utils/execution-progress-visual.js";
 export * from "./utils/execution-progress-renderer.js";
+export * from "./utils/execution-progress-text.js";
 export * from "./utils/execution-progress-image.js";
 export { ContextMapper } from "./utils/context-mapper.js";
 export { ContextHelpers } from "./utils/context-helpers.js";

@@ -94,6 +94,11 @@ export default defineConfig({
               slug: "docs/concepts/workflows",
             },
             {
+              label: "Process view",
+              translations: { ru: "Представление процесса" },
+              slug: "docs/concepts/process-view",
+            },
+            {
               label: "Nodes",
               translations: { ru: "Ноды" },
               slug: "docs/concepts/nodes",
@@ -232,6 +237,16 @@ export default defineConfig({
             {
               label: "Editing Workflows",
               slug: "docs/guides/editing-workflows",
+            },
+            {
+              label: "Reading and editing a flow",
+              translations: { ru: "Чтение и правка флоу" },
+              slug: "docs/guides/flow-page",
+            },
+            {
+              label: "Reading a run",
+              translations: { ru: "Чтение запуска" },
+              slug: "docs/guides/run-page",
             },
             {
               label: "Writing Extensions",

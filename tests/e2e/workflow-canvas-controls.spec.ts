@@ -69,7 +69,7 @@ test.describe("Workflow Canvas Controls", () => {
     await expect(page.locator(".react-flow")).toBeVisible({ timeout: 15000 });
 
     // Find Fit View button by text
-    const fitViewButton = page.locator("button:has-text('Fit View')");
+    const fitViewButton = page.getByTestId("graph-fit-view");
     await expect(fitViewButton).toBeVisible();
 
     // Click Fit View button (should not throw error)
@@ -93,7 +93,7 @@ test.describe("Workflow Canvas Controls", () => {
     await expect(page.locator(".react-flow")).toBeVisible({ timeout: 15000 });
 
     // Find Vertical button
-    const verticalButton = page.locator("button:has-text('Vertical')");
+    const verticalButton = page.getByTestId("graph-layout-vertical");
     await expect(verticalButton).toBeVisible();
 
     // Click vertical layout
@@ -115,7 +115,7 @@ test.describe("Workflow Canvas Controls", () => {
     await expect(page.locator(".react-flow")).toBeVisible({ timeout: 15000 });
 
     // Find Horizontal button
-    const horizontalButton = page.locator("button:has-text('Horizontal')");
+    const horizontalButton = page.getByTestId("graph-layout-horizontal");
     await expect(horizontalButton).toBeVisible();
 
     // Click horizontal layout
@@ -137,12 +137,20 @@ test.describe("Workflow Canvas Controls", () => {
     await expect(page.locator(".react-flow")).toBeVisible({ timeout: 15000 });
 
     // All three buttons should be present
-    await expect(page.locator("button:has-text('Fit View')")).toBeVisible();
-    await expect(page.locator("button:has-text('Vertical')")).toBeVisible();
-    await expect(page.locator("button:has-text('Horizontal')")).toBeVisible();
+    await expect(page.getByTestId("graph-fit-view")).toBeVisible();
+    await expect(page.getByTestId("graph-layout-vertical")).toBeVisible();
+    await expect(page.getByTestId("graph-layout-horizontal")).toBeVisible();
 
-    // Buttons should be in a control panel container
-    const controlPanel = page.locator(".absolute.bottom-20.left-4");
-    await expect(controlPanel).toBeVisible();
+    // The layout buttons sit inside the zoom cluster, one column with the standard controls,
+    // so nothing floats over the cards.
+    const cluster = page.locator(".react-flow__controls");
+    await expect(cluster.getByTestId("graph-fit-view")).toBeVisible();
+    await expect(cluster.getByTestId("graph-layout-vertical")).toBeVisible();
+    await expect(cluster.getByTestId("graph-layout-horizontal")).toBeVisible();
+    const xs = await cluster
+      .locator("button")
+      .evaluateAll((els) => els.map((el) => Math.round(el.getBoundingClientRect().x)));
+    expect(xs.length).toBeGreaterThanOrEqual(5);
+    expect(new Set(xs).size).toBe(1);
   });
 });

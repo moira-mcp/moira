@@ -3,25 +3,44 @@
  * Issue #386: Tests for errors array in execution API responses
  */
 
-import { describe, test, expect, beforeAll } from "@jest/globals";
+import { describe, test, expect, beforeAll, afterAll } from "@jest/globals";
 import { getTestBaseUrl, getAdminCredentials } from "../utils/test-config.js";
-import { signInUser } from "../utils/mcp-auth.js";
+import {
+  advanceWorkflowExecution,
+  callMCPTool,
+  createAuthenticatedMCPClient,
+  formatSessionCookie,
+  signInUser,
+  startWorkflowExecutionState,
+} from "../utils/mcp-auth.js";
 
 const BASE_URL = getTestBaseUrl();
 
-/**
- * Get session cookie name based on URL protocol
- */
-function getSessionCookieName(baseUrl: string): string {
-  const isSecure = baseUrl.startsWith("https://");
-  return isSecure ? "__Secure-better-auth.session_token" : "better-auth.session_token";
-}
-
-/**
- * Format session cookie for HTTP header
- */
-function formatSessionCookie(baseUrl: string, sessionCookie: string): string {
-  return `${getSessionCookieName(baseUrl)}=${sessionCookie}`;
+/** Workflow whose first step rejects any input without `requiredField`. */
+function buildValidationWorkflow() {
+  return {
+    metadata: {
+      name: `Executions Errors API ${Date.now()}`,
+      version: "1.0.0",
+      description: "Produces a validation error for the errors-array API tests",
+    },
+    nodes: [
+      { type: "start", id: "start", connections: { default: "step1" } },
+      {
+        type: "agent-directive",
+        id: "step1",
+        directive: "Provide valid input",
+        completionCondition: "Valid input received",
+        inputSchema: {
+          type: "object",
+          properties: { requiredField: { type: "string" } },
+          required: ["requiredField"],
+        },
+        connections: { success: "end" },
+      },
+      { type: "end", id: "end" },
+    ],
+  };
 }
 
 interface ExecutionListItem {
@@ -48,15 +67,42 @@ interface ExecutionDetail {
 
 describe("Executions API - Errors Array", () => {
   let adminSessionCookie: string;
+  let cleanupMcp: () => Promise<void>;
+  let testWorkflowId: string;
+  /** Execution owned by admin that has exactly one recorded validation error. */
+  let erroredExecutionId: string;
 
   beforeAll(async () => {
-    const { email, password } = getAdminCredentials();
-    adminSessionCookie = await signInUser(BASE_URL, email, password);
+    const credentials = getAdminCredentials();
+    adminSessionCookie = await signInUser(BASE_URL, credentials.email, credentials.password);
+
+    const mcp = await createAuthenticatedMCPClient(credentials);
+    cleanupMcp = mcp.cleanup;
+    const created = await callMCPTool(mcp.client, "manage", {
+      action: "create",
+      workflow: buildValidationWorkflow(),
+    });
+    testWorkflowId = created.workflowId;
+    const execution = await startWorkflowExecutionState(mcp.client, testWorkflowId);
+    erroredExecutionId = execution.processId;
+    // Invalid input (missing requiredField) is logged to the execution's errors array
+    await advanceWorkflowExecution(mcp.client, execution, { wrongField: "value" });
+  });
+
+  afterAll(async () => {
+    const deleted = await fetch(`${BASE_URL}/api/workflows/${testWorkflowId}`, {
+      method: "DELETE",
+      headers: { Cookie: formatSessionCookie(BASE_URL, adminSessionCookie) },
+    });
+    if (!deleted.ok && deleted.status !== 404) {
+      throw new Error(`Failed to clean test workflow: ${deleted.status}`);
+    }
+    await cleanupMcp();
   });
 
   describe("GET /api/executions", () => {
     test("returns errorCount field for each execution", async () => {
-      const response = await fetch(`${BASE_URL}/api/executions?limit=10`, {
+      const response = await fetch(`${BASE_URL}/api/executions?limit=100`, {
         headers: { Cookie: formatSessionCookie(BASE_URL, adminSessionCookie) },
       });
 
@@ -80,6 +126,10 @@ describe("Executions API - Errors Array", () => {
         expect(typeof exec.errorCount).toBe("number");
         expect(exec.errorCount).toBeGreaterThanOrEqual(0);
       }
+
+      // The execution with a recorded validation error reports it in the list
+      const errored = json.data.executions.find((e) => e.executionId === erroredExecutionId);
+      expect(errored?.errorCount).toBe(1);
     });
 
     test("backward compatibility - accepts legacy status values", async () => {
@@ -102,22 +152,7 @@ describe("Executions API - Errors Array", () => {
 
   describe("GET /api/executions/:id", () => {
     test("returns errors array in execution detail", async () => {
-      // First get any execution
-      const listResponse = await fetch(`${BASE_URL}/api/executions?limit=1`, {
-        headers: { Cookie: formatSessionCookie(BASE_URL, adminSessionCookie) },
-      });
-      expect(listResponse.status).toBe(200);
-
-      const listJson = (await listResponse.json()) as {
-        data: { executions: ExecutionListItem[] };
-      };
-
-      if (listJson.data.executions.length === 0) {
-        console.warn("No executions available, skipping detail test");
-        return;
-      }
-
-      const executionId = listJson.data.executions[0].executionId;
+      const executionId = erroredExecutionId;
 
       // Get execution detail
       const response = await fetch(`${BASE_URL}/api/executions/${executionId}`, {
@@ -135,31 +170,14 @@ describe("Executions API - Errors Array", () => {
       expect(json.data.execution).toBeDefined();
       expect(json.data.execution.executionId).toBe(executionId);
 
-      // Should have errors array (even if empty)
       expect(json.data.execution).toHaveProperty("errors");
       expect(Array.isArray(json.data.execution.errors)).toBe(true);
+      expect(json.data.execution.errors).toHaveLength(1);
     });
 
     test("errors array contains proper structure", async () => {
-      // Get any execution with errors (errorCount > 0)
-      const listResponse = await fetch(`${BASE_URL}/api/executions?limit=50`, {
-        headers: { Cookie: formatSessionCookie(BASE_URL, adminSessionCookie) },
-      });
-      expect(listResponse.status).toBe(200);
-
-      const listJson = (await listResponse.json()) as {
-        data: { executions: ExecutionListItem[] };
-      };
-
-      const execWithErrors = listJson.data.executions.find((e) => (e.errorCount ?? 0) > 0);
-
-      if (!execWithErrors) {
-        console.warn("No executions with errors found, skipping structure test");
-        return;
-      }
-
       // Get execution detail
-      const response = await fetch(`${BASE_URL}/api/executions/${execWithErrors.executionId}`, {
+      const response = await fetch(`${BASE_URL}/api/executions/${erroredExecutionId}`, {
         headers: { Cookie: formatSessionCookie(BASE_URL, adminSessionCookie) },
       });
 
@@ -180,8 +198,9 @@ describe("Executions API - Errors Array", () => {
       expect(firstError).toHaveProperty("errorType");
       expect(firstError).toHaveProperty("message");
 
-      // errorType should be one of the valid types
-      expect(["validation", "handler", "system"]).toContain(firstError.errorType);
+      // The recorded error came from input-schema validation on step1
+      expect(firstError.errorType).toBe("validation");
+      expect(firstError.nodeId).toBe("step1");
 
       // timestamp should be a number (unix ms)
       expect(typeof firstError.timestamp).toBe("number");

@@ -9,7 +9,7 @@ import type {
   UniversalGraphExecutor,
   InMemoryRepository,
 } from "@mcp-moira/workflow-engine";
-import { projectExecutionProgress } from "@mcp-moira/workflow-engine";
+import { projectExecutionRun } from "@mcp-moira/workflow-engine";
 
 describe("Error Logging Flow (Issue #386)", () => {
   let executor: UniversalGraphExecutor;
@@ -326,9 +326,15 @@ describe("Error Logging Flow (Issue #386)", () => {
       expect(afterRepeatedCancellation!.revision).toBe(revisionAfterCancellation);
       expect(afterRepeatedCancellation!.errors).toEqual(errorsAfterCancellation);
 
-      expect(projectExecutionProgress(workflow, execution!)?.nodes).toEqual([
-        expect.objectContaining({ id: "work", state: "current" }),
+      // Cancelled on an open wait: the block stays the run's frontier, never done.
+      expect(projectExecutionRun(workflow, execution!)?.nodes).toEqual([
+        expect.objectContaining({ id: "work", state: "current", status: "active" }),
       ]);
+      expect(execution!.visits?.at(-1)).toMatchObject({
+        nodeId: "step",
+        exitKey: null,
+        waited: true,
+      });
 
       const completedExecutionId = await executor.startWorkflow(
         workflow,
@@ -339,7 +345,7 @@ describe("Error Logging Flow (Issue #386)", () => {
       await executor.executeStep(completedExecutionId, {});
       const completedExecution = await executor.getExecutionState(completedExecutionId);
       expect(completedExecution).toMatchObject({ status: "completed", currentNodeId: null });
-      expect(projectExecutionProgress(workflow, completedExecution!)?.nodes).toEqual([
+      expect(projectExecutionRun(workflow, completedExecution!)?.nodes).toEqual([
         expect.objectContaining({ id: "work", state: "completed" }),
       ]);
     });

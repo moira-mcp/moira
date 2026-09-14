@@ -31,8 +31,9 @@ function getSessionCookieName(baseUrl: string): string {
 
 /**
  * Format Cookie header with proper cookie name for the protocol.
+ * Pair with the value returned by `signInUser` / `getAdminSessionCookie`.
  */
-function formatSessionCookie(baseUrl: string, sessionCookie: string): string {
+export function formatSessionCookie(baseUrl: string, sessionCookie: string): string {
   return `${getSessionCookieName(baseUrl)}=${sessionCookie}`;
 }
 

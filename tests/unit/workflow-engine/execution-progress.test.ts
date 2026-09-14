@@ -1,7 +1,8 @@
 import { describe, expect, test } from "@jest/globals";
 import {
   GraphValidator,
-  projectExecutionProgress,
+  projectExecutionRun,
+  type ExecutionVisit,
   type WorkflowExecution,
   type WorkflowGraph,
   type GraphNode,
@@ -38,12 +39,27 @@ function graph(): WorkflowGraph {
           },
           connections: { default: "review" },
         },
-        { id: "review", label: "Review {{unit}}", connections: { default: "repair" } },
-        { id: "repair", label: "Repair", connections: { default: "review" } },
+        {
+          id: "review",
+          label: "Review {{unit}}",
+          content: { summary: "Independent review" },
+          connections: { default: "repair" },
+        },
+        {
+          id: "repair",
+          label: "Repair",
+          content: { summary: "Repair what the review found" },
+          connections: { default: "review" },
+        },
       ],
     },
     nodes: [
-      { id: "start", type: "start", connections: { default: "implement" } },
+      {
+        id: "start",
+        type: "start",
+        progressNodeId: "implementation",
+        connections: { default: "implement" },
+      },
       {
         id: "implement",
         type: "agent-directive",
@@ -52,6 +68,7 @@ function graph(): WorkflowGraph {
         directive: "Implement",
         completionCondition: "Done",
         connections: { success: "review-one" },
+        connectionLabels: { success: "implemented" },
       },
       {
         id: "review-one",
@@ -68,8 +85,23 @@ function graph(): WorkflowGraph {
         directive: "Review two",
         completionCondition: "Done",
         connections: { success: "end" },
+        connectionLabels: { success: "review passed" },
       },
-      { id: "end", type: "end" },
+      {
+        id: "repair-one",
+        type: "agent-directive",
+        progressNodeId: "repair",
+        directive: "Repair",
+        completionCondition: "Done",
+        connections: { success: "review-one" },
+        connectionLabels: {
+          success: {
+            label: "repaired",
+            cycle: { cause: "The review found issues", exit: "A clean review" },
+          },
+        },
+      },
+      { id: "end", type: "end", progressNodeId: "repair" },
     ],
   };
 }
@@ -99,9 +131,39 @@ function execution(
   };
 }
 
-describe("execution progress projection", () => {
-  test("renders templates and derives index state without following backward edges", () => {
-    const projected = projectExecutionProgress(graph(), execution("review-two", "running"));
+describe("execution run projection", () => {
+  const visit = (
+    seq: number,
+    nodeId: string,
+    exitKey: string | null,
+    changes: Record<string, unknown> = {},
+    extra: Partial<ExecutionVisit> = {},
+  ): ExecutionVisit => ({ seq, nodeId, exitKey, changes, ...extra });
+
+  /** A run that reached `implement` and waits there. */
+  function atImplement(): WorkflowExecution {
+    const run = execution("implement", "running");
+    run.visits = [
+      visit(0, "start", "default", { unit: 2, total: 5 }),
+      visit(1, "implement", null, {}, { waited: true }),
+    ];
+    return run;
+  }
+
+  /** A run through implementation and the first review, waiting on the second review. */
+  function atReviewTwo(): WorkflowExecution {
+    const run = execution("review-two", "running");
+    run.visits = [
+      visit(0, "start", "default", { unit: 2, total: 5 }),
+      visit(1, "implement", "success", { "implement.done": true }, { waited: true }),
+      visit(2, "review-one", "success", {}, { waited: true }),
+      visit(3, "review-two", null, {}, { waited: true }),
+    ];
+    return run;
+  }
+
+  test("renders templates and projects statuses from the recorded route", () => {
+    const projected = projectExecutionRun(graph(), atReviewTwo());
     expect(projected).toMatchObject({
       taskTitle: "Implement rich execution progress without hiding essential information",
       title: "Development · unit 2 of 5",
@@ -113,21 +175,44 @@ describe("execution progress projection", () => {
       activeNodeId: "review",
       workflowVersion: "1.0.0",
       executionRevision: 7,
+      routeRecorded: true,
+      source: "trace",
     });
-    expect(projected?.nodes.map(({ id, label, state }) => ({ id, label, state }))).toEqual([
-      { id: "implementation", label: "Implementation", state: "completed" },
-      { id: "review", label: "Review 2", state: "current" },
-      { id: "repair", label: "Repair", state: "pending" },
+    expect(
+      projected?.nodes.map(({ id, label, state, status, iterations }) => ({
+        id,
+        label,
+        state,
+        status,
+        iterations,
+      })),
+    ).toEqual([
+      {
+        id: "implementation",
+        label: "Implementation",
+        state: "completed",
+        status: "done",
+        iterations: 1,
+      },
+      { id: "review", label: "Review 2", state: "current", status: "waiting", iterations: 1 },
+      { id: "repair", label: "Repair", state: "pending", status: "pending", iterations: 0 },
     ]);
     expect(projected?.nodes[1]).toMatchObject({
       primaryNodeIds: ["review-one", "review-two"],
       focusNodeId: "review-two",
+      currentNodeId: "review-two",
     });
-    expect(projected?.nodes[0].focusNodeId).toBe("implement");
+    // Every node is owned, so the first mapped node of the implementation block is `start`.
+    expect(projected?.nodes[0]).toMatchObject({ focusNodeId: "start", currentNodeId: null });
+    expect(projected?.process.blocks.map((block) => block.id)).toEqual([
+      "implementation",
+      "review",
+      "repair",
+    ]);
   });
 
-  test("projects persistent milestone content and exact active content without retaining an old revision", () => {
-    const first = execution("implement", "running");
+  test("projects persistent block content and exact active content without retaining an old revision", () => {
+    const first = atImplement();
     first.globalContext.variables = {
       unit: 1,
       total: 3,
@@ -137,7 +222,7 @@ describe("execution progress projection", () => {
       mode: "Autonomous",
       attention: "Not required",
     };
-    expect(projectExecutionProgress(graph(), first)?.nodes[0].content).toEqual({
+    expect(projectExecutionRun(graph(), first)?.nodes[0].content).toEqual({
       summary: "Implement core",
       details: ["Core, UI, Docs"],
       outcome: "Unit 1/3",
@@ -153,18 +238,18 @@ describe("execution progress projection", () => {
       plan_units: "Core v2, UI v2",
       activity: "Implement revised core",
     };
-    const projected = projectExecutionProgress(graph(), replanned);
+    const projected = projectExecutionRun(graph(), replanned);
     expect(projected?.nodes[0].content).toEqual({
       summary: "Implement revised core",
       details: ["Core v2, UI v2"],
       outcome: "Unit 1/2",
       next: "Review",
     });
-    expect(JSON.stringify(projected)).not.toContain("Docs");
-    expect(JSON.stringify(projected)).not.toContain("Implement core");
+    expect(JSON.stringify(projected?.nodes)).not.toContain("Docs");
+    expect(JSON.stringify(projected?.nodes)).not.toContain("Implement core");
   });
 
-  test("omits stale outcome from pending milestones while retaining pending guidance", () => {
+  test("omits stale outcome from pending and skipped blocks while retaining pending guidance", () => {
     const workflow = graph();
     workflow.progress!.nodes[2].content = {
       summary: "Repair a confirmed finding",
@@ -173,9 +258,7 @@ describe("execution progress projection", () => {
       next: "Return to review",
     };
 
-    expect(
-      projectExecutionProgress(workflow, execution("implement", "running"))?.nodes[2].content,
-    ).toEqual({
+    expect(projectExecutionRun(workflow, atImplement())?.nodes[2].content).toEqual({
       summary: "Repair a confirmed finding",
       details: ["Use current evidence"],
       outcome: null,
@@ -184,46 +267,48 @@ describe("execution progress projection", () => {
   });
 
   test("keeps template syntax inside structured progress data inert", () => {
-    const source = execution("implement", "running");
+    const source = atImplement();
     source.globalContext.variables = {
       ...source.globalContext.variables,
       activity: "leak={{context.variables}}",
       secret: "TOPSECRET",
     };
-    const summary = projectExecutionProgress(graph(), source)?.nodes[0].content.summary;
+    const summary = projectExecutionRun(graph(), source)?.nodes[0].content.summary;
     expect(summary).toBe("leak={{context.variables}}");
     expect(summary).not.toContain("TOPSECRET");
   });
 
   test("renders registry defaults before the start node has seeded execution context", () => {
-    const source = execution("implement", "running");
+    const source = atImplement();
     source.globalContext.variables = {};
-
-    expect(projectExecutionProgress(graph(), source)?.title).toBe("Development · unit 2 of 5");
+    expect(projectExecutionRun(graph(), source)?.title).toBe("Development · unit 2 of 5");
   });
 
   test("falls back to the workflow progress title when an execution has no note", () => {
-    const source = execution("implement", "running");
+    const source = atImplement();
     source.note = null;
-    expect(projectExecutionProgress(graph(), source)?.taskTitle).toBe("Development · unit 2 of 5");
+    expect(projectExecutionRun(graph(), source)?.taskTitle).toBe("Development · unit 2 of 5");
   });
 
   test("falls back to the workflow name when note and rendered progress title are empty", () => {
     const workflow = graph();
     workflow.progress!.title = "{{activity}}";
-    const source = execution("implement", "running");
+    const source = atImplement();
     source.note = null;
     source.globalContext.variables = { ...source.globalContext.variables, activity: "" };
-    expect(projectExecutionProgress(workflow, source)?.taskTitle).toBe("Progress");
-    expect(projectExecutionProgress(workflow, source)?.title).toBeNull();
+    expect(projectExecutionRun(workflow, source)?.taskTitle).toBe("Progress");
+    expect(projectExecutionRun(workflow, source)?.title).toBeNull();
   });
 
-  test("backward activation reopens later stages without mutating execution", () => {
-    const source = execution("implement", "running");
+  test("does not mutate the execution or the workflow", () => {
+    const workflow = graph();
+    const source = atImplement();
     const before = structuredClone(source);
-    const projected = projectExecutionProgress(graph(), source);
-    expect(projected?.nodes.map((node) => node.state)).toEqual(["current", "pending", "pending"]);
+    const projected = projectExecutionRun(workflow, source);
+    expect(projected?.nodes.map((node) => node.status)).toEqual(["waiting", "pending", "pending"]);
     expect(source).toEqual(before);
+    projected!.nodes[0].connections.default = "repair";
+    expect(workflow.progress!.nodes[0].connections?.default).toBe("review");
   });
 
   test("uses a primary active label only for the exact current node and keeps fallback labels", () => {
@@ -231,67 +316,316 @@ describe("execution progress projection", () => {
     workflow.nodes[1].progressActiveLabel = "Implement unit {{unit}}/{{total}}";
     workflow.nodes[2].progressActiveLabel = "Review first · unit {{unit}}";
 
-    expect(
-      projectExecutionProgress(workflow, execution("implement", "running"))?.nodes[0].label,
-    ).toBe("Implement unit 2/5");
-    const reviewTwo = projectExecutionProgress(workflow, execution("review-two", "running"));
+    expect(projectExecutionRun(workflow, atImplement())?.nodes[0].label).toBe("Implement unit 2/5");
+    const reviewTwo = projectExecutionRun(workflow, atReviewTwo());
     expect(reviewTwo?.nodes[0].label).toBe("Implementation");
     expect(reviewTwo?.nodes[1].label).toBe("Review 2");
   });
 
-  test("does not expose mutable workflow connection objects through the projection", () => {
-    const workflow = graph();
-    const projected = projectExecutionProgress(workflow, execution("implement", "running"));
-    projected!.nodes[0].connections.default = "repair";
-    expect(workflow.progress!.nodes[0].connections?.default).toBe("review");
+  test("a repeated block carries the pass count of its working steps and the route marks the loop", () => {
+    const run = execution("review-two", "running");
+    run.visits = [
+      visit(0, "start", "default"),
+      visit(1, "implement", "success", {}, { waited: true }),
+      visit(2, "review-one", "success", {}, { waited: true }),
+      visit(3, "review-two", "success", {}, { waited: true }),
+      visit(4, "repair-one", "success", {}, { waited: true }),
+      visit(5, "review-one", "success", {}, { waited: true }),
+      visit(6, "review-two", null, {}, { waited: true }),
+    ];
+    const projected = projectExecutionRun(graph(), run)!;
+    expect(projected.nodes.map((node) => [node.id, node.status, node.iterations])).toEqual([
+      ["implementation", "done", 1],
+      ["review", "waiting", 2],
+      ["repair", "done", 1],
+    ]);
+    expect(
+      projected.route.map((entry) => [entry.nodeId, entry.blockId, entry.loop ?? false]),
+    ).toEqual([
+      ["start", "implementation", false],
+      ["implement", "implementation", false],
+      ["review-one", "review", false],
+      ["review-two", "review", false],
+      ["repair-one", "repair", false],
+      ["review-one", "review", true],
+      ["review-two", "review", true],
+    ]);
   });
 
-  test("distinguishes successful completion from cancellation persisted at an earlier node", () => {
-    expect(
-      projectExecutionProgress(graph(), execution(null, "completed"))?.nodes.map(
-        (node) => node.state,
-      ),
-    ).toEqual(["completed", "completed", "completed"]);
-    expect(
-      projectExecutionProgress(graph(), execution("review-one", "completed"))?.nodes.map(
-        (node) => node.state,
-      ),
-    ).toEqual(["completed", "current", "pending"]);
+  test("a fact over a variable the run has not set is omitted instead of showing the undefined marker", () => {
+    const definition = graph();
+    definition.progress!.facts = [
+      { label: "Mode", value: "{{mode}}" },
+      { label: "Operator", value: "{{operator_name}}" },
+      { label: "{{missing_label}}", value: "x" },
+      { label: "Empty", value: "{{empty_value}}" },
+    ];
+    definition.variableRegistry!.operator_name = { type: "string", description: "Set later" };
+    definition.variableRegistry!.missing_label = { type: "string", description: "Set later" };
+    definition.variableRegistry!.empty_value = {
+      type: "string",
+      description: "Blank",
+      default: "",
+    };
+    const projected = projectExecutionRun(definition, atImplement())!;
+    expect(projected.facts).toEqual([{ label: "Mode", value: "Autonomous", tone: "neutral" }]);
+    expect(JSON.stringify(projected.facts)).not.toContain("UNDEFINED");
   });
 
-  test("uses the last mapped waiting responsibility as the terminal completion frontier", () => {
-    const workflow = graph();
-    workflow.nodes.splice(-1, 0, {
-      id: "finalize",
-      type: "agent-directive",
-      progressNodeId: "repair",
-      directive: "Finalize",
-      completionCondition: "Done",
-      connections: { success: "end" },
+  test("an adjusted visit that carries an exit key is a closed visit: it closes the wait it sits on", () => {
+    const run = execution("review-two", "running");
+    run.visits = [
+      visit(0, "start", "default"),
+      visit(1, "implement", "success", {}, { waited: true }),
+      visit(2, "review-one", "success", {}, { waited: true }),
+      visit(3, "review-two", null, {}, { waited: true }),
+      visit(
+        4,
+        "review-two",
+        "success",
+        { "review-two.verdict": "ok" },
+        {
+          adjusted: true,
+          actor: { role: "user", userId: "u" },
+        },
+      ),
+    ];
+    const projected = projectExecutionRun(graph(), run)!;
+    // The block is where the run is, but no longer waiting: the adjustment closed the wait.
+    expect(projected.nodes.find((node) => node.id === "review")).toMatchObject({
+      status: "active",
+      iterations: 1,
     });
-    const normal = execution(null, "completed");
-    normal.waitingForInputNodeId = "finalize";
-    expect(projectExecutionProgress(workflow, normal)?.nodes.map((node) => node.state)).toEqual([
-      "completed",
-      "completed",
-      "completed",
-    ]);
-    expect(projectExecutionProgress(workflow, normal)?.activeNodeId).toBeNull();
-
-    const stoppedEarly = execution(null, "completed");
-    stoppedEarly.waitingForInputNodeId = "implement";
+    expect(projected.route[4]).toMatchObject({
+      nodeId: "review-two",
+      adjusted: true,
+      exitKey: "success",
+    });
+    // An open adjustment (the usual kind) leaves the wait as the run's position.
+    run.visits[4] = visit(
+      4,
+      "review-two",
+      null,
+      { "review-two.verdict": "ok" },
+      { adjusted: true },
+    );
     expect(
-      projectExecutionProgress(workflow, stoppedEarly)?.nodes.map((node) => node.state),
-    ).toEqual(["completed", "pending", "pending"]);
-    expect(projectExecutionProgress(workflow, stoppedEarly)?.activeNodeId).toBeNull();
+      projectExecutionRun(graph(), run)!.nodes.find((node) => node.id === "review"),
+    ).toMatchObject({
+      status: "waiting",
+    });
+  });
 
-    const legacy = execution(null, "completed");
-    legacy.waitingForInputNodeId = "unmapped-legacy-node";
-    expect(projectExecutionProgress(workflow, legacy)?.nodes.map((node) => node.state)).toEqual([
-      "completed",
-      "completed",
-      "completed",
+  test("a completed run reports every visited block done and nothing unvisited done", () => {
+    const run = execution(null, "completed");
+    run.waitingForInputNodeId = "review-two";
+    run.visits = [
+      visit(0, "start", "default"),
+      visit(1, "implement", "success", {}, { waited: true }),
+      visit(2, "review-one", "success", {}, { waited: true }),
+      visit(3, "review-two", "success", {}, { waited: true }),
+      visit(4, "end", null),
+    ];
+    const projected = projectExecutionRun(graph(), run)!;
+    expect(projected.activeNodeId).toBeNull();
+    expect(projected.nodes.map((node) => node.status)).toEqual(["done", "done", "done"]);
+
+    const unvisitedRepair = structuredClone(run);
+    unvisitedRepair.visits = run.visits!.slice(0, 4);
+    expect(projectExecutionRun(graph(), unvisitedRepair)!.nodes.map((node) => node.status)).toEqual(
+      ["done", "done", "pending"],
+    );
+  });
+
+  test("a run cancelled on an open wait keeps that block as its frontier, not done", () => {
+    const run = execution("review-one", "completed");
+    run.visits = [
+      visit(0, "start", "default"),
+      visit(1, "implement", "success", {}, { waited: true }),
+      visit(2, "review-one", null, {}, { waited: true }),
+    ];
+    const projected = projectExecutionRun(graph(), run)!;
+    expect(projected.nodes.map((node) => [node.status, node.state])).toEqual([
+      ["done", "completed"],
+      ["active", "current"],
+      ["pending", "pending"],
     ]);
+    expect(projected.activeNodeId).toBe("review");
+  });
+
+  test("a route cursor projects the run as it stood at that visit", () => {
+    const run = execution("review-two", "running");
+    run.globalContext.variables = { unit: 3, total: 5 };
+    run.visits = [
+      visit(0, "start", "default", { unit: 1 }),
+      visit(1, "implement", "success", {}, { waited: true }),
+      visit(2, "review-one", "success", { unit: 2 }, { waited: true }),
+      visit(3, "review-two", "success", {}, { waited: true }),
+      visit(4, "repair-one", "success", { unit: 3 }, { waited: true }),
+      visit(5, "review-one", "success", {}, { waited: true }),
+      visit(6, "review-two", null, {}, { waited: true }),
+    ];
+    const whole = projectExecutionRun(graph(), run)!;
+    expect(whole.cursor).toBeNull();
+
+    const atImplement = projectExecutionRun(graph(), run, { at: 1 })!;
+    expect(atImplement.cursor).toBe(1);
+    expect(atImplement.route.map((entry) => entry.seq)).toEqual([0, 1]);
+    // The visit at the cursor left its node, so its block is active, not waiting; later blocks
+    // are pending because the cut route never reached them.
+    expect(atImplement.nodes.map((node) => [node.status, node.iterations])).toEqual([
+      ["active", 1],
+      ["pending", 0],
+      ["pending", 0],
+    ]);
+    expect(atImplement.activeNodeId).toBe("implementation");
+    const unit = atImplement.variables.find((variable) => variable.name === "unit")!;
+    expect(unit.current).toBe(1);
+    expect(unit.history.map((change) => change.seq)).toEqual([0]);
+    // A variable the route writes only after the cursor shows its registry default.
+    const total = atImplement.variables.find((variable) => variable.name === "total")!;
+    expect(total.current).toBe(5);
+    expect(total.history).toEqual([]);
+
+    const atRepair = projectExecutionRun(graph(), run, { at: 4 })!;
+    expect(atRepair.nodes.map((node) => node.status)).toEqual(["done", "done", "active"]);
+    expect(atRepair.variables.find((variable) => variable.name === "unit")!.current).toBe(3);
+
+    // A cursor at or beyond the last visit is the whole route.
+    expect(projectExecutionRun(graph(), run, { at: 6 })!.cursor).toBeNull();
+    expect(projectExecutionRun(graph(), run, { at: 99 })!.nodes.map((n) => n.status)).toEqual(
+      whole.nodes.map((n) => n.status),
+    );
+  });
+
+  test("an execution without a recorded route infers nothing", () => {
+    const running = execution("review-two", "running");
+    const projected = projectExecutionRun(graph(), running)!;
+    expect(projected.routeRecorded).toBe(false);
+    expect(projected.route).toEqual([]);
+    expect(projected.nodes.map((node) => node.status)).toEqual(["pending", "waiting", "pending"]);
+    expect(projected.nodes[1].currentNodeId).toBe("review-two");
+    expect(projected.diagnostics).toContain("No route was recorded for this execution");
+
+    const completed = execution(null, "completed");
+    completed.waitingForInputNodeId = "review-two";
+    expect(projectExecutionRun(graph(), completed)!.nodes.map((node) => node.status)).toEqual([
+      "pending",
+      "pending",
+      "pending",
+    ]);
+  });
+
+  test("variables carry current values, history and adjustment marks; outputs are flattened", () => {
+    const run = atReviewTwo();
+    run.globalContext.variables = { unit: 3, total: 5, implement: { done: true } };
+    run.visits!.push(
+      visit(
+        4,
+        "review-two",
+        null,
+        { unit: 3 },
+        { adjusted: true, actor: { role: "user", userId: "u" } },
+      ),
+    );
+    const variables = projectExecutionRun(graph(), run)!.variables;
+    const byName = Object.fromEntries(variables.map((variable) => [variable.name, variable]));
+    expect(byName.unit).toEqual({
+      name: "unit",
+      kind: "variable",
+      current: 3,
+      adjusted: true,
+      history: [
+        { seq: 0, nodeId: "start", value: 2 },
+        { seq: 4, nodeId: "review-two", value: 3, adjusted: true },
+      ],
+    });
+    expect(byName["implement.done"]).toMatchObject({
+      kind: "output",
+      current: true,
+      adjusted: false,
+    });
+    expect(byName.plan_revision).toMatchObject({ current: 1, history: [] });
+    expect(variables.map((variable) => variable.kind)).toEqual([
+      ...Array(variables.length - 1).fill("variable"),
+      "output",
+    ]);
+  });
+
+  test("a block whose working step never ran, and a bypassed earlier block, are skipped", () => {
+    const workflow: WorkflowGraph = {
+      metadata: { name: "Skips", version: "1.0.0", description: "" },
+      progress: {
+        nodes: [
+          { id: "a", label: "A", content: { summary: "Do a" } },
+          { id: "x", label: "X", content: { summary: "Optional x" } },
+          { id: "g", label: "Gate", content: { summary: "Route" } },
+          { id: "b", label: "B", content: { summary: "Do b" } },
+        ],
+      },
+      nodes: [
+        { id: "start", type: "start", progressNodeId: "a", connections: { default: "do-a" } },
+        {
+          id: "do-a",
+          type: "agent-directive",
+          progressNodeId: "a",
+          directive: "A",
+          completionCondition: "Done",
+          connections: { full: "do-x", skip: "gate" },
+          connectionLabels: { full: "the long way", skip: "straight to the gate" },
+        },
+        {
+          id: "do-x",
+          type: "agent-directive",
+          progressNodeId: "x",
+          directive: "X",
+          completionCondition: "Done",
+          connections: { success: "gate" },
+          connectionLabels: { success: "x done" },
+        },
+        {
+          id: "gate",
+          type: "condition",
+          progressNodeId: "g",
+          condition: { operator: "eq", left: { contextPath: "go" }, right: true },
+          connections: { true: "do-b", false: "do-g" },
+          connectionLabels: { true: "go" },
+        },
+        {
+          id: "do-g",
+          type: "agent-directive",
+          progressNodeId: "g",
+          directive: "G",
+          completionCondition: "Done",
+          connections: { success: "do-b" },
+          connectionLabels: { success: "gated work done" },
+        },
+        {
+          id: "do-b",
+          type: "agent-directive",
+          progressNodeId: "b",
+          directive: "B",
+          completionCondition: "Done",
+          connections: { success: "end" },
+        },
+        { id: "end", type: "end", progressNodeId: "b" },
+      ],
+    } as WorkflowGraph;
+    const run = execution("do-b", "running");
+    run.visits = [
+      visit(0, "start", "default"),
+      visit(1, "do-a", "skip", {}, { waited: true }),
+      visit(2, "gate", "true"),
+      visit(3, "do-b", null, {}, { waited: true }),
+    ];
+    expect(projectExecutionRun(workflow, run)!.nodes.map((node) => [node.id, node.status])).toEqual(
+      [
+        ["a", "done"],
+        ["x", "skipped"],
+        ["g", "skipped"],
+        ["b", "waiting"],
+      ],
+    );
   });
 
   test("validates static graph references, visible mappings and progress templates", async () => {
@@ -349,7 +683,7 @@ describe("execution progress projection", () => {
     expect(result.errors.map((error) => error.message)).toEqual(
       expect.arrayContaining([
         expect.stringContaining("Duplicate progress node id 'implementation'"),
-        expect.stringContaining("unknown progress node 'missing'"),
+        expect.stringContaining("unknown progress block 'missing'"),
       ]),
     );
   });
@@ -423,15 +757,13 @@ describe("execution progress projection", () => {
     ];
     const validator = new GraphValidator();
     const missing = await validator.validateWorkflow(workflow);
-    expect(missing.errors.map((error) => error.message)).toContain(
-      "User-visible waiting node 'wait' must declare progressNodeId.",
-    );
+    const ownership = (message: string): boolean =>
+      message.startsWith("[unowned-node] Node 'wait' must declare progressNodeId");
+    expect(missing.errors.map((error) => error.message).some(ownership)).toBe(true);
 
     waitingNode.progressNodeId = "implementation";
     const mapped = await validator.validateWorkflow(workflow);
-    expect(mapped.errors.map((error) => error.message)).not.toContain(
-      "User-visible waiting node 'wait' must declare progressNodeId.",
-    );
+    expect(mapped.errors.map((error) => error.message).some(ownership)).toBe(false);
   });
 
   test("requires mapped progress for Telegram photo attachment and bounds captions", async () => {
@@ -568,6 +900,6 @@ describe("execution progress projection", () => {
     const variable = "x".repeat(limit + 1);
     source.globalContext.variables = { ...source.globalContext.variables, overflow: variable };
     configure(workflow, source, variable);
-    expect(() => projectExecutionProgress(workflow, source)).toThrow(/after template resolution/);
+    expect(() => projectExecutionRun(workflow, source)).toThrow(/after template resolution/);
   });
 });

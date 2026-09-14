@@ -2,7 +2,7 @@
   "id": "93609982-70c9-4089-b8c9-19815d8da87b",
   "metadata": {
     "name": "Todo List",
-    "version": "3.5.0",
+    "version": "3.6.0",
     "description": "Executes a finite caller-owned checklist sequentially with minimal orchestration. It materializes one canonical domain-neutral guide before intake, requires every substantive agent responsibility to read it, and keeps checklist, evidence, progress, revision and authority rules in one source without suppressing requested inventories, metrics or log analysis. It accepts an already supplied typed task list or gathers one bounded list, separates content ownership from dependency ordering, derives total and one-based cursor in the engine, projects exactly the current task, advances only after concise verified evidence, and asks for no approval between items. A guarded mid-run revision preserves completed positions and resumes from an explicit task number while the engine recomputes derived state. Todo List intentionally has no plan-design review, per-item retry budget, recovery protocol, aggregate result report or final semantic reviewer. Choose it when the caller already knows the checklist and needs durable cursor progress; use Quick Task when a bounded task needs planning and independent review, Robust Task for retry/recovery and critical work, or Software Development Flow for repository implementation."
   },
   "nodes": [
@@ -11,7 +11,8 @@
       "type": "start",
       "connections": {
         "default": "materialize-workflow-guide"
-      }
+      },
+      "progressNodeId": "checklist"
     },
     {
       "id": "materialize-workflow-guide",
@@ -59,6 +60,9 @@
       "progressActiveContent": {
         "summary": "Capture or order the complete bounded checklist",
         "next": "Derive the first current task"
+      },
+      "connectionLabels": {
+        "success": "checklist confirmed"
       }
     },
     {
@@ -70,7 +74,8 @@
       ],
       "connections": {
         "default": "check-tasks-remaining"
-      }
+      },
+      "progressNodeId": "prepare"
     },
     {
       "id": "check-tasks-remaining",
@@ -87,6 +92,10 @@
       "connections": {
         "true": "project-current-task",
         "false": "end"
+      },
+      "progressNodeId": "prepare",
+      "connectionLabels": {
+        "false": "no tasks remain"
       }
     },
     {
@@ -99,6 +108,10 @@
       ],
       "connections": {
         "default": "execute-task"
+      },
+      "progressNodeId": "prepare",
+      "connectionLabels": {
+        "default": "current task projected"
       }
     },
     {
@@ -143,12 +156,23 @@
       ],
       "connections": {
         "default": "check-tasks-remaining"
+      },
+      "progressNodeId": "work",
+      "connectionLabels": {
+        "default": {
+          "label": "task done, prepare the next one",
+          "cycle": {
+            "cause": "The current task is done, so the cursor advances and the next task is prepared.",
+            "exit": "No tasks remain on the checklist."
+          }
+        }
       }
     },
     {
       "id": "end",
       "type": "end",
-      "finalOutput": []
+      "finalOutput": [],
+      "progressNodeId": "work"
     },
     {
       "id": "teleport-revise-tasks",
@@ -181,6 +205,15 @@
       "progressActiveContent": {
         "summary": "Correct the remaining checklist while preserving completed positions",
         "next": "Resume from the first task that still requires work, or finish if none remains"
+      },
+      "connectionLabels": {
+        "success": {
+          "label": "checklist revised",
+          "cycle": {
+            "cause": "The remaining checklist changed, so the plan state is derived again from the revised list.",
+            "exit": "The revised checklist is exhausted."
+          }
+        }
       }
     },
     {
@@ -192,7 +225,8 @@
       ],
       "connections": {
         "default": "check-tasks-remaining"
-      }
+      },
+      "progressNodeId": "prepare"
     }
   ],
   "variableRegistry": {

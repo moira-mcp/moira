@@ -7,82 +7,55 @@
 
 import { describe, test, expect, beforeAll } from "@jest/globals";
 import { randomUUID } from "node:crypto";
-import { getTestBaseUrl, getAdminCredentials } from "../utils/test-config.js";
+import { getTestBaseUrl } from "../utils/test-config.js";
 import { execSqliteInDocker } from "../utils/docker-command.js";
+import {
+  createTestUserViaApi,
+  formatSessionCookie,
+  getAdminSessionCookie,
+  signInUser,
+} from "../utils/mcp-auth.js";
 
 const BASE_URL = getTestBaseUrl();
-const ADMIN_CREDENTIALS = getAdminCredentials();
 
 // Test users
 let targetUserEmail: string;
 let targetUserPassword: string;
 let adminCookie: string;
 let adminUserId: string;
-let targetCookie: string;
 let targetUserId: string;
+
+/** Fresh session cookie for the target user (earlier tests may have revoked the previous one). */
+async function signInTarget(): Promise<string> {
+  return formatSessionCookie(
+    BASE_URL,
+    await signInUser(BASE_URL, targetUserEmail, targetUserPassword),
+  );
+}
 
 describe("Admin User Security API", () => {
   beforeAll(async () => {
     // Create target user via API
     targetUserEmail = `target-security-${Date.now()}@example.com`;
     targetUserPassword = "TargetSecurity123!";
+    targetUserId = (
+      await createTestUserViaApi(
+        BASE_URL,
+        targetUserEmail,
+        targetUserPassword,
+        "Target Security Test",
+      )
+    ).userId;
 
-    const signUpRes = await fetch(`${BASE_URL}/api/auth/sign-up/email`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        email: targetUserEmail,
-        password: targetUserPassword,
-        name: "Target Security Test",
-        acceptedTermsAt: new Date().toISOString(),
-        acceptedNotRussianResidentAt: new Date().toISOString(),
-      }),
-    });
-    const signUpData = (await signUpRes.json()) as any;
-    targetUserId = signUpData.user.id;
-
-    // Login as admin to verify email and perform admin actions
-    const adminLoginRes = await fetch(`${BASE_URL}/api/auth/sign-in/email`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(ADMIN_CREDENTIALS),
-    });
-    const adminCookies = adminLoginRes.headers.get("set-cookie");
-    adminCookie = adminCookies || "";
+    adminCookie = formatSessionCookie(BASE_URL, await getAdminSessionCookie(BASE_URL));
     const adminStatusRes = await fetch(`${BASE_URL}/api/user/me`, {
       headers: { Cookie: adminCookie },
     });
     expect(adminStatusRes.status).toBe(200);
     adminUserId = ((await adminStatusRes.json()) as { data: { id: string } }).data.id;
 
-    // Verify test user email via admin API
-    await fetch(`${BASE_URL}/api/admin/users/${targetUserId}/verify-email`, {
-      method: "POST",
-      headers: { Cookie: adminCookie },
-    });
-    const featuresRes = await fetch(`${BASE_URL}/api/features`);
-    const features = (await featuresRes.json()) as {
-      data: { features: { accountApproval: boolean } };
-    };
-    if (features.data.features.accountApproval) {
-      const approvalRes = await fetch(`${BASE_URL}/api/admin/users/${targetUserId}/approve`, {
-        method: "POST",
-        headers: { Cookie: adminCookie },
-      });
-      expect(approvalRes.status).toBe(200);
-    }
-
-    // Login as target user
-    const targetLoginRes = await fetch(`${BASE_URL}/api/auth/sign-in/email`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        email: targetUserEmail,
-        password: targetUserPassword,
-      }),
-    });
-    const targetCookies = targetLoginRes.headers.get("set-cookie");
-    targetCookie = targetCookies || "";
+    // Open one session for the target user
+    await signInTarget();
   });
 
   describe("POST /api/admin/users/:id/force-password-reset", () => {
@@ -106,25 +79,8 @@ describe("Admin User Security API", () => {
 
     test("force password reset revokes all user sessions", async () => {
       // Create multiple sessions for target user
-      const session1 = await fetch(`${BASE_URL}/api/auth/sign-in/email`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          email: targetUserEmail,
-          password: targetUserPassword,
-        }),
-      });
-      expect(session1.status).toBe(200);
-
-      const session2 = await fetch(`${BASE_URL}/api/auth/sign-in/email`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          email: targetUserEmail,
-          password: targetUserPassword,
-        }),
-      });
-      expect(session2.status).toBe(200);
+      await signInTarget();
+      await signInTarget();
 
       // Get sessions count before reset
       const sessionsBeforeRes = await fetch(
@@ -183,16 +139,7 @@ describe("Admin User Security API", () => {
     });
 
     test("non-admin cannot force password reset", async () => {
-      // Re-login as target user to get fresh cookie (might have been revoked by previous tests)
-      const targetLoginRes = await fetch(`${BASE_URL}/api/auth/sign-in/email`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          email: targetUserEmail,
-          password: targetUserPassword,
-        }),
-      });
-      const freshTargetCookie = targetLoginRes.headers.get("set-cookie") || "";
+      const freshTargetCookie = await signInTarget();
 
       const response = await fetch(
         `${BASE_URL}/api/admin/users/${targetUserId}/force-password-reset`,
@@ -234,16 +181,7 @@ describe("Admin User Security API", () => {
     });
 
     test("non-admin cannot revoke oauth tokens", async () => {
-      // Re-login as target user to get fresh cookie (might have been revoked by previous tests)
-      const targetLoginRes = await fetch(`${BASE_URL}/api/auth/sign-in/email`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          email: targetUserEmail,
-          password: targetUserPassword,
-        }),
-      });
-      const freshTargetCookie = targetLoginRes.headers.get("set-cookie") || "";
+      const freshTargetCookie = await signInTarget();
 
       const response = await fetch(`${BASE_URL}/api/admin/users/${targetUserId}/oauth-tokens`, {
         method: "DELETE",
@@ -287,16 +225,7 @@ describe("Admin User Security API", () => {
     });
 
     test("non-admin cannot access security activity", async () => {
-      // Re-login as target user to get fresh cookie (might have been revoked by previous tests)
-      const targetLoginRes = await fetch(`${BASE_URL}/api/auth/sign-in/email`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          email: targetUserEmail,
-          password: targetUserPassword,
-        }),
-      });
-      const freshTargetCookie = targetLoginRes.headers.get("set-cookie") || "";
+      const freshTargetCookie = await signInTarget();
 
       const response = await fetch(
         `${BASE_URL}/api/admin/users/${targetUserId}/security-activity`,
@@ -322,13 +251,7 @@ describe("Admin User Security API", () => {
 
   describe("POST /api/admin/users/:id/temporary-password", () => {
     test("rejects malformed credential boundaries without changing the account", async () => {
-      const loginBefore = await fetch(`${BASE_URL}/api/auth/sign-in/email`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: targetUserEmail, password: targetUserPassword }),
-      });
-      expect(loginBefore.status).toBe(200);
-      const sessionCookie = loginBefore.headers.get("set-cookie") || "";
+      const sessionCookie = await signInTarget();
       const stateBeforeResponse = await fetch(`${BASE_URL}/api/user/me`, {
         headers: { Cookie: sessionCookie },
       });
@@ -373,13 +296,7 @@ describe("Admin User Security API", () => {
     test("recovers an ordinary account, revokes old access, and requires a new password", async () => {
       const temporaryPassword = `Temporary-${Date.now()}!`;
       const finalPassword = `Recovered-${Date.now()}!`;
-      const oldSession = await fetch(`${BASE_URL}/api/auth/sign-in/email`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: targetUserEmail, password: targetUserPassword }),
-      });
-      expect(oldSession.status).toBe(200);
-      const oldSessionCookie = oldSession.headers.get("set-cookie") || "";
+      const oldSessionCookie = await signInTarget();
       const tokenResponse = await fetch(`${BASE_URL}/api/tokens`, {
         method: "POST",
         headers: { Cookie: oldSessionCookie, "Content-Type": "application/json" },
@@ -548,13 +465,7 @@ describe("Admin User Security API", () => {
         const triggerName = `rollback_recovery_${randomUUID().replaceAll("-", "")}`;
         const now = new Date().toISOString();
 
-        const oldSession = await fetch(`${BASE_URL}/api/auth/sign-in/email`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ email: targetUserEmail, password: targetUserPassword }),
-        });
-        expect(oldSession.status).toBe(200);
-        const oldSessionCookie = oldSession.headers.get("set-cookie") || "";
+        const oldSessionCookie = await signInTarget();
         const oldSessionId = execSqliteInDocker(
           `SELECT id FROM session WHERE userId = '${targetUserId}' ORDER BY createdAt DESC LIMIT 1`,
         );
@@ -705,17 +616,12 @@ describe("Admin User Security API", () => {
       );
       expect(selfResponse.status).toBe(400);
 
-      const targetLogin = await fetch(`${BASE_URL}/api/auth/sign-in/email`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: targetUserEmail, password: targetUserPassword }),
-      });
       const nonAdminResponse = await fetch(
         `${BASE_URL}/api/admin/users/${targetUserId}/temporary-password`,
         {
           method: "POST",
           headers: {
-            Cookie: targetLogin.headers.get("set-cookie") || "",
+            Cookie: await signInTarget(),
             "Content-Type": "application/json",
           },
           body: JSON.stringify({ temporaryPassword: "MustNotBeUsed-123!" }),

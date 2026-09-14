@@ -148,6 +148,28 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/*
+ * Scroll containers of the process views: one thin, theme-coloured scrollbar in both themes. The
+ * thumb is the muted foreground at reduced alpha, so it reads on the light and the dark ground;
+ * the standard properties cover Firefox and current Chromium, the pseudo-elements older WebKit.
+ */
+@utility scrollbar-thin {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in oklch, var(--muted-foreground) 45%, transparent) transparent;
+
+  &::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  &::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  &::-webkit-scrollbar-thumb {
+    background: color-mix(in oklch, var(--muted-foreground) 45%, transparent);
+    border-radius: 9999px;
+  }
+}
+
 ::selection {
   background-color: oklch(0.488 0.2 264 / 0.3);
   color: inherit;

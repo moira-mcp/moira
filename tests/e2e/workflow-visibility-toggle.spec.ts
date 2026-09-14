@@ -1,6 +1,6 @@
 /**
  * E2E Tests for Workflow Visibility Toggle UI
- * Tests visibility toggle button in WorkflowDetail
+ * Tests the visibility toggle button on the flow page
  */
 
 import { test, expect } from "./fixtures.js";

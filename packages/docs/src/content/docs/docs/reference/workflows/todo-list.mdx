@@ -43,9 +43,9 @@ If the task is incomplete or blocked, the agent must not call `step()`. It repor
 
 ## Execution progress
 
-The execution card and exported image share three horizontal milestones: Checklist → Prepare → Work. Checklist shows the latest confirmed synopsis of the authoritative ordered list. Prepare represents the engine's existing derivation of the length, cursor, action, and expected result. Work covers both ordinary task execution and correction of a checklist that stopped describing the remaining work.
+The execution card and exported image share three blocks: Checklist → Prepare → Work. Checklist shows the latest confirmed synopsis of the authoritative ordered list. Prepare represents the engine's existing derivation of the length, cursor, action, and expected result. Work covers both ordinary task execution and correction of a checklist that stopped describing the remaining work.
 
-The current role remains explicit. Ordinary work is labelled `Task N/M` and shows the complete current action; the full expected result stays in the agent directive because it may be longer than the bounded progress field. A checklist jump is labelled `Revise checklist` and uses no task projection that might be unavailable on that route. Both roles map to the final Work milestone, so normal completion and a revision that removes the whole unfinished tail both finish the progress presentation without adding a synthetic result step.
+The current role remains explicit. Ordinary work is labelled `Task N/M` and shows the complete current action; the full expected result stays in the agent directive because it may be longer than the bounded progress field. A checklist jump is labelled `Revise checklist` and uses no task projection that might be unavailable on that route. Both roles belong to the final Work block, so normal completion and a revision that removes the whole unfinished tail both finish the progress presentation without adding a synthetic result step.
 
 Checklist and Work outcomes are bounded render-only values. Revision replaces the checklist synopsis and atomically keeps only a completed-task outcome that remains true for the preserved prefix, or `Pending`. Progress does not participate in conditions, cursor arithmetic, task data, completion evidence, terminal output, or authority.
 

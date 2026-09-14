@@ -3,12 +3,13 @@
  * Layout for /admin/* routes - admin panel for system management
  */
 
-import React from "react";
+import React, { Suspense } from "react";
 import { Outlet } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { SidebarProvider, SidebarInset, SidebarTrigger } from "@/components/ui/sidebar";
 import { AppSidebar, type NavRoute } from "./AppSidebar";
 import { AnimatedPage } from "../AnimatedPage";
+import { RouteSkeleton } from "../route-skeleton";
 import { ROUTES } from "../../constants/routes";
 
 export const AdminLayout: React.FC = () => {
@@ -87,7 +88,9 @@ export const AdminLayout: React.FC = () => {
         </header>
         <main className="flex-1 overflow-y-auto">
           <AnimatedPage>
-            <Outlet />
+            <Suspense fallback={<RouteSkeleton />}>
+              <Outlet />
+            </Suspense>
           </AnimatedPage>
         </main>
       </SidebarInset>

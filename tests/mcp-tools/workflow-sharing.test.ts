@@ -132,12 +132,9 @@ describe("MCP Workflow Sharing Tools E2E", () => {
         workflowId: testWorkflowId,
       });
 
-      // Error returns as string or object with success: false
-      if (typeof result === "string") {
-        expect(result).toMatch(/not found|denied|access/i);
-      } else {
-        expect(result).toHaveProperty("success", false);
-      }
+      // Errors render as "Error: ..." text
+      expect(typeof result).toBe("string");
+      expect(result).toMatch(/not found|denied|access/i);
     });
 
     test("create-invite requires workflowId", async () => {
@@ -145,13 +142,9 @@ describe("MCP Workflow Sharing Tools E2E", () => {
         action: "create-invite",
       });
 
-      // Error returns as string or object with success: false
-      if (typeof result === "string") {
-        expect(result).toMatch(/workflow.*id|required/i);
-      } else {
-        expect(result).toHaveProperty("success", false);
-        expect(result.error).toContain("Workflow ID");
-      }
+      // Errors render as "Error: ..." text
+      expect(typeof result).toBe("string");
+      expect(result).toMatch(/workflow.*id|required/i);
     });
   });
 
@@ -205,12 +198,9 @@ describe("MCP Workflow Sharing Tools E2E", () => {
         workflowId: testWorkflowId,
       });
 
-      // Error returns as string or object with success: false
-      if (typeof result === "string") {
-        expect(result).toMatch(/not found|denied|access/i);
-      } else {
-        expect(result).toHaveProperty("success", false);
-      }
+      // Errors render as "Error: ..." text
+      expect(typeof result).toBe("string");
+      expect(result).toMatch(/not found|denied|access/i);
     });
   });
 
@@ -250,13 +240,9 @@ describe("MCP Workflow Sharing Tools E2E", () => {
         action: "revoke-invite",
       });
 
-      // Error returns as string or object with success: false
-      if (typeof result === "string") {
-        expect(result).toMatch(/inviteId|required/i);
-      } else {
-        expect(result).toHaveProperty("success", false);
-        expect(result.error).toContain("inviteId");
-      }
+      // Errors render as "Error: ..." text
+      expect(typeof result).toBe("string");
+      expect(result).toMatch(/inviteId|required/i);
     });
 
     test("non-owner cannot revoke invite", async () => {
@@ -271,12 +257,9 @@ describe("MCP Workflow Sharing Tools E2E", () => {
         inviteId: createResult.invite.id,
       });
 
-      // Error returns as string or object with success: false
-      if (typeof result === "string") {
-        expect(result).toMatch(/not found|denied|access/i);
-      } else {
-        expect(result).toHaveProperty("success", false);
-      }
+      // Errors render as "Error: ..." text
+      expect(typeof result).toBe("string");
+      expect(result).toMatch(/not found|denied|access/i);
     });
   });
 
@@ -318,12 +301,9 @@ describe("MCP Workflow Sharing Tools E2E", () => {
         workflowId: testWorkflowId,
       });
 
-      // Error returns as string or object with success: false
-      if (typeof result === "string") {
-        expect(result).toMatch(/not found|denied|access/i);
-      } else {
-        expect(result).toHaveProperty("success", false);
-      }
+      // Errors render as "Error: ..." text
+      expect(typeof result).toBe("string");
+      expect(result).toMatch(/not found|denied|access/i);
     });
 
     test("revoke-access requires targetUserId", async () => {
@@ -332,13 +312,9 @@ describe("MCP Workflow Sharing Tools E2E", () => {
         workflowId: testWorkflowId,
       });
 
-      // Error returns as string or object with success: false
-      if (typeof result === "string") {
-        expect(result).toMatch(/targetUserId|required/i);
-      } else {
-        expect(result).toHaveProperty("success", false);
-        expect(result.error).toContain("targetUserId");
-      }
+      // Errors render as "Error: ..." text
+      expect(typeof result).toBe("string");
+      expect(result).toMatch(/targetUserId|required/i);
     });
 
     test("revoke-access fails for non-existent access", async () => {
@@ -348,12 +324,9 @@ describe("MCP Workflow Sharing Tools E2E", () => {
         targetUserId: "non-existent-user-id",
       });
 
-      // Error returns as string or object with success: false
-      if (typeof result === "string") {
-        expect(result).toMatch(/not found|access/i);
-      } else {
-        expect(result).toHaveProperty("success", false);
-      }
+      // Errors render as "Error: ..." text
+      expect(typeof result).toBe("string");
+      expect(result).toMatch(/not found|access/i);
     });
   });
 

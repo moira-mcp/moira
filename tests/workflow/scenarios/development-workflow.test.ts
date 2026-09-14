@@ -10,7 +10,8 @@ import {
   GraphValidator,
   MaterializeHandler,
   detectCycles,
-  projectExecutionProgress,
+  projectExecutionRun,
+  type ExecutionVisit,
   type WorkflowGraph,
 } from "@mcp-moira/workflow-engine";
 import { calculateCoverage, exportCoverageReport } from "../../helpers/coverage-calculator.js";
@@ -945,22 +946,42 @@ describe("software-development-flow", () => {
     const visibleWaitingNodes = workflow.nodes.filter((node) => visibleWaitingTypes.has(node.type));
     expect(visibleWaitingNodes.filter((node) => !node.progressNodeId)).toEqual([]);
     expect(visibleWaitingNodes.filter((node) => !node.progressActiveContent)).toEqual([]);
-    const stageOutcome = {
-      intake: "progress_intake_outcome",
-      plan: "progress_plan_outcome",
-      implement: "progress_implementation_outcome",
-      tests: "progress_tests_outcome",
-      review: "progress_review_outcome",
-      checkpoint: "progress_checkpoint_outcome",
-      finalize: "progress_finalize_outcome",
-    } as const;
+    // Every waiting node writes at least one progress outcome variable, and each block's nodes
+    // write exactly the variables the block view reports for it.
+    const blockOutcomes: Record<string, string[]> = {
+      intake: ["progress_intake_outcome"],
+      health: ["progress_intake_outcome"],
+      plan: ["progress_plan_outcome"],
+      "plan-approval": ["progress_plan_outcome"],
+      implement: ["progress_implementation_outcome"],
+      "unit-validation": ["progress_tests_outcome", "progress_review_outcome"],
+      "broad-validation": ["progress_review_outcome"],
+      completeness: ["progress_review_outcome", "progress_checkpoint_outcome"],
+      "user-review": ["progress_implementation_outcome", "progress_review_outcome"],
+      checkpoint: ["progress_checkpoint_outcome"],
+      "feature-validation": ["progress_finalize_outcome"],
+      "final-review": ["progress_plan_outcome", "progress_finalize_outcome"],
+      replan: ["progress_plan_outcome"],
+      finalize: ["progress_finalize_outcome"],
+    };
+    const written = new Map<string, Set<string>>();
     for (const node of visibleWaitingNodes.filter(
       (candidate) => candidate.type === "agent-directive" || candidate.type === "teleport",
     )) {
-      const expectedOutcome = stageOutcome[node.progressNodeId as keyof typeof stageOutcome];
-      expect(node.inputSchema?.globalInputs).toContain(expectedOutcome);
-      expect(node.inputSchema?.required).toContain(expectedOutcome);
+      const outcomes = (node.inputSchema?.globalInputs ?? []).filter((name) =>
+        /^progress_\w+_outcome$/.test(name),
+      );
+      expect(outcomes.length).toBeGreaterThan(0);
+      for (const name of outcomes) expect(node.inputSchema?.required).toContain(name);
+      const set = written.get(node.progressNodeId!) ?? new Set<string>();
+      outcomes.forEach((name) => set.add(name));
+      written.set(node.progressNodeId!, set);
     }
+    expect(
+      Object.fromEntries([...written].map(([block, set]) => [block, [...set].sort()])),
+    ).toEqual(
+      Object.fromEntries(Object.entries(blockOutcomes).map(([b, v]) => [b, [...v].sort()])),
+    );
     expect(
       workflow.nodes.find((node) => node.id === "review-unit-completeness")?.inputSchema
         ?.globalInputs,
@@ -1365,14 +1386,60 @@ describe("software-development-flow", () => {
   });
 
   test("projects truthful progress across unit loops, replan, finalization and completion", () => {
+    /**
+     * The shortest authored route to `target`, left open there: from the start node, or — for a
+     * node reachable only after a jump — through the implementation step, a teleport exit and the
+     * teleport node's own connections.
+     */
+    const byId = new Map(workflow.nodes.map((node) => [node.id, node]));
+    const pathFrom = (source: string, target: string) => {
+      const previous = new Map<string, { from: string; key: string }>();
+      const queue = [source];
+      const seen = new Set([source]);
+      while (queue.length) {
+        const id = queue.shift()!;
+        if (id === target) break;
+        const connections = (byId.get(id)?.connections ?? {}) as Record<string, string>;
+        for (const [key, next] of Object.entries(connections)) {
+          if (seen.has(next)) continue;
+          seen.add(next);
+          previous.set(next, { from: id, key });
+          queue.push(next);
+        }
+      }
+      if (source !== target && !previous.has(target)) return null;
+      const path: Array<{ nodeId: string; exitKey: string | null; waited?: boolean }> = [
+        { nodeId: target, exitKey: null, waited: true },
+      ];
+      for (let cursor = target; cursor !== source;) {
+        const step = previous.get(cursor)!;
+        path.unshift({ nodeId: step.from, exitKey: step.key });
+        cursor = step.from;
+      }
+      return path;
+    };
+    const routeTo = (target: string): ExecutionVisit[] => {
+      const start = workflow.nodes.find((node) => node.type === "start")!;
+      const direct = pathFrom(start.id, target);
+      if (direct) return direct.map((entry, seq) => ({ seq, changes: {}, ...entry }));
+      for (const teleport of workflow.nodes.filter((node) => node.type === "teleport")) {
+        const tail = pathFrom(teleport.id, target);
+        if (!tail) continue;
+        const head = pathFrom(start.id, "implement-plan-unit")!;
+        head[head.length - 1] = { nodeId: "implement-plan-unit", exitKey: "teleport" };
+        return [...head, ...tail].map((entry, seq) => ({ seq, changes: {}, ...entry }));
+      }
+      throw new Error(`${target} is unreachable`);
+    };
     const projectionAt = (
       currentNodeId: string | null,
       status: "running" | "completed" = "running",
       variables: Record<string, unknown> = {},
       waitingForInputNodeId: string | null = currentNodeId,
     ) =>
-      projectExecutionProgress(workflow, {
+      projectExecutionRun(workflow, {
         id: "progress-scenario",
+        visits: currentNodeId ? routeTo(currentNodeId) : [],
         workflowId: workflow.id ?? "software-development-flow",
         userId: "scenario-user",
         status,
@@ -1400,58 +1467,58 @@ describe("software-development-flow", () => {
           workflowId: workflow.id ?? "software-development-flow",
           currentNodeId,
         },
-      } as unknown as Parameters<typeof projectExecutionProgress>[1]);
+      } as unknown as Parameters<typeof projectExecutionRun>[1]);
 
     const cases = [
       ["capture-task-and-context", "intake", "Capture task and repository context"],
       ["materialize-development-standards", "intake", "Prepare development standards"],
       ["confirm-requirements", "intake", "Confirm requirements"],
       ["revise-requirements", "intake", "Revise requirements"],
-      ["assess-project-health", "intake", "Assess project health"],
-      ["wait-for-health-state-change", "intake", "Resolve project-health blocker"],
+      ["assess-project-health", "health", "Assess project health"],
+      ["wait-for-health-state-change", "health", "Resolve project-health blocker"],
       ["create-plan", "plan", "Plan r3"],
       ["review-plan", "plan", "Review plan r3"],
       ["repair-plan", "plan", "Repair plan r3"],
-      ["approve-plan", "plan", "Approve plan r3"],
-      ["revise-plan-after-rejection", "plan", "Revise plan r3"],
-      ["activate-reviewed-plan", "plan", "Activate plan r3"],
+      ["approve-plan", "plan-approval", "Approve plan r3"],
+      ["revise-plan-after-rejection", "plan-approval", "Revise plan r3"],
+      ["activate-reviewed-plan", "plan-approval", "Activate plan r3"],
       ["prepare-plan-unit-implementation", "implement", "Prepare · 2/5"],
       ["implement-plan-unit", "implement", "Implement · 2/5"],
       ["complete-plan-unit", "implement", "Complete unit · 2/5"],
-      ["validate-cheap", "tests", "2/5 i4 · Checks"],
-      ["repair-cheap-validation", "tests", "Repair validation · 2/5 · i4"],
-      ["review-test-adequacy", "tests", "Review tests · 2/5 · i4"],
-      ["repair-test-adequacy", "tests", "Repair tests · 2/5 · i4"],
-      ["review-architecture", "review", "2/5 i4 · Arch review"],
-      ["repair-architecture", "review", "Repair architecture · 2/5 · i4"],
-      ["validate-runtime", "review", "Runtime validation · 2/5 · i4"],
-      ["wait-for-runtime-state-change", "review", "Runtime blocker · 2/5"],
-      ["repair-runtime", "review", "Repair runtime · 2/5 · i4"],
-      ["validate-expensive", "review", "Broad validation · 2/5 · i4"],
-      ["wait-for-expensive-state-change", "review", "Validation blocker · 2/5"],
-      ["repair-expensive", "review", "Repair broad checks · 2/5 · i4"],
-      ["review-unit-completeness", "review", "Independent review · 2/5 · i4"],
-      ["repair-unit-completeness", "review", "Repair completeness · 2/5 · i4"],
+      ["validate-cheap", "unit-validation", "2/5 i4 · Checks"],
+      ["repair-cheap-validation", "unit-validation", "Repair validation · 2/5 · i4"],
+      ["review-test-adequacy", "unit-validation", "Review tests · 2/5 · i4"],
+      ["repair-test-adequacy", "unit-validation", "Repair tests · 2/5 · i4"],
+      ["review-architecture", "unit-validation", "2/5 i4 · Arch review"],
+      ["repair-architecture", "unit-validation", "Repair architecture · 2/5 · i4"],
+      ["validate-runtime", "unit-validation", "Runtime validation · 2/5 · i4"],
+      ["wait-for-runtime-state-change", "unit-validation", "Runtime blocker · 2/5"],
+      ["repair-runtime", "unit-validation", "Repair runtime · 2/5 · i4"],
+      ["validate-expensive", "broad-validation", "Broad validation · 2/5 · i4"],
+      ["wait-for-expensive-state-change", "broad-validation", "Validation blocker · 2/5"],
+      ["repair-expensive", "broad-validation", "Repair broad checks · 2/5 · i4"],
+      ["review-unit-completeness", "completeness", "Independent review · 2/5 · i4"],
+      ["repair-unit-completeness", "completeness", "Repair completeness · 2/5 · i4"],
       ["checkpoint-plan-unit", "checkpoint", "Checkpoint · 2/5"],
-      ["approve-current-unit-closure", "plan", "Replan decision · r3"],
-      ["revise-plan-for-replan", "plan", "Replan r3"],
-      ["teleport-replan", "plan", "Replan · r3"],
-      ["revise-plan-for-teleport", "plan", "Replan · r3"],
-      ["review-plan-unit-with-user", "review", "Unit review · 2/5"],
-      ["create-and-upload-step-report", "review", "Visual report · 2/5"],
-      ["update-unit-documentation", "review", "Documentation · 2/5 · i4"],
+      ["approve-current-unit-closure", "replan", "Replan decision · r3"],
+      ["revise-plan-for-replan", "replan", "Replan r3"],
+      ["teleport-replan", "replan", "Replan · r3"],
+      ["revise-plan-for-teleport", "replan", "Replan · r3"],
+      ["review-plan-unit-with-user", "user-review", "Unit review · 2/5"],
+      ["create-and-upload-step-report", "user-review", "Visual report · 2/5"],
+      ["update-unit-documentation", "broad-validation", "Documentation · 2/5 · i4"],
       ["resolve-finalization-blocker", "finalize", "Finalization blocker"],
-      ["validate-feature-wide", "finalize", "Feature validation"],
-      ["repair-feature-validation", "finalize", "Repair feature validation"],
-      ["wait-for-feature-state-change", "finalize", "Feature blocker"],
-      ["review-final-semantics", "finalize", "Independent final review"],
-      ["repair-final-semantics", "finalize", "Repair final evidence"],
-      ["report-and-accept-feature", "finalize", "Final result review"],
-      ["revise-plan-after-feedback", "plan", "Feedback replan · r3"],
+      ["validate-feature-wide", "feature-validation", "Feature validation"],
+      ["repair-feature-validation", "feature-validation", "Repair feature validation"],
+      ["wait-for-feature-state-change", "feature-validation", "Feature blocker"],
+      ["review-final-semantics", "final-review", "Independent final review"],
+      ["repair-final-semantics", "final-review", "Repair final evidence"],
+      ["report-and-accept-feature", "final-review", "Final result review"],
+      ["revise-plan-after-feedback", "final-review", "Feedback replan · r3"],
       ["finalize-feature", "finalize", "Finalize repository"],
-      ["create-final-report", "finalize", "Create final report"],
+      ["create-final-report", "final-review", "Create final report"],
       ["repair-finalization-repository", "finalize", "Repair finalization"],
-      ["repair-user-feedback", "implement", "2/5 i4 · Feedback fix"],
+      ["repair-user-feedback", "user-review", "2/5 i4 · Feedback fix"],
     ] as const;
     expect(cases.map(([nodeId]) => nodeId).sort()).toEqual(
       workflow.nodes
@@ -1460,15 +1527,22 @@ describe("software-development-flow", () => {
         .sort(),
     );
     for (const [primaryNodeId, activeNodeId, activeLabel] of cases) {
+      expect(workflow.nodes.find((node) => node.id === primaryNodeId)?.progressNodeId).toBe(
+        activeNodeId,
+      );
       const projected = projectionAt(primaryNodeId);
       expect(projected?.activeNodeId).toBe(activeNodeId);
       expect(projected?.title).toBe("Software Development · plan r3");
       expect(projected?.goal).toContain("one complete repository change");
       expect(projected?.facts).toEqual([{ label: "Plan", value: "r3", tone: "neutral" }]);
       expect(projected?.nodes.find((node) => node.id === activeNodeId)?.label).toBe(activeLabel);
+      // The active block projects an outcome exactly when its block content or the waiting node's
+      // active content carries an outcome template.
+      const activeBlock = workflow.progress!.nodes.find((node) => node.id === activeNodeId)!;
+      const primaryNode = workflow.nodes.find((node) => node.id === primaryNodeId)!;
       expect(
-        projected?.nodes.find((node) => node.id === activeNodeId)?.content.outcome,
-      ).toBeTruthy();
+        Boolean(projected?.nodes.find((node) => node.id === activeNodeId)?.content.outcome),
+      ).toBe(Boolean(activeBlock.content?.outcome || primaryNode.progressActiveContent?.outcome));
       expect(
         projected?.nodes.filter((node) => node.id !== activeNodeId).map((node) => node.label),
       ).toEqual(
@@ -1484,37 +1558,33 @@ describe("software-development-flow", () => {
     expect(
       projectionAt("checkpoint-plan-unit")?.nodes.find((node) => node.id === "checkpoint")
         ?.connections,
-    ).toEqual({ default: "implement" });
-    expect(projectionAt("update-unit-documentation")?.activeNodeId).toBe("review");
+    ).toEqual({ default: "feature-validation" });
+    expect(projectionAt("update-unit-documentation")?.activeNodeId).toBe("broad-validation");
     const nextUnit = projectionAt("validate-cheap", "running", {
       current_step_index: 3,
       current_iteration: 1,
     });
-    expect(nextUnit?.nodes.find((node) => node.id === "tests")?.label).toBe("3/5 i1 · Checks");
-    expect(nextUnit?.nodes.find((node) => node.id === "implement")?.label).toBe("Implement");
-    expect(nextUnit?.nodes.find((node) => node.id === "review")?.content.outcome).toBeNull();
+    expect(nextUnit?.nodes.find((node) => node.id === "unit-validation")?.label).toBe(
+      "3/5 i1 · Checks",
+    );
+    expect(nextUnit?.nodes.find((node) => node.id === "implement")?.label).toBe("Implement a unit");
+    expect(nextUnit?.nodes.find((node) => node.id === "completeness")?.content.outcome).toBeNull();
     expect(
       projectionAt("prepare-plan-unit-implementation")?.nodes.find((node) => node.id === "plan")
         ?.content.outcome,
     ).toContain("5 executable units");
 
-    expect(projectionAt(null, "completed", {}, null)?.nodes.map((node) => node.state)).toEqual(
-      Array(7).fill("completed"),
-    );
-    expect(
-      projectionAt(null, "completed", {}, "create-final-report")?.nodes.map((node) => node.state),
-    ).toEqual(Array(7).fill("completed"));
-    expect(
-      projectionAt(null, "completed", {}, "review-architecture")?.nodes.map((node) => node.state),
-    ).toEqual([
-      "completed",
-      "completed",
-      "completed",
-      "completed",
-      "completed",
-      "pending",
-      "pending",
-    ]);
+    // A completed execution without a route log infers nothing from block order: no block is
+    // done and the projection says so.
+    const blockCount = workflow.progress!.nodes.length;
+    expect(blockCount).toBe(15);
+    for (const waitingNode of [null, "create-final-report", "review-architecture"]) {
+      const completed = projectionAt(null, "completed", {}, waitingNode);
+      expect(completed?.routeRecorded).toBe(false);
+      expect(completed?.nodes.map((node) => node.status)).toEqual(
+        Array(blockCount).fill("pending"),
+      );
+    }
   });
 
   test.each([

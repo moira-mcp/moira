@@ -7,10 +7,10 @@
  */
 
 import { beforeAll, describe, expect, test } from "@jest/globals";
-import { getAdminCredentials, getTestBaseUrl } from "../utils/test-config.js";
+import { getTestBaseUrl } from "../utils/test-config.js";
+import { formatSessionCookie, getAdminSessionCookie } from "../utils/mcp-auth.js";
 
 const BASE_URL = getTestBaseUrl();
-const ADMIN_CREDENTIALS = getAdminCredentials();
 
 let adminCookie: string;
 
@@ -59,14 +59,7 @@ beforeAll(async () => {
     operationsDevelopment: false,
   });
 
-  const login = await fetch(`${BASE_URL}/api/auth/sign-in/email`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(ADMIN_CREDENTIALS),
-  });
-  expect(login.status).toBe(200);
-  adminCookie = login.headers.get("set-cookie") ?? "";
-  expect(adminCookie).toBeTruthy();
+  adminCookie = formatSessionCookie(BASE_URL, await getAdminSessionCookie(BASE_URL));
 });
 
 describe("self-host capability authorization", () => {

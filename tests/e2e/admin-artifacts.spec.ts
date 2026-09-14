@@ -4,7 +4,12 @@
  */
 
 import { test, expect } from "./fixtures.js";
-import { loginAsAdmin, createTestUser, login } from "./helpers/auth-helper.js";
+import {
+  loginAsAdmin,
+  createTestUser,
+  login,
+  getSessionCookieHeader,
+} from "./helpers/auth-helper.js";
 import { getTestBaseUrl, getTestFetchUrl } from "../utils/test-config.js";
 
 const BASE_URL = getTestBaseUrl();
@@ -31,23 +36,6 @@ async function createArtifactForUser(
   }
   const result = await response.json();
   return result.data;
-}
-
-// Helper to get session cookie for a user
-async function getSessionCookie(email: string, password: string): Promise<string> {
-  const response = await fetch(`${FETCH_URL}/api/auth/sign-in/email`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email, password }),
-  });
-  const setCookie = response.headers.get("set-cookie");
-  if (!setCookie) throw new Error("No session cookie returned");
-  // Extract the cookie value and format it
-  const match = setCookie.match(/(?:__Secure-)?better-auth\.session_token=([^;]+)/);
-  if (!match) throw new Error("Could not extract session cookie");
-  const isSecure = FETCH_URL.startsWith("https://");
-  const cookieName = isSecure ? "__Secure-better-auth.session_token" : "better-auth.session_token";
-  return `${cookieName}=${match[1]}`;
 }
 
 test.describe("Admin Artifacts Page", () => {
@@ -143,7 +131,7 @@ test.describe("Admin Artifacts - With Test Data", () => {
     }
 
     // Login and create an artifact
-    const sessionCookie = await getSessionCookie(testUserEmail, testUserPassword);
+    const sessionCookie = await getSessionCookieHeader(testUserEmail, testUserPassword);
     const artifact = await createArtifactForUser(sessionCookie, `E2E Test Artifact ${Date.now()}`);
     testArtifactUuid = artifact.uuid;
   });
@@ -190,7 +178,7 @@ test.describe("Admin Artifacts - With Test Data", () => {
 
   test("admin can delete artifact via UI", async ({ page }) => {
     // First create a new artifact that we can delete
-    const sessionCookie = await getSessionCookie(testUserEmail, testUserPassword);
+    const sessionCookie = await getSessionCookieHeader(testUserEmail, testUserPassword);
     const artifactToDelete = await createArtifactForUser(
       sessionCookie,
       `Artifact To Delete ${Date.now()}`,
@@ -226,13 +214,10 @@ test.describe("Admin Artifacts - With Test Data", () => {
       timeout: 10000,
     });
 
-    // Enter user filter - the API will reload with the new filter
+    // Enter user filter - the API reloads with the new filter after the input debounce;
+    // the count assertion retries until the filtered list has replaced the initial one.
     await page.getByTestId("user-search-input").fill("nonexistent-filter-value");
 
-    // Wait for the filter to apply (debounced) and API call to complete
-    await page.waitForTimeout(600);
-
-    // The list should be empty or show no artifact cards
     const cards = page.locator('[data-testid^="artifact-row-"]');
     await expect(cards).toHaveCount(0, { timeout: 5000 });
   });

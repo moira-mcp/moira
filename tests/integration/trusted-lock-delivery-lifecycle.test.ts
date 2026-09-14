@@ -200,16 +200,22 @@ describe("production LockHandler trusted-delivery lifecycle", () => {
     );
   }
 
-  test("missing settings fail before PIN generation and the same execution retries safely", async () => {
-    await exerciseFailureAndRetry("missing");
-  });
-
-  test("malformed configuration fails before PIN generation and the same execution retries safely", async () => {
-    await exerciseFailureAndRetry("malformed");
-  });
-
-  test("send failure hides and invalidates the generated PIN before a fresh successful retry", async () => {
-    await exerciseFailureAndRetry("send");
+  // Every kind runs the full failure → retry → unlock cycle with its assertions inside the helper
+  test.each<[string, FailureKind]>([
+    [
+      "missing settings fail before PIN generation and the same execution retries safely",
+      "missing",
+    ],
+    [
+      "malformed configuration fails before PIN generation and the same execution retries safely",
+      "malformed",
+    ],
+    [
+      "send failure hides and invalidates the generated PIN before a fresh successful retry",
+      "send",
+    ],
+  ])("%s", async (_title, kind) => {
+    await exerciseFailureAndRetry(kind);
   });
 
   test("failed-attempt invalidation preserves an earlier persisted context reference", async () => {

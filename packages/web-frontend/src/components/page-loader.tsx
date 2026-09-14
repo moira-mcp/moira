@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card";
 
 export function PageLoader() {
   return (
-    <div className="space-y-6">
+    <div className="space-y-6" role="status" aria-live="polite" data-testid="page-loader">
       <Skeleton className="h-8 w-48" />
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         {Array.from({ length: 4 }).map((_, i) => (

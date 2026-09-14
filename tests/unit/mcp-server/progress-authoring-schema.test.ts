@@ -20,7 +20,7 @@ const richProgress = {
       },
       connections: { default: "implement" },
     },
-    { id: "implement", label: "Implement" },
+    { id: "implement", label: "Implement", content: { summary: "Implement the plan" } },
   ],
 };
 
@@ -52,16 +52,29 @@ describe("MCP rich progress authoring schema", () => {
     ["empty title", { ...richProgress, title: "" }],
     ["empty goal", { ...richProgress, goal: "" }],
     ["empty nodes", { ...richProgress, nodes: [] }],
-    ["empty node id", { ...richProgress, nodes: [{ id: "", label: "Stage" }] }],
-    ["empty label", { ...richProgress, nodes: [{ id: "stage", label: "" }] }],
+    [
+      "empty node id",
+      { ...richProgress, nodes: [{ id: "", label: "Stage", content: { summary: "s" } }] },
+    ],
+    [
+      "empty label",
+      { ...richProgress, nodes: [{ id: "stage", label: "", content: { summary: "s" } }] },
+    ],
     [
       "empty connection",
       {
         ...richProgress,
-        nodes: [{ id: "stage", label: "Stage", connections: { default: "" } }],
+        nodes: [
+          { id: "stage", label: "Stage", content: { summary: "s" }, connections: { default: "" } },
+        ],
       },
     ],
     ["empty content", { ...richProgress, nodes: [{ id: "stage", label: "Stage", content: {} }] }],
+    [
+      "block without a description",
+      { ...richProgress, nodes: [{ id: "stage", label: "Stage", content: { next: "Go on" } }] },
+    ],
+    ["block without content", { ...richProgress, nodes: [{ id: "stage", label: "Stage" }] }],
   ])("rejects %s", (_name, value) => {
     expect(progressAuthoringSchema.safeParse(value).success).toBe(false);
   });

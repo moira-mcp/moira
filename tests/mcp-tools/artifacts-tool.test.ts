@@ -292,7 +292,8 @@ describe("MCP Artifacts Tool E2E", () => {
         offset: 0,
       });
 
-      expect(page1.artifacts.length).toBeLessThanOrEqual(2);
+      // Three artifacts were just created, so the first page is always full
+      expect(page1.artifacts).toHaveLength(2);
 
       // Get second page
       const page2 = await callMCPTool(client, "artifacts", {
@@ -301,10 +302,11 @@ describe("MCP Artifacts Tool E2E", () => {
         offset: 2,
       });
 
-      // Pages should have different artifacts
-      if (page1.artifacts.length > 0 && page2.artifacts.length > 0) {
-        expect(page1.artifacts[0].uuid).not.toBe(page2.artifacts[0].uuid);
-      }
+      // At least the third created artifact lands on page two, and pages never overlap
+      expect(page2.artifacts.length).toBeGreaterThanOrEqual(1);
+      const page1Uuids = page1.artifacts.map((a: { uuid: string }) => a.uuid);
+      const page2Uuids = page2.artifacts.map((a: { uuid: string }) => a.uuid);
+      expect(page1Uuids.filter((uuid: string) => page2Uuids.includes(uuid))).toEqual([]);
     });
   });
 

@@ -5,9 +5,14 @@
 
 import { test, expect } from "./fixtures.js";
 import { login, createTestUser } from "./helpers/auth-helper.js";
+import { loadWorkflowFixture } from "./fixtures/load-workflow.js";
+import { TEST_WORKFLOWS } from "./fixtures/test-constants.js";
 import { getTestBaseUrl } from "../utils/test-config.js";
 
 const BASE_URL = getTestBaseUrl();
+// Public fixture uploaded by global setup; visible to every user in list mode
+const PUBLIC_WORKFLOW = TEST_WORKFLOWS.PUBLIC_TEST;
+const PUBLIC_WORKFLOW_DESCRIPTION = "Public workflow for testing visibility features";
 const TEST_USER = {
   email: "card-test@example.com",
   password: "TestPass123!",
@@ -70,55 +75,53 @@ test.describe("Compact Workflow Cards", () => {
   });
 
   test("should show description in tooltip on hover", async ({ page }) => {
-    const cards = page.locator('[data-testid="workflow-card"]');
-    await expect(cards.first()).toBeVisible({ timeout: 10000 });
+    // The public fixture has a description, so its list-mode card carries a tooltip
+    const card = page
+      .locator('[data-testid="workflow-card"]')
+      .filter({ hasText: PUBLIC_WORKFLOW.name })
+      .first();
+    await expect(card).toBeVisible({ timeout: 10000 });
 
-    // Hover over the first card
-    await cards.first().hover();
+    await card.hover();
 
-    // Wait for tooltip to appear (300ms delay + render time)
-    await page.waitForTimeout(500);
-
-    // Check if tooltip is visible (Radix tooltip content)
-    const tooltip = page.locator('[role="tooltip"]');
-    const tooltipVisible = await tooltip.isVisible().catch(() => false);
-
-    // Tooltip may not appear if workflow has no description
-    // This is expected behavior
-    expect(true).toBe(true);
+    // Radix tooltip content appears after its open delay
+    await expect(page.locator('[role="tooltip"]')).toContainText(PUBLIC_WORKFLOW_DESCRIPTION);
   });
 
   test("should show delete button on hover for owned workflows", async ({ page }) => {
-    // Create a workflow owned by the test user first
-    const cards = page.locator('[data-testid="workflow-card"]');
-    await expect(cards.first()).toBeVisible({ timeout: 10000 });
+    // Upload a workflow owned by the test user, then hover its card
+    const owned = await loadWorkflowFixture(page, TEST_WORKFLOWS.REACT_FLOW_THEME.filename);
+    expect(owned.success).toBe(true);
+    await page.reload();
+    await page.waitForSelector('[data-testid="workflow-explorer"]', { state: "visible" });
 
-    // Hover over a card
-    await cards.first().hover();
+    const ownedCard = page
+      .locator('[data-testid="workflow-card"]')
+      .filter({ hasText: owned.workflowName })
+      .first();
+    await expect(ownedCard).toBeVisible({ timeout: 10000 });
+    await ownedCard.hover();
+    await expect(ownedCard.getByRole("button", { name: "Delete Workflow" })).toBeVisible();
 
-    // Delete button should appear if user owns the workflow
-    // Note: May not appear for public/shared workflows
-    await page.waitForTimeout(200);
+    // A public workflow of another owner offers no delete button to this user
+    const foreignCard = page
+      .locator('[data-testid="workflow-card"]')
+      .filter({ hasText: PUBLIC_WORKFLOW.name })
+      .first();
+    await foreignCard.hover();
+    await expect(foreignCard.getByRole("button", { name: "Delete Workflow" })).toHaveCount(0);
   });
 
   test("should open workflow viewer when clicked", async ({ page }) => {
-    const cards = page.locator('[data-testid="workflow-card"]');
-    await expect(cards.first()).toBeVisible({ timeout: 10000 });
+    const card = page
+      .locator('[data-testid="workflow-card"]')
+      .filter({ hasText: PUBLIC_WORKFLOW.name })
+      .first();
+    await expect(card).toBeVisible({ timeout: 10000 });
 
-    // Click the first card to select it
-    await cards.first().click();
-
-    // Wait for workflow viewer to load
-    await page.waitForTimeout(2000);
-
-    // Verify that either the workflow graph or detail panel is visible
-    // The workflow selection should trigger loading the workflow viewer
-    const reactFlow = page.locator(".react-flow");
-    const hasReactFlow = await reactFlow.isVisible().catch(() => false);
-
-    // If no React Flow visible, workflow detail might be in a different state
-    // Just verify page didn't crash and something is visible
-    const body = await page.locator("body").textContent();
-    expect(body).toBeTruthy();
+    // Clicking a card routes to the workflow page, which renders the React Flow graph
+    await card.click();
+    await page.waitForURL(/\/workflows\/[^/]+\/[^/]+$/);
+    await expect(page.locator(".react-flow")).toBeVisible({ timeout: 15000 });
   });
 });

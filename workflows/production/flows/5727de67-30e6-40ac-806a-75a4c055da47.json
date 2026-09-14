@@ -2,8 +2,8 @@
   "id": "5727de67-30e6-40ac-806a-75a4c055da47",
   "metadata": {
     "name": "Workflow Management Flow",
-    "version": "6.6.2",
-    "description": "Creates or edits one complete Moira workflow through reconciled sources, independently reviewed semantic design, official mutation, quality review, and authority-bound delivery. It materializes nine canonical thematic authoring references and requires each substantive consumer to read its exact applicable files while keeping local node contracts concise. It preserves content-rich progress, cause-aware repair/replan, publication authority, repository identity, and the complete create/edit route model; it does not execute the downstream task.",
+    "version": "6.9.1",
+    "description": "Creates or edits one complete Moira workflow through reconciled sources, independently reviewed semantic design, official mutation, quality review, and authority-bound delivery. It materializes nine canonical thematic authoring references and requires each substantive consumer to read its exact applicable files while keeping local node contracts concise. It preserves the process block contract (every node owned by a described block, every boundary edge and return labelled, one readable order), cause-aware repair/replan, publication authority, repository identity, and the complete create/edit route model; it does not execute the downstream task.",
     "author": "mcp-moira-team",
     "tags": [
       "workflow",
@@ -19,7 +19,8 @@
       "id": "start",
       "connections": {
         "default": "get-action-type"
-      }
+      },
+      "progressNodeId": "source"
     },
     {
       "type": "agent-directive",
@@ -155,6 +156,11 @@
       "connections": {
         "true": "gather-workflow-requirements",
         "false": "prepare-edit-workflow"
+      },
+      "progressNodeId": "source",
+      "connectionLabels": {
+        "true": "create a new workflow",
+        "false": "edit an existing workflow"
       }
     },
     {
@@ -177,12 +183,15 @@
         "success": "design-workflow-structure"
       },
       "progressNodeId": "requirements",
-      "progressActiveLabel": "Capture creation requirements"
+      "progressActiveLabel": "Capture creation requirements",
+      "connectionLabels": {
+        "success": "requirements captured"
+      }
     },
     {
       "type": "agent-directive",
       "id": "design-workflow-structure",
-      "directive": "Before designing, read `{{workspace_path}}/reference/design.md`, `{{workspace_path}}/reference/validation.md`, `{{workspace_path}}/reference/patterns.md`, and `{{workspace_path}}/reference/authority.md`; when progress is applicable, also read `{{workspace_path}}/reference/progress.md`.\n\nUse `{{workspace_path}}/workflow-requirements.md` and actual Moira/project sources to produce the complete create-side pre-mutation design contract. Research externally only when a material correctness or compatibility question cannot be resolved locally, and record any resulting conclusion and source in the design.\n\nCover the whole requested outcome, responsibilities, branches, dependencies, writer/reader contracts, authority and failure boundaries, repair/replan ownership, evidence modalities, and which earlier conclusions each mutation invalidates. Specify progress only when it materially helps, using the current product contract from the reference.\n\nWrite the complete current design to `{{workspace_path}}/workflow-design.md`. Do not return its body or structural inventories through workflow context. Return a concise current `progress_design_outcome`, replacing its prior value.\n",
+      "directive": "Before designing, read `{{workspace_path}}/reference/design.md`, `{{workspace_path}}/reference/validation.md`, `{{workspace_path}}/reference/patterns.md`, and `{{workspace_path}}/reference/authority.md`; when progress is applicable, also read `{{workspace_path}}/reference/progress.md`.\n\nUse `{{workspace_path}}/workflow-requirements.md` and actual Moira/project sources to produce the complete create-side pre-mutation design contract. Research externally only when a material correctness or compatibility question cannot be resolved locally, and record any resulting conclusion and source in the design.\n\nCover the whole requested outcome, responsibilities, branches, dependencies, writer/reader contracts, authority and failure boundaries, repair/replan ownership, evidence modalities, and which earlier conclusions each mutation invalidates. Specify progress only when it materially helps, using the current product contract from the reference. When progress applies, the design specifies the process view completely — blocks with descriptions and order, the block of every node including routing nodes, the label of every boundary edge, the cause and exit of every return, hub order — as part of the pre-mutation contract; `reference/progress.md` owns the rules.\n\nWrite the complete current design to `{{workspace_path}}/workflow-design.md`. Do not return its body or structural inventories through workflow context. Return a concise current `progress_design_outcome`, replacing its prior value.",
       "completionCondition": "The complete current pre-mutation design contract and its evidence model are recorded in the canonical create design file",
       "inputSchema": {
         "type": "object",
@@ -269,6 +278,10 @@
       "connections": {
         "true": "create-workflow-json",
         "false": "refine-structure"
+      },
+      "progressNodeId": "design",
+      "connectionLabels": {
+        "true": "structure approved, build"
       }
     },
     {
@@ -301,12 +314,21 @@
       "progressActiveContent": {
         "summary": "Repair the current create design without changing accepted scope",
         "next": "Independent design re-review"
+      },
+      "connectionLabels": {
+        "success": {
+          "label": "structure refined, review again",
+          "cycle": {
+            "cause": "The user asked for structure changes.",
+            "exit": "The user approves the structure."
+          }
+        }
       }
     },
     {
       "type": "agent-directive",
       "id": "create-workflow-json",
-      "directive": "Before mutation, read `{{workspace_path}}/reference/engine.md`, `{{workspace_path}}/reference/design.md`, `{{workspace_path}}/reference/artifacts.md`, `{{workspace_path}}/reference/validation.md`, `{{workspace_path}}/reference/authority.md`, `{{workspace_path}}/reference/patterns.md`, and `{{workspace_path}}/reference/antipatterns.md`; when the accepted design includes progress, also read `{{workspace_path}}/reference/progress.md`.\n\nCreate the complete workflow from the independently reviewed and, in interactive mode, user-approved `workflow-requirements.md` and `workflow-design.md`. Use actual Moira/project contracts and the official Moira workflow CLI. Implement every accepted outcome and required dependency, preserve every route and authority boundary, and inspect the whole artifact for all manifestations of each confirmed defect class in scope.\n\nSave the complete workflow at `{{workspace_path}}/workflow.json`. Validate that artifact with the official CLI, repair concrete structural errors, overwrite `{{workspace_path}}/workspace/workflow-schema.txt` with the CLI `schema` output, and inspect the complete current projection and JSON for the designed structure, routes, declarations, reachability, cycles, teleports, terminals, data use, coverage, and applicable progress semantics.\n\nReturn only the artifact path as `workflow_artifact_path` and a concise current `progress_build_outcome`, replacing its prior value. Independent review verifies the completed artifact rather than completing ordinary missing work.\n",
+      "directive": "Before mutation, read `{{workspace_path}}/reference/engine.md`, `{{workspace_path}}/reference/design.md`, `{{workspace_path}}/reference/artifacts.md`, `{{workspace_path}}/reference/validation.md`, `{{workspace_path}}/reference/authority.md`, `{{workspace_path}}/reference/patterns.md`, and `{{workspace_path}}/reference/antipatterns.md`; when the accepted design includes progress, also read `{{workspace_path}}/reference/progress.md`.\n\nCreate the complete workflow from the independently reviewed and, in interactive mode, user-approved `workflow-requirements.md` and `workflow-design.md`. Use actual Moira/project contracts and the official Moira workflow CLI. Implement every accepted outcome and required dependency, preserve every route and authority boundary, and inspect the whole artifact for all manifestations of each confirmed defect class in scope.\n\nSave the complete workflow at `{{workspace_path}}/workflow.json`. Validate that artifact with the official CLI, repair concrete structural errors, overwrite `{{workspace_path}}/workspace/workflow-schema.txt` with the CLI `schema` output, and inspect the complete current projection and JSON for the designed structure, routes, declarations, reachability, cycles, teleports, terminals, data use, coverage, and applicable progress semantics. When the workflow declares progress, author its process view with the official CLI block and label commands and run the CLI `derive` until it reports no diagnostic.\n\nReturn only the artifact path as `workflow_artifact_path` and a concise current `progress_build_outcome`, replacing its prior value. Independent review verifies the completed artifact rather than completing ordinary missing work.",
       "completionCondition": "The approved workflow exists at the canonical path, passes official structural validation, and has a complete current structural projection generated and inspected before independent review",
       "inputSchema": {
         "type": "object",
@@ -325,7 +347,10 @@
         "success": "review-workflow-quality"
       },
       "progressNodeId": "build",
-      "progressActiveLabel": "Build workflow definition"
+      "progressActiveLabel": "Build workflow definition",
+      "connectionLabels": {
+        "success": "workflow built"
+      }
     },
     {
       "type": "agent-directive",
@@ -352,7 +377,7 @@
     {
       "type": "agent-directive",
       "id": "apply-workflow-changes",
-      "directive": "Before mutation, read `{{workspace_path}}/reference/engine.md`, `{{workspace_path}}/reference/design.md`, `{{workspace_path}}/reference/artifacts.md`, `{{workspace_path}}/reference/review-repair.md`, `{{workspace_path}}/reference/validation.md`, `{{workspace_path}}/reference/authority.md`, `{{workspace_path}}/reference/patterns.md`, and `{{workspace_path}}/reference/antipatterns.md`; when the reviewed edit plan changes or requires progress, also read `{{workspace_path}}/reference/progress.md`.\n\nApply the independently reviewed and, in interactive mode, user-approved `{{workspace_path}}/edit-plan.md` to the actual workflow at {{workflow_artifact_path}} using actual Moira/project contracts and the official Moira workflow CLI. Implement every accepted outcome and necessary dependency, preserve unrelated behavior and every protected semantic guarantee, and inspect the whole artifact for every manifestation of each confirmed defect class in scope. If an acceptance criterion in the accepted contract is invalid or conflicts with requirements, use the process-revision teleport instead of weakening it.\n\nValidate the actual workflow with the official CLI, repair concrete structural errors, overwrite `{{workspace_path}}/workspace/workflow-schema.txt` with current CLI `schema` output, and inspect the complete projection and JSON for omitted or misrouted nodes, conditions, starts, teleports, terminals, cycles, reachability, dangling targets, declarations, uses, coverage, and applicable progress semantics.\n\nReturn a concise current `progress_build_outcome`, replacing its prior value. Independent review verifies the complete result rather than co-authoring ordinary missing work.\n",
+      "directive": "Before mutation, read `{{workspace_path}}/reference/engine.md`, `{{workspace_path}}/reference/design.md`, `{{workspace_path}}/reference/artifacts.md`, `{{workspace_path}}/reference/review-repair.md`, `{{workspace_path}}/reference/validation.md`, `{{workspace_path}}/reference/authority.md`, `{{workspace_path}}/reference/patterns.md`, and `{{workspace_path}}/reference/antipatterns.md`; when the reviewed edit plan changes or requires progress, also read `{{workspace_path}}/reference/progress.md`.\n\nApply the independently reviewed and, in interactive mode, user-approved `{{workspace_path}}/edit-plan.md` to the actual workflow at {{workflow_artifact_path}} using actual Moira/project contracts and the official Moira workflow CLI. Implement every accepted outcome and necessary dependency, preserve unrelated behavior and every protected semantic guarantee, and inspect the whole artifact for every manifestation of each confirmed defect class in scope. If an acceptance criterion in the accepted contract is invalid or conflicts with requirements, use the process-revision teleport instead of weakening it.\n\nValidate the actual workflow with the official CLI, repair concrete structural errors, overwrite `{{workspace_path}}/workspace/workflow-schema.txt` with current CLI `schema` output, and inspect the complete projection and JSON for omitted or misrouted nodes, conditions, starts, teleports, terminals, cycles, reachability, dangling targets, declarations, uses, coverage, and applicable progress semantics. When the workflow declares progress, author or repair its process view with the official CLI block and label commands and run the CLI `derive` until it reports no diagnostic.\n\nReturn a concise current `progress_build_outcome`, replacing its prior value. Independent review verifies the complete result rather than co-authoring ordinary missing work.",
       "completionCondition": "The approved changes and necessary dependencies are applied; the actual workflow passes official structural validation; and its complete current structural projection is regenerated and inspected before independent review",
       "inputSchema": {
         "type": "object",
@@ -373,6 +398,9 @@
       "progressActiveContent": {
         "summary": "Apply the accepted contract with official workflow tools",
         "next": "Independent quality review"
+      },
+      "connectionLabels": {
+        "success": "changes applied"
       }
     },
     {
@@ -447,21 +475,24 @@
       "connections": {
         "true": "ask-upload",
         "false": "route-final-feedback-action"
-      }
+      },
+      "progressNodeId": "delivery"
     },
     {
       "type": "end",
       "id": "end-cancelled",
       "finalOutput": [
         "action_type"
-      ]
+      ],
+      "progressNodeId": "delivery"
     },
     {
       "type": "end",
       "id": "end",
       "finalOutput": [
         "action_type"
-      ]
+      ],
+      "progressNodeId": "delivery"
     },
     {
       "type": "condition",
@@ -476,7 +507,8 @@
           "contextPath": "ask-upload.upload_confirmed"
         },
         "right": true
-      }
+      },
+      "progressNodeId": "delivery"
     },
     {
       "type": "agent-directive",
@@ -547,7 +579,8 @@
       "connections": {
         "true": "route-local-sync",
         "false": "handle-upload-error"
-      }
+      },
+      "progressNodeId": "delivery"
     },
     {
       "type": "agent-directive",
@@ -619,6 +652,16 @@
       "connections": {
         "true": "save-workflow-to-target",
         "false": "route-error-skip-or-cancel"
+      },
+      "progressNodeId": "delivery",
+      "connectionLabels": {
+        "true": {
+          "label": "retry the upload",
+          "cycle": {
+            "cause": "The upload failed and the user chose to try again.",
+            "exit": "The upload succeeds or the user skips it."
+          }
+        }
       }
     },
     {
@@ -634,7 +677,8 @@
       "connections": {
         "true": "route-local-sync",
         "false": "end-cancelled"
-      }
+      },
+      "progressNodeId": "delivery"
     },
     {
       "type": "agent-directive",
@@ -665,7 +709,7 @@
     {
       "type": "agent-directive",
       "id": "create-edit-plan",
-      "directive": "Before analysis, read `{{workspace_path}}/reference/engine.md`, `{{workspace_path}}/reference/design.md`, `{{workspace_path}}/reference/artifacts.md`, `{{workspace_path}}/reference/validation.md`, `{{workspace_path}}/reference/authority.md`, `{{workspace_path}}/reference/patterns.md`, and `{{workspace_path}}/reference/antipatterns.md`; when this edit changes or requires progress, also read `{{workspace_path}}/reference/progress.md`.\n\nDerive the pre-mutation edit design from `edit-requirements.md`, the complete workflow at {{workflow_artifact_path}}, `source-provenance.md`, approved audit scope {{additional_edit_scope}}, and the complete current `workspace/workflow-schema.txt`. Write the analysis first and its resulting contract second in the single canonical `{{workspace_path}}/edit-plan.md`.\n\nThe analysis identifies affected responsibilities, routes, connections, variables, schemas, artifacts, authority and failure boundaries, dependencies, protected guarantees, material risks, and real alternatives. It must not record turn counts, reference-load totals, state-utilization inventories, counters/protocols, validation-amplification totals, report inventories, or equivalent unused process diagnostics.\n\nThe contract states the required outcomes, invariants, known dependencies, authority and failure boundaries, repair/replan ownership, discriminating acceptance criteria, evidence modality, and behavioral verification while preserving implementation freedom. Use the projection as structural navigation and confirm meaning in JSON; neither projection nor validation is semantic proof. Do not copy the plan into workflow context. Return a concise current `progress_design_outcome`, replacing its prior value.\n",
+      "directive": "Before analysis, read `{{workspace_path}}/reference/engine.md`, `{{workspace_path}}/reference/design.md`, `{{workspace_path}}/reference/artifacts.md`, `{{workspace_path}}/reference/validation.md`, `{{workspace_path}}/reference/authority.md`, `{{workspace_path}}/reference/patterns.md`, and `{{workspace_path}}/reference/antipatterns.md`; when this edit changes or requires progress, also read `{{workspace_path}}/reference/progress.md`.\n\nDerive the pre-mutation edit design from `edit-requirements.md`, the complete workflow at {{workflow_artifact_path}}, `source-provenance.md`, approved audit scope {{additional_edit_scope}}, and the complete current `workspace/workflow-schema.txt`. Write the analysis first and its resulting contract second in the single canonical `{{workspace_path}}/edit-plan.md`.\n\nThe analysis identifies affected responsibilities, routes, connections, variables, schemas, artifacts, authority and failure boundaries, dependencies, protected guarantees, material risks, and real alternatives. It must not record turn counts, reference-load totals, state-utilization inventories, counters/protocols, validation-amplification totals, report inventories, or equivalent unused process diagnostics.\n\nThe contract states the required outcomes, invariants, known dependencies, authority and failure boundaries, repair/replan ownership, discriminating acceptance criteria, evidence modality, and behavioral verification while preserving implementation freedom. When this edit changes or requires progress, the contract specifies the process view completely — blocks with descriptions and order, the block of every affected node including routing nodes, the label of every boundary edge, the cause and exit of every return, hub order — under the rules `reference/progress.md` owns. Use the projection as structural navigation and confirm meaning in JSON; neither projection nor validation is semantic proof. Do not copy the plan into workflow context. Return a concise current `progress_design_outcome`, replacing its prior value.",
       "completionCondition": "One document holds the complete analysis of scope, dependencies, protected guarantees, source decision, risks, and affected routes followed by the outcome-oriented edit contract and its discriminating evidence model, without unused process diagnostics",
       "inputSchema": {
         "type": "object",
@@ -686,12 +730,21 @@
       "progressActiveContent": {
         "summary": "Design the complete edit contract and evidence model",
         "next": "Independent design review"
+      },
+      "connectionLabels": {
+        "success": {
+          "label": "edit plan drafted, review it",
+          "cycle": {
+            "cause": "Each edit plan revision goes back through the design review.",
+            "exit": "The design review passes."
+          }
+        }
       }
     },
     {
       "type": "agent-directive",
       "id": "fix-edit-plan",
-      "directive": "Before repair, read `{{workspace_path}}/reference/design.md`, `{{workspace_path}}/reference/validation.md`, and `{{workspace_path}}/reference/review-repair.md`. Also read `workflow-design-review.md`, the current `edit-plan.md` with its analysis, requirements, original workflow, and applicable primary sources.\n\nReproduce and classify every finding before mutation. Return `changed` only after coherently repairing all real manifestations of a confirmed plan-owned cause in the agreed scope, updating the same plan, and reporting concise `root_cause_class` and `changed_knowledge` for rereview. Return `reassess` without mutation for false, upstream, invalid-criterion, or invalid-evidence findings. Do not turn contextual judgment into a universal detector.\n\nOn either outcome, atomically replace `progress_design_outcome` with the truthful current state and reset `progress_build_outcome`, `progress_review_outcome`, and `progress_delivery_outcome` to pending.\n",
+      "directive": "Before repair, read `{{workspace_path}}/reference/design.md`, `{{workspace_path}}/reference/validation.md`, and `{{workspace_path}}/reference/review-repair.md`. When a finding concerns the process view, also read `{{workspace_path}}/reference/progress.md`. Also read `workflow-design-review.md`, the current `edit-plan.md` with its analysis, requirements, original workflow, and applicable primary sources.\n\nReproduce and classify every finding before mutation. Return `changed` only after coherently repairing all real manifestations of a confirmed plan-owned cause in the agreed scope, updating the same plan, and reporting concise `root_cause_class` and `changed_knowledge` for rereview. Return `reassess` without mutation for false, upstream, invalid-criterion, or invalid-evidence findings. Do not turn contextual judgment into a universal detector.\n\nOn either outcome, atomically replace `progress_design_outcome` with the truthful current state and reset `progress_build_outcome`, `progress_review_outcome`, and `progress_delivery_outcome` to pending.",
       "completionCondition": "The finding is classified and either a real plan repair with consumed changed-knowledge evidence exists or reassessment is explicitly selected",
       "inputSchema": {
         "type": "object",
@@ -827,6 +880,10 @@
       "connections": {
         "true": "apply-workflow-changes",
         "false": "revise-edit-plan"
+      },
+      "progressNodeId": "design",
+      "connectionLabels": {
+        "true": "edit plan approved, apply"
       }
     },
     {
@@ -859,6 +916,15 @@
       "progressActiveContent": {
         "summary": "Replace the current edit plan after user feedback",
         "next": "Independent design review"
+      },
+      "connectionLabels": {
+        "success": {
+          "label": "edit plan revised, review again",
+          "cycle": {
+            "cause": "The user asked for edit plan changes.",
+            "exit": "The user approves the edit plan."
+          }
+        }
       }
     },
     {
@@ -922,7 +988,7 @@
     {
       "type": "agent-directive",
       "id": "review-workflow-quality",
-      "directive": "Before review, read all nine canonical references: `{{workspace_path}}/reference/engine.md`, `{{workspace_path}}/reference/design.md`, `{{workspace_path}}/reference/artifacts.md`, `{{workspace_path}}/reference/review-repair.md`, `{{workspace_path}}/reference/validation.md`, `{{workspace_path}}/reference/authority.md`, `{{workspace_path}}/reference/patterns.md`, `{{workspace_path}}/reference/antipatterns.md`, and `{{workspace_path}}/reference/progress.md`.\n\nIndependently review the complete structurally valid workflow at {{workflow_artifact_path}} against applicable requirements, the reviewed design or edit plan, current `workspace/workflow-schema.txt`, and the complete JSON. Trace every affected success, refusal, repair, replan, recovery, cancellation, terminal, teleport, condition, cycle, reachability class, declaration/use, coverage obligation, reference consumer, and applicable progress behavior. Confirm semantic meaning and authority in JSON; do not repeat structural validation.\n\nVerify one canonical owner per shared rule, explicit applicable-file reads by every substantive consumer, absence of materialized doctrine in directives, preservation of each local contract, bounded user-facing reports, and every frozen guarantee. Classify all reproducible blockers by earliest cause. {{#if fix-quality-issues.root_cause_class}}The preceding artifact repair reported root `{{fix-quality-issues.root_cause_class}}` and changed knowledge/reach `{{fix-quality-issues.changed_knowledge}}`; verify both against the actual artifact and findings.{{/if}} Route a repeated unchanged root to replan.\n\nOverwrite `{{workspace_path}}/workflow-quality-review.md` with all current findings. Return `pass` for none, `repair` only when every blocker is a confirmed workflow-artifact defect in scope, or `replan` for any validation, evidence, upstream contract, plan, process, or out-of-scope documentation defect. Do not mutate, expand scope, or design new machinery. Return a concise current `progress_review_outcome`, replacing its prior value.\n",
+      "directive": "Before review, read all nine canonical references: `{{workspace_path}}/reference/engine.md`, `{{workspace_path}}/reference/design.md`, `{{workspace_path}}/reference/artifacts.md`, `{{workspace_path}}/reference/review-repair.md`, `{{workspace_path}}/reference/validation.md`, `{{workspace_path}}/reference/authority.md`, `{{workspace_path}}/reference/patterns.md`, `{{workspace_path}}/reference/antipatterns.md`, and `{{workspace_path}}/reference/progress.md`.\n\nIndependently review the complete structurally valid workflow at {{workflow_artifact_path}} against applicable requirements, the reviewed design or edit plan, current `workspace/workflow-schema.txt`, and the complete JSON. Trace every affected success, refusal, repair, replan, recovery, cancellation, terminal, teleport, condition, cycle, reachability class, declaration/use, coverage obligation, reference consumer, and applicable progress behavior. Confirm semantic meaning and authority in JSON; do not repeat structural validation. When the workflow declares progress, read the official CLI `derive` output for the complete artifact as its process projection: any diagnostic is a blocker, and judge in the JSON what the validator cannot — labels true to the condition or branch they annotate, cycles naming the real cause and exit, descriptions and order that read as the process, outcome templates on their owning block — as `reference/progress.md` requires.\n\nVerify one canonical owner per shared rule, explicit applicable-file reads by every substantive consumer, absence of materialized doctrine in directives, preservation of each local contract, bounded user-facing reports, and every frozen guarantee. Classify all reproducible blockers by earliest cause. {{#if fix-quality-issues.root_cause_class}}The preceding artifact repair reported root `{{fix-quality-issues.root_cause_class}}` and changed knowledge/reach `{{fix-quality-issues.changed_knowledge}}`; verify both against the actual artifact and findings.{{/if}} Route a repeated unchanged root to replan.\n\nOverwrite `{{workspace_path}}/workflow-quality-review.md` with all current findings. Return `pass` for none, `repair` only when every blocker is a confirmed workflow-artifact defect in scope, or `replan` for any validation, evidence, upstream contract, plan, process, or out-of-scope documentation defect. Do not mutate, expand scope, or design new machinery. Return a concise current `progress_review_outcome`, replacing its prior value.",
       "completionCondition": "The current independent semantic review is recorded once after direct inspection of the complete JSON and current structural projection, and its pass, repair, or replan outcome matches the classified blocking causes",
       "inputSchema": {
         "type": "object",
@@ -968,12 +1034,13 @@
       "connections": {
         "true": "route-operating-mode-final",
         "false": "route-quality-review-replan"
-      }
+      },
+      "progressNodeId": "review"
     },
     {
       "type": "agent-directive",
       "id": "fix-quality-issues",
-      "directive": "Before repair, read `{{workspace_path}}/reference/engine.md` and `{{workspace_path}}/reference/review-repair.md`, then read `workflow-quality-review.md` and every subject file implicated by its confirmed findings from this closed set: `{{workspace_path}}/reference/design.md`, `{{workspace_path}}/reference/artifacts.md`, `{{workspace_path}}/reference/validation.md`, `{{workspace_path}}/reference/authority.md`, `{{workspace_path}}/reference/patterns.md`, `{{workspace_path}}/reference/antipatterns.md`, and `{{workspace_path}}/reference/progress.md`. Also read the actual workflow at {{workflow_artifact_path}}, current `workspace/workflow-schema.txt`, requirements, and reviewed design or edit plan. Do not read unrelated subject files merely because they were materialized.\n\nReproduce and classify every blocker before mutation. Return `changed` only when all blockers are artifact-owned and in scope; repair every real manifestation of each confirmed cause with the official CLI. Validate each changed artifact, regenerate and inspect the complete projection and JSON, and return concise `root_cause_class` plus changed source/reach evidence that gives rereview a stronger observation. Return `reassess` without mutation when a finding is false, upstream, unprovable, validation-only, or lacks stronger evidence.\n\nReplace `progress_review_outcome` with the truthful current repair or reassessment state and reset `progress_delivery_outcome` to pending whenever the prior review is invalidated.\n",
+      "directive": "Before repair, read `{{workspace_path}}/reference/engine.md` and `{{workspace_path}}/reference/review-repair.md`, then read `workflow-quality-review.md` and every subject file implicated by its confirmed findings from this closed set: `{{workspace_path}}/reference/design.md`, `{{workspace_path}}/reference/artifacts.md`, `{{workspace_path}}/reference/validation.md`, `{{workspace_path}}/reference/authority.md`, `{{workspace_path}}/reference/patterns.md`, `{{workspace_path}}/reference/antipatterns.md`, and `{{workspace_path}}/reference/progress.md`. Also read the actual workflow at {{workflow_artifact_path}}, current `workspace/workflow-schema.txt`, requirements, and reviewed design or edit plan. Do not read unrelated subject files merely because they were materialized.\n\nReproduce and classify every blocker before mutation. Return `changed` only when all blockers are artifact-owned and in scope; repair every real manifestation of each confirmed cause with the official CLI. When a confirmed finding concerns the process view, repair it with the CLI block and label commands and run the CLI `derive` on the changed artifact: the repair completes only when it reports no diagnostic. Validate each changed artifact, regenerate and inspect the complete projection and JSON, and return concise `root_cause_class` plus changed source/reach evidence that gives rereview a stronger observation. Return `reassess` without mutation when a finding is false, upstream, unprovable, validation-only, or lacks stronger evidence.\n\nReplace `progress_review_outcome` with the truthful current repair or reassessment state and reset `progress_delivery_outcome` to pending whenever the prior review is invalidated.",
       "completionCondition": "The finding is classified and either a real validated artifact repair with a refreshed complete structural projection and consumed transition evidence exists, or reassessment is explicitly selected without artifact mutation",
       "inputSchema": {
         "type": "object",
@@ -1050,6 +1117,23 @@
       "connections": {
         "true": "revise-create-requirements",
         "false": "revise-edit-requirements"
+      },
+      "progressNodeId": "delivery",
+      "connectionLabels": {
+        "true": {
+          "label": "user feedback changes the requirements",
+          "cycle": {
+            "cause": "The user rejected the result of a new workflow, so its requirements are revised.",
+            "exit": "The user accepts the result."
+          }
+        },
+        "false": {
+          "label": "user feedback changes the edit requirements",
+          "cycle": {
+            "cause": "The user rejected the result of an edit, so the edit requirements are revised.",
+            "exit": "The user accepts the result."
+          }
+        }
       }
     },
     {
@@ -1092,6 +1176,10 @@
       "connections": {
         "true": "audit-complete-workflow",
         "false": "create-edit-plan"
+      },
+      "progressNodeId": "requirements",
+      "connectionLabels": {
+        "false": "requirements captured, plan the edit"
       }
     },
     {
@@ -1114,7 +1202,10 @@
         "success": "create-edit-plan"
       },
       "progressNodeId": "requirements",
-      "progressActiveLabel": "Audit workflow antipatterns"
+      "progressActiveLabel": "Audit workflow antipatterns",
+      "connectionLabels": {
+        "success": "audit done, plan the edit"
+      }
     },
     {
       "type": "agent-directive",
@@ -1144,6 +1235,9 @@
       "progressActiveContent": {
         "summary": "Reconcile complete server and repository sources",
         "next": "Capture edit requirements"
+      },
+      "connectionLabels": {
+        "success": "source resolved, capture edit requirements"
       }
     },
     {
@@ -1178,6 +1272,9 @@
       "progressActiveContent": {
         "summary": "Correct requirements after design feedback",
         "next": "Design the workflow"
+      },
+      "connectionLabels": {
+        "success": "requirements revised, design again"
       }
     },
     {
@@ -1212,6 +1309,9 @@
       "progressActiveContent": {
         "summary": "Correct requirements after design feedback",
         "next": "Design the edit"
+      },
+      "connectionLabels": {
+        "success": "edit requirements revised, plan again"
       }
     },
     {
@@ -1227,7 +1327,8 @@
       "connections": {
         "true": "sync-local-file",
         "false": "end"
-      }
+      },
+      "progressNodeId": "delivery"
     },
     {
       "id": "route-operating-mode-structure",
@@ -1242,6 +1343,10 @@
       "connections": {
         "true": "create-workflow-json",
         "false": "approve-structure"
+      },
+      "progressNodeId": "design",
+      "connectionLabels": {
+        "true": "autonomous mode, build"
       }
     },
     {
@@ -1257,6 +1362,10 @@
       "connections": {
         "true": "apply-workflow-changes",
         "false": "present-edit-plan"
+      },
+      "progressNodeId": "design",
+      "connectionLabels": {
+        "true": "autonomous mode, apply"
       }
     },
     {
@@ -1272,6 +1381,11 @@
       "connections": {
         "true": "report-final-result",
         "false": "user-final-review"
+      },
+      "progressNodeId": "review",
+      "connectionLabels": {
+        "true": "review passed, report",
+        "false": "review passed, user final review"
       }
     },
     {
@@ -1325,12 +1439,21 @@
         "success": "route-action-after-reassessment"
       },
       "progressNodeId": "design",
-      "progressActiveLabel": "Resume revised design process"
+      "progressActiveLabel": "Resume revised design process",
+      "connectionLabels": {
+        "success": {
+          "label": "process revision requested",
+          "cycle": {
+            "cause": "A revision was requested from outside the design block.",
+            "exit": "The design review passes."
+          }
+        }
+      }
     },
     {
       "type": "agent-directive",
       "id": "review-workflow-design",
-      "directive": "Before review, read `{{workspace_path}}/reference/design.md`, `{{workspace_path}}/reference/validation.md`, `{{workspace_path}}/reference/authority.md`, and `{{workspace_path}}/reference/review-repair.md`; for an edit also read `{{workspace_path}}/reference/engine.md`, and whenever progress is applicable read `{{workspace_path}}/reference/progress.md`.\n\nIndependently review the complete current pre-mutation contract against its canonical upstream sources. For create, review `workflow-design.md` against `workflow-requirements.md`. For edit, review both sections of `edit-plan.md` against `edit-requirements.md`, source provenance, the complete original workflow, and current `workspace/workflow-schema.txt`; trace the whole affected graph in the projection and confirm its meaning and authority in JSON.\n\nCheck outcome completeness, responsibilities, dependencies, writer/reader contracts, authority and failure boundaries, repair/replan ownership, acceptance evidence, and applicable progress. Classify each reproducible blocker by its earliest cause. {{#if fix-create-design.root_cause_class}}The preceding create-design repair reported root `{{fix-create-design.root_cause_class}}` and changed knowledge `{{fix-create-design.changed_knowledge}}`; verify both against current sources.{{/if}} {{#if fix-edit-plan.root_cause_class}}The preceding edit-plan repair reported root `{{fix-edit-plan.root_cause_class}}` and changed knowledge `{{fix-edit-plan.changed_knowledge}}`; verify both against current sources.{{/if}} Route a repeated unchanged root to replan.\n\nOverwrite `{{workspace_path}}/workflow-design-review.md` with all current findings. Return `pass` for none, `repair` only when every blocker belongs to the reviewed design artifact under a valid upstream contract, or `replan` for any upstream, process, criterion, or evidence-model defect. Do not mutate the reviewed artifact or invent process machinery.\n",
+      "directive": "Before review, read `{{workspace_path}}/reference/design.md`, `{{workspace_path}}/reference/validation.md`, `{{workspace_path}}/reference/authority.md`, and `{{workspace_path}}/reference/review-repair.md`; for an edit also read `{{workspace_path}}/reference/engine.md`, and whenever progress is applicable read `{{workspace_path}}/reference/progress.md`.\n\nIndependently review the complete current pre-mutation contract against its canonical upstream sources. For create, review `workflow-design.md` against `workflow-requirements.md`. For edit, review both sections of `edit-plan.md` against `edit-requirements.md`, source provenance, the complete original workflow, and current `workspace/workflow-schema.txt`; trace the whole affected graph in the projection and confirm its meaning and authority in JSON.\n\nCheck outcome completeness, responsibilities, dependencies, writer/reader contracts, authority and failure boundaries, repair/replan ownership, acceptance evidence, and applicable progress. When progress applies, confirm the design or plan specifies the process view completely — block descriptions a newcomer can read, ownership of every node, boundary labels true to their conditions, returns with real cause and exit, one readable order with hubs after their sources, outcome templates on their owning block — as `reference/progress.md` requires. Classify each reproducible blocker by its earliest cause. {{#if fix-create-design.root_cause_class}}The preceding create-design repair reported root `{{fix-create-design.root_cause_class}}` and changed knowledge `{{fix-create-design.changed_knowledge}}`; verify both against current sources.{{/if}} {{#if fix-edit-plan.root_cause_class}}The preceding edit-plan repair reported root `{{fix-edit-plan.root_cause_class}}` and changed knowledge `{{fix-edit-plan.changed_knowledge}}`; verify both against current sources.{{/if}} Route a repeated unchanged root to replan.\n\nOverwrite `{{workspace_path}}/workflow-design-review.md` with all current findings. Return `pass` for none, `repair` only when every blocker belongs to the reviewed design artifact under a valid upstream contract, or `replan` for any upstream, process, criterion, or evidence-model defect. Do not mutate the reviewed artifact or invent process machinery.",
       "completionCondition": "The independent pre-mutation review is recorded once; edit review covers the complete current structural projection and JSON while create review does not require a pre-artifact projection; and the pass, repair, or replan outcome matches classified blocking causes",
       "inputSchema": {
         "type": "object",
@@ -1372,7 +1495,8 @@
       "connections": {
         "true": "route-action-after-design-review",
         "false": "route-design-review-replan"
-      }
+      },
+      "progressNodeId": "design"
     },
     {
       "type": "condition",
@@ -1387,7 +1511,8 @@
       "connections": {
         "true": "reassess-design-contract",
         "false": "route-action-design-repair"
-      }
+      },
+      "progressNodeId": "design"
     },
     {
       "type": "condition",
@@ -1402,7 +1527,8 @@
       "connections": {
         "true": "route-operating-mode-structure",
         "false": "route-operating-mode-plan"
-      }
+      },
+      "progressNodeId": "design"
     },
     {
       "type": "condition",
@@ -1417,12 +1543,13 @@
       "connections": {
         "true": "fix-create-design",
         "false": "fix-edit-plan"
-      }
+      },
+      "progressNodeId": "design"
     },
     {
       "type": "agent-directive",
       "id": "fix-create-design",
-      "directive": "Before repair, read `{{workspace_path}}/reference/design.md`, `{{workspace_path}}/reference/validation.md`, and `{{workspace_path}}/reference/review-repair.md`. Also read `workflow-design-review.md`, the current `workflow-design.md`, requirements, and applicable primary sources.\n\nReproduce and classify every finding before mutation. Return `changed` only after coherently repairing all real manifestations of a confirmed design-owned cause in the agreed scope, updating the same design, and reporting concise `root_cause_class` and `changed_knowledge` for rereview. Return `reassess` without mutation for false, upstream, invalid-criterion, or invalid-evidence findings. Do not turn contextual judgment into a universal detector.\n\nOn either outcome, atomically replace `progress_design_outcome` with the truthful current state and reset `progress_build_outcome`, `progress_review_outcome`, and `progress_delivery_outcome` to pending.\n",
+      "directive": "Before repair, read `{{workspace_path}}/reference/design.md`, `{{workspace_path}}/reference/validation.md`, and `{{workspace_path}}/reference/review-repair.md`. When a finding concerns the process view, also read `{{workspace_path}}/reference/progress.md`. Also read `workflow-design-review.md`, the current `workflow-design.md`, requirements, and applicable primary sources.\n\nReproduce and classify every finding before mutation. Return `changed` only after coherently repairing all real manifestations of a confirmed design-owned cause in the agreed scope, updating the same design, and reporting concise `root_cause_class` and `changed_knowledge` for rereview. Return `reassess` without mutation for false, upstream, invalid-criterion, or invalid-evidence findings. Do not turn contextual judgment into a universal detector.\n\nOn either outcome, atomically replace `progress_design_outcome` with the truthful current state and reset `progress_build_outcome`, `progress_review_outcome`, and `progress_delivery_outcome` to pending.",
       "completionCondition": "The finding is classified and either a real design repair with consumed changed-knowledge evidence exists or reassessment is explicitly selected",
       "inputSchema": {
         "type": "object",
@@ -1537,6 +1664,23 @@
       "connections": {
         "true": "design-workflow-structure",
         "false": "create-edit-plan"
+      },
+      "progressNodeId": "design",
+      "connectionLabels": {
+        "true": {
+          "label": "contract reassessed, design again",
+          "cycle": {
+            "cause": "The reassessed contract restarts the design of a new workflow.",
+            "exit": "The design review passes."
+          }
+        },
+        "false": {
+          "label": "contract reassessed, plan the edit again",
+          "cycle": {
+            "cause": "The reassessed contract restarts the edit plan.",
+            "exit": "The design review passes."
+          }
+        }
       }
     },
     {
@@ -1552,6 +1696,16 @@
       "connections": {
         "true": "reassess-design-contract",
         "false": "fix-quality-issues"
+      },
+      "progressNodeId": "review",
+      "connectionLabels": {
+        "true": {
+          "label": "review found a contract defect",
+          "cycle": {
+            "cause": "The quality review found a defect in the design contract itself.",
+            "exit": "The reassessed contract passes design review and the rebuilt workflow passes quality review."
+          }
+        }
       }
     },
     {
@@ -1567,6 +1721,23 @@
       "connections": {
         "true": "review-workflow-quality",
         "false": "reassess-design-contract"
+      },
+      "progressNodeId": "review",
+      "connectionLabels": {
+        "false": {
+          "label": "repair needs a contract change",
+          "cycle": {
+            "cause": "Fixing the quality findings requires changing the design contract.",
+            "exit": "The reassessed contract passes design review and the rebuilt workflow passes quality review."
+          }
+        },
+        "true": {
+          "label": "fixed, review quality again",
+          "cycle": {
+            "cause": "The quality findings were fixed without touching the contract.",
+            "exit": "The quality review passes."
+          }
+        }
       }
     },
     {
@@ -1582,6 +1753,23 @@
       "connections": {
         "true": "review-workflow-design",
         "false": "reassess-design-contract"
+      },
+      "progressNodeId": "design",
+      "connectionLabels": {
+        "true": {
+          "label": "design fixed, review again",
+          "cycle": {
+            "cause": "The design was repaired within the review's reach.",
+            "exit": "The design review passes."
+          }
+        },
+        "false": {
+          "label": "repair needs a contract change",
+          "cycle": {
+            "cause": "The repair requires reassessing the design contract.",
+            "exit": "The design review passes."
+          }
+        }
       }
     },
     {
@@ -1597,6 +1785,23 @@
       "connections": {
         "true": "review-workflow-design",
         "false": "reassess-design-contract"
+      },
+      "progressNodeId": "design",
+      "connectionLabels": {
+        "true": {
+          "label": "edit plan fixed, review again",
+          "cycle": {
+            "cause": "The edit plan was repaired within the review's reach.",
+            "exit": "The design review passes."
+          }
+        },
+        "false": {
+          "label": "repair needs a contract change",
+          "cycle": {
+            "cause": "The repair requires reassessing the design contract.",
+            "exit": "The design review passes."
+          }
+        }
       }
     }
   ],
@@ -1725,8 +1930,8 @@
     },
     "workflow_reference_progress": {
       "type": "string",
-      "description": "Canonical content-rich execution progress projection contract",
-      "default": "# Moira workflow progress reference\n\n## Content-rich execution progress\n\nFor workflows with meaningful user-visible stages, progress is a self-contained stateless projection of the executable graph, not a progress bar or second router. Use the execution note as task identity, a bounded template goal, generic facts such as mode or attention, and milestone content with `summary`, `details`, `outcome`, and `next`. Exact waiting nodes may override active label/content. All essential information is immediately readable in both Web UI and PNG; no required meaning exists only on hover.\n\nUse only declared workflow variables and the normal protected template processor. Definition and resolved output bounds apply; content is plain escaped text. Every observable waiting node maps through `progressNodeId`, multiple nodes may share one milestone, and display connections never route execution. Exact waiting-node overrides use `progressActiveLabel` and `progressActiveContent`. `progressActiveContent` shallowly replaces only supplied `summary`, `details`, `outcome`, or `next` fields; omitted fields retain the milestone's base content. Preserve label-only compatibility. Do not add progress conditions, status/history/cursor, proof tokens, runtime protocols or a separately maintained layout/state graph.\n\nThe producer that owns a semantic result also owns its progress projection. A plan or process revision atomically replaces the current revision, obsolete future units, counters, activity and next action while retaining only still-true completed outcomes. Reviewers reject append-only stale summaries, mixed revisions, undeclared template references, incomplete waiting-node mapping, misleading display edges, arbitrary HTML, or engine fields tied to one workflow domain. Mechanical validation proves schema and mapping; primary-artifact review judges semantic usefulness, scenario completeness and business provenance.\n"
+      "description": "Canonical process block contract and run projection reference for workflow progress",
+      "default": "# Moira workflow progress reference\n\n## The process view\n\nA workflow with meaningful user-visible stages declares `progress`: the process a person reads\nwithout knowing the graph. Its `nodes` array is the list of **blocks** in process order; each\nblock carries a label and a one-sentence description in `content.summary`, with optional\n`details`, `outcome` and `next`. The view is derived from the executable graph, never drawn\nbeside it, so it cannot drift from what runs. The rules below are outcomes; a rule that does not\napply to the current change is met and needs nothing produced to prove it.\n\n- **Every node belongs to one block.** Each node of the primary graph — routing nodes (`start`,\n  `condition`, `expression`), notifications and terminals included — declares the block it\n  belongs to through `progressNodeId`. Why: a run is projected from the route it took; a node\n  outside every block is work the picture cannot show, and a routing node placed in the block\n  whose decision it routes is what makes a skipped block visibly skipped.\n- **Every block is described.** `content.summary` is mandatory and says what the stage does in\n  one sentence a newcomer understands; the label names the stage as a person would. Why: the\n  block is the unit the reader sees first; a bare label is a heading without a paragraph.\n- **Every boundary edge is labelled.** A connection that leaves its block, and a connection\n  that loops back inside a block, carries a `connectionLabels` entry keyed like `connections`:\n  a short phrase naming the decision (\"plan approved\", \"review found defects\"). Why: the\n  arrows between blocks are the process; an unlabelled arrow makes the reader open the graph.\n- **Every return explains itself.** A transition to an earlier block or to its own block is a\n  loop; its label is an object `{ \"label\": …, \"cycle\": { \"cause\": …, \"exit\": … } }` naming\n  what causes the repetition and what ends it. Why: loops are where newcomers lose the thread;\n  the cause and the exit are the two facts that make a loop readable and bounded.\n- **Process order reads left to right.** Array order is process order; a transition to a\n  lower index is a return. A block that several blocks lead into (a hub — replan, stop) is\n  placed after the blocks that feed it. Why: the order is the only sequence the reader has.\n- **The array is bounded and its order is the only order.** The schema caps `progress.nodes`\n  (`maxItems`, 18 today); a process with more stages groups them into fewer blocks a newcomer\n  can hold. The earlier model's display order, `progress.nodes[].connections.default`, is still\n  accepted by the validator (it must name an existing block) but plays no part in the derived\n  process, whose order and transitions come from array order and the labelled connections; an\n  author need not write it. Why: two orders would have to agree, and only one of them is what\n  the engine draws and validates.\n- **One outcome owner per result.** An outcome template `{{progress_*_outcome}}` sits on\n  exactly one block, and that block owns a node whose `globalInputs` write the variable; other\n  blocks may also write it. Why: the block that shows a result must be one where the result is\n  produced, or the picture claims a conclusion it never reached.\n\n- **Every block is connected.** Each block has at least one transition to or from another block;\n  a self-return alone connects nothing; the block that owns the start node is exempt. Why: a block\n  that nothing reaches and that reaches nothing is a stage the picture shows but the run can never\n  be in, so the reader is told a step that does not exist.\n\nThe engine enforces the mechanical half of these rules at validation, each violation an error\nwith a stable code: `unowned-node`, `unknown-block`, `empty-block`, `empty-description`,\n`unlabeled-edge`, `unexplained-cycle`, `outcome-duplicate`, `outcome-unowned`,\n`unconnected-block`. The official CLI\nauthors the contract one change at a time — `set-block <node> <block>`, `add-block`,\n`edit-block`, `set-label <node> <key> <text> [--cause … --exit …]`, `clear-label` — and\n`derive` prints the derived process: blocks with their nodes, labelled transitions, returns\nwith cause and exit, hubs, and every diagnostic — the nine above and `no-start`, which only\n`derive` reports: without a start node the blocks and transitions are still listed, but the\nwalk that finds returns inside a block cannot run, so only returns to an earlier block are\nflagged until a start exists. A producer completes with zero diagnostics;\nthe reviewer reads `derive` as the process projection and judges what the validator cannot:\nwhether each label is true to the condition or branch it annotates, whether each cycle names\nthe real cause and exit, whether the descriptions and the order read as the process a newcomer\nwould recognise.\n\n## Content and rendering\n\nUse the execution note as task identity, a bounded template `goal`, generic `facts` such as\nmode or attention, and block content rendered through the normal protected template processor\nover declared workflow variables only. Definition and resolved output bounds apply; content is\nplain escaped text. An exact waiting node may override the active block's label and content\nthrough `progressActiveLabel` and `progressActiveContent`; the override applies only while that\nnode is current, and `progressActiveContent` shallowly replaces only the supplied `summary`,\n`details`, `outcome` or `next` fields. All essential information is immediately readable in\nthe Web UI and in the PNG; no required meaning exists only on hover.\n\nThe producer that owns a semantic result also owns its outcome text. A plan or process\nrevision atomically replaces the current revision, obsolete future units, counters, activity\nand next action while retaining only still-true completed outcomes. Do not add progress\nconditions, status, history, cursor, proof tokens, runtime protocols, or a separately\nmaintained layout or state graph: the run's state comes from the engine.\n\n## How a run is shown\n\nThe engine records every execution's route — each node it ran, the connection it left through\n(a teleport as a `teleport` exit), the variables it changed, and where it waited — and projects\nthe run onto the process from that route, never from block order: the block of the last visit\nis `active`, or `waiting` when the run pauses there; a visited block is `done`, or `repeated`\nwith the number of passes through its working steps; a block whose work never ran or that the\nrun bypassed is `skipped`; the rest are `pending`. Two cases decide `skipped`: an unvisited\nblock that lies before the furthest visited block in process order was passed by the run and\nis `skipped`, while an unvisited block after it is `pending`; and a block where only its routing\nnodes ran is `skipped`, unless the block consists of routing nodes alone, whose routing is its\nwork and reads as `done`. Why: the picture must say \"the run went around this\" and \"the run\nhas not got here yet\" differently, and a routing-only block (a mode switch, a gate) has done\nits job when it routed. Nothing unvisited is ever shown as done. A\nvalue set from outside the flow appears as a runtime adjustment with its actor. An execution\nrecorded before routes existed shows only its current block and `routeRecorded: false`.\nDesign the blocks so that this projection tells the truth: a repair loop inside one block reads\nas that block repeated, a bypassed approval reads as skipped, a stop reads as its own block.\n\n## Review\n\nMechanical validation proves schema, ownership, labels and template references; primary-artifact\nreview judges semantic usefulness, scenario completeness and business provenance. Reviewers\nreject append-only stale summaries, mixed revisions, undeclared template references, labels\nthat contradict their conditions, cycles without a real cause or exit, orders that do not read\nas the process, arbitrary HTML, or engine fields tied to one workflow domain."
     }
   },
   "progress": {

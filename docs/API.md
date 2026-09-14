@@ -306,49 +306,119 @@ Authentication: Required
 
 ### Execution progress
 
-`GET /api/executions/:id/progress` returns the workflow's read-only user-facing progress projection
-for the execution owner or an administrator. It contains the execution-note `taskTitle`, rendered
-workflow title and goal, bounded generic facts, active progress node, ordered
-`completed|current|pending` nodes with rendered structured content, static display connections,
-deterministic primary-node focus targets, workflow version, execution revision and diagnostics.
+`GET /api/executions/:id/progress` returns the execution's read-only run projection for the
+execution owner or an administrator; `session({ action: "progress" })` returns the same object.
+Both accept an optional route cursor `at` (a visit sequence number, `?at=4` or `at: 4`): the run is
+projected as it stood when that visit was the last one — the route cut there, the run active or
+waiting on that visit's node, later blocks pending, and every variable carrying the value written
+up to that visit (its registry default when the route wrote it only later). The cursor is echoed
+as `cursor`; a cursor at or beyond the last visit projects the whole route with `cursor: null`. A
+negative or non-integer `at` is a validation error.
+It contains the execution-note `taskTitle`, rendered workflow title and goal, bounded generic
+facts, `activeNodeId`, the ordered blocks (`nodes`) with rendered structured content, display
+connections (the next block in process order), deterministic primary-node focus targets, workflow
+version, execution revision, execution status and diagnostics, plus:
 
-Progress is derived from the current primary node's `progressNodeId` and never changes execution
-state. With `status=completed` and `currentNodeId=null`, the last persisted mapped
-`waitingForInputNodeId` bounds the terminal completion frontier; later milestones stay pending after
-an early stopped terminal. Older records without a usable mapped frontier retain the all-completed
-fallback. Pending milestones suppress `content.outcome` while retaining summary, details, and next
+- per block: `status` (`pending | active | done | repeated | skipped | waiting`), `iterations`
+  (completed passes through the block's working steps), `visits`, `currentNodeId` (for the active
+  or waiting block) and the coarse `state` (`completed | current | pending`) derived from
+  `status` for older clients;
+- `process`: the derived process (blocks, transitions with labels and cycles, hubs, diagnostics),
+  the same object `GET /api/workflows/:id/process` returns;
+- `route`: the recorded visits in order — `seq`, `nodeId`, `blockId`, `exitKey`, the names of
+  what the visit `changed`, `waited`, `adjusted` with its `actor`, and `loop` on a repeated node
+  or a re-entered block;
+- `variables`: every global variable and node-local output (`nodeId.field`) with its current
+  value, its history (`seq`, `nodeId`, `value`, `adjusted`) and whether the current value came
+  from an adjustment;
+- `routeRecorded`, `cursor` and `source: "trace"`.
+
+Statuses are projected from the route the engine recorded, never inferred from block order: a
+visited block is done or repeated, the block of the last visit is active or waiting, a block whose
+work never ran or that the run bypassed is skipped, everything else pending; a finished run has no
+active block unless it stopped on an open wait. An execution without a recorded route reports only
+its current block as active or waiting, everything else pending, and `routeRecorded: false`.
+Pending and skipped blocks suppress `content.outcome` while retaining summary, details, and next
 guidance, preventing a result from an earlier revision or unit from appearing current.
 
 Within the engine, `renderExecutionProgressImage(workflow, execution, options?)` is the supported
-workflow/execution-level image API. It returns `null` for a workflow without progress and otherwise
+workflow/execution-level image API; it projects the execution's recorded route, so a caller that
+renders mid-cycle (the notification handlers) passes `withInFlightVisit(execution, nodeId)`, an
+unpersisted copy with an open visit of the node being rendered. It returns `null` for a workflow without progress and otherwise
 returns the PNG buffer, `image/png`, dimensions, workflow version, step revision, and context
 revision. Failures
 remain errors rather than an empty image. `progressActiveLabel` may replace only the active
-milestone's returned label; inactive labels remain the static definition.
+block's returned label; inactive labels remain the static definition.
 `progressActiveContent` applies the same active-only rule to `summary`, `details`, `outcome`, and
-`next`; omitted active fields retain the milestone's base content. The response is derived afresh
+`next`; omitted active fields retain the block's base content. The response is derived afresh
 from the current execution context and does not accumulate values from older revisions. Limits are
 enforced again after template interpolation; an oversized resolved value fails projection instead
 of being silently truncated.
 
 `POST /api/executions/:id/progress-image-token` mints an owner-only, five-minute, single-use PNG
-grant with `downloadUrl`, `expiresAt`, `mimeType`, and `executionRevision`. The optional body accepts
-`theme: "light"|"dark"` and `viewportWidth` from 480 through 4096. `GET
+grant with `downloadUrl`, `expiresAt`, `mimeType`, `executionRevision` and the normalised
+`options`. The optional body accepts `theme: "light"|"dark"`, `viewportWidth` from 480 through
+4096, `view: "cards"|"process"`, `hide` and `collapse` (arrays of up to 100 block ids or authored
+node ids). `cards` (the default) is the content grid: every block as a card with its summary,
+details, outcome and next text, chained in display order. `process` is the aggregated block view:
+one compact block per row in process order with its status mark and, for a repeated block, a
+small `×N` badge, the process's transitions as labelled connectors, forward skips as arcs on the
+right, returns as dashed arcs on the left carrying the transition label (nested by span, labels
+stacked without overlap; the cause and exit of a loop are not drawn — the run page and `session
+progress` carry them), and transitions into hub blocks as bundled connectors in the right gutter
+(one lane and one port per hub) labelled inside the source block. At a width that cannot hold the
+lanes, the column and the label areas, the skips' labels and then the returns' labels move inside
+their source blocks. A block named in `hide` (a node id names the block that owns it) is left
+out and every transition into it is re-targeted to where it led, labels joined with "→"; a block
+in `collapse` is drawn as a label-only chip. An id that names no block or node of the workflow's
+process is refused at mint (400), as is an invalid `view`; the stored options are the resolved
+block ids, so a grant is always honourable. `GET
 /api/public/execution-progress-image/:token` uses the token as authorization and returns the exact
 step revision/context revision/workflow version image once with `Cache-Control: no-store`; expired, stale,
 foreign, or reused grants return 401. Rendering or a failed/closed HTTP response releases the
 reservation; successful response completion consumes it.
 
-The Web UI and PNG adapters consume the same wrapped visual model. Both expose the complete task,
-goal, facts and ordered milestone content; no essential field is available only through hover or
-another interactive control. Valid bounded content is wrapped into deterministic rows and is not
-truncated.
+The PNG adapter consumes the wrapped visual model; the run page reads the projection directly. Both
+expose the complete task, goal, facts and ordered block content; no essential field is available
+only through hover or another interactive control. Valid bounded content is wrapped into
+deterministic rows and is not truncated.
+
+Authentication: Required
+
+### Answering a waiting step
+
+`POST /api/executions/:id/answer` submits the input of the step a running execution waits for, on
+behalf of a person on the run page. Body: `input` (an object matching the step's input schema,
+declared `globalInputs` included) and `expectedRevision` (the execution's step revision). The
+execution's owner or an administrator may answer. The route refuses, before any engine work, an
+execution that is not running (400), one not waiting on its current node (400), an active lock
+(400), a step revision other than the current one (409), an executing or outcome-unknown agent
+attempt (409), a non-owner (403) and a malformed body (400).
+
+The answer then runs as an ordinary engine step over the same executor the MCP server uses: the
+input is validated against the step's schema; a rejected answer is logged on the execution like a
+rejected agent input, leaves the run on the same node, advances the step revision, and is returned
+as 400 with the step's validation message. An accepted answer continues the route; the accepted
+values are recorded on the route as an adjustment visit (`adjusted: true`, `actor: { role: "user",
+userId }`) right after the answered step's visit, and the next step is presented as an agent step
+would present it: the agent's outstanding attempt is marked `superseded`, so its next `step`
+receives `ATTEMPT_STALE` and `session current_step` hands out the attempt for the new node. The
+response carries `revision`, `status`, `currentNodeId`, `waitingForInputNodeId` and the run
+projection after the step. The step is audited as an execution step (`answer-wait`, with the
+acting administrator noted when the owner differs).
 
 Authentication: Required
 
 `GET /api/workflows/:id/variables` provides definition-level names/search/types/hasDefault/
 externallyWritable filters with `hasDefault` and policy on each entry, applied filters and unknown
 names. It does not claim current execution editability.
+
+`GET /api/workflows/:id/process` (id or slug) returns the saved workflow's derived process view:
+`{ workflowId, version, process }` where `process` holds the blocks in process order (id, label,
+description, outcome template, owned node ids, transitions with label, optional `cycle`
+`{ cause, exit }` and the authored edges behind them), hub block ids, node-level back-edges and the
+block-contract diagnostics, or `null` for a workflow without `progress`. It carries nothing about
+any execution; the CLI `derive` command prints the same derivation.
 
 The local definition CLI authors policy with
 `moira-workflow <file> set-variable-write-policy <name> <node-ids|all|none>` and discovers it with
@@ -1546,6 +1616,55 @@ Errors:
 - 404: Workflow not found
 
 Authentication: Required (owner only)
+
+### PUT /api/workflows/:id
+
+Replace the definition of a workflow the caller owns (the flow page's save). `id` is a UUID or the
+caller's slug.
+
+Request body:
+
+```typescript
+{
+  workflow: WorkflowGraph; // the whole definition as the client holds it
+  expectedRevision: number; // fileInfo.revision of the GET the edits were made against
+}
+```
+
+Order of refusals: workflow not found (404), caller not the owner (403), `expectedRevision` other
+than the stored revision (409 `CONFLICT`, `details.currentRevision`), the definition invalid under
+the same validation `manage edit` runs — block-contract diagnostics included (400
+`VALIDATION_FAILED`, `details.validation`); nothing is saved on a refusal. The save keeps the
+workflow's visibility and slug, advances its revision and is audited as a workflow edit.
+
+Response:
+
+```typescript
+{
+  success: true;
+  data: {
+    workflowId: string;
+    slug: string;
+    revision: number; // the new revision
+    lastModified: number;
+    validation: WorkflowValidationStatus;
+    version: string;
+    process: ProcessProjection | null; // re-derived from the saved definition
+  }
+  timestamp: string;
+}
+```
+
+**Workflow revision.** Every workflow row carries an integer `revision` (migration
+`0026_workflow_revision`, existing rows start at 0). It advances on every stored write of the
+graph: the shared repository save behind `WorkflowService.save` (this route, `POST /api/workflows`
+with `overwrite`, every `manage` mutation that stores a graph, upload, copy) and the reconciliation
+repository's apply (bundled-catalog install and reconciliation bundles). Writes that do not touch
+the graph — visibility, slug, validation cache — leave it alone. `GET /api/workflows/:id`, the
+handle/slug form and `manage get` return it as `fileInfo.revision` / `revision`; `manage edit`
+accepts an optional `expectedRevision` with the same refusal. This is unrelated to the
+reconciliation subsystem's string "revision" of conflict records and to an execution's step
+revision.
 
 ### POST /api/workflows/:id/copy
 

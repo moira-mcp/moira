@@ -1,0 +1,358 @@
+/**
+ * View model of the run page: the unit 3 projection (`ExecutionProgress`) read as blocks with
+ * their run state, plus the definition facts a block's steps show (type, summary, expected
+ * evidence). Nothing here derives run state: statuses, pass counts, the route and the variables
+ * are the server's; this module only joins the process blocks with the per-block run facts and
+ * looks up the steps' authored text in the workflow definition.
+ */
+
+import type { WorkflowGraph, WorkflowNode } from "../../types/workflow-types";
+import type {
+  ExecutionBlockStatus,
+  ExecutionProgress,
+  ExecutionProgressContent,
+  ExecutionProgressNode,
+  ExecutionRouteEntry,
+} from "@mcp-moira/workflow-engine/progress-visual";
+
+export type { ExecutionBlockStatus, ExecutionProgress };
+
+export interface RunTransition {
+  to: string;
+  label: string;
+  cycle?: { cause: string; exit: string };
+  edges: string[];
+}
+
+/** One process block with the run's projection of it. */
+export interface RunBlock {
+  id: string;
+  /** Zero-based position in process order. */
+  index: number;
+  name: string;
+  description: string;
+  nodeIds: string[];
+  transitions: RunTransition[];
+  status: ExecutionBlockStatus;
+  iterations: number;
+  visits: number;
+  currentNodeId: string | null;
+  content: ExecutionProgressContent;
+}
+
+const PENDING: Pick<
+  ExecutionProgressNode,
+  "status" | "iterations" | "visits" | "currentNodeId" | "content"
+> = {
+  status: "pending",
+  iterations: 0,
+  visits: 0,
+  currentNodeId: null,
+  content: { summary: null, details: [], outcome: null, next: null },
+};
+
+/** The process blocks in order, each joined with the run's projection of it. */
+export function runBlocks(progress: ExecutionProgress): RunBlock[] {
+  const byId = new Map(progress.nodes.map((node) => [node.id, node]));
+  return progress.process.blocks.map((block, index) => {
+    const run = byId.get(block.id) ?? PENDING;
+    return {
+      id: block.id,
+      index,
+      name: byId.get(block.id)?.label ?? block.label,
+      description: block.description,
+      nodeIds: block.nodeIds,
+      transitions: block.transitions,
+      status: run.status,
+      iterations: run.iterations,
+      visits: run.visits,
+      currentNodeId: run.currentNodeId,
+      content: renderedContent(run.content, [
+        block.description,
+        byId.get(block.id)?.label ?? block.label,
+      ]),
+    };
+  });
+}
+
+/**
+ * The run's rendered content without the summary when it says what the block's title or
+ * description already says: the description is derived from the same summary text, and a
+ * summary template may render to the block's name, so either would appear twice under the title.
+ */
+function renderedContent(
+  content: ExecutionProgressContent,
+  shownAlready: readonly string[],
+): ExecutionProgressContent {
+  if (content.summary === null) return content;
+  const summary = content.summary.trim();
+  if (!shownAlready.some((text) => text.trim() === summary)) return content;
+  return { ...content, summary: null };
+}
+
+export function blockById(blocks: readonly RunBlock[]): Map<string, RunBlock> {
+  return new Map(blocks.map((block) => [block.id, block]));
+}
+
+/** The block the run is on: active or waiting. */
+export function currentBlockId(blocks: readonly RunBlock[]): string | null {
+  return blocks.find((b) => b.status === "active" || b.status === "waiting")?.id ?? null;
+}
+
+/** Which block owns each node. */
+export function nodeOwners(blocks: readonly RunBlock[]): Map<string, string> {
+  const owner = new Map<string, string>();
+  for (const block of blocks) for (const id of block.nodeIds) owner.set(id, block.id);
+  return owner;
+}
+
+/** Node types whose visits route the run instead of doing a block's work. */
+export const ROUTING_NODE_TYPES: ReadonlySet<string> = new Set([
+  "start",
+  "condition",
+  "expression",
+]);
+
+/** One expected-evidence field of a step: a property of its input schema. */
+export interface EvidenceField {
+  name: string;
+  type: string | null;
+  description: string | null;
+  required: boolean;
+  enum: unknown[] | null;
+}
+
+/** A step of a block as the run page describes it. */
+export interface StepInfo {
+  id: string;
+  type: string;
+  displayName: string | null;
+  /** First sentence of the directive or message, bounded; empty for routing nodes. */
+  summary: string;
+  /** The full directive or message text, when the node has one. */
+  text: string | null;
+  evidence: EvidenceField[];
+  routing: boolean;
+}
+
+/** One outgoing connection of a step: inside its block (points at a sibling step) or out of it. */
+export interface StepConnection {
+  label: string;
+  target: string;
+  internal: boolean;
+  /** The block the target belongs to when the connection leaves the step's block. */
+  targetBlockId: string | null;
+  /** What the chip shows: the sibling step's id, or the target block's name. */
+  targetName: string;
+}
+
+/** An edge arriving at a step that the graph names in the card instead of drawing as a line. */
+export interface StepArrival {
+  /** The link's id, which the focus context lights. */
+  linkId: string;
+  sourceId: string;
+  sourceName: string;
+  /** The block the source belongs to, when it is another block. */
+  sourceBlockName: string | null;
+  label: string;
+  /** A transition back to an earlier block or to its own block. */
+  isReturn: boolean;
+}
+
+/**
+ * The connections of a step as the cards show them: the same classification on the run page's
+ * block panel, the flow page's split view and the technical graph, so a step reads the same
+ * everywhere.
+ */
+export function stepConnections(
+  node: { connections?: Record<string, string> } | undefined,
+  block: Pick<RunBlock, "id" | "nodeIds">,
+  blocks: readonly RunBlock[],
+): StepConnection[] {
+  if (!node?.connections) return [];
+  const inBlock = new Set(block.nodeIds);
+  const owners = nodeOwners(blocks);
+  const byId = blockById(blocks);
+  return Object.entries(node.connections).map(([label, target]) => {
+    const internal = inBlock.has(target);
+    const targetBlockId = internal ? null : (owners.get(target) ?? null);
+    return {
+      label,
+      target,
+      internal,
+      targetBlockId,
+      targetName: internal ? target : (byId.get(targetBlockId ?? "")?.name ?? target),
+    };
+  });
+}
+
+const SUMMARY_LIMIT = 180;
+
+/** The first sentence of an authored text, cut at a sentence end or the limit. */
+export function firstSentence(text: string): string {
+  const flat = text.replace(/\s+/g, " ").trim();
+  const end = flat.search(/[.!?](\s|$)/);
+  const sentence = end === -1 ? flat : flat.slice(0, end + 1);
+  return sentence.length > SUMMARY_LIMIT
+    ? `${sentence.slice(0, SUMMARY_LIMIT - 1).trimEnd()}…`
+    : sentence;
+}
+
+interface SchemaLike {
+  properties?: Record<string, Record<string, unknown>>;
+  required?: string[];
+  /** Declared global variables the step writes; the engine inlines their registry schema. */
+  globalInputs?: string[];
+}
+
+function fieldOf(
+  name: string,
+  property: Record<string, unknown> | undefined,
+  required: boolean,
+): EvidenceField {
+  return {
+    name,
+    type: typeof property?.type === "string" ? property.type : null,
+    description: typeof property?.description === "string" ? property.description : null,
+    required,
+    enum: Array.isArray(property?.enum) ? property.enum : null,
+  };
+}
+
+/**
+ * The fields a step's input schema demands, in schema order: its own properties, then the
+ * global inputs it declares, described by the workflow's variable registry the way the engine
+ * inlines them before validation.
+ */
+export function evidenceFields(
+  schema: unknown,
+  registry?: Record<string, Record<string, unknown>>,
+): EvidenceField[] {
+  if (!schema || typeof schema !== "object") return [];
+  const { properties, required, globalInputs } = schema as SchemaLike;
+  const requiredSet = new Set(required ?? []);
+  const fields = Object.entries(properties ?? {}).map(([name, property]) =>
+    fieldOf(name, property, requiredSet.has(name)),
+  );
+  for (const name of globalInputs ?? []) {
+    if (fields.some((field) => field.name === name)) continue;
+    fields.push(fieldOf(name, registry?.[name], requiredSet.has(name)));
+  }
+  return fields;
+}
+
+function authoredText(node: WorkflowNode): string | null {
+  const record = node as unknown as Record<string, unknown>;
+  for (const key of ["directive", "message", "expression"]) {
+    const value = record[key];
+    if (typeof value === "string" && value.trim()) return value;
+    if (Array.isArray(value) && value.every((item) => typeof item === "string"))
+      return (value as string[]).join("\n");
+  }
+  return null;
+}
+
+/** Describe the steps of a block from the workflow definition, in the block's node order. */
+export function stepsOf(
+  workflow: WorkflowGraph | undefined,
+  nodeIds: readonly string[],
+): StepInfo[] {
+  const nodes = new Map((workflow?.nodes ?? []).map((node) => [node.id, node]));
+  return nodeIds.map((id) => {
+    const node = nodes.get(id);
+    if (!node) {
+      return {
+        id,
+        type: "unknown",
+        displayName: null,
+        summary: "",
+        text: null,
+        evidence: [],
+        routing: false,
+      };
+    }
+    const text = authoredText(node);
+    const routing = ROUTING_NODE_TYPES.has(node.type);
+    return {
+      id,
+      type: node.type,
+      displayName: node.metadata?.displayName ?? null,
+      summary: !routing && text ? firstSentence(text) : "",
+      text,
+      evidence: evidenceFields(
+        (node as { inputSchema?: unknown }).inputSchema,
+        workflow?.variableRegistry as unknown as
+          Record<string, Record<string, unknown>> | undefined,
+      ),
+      routing,
+    };
+  });
+}
+
+/** The node the run waits for, with its expected evidence, or null when nothing waits. */
+export function waitingStep(
+  workflow: WorkflowGraph | undefined,
+  waitingForInputNodeId: string | null | undefined,
+): StepInfo | null {
+  if (!waitingForInputNodeId) return null;
+  return stepsOf(workflow, [waitingForInputNodeId])[0] ?? null;
+}
+
+export function formatValue(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (value === undefined) return "—";
+  return JSON.stringify(value);
+}
+
+/** Props every mode of the run page receives. */
+export interface RunViewProps {
+  /** The projection shown: the whole run, or the run at the cursor while one is set. */
+  progress: ExecutionProgress;
+  blocks: RunBlock[];
+  /** The whole recorded route, whatever the cursor: the route mode lists every visit and dims later ones. */
+  route: ExecutionRouteEntry[];
+  workflow?: WorkflowGraph;
+  selectedBlockId: string | null;
+  onSelectBlock: (blockId: string | null) => void;
+  /** Route cursor (visit sequence number); null means the whole run. */
+  cursor: number | null;
+  onSetCursor: (at: number | null) => void;
+}
+
+/** What a block's visits wrote up to the cursor: the latest value per name, with its visit. */
+export function blockWrites(
+  progress: ExecutionProgress,
+  blockId: string,
+  cursor: number | null,
+): Array<{ name: string; value: unknown; seq: number; adjusted: boolean }> {
+  const history = new Map<string, Map<number, { value: unknown; adjusted: boolean }>>();
+  for (const variable of progress.variables) {
+    history.set(
+      variable.name,
+      new Map(
+        variable.history.map((change) => [
+          change.seq,
+          { value: change.value, adjusted: Boolean(change.adjusted) },
+        ]),
+      ),
+    );
+  }
+  const latest = new Map<
+    string,
+    { name: string; value: unknown; seq: number; adjusted: boolean }
+  >();
+  for (const visit of progress.route) {
+    if (visit.blockId !== blockId) continue;
+    if (cursor !== null && visit.seq > cursor) break;
+    for (const name of visit.changed) {
+      const change = history.get(name)?.get(visit.seq);
+      latest.set(name, {
+        name,
+        value: change?.value,
+        seq: visit.seq,
+        adjusted: change?.adjusted ?? Boolean(visit.adjusted),
+      });
+    }
+  }
+  return [...latest.values()];
+}

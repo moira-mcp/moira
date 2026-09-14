@@ -9,8 +9,9 @@
 
 import { describe, test, expect, beforeAll, afterEach } from "@jest/globals";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { getTestBaseUrl, getAdminCredentials } from "../../utils/test-config.js";
+import { getTestBaseUrl } from "../../utils/test-config.js";
 import { execSqliteInDocker } from "../../utils/docker-command.js";
+import { formatSessionCookie, getAdminSessionCookie } from "../../utils/mcp-auth.js";
 
 const BASE_URL = getTestBaseUrl();
 const OAUTH_REDIRECT_URI = "http://localhost:3333/oauth/callback";
@@ -20,14 +21,7 @@ function cookieFrom(response: Response): string {
 }
 
 async function signInAdmin(): Promise<string> {
-  const { email, password } = getAdminCredentials();
-  const response = await fetch(`${BASE_URL}/api/auth/sign-in/email`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email, password }),
-  });
-  expect(response.status).toBe(200);
-  return cookieFrom(response);
+  return formatSessionCookie(BASE_URL, await getAdminSessionCookie(BASE_URL));
 }
 
 async function expectAuditActor(

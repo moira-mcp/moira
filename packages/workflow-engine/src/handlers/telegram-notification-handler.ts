@@ -23,6 +23,7 @@ import {
 import { GraphTemplateProcessor } from "../templates/graph-template-processor.js";
 import { createLogger, WorkflowLogger, InternalError } from "@mcp-moira/shared";
 import { renderExecutionProgressImage } from "../utils/execution-progress-image.js";
+import { withInFlightVisit } from "../utils/execution-visits.js";
 
 /**
  * Handler for telegram-notification nodes
@@ -215,10 +216,11 @@ export class TelegramNotificationHandler implements INodeHandler {
           TelegramErrorType.TEMPLATE_ERROR,
           "Workflow has no progress graph",
         );
-      const rendered = await this.progressImageRenderer(graph, {
-        ...persisted,
-        currentNodeId: node.id,
-      });
+      // The route persisted so far ends at the last pause; this node runs inside the current cycle.
+      const rendered = await this.progressImageRenderer(
+        graph,
+        withInFlightVisit(persisted, node.id),
+      );
       if (!rendered)
         throw this.createTelegramError(
           TelegramErrorType.TEMPLATE_ERROR,

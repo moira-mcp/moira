@@ -155,7 +155,7 @@ export async function manageWorkflow(
       }
 
       case "edit": {
-        const { workflowId, changes } = params;
+        const { workflowId, changes, expectedRevision } = params;
 
         if (!workflowId) {
           return { success: false, error: ERRORS.workflow_id_required_for_action("edit") };
@@ -168,6 +168,17 @@ export async function manageWorkflow(
         // Resolve workflow identifier (UUID, slug, or handle/slug)
         const resolved = await resolveWorkflowIdentifier(repository, workflowId, userId);
         const existingWorkflow = resolved.workflow;
+
+        // Optional optimistic guard: refuse when the stored revision moved on
+        if (expectedRevision !== undefined) {
+          const current = await repository.getWorkflow(resolved.workflowId, userId);
+          if (current && current.revision !== expectedRevision) {
+            return {
+              success: false,
+              error: ERRORS.workflow_revision_conflict(expectedRevision, current.revision),
+            };
+          }
+        }
 
         const modifiedWorkflow: WorkflowGraph = JSON.parse(JSON.stringify(existingWorkflow));
 
@@ -268,10 +279,12 @@ export async function manageWorkflow(
           userId,
           isUpdate: true,
         });
+        const savedInfo = await repository.getWorkflow(resolved.workflowId, userId);
 
         const response = {
           success: true,
           workflowId: modifiedWorkflow.id,
+          revision: savedInfo?.revision ?? null,
           message: SUCCESS.workflow_updated(workflowId),
           changes: {
             metadataUpdated: !!changes.metadata,
@@ -360,6 +373,7 @@ export async function manageWorkflow(
         const response: any = {
           success: true,
           workflowId: resolved.workflowId,
+          revision: workflowInfo.revision,
           visibility: workflowInfo.visibility,
           metadata: workflow.metadata,
           systemReminder: workflow.systemReminder ?? null,
@@ -1299,14 +1313,17 @@ export async function manageWorkflow(
           return { success: false, error: ERRORS.workflow_not_found(workflowId) };
         }
 
-        // Update visibility via service
+        // Visibility is not part of the definition: the dedicated update leaves the stored graph
+        // and its revision alone (the HTTP PATCH route uses the same call).
         const workflowService = getWorkflowService();
-        await workflowService.save({
-          graph: workflowInfo.workflow,
+        const updated = await workflowService.updateVisibility(
+          resolved.workflowId,
           userId,
           visibility,
-          isUpdate: true,
-        });
+        );
+        if (!updated) {
+          return { success: false, error: ERRORS.workflow_not_found(workflowId) };
+        }
 
         return {
           success: true,

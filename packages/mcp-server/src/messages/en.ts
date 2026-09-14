@@ -64,6 +64,8 @@ export const ERRORS = {
 
   // Edit errors
   changes_required: "Changes object required with at least one modification",
+  workflow_revision_conflict: (expected: number, current: number) =>
+    `Workflow revision conflict: expected ${expected}, stored ${current}. Read the workflow again and re-apply the changes`,
 
   // Validation errors
   validation_failed: "Validation failed",

@@ -13,7 +13,8 @@
     "./validation": "./src/validation/graph-validator.ts",
     "./extensions": "./src/extensions/index.ts",
     "./extensions/contract": "./src/extensions/extension-contract.ts",
-    "./progress-visual": "./src/utils/execution-progress-visual.ts"
+    "./progress-visual": "./src/utils/execution-progress-visual.ts",
+    "./process": "./src/utils/process-derivation.ts"
   },
   "scripts": {},
   "dependencies": {

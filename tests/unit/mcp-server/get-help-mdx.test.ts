@@ -128,6 +128,9 @@ tags:
       expect(resolveTopicId("tool")).toBe("tools");
       expect(resolveTopicId("validate")).toBe("validation");
       expect(resolveTopicId("pattern")).toBe("patterns");
+      expect(resolveTopicId("process")).toBe("process-view");
+      expect(resolveTopicId("run")).toBe("process-view");
+      expect(resolveTopicId("blocks")).toBe("process-view");
     });
 
     it("should return original topic if no alias exists", () => {
@@ -454,4 +457,28 @@ tags:
       expect(direct).not.toContain("import {");
     });
   });
+});
+
+describe("process-view help topics use the block contract vocabulary", () => {
+  const topics = [
+    "concepts/workflows.md",
+    "concepts/process-view.md",
+    "guides/editing-workflows.md",
+    "guides/flow-page.md",
+    "guides/run-page.md",
+  ];
+  const retired = [
+    /milestone/i,
+    /display connection/i,
+    /user-visible waiting/i,
+    /observable waiting/i,
+  ];
+
+  it.each(topics.flatMap((topic) => [topic, `ru/${topic}`]))(
+    "%s carries none of the retired process-view terms",
+    (file) => {
+      const text = fs.readFileSync(path.join(helpDirectory, file), "utf8");
+      for (const term of retired) expect(text).not.toMatch(term);
+    },
+  );
 });

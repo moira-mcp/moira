@@ -7,114 +7,49 @@
  */
 
 import { afterAll, describe, test, expect, beforeAll } from "@jest/globals";
-import { getTestBaseUrl, getAdminCredentials } from "../utils/test-config.js";
+import { getTestBaseUrl } from "../utils/test-config.js";
 import {
   callMCPTool,
   createAuthenticatedMCPClient,
+  createTestUserViaApi,
+  formatSessionCookie,
+  getAdminSessionCookie,
+  signInUser,
   startWorkflowExecution,
 } from "../utils/mcp-auth.js";
 import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
 
 const BASE_URL = getTestBaseUrl();
-const ADMIN_CREDENTIALS = getAdminCredentials();
 
 let adminCookie: string;
-let userACookie: string;
+/** Session of an ordinary user who owns none of the executions used here. */
 let userBCookie: string;
-let userAId: string;
-let userBId: string;
-let testExecutionId: string | null = null;
+/** Admin-owned execution paused at an agent step; used for owner/non-owner checks. */
 let humanExecutionId = "";
 let humanWorkflowId = "";
 let humanLockId = "";
 let humanMcpClient: Client;
 let cleanupHumanMcp: (() => Promise<void>) | undefined;
-let accountApprovalEnabled = false;
 let multiUserAdminEnabled = false;
-
-/**
- * Helper: signup, verify, and login a test user. Returns { cookie, userId }.
- */
-async function createAndLoginUser(suffix: string): Promise<{ cookie: string; userId: string }> {
-  const email = `lock-perm-test-${suffix}-${Date.now()}@example.com`;
-
-  // Sign up
-  const signUpRes = await fetch(`${BASE_URL}/api/auth/sign-up/email`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      email,
-      password: "TestUser123!",
-      name: `Lock Perm Test ${suffix}`,
-      acceptedTermsAt: new Date().toISOString(),
-      acceptedNotRussianResidentAt: new Date().toISOString(),
-    }),
-  });
-  const signUpData = (await signUpRes.json()) as any;
-  const userId = signUpData.user?.id;
-  expect(userId).toBeTruthy();
-
-  // Verify email via admin API
-  await fetch(`${BASE_URL}/api/admin/users/${userId}/verify-email`, {
-    method: "POST",
-    headers: { Cookie: adminCookie },
-  });
-
-  if (accountApprovalEnabled) {
-    const approvalRes = await fetch(`${BASE_URL}/api/admin/users/${userId}/approve`, {
-      method: "POST",
-      headers: { Cookie: adminCookie },
-    });
-    expect(approvalRes.ok).toBe(true);
-  }
-
-  // Login
-  const loginRes = await fetch(`${BASE_URL}/api/auth/sign-in/email`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email, password: "TestUser123!" }),
-  });
-  expect(loginRes.ok).toBe(true);
-  const cookie = loginRes.headers.get("set-cookie") || "";
-  expect(cookie).toBeTruthy();
-
-  return { cookie, userId };
-}
 
 describe("User Lock Management API - Permission Checks", () => {
   beforeAll(async () => {
-    // Login as admin first (needed for email verification)
-    const adminLoginRes = await fetch(`${BASE_URL}/api/auth/sign-in/email`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(ADMIN_CREDENTIALS),
-    });
-    expect(adminLoginRes.ok).toBe(true);
-    adminCookie = adminLoginRes.headers.get("set-cookie") || "";
+    adminCookie = formatSessionCookie(BASE_URL, await getAdminSessionCookie(BASE_URL));
 
     const featuresRes = await fetch(`${BASE_URL}/api/features`);
     expect(featuresRes.ok).toBe(true);
     const features = (await featuresRes.json()) as {
-      data?: { features?: { accountApproval?: boolean; multiUserAdmin?: boolean } };
+      data?: { features?: { multiUserAdmin?: boolean } };
     };
-    accountApprovalEnabled = features.data?.features?.accountApproval === true;
     multiUserAdminEnabled = features.data?.features?.multiUserAdmin === true;
 
-    // Create two test users
-    const userA = await createAndLoginUser("a");
-    userACookie = userA.cookie;
-    userAId = userA.userId;
-
-    const userB = await createAndLoginUser("b");
-    userBCookie = userB.cookie;
-    userBId = userB.userId;
-
-    // Find any execution that belongs to admin (not userB)
-    const execRes = await fetch(`${BASE_URL}/api/admin/executions?limit=1`, {
-      headers: { Cookie: adminCookie },
-    });
-    const execData = (await execRes.json()) as any;
-    testExecutionId = execData.data?.executions?.[0]?.executionId || null;
+    const userBEmail = `lock-perm-test-b-${Date.now()}@example.com`;
+    const userBPassword = "TestUser123!";
+    await createTestUserViaApi(BASE_URL, userBEmail, userBPassword, "Lock Perm Test b");
+    userBCookie = formatSessionCookie(
+      BASE_URL,
+      await signInUser(BASE_URL, userBEmail, userBPassword),
+    );
 
     const authenticated = await createAuthenticatedMCPClient();
     humanMcpClient = authenticated.client;
@@ -169,23 +104,17 @@ describe("User Lock Management API - Permission Checks", () => {
   });
 
   describe("GET /api/executions/:id/locks", () => {
-    test("returns 401 for non-owner user accessing another user's execution", async () => {
-      if (!testExecutionId) {
-        // If no executions exist, we can't test permission denial
-        // but we can still test with a fake ID
-        const res = await fetch(
-          `${BASE_URL}/api/executions/00000000-0000-0000-0000-000000000000/locks`,
-          {
-            headers: { Cookie: userBCookie },
-          },
-        );
-        // Should be 404 (not found) since execution doesn't exist
-        expect(res.status).toBe(404);
-        return;
-      }
+    test("returns 404 for a non-existent execution", async () => {
+      const res = await fetch(
+        `${BASE_URL}/api/executions/00000000-0000-0000-0000-000000000000/locks`,
+        { headers: { Cookie: userBCookie } },
+      );
+      expect(res.status).toBe(404);
+    });
 
+    test("returns 401 for non-owner user accessing another user's execution", async () => {
       // userB tries to access an execution they don't own
-      const res = await fetch(`${BASE_URL}/api/executions/${testExecutionId}/locks`, {
+      const res = await fetch(`${BASE_URL}/api/executions/${humanExecutionId}/locks`, {
         headers: { Cookie: userBCookie },
       });
 
@@ -197,12 +126,7 @@ describe("User Lock Management API - Permission Checks", () => {
     });
 
     test("admin can access any execution's locks (admin bypass)", async () => {
-      if (!testExecutionId) {
-        console.warn("Skipping: no test execution available for admin bypass test");
-        return;
-      }
-
-      const res = await fetch(`${BASE_URL}/api/executions/${testExecutionId}/locks`, {
+      const res = await fetch(`${BASE_URL}/api/executions/${humanExecutionId}/locks`, {
         headers: { Cookie: adminCookie },
       });
 
@@ -275,23 +199,22 @@ describe("User Lock Management API - Permission Checks", () => {
   });
 
   describe("POST /api/executions/:id/locks/:lockId/validate-pin", () => {
-    test("returns 401 for non-owner user submitting PIN on another user's execution", async () => {
-      if (!testExecutionId) {
-        const res = await fetch(
-          `${BASE_URL}/api/executions/00000000-0000-0000-0000-000000000000/locks/fake-lock/validate-pin`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json", Cookie: userBCookie },
-            body: JSON.stringify({ pin: "123456" }),
-          },
-        );
-        expect(res.status).toBe(404);
-        return;
-      }
+    test("returns 404 for a non-existent execution", async () => {
+      const res = await fetch(
+        `${BASE_URL}/api/executions/00000000-0000-0000-0000-000000000000/locks/fake-lock/validate-pin`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Cookie: userBCookie },
+          body: JSON.stringify({ pin: "123456" }),
+        },
+      );
+      expect(res.status).toBe(404);
+    });
 
+    test("returns 401 for non-owner user submitting PIN on another user's execution", async () => {
       // userB tries to validate PIN on execution they don't own
       const res = await fetch(
-        `${BASE_URL}/api/executions/${testExecutionId}/locks/any-lock-id/validate-pin`,
+        `${BASE_URL}/api/executions/${humanExecutionId}/locks/any-lock-id/validate-pin`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json", Cookie: userBCookie },
@@ -307,13 +230,8 @@ describe("User Lock Management API - Permission Checks", () => {
     });
 
     test("requires PIN in request body", async () => {
-      if (!testExecutionId) {
-        console.warn("Skipping: no test execution available for PIN validation test");
-        return;
-      }
-
       const res = await fetch(
-        `${BASE_URL}/api/executions/${testExecutionId}/locks/any-lock/validate-pin`,
+        `${BASE_URL}/api/executions/${humanExecutionId}/locks/any-lock/validate-pin`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json", Cookie: adminCookie },

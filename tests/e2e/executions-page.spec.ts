@@ -4,39 +4,21 @@
  */
 
 import { test, expect } from "./fixtures.js";
-import { getTestBaseUrl, getAdminCredentials } from "../utils/test-config.js";
-import { createAuthenticatedMCPClient, startWorkflowExecution } from "../utils/mcp-auth.js";
+import { getTestBaseUrl } from "../utils/test-config.js";
+import { createAuthenticatedMCPClient, startWorkflowExecutionState } from "../utils/mcp-auth.js";
 import { TEST_WORKFLOWS } from "./fixtures/test-constants.js";
-import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { loginAsAdmin } from "./helpers/auth-helper.js";
 
 const BASE_URL = getTestBaseUrl();
-const ADMIN_USER = getAdminCredentials();
 
 test.describe("Executions Page", () => {
-  let _executionId: string;
-  let mcpClient: Client;
   let mcpCleanup: () => Promise<void>;
 
   test.beforeAll(async () => {
-    // Create MCP client via HTTP OAuth (no Inspector UI)
-    const client = await createAuthenticatedMCPClient({
-      email: ADMIN_USER.email,
-      password: ADMIN_USER.password,
-    });
-    mcpClient = client.client;
+    // Create an admin MCP client via HTTP OAuth and start one execution so the list is non-empty
+    const client = await createAuthenticatedMCPClient();
     mcpCleanup = client.cleanup;
-
-    // Start execution via MCP tool
-    const result = await startWorkflowExecution(mcpClient, TEST_WORKFLOWS.REACT_FLOW_THEME.id);
-
-    // Extract execution ID from response
-    const match = result.match(/Process ID: ([a-f0-9-]+)/);
-    if (match) {
-      _executionId = match[1];
-      console.log(`✓ Execution created via MCP: ${_executionId}`);
-    } else {
-      console.error("Failed to extract execution ID from:", result);
-    }
+    await startWorkflowExecutionState(client.client, TEST_WORKFLOWS.REACT_FLOW_THEME.id);
   });
 
   test.afterAll(async () => {
@@ -46,42 +28,7 @@ test.describe("Executions Page", () => {
   });
 
   test.beforeEach(async ({ page }) => {
-    // Dismiss beta agreement modal via cookie
-    const url = new URL(BASE_URL);
-    await page.context().addCookies([
-      {
-        name: "moira-beta-accepted",
-        value: "true",
-        domain: url.hostname,
-        path: "/",
-        httpOnly: false,
-        secure: BASE_URL.startsWith("https://"),
-        sameSite: "Lax" as const,
-      },
-    ]);
-
-    // Login as admin via UI
-    await page.goto(`${BASE_URL}/login`);
-    await page.waitForLoadState("domcontentloaded");
-
-    await page.getByRole("textbox", { name: "Email" }).fill(ADMIN_USER.email);
-    await page.getByRole("textbox", { name: "Password" }).fill(ADMIN_USER.password);
-    await page.getByRole("button", { name: "Login" }).click();
-
-    // Wait for redirect
-    await page.waitForURL((url) => !url.toString().includes("/login"), { timeout: 10000 });
-
-    // Close beta modal if present
-    await page.waitForLoadState("domcontentloaded");
-    try {
-      const modalPresent = (await page.locator('div[role="dialog"]').count()) > 0;
-      if (modalPresent) {
-        await page.click('button:has-text("Accept and Continue")');
-        await page.waitForSelector('div[role="dialog"]', { state: "detached" });
-      }
-    } catch {
-      // Modal not present
-    }
+    await loginAsAdmin(page);
   });
 
   test("executions page loads and displays execution list", async ({ page }) => {
@@ -126,17 +73,6 @@ test.describe("Executions Page", () => {
     await page.goto(`${BASE_URL}/executions`);
     await page.waitForLoadState("domcontentloaded");
 
-    // Close beta modal if present after navigation
-    try {
-      const modalPresent = (await page.locator('div[role="dialog"]').count()) > 0;
-      if (modalPresent) {
-        await page.click('button:has-text("Accept and Continue")');
-        await page.waitForSelector('div[role="dialog"]', { state: "detached" });
-      }
-    } catch {
-      // Modal not present
-    }
-
     // Click first execution card
     const firstCard = page.getByTestId("execution-card").first();
     await firstCard.click();
@@ -147,19 +83,33 @@ test.describe("Executions Page", () => {
   });
 
   test("error state shows retry button", async ({ page }) => {
-    // Navigate to executions
+    // Fail the list request once: the page shows the error state with a Retry button
+    let failNext = true;
+    await page.route(
+      (url) => url.pathname.endsWith("/api/executions"),
+      async (route) => {
+        if (failNext) {
+          failNext = false;
+          await route.fulfill({
+            status: 500,
+            contentType: "application/json",
+            body: JSON.stringify({ success: false, error: { message: "Temporary failure" } }),
+          });
+          return;
+        }
+        await route.continue();
+      },
+    );
+
     await page.goto(`${BASE_URL}/executions`);
-    await page.waitForLoadState("domcontentloaded");
+    const retryButton = page.getByRole("button", { name: "Retry" });
+    await expect(retryButton).toBeVisible({ timeout: 10000 });
+    await expect(page.getByTestId("execution-card")).toHaveCount(0);
 
-    // Stop Docker to trigger error
-    await page.evaluate(() => {
-      // Force error by invalidating API
-      (window as any).__API_ERROR_TEST = true;
-    });
-
-    // Note: This test would need backend to be down to trigger error
-    // For now just verify retry button logic exists in code
-    console.log("✓ Error handling code exists (full test requires backend down)");
+    // Retry reloads the list; the next request succeeds and the cards render
+    await retryButton.click();
+    await expect(page.getByTestId("execution-card").first()).toBeVisible({ timeout: 10000 });
+    await expect(retryButton).toHaveCount(0);
   });
 
   /**

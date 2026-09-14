@@ -1,50 +1,24 @@
 /** Authenticated channel-neutral notification settings API. */
 
 import { beforeAll, describe, expect, test } from "@jest/globals";
-import { getAdminCredentials, getTestFetchUrl } from "../utils/test-config.js";
+import { getTestFetchUrl } from "../utils/test-config.js";
+import { createTestUserViaApi, formatSessionCookie, signInUser } from "../utils/mcp-auth.js";
 
 const BASE_URL = getTestFetchUrl();
-const ADMIN_CREDENTIALS = getAdminCredentials();
 const TEST_USER = {
   email: `notification-api-test-${Date.now()}@example.com`,
   password: "TestPass123!",
   name: "Notification Test User",
-  acceptedTermsAt: new Date().toISOString(),
-  acceptedNotRussianResidentAt: new Date().toISOString(),
 };
 
 let authCookie: string;
 
 beforeAll(async () => {
-  const signUpRes = await fetch(`${BASE_URL}/api/auth/sign-up/email`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(TEST_USER),
-  });
-  const signUpData = (await signUpRes.json()) as { user?: { id: string } };
-  if (!signUpData.user)
-    throw new Error(`Failed to create test user: ${JSON.stringify(signUpData)}`);
-
-  const adminLoginRes = await fetch(`${BASE_URL}/api/auth/sign-in/email`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(ADMIN_CREDENTIALS),
-  });
-  await fetch(`${BASE_URL}/api/admin/users/${signUpData.user.id}/verify-email`, {
-    method: "POST",
-    headers: { Cookie: adminLoginRes.headers.get("set-cookie") || "" },
-  });
-  await fetch(`${BASE_URL}/api/admin/users/${signUpData.user.id}/approve`, {
-    method: "POST",
-    headers: { Cookie: adminLoginRes.headers.get("set-cookie") || "" },
-  });
-
-  const loginRes = await fetch(`${BASE_URL}/api/auth/sign-in/email`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email: TEST_USER.email, password: TEST_USER.password }),
-  });
-  authCookie = loginRes.headers.get("set-cookie") || "";
+  await createTestUserViaApi(BASE_URL, TEST_USER.email, TEST_USER.password, TEST_USER.name);
+  authCookie = formatSessionCookie(
+    BASE_URL,
+    await signInUser(BASE_URL, TEST_USER.email, TEST_USER.password),
+  );
 });
 
 describe("communication channel settings API", () => {

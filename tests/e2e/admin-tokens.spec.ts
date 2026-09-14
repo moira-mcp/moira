@@ -4,50 +4,27 @@
  */
 
 import { test, expect } from "./fixtures.js";
-import { loginAsAdmin, createTestUser } from "./helpers/auth-helper.js";
+import { loginAsAdmin, createTestUser, getSessionCookieHeader } from "./helpers/auth-helper.js";
 import { getTestBaseUrl, getTestFetchUrl } from "../utils/test-config.js";
 
 const BASE_URL = getTestBaseUrl();
 const FETCH_URL = getTestFetchUrl();
 
 /**
- * Helper: create a token via API for a given session cookie
+ * Helper: create a token via API for a given `Cookie` header value
  */
 async function createTokenViaApi(
-  sessionCookie: string,
+  cookieHeader: string,
   name: string,
 ): Promise<{ id: string; tokenPrefix: string }> {
-  const cookieName = BASE_URL.startsWith("https://")
-    ? "__Secure-better-auth.session_token"
-    : "better-auth.session_token";
   const res = await fetch(`${FETCH_URL}/api/tokens`, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Cookie: `${cookieName}=${sessionCookie}`,
-    },
+    headers: { "Content-Type": "application/json", Cookie: cookieHeader },
     body: JSON.stringify({ name, expiresIn: "30d" }),
   });
+  if (!res.ok) throw new Error(`Token creation failed: ${res.status} ${await res.text()}`);
   const data = await res.json();
   return { id: data.data.id, tokenPrefix: data.data.tokenPrefix };
-}
-
-/**
- * Helper: get session cookie for a user via API
- */
-async function getSessionCookie(email: string, password: string): Promise<string> {
-  const res = await fetch(`${FETCH_URL}/api/auth/sign-in/email`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email, password }),
-    redirect: "manual",
-  });
-  const setCookie = res.headers.get("set-cookie") || "";
-  const cookieName = BASE_URL.startsWith("https://")
-    ? "__Secure-better-auth.session_token"
-    : "better-auth.session_token";
-  const match = setCookie.match(new RegExp(`${cookieName}=([^;]+)`));
-  return match?.[1] || "";
 }
 
 test.describe("Admin Token Management", () => {
@@ -61,10 +38,8 @@ test.describe("Admin Token Management", () => {
     const result = await createTestUser(userEmail, userPassword, "Token E2E User", true);
     expect(result.success).toBe(true);
 
-    const sessionCookie = await getSessionCookie(userEmail, userPassword);
-    expect(sessionCookie).toBeTruthy();
-
-    const token = await createTokenViaApi(sessionCookie, tokenName);
+    const cookieHeader = await getSessionCookieHeader(userEmail, userPassword);
+    const token = await createTokenViaApi(cookieHeader, tokenName);
     createdTokenId = token.id;
   });
 
@@ -105,15 +80,20 @@ test.describe("Admin Token Management", () => {
     await page.goto(`${BASE_URL}/admin/tokens`);
     await expect(page.getByTestId("admin-tokens-search")).toBeVisible({ timeout: 10000 });
 
-    // Type a unique part of our token name
+    // Type a unique part of our token name and wait for the debounced, filtered reload
+    const filtered = page.waitForResponse(
+      (r) =>
+        r.url().includes("/api/admin/tokens") &&
+        r.url().includes(encodeURIComponent(tokenName)) &&
+        r.status() === 200,
+    );
     await page.getByTestId("admin-tokens-search").fill(tokenName);
+    await filtered;
 
-    // Wait for debounce + reload
-    await page.waitForTimeout(500);
-
-    // Our token should still be visible
+    // Our token is the only one matching the search
     const tokenEl = page.getByTestId("token-name").filter({ hasText: tokenName });
-    await expect(tokenEl.first()).toBeVisible({ timeout: 5000 });
+    await expect(tokenEl).toHaveCount(1, { timeout: 5000 });
+    await expect(page.getByTestId("token-name")).toHaveCount(1);
   });
 
   test("status filter works", async ({ page }) => {
@@ -121,19 +101,21 @@ test.describe("Admin Token Management", () => {
     await page.goto(`${BASE_URL}/admin/tokens`);
     await expect(page.getByTestId("admin-tokens-search")).toBeVisible({ timeout: 10000 });
 
-    // Select "Active" status filter
+    // Select "Active" status filter and wait for the filtered reload
+    const activeReload = page.waitForResponse(
+      (r) => r.url().includes("/api/admin/tokens") && r.status() === 200,
+    );
     await page.getByTestId("status-filter").click();
     await page.locator('[role="option"]').filter({ hasText: "Active" }).click();
+    await activeReload;
 
     // Our active token should be visible
-    await page.waitForTimeout(500);
     const tokenEl = page.getByTestId("token-name").filter({ hasText: tokenName });
     await expect(tokenEl.first()).toBeVisible({ timeout: 5000 });
 
     // Select "Revoked" - our active token should disappear
     await page.getByTestId("status-filter").click();
     await page.locator('[role="option"]').filter({ hasText: "Revoked" }).click();
-    await page.waitForTimeout(500);
 
     // Token should not be visible (it's active, not revoked)
     const revokedTokens = page.getByTestId("token-name").filter({ hasText: tokenName });
@@ -161,7 +143,6 @@ test.describe("Admin Token Management", () => {
     await dialog.locator('button:has-text("Revoke")').click();
 
     // Token should now show Revoked badge
-    await page.waitForTimeout(1000);
     const tokenRow = page.locator(`[data-testid="token-row-${createdTokenId}"]`);
     await expect(tokenRow.locator("text=Revoked")).toBeVisible({ timeout: 5000 });
 
