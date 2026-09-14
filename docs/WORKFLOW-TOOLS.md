@@ -397,6 +397,7 @@ moira-workflow ./workflows/production/flows/<flow>.json replace node-id ./node.j
 # Set identity and long metadata (a file avoids shell quoting for long text)
 moira-workflow ./workflows/production/flows/<flow>.json set-name "Workflow name"
 moira-workflow ./workflows/production/flows/<flow>.json set-slug workflow-slug
+moira-workflow ./workflows/production/flows/<flow>.json set-owner system-moira
 moira-workflow ./workflows/production/flows/<flow>.json set-description --file ./description.txt
 
 # Rewrite or remove the reminder the engine shows with every presented step
@@ -539,6 +540,7 @@ Available for all modifying commands:
 - `delete-variable`
 - `set-name`
 - `set-slug`
+- `set-owner`
 - `set-description`
 - `set-system-reminder`
 - `set-tags`

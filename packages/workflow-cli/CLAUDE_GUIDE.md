@@ -49,6 +49,7 @@ moira-workflow flow.json add <nodes.json>
 moira-workflow flow.json replace <node-id> <node.json>
 moira-workflow flow.json set-name "Workflow name"
 moira-workflow flow.json set-slug workflow-slug
+moira-workflow flow.json set-owner system-admin
 moira-workflow flow.json set-description "Short description"
 moira-workflow flow.json set-description --file <description.txt>
 moira-workflow flow.json set-system-reminder --file <reminder.txt>

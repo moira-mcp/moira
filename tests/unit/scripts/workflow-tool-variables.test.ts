@@ -621,6 +621,33 @@ describe("workflow-tool variables command", () => {
       }
     });
 
+    test("set-owner accepts the system owner matching visibility and refuses the rest", () => {
+      const workflow = {
+        metadata: { name: "Test", version: "1.0.0", description: "Description" },
+        slug: "a-flow",
+        owner: "admin",
+        visibility: "private",
+        nodes: [
+          { id: "start", type: "start", connections: { default: "end" } },
+          { id: "end", type: "end" },
+        ],
+      };
+      const tmpFile = createTempWorkflow(workflow);
+      try {
+        expect(() => runWorkflowTool([tmpFile, "set-owner", "admin", "--force"])).toThrow();
+        expect(() => runWorkflowTool([tmpFile, "set-owner", "system-moira", "--force"])).toThrow();
+        expect(JSON.parse(fs.readFileSync(tmpFile, "utf-8")).owner).toBe("admin");
+
+        runWorkflowTool([tmpFile, "set-owner", "system-admin", "--force"]);
+        const saved = JSON.parse(fs.readFileSync(tmpFile, "utf-8"));
+        expect(saved.owner).toBe("system-admin");
+        expect(saved.visibility).toBe("private");
+        expect(saved.slug).toBe("a-flow");
+      } finally {
+        fs.unlinkSync(tmpFile);
+      }
+    });
+
     test("set-tags splits a comma list and none clears it", () => {
       const workflow = {
         metadata: { name: "Test", version: "1.0.0", description: "Description" },
