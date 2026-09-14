@@ -5,8 +5,14 @@
   "id": "5dd9c5c3-1176-4967-9d6c-798134b769df",
   "metadata": {
     "name": "Data Analysis",
-    "version": "2.0.0",
-    "description": "Evidence-driven analysis of one or more supplied or explicitly authorized inline, file, or API data sources. Captures the analytical question, decision context, scope, audience, constraints, confidentiality policy, and per-source authorization/availability; produces either a bounded filesystem workspace report or a self-contained inline result; and covers acquisition, preparation and readiness, question-appropriate exploration and methods, optional privacy-safe visualization, evidence-backed conclusions, limitations, recommendations, and reproducibility. Independent readiness and final-result reviews require changed-work repair; autonomous mode skips only human approvals, while interactive mode keeps problem and final acceptance. Unavailable, unauthorized, or insufficient data yields a reviewed limited result rather than false success. The flow never broadens access, exposes credentials or unnecessary raw sensitive records, uploads or publishes data, deploys models, mutates production, or sends substantive notifications. Choose it to analyze datasets already supplied or authorized; use Verified Research or Iterative Research when the primary task is discovering and verifying external literature or web sources."
+    "version": "2.1.0",
+    "description": "Evidence-driven analysis of one or more supplied or explicitly authorized inline, file, or API data sources. Captures the analytical question, decision context, scope, audience, constraints, confidentiality policy, and per-source authorization/availability; produces either a bounded filesystem workspace report or a self-contained inline result; and covers acquisition, preparation and readiness, question-appropriate exploration and methods, optional privacy-safe visualization, evidence-backed conclusions, limitations, recommendations, and reproducibility. Independent readiness and final-result reviews require changed-work repair; autonomous mode skips only human approvals, while interactive mode keeps problem and final acceptance. Unavailable, unauthorized, or insufficient data yields a reviewed limited result rather than false success. The flow never broadens access, exposes credentials or unnecessary raw sensitive records, uploads or publishes data, deploys models, mutates production, or sends substantive notifications. Choose it to analyze datasets already supplied or authorized; use Verified Research or Iterative Research when the primary task is discovering and verifying external literature or web sources.",
+    "tags": [
+      "данные",
+      "анализ",
+      "отчёт",
+      "статистика"
+    ]
   },
   "nodes": [
     {
@@ -14,7 +20,8 @@
       "type": "start",
       "connections": {
         "default": "capture-context"
-      }
+      },
+      "progressNodeId": "contract"
     },
     {
       "id": "capture-context",
@@ -93,7 +100,8 @@
       },
       "connections": {
         "success": "delivery-mode-file"
-      }
+      },
+      "progressNodeId": "contract"
     },
     {
       "id": "delivery-mode-file",
@@ -108,6 +116,10 @@
       "connections": {
         "true": "materialize-workspace",
         "false": "frame-problem"
+      },
+      "progressNodeId": "contract",
+      "connectionLabels": {
+        "false": "результат выдаётся ответом, рабочий каталог не нужен"
       }
     },
     {
@@ -126,6 +138,10 @@
       ],
       "connections": {
         "success": "frame-problem"
+      },
+      "progressNodeId": "contract",
+      "connectionLabels": {
+        "success": "рабочий каталог запуска создан"
       }
     },
     {
@@ -149,7 +165,8 @@
       },
       "connections": {
         "success": "problem-approval-mode"
-      }
+      },
+      "progressNodeId": "framing"
     },
     {
       "id": "problem-approval-mode",
@@ -164,6 +181,10 @@
       "connections": {
         "true": "approve-problem",
         "false": "resume-stage-gate"
+      },
+      "progressNodeId": "framing",
+      "connectionLabels": {
+        "false": "автономный режим — постановка не утверждается человеком"
       }
     },
     {
@@ -213,7 +234,8 @@
       },
       "connections": {
         "success": "problem-approval-gate"
-      }
+      },
+      "progressNodeId": "framing"
     },
     {
       "id": "problem-approval-gate",
@@ -228,6 +250,10 @@
       "connections": {
         "true": "resume-stage-gate",
         "false": "revise-problem"
+      },
+      "progressNodeId": "framing",
+      "connectionLabels": {
+        "true": "пользователь принял постановку"
       }
     },
     {
@@ -273,6 +299,16 @@
       },
       "connections": {
         "success": "frame-problem"
+      },
+      "progressNodeId": "framing",
+      "connectionLabels": {
+        "success": {
+          "label": "постановка переделывается по замечаниям",
+          "cycle": {
+            "cause": "пользователь не принял постановку и назвал, что в ней неверно",
+            "exit": "переделанная постановка принимается на следующем утверждении"
+          }
+        }
       }
     },
     {
@@ -288,6 +324,10 @@
       "connections": {
         "true": "acquire-sources",
         "false": "analyze-and-synthesize"
+      },
+      "progressNodeId": "acquisition",
+      "connectionLabels": {
+        "false": "возобновление после правки процесса — заново собирать источники не нужно"
       }
     },
     {
@@ -317,7 +357,8 @@
       },
       "connections": {
         "success": "usable-sources-gate"
-      }
+      },
+      "progressNodeId": "acquisition"
     },
     {
       "id": "usable-sources-gate",
@@ -332,6 +373,11 @@
       "connections": {
         "true": "prepare-data",
         "false": "produce-limited-result"
+      },
+      "progressNodeId": "acquisition",
+      "connectionLabels": {
+        "true": "есть хотя бы один законно пригодный источник",
+        "false": "пригодных источников нет"
       }
     },
     {
@@ -355,6 +401,10 @@
       },
       "connections": {
         "success": "readiness-review-mode"
+      },
+      "progressNodeId": "preparation",
+      "connectionLabels": {
+        "success": "данные подготовлены, запись готовности составлена"
       }
     },
     {
@@ -370,7 +420,8 @@
       "connections": {
         "true": "review-data-file",
         "false": "review-data-inline"
-      }
+      },
+      "progressNodeId": "readiness"
     },
     {
       "id": "review-data-file",
@@ -392,7 +443,8 @@
       },
       "connections": {
         "success": "review-data-file-gate"
-      }
+      },
+      "progressNodeId": "readiness"
     },
     {
       "id": "review-data-file-gate",
@@ -407,6 +459,10 @@
       "connections": {
         "true": "analyze-and-synthesize",
         "false": "repair-data-file"
+      },
+      "progressNodeId": "readiness",
+      "connectionLabels": {
+        "true": "проверяющий не нашёл замечаний к готовности"
       }
     },
     {
@@ -473,7 +529,8 @@
       },
       "connections": {
         "success": "review-data-inline-gate"
-      }
+      },
+      "progressNodeId": "readiness"
     },
     {
       "id": "review-data-inline-gate",
@@ -488,6 +545,10 @@
       "connections": {
         "true": "analyze-and-synthesize",
         "false": "repair-data-inline"
+      },
+      "progressNodeId": "readiness",
+      "connectionLabels": {
+        "true": "проверяющий не нашёл замечаний к готовности"
       }
     },
     {
@@ -515,7 +576,8 @@
       },
       "connections": {
         "success": "route-data-repair-source"
-      }
+      },
+      "progressNodeId": "readiness"
     },
     {
       "id": "repair-data-inline",
@@ -548,7 +610,8 @@
       },
       "connections": {
         "success": "route-data-repair-source"
-      }
+      },
+      "progressNodeId": "readiness"
     },
     {
       "id": "route-data-repair-source",
@@ -563,6 +626,16 @@
       "connections": {
         "true": "acquire-sources",
         "false": "route-data-repair-limited"
+      },
+      "progressNodeId": "readiness",
+      "connectionLabels": {
+        "true": {
+          "label": "починка достаёт до источников",
+          "cycle": {
+            "cause": "проверка готовности нашла изъян в доступе к данным или в их происхождении, который не закрыть без повторного чтения источников",
+            "exit": "повторно собранные и подготовленные данные проходят проверку готовности без замечаний либо признаются непригодными и запуск уходит к ограниченному результату"
+          }
+        }
       }
     },
     {
@@ -578,6 +651,17 @@
       "connections": {
         "true": "produce-limited-result",
         "false": "readiness-review-mode"
+      },
+      "progressNodeId": "readiness",
+      "connectionLabels": {
+        "true": "данные непригодны — дальше только ограниченный результат",
+        "false": {
+          "label": "починка уложилась в подготовку — повторная проверка",
+          "cycle": {
+            "cause": "проверяющий нашёл изъян готовности, закрываемый переделкой самой подготовки данных",
+            "exit": "повторная проверка не находит замечаний либо починка объявляет, что нужен новый сбор источников или что данные непригодны"
+          }
+        }
       }
     },
     {
@@ -598,6 +682,10 @@
       },
       "connections": {
         "success": "final-review-mode"
+      },
+      "progressNodeId": "analysis",
+      "connectionLabels": {
+        "success": "анализ завершён, выводы готовы"
       }
     },
     {
@@ -618,6 +706,10 @@
       },
       "connections": {
         "success": "final-review-mode"
+      },
+      "progressNodeId": "limited",
+      "connectionLabels": {
+        "success": "ограниченный результат оформлен"
       }
     },
     {
@@ -633,7 +725,8 @@
       "connections": {
         "true": "review-result-file",
         "false": "review-result-inline"
-      }
+      },
+      "progressNodeId": "final-review"
     },
     {
       "id": "review-result-file",
@@ -655,7 +748,8 @@
       },
       "connections": {
         "success": "review-result-file-gate"
-      }
+      },
+      "progressNodeId": "final-review"
     },
     {
       "id": "review-result-file-gate",
@@ -670,6 +764,10 @@
       "connections": {
         "true": "final-approval-mode",
         "false": "repair-result-file"
+      },
+      "progressNodeId": "final-review",
+      "connectionLabels": {
+        "true": "итоговая проверка не нашла замечаний"
       }
     },
     {
@@ -736,7 +834,8 @@
       },
       "connections": {
         "success": "review-result-inline-gate"
-      }
+      },
+      "progressNodeId": "final-review"
     },
     {
       "id": "review-result-inline-gate",
@@ -751,6 +850,10 @@
       "connections": {
         "true": "final-approval-mode",
         "false": "repair-result-inline"
+      },
+      "progressNodeId": "final-review",
+      "connectionLabels": {
+        "true": "итоговая проверка не нашла замечаний"
       }
     },
     {
@@ -902,7 +1005,8 @@
       },
       "connections": {
         "success": "route-result-repair-contract"
-      }
+      },
+      "progressNodeId": "final-review"
     },
     {
       "id": "repair-result-inline",
@@ -1053,7 +1157,8 @@
       },
       "connections": {
         "success": "route-result-repair-contract"
-      }
+      },
+      "progressNodeId": "final-review"
     },
     {
       "id": "route-result-repair-contract",
@@ -1068,6 +1173,16 @@
       "connections": {
         "true": "frame-problem",
         "false": "route-result-repair-source"
+      },
+      "progressNodeId": "final-review",
+      "connectionLabels": {
+        "true": {
+          "label": "изъян в самом контракте задачи",
+          "cycle": {
+            "cause": "итоговая проверка показала, что неверны вопрос, границы, критерии успеха, политика конфиденциальности или перечень источников, а не оформление результата",
+            "exit": "переписанный контракт проводит работу заново до итоговой проверки, которая не находит замечаний"
+          }
+        }
       }
     },
     {
@@ -1083,6 +1198,16 @@
       "connections": {
         "true": "acquire-sources",
         "false": "route-result-repair-data"
+      },
+      "progressNodeId": "final-review",
+      "connectionLabels": {
+        "true": {
+          "label": "нужен повторный сбор источников",
+          "cycle": {
+            "cause": "итоговая проверка нашла изъян в доступе к источникам или в происхождении данных",
+            "exit": "повторно собранные данные доводятся до результата, принимаемого итоговой проверкой"
+          }
+        }
       }
     },
     {
@@ -1098,6 +1223,23 @@
       "connections": {
         "true": "prepare-data",
         "false": "final-review-mode"
+      },
+      "progressNodeId": "final-review",
+      "connectionLabels": {
+        "true": {
+          "label": "нужна переделка подготовки данных",
+          "cycle": {
+            "cause": "итоговая проверка показала изъян в подготовке данных или в методической опоре выводов",
+            "exit": "переделанные данные и результат проходят итоговую проверку без замечаний"
+          }
+        },
+        "false": {
+          "label": "починка уложилась в сам результат — повторная проверка",
+          "cycle": {
+            "cause": "изъян закрывается переделкой самого результата, без возврата к контракту, сбору или подготовке",
+            "exit": "повторная итоговая проверка не находит замечаний и результат уходит на приёмку"
+          }
+        }
       }
     },
     {
@@ -1113,7 +1255,8 @@
       "connections": {
         "true": "approve-final",
         "false": "end"
-      }
+      },
+      "progressNodeId": "acceptance"
     },
     {
       "id": "approve-final",
@@ -1162,7 +1305,8 @@
       },
       "connections": {
         "success": "final-approval-gate"
-      }
+      },
+      "progressNodeId": "acceptance"
     },
     {
       "id": "final-approval-gate",
@@ -1177,7 +1321,8 @@
       "connections": {
         "true": "end",
         "false": "revise-final-from-feedback"
-      }
+      },
+      "progressNodeId": "acceptance"
     },
     {
       "id": "revise-final-from-feedback",
@@ -1328,6 +1473,16 @@
       },
       "connections": {
         "success": "route-result-repair-contract"
+      },
+      "progressNodeId": "acceptance",
+      "connectionLabels": {
+        "success": {
+          "label": "правка по замечаниям пользователя",
+          "cycle": {
+            "cause": "пользователь не принял результат и назвал, что исправить",
+            "exit": "правка выполняется на нужной глубине, проходит итоговую проверку и принимается пользователем"
+          }
+        }
       }
     },
     {
@@ -1335,7 +1490,8 @@
       "type": "end",
       "finalOutput": [
         "analysis_result"
-      ]
+      ],
+      "progressNodeId": "acceptance"
     },
     {
       "id": "revise-analysis-process",
@@ -1381,7 +1537,8 @@
       },
       "connections": {
         "success": "frame-problem"
-      }
+      },
+      "progressNodeId": "framing"
     }
   ],
   "variableRegistry": {
@@ -1992,5 +2149,74 @@
         "contract"
       ]
     }
+  },
+  "progress": {
+    "title": "Data Analysis",
+    "goal": "Ответить на конкретный аналитический вопрос по уже разрешённым данным так, чтобы каждый вывод опирался на проверенное свидетельство, а недостаток данных выдавался честным ограниченным результатом, а не ложным успехом.",
+    "nodes": [
+      {
+        "id": "contract",
+        "label": "Контракт анализа",
+        "content": {
+          "summary": "Один раз выясняются вопрос, решение, ради которого он задан, границы, аудитория, критерии успеха, правила конфиденциальности и перечень разрешённых источников, а также режим работы и способ выдачи; при выдаче через файлы создаётся рабочий каталог запуска."
+        }
+      },
+      {
+        "id": "framing",
+        "label": "Постановка задачи",
+        "content": {
+          "summary": "Из зафиксированного контракта строится постановка анализа и выбирается подходящее семейство методов; в интерактивном режиме пользователь её подтверждает, а замечания возвращают постановку на переделку."
+        }
+      },
+      {
+        "id": "acquisition",
+        "label": "Сбор источников",
+        "content": {
+          "summary": "Каждый разрешённый источник читается отдельно и получает зафиксированный исход доступа, после чего считается число законно пригодных источников; при нуле пригодных запуск уходит к ограниченному результату."
+        }
+      },
+      {
+        "id": "preparation",
+        "label": "Подготовка данных",
+        "content": {
+          "summary": "Пригодные данные приводятся к виду, на котором можно считать: преобразования, склейки, пропуски, выбросы и проверки выбираются по реальным данным, и составляется запись готовности с оставшимися ограничениями."
+        }
+      },
+      {
+        "id": "readiness",
+        "label": "Проверка готовности данных",
+        "content": {
+          "summary": "Отдельный проверяющий, не готовивший данные, оценивает их готовность; подтверждённые изъяны чинятся, и по глубине изъяна работа либо повторяется здесь, либо возвращается к сбору источников, либо признаётся непригодной для полного анализа."
+        }
+      },
+      {
+        "id": "analysis",
+        "label": "Анализ и выводы",
+        "content": {
+          "summary": "Подходящие вопросу и данным методы дают выводы с прослеженными до источников свидетельствами, названной неопределённостью, ограничениями и рекомендациями — это полный результат анализа."
+        }
+      },
+      {
+        "id": "limited",
+        "label": "Ограниченный результат",
+        "content": {
+          "summary": "Когда законно пригодных данных нет или готовность недостижима, вместо ложного успеха выпускается честный ограниченный результат, называющий границу доступных свидетельств по каждому источнику."
+        }
+      },
+      {
+        "id": "final-review",
+        "label": "Независимая проверка результата",
+        "content": {
+          "summary": "Отдельный проверяющий, не создававший результат, сверяет его с контрактом и с данными; подтверждённые изъяны чинятся на самой ранней устаревшей границе, откуда работа возвращается к постановке, сбору, подготовке или к повторной проверке."
+        }
+      },
+      {
+        "id": "acceptance",
+        "label": "Приёмка и выдача",
+        "content": {
+          "summary": "В интерактивном режиме пользователь принимает независимо проверенный результат, а его правки уходят обратно в починку; принятие — или автономный режим, где утверждения пропускаются, — завершает запуск."
+        }
+      }
+    ]
   }
 }

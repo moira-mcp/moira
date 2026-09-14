@@ -3,8 +3,14 @@
   "id": "83cfde40-7021-4798-8c0d-af274b269dc3",
   "metadata": {
     "name": "Content Creation",
-    "version": "2.0.3",
-    "description": "Creates one reviewed text deliverable from an authorized brief. Captures audience, use, format, language, tone, constraints, evidence and effect authority; materializes a durable workspace; develops a content brief, source/provenance notes, structure, draft, final content and limitations; and requires producer completion, deterministic reference checks and genuinely independent semantic review. Complete and reviewed-limited results remain distinct; brief, evidence and content defects use source-specific repair and invalid criteria use cumulative independently reviewed correction. Autonomous mode skips only final acceptance. Local delivery is sufficient; target-bound publication and configured user notification are separate optional effects whose failures do not reclassify content quality. The workflow does not commit, release, deploy or mutate product code. Choose Marketing Campaign for campaign strategy and multi-channel materials, a research workflow when evidence discovery is the result, or Software Development Flow for repository implementation."
+    "version": "2.1.0",
+    "description": "Creates one reviewed text deliverable from an authorized brief. Captures audience, use, format, language, tone, constraints, evidence and effect authority; materializes a durable workspace; develops a content brief, source/provenance notes, structure, draft, final content and limitations; and requires producer completion, deterministic reference checks and genuinely independent semantic review. Complete and reviewed-limited results remain distinct; brief, evidence and content defects use source-specific repair and invalid criteria use cumulative independently reviewed correction. Autonomous mode skips only final acceptance. Local delivery is sufficient; target-bound publication and configured user notification are separate optional effects whose failures do not reclassify content quality. The workflow does not commit, release, deploy or mutate product code. Choose Marketing Campaign for campaign strategy and multi-channel materials, a research workflow when evidence discovery is the result, or Software Development Flow for repository implementation.",
+    "tags": [
+      "контент",
+      "текст",
+      "публикация",
+      "редактура"
+    ]
   },
   "nodes": [
     {
@@ -12,7 +18,8 @@
       "type": "start",
       "connections": {
         "default": "intake"
-      }
+      },
+      "progressNodeId": "intake"
     },
     {
       "id": "intake",
@@ -126,7 +133,8 @@
       },
       "connections": {
         "success": "route-intake-ready"
-      }
+      },
+      "progressNodeId": "intake"
     },
     {
       "id": "route-intake-ready",
@@ -141,6 +149,11 @@
       "connections": {
         "true": "materialize-workspace",
         "false": "finalize-intake-blocked"
+      },
+      "progressNodeId": "intake",
+      "connectionLabels": {
+        "true": "задание пригодно",
+        "false": "задание непригодно"
       }
     },
     {
@@ -204,6 +217,10 @@
       "connections": {
         "success": "initialize-contract",
         "error": "finalize-workspace-blocked"
+      },
+      "progressNodeId": "workspace",
+      "connectionLabels": {
+        "error": "рабочее пространство не создано"
       }
     },
     {
@@ -258,7 +275,8 @@
       },
       "connections": {
         "success": "route-contract-ready"
-      }
+      },
+      "progressNodeId": "workspace"
     },
     {
       "id": "route-contract-ready",
@@ -273,6 +291,11 @@
       "connections": {
         "true": "frame-brief",
         "false": "finalize-blocked"
+      },
+      "progressNodeId": "workspace",
+      "connectionLabels": {
+        "true": "контракт записан",
+        "false": "контракт записать не удалось"
       }
     },
     {
@@ -379,7 +402,8 @@
       },
       "connections": {
         "success": "route-brief-ready"
-      }
+      },
+      "progressNodeId": "brief"
     },
     {
       "id": "route-brief-ready",
@@ -394,6 +418,10 @@
       "connections": {
         "true": "build-evidence",
         "false": "route-brief-replan"
+      },
+      "progressNodeId": "brief",
+      "connectionLabels": {
+        "true": "бриф готов"
       }
     },
     {
@@ -409,6 +437,11 @@
       "connections": {
         "true": "reassess-contract",
         "false": "finalize-blocked"
+      },
+      "progressNodeId": "brief",
+      "connectionLabels": {
+        "true": "бриф требует поправки контракта",
+        "false": "бриф неустранимо заблокирован"
       }
     },
     {
@@ -510,7 +543,8 @@
       },
       "connections": {
         "success": "route-evidence-usable"
-      }
+      },
+      "progressNodeId": "evidence"
     },
     {
       "id": "route-evidence-usable",
@@ -537,6 +571,10 @@
       "connections": {
         "true": "create-content",
         "false": "route-evidence-replan"
+      },
+      "progressNodeId": "evidence",
+      "connectionLabels": {
+        "true": "материалы пригодны полностью или с названными ограничениями"
       }
     },
     {
@@ -552,6 +590,11 @@
       "connections": {
         "true": "reassess-contract",
         "false": "finalize-blocked"
+      },
+      "progressNodeId": "evidence",
+      "connectionLabels": {
+        "true": "материалы требуют поправки контракта",
+        "false": "сбор материалов неустранимо заблокирован"
       }
     },
     {
@@ -658,7 +701,8 @@
       },
       "connections": {
         "success": "route-content-ready"
-      }
+      },
+      "progressNodeId": "content"
     },
     {
       "id": "route-content-ready",
@@ -673,6 +717,10 @@
       "connections": {
         "true": "complete-content",
         "false": "route-content-replan"
+      },
+      "progressNodeId": "content",
+      "connectionLabels": {
+        "true": "пакет содержания написан"
       }
     },
     {
@@ -688,6 +736,11 @@
       "connections": {
         "true": "reassess-contract",
         "false": "finalize-blocked"
+      },
+      "progressNodeId": "content",
+      "connectionLabels": {
+        "true": "создание текста требует поправки контракта",
+        "false": "создание текста неустранимо заблокировано"
       }
     },
     {
@@ -830,7 +883,8 @@
       },
       "connections": {
         "success": "route-completion-ready"
-      }
+      },
+      "progressNodeId": "completion"
     },
     {
       "id": "route-completion-ready",
@@ -845,6 +899,10 @@
       "connections": {
         "true": "validate-package",
         "false": "route-completion-replan"
+      },
+      "progressNodeId": "completion",
+      "connectionLabels": {
+        "true": "производитель завершил пакет"
       }
     },
     {
@@ -860,6 +918,11 @@
       "connections": {
         "true": "reassess-contract",
         "false": "finalize-blocked"
+      },
+      "progressNodeId": "completion",
+      "connectionLabels": {
+        "true": "завершение требует поправки контракта",
+        "false": "завершение неустранимо заблокировано"
       }
     },
     {
@@ -1022,7 +1085,8 @@
       },
       "connections": {
         "success": "route-validation-pass"
-      }
+      },
+      "progressNodeId": "validation"
     },
     {
       "id": "route-validation-pass",
@@ -1037,6 +1101,10 @@
       "connections": {
         "true": "semantic-review",
         "false": "route-validation-repair"
+      },
+      "progressNodeId": "validation",
+      "connectionLabels": {
+        "true": "детерминированная проверка пройдена"
       }
     },
     {
@@ -1052,7 +1120,8 @@
       "connections": {
         "true": "route-validation-package",
         "false": "route-validation-replan"
-      }
+      },
+      "progressNodeId": "validation"
     },
     {
       "id": "route-validation-package",
@@ -1067,6 +1136,10 @@
       "connections": {
         "true": "repair-content-validation",
         "false": "route-validation-evidence"
+      },
+      "progressNodeId": "validation",
+      "connectionLabels": {
+        "true": "проверка назначила владельцем ремонта текст"
       }
     },
     {
@@ -1082,6 +1155,11 @@
       "connections": {
         "true": "repair-evidence-validation",
         "false": "repair-brief-validation"
+      },
+      "progressNodeId": "validation",
+      "connectionLabels": {
+        "true": "проверка назначила владельцем ремонта материалы",
+        "false": "проверка назначила владельцем ремонта бриф"
       }
     },
     {
@@ -1097,6 +1175,11 @@
       "connections": {
         "true": "reassess-contract",
         "false": "finalize-blocked"
+      },
+      "progressNodeId": "validation",
+      "connectionLabels": {
+        "true": "проверка требует поправки контракта",
+        "false": "проверка объявила неустранимый блокер"
       }
     },
     {
@@ -1259,7 +1342,8 @@
       },
       "connections": {
         "success": "route-review-pass"
-      }
+      },
+      "progressNodeId": "review"
     },
     {
       "id": "route-review-pass",
@@ -1274,6 +1358,10 @@
       "connections": {
         "true": "route-mode",
         "false": "route-review-repair"
+      },
+      "progressNodeId": "review",
+      "connectionLabels": {
+        "true": "рецензия приняла пакет"
       }
     },
     {
@@ -1289,7 +1377,8 @@
       "connections": {
         "true": "route-review-package",
         "false": "route-review-replan"
-      }
+      },
+      "progressNodeId": "review"
     },
     {
       "id": "route-review-package",
@@ -1304,6 +1393,10 @@
       "connections": {
         "true": "repair-content-semantic",
         "false": "route-review-evidence"
+      },
+      "progressNodeId": "review",
+      "connectionLabels": {
+        "true": "рецензия назначила владельцем ремонта текст"
       }
     },
     {
@@ -1319,6 +1412,11 @@
       "connections": {
         "true": "repair-evidence-semantic",
         "false": "repair-brief-semantic"
+      },
+      "progressNodeId": "review",
+      "connectionLabels": {
+        "true": "рецензия назначила владельцем ремонта материалы",
+        "false": "рецензия назначила владельцем ремонта бриф"
       }
     },
     {
@@ -1334,6 +1432,11 @@
       "connections": {
         "true": "reassess-contract",
         "false": "finalize-blocked"
+      },
+      "progressNodeId": "review",
+      "connectionLabels": {
+        "true": "рецензия требует поправки контракта",
+        "false": "рецензия объявила неустранимый блокер"
       }
     },
     {
@@ -1459,7 +1562,8 @@
       },
       "connections": {
         "success": "repair-content-validation-changed"
-      }
+      },
+      "progressNodeId": "repair"
     },
     {
       "id": "repair-content-validation-changed",
@@ -1474,6 +1578,16 @@
       "connections": {
         "true": "complete-content",
         "false": "repair-content-validation-blocked"
+      },
+      "progressNodeId": "repair",
+      "connectionLabels": {
+        "true": {
+          "label": "текст починен после детерминированной проверки",
+          "cycle": {
+            "cause": "Детерминированная проверка нашла дефекты в файлах текста; после их починки изменившийся пакет надо заново провести через завершающий проход производителя и обе проверки.",
+            "exit": "Цикл кончается, когда завершение, детерминированная проверка и независимая рецензия проходят без замечаний, либо ремонт объявляет блокер и работа уходит в остановку или в пересмотр контракта."
+          }
+        }
       }
     },
     {
@@ -1489,6 +1603,11 @@
       "connections": {
         "true": "finalize-blocked",
         "false": "reassess-contract"
+      },
+      "progressNodeId": "repair",
+      "connectionLabels": {
+        "true": "ремонт текста неустранимо заблокирован",
+        "false": "ремонт текста требует поправки контракта"
       }
     },
     {
@@ -1614,7 +1733,8 @@
       },
       "connections": {
         "success": "repair-content-semantic-changed"
-      }
+      },
+      "progressNodeId": "repair"
     },
     {
       "id": "repair-content-semantic-changed",
@@ -1629,6 +1749,16 @@
       "connections": {
         "true": "complete-content",
         "false": "repair-content-semantic-blocked"
+      },
+      "progressNodeId": "repair",
+      "connectionLabels": {
+        "true": {
+          "label": "текст починен после рецензии",
+          "cycle": {
+            "cause": "Независимая рецензия нашла смысловые дефекты в тексте; после их починки изменившийся пакет надо заново провести через завершающий проход производителя и обе проверки.",
+            "exit": "Цикл кончается, когда завершение, детерминированная проверка и независимая рецензия проходят без замечаний, либо ремонт объявляет блокер и работа уходит в остановку или в пересмотр контракта."
+          }
+        }
       }
     },
     {
@@ -1644,6 +1774,11 @@
       "connections": {
         "true": "finalize-blocked",
         "false": "reassess-contract"
+      },
+      "progressNodeId": "repair",
+      "connectionLabels": {
+        "true": "ремонт текста неустранимо заблокирован",
+        "false": "ремонт текста требует поправки контракта"
       }
     },
     {
@@ -1769,7 +1904,8 @@
       },
       "connections": {
         "success": "repair-evidence-validation-changed"
-      }
+      },
+      "progressNodeId": "repair"
     },
     {
       "id": "repair-evidence-validation-changed",
@@ -1784,6 +1920,16 @@
       "connections": {
         "true": "create-content",
         "false": "repair-evidence-validation-blocked"
+      },
+      "progressNodeId": "repair",
+      "connectionLabels": {
+        "true": {
+          "label": "материалы починены после детерминированной проверки",
+          "cycle": {
+            "cause": "Детерминированная проверка нашла дефекты в реестре материалов; изменённые материалы делают написанный текст устаревшим, и он создаётся заново.",
+            "exit": "Цикл кончается, когда текст, построенный на починенных материалах, проходит завершение и обе проверки, либо ремонт объявляет блокер и работа уходит в остановку или в пересмотр контракта."
+          }
+        }
       }
     },
     {
@@ -1799,6 +1945,11 @@
       "connections": {
         "true": "finalize-blocked",
         "false": "reassess-contract"
+      },
+      "progressNodeId": "repair",
+      "connectionLabels": {
+        "true": "ремонт материалов неустранимо заблокирован",
+        "false": "ремонт материалов требует поправки контракта"
       }
     },
     {
@@ -1924,7 +2075,8 @@
       },
       "connections": {
         "success": "repair-evidence-semantic-changed"
-      }
+      },
+      "progressNodeId": "repair"
     },
     {
       "id": "repair-evidence-semantic-changed",
@@ -1939,6 +2091,16 @@
       "connections": {
         "true": "create-content",
         "false": "repair-evidence-semantic-blocked"
+      },
+      "progressNodeId": "repair",
+      "connectionLabels": {
+        "true": {
+          "label": "материалы починены после рецензии",
+          "cycle": {
+            "cause": "Независимая рецензия нашла дефекты в материалах и их происхождении; изменённые материалы делают написанный текст устаревшим, и он создаётся заново.",
+            "exit": "Цикл кончается, когда текст, построенный на починенных материалах, проходит завершение и обе проверки, либо ремонт объявляет блокер и работа уходит в остановку или в пересмотр контракта."
+          }
+        }
       }
     },
     {
@@ -1954,6 +2116,11 @@
       "connections": {
         "true": "finalize-blocked",
         "false": "reassess-contract"
+      },
+      "progressNodeId": "repair",
+      "connectionLabels": {
+        "true": "ремонт материалов неустранимо заблокирован",
+        "false": "ремонт материалов требует поправки контракта"
       }
     },
     {
@@ -2079,7 +2246,8 @@
       },
       "connections": {
         "success": "repair-brief-validation-changed"
-      }
+      },
+      "progressNodeId": "repair"
     },
     {
       "id": "repair-brief-validation-changed",
@@ -2094,6 +2262,16 @@
       "connections": {
         "true": "build-evidence",
         "false": "repair-brief-validation-blocked"
+      },
+      "progressNodeId": "repair",
+      "connectionLabels": {
+        "true": {
+          "label": "бриф починен после детерминированной проверки",
+          "cycle": {
+            "cause": "Детерминированная проверка нашла дефекты в брифе; изменённый бриф делает собранные материалы и текст устаревшими, и работа возобновляется со сбора материалов.",
+            "exit": "Цикл кончается, когда материалы и текст по починенному брифу проходят завершение и обе проверки, либо ремонт объявляет блокер и работа уходит в остановку или в пересмотр контракта."
+          }
+        }
       }
     },
     {
@@ -2109,6 +2287,11 @@
       "connections": {
         "true": "finalize-blocked",
         "false": "reassess-contract"
+      },
+      "progressNodeId": "repair",
+      "connectionLabels": {
+        "true": "ремонт брифа неустранимо заблокирован",
+        "false": "ремонт брифа требует поправки контракта"
       }
     },
     {
@@ -2234,7 +2417,8 @@
       },
       "connections": {
         "success": "repair-brief-semantic-changed"
-      }
+      },
+      "progressNodeId": "repair"
     },
     {
       "id": "repair-brief-semantic-changed",
@@ -2249,6 +2433,16 @@
       "connections": {
         "true": "build-evidence",
         "false": "repair-brief-semantic-blocked"
+      },
+      "progressNodeId": "repair",
+      "connectionLabels": {
+        "true": {
+          "label": "бриф починен после рецензии",
+          "cycle": {
+            "cause": "Независимая рецензия нашла смысловые дефекты в брифе; изменённый бриф делает собранные материалы и текст устаревшими, и работа возобновляется со сбора материалов.",
+            "exit": "Цикл кончается, когда материалы и текст по починенному брифу проходят завершение и обе проверки, либо ремонт объявляет блокер и работа уходит в остановку или в пересмотр контракта."
+          }
+        }
       }
     },
     {
@@ -2264,6 +2458,11 @@
       "connections": {
         "true": "finalize-blocked",
         "false": "reassess-contract"
+      },
+      "progressNodeId": "repair",
+      "connectionLabels": {
+        "true": "ремонт брифа неустранимо заблокирован",
+        "false": "ремонт брифа требует поправки контракта"
       }
     },
     {
@@ -2346,7 +2545,8 @@
       },
       "connections": {
         "success": "route-reassessment-corrected"
-      }
+      },
+      "progressNodeId": "reassess"
     },
     {
       "id": "route-reassessment-corrected",
@@ -2361,6 +2561,10 @@
       "connections": {
         "true": "corrected-contract-review",
         "false": "finalize-blocked"
+      },
+      "progressNodeId": "reassess",
+      "connectionLabels": {
+        "false": "поправку к контракту выработать не удалось"
       }
     },
     {
@@ -2459,7 +2663,8 @@
       },
       "connections": {
         "success": "route-contract-review-pass"
-      }
+      },
+      "progressNodeId": "reassess"
     },
     {
       "id": "route-contract-review-pass",
@@ -2474,7 +2679,8 @@
       "connections": {
         "true": "route-reentry-brief",
         "false": "route-contract-review-blocked"
-      }
+      },
+      "progressNodeId": "reassess"
     },
     {
       "id": "route-contract-review-blocked",
@@ -2489,6 +2695,17 @@
       "connections": {
         "true": "finalize-blocked",
         "false": "reassess-contract"
+      },
+      "progressNodeId": "reassess",
+      "connectionLabels": {
+        "true": "поправка к контракту неустранимо заблокирована",
+        "false": {
+          "label": "поправка к контракту отправлена на новую редакцию",
+          "cycle": {
+            "cause": "Независимый рецензент не принял поправку к контракту и не признал её неустранимо заблокированной, поэтому поправка вырабатывается заново.",
+            "exit": "Цикл кончается, когда рецензент принимает поправку и работа возвращается в названную стадию, либо поправка объявляется неустранимо заблокированной и запуск уходит в остановку."
+          }
+        }
       }
     },
     {
@@ -2504,6 +2721,16 @@
       "connections": {
         "true": "frame-brief",
         "false": "route-reentry-evidence"
+      },
+      "progressNodeId": "reassess",
+      "connectionLabels": {
+        "true": {
+          "label": "принятая поправка обесценила бриф",
+          "cycle": {
+            "cause": "Поправка к контракту изменила само задание, и самой ранней устаревшей стадией назван бриф, поэтому работа начинается с него заново.",
+            "exit": "Цикл кончается, когда переделанные стадии проходят завершение, обе проверки и приёмку, либо очередная стадия объявляет неустранимый блокер и запуск уходит в остановку."
+          }
+        }
       }
     },
     {
@@ -2519,6 +2746,16 @@
       "connections": {
         "true": "build-evidence",
         "false": "route-reentry-content"
+      },
+      "progressNodeId": "reassess",
+      "connectionLabels": {
+        "true": {
+          "label": "принятая поправка обесценила материалы",
+          "cycle": {
+            "cause": "Поправка к контракту оставила бриф в силе, но сделала устаревшими материалы, поэтому работа возобновляется с их сбора.",
+            "exit": "Цикл кончается, когда переделанные стадии проходят завершение, обе проверки и приёмку, либо очередная стадия объявляет неустранимый блокер и запуск уходит в остановку."
+          }
+        }
       }
     },
     {
@@ -2534,6 +2771,23 @@
       "connections": {
         "true": "create-content",
         "false": "complete-content"
+      },
+      "progressNodeId": "reassess",
+      "connectionLabels": {
+        "true": {
+          "label": "принятая поправка обесценила текст",
+          "cycle": {
+            "cause": "Поправка к контракту оставила бриф и материалы в силе, но сделала устаревшим написанный текст, поэтому он создаётся заново.",
+            "exit": "Цикл кончается, когда переделанные стадии проходят завершение, обе проверки и приёмку, либо очередная стадия объявляет неустранимый блокер и запуск уходит в остановку."
+          }
+        },
+        "false": {
+          "label": "принятая поправка затронула только завершение пакета",
+          "cycle": {
+            "cause": "Поправка к контракту не обесценила ни бриф, ни материалы, ни текст: переделать нужно только завершающий проход производителя над готовым пакетом.",
+            "exit": "Цикл кончается, когда повторное завершение проходит обе проверки и приёмку, либо очередная стадия объявляет неустранимый блокер и запуск уходит в остановку."
+          }
+        }
       }
     },
     {
@@ -2549,6 +2803,10 @@
       "connections": {
         "true": "interactive-acceptance",
         "false": "route-publication-authorized"
+      },
+      "progressNodeId": "acceptance",
+      "connectionLabels": {
+        "false": "автономный режим: приёмка пользователем не проводится"
       }
     },
     {
@@ -2630,7 +2888,8 @@
       },
       "connections": {
         "success": "route-user-accept"
-      }
+      },
+      "progressNodeId": "acceptance"
     },
     {
       "id": "route-user-accept",
@@ -2645,6 +2904,10 @@
       "connections": {
         "true": "route-publication-authorized",
         "false": "route-user-abort"
+      },
+      "progressNodeId": "acceptance",
+      "connectionLabels": {
+        "true": "пользователь принял результат"
       }
     },
     {
@@ -2660,6 +2923,10 @@
       "connections": {
         "true": "finalize-aborted",
         "false": "route-rework-brief"
+      },
+      "progressNodeId": "acceptance",
+      "connectionLabels": {
+        "true": "пользователь прервал работу"
       }
     },
     {
@@ -2675,6 +2942,16 @@
       "connections": {
         "true": "frame-brief",
         "false": "route-rework-evidence"
+      },
+      "progressNodeId": "acceptance",
+      "connectionLabels": {
+        "true": {
+          "label": "пользователь назначил доработку брифа",
+          "cycle": {
+            "cause": "Пользователь не принял пакет и назвал владельцем доработки бриф, поэтому работа возвращается к нему с действующей заявкой на правку.",
+            "exit": "Цикл кончается, когда пользователь принимает пакет или прерывает работу, либо очередная стадия объявляет неустранимый блокер и запуск уходит в остановку."
+          }
+        }
       }
     },
     {
@@ -2690,6 +2967,16 @@
       "connections": {
         "true": "build-evidence",
         "false": "route-rework-content"
+      },
+      "progressNodeId": "acceptance",
+      "connectionLabels": {
+        "true": {
+          "label": "пользователь назначил доработку материалов",
+          "cycle": {
+            "cause": "Пользователь не принял пакет и назвал владельцем доработки материалы, поэтому работа возвращается к их сбору с действующей заявкой на правку.",
+            "exit": "Цикл кончается, когда пользователь принимает пакет или прерывает работу, либо очередная стадия объявляет неустранимый блокер и запуск уходит в остановку."
+          }
+        }
       }
     },
     {
@@ -2705,6 +2992,23 @@
       "connections": {
         "true": "create-content",
         "false": "reassess-contract"
+      },
+      "progressNodeId": "acceptance",
+      "connectionLabels": {
+        "true": {
+          "label": "пользователь назначил доработку текста",
+          "cycle": {
+            "cause": "Пользователь не принял пакет и назвал владельцем доработки текст, поэтому он создаётся заново с действующей заявкой на правку.",
+            "exit": "Цикл кончается, когда пользователь принимает пакет или прерывает работу, либо очередная стадия объявляет неустранимый блокер и запуск уходит в остановку."
+          }
+        },
+        "false": {
+          "label": "пользователь назначил доработку контракта",
+          "cycle": {
+            "cause": "Пользователь не принял пакет и назвал владельцем доработки сам контракт, поэтому заявка идёт в пересмотр контракта, а не в производящую стадию.",
+            "exit": "Цикл кончается, когда пересмотр называет стадию возврата, работа доходит до приёмки и пользователь принимает пакет или прерывает работу, либо поправка объявляется заблокированной и запуск уходит в остановку."
+          }
+        }
       }
     },
     {
@@ -2720,7 +3024,8 @@
       "connections": {
         "true": "finalize-complete",
         "false": "finalize-limited"
-      }
+      },
+      "progressNodeId": "finalize"
     },
     {
       "id": "finalize-complete",
@@ -2751,7 +3056,8 @@
       },
       "connections": {
         "success": "end"
-      }
+      },
+      "progressNodeId": "finalize"
     },
     {
       "id": "finalize-limited",
@@ -2782,7 +3088,8 @@
       },
       "connections": {
         "success": "end-limited"
-      }
+      },
+      "progressNodeId": "finalize"
     },
     {
       "id": "finalize-blocked",
@@ -2813,7 +3120,8 @@
       },
       "connections": {
         "success": "end-blocked"
-      }
+      },
+      "progressNodeId": "stop"
     },
     {
       "id": "finalize-aborted",
@@ -2844,7 +3152,8 @@
       },
       "connections": {
         "success": "end-aborted"
-      }
+      },
+      "progressNodeId": "stop"
     },
     {
       "id": "finalize-workspace-blocked",
@@ -2875,7 +3184,8 @@
       },
       "connections": {
         "success": "end-workspace-blocked"
-      }
+      },
+      "progressNodeId": "stop"
     },
     {
       "id": "end",
@@ -2890,7 +3200,8 @@
         "public_url",
         "publication_failure_reason",
         "notification_failure_reason"
-      ]
+      ],
+      "progressNodeId": "finalize"
     },
     {
       "id": "end-limited",
@@ -2905,7 +3216,8 @@
         "public_url",
         "publication_failure_reason",
         "notification_failure_reason"
-      ]
+      ],
+      "progressNodeId": "finalize"
     },
     {
       "id": "end-blocked",
@@ -2914,7 +3226,8 @@
         "terminal_status",
         "artifact_path",
         "terminal_reason"
-      ]
+      ],
+      "progressNodeId": "stop"
     },
     {
       "id": "end-aborted",
@@ -2922,7 +3235,8 @@
       "finalOutput": [
         "terminal_status",
         "artifact_path"
-      ]
+      ],
+      "progressNodeId": "stop"
     },
     {
       "id": "end-workspace-blocked",
@@ -2930,7 +3244,8 @@
       "finalOutput": [
         "terminal_status",
         "terminal_reason"
-      ]
+      ],
+      "progressNodeId": "stop"
     },
     {
       "id": "revise-process",
@@ -2965,6 +3280,16 @@
       },
       "connections": {
         "success": "reassess-contract"
+      },
+      "progressNodeId": "revise",
+      "connectionLabels": {
+        "success": {
+          "label": "внеплановая заявка уходит в пересмотр контракта",
+          "cycle": {
+            "cause": "Правка процесса пришла вне обычного хода работы и должна быть сверена с неизменяемым исходным контрактом, прежде чем менять уже сделанное.",
+            "exit": "Цикл кончается, когда пересмотр называет стадию возврата и работа доходит до принятого результата, либо поправка отклоняется как заблокированная и запуск уходит в остановку."
+          }
+        }
       }
     },
     {
@@ -2994,7 +3319,8 @@
       },
       "connections": {
         "success": "end-intake-blocked"
-      }
+      },
+      "progressNodeId": "stop"
     },
     {
       "id": "end-intake-blocked",
@@ -3002,7 +3328,8 @@
       "finalOutput": [
         "terminal_status",
         "terminal_reason"
-      ]
+      ],
+      "progressNodeId": "stop"
     },
     {
       "id": "route-publication-authorized",
@@ -3017,7 +3344,8 @@
       "connections": {
         "true": "publish-content",
         "false": "route-publication-declined"
-      }
+      },
+      "progressNodeId": "publication"
     },
     {
       "id": "publish-content",
@@ -3084,6 +3412,10 @@
       },
       "connections": {
         "success": "route-notification-authorized"
+      },
+      "progressNodeId": "publication",
+      "connectionLabels": {
+        "success": "публикация выполнена или её неудача записана"
       }
     },
     {
@@ -3099,7 +3431,8 @@
       "connections": {
         "true": "send-notification",
         "false": "route-notification-declined"
-      }
+      },
+      "progressNodeId": "notification"
     },
     {
       "id": "send-notification",
@@ -3156,6 +3489,10 @@
       },
       "connections": {
         "success": "route-final-status"
+      },
+      "progressNodeId": "notification",
+      "connectionLabels": {
+        "success": "уведомление отправлено или его неудача записана"
       }
     },
     {
@@ -3171,6 +3508,10 @@
       "connections": {
         "true": "set-publication-declined",
         "false": "route-notification-authorized"
+      },
+      "progressNodeId": "publication",
+      "connectionLabels": {
+        "false": "полномочие на публикацию не выдавалось"
       }
     },
     {
@@ -3181,6 +3522,10 @@
       ],
       "connections": {
         "default": "route-notification-authorized"
+      },
+      "progressNodeId": "publication",
+      "connectionLabels": {
+        "default": "отказ от публикации записан"
       }
     },
     {
@@ -3196,6 +3541,10 @@
       "connections": {
         "true": "set-notification-declined",
         "false": "route-final-status"
+      },
+      "progressNodeId": "notification",
+      "connectionLabels": {
+        "false": "полномочие на уведомление не выдавалось"
       }
     },
     {
@@ -3206,6 +3555,10 @@
       ],
       "connections": {
         "default": "route-final-status"
+      },
+      "progressNodeId": "notification",
+      "connectionLabels": {
+        "default": "отказ от уведомления записан"
       }
     }
   ],
@@ -3392,5 +3745,123 @@
     }
   },
   "owner": "system-moira",
-  "visibility": "public"
+  "visibility": "public",
+  "progress": {
+    "title": "Создание контента",
+    "goal": "Сделать один проверенный текстовый результат по авторизованному заданию: с зафиксированным контрактом, прослеженными источниками, независимой рецензией и честно объявленным классом результата.",
+    "nodes": [
+      {
+        "id": "intake",
+        "label": "Приём задания",
+        "content": {
+          "summary": "Разбирается одно ограниченное задание на текст: цель, аудитория и применение, формат, язык, тон, ограничения, переданные материалы и полномочия на публикацию и уведомление; стадия кончается признанием задания пригодным либо отказом ещё до создания рабочего каталога."
+        }
+      },
+      {
+        "id": "workspace",
+        "label": "Рабочее пространство и контракт",
+        "content": {
+          "summary": "Создаётся долговечный каталог запуска, и в нём записывается неизменяемый контракт содержания — исходная цель, аудитория, формат, тон, объём, переданные материалы и полномочия; стадия кончается контрактом, на который ссылаются все дальнейшие стадии."
+        }
+      },
+      {
+        "id": "brief",
+        "label": "Бриф содержания",
+        "content": {
+          "summary": "По контракту и текущей заявке на правку пишется бриф: что именно должен сделать этот текст и по каким признакам он будет пригоден; стадия кончается готовым брифом, отправкой на пересмотр контракта или остановкой."
+        }
+      },
+      {
+        "id": "evidence",
+        "label": "Материалы и происхождение",
+        "content": {
+          "summary": "Собираются доказательства и их происхождение вместе с указаниями по их использованию; стадия кончается базой, пригодной полностью или с названными ограничениями, отправкой на пересмотр контракта или остановкой."
+        }
+      },
+      {
+        "id": "content",
+        "label": "Создание текста",
+        "content": {
+          "summary": "Пишутся структура, черновик, итоговый текст и перечень ограничений на основе контракта, брифа и собранных материалов; стадия кончается готовым пакетом содержания, отправкой на пересмотр контракта или остановкой."
+        }
+      },
+      {
+        "id": "completion",
+        "label": "Завершение производителем",
+        "content": {
+          "summary": "Производитель сам проходит по всему пакету свежим проходом, закрывает предвидимые пропуски и объявляет класс результата — полный или ограниченный; стадия кончается пакетом, который можно отдавать на проверки."
+        }
+      },
+      {
+        "id": "validation",
+        "label": "Детерминированная проверка",
+        "content": {
+          "summary": "Механически проверяются наличие требуемых файлов, их разбираемость, ссылки и соответствие источникам — без суждений о смысле; стадия кончается пропуском к рецензии, назначением владельца ремонта, пересмотром контракта или остановкой."
+        }
+      },
+      {
+        "id": "review",
+        "label": "Независимая рецензия",
+        "content": {
+          "summary": "Отдельный рецензент читает весь пакет целиком и судит смысл: отвечает ли текст контракту, брифу и материалам; стадия кончается принятием, назначением владельца ремонта, пересмотром контракта или остановкой."
+        }
+      },
+      {
+        "id": "repair",
+        "label": "Адресный ремонт",
+        "content": {
+          "summary": "Назначенный владелец — текст, материалы или бриф — воспроизводит замечания своей проверки и чинит весь подтверждённый класс дефектов в своих файлах; стадия кончается возвратом работы к той стадии, чей результат изменился, передачей на пересмотр контракта или остановкой."
+        }
+      },
+      {
+        "id": "reassess",
+        "label": "Пересмотр контракта",
+        "content": {
+          "summary": "Заявка на правку сверяется с неизменяемым исходным контрактом, поправка проходит независимую рецензию, и называется самая ранняя стадия, ставшая из-за поправки устаревшей; стадия кончается возвратом работы в эту стадию или остановкой."
+        }
+      },
+      {
+        "id": "acceptance",
+        "label": "Приёмка пользователем",
+        "content": {
+          "summary": "В интерактивном режиме пользователь принимает независимо проверенный пакет, прерывает работу или называет одну доработку с её владельцем; в автономном режиме запуск проходит здесь только маршрутом, и приёмка не проводится."
+        }
+      },
+      {
+        "id": "publication",
+        "label": "Публикация",
+        "content": {
+          "summary": "При выданном полномочии принятый текст публикуется в названную цель и возвращается настоящий адрес, отказ от публикации фиксируется отдельным статусом; неудача публикации не меняет качество самого текста."
+        }
+      },
+      {
+        "id": "notification",
+        "label": "Уведомление",
+        "content": {
+          "summary": "При выданном полномочии пользователю уходит одно сообщение о завершении через настроенные каналы, отказ фиксируется отдельным статусом; неудача отправки не меняет класс результата."
+        }
+      },
+      {
+        "id": "finalize",
+        "label": "Итоговый отчёт",
+        "content": {
+          "summary": "По объявленному классу результата пишется итоговый отчёт — полный без переоценки либо ограниченный с сохранёнными ограничениями — и запуск завершается с адресом этого отчёта."
+        }
+      },
+      {
+        "id": "stop",
+        "label": "Остановка",
+        "content": {
+          "summary": "Работа завершается без принятого результата: непригодное задание, несозданное рабочее пространство, неустранимый блокер или прерывание пользователем — с названной причиной и перечнем уже сделанной полезной работы."
+        }
+      },
+      {
+        "id": "revise",
+        "label": "Внеплановая правка процесса",
+        "content": {
+          "summary": "Вход для правки, пришедшей вне обычного хода: формулируется одна действующая заявка, сохраняющая исходную цель и полномочия, и называется ещё пригодная работа; отсюда запуск идёт в пересмотр контракта."
+        }
+      }
+    ]
+  }
 }

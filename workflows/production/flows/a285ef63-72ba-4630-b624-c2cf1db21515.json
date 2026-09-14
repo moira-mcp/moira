@@ -2,8 +2,14 @@
   "id": "workflow-1787080951494-copy-1787083884390",
   "metadata": {
     "name": "Execution Retrospective",
-    "version": "1.0.2",
-    "description": "Analyzes one completed, interrupted, or failed Moira execution from authorized execution context, agent-session evidence, produced artifacts, review findings, retries, user corrections, and terminal behavior. It materializes an execution-correlated workspace, preserves an explicit evidence-state distinction for sufficient, partial, or unavailable data, reconstructs what worked and what caused rework or delay, and produces a source-linked retrospective plus prioritized proposals for the result, workflow definition, or system prompt. Independent analysis and final review must clear current blockers; confirmed report defects use contained or spreading repair routes without mutating the subject execution. Outcomes remain truthful when evidence is partial or unavailable. The workflow is proposal-only: it does not edit workflows, change prompts, publish, notify, commit, deploy, or mutate production. Choose it after a workflow run when the deliverable is evidence-backed process learning; use Workflow Management Flow separately to implement accepted workflow changes."
+    "version": "1.1.0",
+    "description": "Analyzes one completed, interrupted, or failed Moira execution from authorized execution context, agent-session evidence, produced artifacts, review findings, retries, user corrections, and terminal behavior. It materializes an execution-correlated workspace, preserves an explicit evidence-state distinction for sufficient, partial, or unavailable data, reconstructs what worked and what caused rework or delay, and produces a source-linked retrospective plus prioritized proposals for the result, workflow definition, or system prompt. Independent analysis and final review must clear current blockers; confirmed report defects use contained or spreading repair routes without mutating the subject execution. Outcomes remain truthful when evidence is partial or unavailable. The workflow is proposal-only: it does not edit workflows, change prompts, publish, notify, commit, deploy, or mutate production. Choose it after a workflow run when the deliverable is evidence-backed process learning; use Workflow Management Flow separately to implement accepted workflow changes.",
+    "tags": [
+      "ретроспектива",
+      "анализ",
+      "процесс",
+      "выводы"
+    ]
   },
   "nodes": [
     {
@@ -14,7 +20,8 @@
       },
       "initialData": {
         "variables": {}
-      }
+      },
+      "progressNodeId": "subject"
     },
     {
       "id": "end",
@@ -23,7 +30,8 @@
         "subject_execution_id",
         "evidence_state",
         "report_path"
-      ]
+      ],
+      "progressNodeId": "present"
     },
     {
       "id": "resolve-subject-and-workspace",
@@ -45,6 +53,10 @@
       },
       "connections": {
         "success": "materialize-retrospective-bootstrap"
+      },
+      "progressNodeId": "subject",
+      "connectionLabels": {
+        "success": "предмет разбора определён"
       }
     },
     {
@@ -63,6 +75,10 @@
       ],
       "connections": {
         "success": "acquire-and-reconstruct-evidence"
+      },
+      "progressNodeId": "workspace",
+      "connectionLabels": {
+        "success": "каталог и справочник созданы"
       }
     },
     {
@@ -83,7 +99,8 @@
       },
       "connections": {
         "success": "route-evidence-unavailable"
-      }
+      },
+      "progressNodeId": "evidence"
     },
     {
       "id": "route-evidence-unavailable",
@@ -98,6 +115,11 @@
       "connections": {
         "true": "write-no-data-report",
         "false": "evaluate-and-diagnose"
+      },
+      "progressNodeId": "evidence",
+      "connectionLabels": {
+        "true": "свидетельств нет",
+        "false": "свидетельства есть — хотя бы частично"
       }
     },
     {
@@ -112,6 +134,10 @@
       },
       "connections": {
         "success": "review-final-report"
+      },
+      "progressNodeId": "no-data",
+      "connectionLabels": {
+        "success": "отчёт о нехватке данных написан"
       }
     },
     {
@@ -126,6 +152,10 @@
       },
       "connections": {
         "success": "review-analysis"
+      },
+      "progressNodeId": "diagnosis",
+      "connectionLabels": {
+        "success": "разбор написан"
       }
     },
     {
@@ -146,7 +176,8 @@
       },
       "connections": {
         "success": "route-analysis-review-clean"
-      }
+      },
+      "progressNodeId": "analysis-review"
     },
     {
       "id": "route-analysis-review-clean",
@@ -161,6 +192,10 @@
       "connections": {
         "true": "synthesize-retrospective",
         "false": "repair-analysis"
+      },
+      "progressNodeId": "analysis-review",
+      "connectionLabels": {
+        "true": "разбор принят без замечаний"
       }
     },
     {
@@ -175,6 +210,16 @@
       },
       "connections": {
         "success": "review-analysis"
+      },
+      "progressNodeId": "analysis-review",
+      "connectionLabels": {
+        "success": {
+          "label": "исправленный разбор возвращается на проверку",
+          "cycle": {
+            "cause": "Независимая проверка нашла блокирующие замечания к разбору, владелец разбора их закрыл, и исправленный разбор нужно проверить заново.",
+            "exit": "Заканчивается проверкой с нулём блокирующих замечаний."
+          }
+        }
       }
     },
     {
@@ -189,6 +234,10 @@
       },
       "connections": {
         "success": "review-final-report"
+      },
+      "progressNodeId": "report",
+      "connectionLabels": {
+        "success": "отчёт собран"
       }
     },
     {
@@ -209,7 +258,8 @@
       },
       "connections": {
         "success": "route-final-review-clean"
-      }
+      },
+      "progressNodeId": "final-review"
     },
     {
       "id": "route-final-review-clean",
@@ -224,6 +274,10 @@
       "connections": {
         "true": "present-retrospective",
         "false": "repair-final-report"
+      },
+      "progressNodeId": "final-review",
+      "connectionLabels": {
+        "true": "отчёт принят без замечаний"
       }
     },
     {
@@ -250,7 +304,8 @@
       },
       "connections": {
         "success": "route-final-repair-reach"
-      }
+      },
+      "progressNodeId": "final-review"
     },
     {
       "id": "route-final-repair-reach",
@@ -265,6 +320,23 @@
       "connections": {
         "true": "review-final-report",
         "false": "acquire-and-reconstruct-evidence"
+      },
+      "progressNodeId": "final-review",
+      "connectionLabels": {
+        "true": {
+          "label": "правка не вышла за пределы изложения",
+          "cycle": {
+            "cause": "Проверка отчёта нашла блокирующие замечания, правка осталась внутри формулировок и не задела свидетельства, диагноз и решения о приватности.",
+            "exit": "Заканчивается проверкой отчёта с нулём блокирующих замечаний."
+          }
+        },
+        "false": {
+          "label": "правка задела трактовку — назад к свидетельствам",
+          "cycle": {
+            "cause": "Правка отчёта изменила трактовку свидетельств или вышестоящий контракт, либо её ограниченность доказать не удалось.",
+            "exit": "Заканчивается повторным проходом сбора свидетельств, разбора и обеих проверок до отчёта без замечаний."
+          }
+        }
       }
     },
     {
@@ -285,7 +357,8 @@
       },
       "connections": {
         "success": "end"
-      }
+      },
+      "progressNodeId": "present"
     }
   ],
   "slug": "execution-retrospective",
@@ -331,5 +404,74 @@
     }
   },
   "owner": "system-moira",
-  "visibility": "public"
+  "visibility": "public",
+  "progress": {
+    "title": "Ретроспектива исполнения",
+    "goal": "Разобрать одно завершённое исполнение Moira по наблюдаемым свидетельствам и выдать проверенный отчёт с предложениями, ничего при этом не меняя.",
+    "nodes": [
+      {
+        "id": "subject",
+        "label": "Предмет разбора",
+        "content": {
+          "summary": "Определяется ровно одно исполнение Moira, которое разбирается, и имя каталога запуска; при отсутствии явного идентификатора он запрашивается, а не угадывается."
+        }
+      },
+      {
+        "id": "workspace",
+        "label": "Рабочее пространство",
+        "content": {
+          "summary": "Создаётся каталог запуска, соотнесённый с исполнением, и в него кладётся справочник ретроспективы: границы разбора, правила провенанса, контракт независимой проверки и требования к отчёту."
+        }
+      },
+      {
+        "id": "evidence",
+        "label": "Сбор свидетельств",
+        "content": {
+          "summary": "Собираются авторизованные первичные источники по разбираемому исполнению — контекст исполнения, сессия агента, артефакты, проверки и вмешательства пользователя, — фиксируются провенанс и пробелы, после чего полнота свидетельств объявляется достаточной, частичной или отсутствующей."
+        }
+      },
+      {
+        "id": "no-data",
+        "label": "Отчёт о нехватке данных",
+        "content": {
+          "summary": "Когда свидетельств нет, пишется честный отчёт о том, что искали, чего не хватает, каких выводов сделать нельзя и какая наблюдаемость помогла бы позже; разбор и диагноз при этом не проводятся."
+        }
+      },
+      {
+        "id": "diagnosis",
+        "label": "Разбор и диагноз",
+        "content": {
+          "summary": "Раздельно оцениваются качество результата и качество процесса: что сработало, что потребовало переделки, что замедлило работу и что осталось неизвестным, с ссылками на свидетельства и меткой причинности у каждого вывода."
+        }
+      },
+      {
+        "id": "analysis-review",
+        "label": "Проверка разбора",
+        "content": {
+          "summary": "Отдельный исполнитель пытается опровергнуть ведущий диагноз и возвращает число блокирующих замечаний; подтверждённые дефекты чинит владелец разбора, и стадия кончается проверкой без замечаний."
+        }
+      },
+      {
+        "id": "report",
+        "label": "Итоговый отчёт",
+        "content": {
+          "summary": "Из чистого разбора собирается самодостаточная ретроспектива: выводы по результату и процессу, сохранённые сильные стороны, гипотезы и типизированные предложения изменений с условиями проверки и отката."
+        }
+      },
+      {
+        "id": "final-review",
+        "label": "Проверка отчёта",
+        "content": {
+          "summary": "Тот же независимый исполнитель проверяет готовый отчёт; правка либо остаётся внутри изложения и возвращается на ту же проверку, либо задевает трактовку и отправляет работу обратно к свидетельствам."
+        }
+      },
+      {
+        "id": "present",
+        "label": "Выдача результата",
+        "content": {
+          "summary": "Пользователю называются путь к принятому отчёту, состояние свидетельств и главные предложения; решение о любых изменениях остаётся за ним, флоу ничего не правит."
+        }
+      }
+    ]
+  }
 }

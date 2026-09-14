@@ -304,7 +304,10 @@ export default defineConfig({
               slug: "docs/reference/workflows/content-creation",
             },
             { label: "Verified Research", slug: "docs/reference/workflows/verified-research" },
-            { label: "Iterative Research", slug: "docs/reference/workflows/iterative-research" },
+            {
+              label: "Agentic Screencast Video",
+              slug: "docs/reference/workflows/agentic-screencast-video",
+            },
             {
               label: "PRD Creation",
               slug: "docs/reference/workflows/prd-creation",

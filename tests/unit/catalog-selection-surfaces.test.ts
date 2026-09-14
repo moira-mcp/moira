@@ -13,28 +13,24 @@ const russianDocsDir = path.join(
 const helpContentDir = path.join(root, "packages/mcp-server/src/help/content");
 
 const expectedPublicSlugs = [
+  "agentic-screencast-video",
   "architecture-design-flow",
   "content-creation",
   "data-analysis",
   "deep-corpus-research",
   "execution-retrospective",
-  "infinite-task-loop",
-  "iterative-research",
   "marketing-campaign",
   "prd-creation",
   "quick-task",
   "robust-task",
-  "simple-plan-execution",
   "smart-purchase-assistant",
   "software-development-flow",
   "startup-idea-validation",
-  "task-breakdown-flow",
   "telegram-setup",
   "test-generation",
   "test-planning",
   "test-suite-audit",
   "todo-list",
-  "universal-research-workflow",
   "user-onboarding",
   "ux-design",
   "verified-research",
@@ -43,6 +39,11 @@ const expectedPublicSlugs = [
 ].sort();
 
 const removedPublicSlugs = [
+  "infinite-task-loop",
+  "iterative-research",
+  "simple-plan-execution",
+  "task-breakdown-flow",
+  "universal-research-workflow",
   "artifacts-demo-dashboard-builder",
   "artifacts-demo-report-publisher",
   "notes-demo-metrics-collector",
@@ -84,7 +85,6 @@ describe("public workflow selection surfaces", () => {
           `${leftSlug}/${leftId}`.localeCompare(`${rightSlug}/${rightId}`),
         ),
     ).toEqual([
-      ["iterative-research", "send-notification"],
       ["robust-task", "notify-completion"],
       ["robust-task", "notify-escalation"],
       ["robust-task", "notify-plan-ready"],
@@ -95,7 +95,7 @@ describe("public workflow selection surfaces", () => {
       ["software-development-flow", "notify-unit-approval"],
       ["software-development-flow", "notify-workflow-complete"],
       ["software-development-flow", "notify-workflow-stopped"],
-      ["universal-research-workflow", "send-notification"],
+      ["verified-research", "notify-result-ready"],
     ]);
     for (const node of genericNodes) {
       expect(node).not.toHaveProperty("parseMode");

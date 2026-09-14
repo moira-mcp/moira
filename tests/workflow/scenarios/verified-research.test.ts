@@ -24,11 +24,27 @@ function node(graph: WorkflowGraph, id: string): any {
   return found;
 }
 
+const contract = {
+  output_language: "English",
+  target_audience: "Platform engineers choosing a production architecture.",
+  confidentiality_ceiling: "Public sources only; no personal data; licences permitting quotation.",
+};
+
+const sourcePlan =
+  "Vendor documentation, RFCs and public engineering posts, fetched read-only without credentials.";
+
 function terminal(status: "complete" | "limited" | "blocked" | "aborted"): MockInput {
-  return ({ executionId }) => ({
-    artifact_path: `${workspace(executionId)}/final-report.md`,
-    terminal_status: status,
-  });
+  return ({ executionId }) =>
+    status === "complete"
+      ? {
+          artifact_path: `${workspace(executionId)}/final-report.md`,
+          terminal_status: status,
+        }
+      : {
+          artifact_path: `${workspace(executionId)}/final-report.md`,
+          terminal_status: status,
+          terminal_reason: `The run ended ${status} for a recorded reason.`,
+        };
 }
 
 const readyCompletion = {
@@ -45,15 +61,19 @@ function inputs(overrides: Record<string, MockInput> = {}): Record<string, MockI
       research_use: "Choose a production architecture with explicit trade-offs.",
       research_scope: ["HTTP APIs", "multi-region consistency", "current primary sources"],
       operating_mode: "autonomous",
+      ...contract,
     },
     "clarify-question": {
       clarification_outcome: "ready",
       research_question: "Which API rate-limiting approach fits a multi-region service?",
       research_use: "Choose a production architecture with explicit trade-offs.",
       research_scope: ["HTTP APIs", "multi-region consistency"],
+      ...contract,
     },
     "materialize-workspace": {},
-    "frame-research": { framing_outcome: "ready" },
+    "frame-research": { framing_outcome: "ready", source_policy: sourcePlan },
+    "review-source-policy": { policy_review_outcome: "pass" },
+    "ask-review-limit": { limit_decision: "finish" },
     "research-evidence": { evidence_status: "ready" },
     "synthesize-answer": { synthesis_outcome: "ready" },
     "package-completion": readyCompletion,
@@ -76,17 +96,24 @@ function inputs(overrides: Record<string, MockInput> = {}): Record<string, MockI
     "finalize-result": terminal("complete"),
     "finalize-limited": terminal("limited"),
     "finalize-blocked": terminal("blocked"),
-    "finalize-workspace-blocked": {
-      terminal_reason: "The canonical workspace could not be materialized.",
-      terminal_status: "blocked",
-    },
+    "finalize-review-exhausted": ({ executionId }) => ({
+      artifact_path: `${workspace(executionId)}/final-report.md`,
+      terminal_status: "limited",
+      terminal_reason: "The repair budget was exhausted without independent acceptance.",
+    }),
     "finalize-aborted": terminal("aborted"),
     "revise-process": { revision_reason: "The evidence criterion cannot distinguish states." },
     ...overrides,
   };
 }
 
-function configureMaterialize(engine: GraphExecutionEngine, error = false): void {
+type NotificationMode = "default" | "error";
+
+function configureMaterialize(
+  engine: GraphExecutionEngine,
+  error = false,
+  notification: NotificationMode = "default",
+): void {
   const handlers = (engine as unknown as { nodeHandlers: Map<string, any> }).nodeHandlers;
   if (error) {
     handlers.set("materialize", {
@@ -107,11 +134,26 @@ function configureMaterialize(engine: GraphExecutionEngine, error = false): void
       () => "https://moira.example",
     ),
   );
+  if (notification === "error") {
+    handlers.set("user-notification", {
+      getNodeType: () => "user-notification",
+      execute: async (current: { id: string }) => ({
+        nodeId: current.id,
+        action: "continue",
+        outputPath: "error",
+        data: { reason: "delivery_failed" },
+      }),
+    });
+  }
 }
 
-async function run(scenario: TestScenario, materializeError = false): Promise<ScenarioResult> {
+async function run(
+  scenario: TestScenario,
+  materializeError = false,
+  notification: NotificationMode = "default",
+): Promise<ScenarioResult> {
   return runScenario(workflow(), scenario, {
-    engineSetup: (engine) => configureMaterialize(engine, materializeError),
+    engineSetup: (engine) => configureMaterialize(engine, materializeError, notification),
   });
 }
 
@@ -207,6 +249,7 @@ describe("verified-research", () => {
       name: string;
       overrides?: Record<string, MockInput>;
       materializeError?: boolean;
+      notification?: NotificationMode;
       teleportAfter?: TestScenario["teleportAfter"];
       reaches?: string[];
       avoids?: string[];
@@ -250,13 +293,18 @@ describe("verified-research", () => {
         },
         reaches: ["end-intake-blocked"],
       },
-      { name: "materialize blocked", materializeError: true, reaches: ["end-workspace-blocked"] },
+      {
+        name: "no workspace continues from memory with a limited result",
+        materializeError: true,
+        reaches: ["fallback-to-memory", "finalize-limited", "end-limited"],
+        contextContains: { storage_mode: "memory", terminal_status: "limited" },
+      },
       {
         name: "framing replan then corrected",
         overrides: {
           "frame-research": [
             { framing_outcome: "replan", outcome_reason: "Criterion is ambiguous." },
-            { framing_outcome: "ready" },
+            { framing_outcome: "ready", source_policy: sourcePlan },
           ],
         },
         reaches: ["reassess-contract", "corrected-contract-review", "end"],
@@ -467,7 +515,7 @@ describe("verified-research", () => {
         overrides: {
           "frame-research": [
             { framing_outcome: "replan", outcome_reason: "Contract invalid." },
-            { framing_outcome: "ready" },
+            { framing_outcome: "ready", source_policy: sourcePlan },
           ],
           "corrected-contract-review": [
             { contract_review_outcome: "repair" },
@@ -481,7 +529,7 @@ describe("verified-research", () => {
         overrides: {
           "frame-research": [
             { framing_outcome: "replan", outcome_reason: "Contract invalid." },
-            { framing_outcome: "ready" },
+            { framing_outcome: "ready", source_policy: sourcePlan },
           ],
           "corrected-contract-review": [
             { contract_review_outcome: "replan" },
@@ -521,8 +569,12 @@ describe("verified-research", () => {
             research_use: "Choose an architecture.",
             research_scope: ["HTTP APIs"],
             operating_mode: "interactive",
+            ...contract,
           },
-          "frame-research": [{ framing_outcome: "ready" }, { framing_outcome: "ready" }],
+          "frame-research": [
+            { framing_outcome: "ready", source_policy: sourcePlan },
+            { framing_outcome: "ready", source_policy: sourcePlan },
+          ],
           "research-evidence": [{ evidence_status: "ready" }, { evidence_status: "ready" }],
           "synthesize-answer": [{ synthesis_outcome: "ready" }, { synthesis_outcome: "ready" }],
           "package-completion": [readyCompletion, readyCompletion],
@@ -544,15 +596,88 @@ describe("verified-research", () => {
             research_use: "Choose an architecture.",
             research_scope: ["HTTP APIs"],
             operating_mode: "interactive",
+            ...contract,
           },
           "interactive-acceptance": { user_decision: "abort" },
         },
         reaches: ["end-aborted"],
       },
       {
+        name: "planned sources outside the ceiling return to framing",
+        overrides: {
+          "frame-research": [
+            { framing_outcome: "ready", source_policy: sourcePlan },
+            { framing_outcome: "ready", source_policy: sourcePlan },
+          ],
+          "review-source-policy": [
+            {
+              policy_review_outcome: "repair",
+              policy_violation: "One planned source requires an account and personal data.",
+            },
+            { policy_review_outcome: "pass" },
+          ],
+        },
+        reaches: ["review-source-policy", "set-scope-policy", "frame-research", "end"],
+      },
+      {
+        name: "evidence unobtainable inside the ceiling blocks the run",
+        overrides: {
+          "review-source-policy": {
+            policy_review_outcome: "blocked",
+            policy_violation: "Every usable source requires licensed redistribution.",
+            terminal_reason: "The question cannot be answered within the declared ceiling.",
+          },
+        },
+        reaches: ["end-blocked"],
+        avoids: ["research-evidence"],
+      },
+      {
+        name: "autonomous run finishes when the repair budget is exhausted",
+        overrides: {
+          "package-completion": Array(5).fill(readyCompletion),
+          "validate-package": Array(5).fill({ validation_outcome: "pass" }),
+          "semantic-review": Array(5).fill({ review_outcome: "repair", repair_owner: "answer" }),
+        },
+        reaches: ["increment-review-round", "finalize-review-exhausted", "end-limited"],
+        avoids: ["ask-review-limit", "finalize-result"],
+        contextContains: { terminal_status: "limited" },
+      },
+      {
+        name: "interactive run keeps repairing once and then finishes",
+        overrides: {
+          intake: {
+            intake_outcome: "actionable",
+            research_question: "Which rate-limiting design fits?",
+            research_use: "Choose an architecture.",
+            research_scope: ["HTTP APIs"],
+            operating_mode: "interactive",
+            ...contract,
+          },
+          "frame-research": Array(3).fill({
+            framing_outcome: "ready",
+            source_policy: sourcePlan,
+          }),
+          "review-source-policy": Array(3).fill({ policy_review_outcome: "pass" }),
+          "package-completion": Array(9).fill(readyCompletion),
+          "validate-package": Array(9).fill({ validation_outcome: "pass" }),
+          "semantic-review": Array(9).fill({ review_outcome: "repair", repair_owner: "answer" }),
+          "ask-review-limit": [{ limit_decision: "continue" }, { limit_decision: "finish" }],
+        },
+        reaches: ["ask-review-limit", "reset-review-round-limit", "finalize-review-exhausted"],
+      },
+      {
+        name: "failed notification keeps the result",
+        notification: "error",
+        reaches: ["notify-result-ready", "notify-failed", "end"],
+        contextContains: { notification_status: "failed", terminal_status: "complete" },
+      },
+      {
         name: "guarded process revision",
         overrides: {
-          "frame-research": [{ framing_outcome: "ready" }, { framing_outcome: "ready" }],
+          "frame-research": [
+            { framing_outcome: "ready", source_policy: sourcePlan },
+            { framing_outcome: "ready", source_policy: sourcePlan },
+          ],
         },
         teleportAfter: { afterNode: "frame-research", teleportTo: "revise-process" },
         reaches: ["revise-process", "reassess-contract", "corrected-contract-review", "end"],
@@ -575,6 +700,7 @@ describe("verified-research", () => {
             },
           },
           current.materializeError,
+          current.notification,
         ),
       );
     }

@@ -2,8 +2,14 @@
   "id": "58794ccb-3794-441f-8671-9491a408c53a",
   "metadata": {
     "name": "Deep Corpus Research (expensive — ask the user first)",
-    "version": "7.1.4",
-    "description": "High-cost corpus-scale research for one authorized question whose answer depends on reading and synthesizing a defined body of sources as a whole. Requires explicit originating-user consent to the whole-corpus cost in both autonomous and interactive modes; task authorization alone is insufficient. Creates an execution-correlated corpus manifest, access/readiness account, adaptive plan, source-linked readings, synthesis, limitations, deterministic observations, independent plan and semantic findings, corrected-contract findings, repair account, and local final report. The corpus may expand visibly as research discovers in-scope sources. Whole-corpus understanding, boundary fitness, provenance, and conclusion validity remain independent reading judgments rather than counts, receipts, scores, or proof-of-read machinery. Cause-owned corpus, plan, research, and package repair re-enters every stale gate; invalid criteria and process discoveries pass corrected-contract review and normal re-entry. Produces truthful complete, reviewed-limited, blocked, refused, or interactive-aborted outcomes without retry-ceiling success. Local delivery is the default and the workflow never publishes, notifies, commits, deploys, or mutates production. Choose Verified Research for one bounded proportionate source set, Iterative Research for repeated durable critique, Universal Research for adaptive filesystem-or-memory authority modes, and Robust Task for complex non-research work."
+    "version": "7.2.0",
+    "description": "High-cost corpus-scale research for one authorized question whose answer depends on reading and synthesizing a defined body of sources as a whole. Requires explicit originating-user consent to the whole-corpus cost in both autonomous and interactive modes; task authorization alone is insufficient. Creates an execution-correlated corpus manifest, access/readiness account, adaptive plan, source-linked readings, synthesis, limitations, deterministic observations, independent plan and semantic findings, corrected-contract findings, repair account, and local final report. The corpus may expand visibly as research discovers in-scope sources. Whole-corpus understanding, boundary fitness, provenance, and conclusion validity remain independent reading judgments rather than counts, receipts, scores, or proof-of-read machinery. Cause-owned corpus, plan, research, and package repair re-enters every stale gate; invalid criteria and process discoveries pass corrected-contract review and normal re-entry. Produces truthful complete, reviewed-limited, blocked, refused, or interactive-aborted outcomes without retry-ceiling success. Local delivery is the default and the workflow never publishes, notifies, commits, deploys, or mutates production. Choose Verified Research for one bounded proportionate source set, Iterative Research for repeated durable critique, Universal Research for adaptive filesystem-or-memory authority modes, and Robust Task for complex non-research work.",
+    "tags": [
+      "исследование",
+      "корпус",
+      "источники",
+      "анализ"
+    ]
   },
   "nodes": [
     {
@@ -11,7 +17,8 @@
       "type": "start",
       "connections": {
         "default": "intake"
-      }
+      },
+      "progressNodeId": "intake"
     },
     {
       "id": "intake",
@@ -200,7 +207,8 @@
       },
       "connections": {
         "success": "route-intake-authorized"
-      }
+      },
+      "progressNodeId": "intake"
     },
     {
       "id": "route-intake-authorized",
@@ -215,6 +223,10 @@
       "connections": {
         "true": "materialize-workspace",
         "false": "route-intake-clarify"
+      },
+      "progressNodeId": "intake",
+      "connectionLabels": {
+        "true": "заявка разрешена, стоимость чтения корпуса согласована"
       }
     },
     {
@@ -230,6 +242,10 @@
       "connections": {
         "true": "clarify-question",
         "false": "route-intake-refused"
+      },
+      "progressNodeId": "intake",
+      "connectionLabels": {
+        "false": "уточнять нечего: отказ или нехватка сведений"
       }
     },
     {
@@ -245,7 +261,8 @@
       "connections": {
         "true": "end-refused",
         "false": "end-intake-blocked"
-      }
+      },
+      "progressNodeId": "stopped"
     },
     {
       "id": "clarify-question",
@@ -366,7 +383,8 @@
       },
       "connections": {
         "success": "route-clarification-authorized"
-      }
+      },
+      "progressNodeId": "intake"
     },
     {
       "id": "route-clarification-authorized",
@@ -381,6 +399,11 @@
       "connections": {
         "true": "materialize-workspace",
         "false": "route-clarification-refused"
+      },
+      "progressNodeId": "intake",
+      "connectionLabels": {
+        "true": "уточнение дало разрешение",
+        "false": "уточнение разрешения не дало"
       }
     },
     {
@@ -396,7 +419,8 @@
       "connections": {
         "true": "end-refused",
         "false": "end-intake-blocked"
-      }
+      },
+      "progressNodeId": "stopped"
     },
     {
       "id": "materialize-workspace",
@@ -467,6 +491,10 @@
       "connections": {
         "success": "initialize-original-contract",
         "error": "finalize-workspace-blocked"
+      },
+      "progressNodeId": "workspace",
+      "connectionLabels": {
+        "error": "рабочий каталог не создан"
       }
     },
     {
@@ -583,7 +611,8 @@
       },
       "connections": {
         "success": "route-corpus-usable"
-      }
+      },
+      "progressNodeId": "corpus"
     },
     {
       "id": "route-corpus-usable",
@@ -610,6 +639,10 @@
       "connections": {
         "true": "plan-research",
         "false": "route-corpus-replan"
+      },
+      "progressNodeId": "corpus",
+      "connectionLabels": {
+        "true": "корпус пригоден полностью или с ограничениями"
       }
     },
     {
@@ -625,6 +658,11 @@
       "connections": {
         "true": "reassess-contract",
         "false": "finalize-blocked"
+      },
+      "progressNodeId": "corpus",
+      "connectionLabels": {
+        "true": "корпус требует пересмотра договорённостей",
+        "false": "корпус непроходим"
       }
     },
     {
@@ -746,7 +784,8 @@
       },
       "connections": {
         "success": "route-plan-ready"
-      }
+      },
+      "progressNodeId": "plan"
     },
     {
       "id": "route-plan-ready",
@@ -761,6 +800,10 @@
       "connections": {
         "true": "review-plan",
         "false": "route-plan-replan"
+      },
+      "progressNodeId": "plan",
+      "connectionLabels": {
+        "true": "план готов к проверке"
       }
     },
     {
@@ -776,6 +819,11 @@
       "connections": {
         "true": "reassess-contract",
         "false": "finalize-blocked"
+      },
+      "progressNodeId": "plan",
+      "connectionLabels": {
+        "true": "план требует пересмотра договорённостей",
+        "false": "план не строится"
       }
     },
     {
@@ -905,7 +953,8 @@
       },
       "connections": {
         "success": "route-plan-review-pass"
-      }
+      },
+      "progressNodeId": "plan-review"
     },
     {
       "id": "route-plan-review-pass",
@@ -920,6 +969,10 @@
       "connections": {
         "true": "research-evidence",
         "false": "route-plan-review-repair"
+      },
+      "progressNodeId": "plan-review",
+      "connectionLabels": {
+        "true": "план принят рецензентом"
       }
     },
     {
@@ -935,6 +988,10 @@
       "connections": {
         "true": "repair-plan",
         "false": "route-plan-review-corpus"
+      },
+      "progressNodeId": "plan-review",
+      "connectionLabels": {
+        "true": "рецензент требует правки плана"
       }
     },
     {
@@ -950,6 +1007,11 @@
       "connections": {
         "true": "reassess-contract",
         "false": "finalize-blocked"
+      },
+      "progressNodeId": "plan-review",
+      "connectionLabels": {
+        "true": "проверка плана требует пересмотра договорённостей",
+        "false": "проверка плана признала работу непроходимой"
       }
     },
     {
@@ -1089,7 +1151,8 @@
       },
       "connections": {
         "success": "route-plan-repair-changed"
-      }
+      },
+      "progressNodeId": "plan-repair"
     },
     {
       "id": "route-plan-repair-changed",
@@ -1104,6 +1167,16 @@
       "connections": {
         "true": "review-plan",
         "false": "route-plan-repair-blocked"
+      },
+      "progressNodeId": "plan-repair",
+      "connectionLabels": {
+        "true": {
+          "label": "план исправлен по замечаниям рецензента",
+          "cycle": {
+            "cause": "Рецензент плана вернул конкретные замечания, и владелец плана переписал план, не меняя цели и полномочий.",
+            "exit": "Исправленный план проходит ту же независимую проверку и принимается; неснимаемое замечание уводит в пересмотр договорённостей или в остановку."
+          }
+        }
       }
     },
     {
@@ -1119,6 +1192,11 @@
       "connections": {
         "true": "finalize-blocked",
         "false": "reassess-contract"
+      },
+      "progressNodeId": "plan-repair",
+      "connectionLabels": {
+        "true": "правка плана непроходима",
+        "false": "правка плана требует пересмотра договорённостей"
       }
     },
     {
@@ -1262,7 +1340,8 @@
       },
       "connections": {
         "success": "route-research-ready"
-      }
+      },
+      "progressNodeId": "research"
     },
     {
       "id": "route-research-ready",
@@ -1277,6 +1356,10 @@
       "connections": {
         "true": "synthesize-answer",
         "false": "route-research-replan"
+      },
+      "progressNodeId": "research",
+      "connectionLabels": {
+        "true": "корпус прочитан, материал собран"
       }
     },
     {
@@ -1292,6 +1375,11 @@
       "connections": {
         "true": "reassess-contract",
         "false": "finalize-blocked"
+      },
+      "progressNodeId": "research",
+      "connectionLabels": {
+        "true": "чтение требует пересмотра договорённостей",
+        "false": "прочитать корпус не удалось"
       }
     },
     {
@@ -1413,7 +1501,8 @@
       },
       "connections": {
         "success": "route-synthesis-ready"
-      }
+      },
+      "progressNodeId": "synthesis"
     },
     {
       "id": "route-synthesis-ready",
@@ -1428,6 +1517,10 @@
       "connections": {
         "true": "package-completion",
         "false": "route-synthesis-replan"
+      },
+      "progressNodeId": "synthesis",
+      "connectionLabels": {
+        "true": "ответ синтезирован"
       }
     },
     {
@@ -1443,6 +1536,11 @@
       "connections": {
         "true": "reassess-contract",
         "false": "finalize-blocked"
+      },
+      "progressNodeId": "synthesis",
+      "connectionLabels": {
+        "true": "синтез требует пересмотра договорённостей",
+        "false": "ответ из прочитанного не выводится"
       }
     },
     {
@@ -1602,7 +1700,8 @@
       },
       "connections": {
         "success": "route-completion-ready"
-      }
+      },
+      "progressNodeId": "package"
     },
     {
       "id": "route-completion-ready",
@@ -1617,6 +1716,10 @@
       "connections": {
         "true": "validate-package",
         "false": "route-completion-replan"
+      },
+      "progressNodeId": "package",
+      "connectionLabels": {
+        "true": "пакет результата собран"
       }
     },
     {
@@ -1632,6 +1735,11 @@
       "connections": {
         "true": "reassess-contract",
         "false": "finalize-blocked"
+      },
+      "progressNodeId": "package",
+      "connectionLabels": {
+        "true": "сборка требует пересмотра договорённостей",
+        "false": "собрать пакет не удалось"
       }
     },
     {
@@ -1761,7 +1869,8 @@
       },
       "connections": {
         "success": "route-validation-pass"
-      }
+      },
+      "progressNodeId": "validation"
     },
     {
       "id": "route-validation-pass",
@@ -1776,6 +1885,10 @@
       "connections": {
         "true": "semantic-review",
         "false": "route-validation-package"
+      },
+      "progressNodeId": "validation",
+      "connectionLabels": {
+        "true": "пакет прошёл формальную проверку"
       }
     },
     {
@@ -1791,6 +1904,10 @@
       "connections": {
         "true": "repair-answer",
         "false": "route-validation-evidence"
+      },
+      "progressNodeId": "validation",
+      "connectionLabels": {
+        "true": "проверка требует правки пакета"
       }
     },
     {
@@ -1806,6 +1923,10 @@
       "connections": {
         "true": "repair-evidence",
         "false": "route-validation-plan"
+      },
+      "progressNodeId": "validation",
+      "connectionLabels": {
+        "true": "проверка требует правки доказательств"
       }
     },
     {
@@ -1821,6 +1942,10 @@
       "connections": {
         "true": "repair-plan-from-validation",
         "false": "route-validation-replan"
+      },
+      "progressNodeId": "validation",
+      "connectionLabels": {
+        "true": "проверка требует правки плана"
       }
     },
     {
@@ -1836,6 +1961,11 @@
       "connections": {
         "true": "reassess-contract",
         "false": "finalize-blocked"
+      },
+      "progressNodeId": "validation",
+      "connectionLabels": {
+        "true": "проверка требует пересмотра договорённостей",
+        "false": "проверка признала пакет непроходимым"
       }
     },
     {
@@ -2019,7 +2149,8 @@
       },
       "connections": {
         "success": "route-review-pass"
-      }
+      },
+      "progressNodeId": "semantic-review"
     },
     {
       "id": "route-review-pass",
@@ -2034,6 +2165,10 @@
       "connections": {
         "true": "route-mode-acceptance",
         "false": "route-review-repair"
+      },
+      "progressNodeId": "semantic-review",
+      "connectionLabels": {
+        "true": "ревью приняло пакет"
       }
     },
     {
@@ -2049,7 +2184,8 @@
       "connections": {
         "true": "route-review-package",
         "false": "route-review-replan"
-      }
+      },
+      "progressNodeId": "semantic-review"
     },
     {
       "id": "route-review-package",
@@ -2064,6 +2200,10 @@
       "connections": {
         "true": "repair-answer-from-semantic-review",
         "false": "route-review-evidence"
+      },
+      "progressNodeId": "semantic-review",
+      "connectionLabels": {
+        "true": "ревью назначило правку пакета ответа"
       }
     },
     {
@@ -2079,6 +2219,11 @@
       "connections": {
         "true": "repair-evidence-from-semantic-review",
         "false": "repair-plan-from-semantic-review"
+      },
+      "progressNodeId": "semantic-review",
+      "connectionLabels": {
+        "true": "ревью назначило правку доказательств",
+        "false": "ревью назначило правку плана"
       }
     },
     {
@@ -2094,6 +2239,11 @@
       "connections": {
         "true": "reassess-contract",
         "false": "finalize-blocked"
+      },
+      "progressNodeId": "semantic-review",
+      "connectionLabels": {
+        "true": "ревью требует пересмотра договорённостей",
+        "false": "ревью признало работу непроходимой"
       }
     },
     {
@@ -2233,7 +2383,8 @@
       },
       "connections": {
         "success": "route-package-repair-changed"
-      }
+      },
+      "progressNodeId": "package-repair"
     },
     {
       "id": "route-package-repair-changed",
@@ -2248,6 +2399,16 @@
       "connections": {
         "true": "package-completion",
         "false": "route-package-repair-blocked"
+      },
+      "progressNodeId": "package-repair",
+      "connectionLabels": {
+        "true": {
+          "label": "пакет исправлен",
+          "cycle": {
+            "cause": "Формальная проверка вернула дефект состава или целостности пакета, и владелец пакета его отработал.",
+            "exit": "Пакет пересобирается и снова проходит проверку; неснимаемый дефект уводит в пересмотр договорённостей или в остановку."
+          }
+        }
       }
     },
     {
@@ -2263,6 +2424,11 @@
       "connections": {
         "true": "finalize-blocked",
         "false": "reassess-contract"
+      },
+      "progressNodeId": "package-repair",
+      "connectionLabels": {
+        "true": "правка пакета непроходима",
+        "false": "правка пакета требует пересмотра договорённостей"
       }
     },
     {
@@ -2402,7 +2568,8 @@
       },
       "connections": {
         "success": "route-evidence-repair-changed"
-      }
+      },
+      "progressNodeId": "package-repair"
     },
     {
       "id": "route-evidence-repair-changed",
@@ -2417,6 +2584,16 @@
       "connections": {
         "true": "frame-research",
         "false": "route-evidence-repair-blocked"
+      },
+      "progressNodeId": "package-repair",
+      "connectionLabels": {
+        "true": {
+          "label": "доказательства исправлены",
+          "cycle": {
+            "cause": "Формальная проверка нашла дефект в собранных доказательствах, а восстановить их можно только заново открыв корпус и перечитав источники.",
+            "exit": "Корпус и чтение проходятся снова, пакет пересобирается и снова проверяется; невосстановимое доказательство уводит в пересмотр договорённостей или в остановку."
+          }
+        }
       }
     },
     {
@@ -2432,6 +2609,11 @@
       "connections": {
         "true": "finalize-blocked",
         "false": "reassess-contract"
+      },
+      "progressNodeId": "package-repair",
+      "connectionLabels": {
+        "true": "правка доказательств непроходима",
+        "false": "правка доказательств требует пересмотра договорённостей"
       }
     },
     {
@@ -2510,7 +2692,8 @@
       },
       "connections": {
         "success": "route-reassessment-corrected"
-      }
+      },
+      "progressNodeId": "contract"
     },
     {
       "id": "route-reassessment-corrected",
@@ -2525,6 +2708,10 @@
       "connections": {
         "true": "corrected-contract-review",
         "false": "finalize-blocked"
+      },
+      "progressNodeId": "contract",
+      "connectionLabels": {
+        "false": "договорённости исправить не удалось"
       }
     },
     {
@@ -2650,7 +2837,8 @@
       },
       "connections": {
         "success": "route-contract-review-pass"
-      }
+      },
+      "progressNodeId": "contract"
     },
     {
       "id": "route-contract-review-pass",
@@ -2665,7 +2853,8 @@
       "connections": {
         "true": "route-reentry-corpus",
         "false": "route-contract-review-blocked"
-      }
+      },
+      "progressNodeId": "contract"
     },
     {
       "id": "route-contract-review-blocked",
@@ -2680,6 +2869,17 @@
       "connections": {
         "true": "finalize-blocked",
         "false": "reassess-contract"
+      },
+      "progressNodeId": "contract",
+      "connectionLabels": {
+        "true": "проверка контракта признала работу непроходимой",
+        "false": {
+          "label": "корректированный контракт отправлен на доработку",
+          "cycle": {
+            "cause": "Независимая проверка нашла, что корректированный контракт ещё не годится: он расходится с исходным вопросом, согласием на стоимость или полномочиями.",
+            "exit": "Контракт переписывается и проверяется снова, пока не будет принят; признанный непроходимым уводит работу в остановку."
+          }
+        }
       }
     },
     {
@@ -2695,6 +2895,16 @@
       "connections": {
         "true": "frame-research",
         "false": "route-reentry-plan"
+      },
+      "progressNodeId": "contract",
+      "connectionLabels": {
+        "true": {
+          "label": "работа входит заново со сбора корпуса",
+          "cycle": {
+            "cause": "Принятый корректированный контракт обесценил самую раннюю стадию — сам сбор корпуса.",
+            "exit": "Корпус, план, чтение и сборка проходятся заново под новыми договорённостями и доходят до приёмки; очередной тупик уводит в остановку."
+          }
+        }
       }
     },
     {
@@ -2710,6 +2920,16 @@
       "connections": {
         "true": "plan-research",
         "false": "route-reentry-research"
+      },
+      "progressNodeId": "contract",
+      "connectionLabels": {
+        "true": {
+          "label": "работа входит заново с плана",
+          "cycle": {
+            "cause": "Принятый корректированный контракт оставил собранный корпус в силе, но обесценил план чтения.",
+            "exit": "План строится заново, проходит проверку, и работа идёт до приёмки; очередной тупик уводит в остановку."
+          }
+        }
       }
     },
     {
@@ -2725,6 +2945,23 @@
       "connections": {
         "true": "research-evidence",
         "false": "package-completion"
+      },
+      "progressNodeId": "contract",
+      "connectionLabels": {
+        "true": {
+          "label": "работа входит заново с чтения",
+          "cycle": {
+            "cause": "Принятый корректированный контракт оставил корпус и план в силе, но обесценил уже прочитанное.",
+            "exit": "Корпус перечитывается по прежнему плану, ответ пересобирается и работа идёт до приёмки; очередной тупик уводит в остановку."
+          }
+        },
+        "false": {
+          "label": "работа входит заново со сборки пакета",
+          "cycle": {
+            "cause": "Принятый корректированный контракт затронул только сборку результата, а корпус, план и чтение остались в силе.",
+            "exit": "Пакет пересобирается под новыми договорённостями и снова проходит проверку и ревью; очередной тупик уводит в остановку."
+          }
+        }
       }
     },
     {
@@ -2740,6 +2977,10 @@
       "connections": {
         "true": "interactive-acceptance",
         "false": "route-final-result-status"
+      },
+      "progressNodeId": "acceptance",
+      "connectionLabels": {
+        "false": "автономный режим: приёмка не проводится"
       }
     },
     {
@@ -2829,7 +3070,8 @@
       },
       "connections": {
         "success": "route-user-accept"
-      }
+      },
+      "progressNodeId": "acceptance"
     },
     {
       "id": "route-user-accept",
@@ -2844,6 +3086,10 @@
       "connections": {
         "true": "route-final-result-status",
         "false": "route-user-abort"
+      },
+      "progressNodeId": "acceptance",
+      "connectionLabels": {
+        "true": "пользователь принял работу"
       }
     },
     {
@@ -2859,6 +3105,10 @@
       "connections": {
         "true": "finalize-aborted",
         "false": "route-rework-corpus"
+      },
+      "progressNodeId": "acceptance",
+      "connectionLabels": {
+        "true": "пользователь прервал работу"
       }
     },
     {
@@ -2874,6 +3124,16 @@
       "connections": {
         "true": "frame-research",
         "false": "route-rework-plan"
+      },
+      "progressNodeId": "acceptance",
+      "connectionLabels": {
+        "true": {
+          "label": "пользователь вернул работу к корпусу",
+          "cycle": {
+            "cause": "Пользователь при приёмке назвал корпус: тело источников собрано не тем, каким он считает нужным.",
+            "exit": "Корпус, план, чтение и сборка проходятся заново, и приёмка повторяется; принятая или прерванная пользователем работа выходит из круга."
+          }
+        }
       }
     },
     {
@@ -2889,6 +3149,16 @@
       "connections": {
         "true": "plan-research",
         "false": "route-rework-research"
+      },
+      "progressNodeId": "acceptance",
+      "connectionLabels": {
+        "true": {
+          "label": "пользователь вернул работу к плану",
+          "cycle": {
+            "cause": "Пользователь при приёмке назвал план: корпус его устраивает, а способ его разбора нет.",
+            "exit": "План и вся работа за ним проходятся заново, и приёмка повторяется; принятая или прерванная пользователем работа выходит из круга."
+          }
+        }
       }
     },
     {
@@ -2904,6 +3174,16 @@
       "connections": {
         "true": "research-evidence",
         "false": "route-rework-synthesis"
+      },
+      "progressNodeId": "acceptance",
+      "connectionLabels": {
+        "true": {
+          "label": "пользователь вернул работу к чтению",
+          "cycle": {
+            "cause": "Пользователь при приёмке назвал чтение: план его устраивает, а собранный по нему материал нет.",
+            "exit": "Корпус перечитывается, ответ и пакет пересобираются, и приёмка повторяется; принятая или прерванная пользователем работа выходит из круга."
+          }
+        }
       }
     },
     {
@@ -2919,6 +3199,23 @@
       "connections": {
         "true": "synthesize-answer",
         "false": "reassess-contract"
+      },
+      "progressNodeId": "acceptance",
+      "connectionLabels": {
+        "true": {
+          "label": "пользователь вернул работу к синтезу",
+          "cycle": {
+            "cause": "Пользователь при приёмке назвал синтез: прочитанного достаточно, а ответ из него собран не так.",
+            "exit": "Ответ синтезируется заново, пакет пересобирается, и приёмка повторяется; принятая или прерванная пользователем работа выходит из круга."
+          }
+        },
+        "false": {
+          "label": "пользователь требует пересмотра договорённостей",
+          "cycle": {
+            "cause": "Пользователь при приёмке не назвал ни одну рабочую стадию, то есть его замечание касается самих договорённостей о вопросе, границах или полномочиях.",
+            "exit": "Договорённости переписываются и независимо проверяются, работа входит заново с названной устаревшей стадии и снова доходит до приёмки; неисправимые договорённости уводят в остановку."
+          }
+        }
       }
     },
     {
@@ -2934,7 +3231,8 @@
       "connections": {
         "true": "finalize-result",
         "false": "finalize-limited"
-      }
+      },
+      "progressNodeId": "delivery"
     },
     {
       "id": "finalize-result",
@@ -2971,7 +3269,8 @@
       },
       "connections": {
         "success": "end"
-      }
+      },
+      "progressNodeId": "delivery"
     },
     {
       "id": "finalize-limited",
@@ -3008,7 +3307,8 @@
       },
       "connections": {
         "success": "end-limited"
-      }
+      },
+      "progressNodeId": "delivery"
     },
     {
       "id": "finalize-blocked",
@@ -3045,7 +3345,8 @@
       },
       "connections": {
         "success": "end-blocked"
-      }
+      },
+      "progressNodeId": "stopped"
     },
     {
       "id": "finalize-aborted",
@@ -3082,7 +3383,8 @@
       },
       "connections": {
         "success": "end-aborted"
-      }
+      },
+      "progressNodeId": "stopped"
     },
     {
       "id": "finalize-workspace-blocked",
@@ -3113,7 +3415,8 @@
       },
       "connections": {
         "success": "end-workspace-blocked"
-      }
+      },
+      "progressNodeId": "stopped"
     },
     {
       "id": "revise-process",
@@ -3148,7 +3451,8 @@
       },
       "connections": {
         "success": "reassess-contract"
-      }
+      },
+      "progressNodeId": "contract"
     },
     {
       "id": "end",
@@ -3158,7 +3462,8 @@
         "artifact_path",
         "answer_summary",
         "limitation_summary"
-      ]
+      ],
+      "progressNodeId": "delivery"
     },
     {
       "id": "end-limited",
@@ -3168,7 +3473,8 @@
         "artifact_path",
         "answer_summary",
         "limitation_summary"
-      ]
+      ],
+      "progressNodeId": "delivery"
     },
     {
       "id": "end-blocked",
@@ -3177,7 +3483,8 @@
         "terminal_status",
         "artifact_path",
         "terminal_reason"
-      ]
+      ],
+      "progressNodeId": "stopped"
     },
     {
       "id": "end-aborted",
@@ -3185,7 +3492,8 @@
       "finalOutput": [
         "terminal_status",
         "artifact_path"
-      ]
+      ],
+      "progressNodeId": "stopped"
     },
     {
       "id": "end-refused",
@@ -3194,7 +3502,8 @@
         "terminal_status",
         "intake.outcome_reason",
         "clarify-question.outcome_reason"
-      ]
+      ],
+      "progressNodeId": "stopped"
     },
     {
       "id": "end-intake-blocked",
@@ -3203,7 +3512,8 @@
         "terminal_status",
         "intake.outcome_reason",
         "clarify-question.outcome_reason"
-      ]
+      ],
+      "progressNodeId": "stopped"
     },
     {
       "id": "end-workspace-blocked",
@@ -3214,7 +3524,8 @@
         "research_question",
         "research_use",
         "workspace_path"
-      ]
+      ],
+      "progressNodeId": "stopped"
     },
     {
       "id": "initialize-original-contract",
@@ -3272,7 +3583,8 @@
       },
       "connections": {
         "success": "route-original-contract-ready"
-      }
+      },
+      "progressNodeId": "workspace"
     },
     {
       "id": "route-original-contract-ready",
@@ -3287,6 +3599,11 @@
       "connections": {
         "true": "frame-research",
         "false": "finalize-blocked"
+      },
+      "progressNodeId": "workspace",
+      "connectionLabels": {
+        "true": "контракт исследования записан",
+        "false": "контракт из заявки не выводится"
       }
     },
     {
@@ -3302,6 +3619,16 @@
       "connections": {
         "true": "frame-research-from-plan-review",
         "false": "route-plan-review-replan"
+      },
+      "progressNodeId": "plan-review",
+      "connectionLabels": {
+        "true": {
+          "label": "рецензент требует пересобрать корпус",
+          "cycle": {
+            "cause": "Проверка плана нашла, что корпус собран не под вопрос: границы тела источников или их доступность названы неверно, и планировать чтение по нему нельзя.",
+            "exit": "Корпус пересобирается и снова оценивается на пригодность: пригодный уводит работу к новому плану, требующий пересмотра договорённостей — в их пересмотр, непроходимый — в остановку."
+          }
+        }
       }
     },
     {
@@ -3418,6 +3745,16 @@
       },
       "connections": {
         "success": "route-corpus-usable"
+      },
+      "progressNodeId": "corpus",
+      "connectionLabels": {
+        "success": {
+          "label": "корпус пересобран",
+          "cycle": {
+            "cause": "Корпус пересобран по замечанию проверки плана, и его пригодность оценивает тот же узел, что и при первом сборе.",
+            "exit": "Оценка объявляет корпус пригодным — работа уходит к плану, — либо отправляет в пересмотр договорённостей, либо кончается остановкой."
+          }
+        }
       }
     },
     {
@@ -3557,7 +3894,8 @@
       },
       "connections": {
         "success": "route-plan-validation-repair-changed"
-      }
+      },
+      "progressNodeId": "plan-repair"
     },
     {
       "id": "repair-plan-from-semantic-review",
@@ -3696,7 +4034,8 @@
       },
       "connections": {
         "success": "route-plan-semantic-repair-changed"
-      }
+      },
+      "progressNodeId": "plan-repair"
     },
     {
       "id": "repair-answer-from-semantic-review",
@@ -3835,7 +4174,8 @@
       },
       "connections": {
         "success": "route-package-semantic-repair-changed"
-      }
+      },
+      "progressNodeId": "package-repair"
     },
     {
       "id": "repair-evidence-from-semantic-review",
@@ -3974,7 +4314,8 @@
       },
       "connections": {
         "success": "route-evidence-semantic-repair-changed"
-      }
+      },
+      "progressNodeId": "package-repair"
     },
     {
       "id": "route-plan-validation-repair-changed",
@@ -3989,6 +4330,16 @@
       "connections": {
         "true": "review-plan",
         "false": "route-plan-validation-repair-blocked"
+      },
+      "progressNodeId": "plan-repair",
+      "connectionLabels": {
+        "true": {
+          "label": "план исправлен по формальной проверке",
+          "cycle": {
+            "cause": "Формальная проверка пакета нашла дефект, источник которого — план, и владелец плана его отработал.",
+            "exit": "Исправленный план снова проходит независимую проверку плана и работа идёт дальше; неснимаемый дефект уводит в пересмотр договорённостей или в остановку."
+          }
+        }
       }
     },
     {
@@ -4004,6 +4355,11 @@
       "connections": {
         "true": "finalize-blocked",
         "false": "reassess-contract"
+      },
+      "progressNodeId": "plan-repair",
+      "connectionLabels": {
+        "true": "правка плана по формальной проверке непроходима",
+        "false": "правка плана по формальной проверке требует пересмотра договорённостей"
       }
     },
     {
@@ -4019,6 +4375,16 @@
       "connections": {
         "true": "review-plan",
         "false": "route-plan-semantic-repair-blocked"
+      },
+      "progressNodeId": "plan-repair",
+      "connectionLabels": {
+        "true": {
+          "label": "план исправлен по замечанию ревью",
+          "cycle": {
+            "cause": "Смысловое ревью нашло дефект, источник которого — план, и владелец плана переписал план.",
+            "exit": "Исправленный план снова проходит проверку плана и работа идёт дальше; неснимаемый дефект уводит в пересмотр договорённостей или в остановку."
+          }
+        }
       }
     },
     {
@@ -4034,6 +4400,11 @@
       "connections": {
         "true": "finalize-blocked",
         "false": "reassess-contract"
+      },
+      "progressNodeId": "plan-repair",
+      "connectionLabels": {
+        "true": "правка плана по ревью непроходима",
+        "false": "правка плана по ревью требует пересмотра договорённостей"
       }
     },
     {
@@ -4049,6 +4420,16 @@
       "connections": {
         "true": "package-completion",
         "false": "route-package-semantic-repair-blocked"
+      },
+      "progressNodeId": "package-repair",
+      "connectionLabels": {
+        "true": {
+          "label": "пакет исправлен по замечанию ревью",
+          "cycle": {
+            "cause": "Смысловое ревью вернуло замечание к самому пакету ответа, и его владелец переписал свою часть.",
+            "exit": "Пакет пересобирается и снова проходит формальную проверку и ревью; неснимаемое замечание уводит в пересмотр договорённостей или в остановку."
+          }
+        }
       }
     },
     {
@@ -4064,6 +4445,11 @@
       "connections": {
         "true": "finalize-blocked",
         "false": "reassess-contract"
+      },
+      "progressNodeId": "package-repair",
+      "connectionLabels": {
+        "true": "правка пакета по ревью непроходима",
+        "false": "правка пакета по ревью требует пересмотра договорённостей"
       }
     },
     {
@@ -4079,6 +4465,16 @@
       "connections": {
         "true": "frame-research",
         "false": "route-evidence-semantic-repair-blocked"
+      },
+      "progressNodeId": "package-repair",
+      "connectionLabels": {
+        "true": {
+          "label": "доказательства исправлены по замечанию ревью",
+          "cycle": {
+            "cause": "Смысловое ревью нашло, что ответ опирается на неверно собранные доказательства, а их восстановление требует заново открыть корпус.",
+            "exit": "Корпус и чтение проходятся снова, пакет пересобирается и опять идёт на ревью; неснимаемое замечание уводит в пересмотр договорённостей или в остановку."
+          }
+        }
       }
     },
     {
@@ -4094,6 +4490,11 @@
       "connections": {
         "true": "finalize-blocked",
         "false": "reassess-contract"
+      },
+      "progressNodeId": "package-repair",
+      "connectionLabels": {
+        "true": "правка доказательств по ревью непроходима",
+        "false": "правка доказательств по ревью требует пересмотра договорённостей"
       }
     }
   ],
@@ -4223,5 +4624,123 @@
   "visibility": "public",
   "previousSlugs": [
     "robust-research-task"
-  ]
+  ],
+  "progress": {
+    "title": "Deep Corpus Research",
+    "goal": "Ответить на один вопрос, ответ на который требует прочтения целого корпуса источников, и выдать локальный отчёт, честно называющий полноту ответа и его ограничения.",
+    "nodes": [
+      {
+        "id": "intake",
+        "label": "Заявка и согласие на стоимость",
+        "content": {
+          "summary": "Уточняется сам вопрос, кому и для какого решения нужен ответ, границы корпуса и режим работы, и проверяется, что заказчик явно согласился на высокую стоимость чтения всего корпуса; при нехватке сведений задаётся один существенный вопрос, и запуск идёт дальше только с явным разрешением."
+        }
+      },
+      {
+        "id": "workspace",
+        "label": "Рабочий каталог и контракт",
+        "content": {
+          "summary": "Создаётся соотнесённый с исполнением рабочий каталог, и в нём один раз записывается неизменяемый контракт исследования — исходный вопрос, назначение ответа, границы, согласие на стоимость и полномочия, — на который дальше ссылается вся работа."
+        }
+      },
+      {
+        "id": "corpus",
+        "label": "Корпус источников",
+        "content": {
+          "summary": "Определяется и открывается тело источников: что в него входит, что доступно, что прочесть нельзя; стадия кончается объявлением пригодности корпуса — полностью готов, пригоден с ограничениями, требует пересмотра договорённостей или непроходим."
+        }
+      },
+      {
+        "id": "plan",
+        "label": "План исследования",
+        "content": {
+          "summary": "Отдельный исполнитель готовит адаптивный план чтения и разбора корпуса под контракт; стадия кончается готовым планом либо признанием, что план по нынешним договорённостям не строится."
+        }
+      },
+      {
+        "id": "plan-review",
+        "label": "Проверка плана",
+        "content": {
+          "summary": "Независимый рецензент сверяет план с целью, полномочиями и фактическим корпусом и выносит один исход: план принят, план нужно поправить, сначала нужно пересобрать корпус, нужен пересмотр договорённостей или работа непроходима."
+        }
+      },
+      {
+        "id": "research",
+        "label": "Чтение и разбор корпуса",
+        "content": {
+          "summary": "План исполняется: источники читаются целиком, из них собираются привязанные к источникам наблюдения и выписки; стадия кончается готовым материалом для ответа либо сообщением, что корпус или договорённости не позволяют его собрать."
+        }
+      },
+      {
+        "id": "synthesis",
+        "label": "Синтез ответа",
+        "content": {
+          "summary": "Из прочитанного собирается ответ на исходный вопрос вместе с его ограничениями — как целое по корпусу, а не как перечень цитат; стадия кончается готовым ответом либо требованием пересмотреть договорённости."
+        }
+      },
+      {
+        "id": "package",
+        "label": "Сборка пакета результата",
+        "content": {
+          "summary": "Ответ, ограничения, наблюдения и манифест корпуса складываются в цельный пакет и получают честный класс результата — полный или ограниченный; стадия кончается пакетом, готовым к проверке."
+        }
+      },
+      {
+        "id": "validation",
+        "label": "Формальная проверка пакета",
+        "content": {
+          "summary": "Пакет проверяется на состав и целостность: все ли файлы на месте, разбираются ли схемы, сходятся ли ссылки на манифест и источники; стадия кончается либо допуском к смысловому ревью, либо адресным указанием, чья работа подлежит правке — пакета, доказательств или плана."
+        }
+      },
+      {
+        "id": "semantic-review",
+        "label": "Независимое смысловое ревью",
+        "content": {
+          "summary": "Независимый рецензент читает пакет целиком и судит то, чего не видит формальная проверка: отвечает ли ответ на исходный вопрос, держится ли он корпуса и правдивы ли заявленные ограничения; стадия кончается принятием пакета или адресной отправкой на правку."
+        }
+      },
+      {
+        "id": "plan-repair",
+        "label": "Правка плана по замечаниям",
+        "content": {
+          "summary": "Владелец плана разбирает конкретный отчёт того рецензента или проверки, который его вызвал, и переписывает план; стадия кончается изменённым планом, уходящим на повторную проверку, либо признанием, что замечание правкой плана не снимается."
+        }
+      },
+      {
+        "id": "package-repair",
+        "label": "Правка пакета и доказательств",
+        "content": {
+          "summary": "Названный проверкой или ревью владелец — пакета ответа или собранных доказательств — читает конкретный отчёт и переписывает свою часть; стадия кончается изменённой работой, возвращаемой на пересборку или перечитывание, либо признанием, что дефект правкой не снимается."
+        }
+      },
+      {
+        "id": "contract",
+        "label": "Пересмотр договорённостей",
+        "content": {
+          "summary": "Общий узел всех тупиков: исходный вопрос, согласие на стоимость и полномочия сохраняются, а корректированный контракт пишется, независимо проверяется и, будучи принятым, называет самую раннюю устаревшую стадию, с которой работа пойдёт заново."
+        }
+      },
+      {
+        "id": "acceptance",
+        "label": "Приёмка пользователем",
+        "content": {
+          "summary": "В интерактивном режиме пользователю показывают принятый ревью локальный отчёт и его класс результата, и он принимает работу, прерывает её или называет стадию, которую нужно переделать; в автономном режиме стадия не проходится."
+        }
+      },
+      {
+        "id": "delivery",
+        "label": "Итоговый отчёт",
+        "content": {
+          "summary": "Из принятого пакета пишется final-report.md, его класс объявляется честно — полный ответ или ответ с названными ограничениями, — и пользователь получает путь к локальному файлу. Наружу ничего не публикуется."
+        }
+      },
+      {
+        "id": "stopped",
+        "label": "Остановка без ответа",
+        "content": {
+          "summary": "Запуск кончается без ответа на вопрос: в работе отказано, не хватило разрешения или сведений на входе, не создался рабочий каталог, корпус или договорённости оказались непроходимы, либо пользователь прервал работу — с названной причиной и отчётом о том, что успели сделать."
+        }
+      }
+    ]
+  }
 }

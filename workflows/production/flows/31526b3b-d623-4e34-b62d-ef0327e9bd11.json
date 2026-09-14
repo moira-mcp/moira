@@ -5,8 +5,13 @@
   "id": "31526b3b-d623-4e34-b62d-ef0327e9bd11",
   "metadata": {
     "name": "Test Planning Workflow",
-    "version": "2.0.0",
-    "description": "Creates a reviewed, risk-prioritized test plan for a feature, change, API, page, module, or system. It accepts supplied requirements, acceptance criteria, user scenarios, constraints, and risks, and first discovers missing context from available project evidence before asking for material unknowns. The workflow records requirements, analyzes applicable technical, business, security, data-integrity, compatibility, and operational risks, selects only relevant test categories with justified exclusions, and defines traceable P0-P3 cases with executable steps and observable expected results. In one traversal-safe local workspace it writes requirements.md, a schema-validated canonical test-plan.contract.json, and a ready-to-use test-plan.md. An independent file-backed reviewer checks every criterion and risk plus contract-to-Markdown consistency; any finding enters repair and the same review repeats, so delivery is unreachable while known gaps remain. It only creates local planning artifacts: it does not execute tests, change product code, commit, publish, notify, or deploy; test execution may only be recommended for a separately authorized caller or workflow. Choose Test Planning when you need an independently reviewed test strategy and case plan; choose Test Generation when you need test code, or a full development workflow when you need implementation together with tests and documentation."
+    "version": "2.1.0",
+    "description": "Creates a reviewed, risk-prioritized test plan for a feature, change, API, page, module, or system. It accepts supplied requirements, acceptance criteria, user scenarios, constraints, and risks, and first discovers missing context from available project evidence before asking for material unknowns. The workflow records requirements, analyzes applicable technical, business, security, data-integrity, compatibility, and operational risks, selects only relevant test categories with justified exclusions, and defines traceable P0-P3 cases with executable steps and observable expected results. In one traversal-safe local workspace it writes requirements.md, a schema-validated canonical test-plan.contract.json, and a ready-to-use test-plan.md. An independent file-backed reviewer checks every criterion and risk plus contract-to-Markdown consistency; any finding enters repair and the same review repeats, so delivery is unreachable while known gaps remain. It only creates local planning artifacts: it does not execute tests, change product code, commit, publish, notify, or deploy; test execution may only be recommended for a separately authorized caller or workflow. Choose Test Planning when you need an independently reviewed test strategy and case plan; choose Test Generation when you need test code, or a full development workflow when you need implementation together with tests and documentation.",
+    "tags": [
+      "тесты",
+      "планирование",
+      "качество"
+    ]
   },
   "nodes": [
     {
@@ -14,7 +19,8 @@
       "type": "start",
       "connections": {
         "default": "plan"
-      }
+      },
+      "progressNodeId": "plan"
     },
     {
       "id": "end",
@@ -22,7 +28,8 @@
       "finalOutput": [
         "workspace_path",
         "result_summary"
-      ]
+      ],
+      "progressNodeId": "deliver"
     },
     {
       "id": "plan",
@@ -205,6 +212,10 @@
       },
       "connections": {
         "success": "review"
+      },
+      "progressNodeId": "plan",
+      "connectionLabels": {
+        "success": "plan artifacts written"
       }
     },
     {
@@ -225,7 +236,8 @@
       },
       "connections": {
         "success": "review-gate"
-      }
+      },
+      "progressNodeId": "review"
     },
     {
       "id": "review-gate",
@@ -240,6 +252,11 @@
       "connections": {
         "true": "present",
         "false": "repair"
+      },
+      "progressNodeId": "review",
+      "connectionLabels": {
+        "true": "no blocking findings",
+        "false": "review found blocking findings"
       }
     },
     {
@@ -419,6 +436,16 @@
       },
       "connections": {
         "success": "review"
+      },
+      "progressNodeId": "repair",
+      "connectionLabels": {
+        "success": {
+          "label": "repaired plan sent back for review",
+          "cycle": {
+            "cause": "The review recorded at least one blocking finding, so the confirmed defects are repaired in the canonical contract and its Markdown projection and the same review runs again.",
+            "exit": "A review that returns zero blocking findings, which routes the run to delivery."
+          }
+        }
       }
     },
     {
@@ -439,7 +466,8 @@
       },
       "connections": {
         "success": "end"
-      }
+      },
+      "progressNodeId": "deliver"
     }
   ],
   "variableRegistry": {
@@ -462,5 +490,39 @@
       "minLength": 1,
       "maxLength": 2000
     }
+  },
+  "progress": {
+    "title": "Test Planning",
+    "goal": "Produce one independently reviewed, risk-prioritized test plan for a requested scope, written as durable local artifacts and never executed.",
+    "nodes": [
+      {
+        "id": "plan",
+        "label": "Draft the test plan",
+        "content": {
+          "summary": "Inspect the requested scope and the available project evidence, record requirements, risks and category decisions, and write the requirements file, the canonical case contract and its ready-to-use Markdown projection into one workspace."
+        }
+      },
+      {
+        "id": "review",
+        "label": "Independent review",
+        "content": {
+          "summary": "A reviewer who did not write the plan reads the workspace artifacts and the primary evidence directly, records every blocking finding, and returns their count; that count decides whether the plan is accepted or sent back."
+        }
+      },
+      {
+        "id": "repair",
+        "label": "Repair findings",
+        "content": {
+          "summary": "Reproduce each reported finding, fix the confirmed defects in the canonical contract and regenerate the Markdown so both agree, then hand the corrected plan back for another review."
+        }
+      },
+      {
+        "id": "deliver",
+        "label": "Present the plan",
+        "content": {
+          "summary": "Confirm the review reports no blocking findings and hand over the durable plan at its exact path with its tested scope, P0-P3 strategy and any honest remaining limitations."
+        }
+      }
+    ]
   }
 }

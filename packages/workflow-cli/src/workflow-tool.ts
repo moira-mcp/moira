@@ -30,6 +30,8 @@
  *   set-name <text>                  Set workflow display name
  *   set-slug <slug>                  Set workflow catalog slug (kebab-case)
  *   set-description <text>           Set workflow description
+ *   set-system-reminder <text|none>  Set or remove the per-step system reminder
+ *   set-tags <tag,tag,...|none>      Set or remove catalog tags
  *   set-version <version>            Set workflow version
  *   set-progress <json|--file path|none> Set or remove static progress graph
  */
@@ -1086,6 +1088,55 @@ function setDescription(workflow: WorkflowGraph, description: string): WorkflowG
 }
 
 /**
+ * Catalog tags are how a flow is found by subject rather than by name, so an untagged flow is
+ * invisible to selection by topic. `none` clears them.
+ */
+function setTags(workflow: WorkflowGraph, tags: string[] | null): WorkflowGraph {
+  const oldTags = workflow.metadata.tags;
+
+  if (tags === null) {
+    delete workflow.metadata.tags;
+    console.log(c("green", "✓ Tags removed"));
+  } else {
+    workflow.metadata.tags = tags;
+    console.log(c("green", "✓ Tags updated"));
+  }
+  if (oldTags?.length) {
+    console.log(c("dim", `Old tags: ${oldTags.join(", ")}`));
+  }
+  if (tags !== null) {
+    console.log(c("bright", `New tags: ${tags.join(", ")}`));
+  }
+
+  return workflow;
+}
+
+/**
+ * The system reminder is a workflow-level field the engine renders with every presented step, so a
+ * definition whose nodes were rewritten can keep describing an older process until this field is
+ * rewritten too. `none` removes it, which is the right answer when the directives are self-contained.
+ */
+function setSystemReminder(workflow: WorkflowGraph, reminder: string | null): WorkflowGraph {
+  const oldReminder = workflow.systemReminder;
+
+  if (reminder === null) {
+    delete workflow.systemReminder;
+    console.log(c("green", "✓ System reminder removed"));
+  } else {
+    workflow.systemReminder = reminder;
+    console.log(c("green", "✓ System reminder updated"));
+  }
+  if (oldReminder) {
+    console.log(c("dim", `Old reminder: ${oldReminder}`));
+  }
+  if (reminder !== null) {
+    console.log(c("bright", `New reminder: ${reminder}`));
+  }
+
+  return workflow;
+}
+
+/**
  * A validator that knows about custom node types when the server published a registry snapshot.
  *
  * The CLI runs outside the container and cannot ask the live registry, so the snapshot in the
@@ -1601,6 +1652,9 @@ ${c("cyan", "Commands:")}
   set-name <text>                  Set workflow display name
   set-slug <slug>                  Set workflow catalog slug (kebab-case)
   set-description <text|--file path> Set workflow description
+  set-system-reminder <text|--file path|none>
+                                     Set or remove the reminder shown to the agent on every step
+  set-tags <tag,tag,...|none>      Set or remove the catalog tags used to find the flow by subject
   set-version <version>            Set workflow version
   set-progress <json|--file path|none>
                                      Set or remove the static progress graph
@@ -2172,6 +2226,58 @@ async function main(): Promise<void> {
       saveWorkflow(
         config.file,
         setDescription(workflow, description),
+        originalWorkflow,
+        saveOptions,
+      );
+      break;
+    }
+
+    case "set-tags": {
+      const inlineTags = args
+        .slice(2)
+        .filter((argument) => !VERSION_SWITCHES.has(argument))
+        .join(" ")
+        .trim();
+      if (!inlineTags) {
+        console.error(c("red", "Usage: set-tags <tag,tag,...|none>"));
+        process.exit(1);
+      }
+      const tags =
+        inlineTags === "none"
+          ? null
+          : inlineTags
+              .split(",")
+              .map((tag) => tag.trim())
+              .filter((tag) => tag.length > 0);
+      if (tags !== null && tags.length === 0) {
+        console.error(c("red", "ERROR: No usable tag in the argument"));
+        process.exit(1);
+      }
+      createBackup(config.file);
+      saveWorkflow(config.file, setTags(workflow, tags), originalWorkflow, saveOptions);
+      break;
+    }
+
+    case "set-system-reminder": {
+      const reminderFromFile = readTextArgumentFromFile(args, "--file", "System reminder");
+      const inlineReminder = args
+        .slice(2)
+        .filter((argument) => !VERSION_SWITCHES.has(argument))
+        .join(" ")
+        .trim();
+      if (reminderFromFile !== undefined && args[2] !== "--file") {
+        console.error(c("red", "ERROR: Use either inline reminder text or --file, not both"));
+        process.exit(1);
+      }
+      const reminderText = reminderFromFile ?? inlineReminder;
+      if (!reminderText) {
+        console.error(c("red", "Usage: set-system-reminder <text|--file path|none>"));
+        process.exit(1);
+      }
+      createBackup(config.file);
+      saveWorkflow(
+        config.file,
+        setSystemReminder(workflow, reminderText === "none" ? null : reminderText),
         originalWorkflow,
         saveOptions,
       );

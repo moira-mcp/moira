@@ -51,6 +51,10 @@ moira-workflow flow.json set-name "Workflow name"
 moira-workflow flow.json set-slug workflow-slug
 moira-workflow flow.json set-description "Short description"
 moira-workflow flow.json set-description --file <description.txt>
+moira-workflow flow.json set-system-reminder --file <reminder.txt>
+moira-workflow flow.json set-system-reminder none
+moira-workflow flow.json set-tags audio,tts,script
+moira-workflow flow.json set-tags none
 moira-workflow flow.json set-progress --file <progress.json>
 moira-workflow flow.json set-progress none
 

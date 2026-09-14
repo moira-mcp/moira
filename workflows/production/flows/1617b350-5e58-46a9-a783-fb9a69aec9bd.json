@@ -2,8 +2,15 @@
   "id": "1617b350-5e58-46a9-a783-fb9a69aec9bd",
   "metadata": {
     "name": "Verified Research",
-    "version": "3.0.0",
-    "description": "Bounded external-source research for one specific question and one evidence-linked local answer. Frames the decision or use, gathers and critically reads a proportionate set of primary and authoritative sources, preserves meaningful disagreement, distinguishes sourced facts, quotations, calculations, inference, assumptions, uncertainty and gaps, and produces complete source-register, readings, answer, limitations, validation and independent-review artifacts. Supports autonomous and interactive operation, useful explicitly limited answers when evidence is incomplete, truthful blocked/aborted outcomes, cause-owned answer or evidence repair, and replan when the criterion or method is invalid. Choose Iterative Research for repeated durable improvement, Universal Research for adaptive filesystem-or-memory and authority modes, or Deep Corpus Research for separately authorized corpus-scale exhaustive reading. Completion is local: this workflow does not publish, notify, commit, deploy or mutate production."
+    "version": "4.0.0",
+    "description": "Bounded external-source research for one specific question and one evidence-linked answer. Frames the decision, use, audience and answer language, confirms independently that the planned sources stay inside the declared privacy, licensing and consent ceiling before any of them is acquired, gathers and critically reads a proportionate set of primary and authoritative sources, preserves meaningful disagreement, distinguishes sourced facts, quotations, calculations, inference, assumptions, uncertainty and gaps, and produces complete source-register, readings, answer, limitations, validation and independent-review records. Runs from an execution workspace or, when none can be created, from memory with the storage limitation stated and the result honestly limited. Supports autonomous and interactive operation, cause-owned answer or evidence repair bounded by a repair-round budget with a truthful procedural outcome when it is exhausted, useful explicitly limited answers when evidence is incomplete, truthful blocked and aborted outcomes, and replan when the criterion or method is invalid. Choose Deep Corpus Research for separately authorized corpus-scale exhaustive reading. Completion is local and reported to the user through their configured channels: this workflow does not publish, commit, deploy or mutate production.",
+    "tags": [
+      "исследование",
+      "источники",
+      "проверка",
+      "факты",
+      "отчёт"
+    ]
   },
   "nodes": [
     {
@@ -11,7 +18,8 @@
       "type": "start",
       "connections": {
         "default": "intake"
-      }
+      },
+      "progressNodeId": "b1-intake"
     },
     {
       "id": "end",
@@ -20,13 +28,16 @@
         "terminal_status",
         "artifact_path",
         "answer_summary",
-        "limitation_summary"
-      ]
+        "limitation_summary",
+        "storage_limitation",
+        "notification_status"
+      ],
+      "progressNodeId": "b14-delivery"
     },
     {
       "id": "intake",
       "type": "agent-directive",
-      "directive": "Resolve one specific research question, its intended use, proportionate scope and operating mode from the user's request and existing context. Reuse explicit choices. Ask only for a missing fact that materially changes the research and cannot be discovered. Return actionable when the question can be researched, clarify only in interactive mode when one user answer is essential, or blocked when autonomous ambiguity or a prerequisite prevents honest research. Do not invent scope or evidence.",
+      "directive": "Resolve one specific research question, its intended use, its audience, the language of the answer, the confidentiality ceiling, the proportionate scope and the operating mode from the user's request and existing context. The audience is who reads and interprets the answer; it is not the decision the answer supports, and both are recorded. The confidentiality ceiling is the limit for privacy, licensing, consent and retention that no source or access method may exceed later; derive it from what the user already said and ask only when it is genuinely ambiguous. Reuse explicit choices. Ask only for a missing fact that materially changes the research and cannot be discovered. Return actionable when the question can be researched, clarify only in interactive mode when one user answer is essential, or blocked when autonomous ambiguity or a prerequisite prevents honest research. Do not invent scope or evidence.",
       "completionCondition": "The bounded research contract is actionable, one essential clarification is identified, or the prerequisite blocker is explicit",
       "inputSchema": {
         "type": "object",
@@ -55,10 +66,13 @@
           "intake_outcome"
         ],
         "globalInputs": [
+          "confidentiality_ceiling",
+          "operating_mode",
+          "output_language",
           "research_question",
-          "research_use",
           "research_scope",
-          "operating_mode"
+          "research_use",
+          "target_audience"
         ],
         "allOf": [
           {
@@ -77,7 +91,10 @@
                 "research_question",
                 "research_use",
                 "research_scope",
-                "operating_mode"
+                "operating_mode",
+                "output_language",
+                "target_audience",
+                "confidentiality_ceiling"
               ],
               "not": {
                 "anyOf": [
@@ -138,7 +155,8 @@
       },
       "connections": {
         "success": "route-intake-actionable"
-      }
+      },
+      "progressNodeId": "b1-intake"
     },
     {
       "id": "route-intake-actionable",
@@ -153,6 +171,10 @@
       "connections": {
         "true": "materialize-workspace",
         "false": "route-intake-clarify"
+      },
+      "progressNodeId": "b1-intake",
+      "connectionLabels": {
+        "true": "question is clear"
       }
     },
     {
@@ -168,12 +190,16 @@
       "connections": {
         "true": "clarify-question",
         "false": "end-intake-blocked"
+      },
+      "progressNodeId": "b1-intake",
+      "connectionLabels": {
+        "false": "question cannot be researched"
       }
     },
     {
       "id": "clarify-question",
       "type": "agent-directive",
-      "directive": "Ask the one essential clarification already identified by intake. Integrate the user's answer without expanding the requested outcome. Return ready with the complete canonical question, use and scope, or blocked when the prerequisite remains unresolved.",
+      "directive": "Ask the one essential clarification already identified by intake. Integrate the user's answer without expanding the requested outcome. Return ready with the complete canonical question, use and scope, together with the answer language, the audience who will read the answer, and the confidentiality ceiling for privacy, licensing, consent and retention that no later source or access method may exceed. Derive each of them from what the user has now said and from context; do not invent a ceiling the user never agreed to — when it cannot be established honestly, return blocked with the reason instead. Return blocked when the clarification did not make the research honest.",
       "completionCondition": "The bounded question is now actionable or the unresolved prerequisite is explicit",
       "inputSchema": {
         "type": "object",
@@ -196,9 +222,12 @@
           "clarification_outcome"
         ],
         "globalInputs": [
+          "confidentiality_ceiling",
+          "output_language",
           "research_question",
+          "research_scope",
           "research_use",
-          "research_scope"
+          "target_audience"
         ],
         "allOf": [
           {
@@ -216,7 +245,10 @@
               "required": [
                 "research_question",
                 "research_use",
-                "research_scope"
+                "research_scope",
+                "output_language",
+                "target_audience",
+                "confidentiality_ceiling"
               ],
               "not": {
                 "required": [
@@ -253,7 +285,8 @@
       },
       "connections": {
         "success": "route-clarification-ready"
-      }
+      },
+      "progressNodeId": "b1-intake"
     },
     {
       "id": "route-clarification-ready",
@@ -268,6 +301,11 @@
       "connections": {
         "true": "materialize-workspace",
         "false": "end-intake-blocked"
+      },
+      "progressNodeId": "b1-intake",
+      "connectionLabels": {
+        "true": "clarification received",
+        "false": "clarification not obtained"
       }
     },
     {
@@ -281,6 +319,10 @@
         },
         {
           "path": "framing.md",
+          "content": ""
+        },
+        {
+          "path": "framing-policy-review.md",
           "content": ""
         },
         {
@@ -329,14 +371,18 @@
         }
       ],
       "connections": {
-        "success": "frame-research",
-        "error": "finalize-workspace-blocked"
+        "success": "set-scope-initial",
+        "error": "fallback-to-memory"
+      },
+      "progressNodeId": "b2-workspace",
+      "connectionLabels": {
+        "success": "workspace created"
       }
     },
     {
       "id": "frame-research",
       "type": "agent-directive",
-      "directive": "Work only in {{workspace_path}}. Frame the canonical question {{research_question}} for the observable use {{research_use}} within {{research_scope}}. Write framing.md with subquestions, bounded assumptions, applicability, evidence method and what would make the answer useful, limited or impossible. Do not prescribe fixed source counts, providers or search tactics. Return ready, replan for an invalid criterion/method, or blocked for an irreducible prerequisite.",
+      "directive": "Storage mode for this run is {{storage_mode}}. In workspace mode work only in {{workspace_path}} and keep the durable records named below as files there. In memory mode there is no workspace at all: ignore any path, carry the same records in this answer, and never name a file you did not write.\n\nFrame the canonical question {{research_question}} for the observable use {{research_use}}, for the audience {{target_audience}}, in {{output_language}}, within {{research_scope}}. Do what the current entry asks and no more — framing_scope is {{framing_scope}}: initial means the first full framing; contract means an independently corrected contract must be carried into the framing; policy means only the planned sources have to be brought inside the ceiling; framing means the user asked for the framing itself to be rethought; evidence means the user asked for evidence rework, so the accepted framing stays and only the source plan is renewed. Write framing.md with subquestions, bounded assumptions, applicability, evidence method and what would make the answer useful, limited or impossible. Record source_policy: which sources and access methods are planned, so the independent check can judge them against the ceiling {{confidentiality_ceiling}} before anything is acquired. Do not prescribe fixed source counts, providers or search tactics. Return ready, replan for an invalid criterion/method, or blocked for an irreducible prerequisite.\n\nWhen framing_scope is policy, the independent source-authority check has just rejected the plan: read its finding — framing-policy-review.md in {{workspace_path}} in workspace mode, {{current_findings}} in memory mode — and renew the source plan against the named clause rather than guessing what was wrong.",
       "completionCondition": "The durable framing supports proportionate evidence work or the earliest non-product cause is classified",
       "inputSchema": {
         "type": "object",
@@ -360,6 +406,7 @@
           "framing_outcome"
         ],
         "globalInputs": [
+          "source_policy",
           "terminal_reason"
         ],
         "allOf": [
@@ -419,7 +466,10 @@
                       ]
                     }
                   ]
-                }
+                },
+                "required": [
+                  "source_policy"
+                ]
               }
             }
           }
@@ -427,7 +477,8 @@
       },
       "connections": {
         "success": "route-framing-ready"
-      }
+      },
+      "progressNodeId": "b3-framing"
     },
     {
       "id": "route-framing-ready",
@@ -440,8 +491,12 @@
         "right": "ready"
       },
       "connections": {
-        "true": "research-evidence",
+        "true": "review-source-policy",
         "false": "route-framing-replan"
+      },
+      "progressNodeId": "b3-framing",
+      "connectionLabels": {
+        "true": "framing ready"
       }
     },
     {
@@ -457,12 +512,17 @@
       "connections": {
         "true": "reassess-contract",
         "false": "finalize-blocked"
+      },
+      "progressNodeId": "b3-framing",
+      "connectionLabels": {
+        "true": "framing method is invalid",
+        "false": "framing prerequisite is irreducible"
       }
     },
     {
       "id": "research-evidence",
       "type": "agent-directive",
-      "directive": "Work only in {{workspace_path}} from framing.md. Gather and critically read a proportionate source set for {{research_question}}. Prefer primary and authoritative evidence where available, preserve meaningful disagreement, and evaluate authority, recency, independence and applicability. Write source-register.md with resolvable links plus retrieval/publication dates, readings.md with claim-level support and limitations, and alternative-views.md. Distinguish missing evidence from negative evidence. Return the sole canonical evidence_status: ready, limited only when residual evidence supports a useful explicitly limited answer, replan for a broken method or criterion, or blocked rather than fabricate support.",
+      "directive": "Storage mode for this run is {{storage_mode}}. In workspace mode work only in {{workspace_path}} and keep the durable records named below as files there. In memory mode there is no workspace at all: ignore any path, carry the same records in this answer, and never name a file you did not write.\n\nGather and critically read a proportionate source set for {{research_question}}, staying inside the source plan that was independently confirmed: {{source_policy}}. A source outside it is not acquired — it needs a renewed plan and a new confirmation, or it is treated as unavailable. Prefer primary and authoritative evidence where available, preserve meaningful disagreement, and evaluate authority, recency, independence and applicability. Record source-register.md with resolvable links plus retrieval/publication dates, readings.md with claim-level support and limitations, and alternative-views.md. Distinguish missing evidence from negative evidence. Return the sole canonical evidence_status: ready, limited only when residual evidence supports a useful explicitly limited answer, replan for a broken method or criterion, or blocked rather than fabricate support.",
       "completionCondition": "Canonical evidence artifacts support a complete or useful limited answer, or the sole evidence outcome identifies the earliest invalid prerequisite",
       "inputSchema": {
         "type": "object",
@@ -549,7 +609,8 @@
       },
       "connections": {
         "success": "route-evidence-usable"
-      }
+      },
+      "progressNodeId": "b5-evidence"
     },
     {
       "id": "route-evidence-usable",
@@ -576,6 +637,10 @@
       "connections": {
         "true": "synthesize-answer",
         "false": "route-evidence-replan"
+      },
+      "progressNodeId": "b5-evidence",
+      "connectionLabels": {
+        "true": "evidence usable"
       }
     },
     {
@@ -591,12 +656,17 @@
       "connections": {
         "true": "reassess-contract",
         "false": "finalize-blocked"
+      },
+      "progressNodeId": "b5-evidence",
+      "connectionLabels": {
+        "true": "evidence method is invalid",
+        "false": "evidence is unobtainable"
       }
     },
     {
       "id": "synthesize-answer",
       "type": "agent-directive",
-      "directive": "Work only in {{workspace_path}}. Use framing.md, the complete source register, readings, alternative views and primary evidence to write one bounded answer.md and limitations.md for {{research_question}}. Separate sourced facts and quotations, calculations, synthesis/inference, conflicting evidence, assumptions, uncertainty and known gaps. Every material external claim must resolve to supporting evidence. Preserve the current evidence class {{evidence_status}}. Return ready, replan for an invalid answer criterion/method, or blocked when the evidence cannot honestly support an answer.",
+      "directive": "Storage mode for this run is {{storage_mode}}. In workspace mode work only in {{workspace_path}} and keep the durable records named below as files there. In memory mode there is no workspace at all: ignore any path, carry the same records in this answer, and never name a file you did not write.\n\nUse framing.md, the complete source register, readings, alternative views and primary evidence to write one bounded answer.md and limitations.md for {{research_question}}, in {{output_language}} and addressed to {{target_audience}}. Every claim carries its evidence; disagreement is shown, not averaged. The canonical evidence_status is {{evidence_status}} and the answer must not claim more than it allows. Return ready, replan for an invalid framing or method, or blocked for an irreducible prerequisite.",
       "completionCondition": "The current evidence is synthesized into a traceable bounded answer and limitations, or the earliest cause is classified",
       "inputSchema": {
         "type": "object",
@@ -687,7 +757,8 @@
       },
       "connections": {
         "success": "route-synthesis-ready"
-      }
+      },
+      "progressNodeId": "b6-synthesis"
     },
     {
       "id": "route-synthesis-ready",
@@ -702,6 +773,10 @@
       "connections": {
         "true": "package-completion",
         "false": "route-synthesis-replan"
+      },
+      "progressNodeId": "b6-synthesis",
+      "connectionLabels": {
+        "true": "answer written"
       }
     },
     {
@@ -717,12 +792,17 @@
       "connections": {
         "true": "reassess-contract",
         "false": "finalize-blocked"
+      },
+      "progressNodeId": "b6-synthesis",
+      "connectionLabels": {
+        "true": "framing does not support an answer",
+        "false": "answer is unreachable"
       }
     },
     {
       "id": "package-completion",
       "type": "agent-directive",
-      "directive": "Work only in {{workspace_path}}. Perform a fresh producer-completion pass over the question, framing, source register, readings, alternatives, answer and limitations. Close obvious omitted claims, broken source links, stale conclusions and contradictions before gates. For ready, derive answer_summary and limitation_summary from the exact current package bytes while preserving the sole canonical evidence_status {{evidence_status}}; do not create a second answer-class alias. This node is the sole pre-gate writer of these bounded summaries and refreshes them after every package or evidence mutation. Return replan for an invalid contract/evidence method or blocked for an irreducible prerequisite.",
+      "directive": "Storage mode for this run is {{storage_mode}}. In workspace mode work only in {{workspace_path}} and keep the durable records named below as files there. In memory mode there is no workspace at all: ignore any path, carry the same records in this answer, and never name a file you did not write.\n\nPerform a fresh producer-completion pass over the question, framing, source register, readings, alternatives, answer and limitations. Close obvious omitted claims, unsupported statements and missing limitations yourself rather than leaving them for review. Keep the answer in {{output_language}} for {{target_audience}}. Derive answer_summary and limitation_summary from the exact package. Return ready, replan for an invalid contract, or blocked for an irreducible prerequisite.",
       "completionCondition": "The complete package and its bounded current summaries are producer-ready under the canonical evidence class, or the earliest non-product cause is classified",
       "inputSchema": {
         "type": "object",
@@ -847,7 +927,8 @@
       },
       "connections": {
         "success": "route-completion-ready"
-      }
+      },
+      "progressNodeId": "b7-package"
     },
     {
       "id": "route-completion-ready",
@@ -862,6 +943,10 @@
       "connections": {
         "true": "validate-package",
         "false": "route-completion-replan"
+      },
+      "progressNodeId": "b7-package",
+      "connectionLabels": {
+        "true": "package complete"
       }
     },
     {
@@ -877,12 +962,17 @@
       "connections": {
         "true": "reassess-contract",
         "false": "finalize-blocked"
+      },
+      "progressNodeId": "b7-package",
+      "connectionLabels": {
+        "true": "contract is invalid",
+        "false": "package is unreachable"
       }
     },
     {
       "id": "validate-package",
       "type": "agent-directive",
-      "directive": "Work only in {{workspace_path}}. Overwrite package-validation.md with checks whose observations actually distinguish the applicable states: required artifact existence and parsability, bounded schemas, resolvable link syntax and internal source-to-reading references. Do not claim source credibility, semantic completeness or conclusion validity mechanically. Before adding any new validator, name the required and plausible wrong states and the observation that separates them; otherwise replan rather than build proof machinery. Return pass, package_repair for answer/package shape, evidence_repair for concrete source-register/link/reading evidence defects, replan for an invalid criterion/method, or blocked for an irreducible prerequisite.",
+      "directive": "Storage mode for this run is {{storage_mode}}. In workspace mode work only in {{workspace_path}} and keep the durable records named below as files there. In memory mode there is no workspace at all: ignore any path, carry the same records in this answer, and never name a file you did not write.\n\nCheck the package with observations that actually distinguish the applicable states: required records exist and parse, bounded schemas hold, every claim resolves to a listed source, dates and links are present, limitations match the canonical evidence_status {{evidence_status}}, and the language and audience are the declared ones. Record the complete current set of reproducible blockers: as package-validation.md when storage_mode is workspace, otherwise in current_findings, which the repair owner will read. Return pass at zero blockers, package_repair or evidence_repair for one local owner, replan for an invalid criterion, or blocked for an irreducible prerequisite.\n\nIn memory mode write the complete current findings into current_findings; in workspace mode leave it empty so the file stays the single source.",
       "completionCondition": "Deterministic observations are durable and routed to the earliest owner without semantic overclaim",
       "inputSchema": {
         "type": "object",
@@ -903,6 +993,7 @@
           "validation_outcome"
         ],
         "globalInputs": [
+          "current_findings",
           "terminal_reason"
         ],
         "allOf": [
@@ -934,7 +1025,8 @@
       },
       "connections": {
         "success": "route-validation-pass"
-      }
+      },
+      "progressNodeId": "b8-validation"
     },
     {
       "id": "route-validation-pass",
@@ -949,6 +1041,10 @@
       "connections": {
         "true": "semantic-review",
         "false": "route-validation-package"
+      },
+      "progressNodeId": "b8-validation",
+      "connectionLabels": {
+        "true": "checks passed"
       }
     },
     {
@@ -964,6 +1060,10 @@
       "connections": {
         "true": "repair-answer",
         "false": "route-validation-evidence"
+      },
+      "progressNodeId": "b8-validation",
+      "connectionLabels": {
+        "true": "package needs repair"
       }
     },
     {
@@ -979,6 +1079,10 @@
       "connections": {
         "true": "repair-evidence",
         "false": "route-validation-replan"
+      },
+      "progressNodeId": "b8-validation",
+      "connectionLabels": {
+        "true": "evidence base needs repair"
       }
     },
     {
@@ -994,12 +1098,17 @@
       "connections": {
         "true": "reassess-contract",
         "false": "finalize-blocked"
+      },
+      "progressNodeId": "b8-validation",
+      "connectionLabels": {
+        "true": "validation criterion is invalid",
+        "false": "package cannot be fixed"
       }
     },
     {
       "id": "semantic-review",
       "type": "agent-directive",
-      "directive": "Work only in {{workspace_path}}. Delegate one genuinely independent whole-answer review and keep the same reviewer context for rereview where supported. The reviewer reads the original question/use/scope, framing, complete source register and readings, alternative views, answer, limitations, deterministic observations, primary evidence and the exact canonical evidence_status {{evidence_status}} that will drive the terminal. It verifies that this class matches the package rather than inferring it from route execution, then overwrites semantic-review.md with all current reproducible blockers. It diagnoses without repair, accepts zero findings, and classifies answer/package, evidence/source, invalid criterion/method or upstream causes. Return pass only at zero blockers; repair only for one local owner; replan for mixed/upstream/criterion or repeated unchanged roots; blocked when genuine independence or another prerequisite is unavailable without claiming review.",
+      "directive": "Storage mode for this run is {{storage_mode}}. In workspace mode work only in {{workspace_path}} and keep the durable records named below as files there. In memory mode there is no workspace at all: ignore any path, carry the same records in this answer, and never name a file you did not write.\n\nDelegate one genuinely independent whole-answer review and keep the same reviewer context for rereview where supported. The reviewer reads the original question, use, audience and scope, the framing, the complete source register and readings, alternative views, the answer, limitations, deterministic observations, primary evidence and the exact canonical evidence_status {{evidence_status}} that will drive the terminal. It verifies that this class matches the package rather than inferring it from route execution. It records the complete current set of reproducible blockers: as semantic-review.md when storage_mode is workspace, otherwise in current_findings, because in memory mode no file can carry them to the repair owner. It diagnoses without repair, accepts zero findings, and classifies answer/package, evidence/source, invalid criterion/method or upstream causes. Return pass only at zero blockers; repair only for one local owner, naming that owner; replan for mixed or upstream causes; blocked for an irreducible prerequisite.\n\nIn memory mode write the complete current findings into current_findings; in workspace mode leave it empty so the file stays the single source.",
       "completionCondition": "A complete independent semantic review or factual inability record is durable and cause-correct",
       "inputSchema": {
         "type": "object",
@@ -1026,6 +1135,7 @@
           "review_outcome"
         ],
         "globalInputs": [
+          "current_findings",
           "terminal_reason"
         ],
         "allOf": [
@@ -1093,7 +1203,8 @@
       },
       "connections": {
         "success": "route-review-pass"
-      }
+      },
+      "progressNodeId": "b9-review"
     },
     {
       "id": "route-review-pass",
@@ -1106,9 +1217,10 @@
         "right": "pass"
       },
       "connections": {
-        "true": "route-mode-acceptance",
+        "true": "reset-review-round",
         "false": "route-review-repair"
-      }
+      },
+      "progressNodeId": "b9-review"
     },
     {
       "id": "route-review-repair",
@@ -1121,8 +1233,12 @@
         "right": "repair"
       },
       "connections": {
-        "true": "route-review-answer",
+        "true": "increment-review-round",
         "false": "route-review-replan"
+      },
+      "progressNodeId": "b9-review",
+      "connectionLabels": {
+        "true": "review found a defect"
       }
     },
     {
@@ -1138,7 +1254,8 @@
       "connections": {
         "true": "repair-answer",
         "false": "repair-evidence"
-      }
+      },
+      "progressNodeId": "b10-repair"
     },
     {
       "id": "route-review-replan",
@@ -1153,12 +1270,17 @@
       "connections": {
         "true": "reassess-contract",
         "false": "finalize-blocked"
+      },
+      "progressNodeId": "b9-review",
+      "connectionLabels": {
+        "true": "cause lies upstream",
+        "false": "defect is irreducible"
       }
     },
     {
       "id": "repair-answer",
       "type": "agent-directive",
-      "directive": "Work only in {{workspace_path}}. Read package-validation.md and semantic-review.md as applicable. Reproduce every answer/package-owned blocker, repair the complete confirmed class in answer.md, limitations.md or package structure, and record changed relevant knowledge in repair-account.md. Do not patch source defects in prose. Return changed to refresh package completion and all stale gates, reassess for invalid/mixed/unreproduced/repeated roots, or blocked for an irreducible prerequisite.",
+      "directive": "Storage mode for this run is {{storage_mode}}. In workspace mode work only in {{workspace_path}} and keep the durable records named below as files there. In memory mode there is no workspace at all: ignore any path, carry the same records in this answer, and never name a file you did not write.\n\nRead the current blockers: package-validation.md and semantic-review.md when storage_mode is workspace, otherwise current_findings. If in memory mode no findings reached you, do not repair blindly — return reassess. Reproduce every answer/package-owned blocker, repair the complete confirmed class in answer.md and limitations.md, and record what relevant knowledge changed. Return changed to recompute the package and every stale gate, reassess for invalid, mixed, unreproduced or repeated roots, or blocked for an irreducible prerequisite.\n\nFindings handed to you when this run has no workspace: {{current_findings}}. In workspace mode that value is empty and the files named above are the source.",
       "completionCondition": "Confirmed answer/package defects change before every stale gate, or non-local causes do not loop",
       "inputSchema": {
         "type": "object",
@@ -1249,7 +1371,8 @@
       },
       "connections": {
         "success": "route-answer-repair-changed"
-      }
+      },
+      "progressNodeId": "b10-repair"
     },
     {
       "id": "route-answer-repair-changed",
@@ -1264,6 +1387,16 @@
       "connections": {
         "true": "package-completion",
         "false": "route-answer-repair-blocked"
+      },
+      "progressNodeId": "b10-repair",
+      "connectionLabels": {
+        "true": {
+          "label": "repair changed the answer",
+          "cycle": {
+            "cause": "Independent review or validation found a defect owned by the answer, so the package is rebuilt and re-checked.",
+            "exit": "Ends when review returns no blockers, when the repair budget runs out, or when the repair owner sends the cause upstream."
+          }
+        }
       }
     },
     {
@@ -1279,12 +1412,17 @@
       "connections": {
         "true": "finalize-blocked",
         "false": "reassess-contract"
+      },
+      "progressNodeId": "b10-repair",
+      "connectionLabels": {
+        "true": "answer repair is impossible",
+        "false": "repair needs the contract reassessed"
       }
     },
     {
       "id": "repair-evidence",
       "type": "agent-directive",
-      "directive": "Work only in {{workspace_path}}. Read package-validation.md and semantic-review.md as applicable, the source register, readings and primary evidence. Reproduce every evidence/source-owned blocker, change the complete confirmed evidence class, and record changed relevant knowledge in repair-account.md. Return changed to repeat research, synthesis, package completion and all stale gates; reassess for invalid/mixed/unreproduced/repeated roots; or blocked for an irreducible evidence prerequisite.",
+      "directive": "Storage mode for this run is {{storage_mode}}. In workspace mode work only in {{workspace_path}} and keep the durable records named below as files there. In memory mode there is no workspace at all: ignore any path, carry the same records in this answer, and never name a file you did not write.\n\nRead the current blockers: package-validation.md and semantic-review.md when storage_mode is workspace, otherwise current_findings. If in memory mode no findings reached you, do not repair blindly — return reassess. Reproduce every evidence/source-owned blocker and change the complete confirmed evidence class. When the repair needs sources beyond the confirmed plan, renew source_policy here: the independent policy check runs again before anything is acquired, and the ceiling {{confidentiality_ceiling}} still binds. Record what relevant knowledge changed. Return changed to repeat evidence work and all stale gates, reassess for invalid, mixed, unreproduced or repeated roots, or blocked for an irreducible evidence prerequisite.\n\nFindings handed to you when this run has no workspace: {{current_findings}}. In workspace mode that value is empty and the files named above are the source.",
       "completionCondition": "Evidence defects change before every evidence-dependent artifact is recomputed, or non-local causes do not loop",
       "inputSchema": {
         "type": "object",
@@ -1308,6 +1446,7 @@
           "repair_outcome"
         ],
         "globalInputs": [
+          "source_policy",
           "terminal_reason"
         ],
         "allOf": [
@@ -1375,7 +1514,8 @@
       },
       "connections": {
         "success": "route-evidence-repair-changed"
-      }
+      },
+      "progressNodeId": "b10-repair"
     },
     {
       "id": "route-evidence-repair-changed",
@@ -1388,8 +1528,18 @@
         "right": "changed"
       },
       "connections": {
-        "true": "research-evidence",
+        "true": "review-source-policy",
         "false": "route-evidence-repair-blocked"
+      },
+      "progressNodeId": "b10-repair",
+      "connectionLabels": {
+        "true": {
+          "label": "repair changed the evidence base",
+          "cycle": {
+            "cause": "Independent review or validation found a defect owned by the evidence, and rebuilding it starts again from the source-authority check because new sources may be planned.",
+            "exit": "Ends when review returns no blockers, when the repair budget runs out, or when the repair owner sends the cause upstream."
+          }
+        }
       }
     },
     {
@@ -1405,12 +1555,17 @@
       "connections": {
         "true": "finalize-blocked",
         "false": "reassess-contract"
+      },
+      "progressNodeId": "b10-repair",
+      "connectionLabels": {
+        "true": "evidence repair is impossible",
+        "false": "repair needs the contract reassessed"
       }
     },
     {
       "id": "reassess-contract",
       "type": "agent-directive",
-      "directive": "Work only in {{workspace_path}}. Reassess the earliest invalid interpretation, evidence method or acceptance criterion against the original user question, use, scope and authority. When corrected-contract review has run, read and reproduce every current blocker from contract-review-findings.md before changing the reviewed contract. Preserve the user's goal and still-valid requirements. Write only the corrected bounded contract and changed knowledge to contract-review.md; do not lower acceptance or invent delivery authority. Return corrected when an independently reviewable changed contract exists, or blocked when no honest contract can proceed.",
+      "directive": "Storage mode for this run is {{storage_mode}}. In workspace mode work only in {{workspace_path}} and keep the durable records named below as files there. In memory mode there is no workspace at all: ignore any path, carry the same records in this answer, and never name a file you did not write.\n\nReassess the earliest invalid interpretation, evidence method or acceptance criterion against the original question, use, audience, scope and authority. Read the findings that sent you here: contract-review-findings.md when storage_mode is workspace, otherwise current_findings. Record the corrected contract for independent review. Return corrected with the changed knowledge, or blocked when the contract cannot be corrected within the user's goal — including the case where independent contract review left no readable findings for you to act on.\n\nFindings handed to you when this run has no workspace: {{current_findings}}. In workspace mode that value is empty and the files named above are the source.",
       "completionCondition": "The earliest invalid derived contract is corrected without requirement erosion, or the run is truthfully blocked",
       "inputSchema": {
         "type": "object",
@@ -1472,7 +1627,8 @@
       },
       "connections": {
         "success": "route-reassessment-corrected"
-      }
+      },
+      "progressNodeId": "b12-contract"
     },
     {
       "id": "route-reassessment-corrected",
@@ -1487,12 +1643,16 @@
       "connections": {
         "true": "corrected-contract-review",
         "false": "finalize-blocked"
+      },
+      "progressNodeId": "b12-contract",
+      "connectionLabels": {
+        "false": "contract cannot be corrected"
       }
     },
     {
       "id": "corrected-contract-review",
       "type": "agent-directive",
-      "directive": "Work only in {{workspace_path}}. Delegate a genuinely independent review of the corrected contract in contract-review.md against the original question, use, scope and authority. The reviewer diagnoses without implementing research and overwrites the separate contract-review-findings.md with every current reproducible blocker, or an explicit zero-finding result. Return pass only when the corrected contract is coherent and evidence can distinguish its acceptance; repair or replan returns those durable findings to reassessment; blocked records unavailable independence or an irreducible prerequisite without claiming review.",
+      "directive": "Storage mode for this run is {{storage_mode}}. In workspace mode work only in {{workspace_path}} and keep the durable records named below as files there. In memory mode there is no workspace at all: ignore any path, carry the same records in this answer, and never name a file you did not write.\n\nDelegate a genuinely independent review of the corrected contract against the original question, use, audience, scope and authority. The reviewer diagnoses without repairing and records the complete current set of reproducible blockers: as contract-review-findings.md when storage_mode is workspace, otherwise in current_findings. Return pass at zero blockers, repair when the contract owner can fix them, replan when an earlier source is the cause, or blocked for an irreducible prerequisite.\n\nIn memory mode write the complete current findings into current_findings; in workspace mode leave it empty so the file stays the single source.",
       "completionCondition": "The corrected contract has independent acceptance or a truthful blocking result",
       "inputSchema": {
         "type": "object",
@@ -1512,6 +1672,7 @@
           "contract_review_outcome"
         ],
         "globalInputs": [
+          "current_findings",
           "terminal_reason"
         ],
         "allOf": [
@@ -1543,7 +1704,8 @@
       },
       "connections": {
         "success": "route-contract-review-pass"
-      }
+      },
+      "progressNodeId": "b12-contract"
     },
     {
       "id": "route-contract-review-pass",
@@ -1556,8 +1718,18 @@
         "right": "pass"
       },
       "connections": {
-        "true": "frame-research",
+        "true": "set-scope-contract",
         "false": "route-contract-review-blocked"
+      },
+      "progressNodeId": "b12-contract",
+      "connectionLabels": {
+        "true": {
+          "label": "corrected contract reviewed and accepted",
+          "cycle": {
+            "cause": "The reading of the question, method or acceptance criterion was wrong and has been corrected and independently reviewed, so the framing is redone against it.",
+            "exit": "Ends when the framing holds against the corrected contract, or when the contract is declared uncorrectable."
+          }
+        }
       }
     },
     {
@@ -1573,6 +1745,17 @@
       "connections": {
         "true": "finalize-blocked",
         "false": "reassess-contract"
+      },
+      "progressNodeId": "b12-contract",
+      "connectionLabels": {
+        "true": "contract review is blocked",
+        "false": {
+          "label": "contract review asked for another correction",
+          "cycle": {
+            "cause": "The independent review of the corrected contract found blockers the contract owner can still fix, so the correction is reworked.",
+            "exit": "Ends when the corrected contract passes review, or when it is declared uncorrectable."
+          }
+        }
       }
     },
     {
@@ -1587,13 +1770,17 @@
       },
       "connections": {
         "true": "interactive-acceptance",
-        "false": "route-final-answer-status"
+        "false": "route-final-storage-mode"
+      },
+      "progressNodeId": "b13-acceptance",
+      "connectionLabels": {
+        "false": "autonomous run needs no acceptance"
       }
     },
     {
       "id": "interactive-acceptance",
       "type": "agent-directive",
-      "directive": "Present the independently accepted bounded answer and limitations from {{workspace_path}} together with the canonical evidence_status {{evidence_status}}, answer_summary and limitation_summary. Ask the user to accept, request one bounded rework owner, or abort. Preference cannot override deterministic or independent review. Rework must identify the earliest stale owner: framing, evidence, answer or contract.",
+      "directive": "Present the independently accepted bounded answer and limitations together with the canonical evidence_status {{evidence_status}}, answer_summary and limitation_summary; storage mode for this run is {{storage_mode}}; in workspace mode they are in {{workspace_path}}, otherwise they are what this run carried in its answers, and the storage limitation {{storage_limitation}} is stated to the user. Ask the user to accept, request one bounded rework owner, or abort. Preference cannot override deterministic or independent review. Rework must identify the earliest stale owner: framing, evidence, answer or contract. Naming evidence keeps the accepted framing and renews only the source plan; naming framing rethinks the framing itself.",
       "completionCondition": "The user accepts the reviewed package, chooses bounded rework, or aborts",
       "inputSchema": {
         "type": "object",
@@ -1649,7 +1836,8 @@
       },
       "connections": {
         "success": "route-user-accept"
-      }
+      },
+      "progressNodeId": "b13-acceptance"
     },
     {
       "id": "route-user-accept",
@@ -1662,8 +1850,12 @@
         "right": "accept"
       },
       "connections": {
-        "true": "route-final-answer-status",
+        "true": "route-final-storage-mode",
         "false": "route-user-abort"
+      },
+      "progressNodeId": "b13-acceptance",
+      "connectionLabels": {
+        "true": "user accepted the result"
       }
     },
     {
@@ -1679,6 +1871,10 @@
       "connections": {
         "true": "finalize-aborted",
         "false": "route-rework-framing"
+      },
+      "progressNodeId": "b13-acceptance",
+      "connectionLabels": {
+        "true": "user aborted the run"
       }
     },
     {
@@ -1692,8 +1888,18 @@
         "right": "framing"
       },
       "connections": {
-        "true": "frame-research",
+        "true": "set-scope-framing",
         "false": "route-rework-evidence"
+      },
+      "progressNodeId": "b13-acceptance",
+      "connectionLabels": {
+        "true": {
+          "label": "user asked to rethink the framing",
+          "cycle": {
+            "cause": "The user accepted neither the answer nor its framing and named framing as the earliest stale owner.",
+            "exit": "Ends when the user accepts the reworked result or aborts."
+          }
+        }
       }
     },
     {
@@ -1707,8 +1913,18 @@
         "right": "evidence"
       },
       "connections": {
-        "true": "research-evidence",
+        "true": "set-scope-evidence",
         "false": "route-rework-answer"
+      },
+      "progressNodeId": "b13-acceptance",
+      "connectionLabels": {
+        "true": {
+          "label": "user asked to renew the evidence base",
+          "cycle": {
+            "cause": "The user named evidence as the earliest stale owner, so the accepted framing stays and only the source plan is renewed before gathering again.",
+            "exit": "Ends when the user accepts the reworked result or aborts."
+          }
+        }
       }
     },
     {
@@ -1724,31 +1940,41 @@
       "connections": {
         "true": "synthesize-answer",
         "false": "reassess-contract"
+      },
+      "progressNodeId": "b13-acceptance",
+      "connectionLabels": {
+        "true": {
+          "label": "user asked to rewrite the answer",
+          "cycle": {
+            "cause": "The user named the answer as the earliest stale owner, so the evidence stands and only the synthesis is redone.",
+            "exit": "Ends when the user accepts the reworked result or aborts."
+          }
+        },
+        "false": {
+          "label": "user asked to reassess the contract",
+          "cycle": {
+            "cause": "The user named the contract as the earliest stale owner, so the reading of the question or method is reassessed before anything else is redone.",
+            "exit": "Ends when the user accepts the reworked result or aborts."
+          }
+        }
       }
     },
     {
       "id": "finalize-result",
       "type": "agent-directive",
-      "directive": "Work only in {{workspace_path}}. Write final-report.md from the exact independently accepted complete local package whose canonical evidence_status is ready. Preserve answer_summary, limitation_summary and evidence_status without semantic reinterpretation. Report that no publication, notification, VCS, deployment or production mutation was performed. Return artifact_path exactly {{workspace_path}}/final-report.md and terminal_status complete. Do not mutate the accepted package here.",
+      "directive": "Storage mode for this run is {{storage_mode}}. In workspace mode work only in {{workspace_path}} and keep the durable records named below as files there. In memory mode there is no workspace at all: ignore any path, carry the same records in this answer, and never name a file you did not write.\n\nWrite the final report from the exact independently accepted complete package whose canonical evidence_status is ready, in {{output_language}} for {{target_audience}}. Preserve answer_summary, limitation_summary and evidence_status without semantic reinterpretation. The user is notified of completion after this step; no publication, VCS, deployment or production mutation is performed. In workspace mode write final-report.md in {{workspace_path}} and return that path; in memory mode return the report in this answer and no path. Return terminal_status complete. Do not mutate the accepted package here.",
       "completionCondition": "The accepted complete local answer and limitations are truthfully projected without a new semantic mutation",
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,
         "properties": {},
         "required": [
-          "artifact_path",
           "terminal_status"
         ],
         "globalInputs": [
           "artifact_path",
           "terminal_status"
         ],
-        "xContextPathSuffixes": {
-          "baseContextProperty": "workspace_path",
-          "properties": {
-            "artifact_path": "/final-report.md"
-          }
-        },
         "allOf": [
           {
             "properties": {
@@ -1760,32 +1986,28 @@
         ]
       },
       "connections": {
-        "success": "end"
-      }
+        "success": "notify-result-ready"
+      },
+      "progressNodeId": "b14-delivery"
     },
     {
       "id": "finalize-blocked",
       "type": "agent-directive",
-      "directive": "Work only in {{workspace_path}}. Write final-report.md with the original question, completed useful work, terminal_reason, unavailable prerequisite and what could unblock research. Do not claim independent acceptance or fabricate an answer. Return artifact_path exactly {{workspace_path}}/final-report.md and terminal_status blocked.",
+      "directive": "Storage mode for this run is {{storage_mode}}. In workspace mode work only in {{workspace_path}} and keep the durable records named below as files there. In memory mode there is no workspace at all: ignore any path, carry the same records in this answer, and never name a file you did not write.\n\nWrite the final report with the original question, the completed useful work, terminal_reason, the unavailable prerequisite and what could unblock the research, in {{output_language}} for {{target_audience}}. When the run proceeded without a workspace, state {{storage_limitation}} as well. Do not claim independent acceptance, notification, publication, VCS, deployment or production mutation. In workspace mode write final-report.md in {{workspace_path}} and return that path; in memory mode return the report in this answer and no path. Return terminal_status blocked.",
       "completionCondition": "The blocked run has a truthful durable local report without a success claim",
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,
         "properties": {},
         "required": [
-          "artifact_path",
-          "terminal_status"
+          "terminal_status",
+          "terminal_reason"
         ],
         "globalInputs": [
           "artifact_path",
+          "terminal_reason",
           "terminal_status"
         ],
-        "xContextPathSuffixes": {
-          "baseContextProperty": "workspace_path",
-          "properties": {
-            "artifact_path": "/final-report.md"
-          }
-        },
         "allOf": [
           {
             "properties": {
@@ -1798,31 +2020,27 @@
       },
       "connections": {
         "success": "end-blocked"
-      }
+      },
+      "progressNodeId": "b15-stop"
     },
     {
       "id": "finalize-aborted",
       "type": "agent-directive",
-      "directive": "Work only in {{workspace_path}}. Write final-report.md with the user's abort decision, completed useful work and current limitations. Do not claim acceptance or external delivery. Return artifact_path exactly {{workspace_path}}/final-report.md and terminal_status aborted.",
+      "directive": "Storage mode for this run is {{storage_mode}}. In workspace mode work only in {{workspace_path}} and keep the durable records named below as files there. In memory mode there is no workspace at all: ignore any path, carry the same records in this answer, and never name a file you did not write.\n\nWrite the final report with the user's decision to abort, the completed useful work and the current limitations, in {{output_language}} for {{target_audience}}. When the run proceeded without a workspace, state {{storage_limitation}} as well. Do not claim acceptance, notification or external delivery. In workspace mode write final-report.md in {{workspace_path}} and return that path; in memory mode return the report in this answer and no path. Return terminal_status aborted and terminal_reason naming the user's abort as the cause.",
       "completionCondition": "The interactive abort is truthfully recorded without a success claim",
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,
         "properties": {},
         "required": [
-          "artifact_path",
-          "terminal_status"
+          "terminal_status",
+          "terminal_reason"
         ],
         "globalInputs": [
           "artifact_path",
+          "terminal_reason",
           "terminal_status"
         ],
-        "xContextPathSuffixes": {
-          "baseContextProperty": "workspace_path",
-          "properties": {
-            "artifact_path": "/final-report.md"
-          }
-        },
         "allOf": [
           {
             "properties": {
@@ -1835,7 +2053,8 @@
       },
       "connections": {
         "success": "end-aborted"
-      }
+      },
+      "progressNodeId": "b15-stop"
     },
     {
       "id": "revise-process",
@@ -1859,7 +2078,8 @@
       },
       "connections": {
         "success": "reassess-contract"
-      }
+      },
+      "progressNodeId": "b12-contract"
     },
     {
       "id": "end-limited",
@@ -1868,8 +2088,12 @@
         "terminal_status",
         "artifact_path",
         "answer_summary",
-        "limitation_summary"
-      ]
+        "limitation_summary",
+        "terminal_reason",
+        "storage_limitation",
+        "notification_status"
+      ],
+      "progressNodeId": "b14-delivery"
     },
     {
       "id": "end-blocked",
@@ -1877,16 +2101,23 @@
       "finalOutput": [
         "terminal_status",
         "artifact_path",
-        "terminal_reason"
-      ]
+        "terminal_reason",
+        "storage_limitation",
+        "notification_status"
+      ],
+      "progressNodeId": "b15-stop"
     },
     {
       "id": "end-aborted",
       "type": "end",
       "finalOutput": [
         "terminal_status",
-        "artifact_path"
-      ]
+        "artifact_path",
+        "terminal_reason",
+        "storage_limitation",
+        "notification_status"
+      ],
+      "progressNodeId": "b15-stop"
     },
     {
       "id": "end-intake-blocked",
@@ -1897,49 +2128,8 @@
         "intake.blocker_reason",
         "intake.clarification_request",
         "clarify-question.blocker_reason"
-      ]
-    },
-    {
-      "id": "end-workspace-blocked",
-      "type": "end",
-      "finalOutput": [
-        "terminal_status",
-        "terminal_reason",
-        "research_question",
-        "research_use",
-        "workspace_path"
-      ]
-    },
-    {
-      "id": "finalize-workspace-blocked",
-      "type": "agent-directive",
-      "directive": "Report the observed materialization failure truthfully. Explain that no canonical workspace or accepted research package was produced, preserve the bounded question/use when available, and state the concrete action that could unblock workspace creation. Do not claim research completion or create substitute artifacts outside the canonical workspace.",
-      "completionCondition": "The workspace prerequisite failure and recovery action are explicit without a success claim",
-      "inputSchema": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {},
-        "required": [
-          "terminal_reason",
-          "terminal_status"
-        ],
-        "globalInputs": [
-          "terminal_reason",
-          "terminal_status"
-        ],
-        "allOf": [
-          {
-            "properties": {
-              "terminal_status": {
-                "const": "blocked"
-              }
-            }
-          }
-        ]
-      },
-      "connections": {
-        "success": "end-workspace-blocked"
-      }
+      ],
+      "progressNodeId": "b15-stop"
     },
     {
       "id": "route-final-answer-status",
@@ -1954,31 +2144,31 @@
       "connections": {
         "true": "finalize-result",
         "false": "finalize-limited"
+      },
+      "progressNodeId": "b14-delivery",
+      "connectionLabels": {
+        "true": "evidence was complete",
+        "false": "evidence was limited"
       }
     },
     {
       "id": "finalize-limited",
       "type": "agent-directive",
-      "directive": "Work only in {{workspace_path}}. Write final-report.md from the exact independently accepted limited local package whose canonical evidence_status is limited. Preserve answer_summary, limitation_summary and evidence_status without semantic reinterpretation. Make the evidence limits and decision effect prominent. Report that no publication, notification, VCS, deployment or production mutation was performed. Return artifact_path exactly {{workspace_path}}/final-report.md and terminal_status limited. Do not mutate the accepted package here.",
+      "directive": "Storage mode for this run is {{storage_mode}}. In workspace mode work only in {{workspace_path}} and keep the durable records named below as files there. In memory mode there is no workspace at all: ignore any path, carry the same records in this answer, and never name a file you did not write.\n\nWrite the final report from the exact independently accepted limited package, in {{output_language}} for {{target_audience}}. Name the real cause of the limitation and only it: evidential, when the canonical evidence_status is limited, and storage, when the run proceeded without a workspace — state {{storage_limitation}} then. Both can apply at once. Preserve answer_summary, limitation_summary and evidence_status without semantic reinterpretation, and make the limits and their decision effect prominent. The user is notified of completion after this step; no publication, VCS, deployment or production mutation is performed. In workspace mode write final-report.md in {{workspace_path}} and return that path; in memory mode return the report in this answer and no path. Return terminal_status limited and terminal_reason naming the cause.",
       "completionCondition": "The accepted limited local answer and limitations are truthfully projected without a new semantic mutation",
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,
         "properties": {},
         "required": [
-          "artifact_path",
-          "terminal_status"
+          "terminal_status",
+          "terminal_reason"
         ],
         "globalInputs": [
           "artifact_path",
+          "terminal_reason",
           "terminal_status"
         ],
-        "xContextPathSuffixes": {
-          "baseContextProperty": "workspace_path",
-          "properties": {
-            "artifact_path": "/final-report.md"
-          }
-        },
         "allOf": [
           {
             "properties": {
@@ -1990,7 +2180,486 @@
         ]
       },
       "connections": {
-        "success": "end-limited"
+        "success": "notify-result-ready"
+      },
+      "progressNodeId": "b14-delivery"
+    },
+    {
+      "id": "fallback-to-memory",
+      "type": "expression",
+      "expressions": [
+        "storage_mode = \"memory\"",
+        "storage_limitation = \"No writable workspace: the run proceeded from memory, so no durable research package or report file exists.\""
+      ],
+      "connections": {
+        "default": "set-scope-initial"
+      },
+      "progressNodeId": "b2-workspace",
+      "connectionLabels": {
+        "default": "no workspace — continuing from memory"
+      }
+    },
+    {
+      "id": "set-scope-initial",
+      "type": "expression",
+      "expressions": [
+        "framing_scope = \"initial\""
+      ],
+      "connections": {
+        "default": "frame-research"
+      },
+      "progressNodeId": "b3-framing"
+    },
+    {
+      "id": "set-scope-contract",
+      "type": "expression",
+      "expressions": [
+        "framing_scope = \"contract\""
+      ],
+      "connections": {
+        "default": "frame-research"
+      },
+      "progressNodeId": "b3-framing",
+      "connectionLabels": {
+        "default": {
+          "label": "framing redone against the corrected contract",
+          "cycle": {
+            "cause": "Independent review accepted a corrected reading of the question or method, so framing runs again with that correction in hand.",
+            "exit": "Ends when the framing holds against the corrected contract, or when the contract is declared uncorrectable."
+          }
+        }
+      }
+    },
+    {
+      "id": "set-scope-policy",
+      "type": "expression",
+      "expressions": [
+        "framing_scope = \"policy\""
+      ],
+      "connections": {
+        "default": "frame-research"
+      },
+      "progressNodeId": "b3-framing",
+      "connectionLabels": {
+        "default": {
+          "label": "framing renews only the source plan",
+          "cycle": {
+            "cause": "The independent source-authority check found the planned sources outside the declared ceiling, so framing returns to replan them.",
+            "exit": "Ends when the renewed plan is confirmed inside the ceiling, or when the evidence is declared unobtainable within it."
+          }
+        }
+      }
+    },
+    {
+      "id": "set-scope-framing",
+      "type": "expression",
+      "expressions": [
+        "framing_scope = \"framing\""
+      ],
+      "connections": {
+        "default": "frame-research"
+      },
+      "progressNodeId": "b3-framing",
+      "connectionLabels": {
+        "default": {
+          "label": "framing rethought at the user's request",
+          "cycle": {
+            "cause": "The user named framing as the earliest stale owner after seeing the reviewed result.",
+            "exit": "Ends when the user accepts the reworked result or aborts."
+          }
+        }
+      }
+    },
+    {
+      "id": "set-scope-evidence",
+      "type": "expression",
+      "expressions": [
+        "framing_scope = \"evidence\""
+      ],
+      "connections": {
+        "default": "frame-research"
+      },
+      "progressNodeId": "b3-framing",
+      "connectionLabels": {
+        "default": {
+          "label": "framing renews the source plan at the user's request",
+          "cycle": {
+            "cause": "The user named evidence as the earliest stale owner, so the accepted framing stays and only the source plan is renewed.",
+            "exit": "Ends when the user accepts the reworked result or aborts."
+          }
+        }
+      }
+    },
+    {
+      "id": "review-source-policy",
+      "type": "agent-directive",
+      "directive": "Delegate a genuinely independent check of the planned sources before any of them is acquired. The reviewer reads the current plan {{source_policy}}, the confidentiality ceiling {{confidentiality_ceiling}} and, in workspace mode, framing.md in {{workspace_path}}; storage mode for this run is {{storage_mode}}, and in memory mode the plan above is the whole of what it reads. It judges one question: does every planned source and access method stay inside the ceiling for privacy, licensing, consent and retention. When the plan is unchanged since the last confirmation on this run, confirm it without a new delegated read.\n\nReturn pass when the plan stays inside the ceiling; repair when the framing owner can bring it back inside; blocked when the needed evidence cannot be obtained within the ceiling at all. On repair and blocked, name the violated clause and the offending source in policy_violation, and hand the same text to the framing owner: in workspace mode by overwriting framing-policy-review.md in {{workspace_path}}, in memory mode by writing current_findings. A repair the owner cannot read is a loop without changed knowledge.",
+      "completionCondition": "Every planned source and access method is confirmed inside the declared ceiling, or the violation and its owner are named",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "policy_review_outcome": {
+            "type": "string",
+            "enum": [
+              "pass",
+              "repair",
+              "blocked"
+            ]
+          },
+          "policy_violation": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 3000
+          }
+        },
+        "required": [
+          "policy_review_outcome"
+        ],
+        "globalInputs": [
+          "current_findings",
+          "terminal_reason"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "policy_review_outcome": {
+                  "const": "pass"
+                }
+              },
+              "required": [
+                "policy_review_outcome"
+              ]
+            },
+            "then": {
+              "not": {
+                "anyOf": [
+                  {
+                    "required": [
+                      "policy_violation"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "terminal_reason"
+                    ]
+                  }
+                ]
+              }
+            },
+            "else": {
+              "required": [
+                "policy_violation"
+              ]
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "policy_review_outcome": {
+                  "const": "blocked"
+                }
+              },
+              "required": [
+                "policy_review_outcome"
+              ]
+            },
+            "then": {
+              "required": [
+                "terminal_reason"
+              ]
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "route-source-policy-pass"
+      },
+      "progressNodeId": "b4-source-policy"
+    },
+    {
+      "id": "route-source-policy-pass",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "review-source-policy.policy_review_outcome"
+        },
+        "right": "pass"
+      },
+      "connections": {
+        "true": "research-evidence",
+        "false": "route-source-policy-blocked"
+      },
+      "progressNodeId": "b4-source-policy",
+      "connectionLabels": {
+        "true": "source authority confirmed"
+      }
+    },
+    {
+      "id": "route-source-policy-blocked",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "review-source-policy.policy_review_outcome"
+        },
+        "right": "blocked"
+      },
+      "connections": {
+        "true": "finalize-blocked",
+        "false": "set-scope-policy"
+      },
+      "progressNodeId": "b4-source-policy",
+      "connectionLabels": {
+        "true": "evidence unobtainable within the ceiling",
+        "false": {
+          "label": "planned sources exceed the ceiling",
+          "cycle": {
+            "cause": "An independent check found a planned source or access method outside the declared privacy, licensing or consent ceiling, so the framing owner has to renew the source plan.",
+            "exit": "Ends when the renewed plan is confirmed inside the ceiling, or when the needed evidence is declared unobtainable within it."
+          }
+        }
+      }
+    },
+    {
+      "id": "reset-review-round",
+      "type": "expression",
+      "expressions": [
+        "review_round = 0"
+      ],
+      "connections": {
+        "default": "route-mode-acceptance"
+      },
+      "progressNodeId": "b9-review",
+      "connectionLabels": {
+        "default": "review found nothing to block on"
+      }
+    },
+    {
+      "id": "increment-review-round",
+      "type": "expression",
+      "expressions": [
+        "review_round = review_round + 1"
+      ],
+      "connections": {
+        "default": "route-review-budget"
+      },
+      "progressNodeId": "b10-repair"
+    },
+    {
+      "id": "route-review-budget",
+      "type": "condition",
+      "condition": {
+        "operator": "lte",
+        "left": {
+          "contextPath": "review_round"
+        },
+        "right": {
+          "contextPath": "max_review_rounds"
+        }
+      },
+      "connections": {
+        "true": "route-review-answer",
+        "false": "route-limit-mode"
+      },
+      "progressNodeId": "b10-repair",
+      "connectionLabels": {
+        "false": "repair budget exhausted"
+      }
+    },
+    {
+      "id": "route-limit-mode",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "operating_mode"
+        },
+        "right": "interactive"
+      },
+      "connections": {
+        "true": "ask-review-limit",
+        "false": "finalize-review-exhausted"
+      },
+      "progressNodeId": "b11-budget",
+      "connectionLabels": {
+        "false": "autonomous run finishes with a limited result"
+      }
+    },
+    {
+      "id": "ask-review-limit",
+      "type": "agent-directive",
+      "directive": "The repair budget for independent review is spent: {{max_review_rounds}} rounds of repair have already been made on findings this reviewer raised, and it still returns blockers. Storage mode is {{storage_mode}}: in workspace mode the open blockers are in semantic-review.md in {{workspace_path}}; in memory mode they are here: {{current_findings}}. Present them to the user and ask whether to continue repairing with a fresh budget or to finish now with an explicitly limited result that was never independently accepted.",
+      "completionCondition": "The user chose to continue repairing or to finish with a limited result",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "limit_decision": {
+            "type": "string",
+            "enum": [
+              "continue",
+              "finish"
+            ]
+          }
+        },
+        "required": [
+          "limit_decision"
+        ]
+      },
+      "connections": {
+        "success": "route-limit-decision"
+      },
+      "progressNodeId": "b11-budget"
+    },
+    {
+      "id": "route-limit-decision",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "ask-review-limit.limit_decision"
+        },
+        "right": "continue"
+      },
+      "connections": {
+        "true": "reset-review-round-limit",
+        "false": "finalize-review-exhausted"
+      },
+      "progressNodeId": "b11-budget",
+      "connectionLabels": {
+        "false": "user chose to finish"
+      }
+    },
+    {
+      "id": "reset-review-round-limit",
+      "type": "expression",
+      "expressions": [
+        "review_round = 0"
+      ],
+      "connections": {
+        "default": "route-review-answer"
+      },
+      "progressNodeId": "b11-budget",
+      "connectionLabels": {
+        "default": {
+          "label": "user chose to keep repairing",
+          "cycle": {
+            "cause": "The user decided that the open review findings are worth another round, so the repair budget starts again.",
+            "exit": "Ends when the user accepts finishing with a limited result, or when the new budget is exhausted."
+          }
+        }
+      }
+    },
+    {
+      "id": "route-final-storage-mode",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "storage_mode"
+        },
+        "right": "memory"
+      },
+      "connections": {
+        "true": "finalize-limited",
+        "false": "route-final-answer-status"
+      },
+      "progressNodeId": "b14-delivery",
+      "connectionLabels": {
+        "true": "run had no workspace — result is limited",
+        "false": "workspace held the package"
+      }
+    },
+    {
+      "id": "finalize-review-exhausted",
+      "type": "agent-directive",
+      "directive": "The repair budget for independent review is exhausted and the package was never independently accepted. Write the final report truthfully: the bounded question, the answer and limitations as they stand, the blockers independent review left open, and the fact that the limitation is procedural — the repair budget ran out — rather than evidential. Storage mode for this run is {{storage_mode}}. In memory mode, add that no workspace existed and state the storage limitation {{storage_limitation}} as a second cause. Do not claim independent acceptance, publication, VCS, deployment or production mutation. In workspace mode write final-report.md in {{workspace_path}} and return its path; in memory mode return the report in this answer and do not return artifact_path at all. Return terminal_status limited and terminal_reason naming the exhausted budget.",
+      "completionCondition": "The unaccepted package is reported honestly with a procedural limitation and, in memory mode, the storage limitation too",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": [
+          "terminal_status",
+          "terminal_reason"
+        ],
+        "globalInputs": [
+          "artifact_path",
+          "terminal_status",
+          "terminal_reason"
+        ],
+        "allOf": [
+          {
+            "properties": {
+              "terminal_status": {
+                "const": "limited"
+              }
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "notify-result-ready"
+      },
+      "progressNodeId": "b14-delivery"
+    },
+    {
+      "id": "notify-result-ready",
+      "type": "user-notification",
+      "message": "Verified Research finished: {{terminal_status}}. {{answer_summary}}",
+      "connections": {
+        "default": "notify-delivered",
+        "error": "notify-failed"
+      },
+      "progressNodeId": "b14-delivery",
+      "connectionLabels": {
+        "default": "user notified",
+        "error": "notification could not be delivered"
+      }
+    },
+    {
+      "id": "notify-delivered",
+      "type": "expression",
+      "expressions": [
+        "notification_status = \"delivered\""
+      ],
+      "connections": {
+        "default": "route-terminal-class"
+      },
+      "progressNodeId": "b14-delivery"
+    },
+    {
+      "id": "notify-failed",
+      "type": "expression",
+      "expressions": [
+        "notification_status = \"failed\""
+      ],
+      "connections": {
+        "default": "route-terminal-class"
+      },
+      "progressNodeId": "b14-delivery"
+    },
+    {
+      "id": "route-terminal-class",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "terminal_status"
+        },
+        "right": "complete"
+      },
+      "connections": {
+        "true": "end",
+        "false": "end-limited"
+      },
+      "progressNodeId": "b14-delivery",
+      "connectionLabels": {
+        "true": "result is complete",
+        "false": "result is limited"
       }
     }
   ],
@@ -2080,9 +2749,193 @@
       ],
       "description": "Truthful terminal class for the bounded research run.",
       "default": "blocked"
+    },
+    "max_review_rounds": {
+      "type": "number",
+      "description": "Maximum independent-review repair rounds before the run stops repairing and finishes with an explicitly procedural limitation.",
+      "default": 3
+    },
+    "confidentiality_ceiling": {
+      "type": "string",
+      "description": "Unchangeable ceiling for privacy, licensing, consent and retention that no source or access method may exceed.",
+      "maxLength": 4000
+    },
+    "current_findings": {
+      "type": "string",
+      "description": "Current reproducible blockers handed from a check to its repair owner when no workspace file can carry them.",
+      "maxLength": 12000,
+      "default": ""
+    },
+    "framing_scope": {
+      "type": "string",
+      "description": "Why the run entered framing: a first pass, a corrected contract, a source-policy repair, user-requested reframing, or user-requested evidence rework.",
+      "enum": [
+        "initial",
+        "contract",
+        "policy",
+        "framing",
+        "evidence"
+      ],
+      "default": "initial"
+    },
+    "notification_status": {
+      "type": "string",
+      "description": "Whether the completion notification reached the user.",
+      "enum": [
+        "unsent",
+        "delivered",
+        "failed"
+      ],
+      "default": "unsent"
+    },
+    "output_language": {
+      "type": "string",
+      "description": "Language of the answer, the limitations and the final report.",
+      "maxLength": 100
+    },
+    "review_round": {
+      "type": "number",
+      "description": "Repair rounds already spent on findings raised by independent semantic review.",
+      "default": 0
+    },
+    "source_policy": {
+      "type": "string",
+      "description": "Currently planned sources and access methods, judged against the confidentiality ceiling before any acquisition.",
+      "maxLength": 6000
+    },
+    "storage_limitation": {
+      "type": "string",
+      "description": "The storage limitation that applies when the run proceeds without a workspace.",
+      "maxLength": 2000,
+      "default": ""
+    },
+    "storage_mode": {
+      "type": "string",
+      "description": "Whether the run keeps its research package in the execution workspace or carries it in memory because no workspace could be created.",
+      "enum": [
+        "workspace",
+        "memory"
+      ],
+      "default": "workspace"
+    },
+    "target_audience": {
+      "type": "string",
+      "description": "Who reads and interprets the answer, as distinct from the decision it supports.",
+      "maxLength": 2000
     }
   },
   "slug": "verified-research",
   "owner": "system-moira",
-  "visibility": "public"
+  "visibility": "public",
+  "progress": {
+    "title": "Verified Research",
+    "goal": "Answer one bounded research question with evidence-linked, independently reviewed material and an honest result class.",
+    "nodes": [
+      {
+        "id": "b1-intake",
+        "label": "Question and contract",
+        "content": {
+          "summary": "The run pins down one researchable question, the decision it serves, who reads the answer, its language and the confidentiality ceiling, asking the user only when something essential is genuinely missing."
+        }
+      },
+      {
+        "id": "b2-workspace",
+        "label": "Workspace",
+        "content": {
+          "summary": "An execution-correlated workspace is created for the durable research records; when none can be created, the run continues from memory and says so."
+        }
+      },
+      {
+        "id": "b3-framing",
+        "label": "Framing",
+        "content": {
+          "summary": "The question is broken into subquestions with an evidence method and a planned set of sources, doing only what this entry asks: a first framing, a corrected contract, a renewed source plan, or the rework the user named."
+        }
+      },
+      {
+        "id": "b4-source-policy",
+        "label": "Source authority",
+        "content": {
+          "summary": "An independent check confirms that every planned source and access method stays inside the declared privacy, licensing and consent ceiling before anything is acquired."
+        }
+      },
+      {
+        "id": "b5-evidence",
+        "label": "Evidence",
+        "content": {
+          "summary": "Sources within the confirmed plan are gathered and read critically, with claim-level support, disagreement preserved, and missing evidence distinguished from negative evidence."
+        }
+      },
+      {
+        "id": "b6-synthesis",
+        "label": "Answer",
+        "content": {
+          "summary": "One bounded answer and its limitations are written from the evidence, in the declared language and for the declared audience."
+        }
+      },
+      {
+        "id": "b7-package",
+        "label": "Package completion",
+        "content": {
+          "summary": "The author closes obvious gaps, unsupported claims and missing limitations before anyone reviews the package."
+        }
+      },
+      {
+        "id": "b8-validation",
+        "label": "Validation",
+        "content": {
+          "summary": "Mechanical checks confirm that the records exist, parse, resolve to listed sources and match the canonical evidence class."
+        }
+      },
+      {
+        "id": "b9-review",
+        "label": "Independent review",
+        "content": {
+          "summary": "A genuinely independent reviewer judges the whole answer, records every reproducible blocker and names the owner of each defect."
+        }
+      },
+      {
+        "id": "b10-repair",
+        "label": "Repair",
+        "content": {
+          "summary": "The owner of the defect — the answer or the evidence base — repairs it within the repair-round budget and returns the work to the gate whose evidence went stale."
+        }
+      },
+      {
+        "id": "b11-budget",
+        "label": "Repair budget",
+        "content": {
+          "summary": "The repair budget is exhausted: an autonomous run finishes with an honest procedural limitation, an interactive one asks the user once whether to continue."
+        }
+      },
+      {
+        "id": "b12-contract",
+        "label": "Contract reassessment",
+        "content": {
+          "summary": "A wrong reading of the question, method or acceptance criterion is corrected and the correction is reviewed independently before the work resumes."
+        }
+      },
+      {
+        "id": "b13-acceptance",
+        "label": "Acceptance",
+        "content": {
+          "summary": "The user accepts the reviewed result, sends it back to a named owner for rework, or aborts; an autonomous run goes straight to delivery."
+        }
+      },
+      {
+        "id": "b14-delivery",
+        "label": "Delivery",
+        "content": {
+          "summary": "The final report is written, the user is notified, and the result is classed truthfully as complete or limited."
+        }
+      },
+      {
+        "id": "b15-stop",
+        "label": "Stop",
+        "content": {
+          "summary": "The run ends without an accepted result: an irreducible blocker or the user's decision to abort."
+        }
+      }
+    ]
+  }
 }

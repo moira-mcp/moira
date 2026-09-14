@@ -53,6 +53,8 @@ variable schemas can be read from files, avoiding fragile shell quoting:
 
 ```bash
 moira-workflow ./workflow.json set-description --file ./description.txt
+moira-workflow ./workflow.json set-system-reminder --file ./reminder.txt
+moira-workflow ./workflow.json set-tags research,verification
 moira-workflow ./workflow.json set-variable-schema result --file ./result-schema.json
 ```
 
