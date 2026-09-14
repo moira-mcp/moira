@@ -143,6 +143,7 @@ class LifecycleProvider implements WorkspaceProviderAdapter {
 class DomainFixture {
   readonly root = mkdtempSync(join(tmpdir(), "moira-mcp-domain-"));
   readonly repositoryPath = join(this.root, "workspaces", "repository");
+  environmentId = "life-one";
   readonly databasePath = join(this.root, "domain.sqlite");
   readonly provider = new LifecycleProvider();
   readonly jobs: Array<{ action: string; remoteMarker: string }> = [];
@@ -335,6 +336,9 @@ class DomainFixture {
           ...process.env,
           MOIRA_WORKSPACES_ROOT: join(this.root, "workspaces"),
           MOIRA_OPERATION_STATE_DIR: join(this.root, "remote-state"),
+          // A real Codespace derives its life from the running Linux environment; this host is not
+          // one, so the fixture states which life it is emulating.
+          MOIRA_ENVIRONMENT_ID: this.environmentId,
         },
         stdio: ["pipe", "pipe", "pipe"],
       });
@@ -749,6 +753,127 @@ describe("ChatGPT-compatible workspace MCP with real domain services", () => {
       cancel: true,
     });
     expect(operation(stopped).state).toBe("cancelled");
+  });
+
+  it("carries a working directory and variables between commands in one session", async () => {
+    const { fixture, mcp } = await setup();
+    const workspaceId = await createWorkspace(mcp);
+    const args = { workspace_id: workspaceId };
+    mkdirSync(join(fixture.repositoryPath, "service"), { recursive: true });
+    const observe = [
+      process.execPath,
+      "-e",
+      "process.stdout.write(require('node:path').basename(process.cwd())+'|'+(process.env.BUILD_TARGET??'none'))",
+    ];
+
+    const opened = await finish(
+      mcp,
+      "workspace_exec",
+      workspaceId,
+      await mcp.call("workspace_exec", {
+        ...args,
+        argv: observe,
+        timeout_seconds: 10,
+        session: "build",
+        session_start: true,
+        cwd: "service",
+        env: { BUILD_TARGET: "release" },
+      }),
+    );
+    expect(opened.structuredContent).toMatchObject({
+      result: { stdout: "service|release", exit_code: 0 },
+    });
+
+    // The next command names neither and observes both; a command outside the session observes
+    // neither. This is the difficulty the requirement describes, gone.
+    const continued = await finish(
+      mcp,
+      "workspace_exec",
+      workspaceId,
+      await mcp.call("workspace_exec", {
+        ...args,
+        argv: observe,
+        timeout_seconds: 10,
+        session: "build",
+      }),
+    );
+    expect(continued.structuredContent).toMatchObject({
+      result: { stdout: "service|release", exit_code: 0 },
+    });
+    const outside = await finish(
+      mcp,
+      "workspace_exec",
+      workspaceId,
+      await mcp.call("workspace_exec", { ...args, argv: observe, timeout_seconds: 10 }),
+    );
+    expect(outside.structuredContent).toMatchObject({
+      result: { stdout: "repository|none", exit_code: 0 },
+    });
+
+    // Nothing the session stores is echoed back to the agent, and no stored row carries it.
+    expect(JSON.stringify(continued.structuredContent)).not.toContain("BUILD_TARGET");
+    expect(
+      JSON.stringify(fixture.sqlite.prepare("SELECT * FROM workspaceOperation").all()),
+    ).not.toContain("BUILD_TARGET");
+
+    // A script activates a toolchain; the next ordinary command inherits what it left behind.
+    const activated = await finish(
+      mcp,
+      "workspace_exec",
+      workspaceId,
+      await mcp.call("workspace_exec", {
+        ...args,
+        session: "build",
+        script: "cd service\nexport BUILD_TARGET=debug\nexport TOOLCHAIN=/opt/toolchain\n",
+        timeout_seconds: 20,
+      }),
+    );
+    expect(activated.structuredContent).toMatchObject({
+      result: { state: "succeeded", session_capture_dropped: false },
+    });
+    const afterScript = await finish(
+      mcp,
+      "workspace_exec",
+      workspaceId,
+      await mcp.call("workspace_exec", {
+        ...args,
+        argv: [
+          process.execPath,
+          "-e",
+          "process.stdout.write(require('node:path').basename(process.cwd())+'|'+process.env.BUILD_TARGET+'|'+process.env.TOOLCHAIN)",
+        ],
+        timeout_seconds: 10,
+        session: "build",
+      }),
+    );
+    expect(afterScript.structuredContent).toMatchObject({
+      result: { stdout: "service|debug|/opt/toolchain", exit_code: 0 },
+    });
+
+    // Ending the session removes what it stored, so naming it afterwards is refused.
+    const ended = await mcp.call("workspace_exec", {
+      ...args,
+      session: "build",
+      session_end: true,
+    });
+    expect(operation(ended).state).toBe("succeeded");
+    const afterEnd = await mcp.call("workspace_exec", {
+      ...args,
+      argv: observe,
+      timeout_seconds: 10,
+      session: "build",
+    });
+    expect(afterEnd.isError).toBe(true);
+
+    // A session that was never opened is refused rather than silently created.
+    const unknown = await mcp.call("workspace_exec", {
+      ...args,
+      argv: observe,
+      timeout_seconds: 10,
+      session: "never-opened",
+    });
+    expect(unknown.isError).toBe(true);
+    expect(JSON.stringify(unknown.structuredContent)).toContain("WORKSPACE_SESSION_UNAVAILABLE");
   });
 
   it("recovers lost write and exec responses from reopened SQLite without redispatch or foreign access", async () => {

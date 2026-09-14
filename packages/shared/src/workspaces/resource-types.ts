@@ -152,6 +152,7 @@ export type WorkspaceResourceErrorCode =
   | "WORKSPACE_PROVIDER_DISABLED"
   | "WORKSPACE_PROVIDER_UNAVAILABLE"
   | "WORKSPACE_POLICY_LIMIT"
+  | "WORKSPACE_SESSION_UNAVAILABLE"
   | "WORKSPACE_OPERATION_BUSY"
   | "WORKSPACE_AUTHORIZATION_REQUIRED"
   | "WORKSPACE_RESULT_EXPIRED"
@@ -211,8 +212,20 @@ export type WorkspaceByteSource =
     };
 
 export interface WorkspaceExecRequest {
-  argv: readonly string[];
-  cwd: string;
+  /** Absent only for a script command or a call that just ends a session. */
+  argv?: readonly string[];
+  /** Text run by the workspace's own shell inside a session; its end state is captured. */
+  script?: string;
+  /** Ends the named session after this call, removing its stored context. */
+  sessionEnd?: boolean;
+  /** Absent means the session's working directory, or the repository root without a session. */
+  cwd?: string;
+  /** Names a session whose working directory and variables this command continues. */
+  session?: string;
+  /** Opens the named session instead of continuing it. */
+  sessionStart?: boolean;
+  /** Variables to apply to this command and, in a session, to the ones that follow it. */
+  env?: Readonly<Record<string, string>>;
   stdin: WorkspaceByteSource;
   /** Absent means the mode's own default: an ordinary bounded duration, or the background ceiling. */
   timeoutMs?: number;
@@ -239,6 +252,8 @@ export interface WorkspaceOperationResult {
   stderrTotalBytes: number;
   /** True when the workspace's retained-output ceiling stopped the command. */
   outputLimitExceeded: boolean;
+  /** True when a script's end state would not fit the session's stored-context ceiling. */
+  sessionCaptureDropped: boolean;
 }
 
 export interface WorkspaceOperationOutputRequest {
@@ -269,7 +284,12 @@ export interface WorkspaceOperationTransport extends WorkspaceTransportAvailabil
     workspace: WorkspaceResourceRecord,
     operation: WorkspaceOperationRecord,
     request: WorkspaceExecRequest,
-  ): Promise<WorkspaceOperationResult | { state: "running" }>;
+  ): Promise<
+    | WorkspaceOperationResult
+    | { state: "running" }
+    | { state: "session_unavailable" }
+    | { state: "session_limit"; limit: "context" | "sessions" }
+  >;
   inspect(
     credential: string,
     workspace: WorkspaceResourceRecord,

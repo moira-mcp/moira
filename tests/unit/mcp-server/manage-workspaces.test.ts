@@ -822,6 +822,36 @@ describe("workspace MCP adapter", () => {
     );
   });
 
+  it("passes a session through and never echoes what it stores", async () => {
+    const base = services();
+    const executed = await executeWorkspaceTool(
+      "workspace_exec",
+      parseWorkspaceToolParams("workspace_exec", {
+        workspace_id: WORKSPACE_ID,
+        argv: ["npm", "run", "build"],
+        session: "build",
+        session_start: true,
+        cwd: "service",
+        env: { BUILD_TARGET: "release" },
+      }),
+      USER_ID,
+      base,
+    );
+    expect(base.operation!.execute).toHaveBeenCalledWith(
+      USER_ID,
+      WORKSPACE_ID,
+      expect.objectContaining({
+        session: "build",
+        sessionStart: true,
+        cwd: "service",
+        env: { BUILD_TARGET: "release" },
+      }),
+    );
+    // A session's variables are the caller's own secret material; no result carries them back.
+    expect(JSON.stringify(data(executed))).not.toContain("BUILD_TARGET");
+    expect(JSON.stringify(data(executed))).not.toContain("release");
+  });
+
   it("tells a refused caller which ceiling stopped it and stays generic without a detail", async () => {
     const base = services();
     const named = services({
@@ -973,7 +1003,13 @@ describe("workspace MCP adapter", () => {
     expect(
       parseWorkspaceToolParams("workspace_exec", { workspace_id: WORKSPACE_ID, argv: ["ls"] }),
       // A bounded command names no duration: the service applies the default its mode implies.
-    ).toEqual({ workspace_id: WORKSPACE_ID, argv: ["ls"], cwd: ".", background: false });
+    ).toEqual({
+      workspace_id: WORKSPACE_ID,
+      argv: ["ls"],
+      background: false,
+      session_start: false,
+      session_end: false,
+    });
     expect(
       parseWorkspaceToolParams("workspace_download", {
         workspace_id: WORKSPACE_ID,

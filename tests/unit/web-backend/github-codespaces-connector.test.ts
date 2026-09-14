@@ -109,6 +109,7 @@ describe("GitHub Codespaces connector boundary", () => {
         stdoutBytes: 90_000,
         stderrBytes: 8,
         outputLimitExceeded: false,
+        sessionCaptureDropped: false,
       }),
     }));
     const connector = new GitHubCodespacesConnector(harness.requestImpl);
@@ -131,6 +132,7 @@ describe("GitHub Codespaces connector boundary", () => {
       stdoutTotalBytes: 90_000,
       stderrTotalBytes: 8,
       outputLimitExceeded: false,
+      sessionCaptureDropped: false,
     });
     const body = JSON.parse(harness.calls[0].body);
     expect(body.job.argv).toEqual(["printf", "%s", "a value;$(false)"]);
@@ -162,6 +164,7 @@ describe("GitHub Codespaces connector boundary", () => {
       stdoutBytes: 8 * 1024 * 1024,
       stderrBytes: 8 * 1024 * 1024,
       outputLimitExceeded: false,
+      sessionCaptureDropped: false,
     });
     const maximumWireResult = encodeConnectorResponse({
       value: remoteWireResult.toString("utf8"),
@@ -582,6 +585,46 @@ describe("GitHub Codespaces connector boundary", () => {
     ).rejects.toThrow(/invalid output range/);
   });
 
+  test("maps the remote session answers to their transport shapes", async () => {
+    for (const [remote, expected] of [
+      [{ state: "session_unavailable" }, { state: "session_unavailable" }],
+      [
+        { state: "session_limit", limit: "sessions" },
+        { state: "session_limit", limit: "sessions" },
+      ],
+      [{ state: "session_limit" }, { state: "session_limit", limit: "context" }],
+      [
+        { state: "session_ended" },
+        {
+          state: "succeeded",
+          stdout: "",
+          stderr: "",
+          exitCode: 0,
+          stdoutTotalBytes: 0,
+          stderrTotalBytes: 0,
+          outputLimitExceeded: false,
+          sessionCaptureDropped: false,
+        },
+      ],
+    ] as const) {
+      const connector = new GitHubCodespacesConnector(
+        requestHarness(() => ({ value: JSON.stringify(remote) })).requestImpl,
+      );
+      await expect(
+        connector.execute("ghu_topsecret", workspace, operation, {
+          argv: ["true"],
+          cwd: ".",
+          stdin: { kind: "inline", bytes: new Uint8Array() },
+          timeoutMs: 5_000,
+          maxStdoutBytes: 4096,
+          maxStderrBytes: 4096,
+          maxRetainedBytes: 1024 * 1024,
+          session: "build",
+        }),
+      ).resolves.toEqual(expected);
+    }
+  });
+
   test("rejects a malformed remote terminal envelope", async () => {
     const harness = requestHarness(() => ({
       value: JSON.stringify({
@@ -592,6 +635,7 @@ describe("GitHub Codespaces connector boundary", () => {
         stdoutBytes: 10,
         stderrBytes: 0,
         outputLimitExceeded: false,
+        sessionCaptureDropped: false,
       }),
     }));
     const connector = new GitHubCodespacesConnector(harness.requestImpl);

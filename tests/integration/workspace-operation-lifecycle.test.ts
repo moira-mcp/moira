@@ -456,6 +456,113 @@ describe("durable direct workspace operations", () => {
     }
   });
 
+  test("refuses a session that would exceed its ceiling and keeps the caller's command forms honest", async () => {
+    const value = fixture();
+    try {
+      value.transport.executeResult = { state: "session_limit", limit: "context" };
+      await expect(
+        value.service.execute("user-1", "workspace-1", {
+          argv: ["true"],
+          cwd: ".",
+          stdin: { kind: "inline", bytes: new Uint8Array() },
+          timeoutMs: 5_000,
+          session: "build",
+          env: { BIG: "x" },
+        }),
+      ).rejects.toMatchObject({
+        code: "WORKSPACE_POLICY_LIMIT",
+        detail: expect.stringContaining("stored context"),
+      });
+      value.transport.executeResult = { state: "session_limit", limit: "sessions" };
+      await expect(
+        value.service.execute("user-1", "workspace-1", {
+          argv: ["true"],
+          cwd: ".",
+          stdin: { kind: "inline", bytes: new Uint8Array() },
+          timeoutMs: 5_000,
+          session: "another",
+          sessionStart: true,
+        }),
+      ).rejects.toMatchObject({
+        code: "WORKSPACE_POLICY_LIMIT",
+        detail: expect.stringContaining("open sessions"),
+      });
+      // Both refusals end their operation rather than leaving capacity held, and the stored record
+      // says why, so a later audit read does not read them as cancellations the caller asked for.
+      expect(
+        value.service.list("user-1", "workspace-1").map((operation) => operation.lastOutcome),
+      ).toEqual(["session_limit", "session_limit"]);
+
+      // A caller names one kind of work: argv, a script inside a session, or ending a session.
+      for (const invalid of [
+        { argv: ["true"], script: "echo hello", session: "build" },
+        { script: "echo hello" },
+        {},
+      ]) {
+        await expect(
+          value.service.execute("user-1", "workspace-1", {
+            cwd: ".",
+            stdin: { kind: "inline", bytes: new Uint8Array() },
+            timeoutMs: 5_000,
+            ...invalid,
+          }),
+        ).rejects.toMatchObject({ code: "WORKSPACE_RESOURCE_INVALID" });
+      }
+    } finally {
+      value.sqlite.close();
+    }
+  });
+
+  test("refuses a command whose session is gone without running it", async () => {
+    const value = fixture();
+    try {
+      value.transport.executeResult = { state: "session_unavailable" };
+      const before = value.service.list("user-1", "workspace-1").length;
+      await expect(
+        value.service.execute("user-1", "workspace-1", {
+          argv: ["npm", "test"],
+          cwd: ".",
+          stdin: { kind: "inline", bytes: new Uint8Array() },
+          timeoutMs: 5_000,
+          session: "build",
+        }),
+      ).rejects.toMatchObject({
+        code: "WORKSPACE_SESSION_UNAVAILABLE",
+        detail: expect.stringContaining("session"),
+      });
+      // The operation exists and is over; no command ran and no capacity stays held.
+      const operations = value.service.list("user-1", "workspace-1");
+      expect(operations).toHaveLength(before + 1);
+      expect(operations[operations.length - 1]).toMatchObject({
+        state: "cancelled",
+        exitCode: null,
+        outputBytes: 0,
+        lastOutcome: "session_unavailable",
+      });
+      expect(value.transport.executeCalls).toHaveBeenCalledTimes(1);
+
+      // A malformed session or variable is refused before anything is reserved.
+      for (const invalid of [
+        { session: "../escape" },
+        { env: { "not a name": "x" } },
+        { env: Object.fromEntries(Array.from({ length: 65 }, (_, index) => [`V${index}`, "x"])) },
+      ]) {
+        await expect(
+          value.service.execute("user-1", "workspace-1", {
+            argv: ["true"],
+            cwd: ".",
+            stdin: { kind: "inline", bytes: new Uint8Array() },
+            timeoutMs: 5_000,
+            ...invalid,
+          }),
+        ).rejects.toMatchObject({ code: "WORKSPACE_RESOURCE_INVALID" });
+      }
+      expect(value.service.list("user-1", "workspace-1")).toHaveLength(before + 1);
+    } finally {
+      value.sqlite.close();
+    }
+  });
+
   test("bounds each kind of command by its own ceiling and says which one was met", async () => {
     const value = fixture();
     try {

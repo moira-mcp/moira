@@ -37,6 +37,9 @@ const CONNECTOR_MAX_RETAINED_OUTPUT_BYTES = 4 * 1024 * 1024 * 1024;
 const MAX_OUTPUT_RANGE_BYTES = 4 * 1024 * 1024;
 const DEFAULT_RETAINED_OUTPUT_BYTES = 64 * 1024 * 1024;
 const MAX_WORKSPACE_CWD_BYTES = 4096;
+const MAX_SESSION_VARIABLES = 64;
+const MAX_SCRIPT_BYTES = 64 * 1024;
+const MAX_ENVIRONMENT_VALUE_LENGTH = 4096;
 
 /**
  * The disk one command's retained output may occupy in the workspace. It is the only output bound
@@ -47,6 +50,22 @@ function retainedOutputBytes(policy: WorkspaceResourcePolicy): number {
     policy.maxRetainedOutputBytes ?? DEFAULT_RETAINED_OUTPUT_BYTES,
     CONNECTOR_MAX_RETAINED_OUTPUT_BYTES,
   );
+}
+
+/** A terminal outcome for an operation that ended without running a command. */
+function terminalWithoutCommand(
+  state: WorkspaceOperationResult["state"],
+): WorkspaceOperationResult {
+  return {
+    state,
+    stdout: "",
+    stderr: "",
+    exitCode: null,
+    stdoutTotalBytes: 0,
+    stderrTotalBytes: 0,
+    outputLimitExceeded: false,
+    sessionCaptureDropped: false,
+  };
 }
 
 function isTerminalOperationState(
@@ -79,25 +98,54 @@ function validateRequest(
   stderrLimitBytes: number;
   timeoutMs: number;
 } {
+  // A call carries exactly one kind of work: argv, a script, or ending a session and nothing else.
+  const forms = [request.argv !== undefined, request.script !== undefined].filter(Boolean).length;
+  if (forms > 1 || (forms === 0 && !request.sessionEnd)) {
+    throw new WorkspaceResourceError(
+      "WORKSPACE_RESOURCE_INVALID",
+      "Command form is invalid",
+      "Give argv, or a script inside a session, or end a session with neither.",
+    );
+  }
+  if (request.script !== undefined && request.session === undefined) {
+    throw new WorkspaceResourceError(
+      "WORKSPACE_RESOURCE_INVALID",
+      "A script requires a session",
+      "A script runs in a session so that what it leaves behind can be carried; name one.",
+    );
+  }
   if (
-    request.argv.length === 0 ||
-    request.argv.length > 128 ||
-    request.argv.some(
-      (value) =>
-        typeof value !== "string" ||
-        value.length === 0 ||
-        Buffer.byteLength(value) > 16_384 ||
-        value.includes("\0"),
-    )
+    request.script !== undefined &&
+    (request.script.length === 0 || Buffer.byteLength(request.script) > MAX_SCRIPT_BYTES)
+  ) {
+    throw new WorkspaceResourceError(
+      "WORKSPACE_RESOURCE_INVALID",
+      "Script is invalid",
+      `A script is between 1 and ${MAX_SCRIPT_BYTES} bytes.`,
+    );
+  }
+  if (
+    request.argv !== undefined &&
+    (request.argv.length === 0 ||
+      request.argv.length > 128 ||
+      request.argv.some(
+        (value) =>
+          typeof value !== "string" ||
+          value.length === 0 ||
+          Buffer.byteLength(value) > 16_384 ||
+          value.includes("\0"),
+      ))
   ) {
     throw new WorkspaceResourceError("WORKSPACE_RESOURCE_INVALID", "Invalid command arguments");
   }
+  const requestedCwd = request.cwd;
   if (
-    Buffer.byteLength(request.cwd, "utf8") > MAX_WORKSPACE_CWD_BYTES ||
-    request.cwd.startsWith("/") ||
-    (request.cwd !== "." &&
-      request.cwd.split("/").some((part) => part === ".." || part === "." || part === "")) ||
-    request.cwd.includes("\0")
+    requestedCwd !== undefined &&
+    (Buffer.byteLength(requestedCwd, "utf8") > MAX_WORKSPACE_CWD_BYTES ||
+      requestedCwd.startsWith("/") ||
+      (requestedCwd !== "." &&
+        requestedCwd.split("/").some((part) => part === ".." || part === "." || part === "")) ||
+      requestedCwd.includes("\0"))
   ) {
     throw new WorkspaceResourceError(
       "WORKSPACE_RESOURCE_INVALID",
@@ -131,7 +179,8 @@ function validateRequest(
   // default, a background command its whole ceiling. Otherwise background would mean "returns
   // immediately and is killed in five minutes".
   const timeoutMs =
-    request.timeoutMs ?? (request.background ? ceilingMs : DEFAULT_BOUNDED_TIMEOUT_MS);
+    request.timeoutMs ??
+    (request.background ? ceilingMs : Math.min(DEFAULT_BOUNDED_TIMEOUT_MS, ceilingMs));
   if (timeoutMs < 1 || timeoutMs > ceilingMs) {
     throw new WorkspaceResourceError(
       "WORKSPACE_POLICY_LIMIT",
@@ -140,6 +189,31 @@ function validateRequest(
         ? `A background command may run for at most ${Math.floor(ceilingMs / 3_600_000)} hours.`
         : `A command may run for at most ${Math.floor(ceilingMs / 1000)} seconds; start it in the background to run longer.`,
     );
+  }
+  if (request.session !== undefined && !/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(request.session)) {
+    throw new WorkspaceResourceError(
+      "WORKSPACE_RESOURCE_INVALID",
+      "Session name is invalid",
+      "A session name is 1 to 64 characters of letters, digits, hyphen or underscore.",
+    );
+  }
+  if (request.env !== undefined) {
+    const variables = Object.entries(request.env);
+    if (
+      variables.length > MAX_SESSION_VARIABLES ||
+      variables.some(
+        ([name, value]) =>
+          !/^[A-Za-z_][A-Za-z0-9_]{0,127}$/.test(name) ||
+          typeof value !== "string" ||
+          value.length > MAX_ENVIRONMENT_VALUE_LENGTH,
+      )
+    ) {
+      throw new WorkspaceResourceError(
+        "WORKSPACE_RESOURCE_INVALID",
+        "Session variables are invalid",
+        `At most ${MAX_SESSION_VARIABLES} variables, each a valid name with a value of at most ${MAX_ENVIRONMENT_VALUE_LENGTH} characters.`,
+      );
+    }
   }
   const stdoutLimitBytes = request.maxStdoutBytes ?? policy.maxOperationStdoutBytes ?? 1024 * 1024;
   const stderrLimitBytes = request.maxStderrBytes ?? policy.maxOperationStderrBytes ?? 256 * 1024;
@@ -409,6 +483,8 @@ export class WorkspaceOperationService {
     } = prepared;
     let terminalResult: WorkspaceOperationResult | null = null;
     let terminalEmitted = false;
+    let sessionUnavailable = false;
+    let sessionLimit: "context" | "sessions" | null = null;
     let remoteContacted = false;
     let claimedInput: WorkspaceTransferRecord | null = null;
     let preDispatchOutcome = "credential_unavailable_before_dispatch";
@@ -487,7 +563,26 @@ export class WorkspaceOperationService {
         operation.resourceGeneration,
         this.now(),
       );
-      if (result.state === "running") {
+      if (result.state === "session_limit") {
+        // The stored record says why this operation ended, so a later audit read does not mistake
+        // it for a cancellation the caller asked for.
+        this.complete(userId, operation, terminalWithoutCommand("cancelled"), "session_limit");
+        terminalEmitted = true;
+        sessionLimit = result.limit;
+        await this.emit("terminal", this.dependencies.repository.getOwned(userId, operation.id)!);
+      } else if (result.state === "session_unavailable") {
+        // The command never ran, so the operation ends without one; the refusal is raised after
+        // this block so it reaches the caller instead of the recovery path below.
+        this.complete(
+          userId,
+          operation,
+          terminalWithoutCommand("cancelled"),
+          "session_unavailable",
+        );
+        terminalEmitted = true;
+        sessionUnavailable = true;
+        await this.emit("terminal", this.dependencies.repository.getOwned(userId, operation.id)!);
+      } else if (result.state === "running") {
         this.dependencies.repository.markRunning(
           userId,
           operation.id,
@@ -525,6 +620,22 @@ export class WorkspaceOperationService {
         );
         await this.emit("terminal", this.dependencies.repository.getOwned(userId, operation.id)!);
       }
+    }
+    if (sessionLimit) {
+      throw new WorkspaceResourceError(
+        "WORKSPACE_POLICY_LIMIT",
+        "Workspace session limit reached",
+        sessionLimit === "sessions"
+          ? "This workspace already holds the maximum number of open sessions. End one before opening another."
+          : "The session's stored context would exceed its ceiling. Pass fewer or smaller variables, or open a new session.",
+      );
+    }
+    if (sessionUnavailable) {
+      throw new WorkspaceResourceError(
+        "WORKSPACE_SESSION_UNAVAILABLE",
+        "Workspace session is unavailable",
+        "That session belongs to an earlier life of this workspace or was never opened. Open a new session for this workspace.",
+      );
     }
     const current = this.dependencies.repository.getOwned(userId, operation.id)!;
     if (terminalResult && !terminalEmitted) await this.emit("terminal", current);
@@ -614,15 +725,11 @@ export class WorkspaceOperationService {
       );
       if (result.state === "running") return null;
       if (result.state === "absent") {
-        return await this.completeObserved(userId, operation, {
-          state: cancel ? "cancelled" : "failed",
-          stdout: "",
-          stderr: "",
-          exitCode: null,
-          stdoutTotalBytes: 0,
-          stderrTotalBytes: 0,
-          outputLimitExceeded: false,
-        });
+        return await this.completeObserved(
+          userId,
+          operation,
+          terminalWithoutCommand(cancel ? "cancelled" : "failed"),
+        );
       }
       return await this.completeObserved(userId, operation, result);
     } catch (error) {
@@ -743,15 +850,11 @@ export class WorkspaceOperationService {
           this.now(),
         );
       } else if (result.state === "absent") {
-        const terminal = this.complete(operation.userId, operation, {
-          state: shouldCancel ? "cancelled" : "failed",
-          stdout: "",
-          stderr: "",
-          exitCode: null,
-          stdoutTotalBytes: 0,
-          stderrTotalBytes: 0,
-          outputLimitExceeded: false,
-        });
+        const terminal = this.complete(
+          operation.userId,
+          operation,
+          terminalWithoutCommand(shouldCancel ? "cancelled" : "failed"),
+        );
         if (terminal) {
           await this.emit(
             "terminal",
@@ -827,6 +930,7 @@ export class WorkspaceOperationService {
     userId: string,
     operation: WorkspaceOperationRecord,
     result: WorkspaceOperationResult,
+    lastOutcome?: string,
   ): WorkspaceOperationResult | null {
     const now = this.now();
     return this.dependencies.repository.complete(
@@ -838,6 +942,7 @@ export class WorkspaceOperationService {
       operation.stderrLimitBytes,
       now + this.resultRetentionMs(operation),
       now,
+      lastOutcome,
     );
   }
 

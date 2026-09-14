@@ -43,6 +43,7 @@ const RESOURCE_ERROR_STATUS: Record<string, number> = {
   WORKSPACE_RESOURCE_INVALID: 400,
   WORKSPACE_CREATE_REJECTED: 422,
   WORKSPACE_POLICY_LIMIT: 429,
+  WORKSPACE_SESSION_UNAVAILABLE: 409,
   WORKSPACE_OPERATION_BUSY: 429,
   WORKSPACE_PROVIDER_DISABLED: 503,
   WORKSPACE_PROVIDER_UNAVAILABLE: 503,
@@ -304,6 +305,8 @@ function publicMessage(code: string): string {
       return "The workspace changed; refresh and retry";
     case "WORKSPACE_POLICY_LIMIT":
       return "A workspace quota or limit was reached";
+    case "WORKSPACE_SESSION_UNAVAILABLE":
+      return "The command session is not available in this workspace";
     case "WORKSPACE_OPERATION_BUSY":
       return "Workspace operations are busy; retry later";
     case "WORKSPACE_PROVIDER_DISABLED":

@@ -639,8 +639,33 @@ const workspaceExecStartSchema = z
           .max(16 * 1024),
       )
       .min(1)
-      .max(128),
-    cwd: z.string().max(4096).default("."),
+      .max(128)
+      .optional(),
+    script: z
+      .string()
+      .min(1)
+      .max(64 * 1024)
+      .optional()
+      .describe("Shell script run inside a session; what it leaves behind is carried forward"),
+    session_end: z
+      .boolean()
+      .default(false)
+      .describe("End the named session after this call, or alone with no command"),
+    // Absent means the session's working directory, or the repository root without a session.
+    cwd: z.string().max(4096).optional(),
+    session: z
+      .string()
+      .regex(/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/)
+      .optional()
+      .describe("Continue the working directory and variables of this named session"),
+    session_start: z
+      .boolean()
+      .default(false)
+      .describe("Open the named session instead of continuing it"),
+    env: z
+      .record(z.string().regex(/^[A-Za-z_][A-Za-z0-9_]{0,127}$/), z.string().max(4096))
+      .optional()
+      .describe("Variables for this command, and for later commands in the same session"),
     // Absent means the mode's own default: an ordinary bounded duration, or the whole background
     // ceiling. The upper value is that ceiling; a bounded command is refused above its own, smaller
     // one with a message naming it.

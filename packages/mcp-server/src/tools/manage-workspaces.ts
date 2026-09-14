@@ -202,6 +202,8 @@ const SAFE_ERROR_MESSAGES: Record<string, string> = {
   WORKSPACE_PROVIDER_DISABLED: "Cloud workspace operations are disabled.",
   WORKSPACE_PROVIDER_UNAVAILABLE: "The cloud workspace provider is unavailable.",
   WORKSPACE_POLICY_LIMIT: "A workspace quota, concurrency, size or time limit was reached.",
+  WORKSPACE_SESSION_UNAVAILABLE:
+    "The named command session is not available in this workspace's current life.",
   WORKSPACE_OPERATION_BUSY:
     "Workspace operation capacity is busy; wait for pending operations before retrying.",
   WORKSPACE_RESULT_EXPIRED:
@@ -294,6 +296,9 @@ function projectExecResult(result: NonNullable<WorkspaceOperationResponse["resul
     stdout: result.stdout,
     stderr: result.stderr,
     exit_code: result.exitCode,
+    // A script's end state is carried into its session unless it would not fit the ceiling, which
+    // the caller is told rather than left to discover.
+    session_capture_dropped: result.sessionCaptureDropped,
     // The payload above is the beginning of each stream; the complete streams stay in the
     // workspace and are read by range with workspace_read and this operation's identifier.
     stdout_total_bytes: result.stdoutTotalBytes,
@@ -729,8 +734,17 @@ export async function executeWorkspaceTool<Name extends WorkspaceToolName>(
       case "workspace_exec": {
         const input = params as WorkspaceNewToolParams<"workspace_exec">;
         const request = {
-          argv: input.argv,
-          cwd: input.cwd,
+          ...(input.argv !== undefined ? { argv: input.argv } : {}),
+          ...(input.script !== undefined ? { script: input.script } : {}),
+          ...(input.cwd !== undefined ? { cwd: input.cwd } : {}),
+          ...(input.session !== undefined
+            ? {
+                session: input.session,
+                sessionStart: input.session_start,
+                sessionEnd: input.session_end,
+              }
+            : {}),
+          ...(input.env !== undefined ? { env: input.env } : {}),
           // Absent stays absent: the service applies the default the requested mode implies.
           ...(input.timeout_seconds !== undefined
             ? { timeoutMs: input.timeout_seconds * 1000 }

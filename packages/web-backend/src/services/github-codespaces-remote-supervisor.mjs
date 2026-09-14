@@ -59,6 +59,20 @@ const STATE_ROOT = process.env.MOIRA_OPERATION_STATE_DIR
   ? resolve(process.env.MOIRA_OPERATION_STATE_DIR)
   : join(homedir(), ".local", "state", "moira", "operations");
 const WORKSPACES_ROOT = resolve(process.env.MOIRA_WORKSPACES_ROOT || "/workspaces");
+// A session outlives the commands that use it, so it lives beside the operation directories rather
+// than inside one of them, and it is removed with the workspace rather than with an operation.
+const SESSION_ROOT = join(STATE_ROOT, "sessions");
+const SESSION_NAME = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
+const MAX_SESSION_BYTES = 64 * 1024;
+const MAX_SESSION_VARIABLES = 64;
+const MAX_SESSIONS_PER_WORKSPACE = 16;
+const MAX_SESSION_VALUE_LENGTH = 4096;
+const MAX_SCRIPT_BYTES = 64 * 1024;
+const ENVIRONMENT_NAME = /^[A-Za-z_][A-Za-z0-9_]{0,127}$/;
+// A shell sets these for itself; they describe the shell rather than anything the script changed.
+const SHELL_OWNED_VARIABLES = new Set(["PWD", "OLDPWD", "SHLVL", "_"]);
+/** Marks a variable a script removed, so a later command in the session does not see it again. */
+const REMOVED = null;
 const DESCRIPTOR_ROOT = process.platform === "linux" ? "/proc/self/fd" : "/dev/fd";
 
 const REGEX_WORKER = String.raw`
@@ -102,18 +116,32 @@ function validateExecution(request) {
   const match = request.repositoryFullName?.match(REPOSITORY);
   if (
     !match ||
-    !Array.isArray(request.argv) ||
-    request.argv.length < 1 ||
-    request.argv.length > 128 ||
-    request.argv.some(
-      (value) =>
-        typeof value !== "string" || !value || value.length > 16_384 || value.includes("\0"),
-    ) ||
-    typeof request.cwd !== "string" ||
-    Buffer.byteLength(request.cwd, "utf8") > 4096 ||
-    request.cwd.startsWith("/") ||
-    (request.cwd !== "." &&
-      request.cwd.split("/").some((part) => !part || part === "." || part === "..")) ||
+    (request.argv !== undefined && request.argv !== null && !Array.isArray(request.argv)) ||
+    (request.script === undefined &&
+      !request.sessionEnd &&
+      (!Array.isArray(request.argv) || request.argv.length < 1)) ||
+    (request.script !== undefined &&
+      (typeof request.script !== "string" ||
+        request.script.length < 1 ||
+        Buffer.byteLength(request.script, "utf8") > MAX_SCRIPT_BYTES ||
+        request.argv !== undefined)) ||
+    (request.argv !== undefined &&
+      request.argv !== null &&
+      (request.argv.length > 128 ||
+        request.argv.some(
+          (value) =>
+            typeof value !== "string" || !value || value.length > 16_384 || value.includes("\0"),
+        ))) ||
+    (request.cwd !== undefined &&
+      (typeof request.cwd !== "string" ||
+        Buffer.byteLength(request.cwd, "utf8") > 4096 ||
+        request.cwd.startsWith("/") ||
+        (request.cwd !== "." &&
+          request.cwd.split("/").some((part) => !part || part === "." || part === "..")))) ||
+    (request.session !== undefined && !SESSION_NAME.test(request.session)) ||
+    (request.sessionStart !== undefined && typeof request.sessionStart !== "boolean") ||
+    (request.sessionEnd !== undefined && typeof request.sessionEnd !== "boolean") ||
+    (request.script !== undefined && request.session === undefined) ||
     typeof request.stdin !== "string" ||
     !Number.isSafeInteger(request.timeoutMs) ||
     request.timeoutMs < 1 ||
@@ -135,6 +163,156 @@ function validateExecution(request) {
     fail("invalid execution input");
   }
   return { repositoryName: match[1], stdin };
+}
+
+/**
+ * Identifies the workspace's current running environment. It changes when that environment is
+ * restarted or replaced, which is what binds a session to the life it was opened in. On Linux it is
+ * the kernel's boot identity together with the start time of the first process; elsewhere only an
+ * explicit override can establish it, which is how the suite exercises two different lives.
+ */
+async function environmentIdentity() {
+  if (process.platform === "linux") {
+    // Where the running environment can identify itself it does, and an override never outranks it.
+    const bootId = await readFile("/proc/sys/kernel/random/boot_id", "utf8").catch(() => null);
+    const firstProcess = await linuxStartTime(1);
+    if (!bootId || firstProcess === null) return null;
+    return createHash("sha256").update(`${bootId.trim()}|${firstProcess}`).digest("hex");
+  }
+  const override = process.env.MOIRA_ENVIRONMENT_ID;
+  return override ? createHash("sha256").update(`override:${override}`).digest("hex") : null;
+}
+
+function sessionPath(name) {
+  if (!SESSION_NAME.test(name ?? "")) fail("invalid session name");
+  return join(SESSION_ROOT, `${name}.json`);
+}
+
+function validateSessionEnvironment(value, allowRemovals = false) {
+  if (value === undefined) return {};
+  if (!value || typeof value !== "object" || Array.isArray(value))
+    fail("invalid session variables");
+  const entries = Object.entries(value);
+  if (entries.length > MAX_SESSION_VARIABLES) fail("invalid session variables");
+  for (const [name, entry] of entries) {
+    const removal = allowRemovals && entry === REMOVED;
+    if (
+      !ENVIRONMENT_NAME.test(name) ||
+      (!removal && (typeof entry !== "string" || entry.length > MAX_SESSION_VALUE_LENGTH))
+    ) {
+      fail("invalid session variables");
+    }
+  }
+  return Object.fromEntries(entries);
+}
+
+/**
+ * Resolves the context a command runs in. A session that was opened in an earlier life of this
+ * environment is refused rather than resumed, and so is one that was never opened: an agent must be
+ * able to tell "your context is gone" from "your context is here".
+ */
+/** Applies a stored context to an environment: a value sets a variable, a removal takes it away. */
+function applyContext(base, context) {
+  const applied = { ...base };
+  for (const [name, value] of Object.entries(context)) {
+    if (value === REMOVED) delete applied[name];
+    else applied[name] = value;
+  }
+  return applied;
+}
+
+/**
+ * Counts the sessions this life of the environment can actually use. A file written by an earlier
+ * life is not a session any more: it cannot be continued, so it must not hold a slot either.
+ */
+async function countSessions(identity) {
+  let entries;
+  try {
+    entries = await readdir(SESSION_ROOT);
+  } catch (error) {
+    if (error?.code === "ENOENT") return 0;
+    throw error;
+  }
+  let live = 0;
+  for (const entry of entries) {
+    if (!entry.endsWith(".json")) continue;
+    const stored = await readBoundedJson(join(SESSION_ROOT, entry), MAX_SESSION_BYTES).catch(
+      () => null,
+    );
+    if (stored?.environment === identity) live += 1;
+  }
+  return live;
+}
+
+/**
+ * A stored context must fit the same bounds when it is written as when it is read, or a session
+ * becomes unusable the moment it exceeds them. A call that would cross a ceiling is refused, and the
+ * previous context survives untouched.
+ */
+function withinStoredContextBounds(identity, cwd, context) {
+  return (
+    Object.keys(context).length <= MAX_SESSION_VARIABLES &&
+    Buffer.byteLength(JSON.stringify({ environment: identity, cwd, env: context }), "utf8") <=
+      MAX_SESSION_BYTES
+  );
+}
+
+async function resolveSession(request) {
+  const requested = validateSessionEnvironment(request.env);
+  if (!request.session) return { cwd: request.cwd ?? ".", env: requested, store: null, end: null };
+  const identity = await environmentIdentity();
+  if (identity === null) return null;
+  const path = sessionPath(request.session);
+  // Ending a session removes whatever stands under that name, including a file an earlier life of
+  // this environment left behind, so a dead session can never hold a slot no call can free.
+  if (request.sessionEnd && !request.argv && !request.script) {
+    return { ended: true, end: async () => rm(path, { force: true }) };
+  }
+  const stored = request.sessionStart
+    ? null
+    : await readBoundedJson(path, MAX_SESSION_BYTES).catch((error) => {
+        if (error?.code === "ENOENT") return undefined;
+        throw error;
+      });
+  if (stored === undefined) return null;
+  if (stored && stored.environment !== identity) return null;
+  if (request.sessionStart) {
+    const current = await readBoundedJson(path, MAX_SESSION_BYTES).catch(() => null);
+    const replacing = current?.environment === identity;
+    if (!replacing && (await countSessions(identity)) >= MAX_SESSIONS_PER_WORKSPACE) {
+      return { limit: "sessions" };
+    }
+  }
+  const context = { ...validateSessionEnvironment(stored?.env, true), ...requested };
+  const cwd = request.cwd ?? stored?.cwd ?? ".";
+  if (!withinStoredContextBounds(identity, cwd, context)) return { limit: "context" };
+  return {
+    cwd,
+    context,
+    env: applyContext({}, context),
+    /**
+     * Stores the context this command ran with, plus whatever a script left behind. A capture keeps
+     * only the difference from the environment the script started with, so the workspace's own
+     * environment never enters the file.
+     */
+    store: async (captured) => {
+      const merged = captured ? { ...context, ...captured.context } : context;
+      const finalCwd = captured?.cwd ?? cwd;
+      if (!withinStoredContextBounds(identity, finalCwd, merged)) return { limit: "context" };
+      await mkdir(SESSION_ROOT, { recursive: true, mode: 0o700 });
+      const temporary = `${path}.${randomBytes(8).toString("hex")}`;
+      await writeFile(
+        temporary,
+        JSON.stringify({ environment: identity, cwd: finalCwd, env: merged }),
+        { mode: 0o600 },
+      );
+      await rename(temporary, path);
+      return null;
+    },
+    end: async () => {
+      await rm(path, { force: true });
+    },
+  };
 }
 
 async function verifyRepository(request, repositoryName) {
@@ -1322,7 +1500,7 @@ function capture(executable, argv) {
 const RUNNER = String.raw`
 const {spawn}=require("node:child_process");
 const {createWriteStream}=require("node:fs");
-const {access,readFile,rename,writeFile}=require("node:fs/promises");
+const {access,readFile,rename,rm,writeFile}=require("node:fs/promises");
 const startTimeOf=async(path)=>{try{const value=await readFile(path,'utf8');const field=value.slice(value.lastIndexOf(') ')+2).split(' ')[19]??null;return /^[0-9]+$/.test(field)?field:null}catch{return null}};
 (async()=>{let raw="";for await(const chunk of process.stdin)raw+=chunk;const input=JSON.parse(raw);
 // The payload prefix is what a response may carry; the file beside it keeps the complete stream.
@@ -1334,7 +1512,15 @@ for(const stream of ["stdout","stderr"])sink[stream].on("error",()=>{});
 let terminal=false;let retainedExceeded=false;let timedOut=false;
 let runnerStartTime=null;if(process.platform==="linux"){runnerStartTime=await startTimeOf('/proc/self/stat');if(runnerStartTime===null)throw new Error("invalid runner start time")}
 await writeFile(input.runnerPidPath,JSON.stringify({pid:process.pid,startTime:runnerStartTime}),{mode:0o600});
-const child=spawn(input.argv[0],input.argv.slice(1),{cwd:input.cwd,env:process.env,detached:true,stdio:["pipe","pipe","pipe"]});
+const childEnv={...process.env};
+for(const [name,value] of Object.entries(input.env??{})){if(value===null)delete childEnv[name];else childEnv[name]=value}
+// A script runs under the workspace's own shell, sourced so that its directory changes and exports
+// take effect in that shell, and the shell then reports where it ended and what it ended with. An
+// argv command is spawned exactly as before, with no shell anywhere near it.
+const spawned=input.script
+?spawn("/bin/sh",["-c",'. "$1"; __moira_status=$?; { pwd; "$2" -e "process.stdout.write(JSON.stringify(process.env))"; } > "$3"; exit $__moira_status',"sh",input.script,process.execPath,input.capturePath],{cwd:input.cwd,env:childEnv,detached:true,stdio:["pipe","pipe","pipe"]})
+:spawn(input.argv[0],input.argv.slice(1),{cwd:input.cwd,env:childEnv,detached:true,stdio:["pipe","pipe","pipe"]});
+const child=spawned;
 const payloadLimit=(stream)=>stream==="stdout"?input.maxStdoutBytes:input.maxStderrBytes;
 const collect=(stream)=>(chunk)=>{if(retainedExceeded)return;const buffer=Buffer.from(chunk);
 const room=input.maxRetainedBytes-total[stream];const kept=buffer.length>room?buffer.subarray(0,room):buffer;
@@ -1358,13 +1544,54 @@ const code=await closed;let cancelled=false;try{await access(input.cancelPath);c
 // The retained streams must be complete on disk before the result announces their size.
 await Promise.all(["stdout","stderr"].map((stream)=>new Promise((done)=>{sink[stream].end(done)})));
 const state=cancelled?"cancelled":timedOut?"timed_out":retainedExceeded?"failed":code===0?"succeeded":"failed";
-await writeFile(input.resultTempPath,JSON.stringify({state,stdout:Buffer.concat(prefix.stdout).toString("base64"),stderr:Buffer.concat(prefix.stderr).toString("base64"),exitCode:Number.isInteger(code)?code:null,stdoutBytes:total.stdout,stderrBytes:total.stderr,outputLimitExceeded:retainedExceeded}),{mode:0o600});await rename(input.resultTempPath,input.resultPath);
+// What the script left behind is the difference from the environment it started with, and only that.
+let captureDropped=false;
+if(input.session&&input.script&&(state==="succeeded"||state==="failed")){
+try{
+const raw=await readFile(input.capturePath,"utf8");
+const split=raw.indexOf("\n");
+const endedIn=raw.slice(0,split);
+const ended=JSON.parse(raw.slice(split+1));
+const shellOwned=new Set(input.shellOwned);
+const difference={};
+// A capture obeys every rule the reader applies, name and value alike, so a stored context can
+// always be read back; anything the reader would refuse means the capture is dropped instead.
+const nameRule=new RegExp(input.session.namePattern);
+let refused=false;
+const keep=(name,value)=>{if(!nameRule.test(name)||(value!==null&&(typeof value!=="string"||value.length>input.session.maxValueLength))){refused=true;return}difference[name]=value};
+for(const [name,value] of Object.entries(ended))if(!shellOwned.has(name)&&childEnv[name]!==value)keep(name,value);
+for(const name of Object.keys(childEnv))if(!shellOwned.has(name)&&!(name in ended))keep(name,null);
+// The shell reports the path it actually stands in, which may differ from the configured root by a
+// symbolic link, so both sides are resolved before they are compared.
+const {realpathSync}=require("node:fs");const {relative:relativeTo}=require("node:path");
+let relative=null;try{const inside=relativeTo(realpathSync(input.repositoryRoot),realpathSync(endedIn));relative=inside===""?".":(inside.startsWith("..")?null:inside)}catch{relative=null}
+const merged={...input.session.context,...difference};
+const cwd=relative??input.session.cwd;
+const encoded=JSON.stringify({environment:input.session.identity,cwd,env:merged});
+if(!refused&&Object.keys(merged).length<=input.session.maxVariables&&Buffer.byteLength(encoded,"utf8")<=input.session.maxBytes){
+const temporary=input.session.path+"."+Math.random().toString(16).slice(2);
+await writeFile(temporary,encoded,{mode:0o600});await rename(temporary,input.session.path);
+}else captureDropped=true;
+}catch{captureDropped=true}
+}
+else if(input.session&&input.script)captureDropped=true;
+if(input.session&&input.sessionEnd)await rm(input.session.path,{force:true}).catch(()=>{});
+await writeFile(input.resultTempPath,JSON.stringify({state,stdout:Buffer.concat(prefix.stdout).toString("base64"),stderr:Buffer.concat(prefix.stderr).toString("base64"),exitCode:Number.isInteger(code)?code:null,stdoutBytes:total.stdout,stderrBytes:total.stderr,outputLimitExceeded:retainedExceeded,sessionCaptureDropped:captureDropped}),{mode:0o600});await rename(input.resultTempPath,input.resultPath);
 })().catch(async()=>{process.exitCode=1});`;
 
 async function execute(request) {
   const directory = validateBase(request);
   const { repositoryName } = validateExecution(request);
-  const cwd = await verifyRepository(request, repositoryName);
+  const session = await resolveSession(request);
+  // A command whose session belongs to an earlier life of this environment does not run at all.
+  if (session === null) return { state: "session_unavailable" };
+  if (session.limit) return { state: "session_limit", limit: session.limit };
+  // Ending a session is answered here: the stored context is removed and nothing is dispatched.
+  if (session.ended) {
+    await session.end?.();
+    return { state: "session_ended" };
+  }
+  const cwd = await verifyRepository({ ...request, cwd: session.cwd }, repositoryName);
   await mkdir(dirname(directory), { recursive: true, mode: 0o700 });
   await mkdir(directory, { mode: 0o700 });
   const pidPath = join(directory, "pid");
@@ -1374,15 +1601,48 @@ async function execute(request) {
   const resultPath = join(directory, "result.json");
   const resultTempPath = join(directory, "result.tmp");
   const cancelPath = join(directory, "cancel-requested");
+  const capturePath = join(directory, "session-capture.json");
+  let scriptPath = null;
+  if (request.script !== undefined) {
+    scriptPath = join(directory, "script.sh");
+    await writeFile(scriptPath, request.script, { mode: 0o600 });
+  }
   const runner = spawn(process.execPath, ["-e", RUNNER], {
     detached: true,
     stdio: ["pipe", "ignore", "ignore"],
     env: process.env,
   });
+  // The session is recorded only once its command is about to run, so a refused request leaves the
+  // stored context exactly as it was. What a script leaves behind is merged when it ends.
+  const stored = await session.store?.();
+  if (stored?.limit) {
+    runner.kill("SIGKILL");
+    await rm(directory, { recursive: true, force: true });
+    return { state: "session_limit", limit: stored.limit };
+  }
   runner.stdin.end(
     JSON.stringify({
-      argv: request.argv,
+      argv: request.argv ?? null,
+      script: scriptPath,
+      capturePath,
+      shellOwned: [...SHELL_OWNED_VARIABLES],
+      sessionEnd: Boolean(request.sessionEnd),
+      repositoryRoot: join(WORKSPACES_ROOT, repositoryName),
+      session: session.store
+        ? {
+            path: sessionPath(request.session),
+            identity: await environmentIdentity(),
+            context: session.context,
+            cwd: session.cwd,
+            maxVariables: MAX_SESSION_VARIABLES,
+            maxBytes: MAX_SESSION_BYTES,
+            maxValueLength: MAX_SESSION_VALUE_LENGTH,
+            namePattern: ENVIRONMENT_NAME.source,
+          }
+        : null,
       cwd,
+      // The context travels as it is stored, so a removal reaches the child as a removal.
+      env: session.context ?? session.env,
       stdin: request.stdin,
       timeoutMs: request.timeoutMs,
       maxStdoutBytes: request.maxStdoutBytes,
@@ -1434,6 +1694,7 @@ async function readResult(directory) {
       stdoutBytes: Number.isSafeInteger(value.stdoutBytes) ? value.stdoutBytes : 0,
       stderrBytes: Number.isSafeInteger(value.stderrBytes) ? value.stderrBytes : 0,
       outputLimitExceeded: value.outputLimitExceeded === true,
+      sessionCaptureDropped: value.sessionCaptureDropped === true,
     };
   } catch (error) {
     if (error?.code !== "ENOENT") throw error;
@@ -1502,6 +1763,7 @@ async function inspect(request) {
       stdoutBytes: 0,
       stderrBytes: 0,
       outputLimitExceeded: false,
+      sessionCaptureDropped: false,
     };
   } catch (error) {
     if (error?.code === "ENOENT") return { state: "absent" };
@@ -1539,6 +1801,7 @@ async function cancel(request) {
     stdoutBytes: await retainedSize(directory, "stdout"),
     stderrBytes: await retainedSize(directory, "stderr"),
     outputLimitExceeded: false,
+    sessionCaptureDropped: false,
   };
   // A cancelled command still produced whatever it printed; the published result names those
   // sizes so the retained streams stay readable by range until cleanup removes them.

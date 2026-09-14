@@ -449,6 +449,7 @@ export class WorkspaceOperationRepository {
     maxStderrBytes: number,
     resultExpiresAt: number,
     now: number,
+    lastOutcome = "remote_terminal",
   ): WorkspaceOperationResult | null {
     const stdout = truncateUtf8(result.stdout, maxStdoutBytes);
     const stderr = truncateUtf8(result.stderr, maxStderrBytes);
@@ -467,7 +468,7 @@ export class WorkspaceOperationRepository {
     const changed = this.sqlite
       .prepare(
         `UPDATE workspaceOperation SET state = ?, outputBytes = ?, exitCode = ?,
-           resultExpiresAt = ?, lastOutcome = 'remote_terminal',
+           resultExpiresAt = ?, lastOutcome = ?,
            claimId = NULL, claimExpiresAt = NULL, updatedAt = ?
            WHERE id = ? AND userId = ? AND resourceGeneration = ?
              AND state IN ('reserved', 'running', 'cancel_pending', 'reconcile_pending')`,
@@ -478,6 +479,7 @@ export class WorkspaceOperationRepository {
         result.stdoutTotalBytes + result.stderrTotalBytes,
         result.exitCode,
         resultExpiresAt,
+        lastOutcome,
         now,
         operationId,
         userId,

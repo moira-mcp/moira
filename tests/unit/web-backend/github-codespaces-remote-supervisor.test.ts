@@ -8,6 +8,7 @@ import {
   mkdirSync,
   readFileSync,
   readdirSync,
+  realpathSync,
   renameSync,
   rmSync,
   statSync,
@@ -1067,6 +1068,7 @@ if (process.env.MOIRA_TEST_HOLD_FILE_RUNNER === "1") {
       stdoutBytes: "argument with spaces;$(false)|native stdin".length,
       stderrBytes: 3,
       outputLimitExceeded: false,
+      sessionCaptureDropped: false,
     };
     await expect(inspectUntilTerminal(value.environment, remoteMarker)).resolves.toEqual(terminal);
     await expect(
@@ -1108,6 +1110,7 @@ if (process.env.MOIRA_TEST_HOLD_FILE_RUNNER === "1") {
       stdoutBytes: 5,
       stderrBytes: 0,
       outputLimitExceeded: false,
+      sessionCaptureDropped: false,
     });
   });
 
@@ -1229,6 +1232,285 @@ if (process.env.MOIRA_TEST_HOLD_FILE_RUNNER === "1") {
     });
   });
 
+  test("carries a session's directory and variables and refuses one from an earlier life", async () => {
+    const value = fixture();
+    mkdirSync(join(value.repository, "packages"), { recursive: true });
+    const environment = { ...value.environment, MOIRA_ENVIRONMENT_ID: "life-one" };
+    const observe = [
+      process.execPath,
+      "-e",
+      "process.stdout.write(process.cwd()+'|'+(process.env.SESSION_VARIABLE??'none'))",
+    ];
+    const run = async (remoteMarker: string, extra: Record<string, unknown>) => {
+      await request(environment, {
+        action: "execute",
+        version: 1,
+        remoteMarker,
+        repositoryFullName: "owner/repository",
+        argv: observe,
+        stdin: "",
+        timeoutMs: 10_000,
+        maxStdoutBytes: 4096,
+        maxStderrBytes: 4096,
+        maxRetainedBytes: 1024 * 1024,
+        ...extra,
+      });
+      return inspectUntilTerminal(environment, remoteMarker);
+    };
+    const marker = (character: string) => `moira-op-${character.repeat(32)}`;
+
+    // The opening call establishes the context its command runs in.
+    const opened = (await run(marker("a"), {
+      session: "build",
+      sessionStart: true,
+      cwd: "packages",
+      env: { SESSION_VARIABLE: "carried" },
+    })) as Record<string, string>;
+    expect(opened.stdout).toBe(`${realpathSync(join(value.repository, "packages"))}|carried`);
+
+    // A later command in the same session names neither and observes both.
+    const continued = (await run(marker("b"), { session: "build" })) as Record<string, string>;
+    expect(continued.stdout).toBe(`${realpathSync(join(value.repository, "packages"))}|carried`);
+
+    // A command outside the session observes neither, and a second session is independent.
+    const outside = (await run(marker("c"), {})) as Record<string, string>;
+    expect(outside.stdout).toBe(`${realpathSync(value.repository)}|none`);
+    const other = (await run(marker("d"), { session: "other", sessionStart: true })) as Record<
+      string,
+      string
+    >;
+    expect(other.stdout).toBe(`${realpathSync(value.repository)}|none`);
+
+    // The stored context belongs to this life of the environment: in another it is refused, and a
+    // session that was never opened is refused too.
+    await expect(
+      request(
+        { ...environment, MOIRA_ENVIRONMENT_ID: "life-two" },
+        {
+          action: "execute",
+          version: 1,
+          remoteMarker: marker("e"),
+          repositoryFullName: "owner/repository",
+          argv: observe,
+          stdin: "",
+          timeoutMs: 10_000,
+          maxStdoutBytes: 4096,
+          maxStderrBytes: 4096,
+          maxRetainedBytes: 1024 * 1024,
+          session: "build",
+        },
+      ),
+    ).resolves.toEqual({ state: "session_unavailable" });
+    await expect(
+      request(environment, {
+        action: "execute",
+        version: 1,
+        remoteMarker: marker("f"),
+        repositoryFullName: "owner/repository",
+        argv: observe,
+        stdin: "",
+        timeoutMs: 10_000,
+        maxStdoutBytes: 4096,
+        maxStderrBytes: 4096,
+        maxRetainedBytes: 1024 * 1024,
+        session: "never-opened",
+      }),
+    ).resolves.toEqual({ state: "session_unavailable" });
+  });
+
+  test("carries what a script leaves behind and refuses a context that would not fit", async () => {
+    const value = fixture();
+    mkdirSync(join(value.repository, "service"), { recursive: true });
+    const environment = {
+      ...value.environment,
+      MOIRA_ENVIRONMENT_ID: "life-one",
+      INHERITED_TOOL: "old",
+      REMOVE_ME: "present",
+    };
+    const marker = (character: string) => `moira-op-${character.repeat(32)}`;
+    const send = (remoteMarker: string, extra: Record<string, unknown>) =>
+      request(environment, {
+        action: "execute",
+        version: 1,
+        remoteMarker,
+        repositoryFullName: "owner/repository",
+        stdin: "",
+        timeoutMs: 20_000,
+        maxStdoutBytes: 4096,
+        maxStderrBytes: 4096,
+        maxRetainedBytes: 1024 * 1024,
+        ...extra,
+      });
+    const observe = [
+      process.execPath,
+      "-e",
+      "process.stdout.write([require('node:path').basename(process.cwd()),process.env.TOOL_HOME??'none',process.env.INHERITED_TOOL??'gone',process.env.REMOVE_ME??'gone',process.env.PATH.split(':')[0]].join('|'))",
+    ];
+
+    // A script activates something: it changes directory, adds a variable, changes an inherited one
+    // and removes another.
+    await send(marker("1"), {
+      session: "build",
+      sessionStart: true,
+      script:
+        "cd service\nexport TOOL_HOME=/opt/tool\nexport INHERITED_TOOL=new\nexport PATH=/opt/tool/bin:$PATH\nunset REMOVE_ME\n",
+    });
+    expect(await inspectUntilTerminal(environment, marker("1"))).toMatchObject({
+      state: "succeeded",
+      sessionCaptureDropped: false,
+    });
+
+    // An ordinary argv command in that session sees every one of those changes and nothing else.
+    await send(marker("2"), { session: "build", argv: observe });
+    const continued = (await inspectUntilTerminal(environment, marker("2"))) as Record<
+      string,
+      string
+    >;
+    expect(continued.stdout).toBe("service|/opt/tool|new|gone|/opt/tool/bin");
+
+    // A command outside the session is untouched by all of it.
+    await send(marker("3"), { argv: observe });
+    const outside = (await inspectUntilTerminal(environment, marker("3"))) as Record<
+      string,
+      string
+    >;
+    expect(outside.stdout).toBe(
+      "repository|none|old|present|/opt/tool/bin".replace(
+        "/opt/tool/bin",
+        environment.PATH!.split(":")[0],
+      ),
+    );
+
+    // A call whose declared context would not fit the stored-context ceiling is refused, and the
+    // session it names still works afterwards.
+    const oversized = Object.fromEntries(
+      Array.from({ length: 40 }, (_, index) => [`BIG_${index}`, "x".repeat(4000)]),
+    );
+    await expect(
+      send(marker("4"), { session: "build", argv: observe, env: oversized }),
+    ).resolves.toEqual({ state: "session_limit", limit: "context" });
+    await send(marker("5"), { session: "build", argv: observe });
+    expect(
+      ((await inspectUntilTerminal(environment, marker("5"))) as Record<string, string>).stdout,
+    ).toBe("service|/opt/tool|new|gone|/opt/tool/bin");
+
+    // The stored context holds only what the script touched: an inherited variable it never named
+    // is absent from the file, which is what keeps the workspace's own environment out of it.
+    const storedSession = JSON.parse(
+      readFileSync(join(value.stateRoot, "sessions", "build.json"), "utf8"),
+    ) as { env: Record<string, string | null> };
+    expect(Object.keys(storedSession.env).sort()).toEqual([
+      "INHERITED_TOOL",
+      "PATH",
+      "REMOVE_ME",
+      "TOOL_HOME",
+    ]);
+    expect(JSON.stringify(storedSession)).not.toContain("MOIRA_ENVIRONMENT_ID");
+
+    // A script that fails still leaves its end state behind, while one that ends the shell itself
+    // cannot report an end state at all and the answer says its capture was dropped.
+    await send(marker("8"), {
+      session: "build",
+      script: "export AFTER_FAILURE=kept\nfalse\n",
+    });
+    expect(await inspectUntilTerminal(environment, marker("8"))).toMatchObject({
+      state: "failed",
+      exitCode: 1,
+      sessionCaptureDropped: false,
+    });
+    await send(marker("c"), { session: "build", script: "export NEVER_SEEN=x\nexit 3\n" });
+    expect(await inspectUntilTerminal(environment, marker("c"))).toMatchObject({
+      state: "failed",
+      exitCode: 3,
+      sessionCaptureDropped: true,
+    });
+    await send(marker("9"), {
+      session: "build",
+      argv: [process.execPath, "-e", "process.stdout.write(process.env.AFTER_FAILURE??'lost')"],
+    });
+    expect(
+      ((await inspectUntilTerminal(environment, marker("9"))) as Record<string, string>).stdout,
+    ).toBe("kept");
+
+    await send(marker("a"), {
+      session: "build",
+      script: `export TOO_LONG=${"x".repeat(5000)}\n`,
+    });
+    expect(await inspectUntilTerminal(environment, marker("a"))).toMatchObject({
+      state: "succeeded",
+      sessionCaptureDropped: true,
+    });
+    // The session still works, with the context it had before that script.
+    await send(marker("b"), {
+      session: "build",
+      argv: [process.execPath, "-e", "process.stdout.write(process.env.TOOL_HOME??'none')"],
+    });
+    expect(
+      ((await inspectUntilTerminal(environment, marker("b"))) as Record<string, string>).stdout,
+    ).toBe("/opt/tool");
+
+    // Ending the session frees its slot and removes the stored context, so naming it is refused.
+    await expect(send(marker("6"), { session: "build", sessionEnd: true })).resolves.toEqual({
+      state: "session_ended",
+    });
+    await expect(send(marker("7"), { session: "build", argv: observe })).resolves.toEqual({
+      state: "session_unavailable",
+    });
+  });
+
+  test("counts only the sessions this life can use and lets a dead one free its slot", async () => {
+    const value = fixture();
+    const life = (id: string) => ({ ...value.environment, MOIRA_ENVIRONMENT_ID: id });
+    const marker = (index: number) => `moira-op-${index.toString(16).padStart(32, "0")}`;
+    const open = (environment: NodeJS.ProcessEnv, session: string, remoteMarker: string) =>
+      request(environment, {
+        action: "execute",
+        version: 1,
+        remoteMarker,
+        repositoryFullName: "owner/repository",
+        argv: ["/bin/echo", "open"],
+        stdin: "",
+        timeoutMs: 10_000,
+        maxStdoutBytes: 4096,
+        maxStderrBytes: 4096,
+        maxRetainedBytes: 1024 * 1024,
+        session,
+        sessionStart: true,
+      });
+
+    // Fill the workspace's sessions in one life of the environment.
+    for (let index = 0; index < 16; index++) {
+      await expect(open(life("first"), `session-${index}`, marker(index))).resolves.toEqual({
+        state: "running",
+      });
+    }
+    await expect(open(life("first"), "one-too-many", marker(100))).resolves.toEqual({
+      state: "session_limit",
+      limit: "sessions",
+    });
+
+    // After a restart none of them can be used, so none of them holds a slot any more.
+    await expect(open(life("second"), "fresh", marker(101))).resolves.toEqual({ state: "running" });
+
+    // A session left by an earlier life is removed by the call that ends it, rather than lingering.
+    await expect(
+      request(life("second"), {
+        action: "execute",
+        version: 1,
+        remoteMarker: marker(102),
+        repositoryFullName: "owner/repository",
+        stdin: "",
+        timeoutMs: 10_000,
+        maxStdoutBytes: 4096,
+        maxStderrBytes: 4096,
+        maxRetainedBytes: 1024 * 1024,
+        session: "session-0",
+        sessionEnd: true,
+      }),
+    ).resolves.toEqual({ state: "session_ended" });
+    expect(existsSync(join(value.stateRoot, "sessions", "session-0.json"))).toBe(false);
+  });
+
   test("reports cancellation only after the foreground process group is absent", async () => {
     const value = fixture();
     const remoteMarker = `moira-op-${"2".repeat(32)}`;
@@ -1306,6 +1588,7 @@ if (process.env.MOIRA_TEST_HOLD_FILE_RUNNER === "1") {
       stdoutBytes: 0,
       stderrBytes: 0,
       outputLimitExceeded: false,
+      sessionCaptureDropped: false,
     });
   });
 

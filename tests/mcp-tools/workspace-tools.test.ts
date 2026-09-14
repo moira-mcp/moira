@@ -144,6 +144,17 @@ describe("Workspace MCP HTTP contract on a default-disabled installation", () =>
         stdin_text: { type: "string" },
         stdin_file: expect.any(Object),
         operation_id: expect.any(Object),
+        // The session form reaches the agent through the published catalog, not only through the
+        // in-process schema: a projection that dropped these would leave an agent unable to ask
+        // for a session while every in-process check still passed.
+        session: expect.objectContaining({
+          type: "string",
+          pattern: "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+        }),
+        session_start: expect.objectContaining({ type: "boolean" }),
+        session_end: expect.objectContaining({ type: "boolean" }),
+        script: expect.objectContaining({ type: "string" }),
+        env: expect.objectContaining({ type: "object" }),
       }),
     });
     expect(exec.inputSchema).not.toHaveProperty("anyOf");

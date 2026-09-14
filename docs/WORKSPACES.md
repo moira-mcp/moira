@@ -321,8 +321,53 @@ the same tool again with only `workspace_id` and `operation_id` reconciles that
 operation without dispatching a second command, write, upload or download. The
 same resume call with `cancel: true` stops a command instead of reporting it.
 
-`workspace_exec` accepts argv as data, a repository-relative `cwd`,
-`timeout_seconds` (default 300), `background`, optional per-stream output limits and exactly one optional stdin
+Consecutive commands share a working context through a named session. A caller
+opens one with `session` and `session_start: true` and continues it by naming
+`session` alone. The session remembers the `cwd` a call names and the variables a
+call passes in `env`, and applies both to every command that continues it; a
+command without a session is unaffected.
+
+Inside a session a caller may send `script` instead of `argv`. The script is run
+by the workspace's own shell and sourced, so its directory changes and exports
+take effect, and the session then keeps the directory it ended in together with
+the variables it added, changed or removed. A removal is remembered as a removal,
+so a later command does not see a variable the script took away. Only the
+difference from the environment the script started in is kept, never the whole
+inherited environment, which is what keeps the workspace's own environment out of
+the stored file; the few variables a shell maintains for itself are excluded. An
+argv command is never run through a shell, and a call carries exactly one kind of
+work: `argv`, a `script` inside a session, or ending a session with neither.
+
+`session_end: true` ends the named session, alone or alongside a command. Ending
+frees the session's slot and removes its stored context. A workspace holds at most
+sixteen sessions of its current life, and opening one past that is refused with
+that ceiling named; a session left by an earlier life holds no slot and is removed
+by the call that ends it.
+
+A script is at most 64 KiB of text, and the stored context is bounded by 64
+variables and 64 KiB, enforced where it is written. A call whose declared context would cross that is refused as a bounded
+policy outcome naming the stored-context ceiling, and the previous context
+survives. A script whose end state fits is stored whether the script succeeded or failed;
+one whose end state would not fit, or a script that ended its own shell with
+`exit` or was stopped before it finished, carries nothing and the result says
+`session_capture_dropped` rather than leaving a session that later commands
+cannot use. A capture obeys every rule the stored context is read back under, so a
+variable whose name or value the context cannot hold drops the capture instead of
+wedging the session.
+
+A session belongs to the workspace life it was opened in. The remote side stores it
+beside the operation directories in the workspace's own state root, together with
+the identity of the running environment, which on Linux is the kernel boot identity
+and the first process's start time; an explicit override is honoured only where
+those sources do not exist. A command naming a session from an earlier life,
+or one that was never opened, is refused with `WORKSPACE_SESSION_UNAVAILABLE` and
+does not run. The stored context never returns to the caller. A session name is
+validated data, never a path: the remote side builds the path from a name it has
+accepted, and a session's stored working directory is resolved by the same rule that
+refuses any escape from the repository.
+
+`workspace_exec` accepts argv as data, an optional repository-relative `cwd`,
+`timeout_seconds`, `background`, `session`, `session_start`, `session_end`, `env`, `script`, optional per-stream output limits and exactly one optional stdin
 form: `stdin_text` (UTF-8) or `stdin_file`, a native ChatGPT file reference. The
 registry publishes `_meta["openai/fileParams"]` for `stdin_file` and for
 `workspace_upload.file`; inside a reference only `file_id` and `download_url` are

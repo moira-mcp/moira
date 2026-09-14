@@ -128,7 +128,7 @@ is absent from it while `workspace_get` still answers for its `workspace_id`. `w
 `generation`, so a stale call cannot delete a changed workspace.
 
 `workspace_exec` runs argv as data (no shell interpolation) in a repository-relative `cwd` with a
-timeout (`timeout_seconds`, default 300) and optional per-stream output limits, and returns bounded `stdout`, `stderr` and the exact
+timeout (`timeout_seconds`, optional) and optional per-stream output limits, and returns bounded `stdout`, `stderr` and the exact
 `exit_code`. Those limits bound the answer, not the command: a command that prints more keeps
 running, keeps its own exit code and keeps its own `stderr`, and the result reports each stream's
 complete size and whether the payload was truncated. The whole output stays in the workspace until
@@ -139,7 +139,25 @@ test suite, pass `background: true`: the call returns a running operation at onc
 running in the workspace under a much larger ceiling, its output is readable by range while it runs,
 and its result is collected later with the same `operation_id`, which stays collectible for at least
 as long as the command was allowed to run. Omitting `timeout_seconds` gives a bounded command 300
-seconds and a background command its whole ceiling. Stop either kind by calling the tool
+seconds and a background command its whole ceiling.
+
+Consecutive commands can share a working context. Open a session with `session` and
+`session_start: true`, then name the same `session` on later commands: it remembers the `cwd` a call
+names and the variables a call passes in `env`, and applies both to every command that continues it.
+A command without a session is unaffected. Inside a session you may send `script` instead of `argv`:
+it runs under the workspace's own shell, and the directory it ends in and the variables it added,
+changed or removed are carried to the commands that follow, which is how activating a toolchain or a
+virtual environment survives. An `argv` command is never run through a shell, and one call carries one
+kind of work. End a session with `session_end: true`, alone or with a command; ending frees its slot
+and removes what it stored. A workspace holds a bounded number of open sessions, and once it is full the next
+`session_start` is refused with that ceiling named and asks you to end one rather than retry or open
+another workspace. A session's stored context is bounded too, a call that would exceed it is
+refused with that ceiling named, and a script carries its end state whether it
+succeeded or failed, while one whose end state would not fit, one that ends its own shell with `exit`
+and one that was stopped report `session_capture_dropped` instead of leaving a session you cannot use. A session belongs to the
+workspace's current life: after the workspace stops and starts again, naming it returns
+`WORKSPACE_SESSION_UNAVAILABLE` and a new session must be opened, as it does for a session that was
+never opened. What a session stores stays in the workspace and is never returned. Stop either kind by calling the tool
 with only `workspace_id`, `operation_id` and `cancel: true`. A command stops with its workspace, so a
 long one needs a workspace whose idle lifetime outlasts it. Supply at most one stdin form: `stdin_text` for UTF-8 text or `stdin_file` for a native
 ChatGPT file reference; the file's bytes reach the process without base64 in the conversation.

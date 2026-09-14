@@ -168,7 +168,12 @@ export class GitHubCodespacesConnector
     workspace: WorkspaceResourceRecord,
     operation: WorkspaceOperationRecord,
     request: WorkspaceExecRequest,
-  ): Promise<WorkspaceOperationResult | { state: "running" }> {
+  ): Promise<
+    | WorkspaceOperationResult
+    | { state: "running" }
+    | { state: "session_unavailable" }
+    | { state: "session_limit"; limit: "context" | "sessions" }
+  > {
     if (request.stdin.kind !== "inline") {
       throw new Error("Referenced operation input is not materialized by this transport version");
     }
@@ -177,8 +182,13 @@ export class GitHubCodespacesConnector
       version: 1,
       remoteMarker: operation.remoteMarker,
       repositoryFullName: workspace.repositoryFullName,
-      argv: request.argv,
-      cwd: request.cwd,
+      ...(request.argv !== undefined ? { argv: request.argv } : {}),
+      ...(request.cwd !== undefined ? { cwd: request.cwd } : {}),
+      ...(request.session !== undefined ? { session: request.session } : {}),
+      ...(request.sessionStart !== undefined ? { sessionStart: request.sessionStart } : {}),
+      ...(request.sessionEnd !== undefined ? { sessionEnd: request.sessionEnd } : {}),
+      ...(request.script !== undefined ? { script: request.script } : {}),
+      ...(request.env !== undefined ? { env: request.env } : {}),
       stdin: Buffer.from(request.stdin.bytes).toString("base64"),
       timeoutMs: request.timeoutMs,
       maxStdoutBytes: request.maxStdoutBytes,
@@ -189,28 +199,38 @@ export class GitHubCodespacesConnector
     return result;
   }
 
-  inspect(
+  async inspect(
     credential: string,
     workspace: WorkspaceResourceRecord,
     operation: WorkspaceOperationRecord,
-  ) {
-    return this.operationJob(credential, workspace, operation, {
+  ): Promise<WorkspaceOperationResult | { state: "running" } | { state: "absent" }> {
+    // Only a dispatch can be refused for its session; an inspection of an existing operation
+    // cannot, so that answer is not part of this contract.
+    const result = await this.operationJob(credential, workspace, operation, {
       action: "inspect",
       version: 1,
       remoteMarker: operation.remoteMarker,
     });
+    if (result.state === "session_unavailable" || result.state === "session_limit") {
+      throw new Error("Codespace operation transport returned an invalid result");
+    }
+    return result;
   }
 
-  cancel(
+  async cancel(
     credential: string,
     workspace: WorkspaceResourceRecord,
     operation: WorkspaceOperationRecord,
-  ) {
-    return this.operationJob(credential, workspace, operation, {
+  ): Promise<WorkspaceOperationResult | { state: "running" } | { state: "absent" }> {
+    const result = await this.operationJob(credential, workspace, operation, {
       action: "cancel",
       version: 1,
       remoteMarker: operation.remoteMarker,
     });
+    if (result.state === "session_unavailable" || result.state === "session_limit") {
+      throw new Error("Codespace operation transport returned an invalid result");
+    }
+    return result;
   }
 
   async finalize(
@@ -620,9 +640,39 @@ export class GitHubCodespacesConnector
     workspace: WorkspaceResourceRecord,
     operation: WorkspaceOperationRecord,
     job: Record<string, unknown>,
-  ): Promise<WorkspaceOperationResult | { state: "running" } | { state: "absent" }> {
+  ): Promise<
+    | WorkspaceOperationResult
+    | { state: "running" }
+    | { state: "absent" }
+    | { state: "session_unavailable" }
+    | { state: "session_limit"; limit: "context" | "sessions" }
+  > {
     const value = await this.submitOperationJob(credential, workspace, operation, job);
-    if (value.state === "running" || value.state === "absent") return { state: value.state };
+    if (
+      value.state === "running" ||
+      value.state === "absent" ||
+      value.state === "session_unavailable"
+    ) {
+      return { state: value.state as "running" | "absent" | "session_unavailable" };
+    }
+    if (value.state === "session_limit") {
+      const limit = value.limit === "sessions" ? "sessions" : "context";
+      return { state: "session_limit", limit };
+    }
+    if (value.state === "session_ended") {
+      // Ending a session runs no command, so it is reported as an operation that succeeded with
+      // nothing to show.
+      return {
+        state: "succeeded",
+        stdout: "",
+        stderr: "",
+        exitCode: 0,
+        stdoutTotalBytes: 0,
+        stderrTotalBytes: 0,
+        outputLimitExceeded: false,
+        sessionCaptureDropped: false,
+      };
+    }
     if (
       typeof value.state !== "string" ||
       !TERMINAL_OPERATION_STATES.has(value.state) ||
@@ -631,7 +681,8 @@ export class GitHubCodespacesConnector
       !(value.exitCode === null || Number.isInteger(value.exitCode)) ||
       !nonnegativeInteger(value.stdoutBytes) ||
       !nonnegativeInteger(value.stderrBytes) ||
-      typeof value.outputLimitExceeded !== "boolean"
+      typeof value.outputLimitExceeded !== "boolean" ||
+      typeof value.sessionCaptureDropped !== "boolean"
     ) {
       throw new Error("Codespace operation transport returned an invalid result");
     }
@@ -655,6 +706,7 @@ export class GitHubCodespacesConnector
       stdoutTotalBytes: value.stdoutBytes as number,
       stderrTotalBytes: value.stderrBytes as number,
       outputLimitExceeded: value.outputLimitExceeded as boolean,
+      sessionCaptureDropped: value.sessionCaptureDropped as boolean,
     };
   }
 
