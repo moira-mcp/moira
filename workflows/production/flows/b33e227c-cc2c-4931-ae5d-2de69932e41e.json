@@ -5,8 +5,14 @@
   "id": "b33e227c-cc2c-4931-ae5d-2de69932e41e",
   "metadata": {
     "name": "Smart Purchase Assistant",
-    "version": "4.0.1",
-    "description": "Produces a durable, evidence-linked purchase decision package for one product need: it captures use, region, currency, budget, constraints, source and privacy limits, operating mode, and separate publication/notification authority; researches current category trade-offs, relevant variants, specifications, prices, availability, seller terms and review evidence without fixed quotas or fabricated certainty; and creates a buyer guide, comparison, profile-specific recommendations, direct observed links, limitations, pre-purchase checks, readable Markdown and self-contained HTML. A filesystem workspace, deterministic HTML observations and genuinely independent semantic review precede cause-owned evidence/report repair or contract reassessment. Outcomes distinguish complete, reviewed-limited, blocked and interactive-aborted local results; optional artifact upload and configured user notification cannot invalidate an accepted local report. The workflow never buys, reserves, contacts sellers, submits forms, spends money, changes settings, commits, publishes without authority or mutates production. Because the graph contains an optional user-notification node, start it with skipNotificationCheck: true when no ordinary communication channel is configured; actual notification configuration is observed only on the authorized delivery route. Choose it for product selection; use a research workflow for evidence synthesis without purchase semantics or Data Analysis for supplied datasets."
+    "version": "4.1.0",
+    "description": "Produces a durable, evidence-linked purchase decision package for one product need: it captures use, region, currency, budget, constraints, source and privacy limits, operating mode, and separate publication/notification authority; researches current category trade-offs, relevant variants, specifications, prices, availability, seller terms and review evidence without fixed quotas or fabricated certainty; and creates a buyer guide, comparison, profile-specific recommendations, direct observed links, limitations, pre-purchase checks, readable Markdown and self-contained HTML. A filesystem workspace, deterministic HTML observations and genuinely independent semantic review precede cause-owned evidence/report repair or contract reassessment. Outcomes distinguish complete, reviewed-limited, blocked and interactive-aborted local results; optional artifact upload and configured user notification cannot invalidate an accepted local report. The workflow never buys, reserves, contacts sellers, submits forms, spends money, changes settings, commits, publishes without authority or mutates production. Because the graph contains an optional user-notification node, start it with skipNotificationCheck: true when no ordinary communication channel is configured; actual notification configuration is observed only on the authorized delivery route. Choose it for product selection; use a research workflow for evidence synthesis without purchase semantics or Data Analysis for supplied datasets.",
+    "tags": [
+      "покупка",
+      "сравнение",
+      "решение",
+      "рекомендация"
+    ]
   },
   "nodes": [
     {
@@ -14,7 +20,8 @@
       "type": "start",
       "connections": {
         "default": "intake"
-      }
+      },
+      "progressNodeId": "intake"
     },
     {
       "id": "intake",
@@ -82,7 +89,8 @@
       },
       "connections": {
         "success": "route-intake-actionable"
-      }
+      },
+      "progressNodeId": "intake"
     },
     {
       "id": "route-intake-actionable",
@@ -97,6 +105,10 @@
       "connections": {
         "true": "route-filesystem",
         "false": "finalize-no-workspace"
+      },
+      "progressNodeId": "intake",
+      "connectionLabels": {
+        "false": "исходный запрос не даёт основания работать"
       }
     },
     {
@@ -112,6 +124,10 @@
       "connections": {
         "true": "materialize-workspace",
         "false": "finalize-no-workspace"
+      },
+      "progressNodeId": "intake",
+      "connectionLabels": {
+        "false": "рабочей файловой системы нет"
       }
     },
     {
@@ -159,6 +175,11 @@
       "connections": {
         "success": "frame-contract",
         "error": "finalize-no-workspace"
+      },
+      "progressNodeId": "intake",
+      "connectionLabels": {
+        "success": "рабочий каталог запуска создан",
+        "error": "каталог создать не удалось"
       }
     },
     {
@@ -216,7 +237,8 @@
       },
       "connections": {
         "success": "route-frame-ready"
-      }
+      },
+      "progressNodeId": "contract"
     },
     {
       "id": "route-frame-ready",
@@ -231,6 +253,10 @@
       "connections": {
         "true": "research-evidence",
         "false": "route-frame-reassess"
+      },
+      "progressNodeId": "contract",
+      "connectionLabels": {
+        "true": "контракт решения готов"
       }
     },
     {
@@ -246,6 +272,11 @@
       "connections": {
         "true": "reassess-contract",
         "false": "finalize-blocked"
+      },
+      "progressNodeId": "contract",
+      "connectionLabels": {
+        "true": "контракт составлен неверно и требует пересмотра",
+        "false": "контракт составить невозможно"
       }
     },
     {
@@ -314,7 +345,8 @@
       },
       "connections": {
         "success": "route-research-blocked"
-      }
+      },
+      "progressNodeId": "research"
     },
     {
       "id": "route-research-blocked",
@@ -329,6 +361,10 @@
       "connections": {
         "true": "finalize-blocked",
         "false": "route-research-reassess"
+      },
+      "progressNodeId": "research",
+      "connectionLabels": {
+        "true": "нужных свидетельств не добыть"
       }
     },
     {
@@ -344,6 +380,11 @@
       "connections": {
         "true": "reassess-contract",
         "false": "produce-report"
+      },
+      "progressNodeId": "research",
+      "connectionLabels": {
+        "true": "исследование показало, что неверен сам контракт",
+        "false": "свидетельства собраны"
       }
     },
     {
@@ -438,7 +479,8 @@
       },
       "connections": {
         "success": "route-production-ready"
-      }
+      },
+      "progressNodeId": "report"
     },
     {
       "id": "route-production-ready",
@@ -453,6 +495,10 @@
       "connections": {
         "true": "semantic-review",
         "false": "route-production-blocked"
+      },
+      "progressNodeId": "report",
+      "connectionLabels": {
+        "true": "пакет решения собран"
       }
     },
     {
@@ -468,6 +514,11 @@
       "connections": {
         "true": "finalize-blocked",
         "false": "reassess-contract"
+      },
+      "progressNodeId": "report",
+      "connectionLabels": {
+        "true": "собрать пакет невозможно",
+        "false": "сборка пакета упёрлась в контракт"
       }
     },
     {
@@ -528,7 +579,8 @@
       },
       "connections": {
         "success": "route-review-pass"
-      }
+      },
+      "progressNodeId": "review"
     },
     {
       "id": "route-review-pass",
@@ -543,6 +595,10 @@
       "connections": {
         "true": "route-mode",
         "false": "route-review-blocked"
+      },
+      "progressNodeId": "review",
+      "connectionLabels": {
+        "true": "проверяющий принял пакет"
       }
     },
     {
@@ -558,6 +614,10 @@
       "connections": {
         "true": "finalize-blocked",
         "false": "route-review-reassess"
+      },
+      "progressNodeId": "review",
+      "connectionLabels": {
+        "true": "замечания проверки неустранимы"
       }
     },
     {
@@ -573,6 +633,11 @@
       "connections": {
         "true": "reassess-contract",
         "false": "route-repair-owner"
+      },
+      "progressNodeId": "review",
+      "connectionLabels": {
+        "true": "проверка нашла изъян в самом контракте",
+        "false": "есть устранимые замечания к работе"
       }
     },
     {
@@ -588,7 +653,8 @@
       "connections": {
         "true": "repair-evidence",
         "false": "repair-report"
-      }
+      },
+      "progressNodeId": "repair"
     },
     {
       "id": "repair-evidence",
@@ -686,7 +752,8 @@
       },
       "connections": {
         "success": "route-evidence-changed"
-      }
+      },
+      "progressNodeId": "repair"
     },
     {
       "id": "route-evidence-changed",
@@ -701,6 +768,16 @@
       "connections": {
         "true": "research-evidence",
         "false": "route-evidence-reassess"
+      },
+      "progressNodeId": "repair",
+      "connectionLabels": {
+        "true": {
+          "label": "свидетельства изменены — исследование повторяется",
+          "cycle": {
+            "cause": "независимая проверка нашла изъян, принадлежащий свидетельствам, и починка действительно переписала их",
+            "exit": "повторное исследование и пересобранный пакет проходят независимую проверку, либо изъян уводит работу на пересмотр контракта или в остановку"
+          }
+        }
       }
     },
     {
@@ -716,6 +793,11 @@
       "connections": {
         "true": "reassess-contract",
         "false": "finalize-blocked"
+      },
+      "progressNodeId": "repair",
+      "connectionLabels": {
+        "true": "починка свидетельств упёрлась в контракт",
+        "false": "свидетельства починить не удалось"
       }
     },
     {
@@ -864,7 +946,8 @@
       },
       "connections": {
         "success": "route-report-changed"
-      }
+      },
+      "progressNodeId": "repair"
     },
     {
       "id": "route-report-changed",
@@ -879,6 +962,16 @@
       "connections": {
         "true": "semantic-review",
         "false": "route-report-reassess"
+      },
+      "progressNodeId": "repair",
+      "connectionLabels": {
+        "true": {
+          "label": "отчёт изменён — проверка повторяется",
+          "cycle": {
+            "cause": "независимая проверка нашла изъян, принадлежащий отчёту и его HTML, и починка переписала их вместе с наблюдениями",
+            "exit": "повторная проверка принимает пакет, либо изъян уводит работу на пересмотр контракта или в остановку"
+          }
+        }
       }
     },
     {
@@ -894,6 +987,11 @@
       "connections": {
         "true": "reassess-contract",
         "false": "finalize-blocked"
+      },
+      "progressNodeId": "repair",
+      "connectionLabels": {
+        "true": "починка отчёта упёрлась в контракт",
+        "false": "отчёт починить не удалось"
       }
     },
     {
@@ -963,7 +1061,8 @@
       },
       "connections": {
         "success": "route-reassessment-eligible"
-      }
+      },
+      "progressNodeId": "reassessment"
     },
     {
       "id": "route-reassessment-eligible",
@@ -978,6 +1077,10 @@
       "connections": {
         "true": "review-corrected-contract",
         "false": "finalize-blocked"
+      },
+      "progressNodeId": "reassessment",
+      "connectionLabels": {
+        "false": "пересмотр контракта недопустим"
       }
     },
     {
@@ -1004,7 +1107,8 @@
       },
       "connections": {
         "success": "route-contract-pass"
-      }
+      },
+      "progressNodeId": "reassessment"
     },
     {
       "id": "route-contract-pass",
@@ -1019,6 +1123,16 @@
       "connections": {
         "true": "research-evidence",
         "false": "route-contract-blocked"
+      },
+      "progressNodeId": "reassessment",
+      "connectionLabels": {
+        "true": {
+          "label": "исправленный контракт принят проверкой",
+          "cycle": {
+            "cause": "изъян лежал в самом контракте решения, поэтому исследование и сборка пакета начинаются заново на исправленном контракте",
+            "exit": "работа на исправленном контракте доходит до принятого проверкой пакета, либо контракт признаётся негодным и запуск останавливается"
+          }
+        }
       }
     },
     {
@@ -1034,6 +1148,17 @@
       "connections": {
         "true": "finalize-blocked",
         "false": "reassess-contract"
+      },
+      "progressNodeId": "reassessment",
+      "connectionLabels": {
+        "true": "исправленный контракт признан негодным",
+        "false": {
+          "label": "исправление несущественно — контракт переписывается снова",
+          "cycle": {
+            "cause": "проверка исправленного контракта не признала правку материальной или корень остался неизменным",
+            "exit": "очередное исправление проходит проверку контракта либо признаётся негодным и запуск останавливается"
+          }
+        }
       }
     },
     {
@@ -1049,6 +1174,10 @@
       "connections": {
         "true": "route-publication",
         "false": "present-result"
+      },
+      "progressNodeId": "acceptance",
+      "connectionLabels": {
+        "true": "автономный режим — пакет человеку не показывают"
       }
     },
     {
@@ -1106,7 +1235,8 @@
       },
       "connections": {
         "success": "route-result-accept"
-      }
+      },
+      "progressNodeId": "acceptance"
     },
     {
       "id": "route-result-accept",
@@ -1121,6 +1251,10 @@
       "connections": {
         "true": "route-publication",
         "false": "route-result-rework"
+      },
+      "progressNodeId": "acceptance",
+      "connectionLabels": {
+        "true": "пользователь принял пакет"
       }
     },
     {
@@ -1136,6 +1270,10 @@
       "connections": {
         "true": "rework-result",
         "false": "finalize-aborted"
+      },
+      "progressNodeId": "acceptance",
+      "connectionLabels": {
+        "false": "пользователь прервал работу"
       }
     },
     {
@@ -1162,7 +1300,8 @@
       },
       "connections": {
         "success": "route-rework-contract"
-      }
+      },
+      "progressNodeId": "acceptance"
     },
     {
       "id": "route-rework-contract",
@@ -1177,6 +1316,16 @@
       "connections": {
         "true": "reassess-contract",
         "false": "route-rework-evidence"
+      },
+      "progressNodeId": "acceptance",
+      "connectionLabels": {
+        "true": {
+          "label": "доработка достаёт до контракта",
+          "cycle": {
+            "cause": "замечания пользователя показали, что неверен сам контракт решения, а не его исполнение",
+            "exit": "исправленный контракт проводит работу заново до пакета, который пользователь принимает или прерывает"
+          }
+        }
       }
     },
     {
@@ -1192,6 +1341,23 @@
       "connections": {
         "true": "research-evidence",
         "false": "produce-report"
+      },
+      "progressNodeId": "acceptance",
+      "connectionLabels": {
+        "true": {
+          "label": "доработка достаёт до свидетельств",
+          "cycle": {
+            "cause": "замечания пользователя требуют новых или других свидетельств, а не переписывания отчёта",
+            "exit": "исследование и пересобранный пакет снова проходят проверку и показываются пользователю до приёмки или прерывания"
+          }
+        },
+        "false": {
+          "label": "доработка укладывается в пересборку пакета",
+          "cycle": {
+            "cause": "замечания пользователя касаются самого пакета решения при годных контракте и свидетельствах",
+            "exit": "пересобранный пакет проходит проверку и показывается пользователю до приёмки или прерывания"
+          }
+        }
       }
     },
     {
@@ -1207,7 +1373,8 @@
       "connections": {
         "true": "publish-artifact",
         "false": "route-notification"
-      }
+      },
+      "progressNodeId": "publication"
     },
     {
       "id": "publish-artifact",
@@ -1278,7 +1445,8 @@
       },
       "connections": {
         "success": "route-notification"
-      }
+      },
+      "progressNodeId": "publication"
     },
     {
       "id": "route-notification",
@@ -1293,6 +1461,10 @@
       "connections": {
         "true": "send-notification",
         "false": "finalize-result"
+      },
+      "progressNodeId": "publication",
+      "connectionLabels": {
+        "false": "уведомление не разрешено"
       }
     },
     {
@@ -1303,6 +1475,10 @@
       "connections": {
         "default": "route-notification-sent",
         "error": "finalize-notification-error"
+      },
+      "progressNodeId": "publication",
+      "connectionLabels": {
+        "error": "движок уведомления вернул ошибку"
       }
     },
     {
@@ -1330,6 +1506,11 @@
       "connections": {
         "true": "finalize-notified",
         "false": "finalize-notification-unsent"
+      },
+      "progressNodeId": "publication",
+      "connectionLabels": {
+        "true": "уведомление принято хотя бы одним каналом",
+        "false": "ни один канал уведомление не принял"
       }
     },
     {
@@ -1369,7 +1550,8 @@
       },
       "connections": {
         "success": "end-success"
-      }
+      },
+      "progressNodeId": "delivery"
     },
     {
       "id": "finalize-notified",
@@ -1408,7 +1590,8 @@
       },
       "connections": {
         "success": "end-success"
-      }
+      },
+      "progressNodeId": "delivery"
     },
     {
       "id": "finalize-notification-unsent",
@@ -1447,7 +1630,8 @@
       },
       "connections": {
         "success": "end-success"
-      }
+      },
+      "progressNodeId": "delivery"
     },
     {
       "id": "finalize-notification-error",
@@ -1486,7 +1670,8 @@
       },
       "connections": {
         "success": "end-success"
-      }
+      },
+      "progressNodeId": "delivery"
     },
     {
       "id": "finalize-blocked",
@@ -1525,7 +1710,8 @@
       },
       "connections": {
         "success": "end-blocked"
-      }
+      },
+      "progressNodeId": "blocked"
     },
     {
       "id": "finalize-aborted",
@@ -1564,7 +1750,8 @@
       },
       "connections": {
         "success": "end-aborted"
-      }
+      },
+      "progressNodeId": "aborted"
     },
     {
       "id": "finalize-no-workspace",
@@ -1595,7 +1782,8 @@
       },
       "connections": {
         "success": "end-no-workspace"
-      }
+      },
+      "progressNodeId": "no-workspace"
     },
     {
       "id": "end-success",
@@ -1610,7 +1798,8 @@
         "notification_status",
         "public_url",
         "summary"
-      ]
+      ],
+      "progressNodeId": "delivery"
     },
     {
       "id": "end-blocked",
@@ -1620,7 +1809,8 @@
         "artifact_path",
         "result_class",
         "summary"
-      ]
+      ],
+      "progressNodeId": "blocked"
     },
     {
       "id": "end-aborted",
@@ -1630,7 +1820,8 @@
         "artifact_path",
         "result_class",
         "summary"
-      ]
+      ],
+      "progressNodeId": "aborted"
     },
     {
       "id": "end-no-workspace",
@@ -1638,7 +1829,8 @@
       "finalOutput": [
         "result_class",
         "summary"
-      ]
+      ],
+      "progressNodeId": "no-workspace"
     },
     {
       "id": "teleport-revise-process",
@@ -1653,7 +1845,8 @@
       },
       "connections": {
         "success": "reassess-contract"
-      }
+      },
+      "progressNodeId": "reassessment"
     }
   ],
   "variableRegistry": {
@@ -1764,5 +1957,102 @@
       "maxLength": 4000,
       "description": "Bounded truthful terminal summary."
     }
+  },
+  "progress": {
+    "title": "Smart Purchase Assistant",
+    "goal": "Довести одну потребность в покупке до долговечного пакета решения, где каждая рекомендация опирается на наблюдённое свидетельство, а сама покупка остаётся за человеком.",
+    "nodes": [
+      {
+        "id": "intake",
+        "label": "Запрос и рабочее пространство",
+        "content": {
+          "summary": "Из исходной просьбы вычитываются товар, применение, регион и валюта, бюджет, ограничения, срок, пределы источников и приватности, режим работы и отдельные разрешения на публикацию и уведомление, после чего создаётся рабочий каталог запуска, без которого работа дальше не идёт."
+        }
+      },
+      {
+        "id": "contract",
+        "label": "Контракт решения",
+        "content": {
+          "summary": "В рабочем каталоге записывается контракт покупки: что именно выбираем, в каких границах категории и вариантов, по каким критериям, с какой глубиной и с каким потолком источников — либо объявляется, что контракт надо пересматривать, либо что задача невыполнима."
+        }
+      },
+      {
+        "id": "research",
+        "label": "Сбор свидетельств",
+        "content": {
+          "summary": "По контракту соразмерно исследуются типы и компромиссы категории, подходящие варианты, характеристики, цены, наличие, условия продавцов и отзывы — со ссылками на наблюдённое, без выдуманных чисел и без придуманной уверенности."
+        }
+      },
+      {
+        "id": "report",
+        "label": "Пакет решения",
+        "content": {
+          "summary": "Из контракта и свидетельств собирается сам результат: сводка решения, руководство покупателю, сравнение со ссылками на свидетельства, рекомендации под разные профили покупателя, прямые наблюдённые ссылки, ограничения и предпокупочные проверки — в виде Markdown и самодостаточного HTML."
+        }
+      },
+      {
+        "id": "review",
+        "label": "Независимая проверка",
+        "content": {
+          "summary": "Отдельный проверяющий, не делавший пакет, читает контракт, свидетельства, отчёт и наблюдения и проверяет утверждения по существу; его исход решает, идёт ли пакет к человеку, чинится, пересматривается контракт или работа останавливается."
+        }
+      },
+      {
+        "id": "repair",
+        "label": "Починка по замечаниям",
+        "content": {
+          "summary": "Замечания проверки чинит их владелец: переделываются либо свидетельства, либо сам отчёт с его HTML и наблюдениями; починка обязана действительно изменить файлы, иначе работа уходит на пересмотр контракта или останавливается."
+        }
+      },
+      {
+        "id": "reassessment",
+        "label": "Пересмотр контракта",
+        "content": {
+          "summary": "Когда изъян лежит не в работе, а в самом контракте решения, контракт исправляется с сохранением исходной цели и полномочий, и отдельная проверка судит, материально ли исправление; принятое исправление отправляет запуск исследовать заново."
+        }
+      },
+      {
+        "id": "acceptance",
+        "label": "Приёмка пользователем",
+        "content": {
+          "summary": "В интерактивном режиме человеку показывают принятый проверкой пакет, и он принимает его, просит доработку или прерывает работу; доработка классифицируется по глубине и возвращает запуск к контракту, свидетельствам или сборке пакета, а в автономном режиме блок не проходится."
+        }
+      },
+      {
+        "id": "publication",
+        "label": "Публикация и уведомление",
+        "content": {
+          "summary": "Только при заранее выданных полномочиях HTML-отчёт выкладывается артефактом и пользователю уходит уведомление; ни неудача выкладки, ни неудача уведомления не отменяют уже принятый локальный отчёт."
+        }
+      },
+      {
+        "id": "delivery",
+        "label": "Итоговый отчёт",
+        "content": {
+          "summary": "Записывается итоговый отчёт с принятым результатом и фактическими исходами публикации и уведомления, и запуск завершается успехом."
+        }
+      },
+      {
+        "id": "blocked",
+        "label": "Остановка без результата",
+        "content": {
+          "summary": "Называется точная причина, по которой решение не получено — свидетельств не добыть, замечания неустранимы или контракт негоден, — и запуск завершается без ложного успеха."
+        }
+      },
+      {
+        "id": "aborted",
+        "label": "Прерывание пользователем",
+        "content": {
+          "summary": "Человек явно прервал работу: факт прерывания и сохранённые локальные файлы записываются без притязания на приёмку и без побочных действий."
+        }
+      },
+      {
+        "id": "no-workspace",
+        "label": "Нет рабочего пространства",
+        "content": {
+          "summary": "Запрос не позволяет действовать или безопасный рабочий каталог недоступен: называется конкретное невыполненное условие, и содержательная работа не начинается."
+        }
+      }
+    ]
   }
 }

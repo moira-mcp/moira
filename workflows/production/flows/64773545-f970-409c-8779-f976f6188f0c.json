@@ -3,8 +3,14 @@
   "id": "64773545-f970-409c-8779-f976f6188f0c",
   "metadata": {
     "name": "Architecture Design Flow",
-    "version": "2.0.5",
-    "description": "Produces a decision-ready, maintained architecture package for either a new system or an existing product. It resolves source and delivery authority, materializes a durable workspace, performs scenario-appropriate requirements discovery or evidence-backed reverse engineering, develops proportionate architecture decisions and documentation without forcing C4, DDD, arc42, Mermaid or arbitrary counts, validates only mechanically observable package properties, and requires independent whole-package review. Cause-owned repair and independently reviewed contract correction return to the earliest stale responsibility; autonomous mode skips only final user acceptance. Outcomes distinguish complete, reviewed-limited, blocked, workspace failure and interactive abort, while project delivery occurs only to an explicitly authorized target. The workflow never changes product code, commits, publishes, notifies, releases or deploys."
+    "version": "2.1.0",
+    "description": "Produces a decision-ready, maintained architecture package for either a new system or an existing product. It resolves source and delivery authority, materializes a durable workspace, performs scenario-appropriate requirements discovery or evidence-backed reverse engineering, develops proportionate architecture decisions and documentation without forcing C4, DDD, arc42, Mermaid or arbitrary counts, validates only mechanically observable package properties, and requires independent whole-package review. Cause-owned repair and independently reviewed contract correction return to the earliest stale responsibility; autonomous mode skips only final user acceptance. Outcomes distinguish complete, reviewed-limited, blocked, workspace failure and interactive abort, while project delivery occurs only to an explicitly authorized target. The workflow never changes product code, commits, publishes, notifies, releases or deploys.",
+    "tags": [
+      "архитектура",
+      "проектирование",
+      "решения",
+      "разработка"
+    ]
   },
   "nodes": [
     {
@@ -12,7 +18,8 @@
       "type": "start",
       "connections": {
         "default": "intake"
-      }
+      },
+      "progressNodeId": "intake"
     },
     {
       "id": "intake",
@@ -139,7 +146,8 @@
       },
       "connections": {
         "success": "route-intake-ready"
-      }
+      },
+      "progressNodeId": "intake"
     },
     {
       "id": "route-intake-ready",
@@ -154,6 +162,11 @@
       "connections": {
         "true": "materialize-workspace",
         "false": "finalize-intake-blocked"
+      },
+      "progressNodeId": "intake",
+      "connectionLabels": {
+        "true": "заявка собрана",
+        "false": "заявку собрать не удалось"
       }
     },
     {
@@ -237,6 +250,10 @@
       "connections": {
         "success": "initialize-contract",
         "error": "finalize-workspace-blocked"
+      },
+      "progressNodeId": "workspace",
+      "connectionLabels": {
+        "error": "рабочий каталог не создан"
       }
     },
     {
@@ -344,7 +361,8 @@
       },
       "connections": {
         "success": "route-contract-ready"
-      }
+      },
+      "progressNodeId": "workspace"
     },
     {
       "id": "route-contract-ready",
@@ -359,6 +377,11 @@
       "connections": {
         "true": "route-scenario",
         "false": "finalize-blocked"
+      },
+      "progressNodeId": "workspace",
+      "connectionLabels": {
+        "true": "контракт работы записан",
+        "false": "контракт из заявки не выводится"
       }
     },
     {
@@ -374,7 +397,8 @@
       "connections": {
         "true": "discover-new-system",
         "false": "discover-existing-system"
-      }
+      },
+      "progressNodeId": "discovery"
     },
     {
       "id": "discover-new-system",
@@ -496,7 +520,8 @@
       },
       "connections": {
         "success": "route-new-discovery-ready"
-      }
+      },
+      "progressNodeId": "discovery"
     },
     {
       "id": "route-new-discovery-ready",
@@ -511,6 +536,10 @@
       "connections": {
         "true": "design-architecture",
         "false": "route-new-discovery-replan"
+      },
+      "progressNodeId": "discovery",
+      "connectionLabels": {
+        "true": "предмет новой системы изучен"
       }
     },
     {
@@ -526,6 +555,11 @@
       "connections": {
         "true": "reassess-contract",
         "false": "finalize-blocked"
+      },
+      "progressNodeId": "discovery",
+      "connectionLabels": {
+        "true": "изучение новой системы требует пересмотра договорённостей",
+        "false": "изучить предмет новой системы не удалось"
       }
     },
     {
@@ -648,7 +682,8 @@
       },
       "connections": {
         "success": "route-existing-discovery-ready"
-      }
+      },
+      "progressNodeId": "discovery"
     },
     {
       "id": "route-existing-discovery-ready",
@@ -663,6 +698,10 @@
       "connections": {
         "true": "design-architecture",
         "false": "route-existing-discovery-replan"
+      },
+      "progressNodeId": "discovery",
+      "connectionLabels": {
+        "true": "существующая система изучена по её исходнику"
       }
     },
     {
@@ -678,6 +717,11 @@
       "connections": {
         "true": "reassess-contract",
         "false": "finalize-blocked"
+      },
+      "progressNodeId": "discovery",
+      "connectionLabels": {
+        "true": "изучение существующей системы требует пересмотра договорённостей",
+        "false": "изучить существующую систему не удалось"
       }
     },
     {
@@ -788,7 +832,8 @@
       },
       "connections": {
         "success": "route-architecture-ready"
-      }
+      },
+      "progressNodeId": "design"
     },
     {
       "id": "route-architecture-ready",
@@ -803,6 +848,10 @@
       "connections": {
         "true": "create-architecture-package",
         "false": "route-architecture-replan"
+      },
+      "progressNodeId": "design",
+      "connectionLabels": {
+        "true": "архитектурные решения готовы"
       }
     },
     {
@@ -818,6 +867,11 @@
       "connections": {
         "true": "reassess-contract",
         "false": "finalize-blocked"
+      },
+      "progressNodeId": "design",
+      "connectionLabels": {
+        "true": "решения требуют пересмотра договорённостей",
+        "false": "принять решения не удалось"
       }
     },
     {
@@ -928,7 +982,8 @@
       },
       "connections": {
         "success": "route-package-ready"
-      }
+      },
+      "progressNodeId": "package"
     },
     {
       "id": "route-package-ready",
@@ -943,6 +998,10 @@
       "connections": {
         "true": "complete-architecture-package",
         "false": "route-package-replan"
+      },
+      "progressNodeId": "package",
+      "connectionLabels": {
+        "true": "пакет собран"
       }
     },
     {
@@ -958,6 +1017,11 @@
       "connections": {
         "true": "reassess-contract",
         "false": "finalize-blocked"
+      },
+      "progressNodeId": "package",
+      "connectionLabels": {
+        "true": "сборка требует пересмотра договорённостей",
+        "false": "собрать пакет не удалось"
       }
     },
     {
@@ -1104,7 +1168,8 @@
       },
       "connections": {
         "success": "route-completion-ready"
-      }
+      },
+      "progressNodeId": "completion"
     },
     {
       "id": "route-completion-ready",
@@ -1119,6 +1184,10 @@
       "connections": {
         "true": "validate-architecture-package",
         "false": "route-completion-replan"
+      },
+      "progressNodeId": "completion",
+      "connectionLabels": {
+        "true": "пакет доведён, класс результата объявлен"
       }
     },
     {
@@ -1134,6 +1203,11 @@
       "connections": {
         "true": "reassess-contract",
         "false": "finalize-blocked"
+      },
+      "progressNodeId": "completion",
+      "connectionLabels": {
+        "true": "доведение требует пересмотра договорённостей",
+        "false": "довести пакет не удалось"
       }
     },
     {
@@ -1301,7 +1375,8 @@
       },
       "connections": {
         "success": "route-validation-pass"
-      }
+      },
+      "progressNodeId": "validation"
     },
     {
       "id": "route-validation-pass",
@@ -1316,6 +1391,10 @@
       "connections": {
         "true": "architecture-review",
         "false": "route-validation-repair"
+      },
+      "progressNodeId": "validation",
+      "connectionLabels": {
+        "true": "пакет прошёл механическую проверку"
       }
     },
     {
@@ -1331,7 +1410,8 @@
       "connections": {
         "true": "route-validation-validation",
         "false": "route-validation-replan"
-      }
+      },
+      "progressNodeId": "validation"
     },
     {
       "id": "route-validation-validation",
@@ -1346,6 +1426,10 @@
       "connections": {
         "true": "repair-validation-mechanical",
         "false": "route-validation-completion"
+      },
+      "progressNodeId": "validation",
+      "connectionLabels": {
+        "true": "правку берёт сама проверка"
       }
     },
     {
@@ -1361,6 +1445,16 @@
       "connections": {
         "true": "complete-architecture-package",
         "false": "route-validation-package"
+      },
+      "progressNodeId": "validation",
+      "connectionLabels": {
+        "true": {
+          "label": "правку берёт доведение пакета",
+          "cycle": {
+            "cause": "Механическая проверка нашла дефект, который правит владелец доведения: он воспроизводит все текущие замечания и переписывает свою часть прямо на этой стадии.",
+            "exit": "Доведённый заново пакет снова проходит ту же проверку; неснимаемый дефект уводит в пересмотр договорённостей или в остановку."
+          }
+        }
       }
     },
     {
@@ -1376,6 +1470,10 @@
       "connections": {
         "true": "repair-package-validation",
         "false": "route-validation-architecture"
+      },
+      "progressNodeId": "validation",
+      "connectionLabels": {
+        "true": "правку берёт сборка пакета"
       }
     },
     {
@@ -1391,6 +1489,11 @@
       "connections": {
         "true": "repair-architecture-validation",
         "false": "repair-discovery-validation"
+      },
+      "progressNodeId": "validation",
+      "connectionLabels": {
+        "true": "правку берут архитектурные решения",
+        "false": "правку берёт изучение предмета"
       }
     },
     {
@@ -1406,6 +1509,11 @@
       "connections": {
         "true": "reassess-contract",
         "false": "finalize-blocked"
+      },
+      "progressNodeId": "validation",
+      "connectionLabels": {
+        "true": "проверка требует пересмотра договорённостей",
+        "false": "проверка признала работу непроходимой"
       }
     },
     {
@@ -1571,7 +1679,8 @@
       },
       "connections": {
         "success": "route-review-pass"
-      }
+      },
+      "progressNodeId": "review"
     },
     {
       "id": "route-review-pass",
@@ -1586,6 +1695,10 @@
       "connections": {
         "true": "route-mode",
         "false": "route-review-repair"
+      },
+      "progressNodeId": "review",
+      "connectionLabels": {
+        "true": "ревью приняло пакет"
       }
     },
     {
@@ -1601,7 +1714,8 @@
       "connections": {
         "true": "route-review-validation",
         "false": "route-review-replan"
-      }
+      },
+      "progressNodeId": "review"
     },
     {
       "id": "route-review-validation",
@@ -1616,6 +1730,10 @@
       "connections": {
         "true": "repair-validation-semantic",
         "false": "route-review-completion"
+      },
+      "progressNodeId": "review",
+      "connectionLabels": {
+        "true": "правку берёт механическая проверка"
       }
     },
     {
@@ -1631,6 +1749,16 @@
       "connections": {
         "true": "complete-architecture-package",
         "false": "route-review-package"
+      },
+      "progressNodeId": "review",
+      "connectionLabels": {
+        "true": {
+          "label": "правку берёт доведение пакета",
+          "cycle": {
+            "cause": "Ревью нашло находку, которую правит владелец доведения: он воспроизводит все текущие блокирующие находки и переписывает свою часть прямо на этой стадии.",
+            "exit": "Доведённый заново пакет снова проходит проверку и ревью; неснимаемая находка уводит в пересмотр договорённостей или в остановку."
+          }
+        }
       }
     },
     {
@@ -1646,6 +1774,10 @@
       "connections": {
         "true": "repair-package-semantic",
         "false": "route-review-architecture"
+      },
+      "progressNodeId": "review",
+      "connectionLabels": {
+        "true": "правку берёт сборка пакета"
       }
     },
     {
@@ -1661,6 +1793,11 @@
       "connections": {
         "true": "repair-architecture-semantic",
         "false": "repair-discovery-semantic"
+      },
+      "progressNodeId": "review",
+      "connectionLabels": {
+        "true": "правку берут архитектурные решения",
+        "false": "правку берёт изучение предмета"
       }
     },
     {
@@ -1676,6 +1813,11 @@
       "connections": {
         "true": "reassess-contract",
         "false": "finalize-blocked"
+      },
+      "progressNodeId": "review",
+      "connectionLabels": {
+        "true": "ревью требует пересмотра договорённостей",
+        "false": "ревью признало работу непроходимой"
       }
     },
     {
@@ -1802,7 +1944,8 @@
       },
       "connections": {
         "success": "repair-package-validation-changed"
-      }
+      },
+      "progressNodeId": "repair-validation"
     },
     {
       "id": "repair-package-validation-changed",
@@ -1817,6 +1960,16 @@
       "connections": {
         "true": "complete-architecture-package",
         "false": "repair-package-validation-blocked"
+      },
+      "progressNodeId": "repair-validation",
+      "connectionLabels": {
+        "true": {
+          "label": "пакет исправлен по механической проверке",
+          "cycle": {
+            "cause": "Механическая проверка нашла дефект, источник которого — сборка пакета, и её владелец переписал свою часть.",
+            "exit": "Исправленный пакет заново доводится и проходит проверку; неснимаемый дефект уводит в пересмотр договорённостей или в остановку."
+          }
+        }
       }
     },
     {
@@ -1832,6 +1985,11 @@
       "connections": {
         "true": "finalize-blocked",
         "false": "reassess-contract"
+      },
+      "progressNodeId": "repair-validation",
+      "connectionLabels": {
+        "true": "правка пакета по проверке непроходима",
+        "false": "правка пакета по проверке требует пересмотра договорённостей"
       }
     },
     {
@@ -1958,7 +2116,8 @@
       },
       "connections": {
         "success": "repair-package-semantic-changed"
-      }
+      },
+      "progressNodeId": "repair-review"
     },
     {
       "id": "repair-package-semantic-changed",
@@ -1973,6 +2132,16 @@
       "connections": {
         "true": "complete-architecture-package",
         "false": "repair-package-semantic-blocked"
+      },
+      "progressNodeId": "repair-review",
+      "connectionLabels": {
+        "true": {
+          "label": "пакет исправлен по ревью",
+          "cycle": {
+            "cause": "Ревью нашло находку, источник которой — сборка пакета, и её владелец переписал свою часть.",
+            "exit": "Исправленный пакет заново доводится и проходит проверку и ревью; неснимаемая находка уводит в пересмотр договорённостей или в остановку."
+          }
+        }
       }
     },
     {
@@ -1988,6 +2157,11 @@
       "connections": {
         "true": "finalize-blocked",
         "false": "reassess-contract"
+      },
+      "progressNodeId": "repair-review",
+      "connectionLabels": {
+        "true": "правка пакета по ревью непроходима",
+        "false": "правка пакета по ревью требует пересмотра договорённостей"
       }
     },
     {
@@ -2114,7 +2288,8 @@
       },
       "connections": {
         "success": "repair-architecture-validation-changed"
-      }
+      },
+      "progressNodeId": "repair-validation"
     },
     {
       "id": "repair-architecture-validation-changed",
@@ -2129,6 +2304,16 @@
       "connections": {
         "true": "create-architecture-package",
         "false": "repair-architecture-validation-blocked"
+      },
+      "progressNodeId": "repair-validation",
+      "connectionLabels": {
+        "true": {
+          "label": "решения исправлены по механической проверке",
+          "cycle": {
+            "cause": "Механическая проверка нашла дефект, источник которого — сами архитектурные решения, и их владелец их переписал.",
+            "exit": "Пакет собирается заново из исправленных решений, доводится и снова проходит проверку; неснимаемый дефект уводит в пересмотр договорённостей или в остановку."
+          }
+        }
       }
     },
     {
@@ -2144,6 +2329,11 @@
       "connections": {
         "true": "finalize-blocked",
         "false": "reassess-contract"
+      },
+      "progressNodeId": "repair-validation",
+      "connectionLabels": {
+        "true": "правка решений по проверке непроходима",
+        "false": "правка решений по проверке требует пересмотра договорённостей"
       }
     },
     {
@@ -2270,7 +2460,8 @@
       },
       "connections": {
         "success": "repair-architecture-semantic-changed"
-      }
+      },
+      "progressNodeId": "repair-review"
     },
     {
       "id": "repair-architecture-semantic-changed",
@@ -2285,6 +2476,16 @@
       "connections": {
         "true": "create-architecture-package",
         "false": "repair-architecture-semantic-blocked"
+      },
+      "progressNodeId": "repair-review",
+      "connectionLabels": {
+        "true": {
+          "label": "решения исправлены по ревью",
+          "cycle": {
+            "cause": "Ревью нашло находку, источник которой — сами архитектурные решения, и их владелец их переписал.",
+            "exit": "Пакет собирается заново из исправленных решений и снова проходит проверку и ревью; неснимаемая находка уводит в пересмотр договорённостей или в остановку."
+          }
+        }
       }
     },
     {
@@ -2300,6 +2501,11 @@
       "connections": {
         "true": "finalize-blocked",
         "false": "reassess-contract"
+      },
+      "progressNodeId": "repair-review",
+      "connectionLabels": {
+        "true": "правка решений по ревью непроходима",
+        "false": "правка решений по ревью требует пересмотра договорённостей"
       }
     },
     {
@@ -2426,7 +2632,8 @@
       },
       "connections": {
         "success": "repair-discovery-validation-changed"
-      }
+      },
+      "progressNodeId": "repair-validation"
     },
     {
       "id": "repair-discovery-validation-changed",
@@ -2441,6 +2648,16 @@
       "connections": {
         "true": "route-scenario",
         "false": "repair-discovery-validation-blocked"
+      },
+      "progressNodeId": "repair-validation",
+      "connectionLabels": {
+        "true": {
+          "label": "предмет изучен заново по механической проверке",
+          "cycle": {
+            "cause": "Механическая проверка нашла дефект, источник которого — изучение предмета: собранного материала или доказательств не хватает для пакета.",
+            "exit": "Предмет изучается заново по своему сценарию, решения и пакет пересобираются и снова проходят проверку; неснимаемый дефект уводит в пересмотр договорённостей или в остановку."
+          }
+        }
       }
     },
     {
@@ -2456,6 +2673,11 @@
       "connections": {
         "true": "finalize-blocked",
         "false": "reassess-contract"
+      },
+      "progressNodeId": "repair-validation",
+      "connectionLabels": {
+        "true": "правка изучения по проверке непроходима",
+        "false": "правка изучения по проверке требует пересмотра договорённостей"
       }
     },
     {
@@ -2582,7 +2804,8 @@
       },
       "connections": {
         "success": "repair-discovery-semantic-changed"
-      }
+      },
+      "progressNodeId": "repair-review"
     },
     {
       "id": "repair-discovery-semantic-changed",
@@ -2597,6 +2820,16 @@
       "connections": {
         "true": "route-scenario",
         "false": "repair-discovery-semantic-blocked"
+      },
+      "progressNodeId": "repair-review",
+      "connectionLabels": {
+        "true": {
+          "label": "предмет изучен заново по ревью",
+          "cycle": {
+            "cause": "Ревью нашло находку, источник которой — изучение предмета: утверждения пакета не обеспечены собранными доказательствами.",
+            "exit": "Предмет изучается заново, решения и пакет пересобираются и снова проходят проверку и ревью; неснимаемая находка уводит в пересмотр договорённостей или в остановку."
+          }
+        }
       }
     },
     {
@@ -2612,6 +2845,11 @@
       "connections": {
         "true": "finalize-blocked",
         "false": "reassess-contract"
+      },
+      "progressNodeId": "repair-review",
+      "connectionLabels": {
+        "true": "правка изучения по ревью непроходима",
+        "false": "правка изучения по ревью требует пересмотра договорённостей"
       }
     },
     {
@@ -2738,7 +2976,8 @@
       },
       "connections": {
         "success": "repair-validation-mechanical-changed"
-      }
+      },
+      "progressNodeId": "repair-validation"
     },
     {
       "id": "repair-validation-mechanical-changed",
@@ -2753,6 +2992,16 @@
       "connections": {
         "true": "validate-architecture-package",
         "false": "repair-validation-mechanical-blocked"
+      },
+      "progressNodeId": "repair-validation",
+      "connectionLabels": {
+        "true": {
+          "label": "проверка переделана",
+          "cycle": {
+            "cause": "Проверка сама оказалась негодной: её наблюдения или критерии неверны, и её владелец переписал их.",
+            "exit": "Пакет проверяется заново по исправленным наблюдениям и идёт на ревью; неснимаемый дефект уводит в пересмотр договорённостей или в остановку."
+          }
+        }
       }
     },
     {
@@ -2768,6 +3017,11 @@
       "connections": {
         "true": "finalize-blocked",
         "false": "reassess-contract"
+      },
+      "progressNodeId": "repair-validation",
+      "connectionLabels": {
+        "true": "переделка проверки непроходима",
+        "false": "переделка проверки требует пересмотра договорённостей"
       }
     },
     {
@@ -2894,7 +3148,8 @@
       },
       "connections": {
         "success": "repair-validation-semantic-changed"
-      }
+      },
+      "progressNodeId": "repair-review"
     },
     {
       "id": "repair-validation-semantic-changed",
@@ -2909,6 +3164,16 @@
       "connections": {
         "true": "validate-architecture-package",
         "false": "repair-validation-semantic-blocked"
+      },
+      "progressNodeId": "repair-review",
+      "connectionLabels": {
+        "true": {
+          "label": "проверка переделана по ревью",
+          "cycle": {
+            "cause": "Ревью нашло, что негодна сама механическая проверка: она пропускает или ложно отмечает то, что должна наблюдать.",
+            "exit": "Пакет проверяется заново по исправленным наблюдениям и снова идёт на ревью; неснимаемая находка уводит в пересмотр договорённостей или в остановку."
+          }
+        }
       }
     },
     {
@@ -2924,6 +3189,11 @@
       "connections": {
         "true": "finalize-blocked",
         "false": "reassess-contract"
+      },
+      "progressNodeId": "repair-review",
+      "connectionLabels": {
+        "true": "переделка проверки по ревью непроходима",
+        "false": "переделка проверки по ревью требует пересмотра договорённостей"
       }
     },
     {
@@ -3006,7 +3276,8 @@
       },
       "connections": {
         "success": "route-reassessment-corrected"
-      }
+      },
+      "progressNodeId": "contract"
     },
     {
       "id": "route-reassessment-corrected",
@@ -3021,6 +3292,10 @@
       "connections": {
         "true": "corrected-contract-review",
         "false": "finalize-blocked"
+      },
+      "progressNodeId": "contract",
+      "connectionLabels": {
+        "false": "договорённости исправить не удалось"
       }
     },
     {
@@ -3128,7 +3403,8 @@
       },
       "connections": {
         "success": "route-contract-review-pass"
-      }
+      },
+      "progressNodeId": "contract"
     },
     {
       "id": "route-contract-review-pass",
@@ -3143,7 +3419,8 @@
       "connections": {
         "true": "route-reentry-discovery",
         "false": "route-contract-review-blocked"
-      }
+      },
+      "progressNodeId": "contract"
     },
     {
       "id": "route-contract-review-blocked",
@@ -3158,6 +3435,17 @@
       "connections": {
         "true": "finalize-blocked",
         "false": "reassess-contract"
+      },
+      "progressNodeId": "contract",
+      "connectionLabels": {
+        "true": "проверка дополнения признала работу непроходимой",
+        "false": {
+          "label": "дополнение к контракту отправлено на доработку",
+          "cycle": {
+            "cause": "Независимая проверка нашла, что дополнение ещё не годится: оно расходится с исходной целью, границами или полномочиями либо называет не самую раннюю устаревшую стадию.",
+            "exit": "Дополнение переписывается и проверяется снова, пока не будет принято; признанное непроходимым уводит работу в остановку."
+          }
+        }
       }
     },
     {
@@ -3173,6 +3461,16 @@
       "connections": {
         "true": "route-scenario",
         "false": "route-reentry-architecture"
+      },
+      "progressNodeId": "contract",
+      "connectionLabels": {
+        "true": {
+          "label": "работа входит заново с изучения предмета",
+          "cycle": {
+            "cause": "Принятое дополнение к контракту обесценило самую раннюю стадию — изучение предмета.",
+            "exit": "Предмет, решения, пакет и его доведение проходятся заново под исправленными договорённостями и доходят до приёмки; очередной тупик уводит в остановку."
+          }
+        }
       }
     },
     {
@@ -3188,6 +3486,16 @@
       "connections": {
         "true": "design-architecture",
         "false": "route-reentry-package"
+      },
+      "progressNodeId": "contract",
+      "connectionLabels": {
+        "true": {
+          "label": "работа входит заново с решений",
+          "cycle": {
+            "cause": "Принятое дополнение оставило изучение предмета в силе, но обесценило архитектурные решения.",
+            "exit": "Решения принимаются заново, пакет пересобирается, и работа идёт до приёмки; очередной тупик уводит в остановку."
+          }
+        }
       }
     },
     {
@@ -3203,6 +3511,16 @@
       "connections": {
         "true": "create-architecture-package",
         "false": "route-reentry-validation"
+      },
+      "progressNodeId": "contract",
+      "connectionLabels": {
+        "true": {
+          "label": "работа входит заново со сборки пакета",
+          "cycle": {
+            "cause": "Принятое дополнение оставило предмет и решения в силе, но обесценило собранный пакет.",
+            "exit": "Пакет собирается заново, доводится и снова проходит проверку и ревью; очередной тупик уводит в остановку."
+          }
+        }
       }
     },
     {
@@ -3218,6 +3536,23 @@
       "connections": {
         "true": "validate-architecture-package",
         "false": "complete-architecture-package"
+      },
+      "progressNodeId": "contract",
+      "connectionLabels": {
+        "true": {
+          "label": "работа входит заново с механической проверки",
+          "cycle": {
+            "cause": "Принятое дополнение затронуло только критерии проверки пакета, а сам пакет остался в силе.",
+            "exit": "Пакет проверяется заново по исправленным критериям и идёт на ревью; очередной тупик уводит в остановку."
+          }
+        },
+        "false": {
+          "label": "работа входит заново с доведения пакета",
+          "cycle": {
+            "cause": "Принятое дополнение затронуло только доведение результата: пакет остаётся в силе, а его полнота и класс результата объявлены по устаревшим договорённостям.",
+            "exit": "Пакет доводится заново и снова проходит проверку и ревью; очередной тупик уводит в остановку."
+          }
+        }
       }
     },
     {
@@ -3233,6 +3568,10 @@
       "connections": {
         "true": "interactive-acceptance",
         "false": "route-delivery-scope"
+      },
+      "progressNodeId": "acceptance",
+      "connectionLabels": {
+        "false": "автономный режим: приёмка не проводится"
       }
     },
     {
@@ -3316,7 +3655,8 @@
       },
       "connections": {
         "success": "route-user-accept"
-      }
+      },
+      "progressNodeId": "acceptance"
     },
     {
       "id": "route-user-accept",
@@ -3331,6 +3671,10 @@
       "connections": {
         "true": "route-delivery-scope",
         "false": "route-user-abort"
+      },
+      "progressNodeId": "acceptance",
+      "connectionLabels": {
+        "true": "пользователь принял пакет"
       }
     },
     {
@@ -3346,6 +3690,10 @@
       "connections": {
         "true": "finalize-aborted",
         "false": "route-rework-discovery"
+      },
+      "progressNodeId": "acceptance",
+      "connectionLabels": {
+        "true": "пользователь прервал работу"
       }
     },
     {
@@ -3361,6 +3709,16 @@
       "connections": {
         "true": "route-scenario",
         "false": "route-rework-architecture"
+      },
+      "progressNodeId": "acceptance",
+      "connectionLabels": {
+        "true": {
+          "label": "пользователь вернул работу к изучению предмета",
+          "cycle": {
+            "cause": "Пользователь при приёмке назвал изучение предмета: собранная картина требований или текущего состояния его не устраивает.",
+            "exit": "Предмет изучается заново, решения и пакет пересобираются, и приёмка повторяется; принятая или прерванная пользователем работа выходит из круга."
+          }
+        }
       }
     },
     {
@@ -3376,6 +3734,16 @@
       "connections": {
         "true": "design-architecture",
         "false": "route-rework-package"
+      },
+      "progressNodeId": "acceptance",
+      "connectionLabels": {
+        "true": {
+          "label": "пользователь вернул работу к решениям",
+          "cycle": {
+            "cause": "Пользователь при приёмке назвал архитектурные решения: картина предмета его устраивает, а принятые по ней решения нет.",
+            "exit": "Решения принимаются заново, пакет пересобирается, и приёмка повторяется; принятая или прерванная пользователем работа выходит из круга."
+          }
+        }
       }
     },
     {
@@ -3391,6 +3759,16 @@
       "connections": {
         "true": "create-architecture-package",
         "false": "route-rework-validation"
+      },
+      "progressNodeId": "acceptance",
+      "connectionLabels": {
+        "true": {
+          "label": "пользователь вернул работу к сборке пакета",
+          "cycle": {
+            "cause": "Пользователь при приёмке назвал пакет: решения его устраивают, а состав и подача пакета нет.",
+            "exit": "Пакет собирается заново, доводится и снова проходит проверку и ревью, и приёмка повторяется; принятая или прерванная работа выходит из круга."
+          }
+        }
       }
     },
     {
@@ -3406,6 +3784,16 @@
       "connections": {
         "true": "validate-architecture-package",
         "false": "route-rework-completion"
+      },
+      "progressNodeId": "acceptance",
+      "connectionLabels": {
+        "true": {
+          "label": "пользователь вернул работу к механической проверке",
+          "cycle": {
+            "cause": "Пользователь при приёмке назвал проверку: он не согласен с тем, что и как в пакете проверялось наблюдаемо.",
+            "exit": "Пакет проверяется заново, идёт на ревью, и приёмка повторяется; принятая или прерванная работа выходит из круга."
+          }
+        }
       }
     },
     {
@@ -3421,6 +3809,23 @@
       "connections": {
         "true": "complete-architecture-package",
         "false": "reassess-contract"
+      },
+      "progressNodeId": "acceptance",
+      "connectionLabels": {
+        "true": {
+          "label": "пользователь вернул работу к доведению пакета",
+          "cycle": {
+            "cause": "Пользователь при приёмке назвал доведение: объявленные полнота и ограничения результата его не устраивают.",
+            "exit": "Пакет доводится заново и снова проходит проверку и ревью, и приёмка повторяется; принятая или прерванная работа выходит из круга."
+          }
+        },
+        "false": {
+          "label": "пользователь требует пересмотра договорённостей",
+          "cycle": {
+            "cause": "Пользователь при приёмке не назвал ни одну рабочую стадию, то есть его замечание касается самих договорённостей о цели, границах или полномочиях.",
+            "exit": "Договорённости исправляются и независимо проверяются, работа входит заново с названной устаревшей стадии и снова доходит до приёмки; неисправимые договорённости уводят в остановку."
+          }
+        }
       }
     },
     {
@@ -3436,6 +3841,10 @@
       "connections": {
         "true": "deliver-package",
         "false": "route-final-status"
+      },
+      "progressNodeId": "delivery",
+      "connectionLabels": {
+        "false": "передавать некуда: результат остаётся в рабочем каталоге"
       }
     },
     {
@@ -3562,7 +3971,8 @@
       },
       "connections": {
         "success": "route-delivery-complete"
-      }
+      },
+      "progressNodeId": "delivery"
     },
     {
       "id": "route-delivery-complete",
@@ -3577,6 +3987,10 @@
       "connections": {
         "true": "route-final-status-delivered",
         "false": "route-delivery-replan"
+      },
+      "progressNodeId": "delivery",
+      "connectionLabels": {
+        "true": "пакет передан по разрешённому адресу"
       }
     },
     {
@@ -3592,6 +4006,17 @@
       "connections": {
         "true": "reassess-contract",
         "false": "finalize-blocked"
+      },
+      "progressNodeId": "delivery",
+      "connectionLabels": {
+        "true": {
+          "label": "передача требует пересмотра договорённостей",
+          "cycle": {
+            "cause": "Условие передачи оказалось негодным: разрешённый адрес или критерий передачи не соответствуют контракту.",
+            "exit": "Договорённости исправляются, работа входит заново с названной устаревшей стадии и снова доходит до передачи; неисправимая передача уводит в остановку."
+          }
+        },
+        "false": "передать пакет по адресу не удалось"
       }
     },
     {
@@ -3607,7 +4032,8 @@
       "connections": {
         "true": "finalize-complete",
         "false": "finalize-limited"
-      }
+      },
+      "progressNodeId": "final"
     },
     {
       "id": "route-final-status-delivered",
@@ -3622,7 +4048,8 @@
       "connections": {
         "true": "finalize-complete-delivered",
         "false": "finalize-limited-delivered"
-      }
+      },
+      "progressNodeId": "final"
     },
     {
       "id": "finalize-complete-delivered",
@@ -3653,7 +4080,8 @@
       },
       "connections": {
         "success": "end"
-      }
+      },
+      "progressNodeId": "final"
     },
     {
       "id": "finalize-limited-delivered",
@@ -3684,7 +4112,8 @@
       },
       "connections": {
         "success": "end-limited"
-      }
+      },
+      "progressNodeId": "final"
     },
     {
       "id": "finalize-complete",
@@ -3724,7 +4153,8 @@
       },
       "connections": {
         "success": "end"
-      }
+      },
+      "progressNodeId": "final"
     },
     {
       "id": "finalize-limited",
@@ -3764,7 +4194,8 @@
       },
       "connections": {
         "success": "end-limited"
-      }
+      },
+      "progressNodeId": "final"
     },
     {
       "id": "finalize-blocked",
@@ -3804,7 +4235,8 @@
       },
       "connections": {
         "success": "end-blocked"
-      }
+      },
+      "progressNodeId": "stopped"
     },
     {
       "id": "finalize-aborted",
@@ -3844,7 +4276,8 @@
       },
       "connections": {
         "success": "end-aborted"
-      }
+      },
+      "progressNodeId": "stopped"
     },
     {
       "id": "finalize-workspace-blocked",
@@ -3875,7 +4308,8 @@
       },
       "connections": {
         "success": "end-workspace-blocked"
-      }
+      },
+      "progressNodeId": "stopped"
     },
     {
       "id": "finalize-intake-blocked",
@@ -3904,7 +4338,8 @@
       },
       "connections": {
         "success": "end-intake-blocked"
-      }
+      },
+      "progressNodeId": "stopped"
     },
     {
       "id": "end",
@@ -3916,7 +4351,8 @@
         "architecture_summary",
         "limitation_summary",
         "delivery_status"
-      ]
+      ],
+      "progressNodeId": "final"
     },
     {
       "id": "end-limited",
@@ -3928,7 +4364,8 @@
         "architecture_summary",
         "limitation_summary",
         "delivery_status"
-      ]
+      ],
+      "progressNodeId": "final"
     },
     {
       "id": "end-blocked",
@@ -3939,7 +4376,8 @@
         "package_path",
         "terminal_reason",
         "delivery_status"
-      ]
+      ],
+      "progressNodeId": "stopped"
     },
     {
       "id": "end-aborted",
@@ -3950,7 +4388,8 @@
         "package_path",
         "terminal_reason",
         "delivery_status"
-      ]
+      ],
+      "progressNodeId": "stopped"
     },
     {
       "id": "end-workspace-blocked",
@@ -3958,7 +4397,8 @@
       "finalOutput": [
         "terminal_status",
         "terminal_reason"
-      ]
+      ],
+      "progressNodeId": "stopped"
     },
     {
       "id": "end-intake-blocked",
@@ -3966,7 +4406,8 @@
       "finalOutput": [
         "terminal_status",
         "terminal_reason"
-      ]
+      ],
+      "progressNodeId": "stopped"
     },
     {
       "id": "revise-process",
@@ -4001,7 +4442,8 @@
       },
       "connections": {
         "success": "reassess-contract"
-      }
+      },
+      "progressNodeId": "contract"
     }
   ],
   "variableRegistry": {
@@ -4170,5 +4612,116 @@
     }
   },
   "owner": "system-moira",
-  "visibility": "public"
+  "visibility": "public",
+  "progress": {
+    "title": "Architecture Design",
+    "goal": "Довести один архитектурный вопрос — по новой системе или по уже существующей — до поддерживаемого пакета решений, независимо проверенного и честно названного полным или ограниченным.",
+    "nodes": [
+      {
+        "id": "intake",
+        "label": "Заявка",
+        "content": {
+          "summary": "Выясняется, какое архитектурное решение нужно принять и ради чего, новая это система или существующая, какой исходник разрешён к изучению, куда класть результат и нужна ли приёмка человеком; стадия кончается разрешённой заявкой либо отказом из-за нехватки сведений."
+        }
+      },
+      {
+        "id": "workspace",
+        "label": "Рабочий каталог и контракт",
+        "content": {
+          "summary": "Создаётся долговечный рабочий каталог, и в нём один раз пишется неизменяемый контракт работы — цель, назначение решения, сценарий, границы, разрешённый источник и полномочия на передачу результата, — на который дальше ссылается вся работа."
+        }
+      },
+      {
+        "id": "discovery",
+        "label": "Изучение предмета",
+        "content": {
+          "summary": "По сценарию: для новой системы собираются требования, участники, ограничения, вопросы решения и неизвестности; для существующей изучается разрешённый исходник и пишутся доказательства и картина текущего состояния с отделением наблюдений от догадок. Стадия кончается материалом, пригодным полностью или с ограничениями."
+        }
+      },
+      {
+        "id": "design",
+        "label": "Архитектурные решения",
+        "content": {
+          "summary": "Пишется связный набор решений: границы и декомпозиция, интерфейсы и потоки данных, поведение при отказах, значимые решения с альтернативами и последствиями, измеримые сценарии качества и риски, а для существующей системы — привязанные к доказательствам пошаговые улучшения. Метод и форма выбираются по задаче, а не по шаблону."
+        }
+      },
+      {
+        "id": "package",
+        "label": "Сборка пакета",
+        "content": {
+          "summary": "Из решений собирается один поддерживаемый пакет с оглавлением: нужные для запрошенного решения представления, интерфейсы и владение данными, сами решения, сценарии качества, сквозные и эксплуатационные вопросы, риски; всё осознанно не сделанное записывается в ограничения."
+        }
+      },
+      {
+        "id": "completion",
+        "label": "Доведение пакета",
+        "content": {
+          "summary": "Свежим проходом по контракту, доказательствам и пакету закрываются предвидимые пробелы и объявляется класс результата: полный — только если запрошенное решение поддержано целиком, иначе ограниченный, с явно названными ограничениями."
+        }
+      },
+      {
+        "id": "validation",
+        "label": "Механическая проверка пакета",
+        "content": {
+          "summary": "Пакет проверяется наблюдаемо и без суждений о качестве архитектуры: на месте ли требуемые контрактом файлы, разбираются ли они, разрешаются ли внутренние ссылки, рисуются ли диаграммы. Стадия кончается допуском к ревью либо указанием одного самого раннего владельца правки."
+        }
+      },
+      {
+        "id": "review",
+        "label": "Независимое ревью пакета",
+        "content": {
+          "summary": "Отдельный рецензент читает контракт, первичные доказательства и весь пакет и судит то, чего не видит механическая проверка: пригодность архитектуры, границы, компромиссы, происхождение утверждений, качества и честность ограничений. Он ставит диагноз, но не чинит, и называет одного самого раннего владельца правки."
+        }
+      },
+      {
+        "id": "repair-validation",
+        "label": "Правка по механической проверке",
+        "content": {
+          "summary": "Названный проверкой владелец — изучение предмета, решения, пакет, доведение или сама проверка — читает её отчёт, воспроизводит все текущие замечания и переписывает только свою часть; стадия кончается изменённой работой, уходящей на повторный проход, либо признанием, что замечание правкой не снимается."
+        }
+      },
+      {
+        "id": "repair-review",
+        "label": "Правка по ревью",
+        "content": {
+          "summary": "То же по замечаниям независимого ревью: названный владелец читает отчёт рецензента, воспроизводит все текущие блокирующие находки и переписывает свою часть; стадия кончается изменённой работой, возвращаемой на нужный проход, либо признанием, что находка правкой не снимается."
+        }
+      },
+      {
+        "id": "contract",
+        "label": "Пересмотр договорённостей",
+        "content": {
+          "summary": "Общий узел всех тупиков: исходные цель и полномочия остаются неприкосновенными, а неверный производный критерий, метод или разграничение ответственности исправляется дополнением к контракту; дополнение независимо проверяется и, будучи принятым, называет самую раннюю устаревшую стадию для повторного входа."
+        }
+      },
+      {
+        "id": "acceptance",
+        "label": "Приёмка пользователем",
+        "content": {
+          "summary": "В интерактивном режиме пользователю показывают принятый ревью пакет, сводку архитектуры и её ограничения, и он принимает работу, прерывает её или называет одну стадию для переделки с конкретным замечанием; в автономном режиме стадия не проходится."
+        }
+      },
+      {
+        "id": "delivery",
+        "label": "Передача пакета в проект",
+        "content": {
+          "summary": "Когда полномочия позволяют отдавать результат за пределы рабочего каталога, принятый пакет побайтно копируется в заранее разрешённый адрес и тождество файлов проверяется отдельно, чтобы отличить принятую редакцию от старой или частичной копии; продуктовый код при этом не меняется. Без таких полномочий стадия не проходится."
+        }
+      },
+      {
+        "id": "final",
+        "label": "Итог",
+        "content": {
+          "summary": "Пишется итог запуска с честным классом результата — полный пакет или пакет с названными ограничениями — и с указанием, остался ли он в рабочем каталоге или передан в разрешённый адрес."
+        }
+      },
+      {
+        "id": "stopped",
+        "label": "Остановка без пакета",
+        "content": {
+          "summary": "Запуск кончается без архитектурного пакета: заявка не собралась, рабочий каталог не создан, работа признана непроходимой на одной из стадий или пользователь её прервал — с названной причиной и отчётом о сделанном."
+        }
+      }
+    ]
+  }
 }

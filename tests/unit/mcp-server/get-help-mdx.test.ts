@@ -183,14 +183,14 @@ tags:
       expect(filePathToTopicId("reference/workflows/test-planning.mdx")).toBe(
         "workflow-test-planning",
       );
-      expect(filePathToTopicId("reference/workflows/simple-plan-execution.mdx")).toBe(
-        "workflow-simple-plan-execution",
+      expect(filePathToTopicId("reference/workflows/agentic-screencast-video.mdx")).toBe(
+        "workflow-agentic-screencast-video",
       );
-      expect(filePathToTopicId("reference/workflows/infinite-task-loop.mdx")).toBe(
-        "workflow-infinite-task-loop",
+      expect(filePathToTopicId("reference/workflows/execution-retrospective.mdx")).toBe(
+        "workflow-execution-retrospective",
       );
-      expect(filePathToTopicId("reference/workflows/task-breakdown-flow.mdx")).toBe(
-        "workflow-task-breakdown-flow",
+      expect(filePathToTopicId("reference/workflows/deep-corpus-research.mdx")).toBe(
+        "workflow-deep-corpus-research",
       );
     });
   });
@@ -224,18 +224,16 @@ tags:
       expect(result).toContain("test-suite-audit");
       expect(result).toContain("content-creation");
       expect(result).toContain("research");
-      expect(result).toContain("iterative-research");
-      expect(result).toContain("universal-research-workflow");
       expect(result).toContain("prd-creation");
       expect(result).toContain("ux-design");
       expect(result).toContain("data-analysis");
       expect(result).toContain("marketing-campaign");
       expect(result).toContain("quick-task");
       expect(result).toContain("robust-task");
-      expect(result).toContain("simple-plan-execution");
-      expect(result).toContain("task-breakdown-flow");
-      expect(result).toContain("infinite-task-loop");
       expect(result).toContain("software-development-flow");
+      expect(result).toContain("agentic-screencast-video");
+      expect(result).toContain("deep-corpus-research");
+      expect(result).toContain("todo-list");
     });
 
     it("should include trigger phrases for workflow mapping", () => {
@@ -247,14 +245,14 @@ tags:
       expect(result).toContain("test plan");
       expect(result).toContain("test suite audit");
       expect(result).toContain("one reviewed article");
+      expect(result).toContain("bounded by a repair budget");
+      expect(result).toContain("source-backed facts and story");
+      expect(result).toContain("a known checklist needing a durable cursor");
       expect(result).toContain("research");
-      expect(result).toContain("repeated independent zero-issue review");
       expect(result).toContain("develop feature");
       expect(result).toContain("implement");
       expect(result).toContain("build feature");
       expect(result).toContain("fix bug");
-      expect(result).toContain("tasks that are not known in advance");
-      expect(result).toContain("independent item review, changed retries, suffix revision");
     });
 
     it("should include start command with parentExecutionId", () => {

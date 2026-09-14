@@ -399,6 +399,13 @@ moira-workflow ./workflows/production/flows/<flow>.json set-name "Workflow name"
 moira-workflow ./workflows/production/flows/<flow>.json set-slug workflow-slug
 moira-workflow ./workflows/production/flows/<flow>.json set-description --file ./description.txt
 
+# Rewrite or remove the reminder the engine shows with every presented step
+moira-workflow ./workflows/production/flows/<flow>.json set-system-reminder --file ./reminder.txt
+moira-workflow ./workflows/production/flows/<flow>.json set-system-reminder none
+
+# Set the catalog tags a flow is found by
+moira-workflow ./workflows/production/flows/<flow>.json set-tags research,verification
+
 # Replace an existing copy while preserving its id/slug/owner/visibility/previousSlugs
 moira-workflow ./workspace.json sync ./workflows/production/flows/<flow>.json
 ```
@@ -533,6 +540,8 @@ Available for all modifying commands:
 - `set-name`
 - `set-slug`
 - `set-description`
+- `set-system-reminder`
+- `set-tags`
 - `replace`
 
 ## Limitations

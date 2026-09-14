@@ -3,8 +3,14 @@
   "id": "a4d6cc4c-2319-4426-a788-34d410441357",
   "metadata": {
     "name": "Workflow Presentation Generator",
-    "version": "2.0.0",
-    "description": "Creates a source-faithful, self-contained local HTML presentation for any authorized Moira workflow, with distinct business and technical views. It accepts an accessible Moira identity or authorized JSON path, materializes an execution-correlated workspace, obtains the complete source, validates it and generates the official full structural projection, labels source facts versus inference, scales large graphs through progressive disclosure, excludes secrets and unrelated private content, and produces network-independent HTML suitable for the Moira static sandbox. Deterministic file/HTML checks and genuinely independent semantic/visual review precede complete or reviewed-limited local delivery. Cause-owned source, content, HTML, completion and validation repair reruns stale gates; invalid criteria use independently reviewed contract correction. Autonomous mode skips only final acceptance. The workflow never mutates the source, publishes, uploads, notifies, commits, releases or deploys."
+    "version": "2.1.0",
+    "description": "Creates a source-faithful, self-contained local HTML presentation for any authorized Moira workflow, with distinct business and technical views. It accepts an accessible Moira identity or authorized JSON path, materializes an execution-correlated workspace, obtains the complete source, validates it and generates the official full structural projection, labels source facts versus inference, scales large graphs through progressive disclosure, excludes secrets and unrelated private content, and produces network-independent HTML suitable for the Moira static sandbox. Deterministic file/HTML checks and genuinely independent semantic/visual review precede complete or reviewed-limited local delivery. Cause-owned source, content, HTML, completion and validation repair reruns stale gates; invalid criteria use independently reviewed contract correction. Autonomous mode skips only final acceptance. The workflow never mutates the source, publishes, uploads, notifies, commits, releases or deploys.",
+    "tags": [
+      "презентация",
+      "флоу",
+      "документация",
+      "показ"
+    ]
   },
   "variableRegistry": {
     "operating_mode": {
@@ -152,7 +158,8 @@
       "type": "start",
       "connections": {
         "default": "intake"
-      }
+      },
+      "progressNodeId": "intake"
     },
     {
       "id": "intake",
@@ -226,7 +233,8 @@
       },
       "connections": {
         "success": "route-intake-ready"
-      }
+      },
+      "progressNodeId": "intake"
     },
     {
       "id": "route-intake-ready",
@@ -241,6 +249,11 @@
       "connections": {
         "true": "materialize-workspace",
         "false": "finalize-intake-blocked"
+      },
+      "progressNodeId": "intake",
+      "connectionLabels": {
+        "true": "заявка полна — можно готовить рабочий каталог",
+        "false": "заявки не хватает, чтобы начать"
       }
     },
     {
@@ -316,6 +329,10 @@
       "connections": {
         "success": "initialize-contract",
         "error": "finalize-workspace-blocked"
+      },
+      "progressNodeId": "workspace",
+      "connectionLabels": {
+        "error": "рабочий каталог создать не удалось"
       }
     },
     {
@@ -374,7 +391,8 @@
       },
       "connections": {
         "success": "route-contract-ready"
-      }
+      },
+      "progressNodeId": "workspace"
     },
     {
       "id": "route-contract-ready",
@@ -389,6 +407,11 @@
       "connections": {
         "true": "prepare-source",
         "false": "finalize-blocked"
+      },
+      "progressNodeId": "workspace",
+      "connectionLabels": {
+        "true": "контракт презентации записан",
+        "false": "контракт записать невозможно"
       }
     },
     {
@@ -499,7 +522,8 @@
       },
       "connections": {
         "success": "route-source-ready"
-      }
+      },
+      "progressNodeId": "source"
     },
     {
       "id": "route-source-ready",
@@ -514,6 +538,10 @@
       "connections": {
         "true": "develop-content",
         "false": "route-source-replan"
+      },
+      "progressNodeId": "source",
+      "connectionLabels": {
+        "true": "исходник получен и спроецирован"
       }
     },
     {
@@ -529,6 +557,11 @@
       "connections": {
         "true": "reassess-contract",
         "false": "finalize-blocked"
+      },
+      "progressNodeId": "source",
+      "connectionLabels": {
+        "true": "получение исходника упирается в контракт",
+        "false": "исходник получить невозможно"
       }
     },
     {
@@ -639,7 +672,8 @@
       },
       "connections": {
         "success": "route-content-ready"
-      }
+      },
+      "progressNodeId": "content"
     },
     {
       "id": "route-content-ready",
@@ -654,6 +688,10 @@
       "connections": {
         "true": "generate-html",
         "false": "route-content-replan"
+      },
+      "progressNodeId": "content",
+      "connectionLabels": {
+        "true": "содержание готово"
       }
     },
     {
@@ -669,6 +707,11 @@
       "connections": {
         "true": "reassess-contract",
         "false": "finalize-blocked"
+      },
+      "progressNodeId": "content",
+      "connectionLabels": {
+        "true": "содержание упирается в контракт",
+        "false": "содержание составить невозможно"
       }
     },
     {
@@ -779,7 +822,8 @@
       },
       "connections": {
         "success": "route-html-ready"
-      }
+      },
+      "progressNodeId": "html"
     },
     {
       "id": "route-html-ready",
@@ -794,6 +838,10 @@
       "connections": {
         "true": "complete-presentation",
         "false": "route-html-replan"
+      },
+      "progressNodeId": "html",
+      "connectionLabels": {
+        "true": "HTML собран"
       }
     },
     {
@@ -809,6 +857,11 @@
       "connections": {
         "true": "reassess-contract",
         "false": "finalize-blocked"
+      },
+      "progressNodeId": "html",
+      "connectionLabels": {
+        "true": "сборка HTML упирается в контракт",
+        "false": "HTML собрать невозможно"
       }
     },
     {
@@ -955,7 +1008,8 @@
       },
       "connections": {
         "success": "route-completion-ready"
-      }
+      },
+      "progressNodeId": "completion"
     },
     {
       "id": "route-completion-ready",
@@ -970,6 +1024,10 @@
       "connections": {
         "true": "validate-presentation",
         "false": "route-completion-replan"
+      },
+      "progressNodeId": "completion",
+      "connectionLabels": {
+        "true": "полнота результата зафиксирована"
       }
     },
     {
@@ -985,6 +1043,11 @@
       "connections": {
         "true": "reassess-contract",
         "false": "finalize-blocked"
+      },
+      "progressNodeId": "completion",
+      "connectionLabels": {
+        "true": "фиксация полноты упирается в контракт",
+        "false": "полноту зафиксировать невозможно"
       }
     },
     {
@@ -1152,7 +1215,8 @@
       },
       "connections": {
         "success": "route-validation-pass"
-      }
+      },
+      "progressNodeId": "validation"
     },
     {
       "id": "route-validation-pass",
@@ -1167,6 +1231,10 @@
       "connections": {
         "true": "presentation-review",
         "false": "route-validation-repair"
+      },
+      "progressNodeId": "validation",
+      "connectionLabels": {
+        "true": "наблюдаемые проверки пройдены"
       }
     },
     {
@@ -1182,7 +1250,8 @@
       "connections": {
         "true": "route-validation-owner-source",
         "false": "route-validation-replan"
-      }
+      },
+      "progressNodeId": "validation"
     },
     {
       "id": "route-validation-owner-source",
@@ -1197,6 +1266,16 @@
       "connections": {
         "true": "prepare-source",
         "false": "route-validation-owner-content"
+      },
+      "progressNodeId": "validation",
+      "connectionLabels": {
+        "true": {
+          "label": "изъян принадлежит исходнику",
+          "cycle": {
+            "cause": "проверка файлов нашла изъян и назвала его владельцем исходник флоу: файл или проекция не соответствуют наблюдаемому",
+            "exit": "переделанная стадия заново проходит проверку файлов и доходит до независимого разбора, либо изъян уводит работу на пересмотр контракта или в остановку"
+          }
+        }
       }
     },
     {
@@ -1212,6 +1291,16 @@
       "connections": {
         "true": "develop-content",
         "false": "route-validation-owner-html"
+      },
+      "progressNodeId": "validation",
+      "connectionLabels": {
+        "true": {
+          "label": "изъян принадлежит содержанию",
+          "cycle": {
+            "cause": "проверка файлов нашла изъян и назвала его владельцем содержание презентации",
+            "exit": "переделанная стадия заново проходит проверку файлов и доходит до независимого разбора, либо изъян уводит работу на пересмотр контракта или в остановку"
+          }
+        }
       }
     },
     {
@@ -1227,6 +1316,16 @@
       "connections": {
         "true": "generate-html",
         "false": "route-validation-owner-validation"
+      },
+      "progressNodeId": "validation",
+      "connectionLabels": {
+        "true": {
+          "label": "изъян принадлежит HTML",
+          "cycle": {
+            "cause": "проверка файлов нашла изъян и назвала его владельцем сборку HTML: файл не разбирается, ссылки не ведут или есть сетевая зависимость",
+            "exit": "переделанная стадия заново проходит проверку файлов и доходит до независимого разбора, либо изъян уводит работу на пересмотр контракта или в остановку"
+          }
+        }
       }
     },
     {
@@ -1242,6 +1341,23 @@
       "connections": {
         "true": "validate-presentation",
         "false": "complete-presentation"
+      },
+      "progressNodeId": "validation",
+      "connectionLabels": {
+        "true": {
+          "label": "изъян принадлежит самой проверке",
+          "cycle": {
+            "cause": "проверка файлов нашла изъян и назвала его владельцем саму проверку: наблюдения записаны неверно или неполно",
+            "exit": "переделанная стадия заново проходит проверку файлов и доходит до независимого разбора, либо изъян уводит работу на пересмотр контракта или в остановку"
+          }
+        },
+        "false": {
+          "label": "изъян принадлежит фиксации полноты",
+          "cycle": {
+            "cause": "проверка файлов нашла изъян и назвала его владельцем фиксацию полноты результата",
+            "exit": "переделанная стадия заново проходит проверку файлов и доходит до независимого разбора, либо изъян уводит работу на пересмотр контракта или в остановку"
+          }
+        }
       }
     },
     {
@@ -1257,6 +1373,11 @@
       "connections": {
         "true": "reassess-contract",
         "false": "finalize-blocked"
+      },
+      "progressNodeId": "validation",
+      "connectionLabels": {
+        "true": "проверка файлов упирается в контракт",
+        "false": "проверку пройти невозможно"
       }
     },
     {
@@ -1422,7 +1543,8 @@
       },
       "connections": {
         "success": "route-review-pass"
-      }
+      },
+      "progressNodeId": "review"
     },
     {
       "id": "route-review-pass",
@@ -1437,6 +1559,10 @@
       "connections": {
         "true": "route-mode",
         "false": "route-review-repair"
+      },
+      "progressNodeId": "review",
+      "connectionLabels": {
+        "true": "разбор принял презентацию"
       }
     },
     {
@@ -1452,7 +1578,8 @@
       "connections": {
         "true": "route-review-owner-source",
         "false": "route-review-replan"
-      }
+      },
+      "progressNodeId": "review"
     },
     {
       "id": "route-review-owner-source",
@@ -1467,6 +1594,16 @@
       "connections": {
         "true": "prepare-source",
         "false": "route-review-owner-content"
+      },
+      "progressNodeId": "review",
+      "connectionLabels": {
+        "true": {
+          "label": "разбор вернул работу к исходнику",
+          "cycle": {
+            "cause": "независимый разбор нашёл изъян по существу и назвал его владельцем исходник флоу или его происхождение",
+            "exit": "переделанная стадия заново проходит проверку файлов и независимый разбор, либо изъян уводит работу на пересмотр контракта или в остановку"
+          }
+        }
       }
     },
     {
@@ -1482,6 +1619,16 @@
       "connections": {
         "true": "develop-content",
         "false": "route-review-owner-html"
+      },
+      "progressNodeId": "review",
+      "connectionLabels": {
+        "true": {
+          "label": "разбор вернул работу к содержанию",
+          "cycle": {
+            "cause": "независимый разбор нашёл изъян по существу и назвал его владельцем содержание: неверное деловое описание, неподтверждённый вывод или неточность по технике",
+            "exit": "переделанная стадия заново проходит проверку файлов и независимый разбор, либо изъян уводит работу на пересмотр контракта или в остановку"
+          }
+        }
       }
     },
     {
@@ -1497,6 +1644,16 @@
       "connections": {
         "true": "generate-html",
         "false": "route-review-owner-validation"
+      },
+      "progressNodeId": "review",
+      "connectionLabels": {
+        "true": {
+          "label": "разбор вернул работу к HTML",
+          "cycle": {
+            "cause": "независимый разбор нашёл изъян по существу и назвал его владельцем сборку HTML: подача, доступность или читаемость большого графа",
+            "exit": "переделанная стадия заново проходит проверку файлов и независимый разбор, либо изъян уводит работу на пересмотр контракта или в остановку"
+          }
+        }
       }
     },
     {
@@ -1512,6 +1669,23 @@
       "connections": {
         "true": "validate-presentation",
         "false": "complete-presentation"
+      },
+      "progressNodeId": "review",
+      "connectionLabels": {
+        "true": {
+          "label": "разбор вернул работу к проверке файлов",
+          "cycle": {
+            "cause": "независимый разбор нашёл изъян по существу и назвал его владельцем саму проверку файлов",
+            "exit": "переделанная стадия заново проходит проверку файлов и независимый разбор, либо изъян уводит работу на пересмотр контракта или в остановку"
+          }
+        },
+        "false": {
+          "label": "разбор вернул работу к фиксации полноты",
+          "cycle": {
+            "cause": "независимый разбор нашёл изъян по существу и назвал его владельцем фиксацию полноты результата",
+            "exit": "переделанная стадия заново проходит проверку файлов и независимый разбор, либо изъян уводит работу на пересмотр контракта или в остановку"
+          }
+        }
       }
     },
     {
@@ -1527,6 +1701,11 @@
       "connections": {
         "true": "reassess-contract",
         "false": "finalize-blocked"
+      },
+      "progressNodeId": "review",
+      "connectionLabels": {
+        "true": "разбор упирается в контракт",
+        "false": "замечания разбора неустранимы"
       }
     },
     {
@@ -1609,7 +1788,8 @@
       },
       "connections": {
         "success": "route-reassessment-corrected"
-      }
+      },
+      "progressNodeId": "reassessment"
     },
     {
       "id": "route-reassessment-corrected",
@@ -1624,6 +1804,10 @@
       "connections": {
         "true": "corrected-contract-review",
         "false": "finalize-blocked"
+      },
+      "progressNodeId": "reassessment",
+      "connectionLabels": {
+        "false": "исправить контракт невозможно"
       }
     },
     {
@@ -1731,7 +1915,8 @@
       },
       "connections": {
         "success": "route-contract-review-pass"
-      }
+      },
+      "progressNodeId": "reassessment"
     },
     {
       "id": "route-contract-review-pass",
@@ -1746,7 +1931,8 @@
       "connections": {
         "true": "route-reentry-source",
         "false": "route-contract-review-blocked"
-      }
+      },
+      "progressNodeId": "reassessment"
     },
     {
       "id": "route-contract-review-blocked",
@@ -1761,6 +1947,17 @@
       "connections": {
         "true": "finalize-blocked",
         "false": "reassess-contract"
+      },
+      "progressNodeId": "reassessment",
+      "connectionLabels": {
+        "true": "исправленный контракт признан негодным",
+        "false": {
+          "label": "исправление негодно — контракт переписывается снова",
+          "cycle": {
+            "cause": "проверка исправленного контракта не признала правку годной, но допустила повторный пересмотр с изменённым знанием",
+            "exit": "очередное исправление проходит проверку контракта и возвращает работу в дело либо признаётся негодным и запуск останавливается"
+          }
+        }
       }
     },
     {
@@ -1776,6 +1973,16 @@
       "connections": {
         "true": "prepare-source",
         "false": "route-reentry-content"
+      },
+      "progressNodeId": "reassessment",
+      "connectionLabels": {
+        "true": {
+          "label": "возобновление с исходника",
+          "cycle": {
+            "cause": "исправленный контракт принят отдельной проверкой, и работа возобновляется с самой ранней устаревшей стадии — получения исходника",
+            "exit": "работа по исправленному контракту доходит до принятой разбором презентации, либо контракт снова признаётся негодным и запуск останавливается"
+          }
+        }
       }
     },
     {
@@ -1791,6 +1998,16 @@
       "connections": {
         "true": "develop-content",
         "false": "route-reentry-html"
+      },
+      "progressNodeId": "reassessment",
+      "connectionLabels": {
+        "true": {
+          "label": "возобновление с содержания",
+          "cycle": {
+            "cause": "исправленный контракт принят отдельной проверкой, и работа возобновляется с самой ранней устаревшей стадии — содержания",
+            "exit": "работа по исправленному контракту доходит до принятой разбором презентации, либо контракт снова признаётся негодным и запуск останавливается"
+          }
+        }
       }
     },
     {
@@ -1806,6 +2023,16 @@
       "connections": {
         "true": "generate-html",
         "false": "route-reentry-validation"
+      },
+      "progressNodeId": "reassessment",
+      "connectionLabels": {
+        "true": {
+          "label": "возобновление со сборки HTML",
+          "cycle": {
+            "cause": "исправленный контракт принят отдельной проверкой, и работа возобновляется с самой ранней устаревшей стадии — сборки HTML",
+            "exit": "работа по исправленному контракту доходит до принятой разбором презентации, либо контракт снова признаётся негодным и запуск останавливается"
+          }
+        }
       }
     },
     {
@@ -1821,6 +2048,23 @@
       "connections": {
         "true": "validate-presentation",
         "false": "complete-presentation"
+      },
+      "progressNodeId": "reassessment",
+      "connectionLabels": {
+        "true": {
+          "label": "возобновление с проверки файлов",
+          "cycle": {
+            "cause": "исправленный контракт принят отдельной проверкой, и работа возобновляется с самой ранней устаревшей стадии — проверки файлов",
+            "exit": "работа по исправленному контракту доходит до принятой разбором презентации, либо контракт снова признаётся негодным и запуск останавливается"
+          }
+        },
+        "false": {
+          "label": "возобновление с фиксации полноты",
+          "cycle": {
+            "cause": "исправленный контракт принят отдельной проверкой, и работа возобновляется с самой ранней устаревшей стадии — фиксации полноты",
+            "exit": "работа по исправленному контракту доходит до принятой разбором презентации, либо контракт снова признаётся негодным и запуск останавливается"
+          }
+        }
       }
     },
     {
@@ -1836,6 +2080,10 @@
       "connections": {
         "true": "interactive-acceptance",
         "false": "route-final-status"
+      },
+      "progressNodeId": "acceptance",
+      "connectionLabels": {
+        "false": "автономный режим — человеку презентацию не показывают"
       }
     },
     {
@@ -1919,7 +2167,8 @@
       },
       "connections": {
         "success": "route-user-accept"
-      }
+      },
+      "progressNodeId": "acceptance"
     },
     {
       "id": "route-user-accept",
@@ -1934,6 +2183,10 @@
       "connections": {
         "true": "route-final-status",
         "false": "route-user-abort"
+      },
+      "progressNodeId": "acceptance",
+      "connectionLabels": {
+        "true": "пользователь принял презентацию"
       }
     },
     {
@@ -1949,6 +2202,10 @@
       "connections": {
         "true": "finalize-aborted",
         "false": "route-rework-source"
+      },
+      "progressNodeId": "acceptance",
+      "connectionLabels": {
+        "true": "пользователь прервал работу"
       }
     },
     {
@@ -1964,6 +2221,16 @@
       "connections": {
         "true": "prepare-source",
         "false": "route-rework-content"
+      },
+      "progressNodeId": "acceptance",
+      "connectionLabels": {
+        "true": {
+          "label": "доработка достаёт до исходника",
+          "cycle": {
+            "cause": "пользователь не принял презентацию и назвал стадию на доработку — получение исходника",
+            "exit": "переделанная работа снова проходит проверку файлов и независимый разбор и показывается пользователю до приёмки или прерывания"
+          }
+        }
       }
     },
     {
@@ -1979,6 +2246,16 @@
       "connections": {
         "true": "develop-content",
         "false": "route-rework-html"
+      },
+      "progressNodeId": "acceptance",
+      "connectionLabels": {
+        "true": {
+          "label": "доработка достаёт до содержания",
+          "cycle": {
+            "cause": "пользователь не принял презентацию и назвал стадию на доработку — содержание",
+            "exit": "переделанная работа снова проходит проверку файлов и независимый разбор и показывается пользователю до приёмки или прерывания"
+          }
+        }
       }
     },
     {
@@ -1994,6 +2271,16 @@
       "connections": {
         "true": "generate-html",
         "false": "route-rework-validation"
+      },
+      "progressNodeId": "acceptance",
+      "connectionLabels": {
+        "true": {
+          "label": "доработка достаёт до HTML",
+          "cycle": {
+            "cause": "пользователь не принял презентацию и назвал стадию на доработку — сборку HTML",
+            "exit": "переделанная работа снова проходит проверку файлов и независимый разбор и показывается пользователю до приёмки или прерывания"
+          }
+        }
       }
     },
     {
@@ -2009,6 +2296,16 @@
       "connections": {
         "true": "validate-presentation",
         "false": "route-rework-completion"
+      },
+      "progressNodeId": "acceptance",
+      "connectionLabels": {
+        "true": {
+          "label": "доработка достаёт до проверки файлов",
+          "cycle": {
+            "cause": "пользователь не принял презентацию и назвал стадию на доработку — проверку файлов",
+            "exit": "переделанная работа снова проходит проверку файлов и независимый разбор и показывается пользователю до приёмки или прерывания"
+          }
+        }
       }
     },
     {
@@ -2024,6 +2321,23 @@
       "connections": {
         "true": "complete-presentation",
         "false": "reassess-contract"
+      },
+      "progressNodeId": "acceptance",
+      "connectionLabels": {
+        "true": {
+          "label": "доработка достаёт до фиксации полноты",
+          "cycle": {
+            "cause": "пользователь не принял презентацию и назвал стадию на доработку — фиксацию полноты результата",
+            "exit": "переделанная работа снова проходит проверку файлов и независимый разбор и показывается пользователю до приёмки или прерывания"
+          }
+        },
+        "false": {
+          "label": "доработка достаёт до контракта",
+          "cycle": {
+            "cause": "пользователь не принял презентацию и назвал стадию на доработку — сам контракт презентации",
+            "exit": "переделанная работа снова проходит проверку файлов и независимый разбор и показывается пользователю до приёмки или прерывания"
+          }
+        }
       }
     },
     {
@@ -2039,7 +2353,8 @@
       "connections": {
         "true": "finalize-complete",
         "false": "finalize-limited"
-      }
+      },
+      "progressNodeId": "delivery"
     },
     {
       "id": "finalize-complete",
@@ -2070,7 +2385,8 @@
       },
       "connections": {
         "success": "end-complete"
-      }
+      },
+      "progressNodeId": "delivery"
     },
     {
       "id": "finalize-limited",
@@ -2101,7 +2417,8 @@
       },
       "connections": {
         "success": "end-limited"
-      }
+      },
+      "progressNodeId": "delivery"
     },
     {
       "id": "finalize-blocked",
@@ -2132,7 +2449,8 @@
       },
       "connections": {
         "success": "end-blocked"
-      }
+      },
+      "progressNodeId": "blocked"
     },
     {
       "id": "finalize-aborted",
@@ -2163,7 +2481,8 @@
       },
       "connections": {
         "success": "end-aborted"
-      }
+      },
+      "progressNodeId": "aborted"
     },
     {
       "id": "finalize-workspace-blocked",
@@ -2194,7 +2513,8 @@
       },
       "connections": {
         "success": "end-workspace-blocked"
-      }
+      },
+      "progressNodeId": "no-start"
     },
     {
       "id": "finalize-intake-blocked",
@@ -2223,7 +2543,8 @@
       },
       "connections": {
         "success": "end-intake-blocked"
-      }
+      },
+      "progressNodeId": "no-start"
     },
     {
       "id": "end-complete",
@@ -2234,7 +2555,8 @@
         "presentation_path",
         "presentation_summary",
         "limitation_summary"
-      ]
+      ],
+      "progressNodeId": "delivery"
     },
     {
       "id": "end-limited",
@@ -2245,7 +2567,8 @@
         "presentation_path",
         "presentation_summary",
         "limitation_summary"
-      ]
+      ],
+      "progressNodeId": "delivery"
     },
     {
       "id": "end-blocked",
@@ -2254,7 +2577,8 @@
         "terminal_status",
         "artifact_path",
         "terminal_reason"
-      ]
+      ],
+      "progressNodeId": "blocked"
     },
     {
       "id": "end-aborted",
@@ -2263,7 +2587,8 @@
         "terminal_status",
         "artifact_path",
         "presentation_path"
-      ]
+      ],
+      "progressNodeId": "aborted"
     },
     {
       "id": "end-workspace-blocked",
@@ -2271,7 +2596,8 @@
       "finalOutput": [
         "terminal_status",
         "terminal_reason"
-      ]
+      ],
+      "progressNodeId": "no-start"
     },
     {
       "id": "end-intake-blocked",
@@ -2279,7 +2605,8 @@
       "finalOutput": [
         "terminal_status",
         "terminal_reason"
-      ]
+      ],
+      "progressNodeId": "no-start"
     },
     {
       "id": "revise-process",
@@ -2314,9 +2641,114 @@
       },
       "connections": {
         "success": "reassess-contract"
-      }
+      },
+      "progressNodeId": "reassessment"
     }
   ],
   "owner": "system-moira",
-  "visibility": "public"
+  "visibility": "public",
+  "progress": {
+    "title": "Workflow Presentation Generator",
+    "goal": "Сделать по одному разрешённому флоу Moira самодостаточную локальную HTML-презентацию, верную исходнику: с деловым и техническим взглядами, честно разделяющую факты источника и вывод автора.",
+    "nodes": [
+      {
+        "id": "intake",
+        "label": "Заявка",
+        "content": {
+          "summary": "Выясняются, какой именно флоу презентуем и откуда его брать, для кого и ради чего презентация, на каком языке, какие есть ограничения по чувствительным сведениям и в каком режиме идёт работа; исходник при этом ещё не читается."
+        }
+      },
+      {
+        "id": "workspace",
+        "label": "Рабочее пространство и контракт",
+        "content": {
+          "summary": "Создаётся соотнесённый с запуском рабочий каталог, и в нём записывается неизменяемый контракт презентации — источник, аудитория, назначение, язык, объём и право работать только локально."
+        }
+      },
+      {
+        "id": "source",
+        "label": "Исходник флоу",
+        "content": {
+          "summary": "Полное определение флоу берётся из Moira по токену или из разрешённого файла, проверяется и переводится в официальную структурную проекцию; рядом записывается происхождение исходника, а сам он не изменяется."
+        }
+      },
+      {
+        "id": "content",
+        "label": "Содержание презентации",
+        "content": {
+          "summary": "Пишется само содержание обоих взглядов: деловое назначение и технический разбор стартов, телепортов, ветвлений и циклов, где каждое утверждение либо опирается на факт исходника, либо помечено как вывод или неизвестное, а ограничения выписаны отдельно."
+        }
+      },
+      {
+        "id": "html",
+        "label": "Сборка HTML",
+        "content": {
+          "summary": "Содержание превращается в один разбираемый самодостаточный HTML-файл со встроенными стилями, смысловой разметкой, доступной с клавиатуры навигацией, печатным видом и постепенным раскрытием больших графов — без единой сетевой зависимости."
+        }
+      },
+      {
+        "id": "completion",
+        "label": "Фиксация полноты",
+        "content": {
+          "summary": "Результат перечитывается целиком, закрываются предвидимые пропуски и записывается, чем он вышел — полным по контракту или ограниченным, — вместе со сводкой и перечнем ограничений."
+        }
+      },
+      {
+        "id": "validation",
+        "label": "Проверка файлов",
+        "content": {
+          "summary": "Детерминированно проверяется наблюдаемое: нужные файлы на месте, тождество исходника и проекции, HTML разбирается, внутренние ссылки ведут куда надо, ресурсы встроены и сетевых зависимостей нет; найденный изъян возвращается его владельцу — исходнику, содержанию, HTML, полноте или самой проверке."
+        }
+      },
+      {
+        "id": "review",
+        "label": "Независимый разбор",
+        "content": {
+          "summary": "Отдельный проверяющий, не делавший презентацию, читает исходник, проекцию, содержание, HTML и ограничения и судит по существу: верность делового описания, обоснованность выводов, точность техники, читаемость больших графов и безопасность чувствительных сведений; изъян он приписывает конкретной стадии."
+        }
+      },
+      {
+        "id": "reassessment",
+        "label": "Пересмотр контракта",
+        "content": {
+          "summary": "Когда изъян лежит в самом задании, а не в работе, записывается одно накопительное исправление контракта с сохранением исходного источника, ограничений и локальности, называется самая ранняя устаревшая стадия, и отдельная проверка судит, годно ли исправление."
+        }
+      },
+      {
+        "id": "acceptance",
+        "label": "Приёмка пользователем",
+        "content": {
+          "summary": "В интерактивном режиме человеку показывают принятую разбором презентацию, и он принимает её, прерывает работу или называет одну стадию на доработку; в автономном режиме блок не проходится."
+        }
+      },
+      {
+        "id": "delivery",
+        "label": "Выдача результата",
+        "content": {
+          "summary": "Записывается итоговый отчёт с путём к презентации, сводкой и ограничениями — отдельно для полного результата и отдельно для проверенного ограниченного; ничего никуда не выкладывается и не отправляется."
+        }
+      },
+      {
+        "id": "blocked",
+        "label": "Остановка без результата",
+        "content": {
+          "summary": "Называется конкретный блокер и действие для восстановления, перечисляется уже сделанная полезная работа, и запуск завершается без притязания на приёмку."
+        }
+      },
+      {
+        "id": "aborted",
+        "label": "Прерывание пользователем",
+        "content": {
+          "summary": "Человек явно прервал работу: прерывание и сохранённые локальные файлы записываются без притязания на приёмку."
+        }
+      },
+      {
+        "id": "no-start",
+        "label": "Работа не начата",
+        "content": {
+          "summary": "Заявки не хватает или безопасный рабочий каталог создать не удалось: называется точное невыполненное условие и действие для восстановления, а пути к несуществующим файлам не выдумываются."
+        }
+      }
+    ]
+  }
 }

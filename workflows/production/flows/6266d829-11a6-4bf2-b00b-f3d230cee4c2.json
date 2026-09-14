@@ -2,8 +2,14 @@
   "id": "6266d829-11a6-4bf2-b00b-f3d230cee4c2",
   "metadata": {
     "name": "UX Design",
-    "version": "2.0.0",
-    "description": "Produces a reviewed, implementation-ready UX design specification from supplied requirements and authorized project evidence. It captures the design goal, primary users and usage context, jobs to be done, pain points, relevant edge cases, constraints, accessibility target, success criteria, evidence limits, operating mode, deliverables, and authority in one execution-bound filesystem workspace. It then synthesizes design-contract.md, design-package.md, and validation-plan.md covering applicable interaction states, user flows, layout and hierarchy, design-system reuse, justified new components, microcopy, responsive behavior, accessibility intent and unresolved gaps, prototype behavior, risks, assumptions, limitations, decision traceability, and downstream handoff. A genuinely independent reviewer must report exactly zero current blocking findings before delivery; confirmed findings are repaired at their earliest source and reviewed again, while contract-reaching changes rerun synthesis. Interactive mode supports accept, revise with feedback, or abort; autonomous mode skips only that final human wait and retains every quality gate. Results are local-only and distinguish accepted, reviewed-limited, blocked, and aborted outcomes; the workflow does not implement UI, create a graphical prototype, execute user research or usability studies, certify WCAG conformance, commit code, publish, notify, or deploy. Choose UX Design for an interaction and interface specification; choose PRD Creation for product requirements, Content Creation for standalone content, Test Planning for executable test strategy, a research workflow for evidence discovery, or Software Development Flow for implementation, tests, documentation, release, and deployment."
+    "version": "2.1.0",
+    "description": "Produces a reviewed, implementation-ready UX design specification from supplied requirements and authorized project evidence. It captures the design goal, primary users and usage context, jobs to be done, pain points, relevant edge cases, constraints, accessibility target, success criteria, evidence limits, operating mode, deliverables, and authority in one execution-bound filesystem workspace. It then synthesizes design-contract.md, design-package.md, and validation-plan.md covering applicable interaction states, user flows, layout and hierarchy, design-system reuse, justified new components, microcopy, responsive behavior, accessibility intent and unresolved gaps, prototype behavior, risks, assumptions, limitations, decision traceability, and downstream handoff. A genuinely independent reviewer must report exactly zero current blocking findings before delivery; confirmed findings are repaired at their earliest source and reviewed again, while contract-reaching changes rerun synthesis. Interactive mode supports accept, revise with feedback, or abort; autonomous mode skips only that final human wait and retains every quality gate. Results are local-only and distinguish accepted, reviewed-limited, blocked, and aborted outcomes; the workflow does not implement UI, create a graphical prototype, execute user research or usability studies, certify WCAG conformance, commit code, publish, notify, or deploy. Choose UX Design for an interaction and interface specification; choose PRD Creation for product requirements, Content Creation for standalone content, Test Planning for executable test strategy, a research workflow for evidence discovery, or Software Development Flow for implementation, tests, documentation, release, and deployment.",
+    "tags": [
+      "дизайн",
+      "интерфейс",
+      "пользователь",
+      "прототип"
+    ]
   },
   "nodes": [
     {
@@ -11,7 +17,8 @@
       "type": "start",
       "connections": {
         "default": "materialize-workspace"
-      }
+      },
+      "progressNodeId": "workspace"
     },
     {
       "id": "materialize-workspace",
@@ -50,6 +57,11 @@
       "connections": {
         "success": "capture-design-contract",
         "error": "prepare-workspace-blocker"
+      },
+      "progressNodeId": "workspace",
+      "connectionLabels": {
+        "success": "рабочий каталог создан",
+        "error": "рабочий каталог создать не удалось"
       }
     },
     {
@@ -128,7 +140,8 @@
       },
       "connections": {
         "success": "route-intake-ready"
-      }
+      },
+      "progressNodeId": "contract"
     },
     {
       "id": "route-intake-ready",
@@ -143,6 +156,10 @@
       "connections": {
         "true": "create-design-package",
         "false": "route-intake-abort"
+      },
+      "progressNodeId": "contract",
+      "connectionLabels": {
+        "true": "задание на дизайн собрано"
       }
     },
     {
@@ -158,6 +175,11 @@
       "connections": {
         "true": "prepare-abort",
         "false": "prepare-intake-blocker"
+      },
+      "progressNodeId": "contract",
+      "connectionLabels": {
+        "true": "пользователь прервал работу на сборе задания",
+        "false": "задание собрать не из чего"
       }
     },
     {
@@ -241,7 +263,8 @@
       },
       "connections": {
         "success": "route-design-reviewable"
-      }
+      },
+      "progressNodeId": "synthesis"
     },
     {
       "id": "route-design-reviewable",
@@ -256,6 +279,11 @@
       "connections": {
         "true": "review-design",
         "false": "prepare-design-blocker"
+      },
+      "progressNodeId": "synthesis",
+      "connectionLabels": {
+        "true": "пакет пригоден к обзору",
+        "false": "пригодный к обзору пакет не собирается"
       }
     },
     {
@@ -325,7 +353,8 @@
       },
       "connections": {
         "success": "route-review-completed"
-      }
+      },
+      "progressNodeId": "review"
     },
     {
       "id": "route-review-completed",
@@ -340,6 +369,10 @@
       "connections": {
         "true": "route-review-clean",
         "false": "prepare-review-blocker"
+      },
+      "progressNodeId": "review",
+      "connectionLabels": {
+        "false": "независимый обзор провести нечем"
       }
     },
     {
@@ -355,6 +388,11 @@
       "connections": {
         "true": "route-operating-mode",
         "false": "repair-design"
+      },
+      "progressNodeId": "review",
+      "connectionLabels": {
+        "true": "обзор не нашёл блокирующих замечаний",
+        "false": "обзор нашёл блокирующие замечания"
       }
     },
     {
@@ -455,7 +493,8 @@
       },
       "connections": {
         "success": "route-repair-changed"
-      }
+      },
+      "progressNodeId": "repair"
     },
     {
       "id": "route-repair-changed",
@@ -470,6 +509,10 @@
       "connections": {
         "true": "route-repair-contract",
         "false": "prepare-repair-blocker"
+      },
+      "progressNodeId": "repair",
+      "connectionLabels": {
+        "false": "починка не изменила артефакты в рамках полномочий"
       }
     },
     {
@@ -485,6 +528,23 @@
       "connections": {
         "true": "create-design-package",
         "false": "review-design"
+      },
+      "progressNodeId": "repair",
+      "connectionLabels": {
+        "true": {
+          "label": "починка дошла до самого задания — собираем пакет заново",
+          "cycle": {
+            "cause": "Подтверждённое замечание чинится на уровне договора о дизайне, поэтому пакет, собранный по прежнему договору, больше не годится.",
+            "exit": "Заканчивается обзором без блокирующих замечаний либо препятствием, которое не снять."
+          }
+        },
+        "false": {
+          "label": "правка осталась внутри пакета — возвращаем на обзор",
+          "cycle": {
+            "cause": "Замечания закрыты правкой самих артефактов, а подтвердить их чистоту может только повторный независимый обзор.",
+            "exit": "Заканчивается обзором с нулём замечаний либо препятствием, которое не снять."
+          }
+        }
       }
     },
     {
@@ -500,6 +560,10 @@
       "connections": {
         "true": "route-result-kind",
         "false": "present-for-approval"
+      },
+      "progressNodeId": "approval",
+      "connectionLabels": {
+        "true": "автономный режим — человека не ждём"
       }
     },
     {
@@ -557,7 +621,8 @@
       },
       "connections": {
         "success": "route-approval-accept"
-      }
+      },
+      "progressNodeId": "approval"
     },
     {
       "id": "route-approval-accept",
@@ -572,6 +637,10 @@
       "connections": {
         "true": "route-result-kind",
         "false": "route-approval-abort"
+      },
+      "progressNodeId": "approval",
+      "connectionLabels": {
+        "true": "пользователь принял пакет"
       }
     },
     {
@@ -587,6 +656,11 @@
       "connections": {
         "true": "prepare-abort",
         "false": "apply-user-feedback"
+      },
+      "progressNodeId": "approval",
+      "connectionLabels": {
+        "true": "пользователь прервал работу на показе",
+        "false": "пользователь прислал замечания"
       }
     },
     {
@@ -671,7 +745,8 @@
       },
       "connections": {
         "success": "route-feedback-changed"
-      }
+      },
+      "progressNodeId": "feedback"
     },
     {
       "id": "route-feedback-changed",
@@ -686,6 +761,10 @@
       "connections": {
         "true": "route-feedback-contract",
         "false": "prepare-feedback-blocker"
+      },
+      "progressNodeId": "feedback",
+      "connectionLabels": {
+        "false": "замечания учесть не удалось"
       }
     },
     {
@@ -701,6 +780,23 @@
       "connections": {
         "true": "create-design-package",
         "false": "review-design"
+      },
+      "progressNodeId": "feedback",
+      "connectionLabels": {
+        "true": {
+          "label": "замечания дошли до самого задания — собираем пакет заново",
+          "cycle": {
+            "cause": "Правка по замечаниям пользователя затронула договор о дизайне, поэтому пакет нужно синтезировать заново.",
+            "exit": "Заканчивается принятием пакета пользователем, прерыванием или препятствием."
+          }
+        },
+        "false": {
+          "label": "замечания учтены внутри пакета — возвращаем на обзор",
+          "cycle": {
+            "cause": "Изменения по замечаниям пользователя не затронули договор, но изменённые артефакты обязаны снова пройти независимый обзор.",
+            "exit": "Заканчивается принятием пакета пользователем, прерыванием или препятствием."
+          }
+        }
       }
     },
     {
@@ -716,7 +812,8 @@
       "connections": {
         "true": "prepare-accepted",
         "false": "prepare-limited"
-      }
+      },
+      "progressNodeId": "delivery"
     },
     {
       "id": "prepare-accepted",
@@ -738,6 +835,10 @@
       },
       "connections": {
         "success": "end"
+      },
+      "progressNodeId": "delivery",
+      "connectionLabels": {
+        "success": "принятая спецификация выдана"
       }
     },
     {
@@ -760,6 +861,10 @@
       },
       "connections": {
         "success": "end"
+      },
+      "progressNodeId": "delivery",
+      "connectionLabels": {
+        "success": "спецификация выдана с названными ограничениями"
       }
     },
     {
@@ -782,6 +887,10 @@
       },
       "connections": {
         "success": "end"
+      },
+      "progressNodeId": "blocked",
+      "connectionLabels": {
+        "success": "препятствие зафиксировано"
       }
     },
     {
@@ -804,6 +913,10 @@
       },
       "connections": {
         "success": "end"
+      },
+      "progressNodeId": "blocked",
+      "connectionLabels": {
+        "success": "препятствие зафиксировано"
       }
     },
     {
@@ -826,6 +939,10 @@
       },
       "connections": {
         "success": "end"
+      },
+      "progressNodeId": "blocked",
+      "connectionLabels": {
+        "success": "препятствие зафиксировано"
       }
     },
     {
@@ -848,6 +965,10 @@
       },
       "connections": {
         "success": "end"
+      },
+      "progressNodeId": "blocked",
+      "connectionLabels": {
+        "success": "препятствие зафиксировано"
       }
     },
     {
@@ -870,6 +991,10 @@
       },
       "connections": {
         "success": "end"
+      },
+      "progressNodeId": "blocked",
+      "connectionLabels": {
+        "success": "препятствие зафиксировано"
       }
     },
     {
@@ -892,6 +1017,10 @@
       },
       "connections": {
         "success": "end"
+      },
+      "progressNodeId": "blocked",
+      "connectionLabels": {
+        "success": "препятствие зафиксировано"
       }
     },
     {
@@ -914,6 +1043,10 @@
       },
       "connections": {
         "success": "end"
+      },
+      "progressNodeId": "aborted",
+      "connectionLabels": {
+        "success": "работа прервана по решению пользователя"
       }
     },
     {
@@ -925,7 +1058,8 @@
         "design_package_path",
         "validation_plan_path",
         "result_summary"
-      ]
+      ],
+      "progressNodeId": "finish"
     },
     {
       "id": "revise-design-process",
@@ -940,6 +1074,10 @@
       },
       "connections": {
         "success": "create-design-package"
+      },
+      "progressNodeId": "contract",
+      "connectionLabels": {
+        "success": "задание пересмотрено — собираем пакет заново"
       }
     }
   ],
@@ -1012,5 +1150,88 @@
   },
   "slug": "ux-design",
   "owner": "system-moira",
-  "visibility": "public"
+  "visibility": "public",
+  "progress": {
+    "title": "Проектирование интерфейса",
+    "goal": "Получить проверенную независимым обзором спецификацию интерфейса, по которой можно начинать реализацию, не выходя за пределы локальных файлов запуска.",
+    "nodes": [
+      {
+        "id": "workspace",
+        "label": "Рабочее пространство",
+        "content": {
+          "summary": "Создаётся каталог запуска, соотнесённый с этим исполнением, и в него кладётся стандарт проектирования — общая опора для всех дальнейших шагов."
+        }
+      },
+      {
+        "id": "contract",
+        "label": "Задание на дизайн",
+        "content": {
+          "summary": "Из запроса и разрешённых источников проекта собирается договор о дизайне: цель, пользователи и контекст использования, задачи, боли, граничные случаи, ограничения, планка доступности, критерии успеха, предел доказательств, режим работы и полномочия; сюда же запуск возвращается извне, когда само задание перестало соответствовать реальности."
+        }
+      },
+      {
+        "id": "synthesis",
+        "label": "Синтез пакета",
+        "content": {
+          "summary": "По договору о дизайне и стандарту собираются состояния интерфейса, пользовательские потоки, компоновка и иерархия, переиспользование дизайн-системы, обоснованные новые компоненты, микротексты, адаптивность, замысел доступности, поведение прототипа, риски и допущения — в виде пакета, пригодного к обзору."
+        }
+      },
+      {
+        "id": "review",
+        "label": "Независимый обзор",
+        "content": {
+          "summary": "Отдельный, не участвовавший в синтезе исполнитель проверяет пакет по первичным источникам и называет число блокирующих замечаний; к выдаче пакет допускается только с нулём замечаний."
+        }
+      },
+      {
+        "id": "repair",
+        "label": "Починка по обзору",
+        "content": {
+          "summary": "Подтверждённые замечания чинятся в самом раннем затронутом артефакте, и по глубине правки решается, хватит ли повторного обзора или пакет нужно собирать заново."
+        }
+      },
+      {
+        "id": "approval",
+        "label": "Показ пользователю",
+        "content": {
+          "summary": "В обычном режиме проверенный пакет показывают пользователю, и он принимает его, просит доработку с замечаниями или прерывает работу; в автономном режиме эта — и только эта — остановка пропускается."
+        }
+      },
+      {
+        "id": "feedback",
+        "label": "Доработка по замечаниям",
+        "content": {
+          "summary": "Замечания пользователя воспроизводятся на текущем пакете и закрываются правкой; по глубине правки решается, хватит ли повторного обзора или задание и пакет нужно пересобрать."
+        }
+      },
+      {
+        "id": "delivery",
+        "label": "Выдача результата",
+        "content": {
+          "summary": "Результат выдаётся локально и честно называет себя: либо принятая полная спецификация, либо проверенная, но явно ограниченная — с перечнем нерешённых мест и того, что осталось за пределами доказательств."
+        }
+      },
+      {
+        "id": "blocked",
+        "label": "Остановка на препятствии",
+        "content": {
+          "summary": "Запуск закончен там, где дальше нельзя двигаться честно: не создано рабочее пространство, не из чего собрать задание, не собирается пакет, не получить независимый обзор, не сделать починку или не учесть замечания; препятствие и безопасный следующий шаг названы фактически."
+        }
+      },
+      {
+        "id": "aborted",
+        "label": "Прерывание",
+        "content": {
+          "summary": "Пользователь остановил работу — на сборе задания или на показе результата, — и запуск заканчивается без дальнейших изменений, с перечислением того, какие локальные файлы уже существуют."
+        }
+      },
+      {
+        "id": "finish",
+        "label": "Завершение",
+        "content": {
+          "summary": "Запуск закончен, и его исход — принято, проверено с ограничениями, препятствие или прерывание — зафиксирован в итоговом результате."
+        }
+      }
+    ]
+  }
 }

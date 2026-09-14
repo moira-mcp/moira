@@ -2,8 +2,14 @@
   "id": "d2164606-fbda-4b33-b6dc-572571a2dd14",
   "metadata": {
     "name": "Startup Idea Validation",
-    "version": "2.0.1",
-    "description": "Evidence-led startup idea validation from free-form input to a durable local decision package: frames the decision, researches traceable current evidence, analyzes market, demand, competitors, alternatives, technical feasibility, economics, team, regulation and risks, proposes uncertainty-reduction experiments, creates a self-contained offline HTML report, runs deterministic package checks and genuinely independent semantic review, and routes cause-owned repair or contract reassessment. Autonomous mode skips human waits only; interactive mode supports clarification and accepted-result rework. Publication and configured user notification are separately authorized optional effects whose failure never invalidates the local package. Outcomes distinguish complete local validation, blocked prerequisites and explicit abort."
+    "version": "2.1.0",
+    "description": "Evidence-led startup idea validation from free-form input to a durable local decision package: frames the decision, researches traceable current evidence, analyzes market, demand, competitors, alternatives, technical feasibility, economics, team, regulation and risks, proposes uncertainty-reduction experiments, creates a self-contained offline HTML report, runs deterministic package checks and genuinely independent semantic review, and routes cause-owned repair or contract reassessment. Autonomous mode skips human waits only; interactive mode supports clarification and accepted-result rework. Publication and configured user notification are separately authorized optional effects whose failure never invalidates the local package. Outcomes distinguish complete local validation, blocked prerequisites and explicit abort.",
+    "tags": [
+      "стартап",
+      "идея",
+      "проверка",
+      "рынок"
+    ]
   },
   "nodes": [
     {
@@ -11,7 +17,8 @@
       "type": "start",
       "connections": {
         "default": "intake"
-      }
+      },
+      "progressNodeId": "intake"
     },
     {
       "id": "end",
@@ -25,7 +32,8 @@
         "publication_status",
         "notification_status",
         "public_url"
-      ]
+      ],
+      "progressNodeId": "completion"
     },
     {
       "id": "intake",
@@ -93,7 +101,8 @@
       },
       "connections": {
         "success": "materialize-workspace"
-      }
+      },
+      "progressNodeId": "intake"
     },
     {
       "id": "materialize-workspace",
@@ -152,6 +161,10 @@
       "connections": {
         "success": "route-intake-actionable",
         "error": "finalize-workspace-blocked"
+      },
+      "progressNodeId": "intake",
+      "connectionLabels": {
+        "error": "рабочий каталог запуска не создан"
       }
     },
     {
@@ -167,6 +180,10 @@
       "connections": {
         "true": "frame-idea",
         "false": "route-intake-clarify"
+      },
+      "progressNodeId": "intake",
+      "connectionLabels": {
+        "true": "идея пригодна к разбору"
       }
     },
     {
@@ -182,6 +199,11 @@
       "connections": {
         "true": "route-clarification-interactive",
         "false": "finalize-blocked"
+      },
+      "progressNodeId": "intake",
+      "connectionLabels": {
+        "true": "идее нужно уточнение",
+        "false": "идея неразбираема"
       }
     },
     {
@@ -197,6 +219,10 @@
       "connections": {
         "true": "clarify-idea",
         "false": "finalize-blocked"
+      },
+      "progressNodeId": "clarification",
+      "connectionLabels": {
+        "false": "автономный режим: уточнение спросить не у кого"
       }
     },
     {
@@ -253,7 +279,8 @@
       },
       "connections": {
         "success": "route-clarification-update"
-      }
+      },
+      "progressNodeId": "clarification"
     },
     {
       "id": "route-clarification-update",
@@ -268,6 +295,10 @@
       "connections": {
         "true": "revise-intake",
         "false": "finalize-aborted"
+      },
+      "progressNodeId": "clarification",
+      "connectionLabels": {
+        "false": "пользователь прервал запуск вместо уточнения"
       }
     },
     {
@@ -283,6 +314,10 @@
       },
       "connections": {
         "success": "frame-idea"
+      },
+      "progressNodeId": "clarification",
+      "connectionLabels": {
+        "success": "вход обновлён уточнением"
       }
     },
     {
@@ -343,7 +378,8 @@
       },
       "connections": {
         "success": "route-framing-ready"
-      }
+      },
+      "progressNodeId": "framing"
     },
     {
       "id": "route-framing-ready",
@@ -358,6 +394,10 @@
       "connections": {
         "true": "research-evidence",
         "false": "route-framing-replan"
+      },
+      "progressNodeId": "framing",
+      "connectionLabels": {
+        "true": "постановка готова, исследование можно начинать"
       }
     },
     {
@@ -373,6 +413,11 @@
       "connections": {
         "true": "reassess-contract",
         "false": "finalize-blocked"
+      },
+      "progressNodeId": "framing",
+      "connectionLabels": {
+        "true": "постановка требует пересмотра контракта",
+        "false": "ответственную постановку составить нечем"
       }
     },
     {
@@ -435,7 +480,8 @@
       },
       "connections": {
         "success": "route-research-proceed"
-      }
+      },
+      "progressNodeId": "evidence"
     },
     {
       "id": "route-research-proceed",
@@ -462,6 +508,10 @@
       "connections": {
         "true": "analyze-feasibility",
         "false": "route-research-replan"
+      },
+      "progressNodeId": "evidence",
+      "connectionLabels": {
+        "true": "свидетельств хватает — полностью или с названными ограничениями"
       }
     },
     {
@@ -477,6 +527,11 @@
       "connections": {
         "true": "reassess-contract",
         "false": "finalize-blocked"
+      },
+      "progressNodeId": "evidence",
+      "connectionLabels": {
+        "true": "исследование требует пересмотра контракта",
+        "false": "исследование невозможно"
       }
     },
     {
@@ -492,6 +547,10 @@
       },
       "connections": {
         "success": "synthesize-package"
+      },
+      "progressNodeId": "analysis",
+      "connectionLabels": {
+        "success": "разбор выполнимости и вариантов готов"
       }
     },
     {
@@ -507,7 +566,8 @@
       },
       "connections": {
         "success": "package-completion"
-      }
+      },
+      "progressNodeId": "package"
     },
     {
       "id": "package-completion",
@@ -589,7 +649,8 @@
       },
       "connections": {
         "success": "route-completion-ready"
-      }
+      },
+      "progressNodeId": "package"
     },
     {
       "id": "route-completion-ready",
@@ -604,6 +665,10 @@
       "connections": {
         "true": "validate-package",
         "false": "route-completion-replan"
+      },
+      "progressNodeId": "package",
+      "connectionLabels": {
+        "true": "пакет готов к проверкам"
       }
     },
     {
@@ -619,6 +684,11 @@
       "connections": {
         "true": "reassess-contract",
         "false": "finalize-blocked"
+      },
+      "progressNodeId": "package",
+      "connectionLabels": {
+        "true": "сборка пакета требует пересмотра контракта",
+        "false": "собрать пакет нечем"
       }
     },
     {
@@ -681,7 +751,8 @@
       },
       "connections": {
         "success": "route-validation-pass"
-      }
+      },
+      "progressNodeId": "validation"
     },
     {
       "id": "route-validation-pass",
@@ -696,6 +767,10 @@
       "connections": {
         "true": "semantic-review",
         "false": "route-validation-package"
+      },
+      "progressNodeId": "validation",
+      "connectionLabels": {
+        "true": "механические проверки пройдены"
       }
     },
     {
@@ -711,6 +786,16 @@
       "connections": {
         "true": "repair-package",
         "false": "route-validation-replan"
+      },
+      "progressNodeId": "validation",
+      "connectionLabels": {
+        "true": {
+          "label": "проверка нашла дефект самого пакета",
+          "cycle": {
+            "cause": "Детерминированная проверка нашла дефект, за который отвечает сам пакет: состав файлов, форма реестра источников, разбор HTML или сетевая зависимость.",
+            "exit": "Заканчивается пакетом, прошедшим проверки, пересмотром контракта или остановкой."
+          }
+        }
       }
     },
     {
@@ -726,6 +811,11 @@
       "connections": {
         "true": "reassess-contract",
         "false": "finalize-blocked"
+      },
+      "progressNodeId": "validation",
+      "connectionLabels": {
+        "true": "проверка упирается в сам контракт",
+        "false": "проверить пакет нечем"
       }
     },
     {
@@ -824,7 +914,8 @@
       },
       "connections": {
         "success": "route-package-repair-changed"
-      }
+      },
+      "progressNodeId": "package"
     },
     {
       "id": "route-package-repair-changed",
@@ -839,6 +930,16 @@
       "connections": {
         "true": "package-completion",
         "false": "route-package-repair-reassess"
+      },
+      "progressNodeId": "package",
+      "connectionLabels": {
+        "true": {
+          "label": "пакет изменён и проходится заново",
+          "cycle": {
+            "cause": "Правка изменила файлы пакета, и завершающий проход производителя нужно повторить по новому состоянию.",
+            "exit": "Заканчивается пакетом, прошедшим механическую проверку и независимое ревью, пересмотром контракта или остановкой."
+          }
+        }
       }
     },
     {
@@ -854,6 +955,11 @@
       "connections": {
         "true": "reassess-contract",
         "false": "finalize-blocked"
+      },
+      "progressNodeId": "package",
+      "connectionLabels": {
+        "true": "правка пакета упирается в контракт",
+        "false": "дефект пакета неустраним"
       }
     },
     {
@@ -914,7 +1020,8 @@
       },
       "connections": {
         "success": "route-semantic-pass"
-      }
+      },
+      "progressNodeId": "review"
     },
     {
       "id": "route-semantic-pass",
@@ -929,6 +1036,10 @@
       "connections": {
         "true": "route-result-mode",
         "false": "route-semantic-blocked"
+      },
+      "progressNodeId": "review",
+      "connectionLabels": {
+        "true": "ревью приняло пакет"
       }
     },
     {
@@ -944,6 +1055,10 @@
       "connections": {
         "true": "finalize-blocked",
         "false": "route-semantic-replan"
+      },
+      "progressNodeId": "review",
+      "connectionLabels": {
+        "true": "ревью назвало неустранимый блокер"
       }
     },
     {
@@ -959,6 +1074,10 @@
       "connections": {
         "true": "reassess-contract",
         "false": "route-semantic-repair-owner"
+      },
+      "progressNodeId": "review",
+      "connectionLabels": {
+        "true": "ревью требует пересмотра контракта"
       }
     },
     {
@@ -974,6 +1093,23 @@
       "connections": {
         "true": "repair-package",
         "false": "repair-evidence"
+      },
+      "progressNodeId": "review",
+      "connectionLabels": {
+        "true": {
+          "label": "виновник блокеров — пакет",
+          "cycle": {
+            "cause": "Независимое ревью нашло воспроизводимые блокеры, за которые отвечает сам пакет решения.",
+            "exit": "Заканчивается принятым ревью пакетом, пересмотром контракта или остановкой."
+          }
+        },
+        "false": {
+          "label": "виновник блокеров — свидетельства",
+          "cycle": {
+            "cause": "Независимое ревью нашло блокеры, за которые отвечают собранные свидетельства, а не оформление пакета.",
+            "exit": "Заканчивается принятым ревью пакетом, пересмотром контракта или остановкой."
+          }
+        }
       }
     },
     {
@@ -1072,7 +1208,8 @@
       },
       "connections": {
         "success": "route-evidence-repair-changed"
-      }
+      },
+      "progressNodeId": "evidence"
     },
     {
       "id": "route-evidence-repair-changed",
@@ -1087,6 +1224,16 @@
       "connections": {
         "true": "research-evidence",
         "false": "route-evidence-repair-reassess"
+      },
+      "progressNodeId": "evidence",
+      "connectionLabels": {
+        "true": {
+          "label": "свидетельства изменены и собираются заново",
+          "cycle": {
+            "cause": "Правка изменила подтверждённый класс свидетельств, и всё производное от них нужно пересчитать с исследования.",
+            "exit": "Заканчивается принятым ревью пакетом, пересмотром контракта или остановкой."
+          }
+        }
       }
     },
     {
@@ -1102,6 +1249,11 @@
       "connections": {
         "true": "reassess-contract",
         "false": "finalize-blocked"
+      },
+      "progressNodeId": "evidence",
+      "connectionLabels": {
+        "true": "правка свидетельств упирается в контракт",
+        "false": "дефект свидетельств неустраним"
       }
     },
     {
@@ -1172,7 +1324,8 @@
       },
       "connections": {
         "success": "route-reassessment-eligible"
-      }
+      },
+      "progressNodeId": "reassess"
     },
     {
       "id": "route-reassessment-eligible",
@@ -1187,7 +1340,8 @@
       "connections": {
         "true": "review-corrected-contract",
         "false": "route-reassessment-aborted"
-      }
+      },
+      "progressNodeId": "reassess"
     },
     {
       "id": "route-reassessment-aborted",
@@ -1202,6 +1356,11 @@
       "connections": {
         "true": "finalize-aborted",
         "false": "finalize-blocked"
+      },
+      "progressNodeId": "reassess",
+      "connectionLabels": {
+        "true": "пользователь прервал запуск",
+        "false": "исправлять в контракте нечего"
       }
     },
     {
@@ -1229,7 +1388,8 @@
       },
       "connections": {
         "success": "route-contract-review-pass"
-      }
+      },
+      "progressNodeId": "reassess"
     },
     {
       "id": "route-contract-review-pass",
@@ -1244,6 +1404,16 @@
       "connections": {
         "true": "frame-idea",
         "false": "route-contract-review-blocked"
+      },
+      "progressNodeId": "reassess",
+      "connectionLabels": {
+        "true": {
+          "label": "исправленный контракт принят",
+          "cycle": {
+            "cause": "Контракт запуска исправлен, поэтому постановку и всю производную от неё работу нужно сделать заново по новым условиям.",
+            "exit": "Заканчивается пакетом, прошедшим проверку и ревью, прерыванием или остановкой."
+          }
+        }
       }
     },
     {
@@ -1259,6 +1429,17 @@
       "connections": {
         "true": "finalize-blocked",
         "false": "reassess-contract"
+      },
+      "progressNodeId": "reassess",
+      "connectionLabels": {
+        "true": "ревью контракта назвало неустранимый блокер",
+        "false": {
+          "label": "поправка контракта вернулась на доработку",
+          "cycle": {
+            "cause": "Независимое ревью не приняло исправленный контракт и не признало его неустранимым, поэтому поправку составляют заново.",
+            "exit": "Заканчивается принятой поправкой, прерыванием или остановкой."
+          }
+        }
       }
     },
     {
@@ -1274,6 +1455,10 @@
       "connections": {
         "true": "route-publication-authorized",
         "false": "present-result"
+      },
+      "progressNodeId": "acceptance",
+      "connectionLabels": {
+        "true": "автономный режим: приёмка не проводится"
       }
     },
     {
@@ -1331,7 +1516,8 @@
       },
       "connections": {
         "success": "route-result-accepted"
-      }
+      },
+      "progressNodeId": "acceptance"
     },
     {
       "id": "route-result-accepted",
@@ -1346,6 +1532,10 @@
       "connections": {
         "true": "route-publication-authorized",
         "false": "route-result-rework"
+      },
+      "progressNodeId": "acceptance",
+      "connectionLabels": {
+        "true": "пользователь принял пакет"
       }
     },
     {
@@ -1361,6 +1551,10 @@
       "connections": {
         "true": "rework-result",
         "false": "finalize-aborted"
+      },
+      "progressNodeId": "acceptance",
+      "connectionLabels": {
+        "false": "пользователь прервал запуск вместо доработки"
       }
     },
     {
@@ -1424,7 +1618,8 @@
       },
       "connections": {
         "success": "route-rework-framing"
-      }
+      },
+      "progressNodeId": "acceptance"
     },
     {
       "id": "route-rework-framing",
@@ -1439,6 +1634,16 @@
       "connections": {
         "true": "frame-idea",
         "false": "route-rework-evidence"
+      },
+      "progressNodeId": "acceptance",
+      "connectionLabels": {
+        "true": {
+          "label": "доработка: виновник — постановка",
+          "cycle": {
+            "cause": "Пользователь запросил ограниченную доработку, и самой ранней устаревшей стадией названа постановка.",
+            "exit": "Заканчивается принятым пользователем пакетом, прерыванием или остановкой."
+          }
+        }
       }
     },
     {
@@ -1454,6 +1659,16 @@
       "connections": {
         "true": "research-evidence",
         "false": "route-rework-analysis"
+      },
+      "progressNodeId": "acceptance",
+      "connectionLabels": {
+        "true": {
+          "label": "доработка: виновник — свидетельства",
+          "cycle": {
+            "cause": "Пользователь запросил ограниченную доработку, и самой ранней устаревшей стадией названы свидетельства.",
+            "exit": "Заканчивается принятым пользователем пакетом, прерыванием или остановкой."
+          }
+        }
       }
     },
     {
@@ -1469,6 +1684,16 @@
       "connections": {
         "true": "analyze-feasibility",
         "false": "route-rework-presentation"
+      },
+      "progressNodeId": "acceptance",
+      "connectionLabels": {
+        "true": {
+          "label": "доработка: виновник — разбор выполнимости",
+          "cycle": {
+            "cause": "Пользователь запросил ограниченную доработку, и самой ранней устаревшей стадией назван разбор выполнимости.",
+            "exit": "Заканчивается принятым пользователем пакетом, прерыванием или остановкой."
+          }
+        }
       }
     },
     {
@@ -1484,6 +1709,16 @@
       "connections": {
         "true": "synthesize-package",
         "false": "route-rework-reassess"
+      },
+      "progressNodeId": "acceptance",
+      "connectionLabels": {
+        "true": {
+          "label": "доработка: виновник — подача пакета",
+          "cycle": {
+            "cause": "Пользователь запросил ограниченную доработку, и она затрагивает только подачу — решение и отчёт.",
+            "exit": "Заканчивается принятым пользователем пакетом, прерыванием или остановкой."
+          }
+        }
       }
     },
     {
@@ -1499,6 +1734,17 @@
       "connections": {
         "true": "reassess-contract",
         "false": "finalize-blocked"
+      },
+      "progressNodeId": "acceptance",
+      "connectionLabels": {
+        "true": {
+          "label": "доработка упирается в контракт",
+          "cycle": {
+            "cause": "Обратная связь пользователя затрагивает сам контракт запуска, а не отдельный артефакт.",
+            "exit": "Заканчивается принятым пользователем пакетом, прерыванием или остановкой."
+          }
+        },
+        "false": "доработка невыполнима"
       }
     },
     {
@@ -1514,7 +1760,8 @@
       "connections": {
         "true": "publish-artifact",
         "false": "route-publication-interactive"
-      }
+      },
+      "progressNodeId": "publication"
     },
     {
       "id": "route-publication-interactive",
@@ -1541,6 +1788,10 @@
       "connections": {
         "true": "ask-publication",
         "false": "route-notification-authorized"
+      },
+      "progressNodeId": "publication",
+      "connectionLabels": {
+        "false": "публикация не разрешена и спросить не у кого"
       }
     },
     {
@@ -1566,7 +1817,8 @@
       },
       "connections": {
         "success": "route-publication-choice"
-      }
+      },
+      "progressNodeId": "publication"
     },
     {
       "id": "route-publication-choice",
@@ -1581,6 +1833,10 @@
       "connections": {
         "true": "publish-artifact",
         "false": "route-notification-authorized"
+      },
+      "progressNodeId": "publication",
+      "connectionLabels": {
+        "false": "пользователь оставил отчёт только локальным"
       }
     },
     {
@@ -1652,6 +1908,10 @@
       },
       "connections": {
         "success": "route-notification-authorized"
+      },
+      "progressNodeId": "publication",
+      "connectionLabels": {
+        "success": "публикация отработана"
       }
     },
     {
@@ -1667,7 +1927,8 @@
       "connections": {
         "true": "send-notification",
         "false": "route-notification-interactive"
-      }
+      },
+      "progressNodeId": "notification"
     },
     {
       "id": "route-notification-interactive",
@@ -1694,6 +1955,10 @@
       "connections": {
         "true": "ask-notification",
         "false": "finalize-result"
+      },
+      "progressNodeId": "notification",
+      "connectionLabels": {
+        "false": "уведомление не разрешено и спросить не у кого"
       }
     },
     {
@@ -1719,7 +1984,8 @@
       },
       "connections": {
         "success": "route-notification-choice"
-      }
+      },
+      "progressNodeId": "notification"
     },
     {
       "id": "route-notification-choice",
@@ -1734,6 +2000,10 @@
       "connections": {
         "true": "send-notification",
         "false": "finalize-result"
+      },
+      "progressNodeId": "notification",
+      "connectionLabels": {
+        "false": "пользователь отказался от уведомления"
       }
     },
     {
@@ -1766,6 +2036,10 @@
       },
       "connections": {
         "success": "finalize-result"
+      },
+      "progressNodeId": "notification",
+      "connectionLabels": {
+        "success": "уведомление отработано"
       }
     },
     {
@@ -1809,7 +2083,8 @@
       },
       "connections": {
         "success": "end"
-      }
+      },
+      "progressNodeId": "completion"
     },
     {
       "id": "finalize-blocked",
@@ -1848,7 +2123,8 @@
       },
       "connections": {
         "success": "end-blocked"
-      }
+      },
+      "progressNodeId": "stop"
     },
     {
       "id": "finalize-workspace-blocked",
@@ -1879,7 +2155,8 @@
       },
       "connections": {
         "success": "end-workspace-blocked"
-      }
+      },
+      "progressNodeId": "stop"
     },
     {
       "id": "finalize-aborted",
@@ -1918,7 +2195,8 @@
       },
       "connections": {
         "success": "end-aborted"
-      }
+      },
+      "progressNodeId": "stop"
     },
     {
       "id": "end-blocked",
@@ -1927,7 +2205,8 @@
         "delivery_status",
         "artifact_path",
         "summary"
-      ]
+      ],
+      "progressNodeId": "stop"
     },
     {
       "id": "end-workspace-blocked",
@@ -1935,7 +2214,8 @@
       "finalOutput": [
         "delivery_status",
         "summary"
-      ]
+      ],
+      "progressNodeId": "stop"
     },
     {
       "id": "end-aborted",
@@ -1944,7 +2224,8 @@
         "delivery_status",
         "artifact_path",
         "summary"
-      ]
+      ],
+      "progressNodeId": "stop"
     },
     {
       "id": "teleport-revise-process",
@@ -1959,7 +2240,8 @@
       },
       "connections": {
         "success": "reassess-contract"
-      }
+      },
+      "progressNodeId": "reassess"
     }
   ],
   "slug": "startup-idea-validation",
@@ -2072,5 +2354,109 @@
     }
   },
   "owner": "system-moira",
-  "visibility": "public"
+  "visibility": "public",
+  "progress": {
+    "title": "Проверка стартап-идеи",
+    "goal": "Довести свободно сформулированную идею до локального пакета решения, где каждый вывод опирается на прослеживаемое свидетельство, а публикация и уведомление остаются отдельно разрешёнными действиями.",
+    "nodes": [
+      {
+        "id": "intake",
+        "label": "Приём идеи",
+        "content": {
+          "summary": "Свободная формулировка идеи разбирается в ограниченный вход: определяются режим работы и раздельные разрешения на публикацию и на уведомление, создаётся рабочий каталог запуска. Кончается тем, что идея признана пригодной к разбору, требующей уточнения или неразбираемой."
+        }
+      },
+      {
+        "id": "clarification",
+        "label": "Уточнение",
+        "content": {
+          "summary": "Пользователю показывают единственную решающую неясность и её последствие, он даёт ограниченное уточнение или прерывает запуск, после чего уточнение переносится во вход без расширения полномочий. В автономном режиме стадия не проходится: неясность там сразу останавливает работу."
+        }
+      },
+      {
+        "id": "framing",
+        "label": "Постановка",
+        "content": {
+          "summary": "Пишется каноническая постановка: кому и какую проблему решаем, предлагаемая ценность, география и регулирование, гипотезы модели заработка, запрошенное решение, допущения и существенные неизвестные. Кончается признанием, что ответственное исследование можно начинать, либо требованием пересмотреть контракт."
+        }
+      },
+      {
+        "id": "evidence",
+        "label": "Свидетельства",
+        "content": {
+          "summary": "Собирается исследование по источникам: реестр источников и разбор спроса, рынка, альтернатив, конкурентов и регулирования со ссылками и датами, с явными противоречиями и пробелами. Сюда же возвращается работа, когда ревью назвало виновником свидетельства: их чинят и собирают заново."
+        }
+      },
+      {
+        "id": "analysis",
+        "label": "Разбор выполнимости",
+        "content": {
+          "summary": "Постановка и свидетельства сводятся в разбор технической выполнимости, экономики поставки и эксплуатации, способностей команды, существенных рисков, альтернатив модели заработка и опытов, снижающих неопределённость. Оценки раскрывают вход, метод, диапазон и дату."
+        }
+      },
+      {
+        "id": "package",
+        "label": "Пакет решения",
+        "content": {
+          "summary": "Пишутся решение и самодостаточный HTML-отчёт без внешних загрузок, затем производитель сам проходит пакет заново и закрывает пропущенные области, битые ссылки на утверждения и устаревшие выводы. Здесь же чинят дефекты, за которые отвечает пакет, и после правки пакет проходится ещё раз."
+        }
+      },
+      {
+        "id": "validation",
+        "label": "Механическая проверка",
+        "content": {
+          "summary": "По фактическим файлам прогоняются дешёвые детерминированные проверки: состав и структура файлов, форма реестра источников, разбираемость HTML и отсутствие сетевых зависимостей при показе. Кончается решением: пропустить дальше, чинить пакет или пересмотреть контракт."
+        }
+      },
+      {
+        "id": "review",
+        "label": "Независимое ревью",
+        "content": {
+          "summary": "Отдельный исполнитель, не участвовавший в работе, читает исходную идею, все канонические артефакты, сами источники, наблюдения проверки и HTML и перечисляет все воспроизводимые блокеры, не правя ничего сам. Кончается приёмкой либо назначением виновника: пакет, свидетельства, пересмотр контракта или остановка."
+        }
+      },
+      {
+        "id": "reassess",
+        "label": "Пересмотр контракта",
+        "content": {
+          "summary": "Когда дело не в дефекте артефакта, а в самой постановке, исправляется самое раннее неверное толкование, критерий, метод сбора свидетельств, объём или полномочие при сохранении цели; исправленный контракт проверяет независимый исполнитель. Кончается возвратом к постановке, прерыванием или остановкой."
+        }
+      },
+      {
+        "id": "acceptance",
+        "label": "Приёмка",
+        "content": {
+          "summary": "Принятый ревью пакет показывают пользователю: он принимает его, просит ограниченную доработку с конкретной обратной связью или прерывает запуск. Доработка называет самого раннего виновника и возвращает работу именно на его стадию; в автономном режиме запуск проходит стадию только маршрутом."
+        }
+      },
+      {
+        "id": "publication",
+        "label": "Публикация",
+        "content": {
+          "summary": "Отдельное необязательное внешнее действие: по уже данному разрешению или по разовому вопросу пользователю принятый HTML выкладывается публично и возвращается настоящий адрес либо фактическая причина неудачи. Неудача публикации не отменяет готовый локальный пакет."
+        }
+      },
+      {
+        "id": "notification",
+        "label": "Уведомление",
+        "content": {
+          "summary": "Второе необязательное внешнее действие со своим собственным разрешением: по уже данному разрешению или по разовому вопросу отправляется одно сообщение о завершении, и публичная ссылка попадает в него только при удавшейся публикации."
+        }
+      },
+      {
+        "id": "completion",
+        "label": "Итог",
+        "content": {
+          "summary": "Пишется итоговый отчёт по принятому локальному пакету и фактическим наблюдениям необязательных действий, с рекомендацией, ограничениями и адресами артефактов. Запуск закрывается как доведённая локальная проверка идеи."
+        }
+      },
+      {
+        "id": "stop",
+        "label": "Остановка",
+        "content": {
+          "summary": "Работа кончается без принятого пакета: не создан рабочий каталог, не хватило свидетельств или полномочий, либо пользователь явно прервал запуск. Называются фактическая причина, сделанная безопасная работа, сохранённые артефакты и то, что нужно для возобновления."
+        }
+      }
+    ]
+  }
 }

@@ -2,8 +2,14 @@
   "id": "78021f41-f006-4af6-aede-d9a039810aaa",
   "metadata": {
     "name": "Test Generation",
-    "version": "2.0.4",
-    "description": "Adds or updates executable test code for one authorized target in an existing project. Captures repository, target behavior, test levels and VCS authority; materializes a durable workspace; analyzes production behavior and existing project test patterns; designs behavior/risk/boundary cases; writes the complete authorized test, fixture, configuration and coverage-record change to real project paths; performs a fresh producer completion pass before targeted and broader deterministic commands; and requires independent semantic review. Test, target/design and evidence defects have cause-owned repair; production-code requirements end in a durable Software Development Flow handoff. Autonomous mode skips human waits only, and VCS effects require separate originating authority. The workflow never modifies production code, publishes, notifies, releases or deploys. Choose Test Planning for strategy without code, Test Suite Audit for an existing-suite audit, or Software Development Flow for production implementation with tests and documentation."
+    "version": "2.1.0",
+    "description": "Adds or updates executable test code for one authorized target in an existing project. Captures repository, target behavior, test levels and VCS authority; materializes a durable workspace; analyzes production behavior and existing project test patterns; designs behavior/risk/boundary cases; writes the complete authorized test, fixture, configuration and coverage-record change to real project paths; performs a fresh producer completion pass before targeted and broader deterministic commands; and requires independent semantic review. Test, target/design and evidence defects have cause-owned repair; production-code requirements end in a durable Software Development Flow handoff. Autonomous mode skips human waits only, and VCS effects require separate originating authority. The workflow never modifies production code, publishes, notifies, releases or deploys. Choose Test Planning for strategy without code, Test Suite Audit for an existing-suite audit, or Software Development Flow for production implementation with tests and documentation.",
+    "tags": [
+      "тесты",
+      "генерация",
+      "покрытие",
+      "разработка"
+    ]
   },
   "nodes": [
     {
@@ -11,7 +17,8 @@
       "type": "start",
       "connections": {
         "default": "intake"
-      }
+      },
+      "progressNodeId": "intake"
     },
     {
       "id": "end",
@@ -22,7 +29,8 @@
         "summary",
         "commit_status",
         "push_status"
-      ]
+      ],
+      "progressNodeId": "closure"
     },
     {
       "id": "intake",
@@ -91,7 +99,8 @@
       },
       "connections": {
         "success": "materialize-workspace"
-      }
+      },
+      "progressNodeId": "intake"
     },
     {
       "id": "materialize-workspace",
@@ -150,6 +159,10 @@
       "connections": {
         "success": "route-intake-eligible",
         "error": "finalize-workspace-blocked"
+      },
+      "progressNodeId": "intake",
+      "connectionLabels": {
+        "error": "рабочий каталог запуска не создан"
       }
     },
     {
@@ -165,6 +178,10 @@
       "connections": {
         "true": "plan-change",
         "false": "route-intake-handoff"
+      },
+      "progressNodeId": "intake",
+      "connectionLabels": {
+        "true": "заявка пригодна для написания тестов"
       }
     },
     {
@@ -180,6 +197,11 @@
       "connections": {
         "true": "finalize-handoff",
         "false": "finalize-blocked"
+      },
+      "progressNodeId": "intake",
+      "connectionLabels": {
+        "true": "задача требует правки продуктового кода",
+        "false": "заявку выполнить нечем"
       }
     },
     {
@@ -240,7 +262,8 @@
       },
       "connections": {
         "success": "route-plan-eligible"
-      }
+      },
+      "progressNodeId": "plan"
     },
     {
       "id": "route-plan-eligible",
@@ -255,6 +278,10 @@
       "connections": {
         "true": "review-plan",
         "false": "route-plan-handoff"
+      },
+      "progressNodeId": "plan",
+      "connectionLabels": {
+        "true": "контракт задачи и план случаев составлены"
       }
     },
     {
@@ -270,6 +297,11 @@
       "connections": {
         "true": "finalize-handoff",
         "false": "finalize-blocked"
+      },
+      "progressNodeId": "plan",
+      "connectionLabels": {
+        "true": "план упирается в правку продуктового кода",
+        "false": "составить план нечем"
       }
     },
     {
@@ -297,7 +329,8 @@
       },
       "connections": {
         "success": "route-plan-review-pass"
-      }
+      },
+      "progressNodeId": "plan-review"
     },
     {
       "id": "route-plan-review-pass",
@@ -312,6 +345,10 @@
       "connections": {
         "true": "implement-change",
         "false": "route-plan-review-blocked"
+      },
+      "progressNodeId": "plan-review",
+      "connectionLabels": {
+        "true": "ревью приняло план"
       }
     },
     {
@@ -327,6 +364,10 @@
       "connections": {
         "true": "reassess-contract",
         "false": "repair-plan"
+      },
+      "progressNodeId": "plan-review",
+      "connectionLabels": {
+        "true": "ревью плана требует пересмотра контракта"
       }
     },
     {
@@ -383,7 +424,8 @@
       },
       "connections": {
         "success": "route-plan-repair-changed"
-      }
+      },
+      "progressNodeId": "plan-review"
     },
     {
       "id": "route-plan-repair-changed",
@@ -398,6 +440,17 @@
       "connections": {
         "true": "review-plan",
         "false": "reassess-contract"
+      },
+      "progressNodeId": "plan-review",
+      "connectionLabels": {
+        "true": {
+          "label": "план изменён и возвращается на ревью",
+          "cycle": {
+            "cause": "Ревью нашло возражения, за которые отвечает сам план, и после правки замысел случаев нужно проверить заново.",
+            "exit": "Заканчивается принятым планом, пересмотром контракта или остановкой."
+          }
+        },
+        "false": "правка плана упирается в контракт"
       }
     },
     {
@@ -481,7 +534,8 @@
       },
       "connections": {
         "success": "route-reassessment-corrected"
-      }
+      },
+      "progressNodeId": "reassess"
     },
     {
       "id": "implement-change",
@@ -541,7 +595,8 @@
       },
       "connections": {
         "success": "route-implementation-ready"
-      }
+      },
+      "progressNodeId": "implementation"
     },
     {
       "id": "route-implementation-ready",
@@ -556,6 +611,10 @@
       "connections": {
         "true": "producer-completion",
         "false": "route-implementation-handoff"
+      },
+      "progressNodeId": "implementation",
+      "connectionLabels": {
+        "true": "тесты написаны в файлах проекта"
       }
     },
     {
@@ -571,6 +630,11 @@
       "connections": {
         "true": "finalize-handoff",
         "false": "finalize-blocked"
+      },
+      "progressNodeId": "implementation",
+      "connectionLabels": {
+        "true": "написание упирается в правку продуктового кода",
+        "false": "написать тесты нечем"
       }
     },
     {
@@ -633,7 +697,8 @@
       },
       "connections": {
         "success": "route-completion-ready"
-      }
+      },
+      "progressNodeId": "completion"
     },
     {
       "id": "route-completion-ready",
@@ -648,6 +713,10 @@
       "connections": {
         "true": "validate-change",
         "false": "route-completion-handoff"
+      },
+      "progressNodeId": "completion",
+      "connectionLabels": {
+        "true": "результат готов к прогону проверок"
       }
     },
     {
@@ -663,6 +732,10 @@
       "connections": {
         "true": "finalize-handoff",
         "false": "route-completion-replan"
+      },
+      "progressNodeId": "completion",
+      "connectionLabels": {
+        "true": "завершение упирается в правку продуктового кода"
       }
     },
     {
@@ -678,6 +751,11 @@
       "connections": {
         "true": "reassess-contract",
         "false": "finalize-blocked"
+      },
+      "progressNodeId": "completion",
+      "connectionLabels": {
+        "true": "завершение требует пересмотра контракта",
+        "false": "довести результат нечем"
       }
     },
     {
@@ -738,7 +816,8 @@
       },
       "connections": {
         "success": "route-validation-pass"
-      }
+      },
+      "progressNodeId": "validation"
     },
     {
       "id": "route-validation-pass",
@@ -753,6 +832,10 @@
       "connections": {
         "true": "semantic-review",
         "false": "route-validation-tests"
+      },
+      "progressNodeId": "validation",
+      "connectionLabels": {
+        "true": "проверки пройдены"
       }
     },
     {
@@ -768,6 +851,10 @@
       "connections": {
         "true": "repair-tests",
         "false": "route-validation-verification"
+      },
+      "progressNodeId": "validation",
+      "connectionLabels": {
+        "true": "виноваты сами тесты"
       }
     },
     {
@@ -783,6 +870,10 @@
       "connections": {
         "true": "repair-verification",
         "false": "route-validation-handoff"
+      },
+      "progressNodeId": "validation",
+      "connectionLabels": {
+        "true": "виновато доказательство прогона"
       }
     },
     {
@@ -798,6 +889,11 @@
       "connections": {
         "true": "reassess-contract",
         "false": "finalize-blocked"
+      },
+      "progressNodeId": "validation",
+      "connectionLabels": {
+        "true": "проверки требуют пересмотра контракта",
+        "false": "прогнать проверки нечем"
       }
     },
     {
@@ -896,7 +992,8 @@
       },
       "connections": {
         "success": "route-tests-repair-changed"
-      }
+      },
+      "progressNodeId": "repair-tests"
     },
     {
       "id": "route-tests-repair-changed",
@@ -911,6 +1008,16 @@
       "connections": {
         "true": "producer-completion",
         "false": "route-tests-repair-reassess"
+      },
+      "progressNodeId": "repair-tests",
+      "connectionLabels": {
+        "true": {
+          "label": "тесты изменены, нужен новый завершающий проход",
+          "cycle": {
+            "cause": "Ремонт изменил тесты, фикстуры или настройки, поэтому завершающий проход и проверки надо повторить на новых байтах.",
+            "exit": "Заканчивается пройденными проверками и принятым ревью результатом, пересмотром контракта или остановкой."
+          }
+        }
       }
     },
     {
@@ -926,6 +1033,11 @@
       "connections": {
         "true": "reassess-contract",
         "false": "finalize-blocked"
+      },
+      "progressNodeId": "repair-tests",
+      "connectionLabels": {
+        "true": "ремонт тестов упирается в контракт",
+        "false": "дефект тестов неустраним"
       }
     },
     {
@@ -1028,7 +1140,8 @@
       },
       "connections": {
         "success": "route-verification-repair-changed"
-      }
+      },
+      "progressNodeId": "repair-verification"
     },
     {
       "id": "route-verification-repair-changed",
@@ -1043,6 +1156,16 @@
       "connections": {
         "true": "validate-change",
         "false": "route-verification-tests"
+      },
+      "progressNodeId": "repair-verification",
+      "connectionLabels": {
+        "true": {
+          "label": "доказательство исправлено, проверки прогоняются заново",
+          "cycle": {
+            "cause": "Дефект был в командах и записи их исходов, поэтому после исправления доказательства проверки надо прогнать снова.",
+            "exit": "Заканчивается пройденными проверками, ремонтом тестов, пересмотром контракта или остановкой."
+          }
+        }
       }
     },
     {
@@ -1058,6 +1181,16 @@
       "connections": {
         "true": "repair-tests",
         "false": "route-verification-reassess"
+      },
+      "progressNodeId": "repair-verification",
+      "connectionLabels": {
+        "true": {
+          "label": "доказательство вскрыло дефект самих тестов",
+          "cycle": {
+            "cause": "Более сильное доказательство показало, что виноваты не команды и не запись исходов, а сами тесты.",
+            "exit": "Заканчивается пройденными проверками и принятым ревью результатом, пересмотром контракта или остановкой."
+          }
+        }
       }
     },
     {
@@ -1073,6 +1206,11 @@
       "connections": {
         "true": "reassess-contract",
         "false": "finalize-blocked"
+      },
+      "progressNodeId": "repair-verification",
+      "connectionLabels": {
+        "true": "ремонт доказательства упирается в контракт",
+        "false": "дефект доказательства неустраним"
       }
     },
     {
@@ -1133,7 +1271,8 @@
       },
       "connections": {
         "success": "route-semantic-pass"
-      }
+      },
+      "progressNodeId": "review"
     },
     {
       "id": "route-semantic-pass",
@@ -1148,6 +1287,10 @@
       "connections": {
         "true": "route-result-mode",
         "false": "route-semantic-blocked"
+      },
+      "progressNodeId": "review",
+      "connectionLabels": {
+        "true": "ревью приняло результат"
       }
     },
     {
@@ -1163,6 +1306,10 @@
       "connections": {
         "true": "reassess-contract",
         "false": "route-semantic-repair-owner"
+      },
+      "progressNodeId": "review",
+      "connectionLabels": {
+        "true": "ревью требует пересмотра контракта"
       }
     },
     {
@@ -1178,6 +1325,23 @@
       "connections": {
         "true": "repair-tests",
         "false": "repair-verification"
+      },
+      "progressNodeId": "review",
+      "connectionLabels": {
+        "true": {
+          "label": "виновник замечаний — тесты",
+          "cycle": {
+            "cause": "Независимое ревью нашло воспроизводимые замечания, за которые отвечают сами тесты.",
+            "exit": "Заканчивается принятым ревью результатом, пересмотром контракта или остановкой."
+          }
+        },
+        "false": {
+          "label": "виновник замечаний — доказательство прогона",
+          "cycle": {
+            "cause": "Независимое ревью нашло замечания к командам и записи их исходов, а не к самим тестам.",
+            "exit": "Заканчивается принятым ревью результатом, пересмотром контракта или остановкой."
+          }
+        }
       }
     },
     {
@@ -1193,6 +1357,10 @@
       "connections": {
         "true": "close-result",
         "false": "present-result"
+      },
+      "progressNodeId": "acceptance",
+      "connectionLabels": {
+        "true": "автономный режим: приёмка не проводится"
       }
     },
     {
@@ -1250,7 +1418,8 @@
       },
       "connections": {
         "success": "route-result-accepted"
-      }
+      },
+      "progressNodeId": "acceptance"
     },
     {
       "id": "route-result-accepted",
@@ -1265,6 +1434,10 @@
       "connections": {
         "true": "close-result",
         "false": "route-result-rework"
+      },
+      "progressNodeId": "acceptance",
+      "connectionLabels": {
+        "true": "пользователь принял результат"
       }
     },
     {
@@ -1280,6 +1453,10 @@
       "connections": {
         "true": "rework-result",
         "false": "finalize-aborted"
+      },
+      "progressNodeId": "acceptance",
+      "connectionLabels": {
+        "false": "пользователь прервал запуск вместо доработки"
       }
     },
     {
@@ -1342,7 +1519,8 @@
       },
       "connections": {
         "success": "route-rework-tests"
-      }
+      },
+      "progressNodeId": "acceptance"
     },
     {
       "id": "route-rework-tests",
@@ -1357,6 +1535,16 @@
       "connections": {
         "true": "producer-completion",
         "false": "route-rework-reassess"
+      },
+      "progressNodeId": "acceptance",
+      "connectionLabels": {
+        "true": {
+          "label": "доработка уместилась в разрешённые тесты",
+          "cycle": {
+            "cause": "Пользователь запросил доработку, которую удалось сделать в пределах разрешённых тестов, и изменённые байты снова проходят завершение и проверки.",
+            "exit": "Заканчивается независимо принятым результатом, передачей в разработку или остановкой."
+          }
+        }
       }
     },
     {
@@ -1372,6 +1560,16 @@
       "connections": {
         "true": "reassess-contract",
         "false": "route-rework-handoff"
+      },
+      "progressNodeId": "acceptance",
+      "connectionLabels": {
+        "true": {
+          "label": "доработка упирается в контракт",
+          "cycle": {
+            "cause": "Обратная связь пользователя меняет саму задачу, её пригодность, критерии или модель доказательства, а не отдельный тест.",
+            "exit": "Заканчивается независимо принятым результатом, передачей в разработку или остановкой."
+          }
+        }
       }
     },
     {
@@ -1387,6 +1585,11 @@
       "connections": {
         "true": "finalize-handoff",
         "false": "finalize-blocked"
+      },
+      "progressNodeId": "acceptance",
+      "connectionLabels": {
+        "true": "доработка упирается в правку продуктового кода",
+        "false": "доработку выполнить нечем"
       }
     },
     {
@@ -1504,7 +1707,8 @@
       },
       "connections": {
         "success": "route-closure-complete"
-      }
+      },
+      "progressNodeId": "closure"
     },
     {
       "id": "route-closure-complete",
@@ -1519,7 +1723,8 @@
       "connections": {
         "true": "end",
         "false": "end-vcs-blocked"
-      }
+      },
+      "progressNodeId": "closure"
     },
     {
       "id": "finalize-handoff",
@@ -1563,7 +1768,8 @@
       },
       "connections": {
         "success": "end-handoff"
-      }
+      },
+      "progressNodeId": "handoff"
     },
     {
       "id": "finalize-blocked",
@@ -1607,7 +1813,8 @@
       },
       "connections": {
         "success": "end-blocked"
-      }
+      },
+      "progressNodeId": "stop"
     },
     {
       "id": "finalize-workspace-blocked",
@@ -1643,7 +1850,8 @@
       },
       "connections": {
         "success": "end-workspace-blocked"
-      }
+      },
+      "progressNodeId": "stop"
     },
     {
       "id": "finalize-aborted",
@@ -1687,7 +1895,8 @@
       },
       "connections": {
         "success": "end-aborted"
-      }
+      },
+      "progressNodeId": "stop"
     },
     {
       "id": "end-handoff",
@@ -1697,7 +1906,8 @@
         "artifact_path",
         "summary",
         "vcs_status"
-      ]
+      ],
+      "progressNodeId": "handoff"
     },
     {
       "id": "end-blocked",
@@ -1707,7 +1917,8 @@
         "artifact_path",
         "summary",
         "vcs_status"
-      ]
+      ],
+      "progressNodeId": "stop"
     },
     {
       "id": "end-aborted",
@@ -1717,7 +1928,8 @@
         "artifact_path",
         "summary",
         "vcs_status"
-      ]
+      ],
+      "progressNodeId": "stop"
     },
     {
       "id": "teleport-revise-process",
@@ -1732,7 +1944,8 @@
       },
       "connections": {
         "success": "reassess-contract"
-      }
+      },
+      "progressNodeId": "reassess"
     },
     {
       "id": "route-plan-review-blocked",
@@ -1747,6 +1960,10 @@
       "connections": {
         "true": "finalize-blocked",
         "false": "route-plan-review-replan"
+      },
+      "progressNodeId": "plan-review",
+      "connectionLabels": {
+        "true": "ревью плана назвало неустранимый блокер"
       }
     },
     {
@@ -1762,6 +1979,10 @@
       "connections": {
         "true": "finalize-blocked",
         "false": "route-semantic-replan"
+      },
+      "progressNodeId": "review",
+      "connectionLabels": {
+        "true": "ревью назвало неустранимый блокер"
       }
     },
     {
@@ -1777,6 +1998,10 @@
       "connections": {
         "true": "finalize-handoff",
         "false": "route-validation-replan"
+      },
+      "progressNodeId": "validation",
+      "connectionLabels": {
+        "true": "проверки упёрлись в продуктовый код"
       }
     },
     {
@@ -1792,7 +2017,8 @@
       "connections": {
         "true": "corrected-contract-review",
         "false": "route-reassessment-handoff"
-      }
+      },
+      "progressNodeId": "reassess"
     },
     {
       "id": "route-reassessment-handoff",
@@ -1807,6 +2033,11 @@
       "connections": {
         "true": "finalize-handoff",
         "false": "finalize-blocked"
+      },
+      "progressNodeId": "reassess",
+      "connectionLabels": {
+        "true": "пересмотр упирается в правку продуктового кода",
+        "false": "исправить контракт нечем"
       }
     },
     {
@@ -1833,7 +2064,8 @@
       },
       "connections": {
         "success": "route-corrected-review-pass"
-      }
+      },
+      "progressNodeId": "reassess"
     },
     {
       "id": "route-corrected-review-pass",
@@ -1848,7 +2080,8 @@
       "connections": {
         "true": "route-reentry-target",
         "false": "route-corrected-review-replan"
-      }
+      },
+      "progressNodeId": "reassess"
     },
     {
       "id": "route-corrected-review-replan",
@@ -1863,6 +2096,17 @@
       "connections": {
         "true": "reassess-contract",
         "false": "finalize-blocked"
+      },
+      "progressNodeId": "reassess",
+      "connectionLabels": {
+        "true": {
+          "label": "поправка контракта вернулась на доработку",
+          "cycle": {
+            "cause": "Независимое ревью не приняло поправку контракта, поэтому её составляют заново с учётом найденных возражений.",
+            "exit": "Заканчивается принятой поправкой, передачей в разработку или остановкой."
+          }
+        },
+        "false": "ревью поправки назвало неустранимый блокер"
       }
     },
     {
@@ -1878,6 +2122,10 @@
       "connections": {
         "true": "reanalyze-target",
         "false": "route-reentry-design"
+      },
+      "progressNodeId": "reassess",
+      "connectionLabels": {
+        "true": "поправка обесценила разбор цели"
       }
     },
     {
@@ -1893,6 +2141,16 @@
       "connections": {
         "true": "review-plan",
         "false": "route-reentry-tests"
+      },
+      "progressNodeId": "reassess",
+      "connectionLabels": {
+        "true": {
+          "label": "поправка обесценила замысел случаев",
+          "cycle": {
+            "cause": "Принятая поправка контракта сделала устаревшим план случаев, и его надо снова провести через независимое ревью.",
+            "exit": "Заканчивается независимо принятым результатом, передачей в разработку или остановкой."
+          }
+        }
       }
     },
     {
@@ -1908,6 +2166,16 @@
       "connections": {
         "true": "implement-change",
         "false": "route-reentry-evidence"
+      },
+      "progressNodeId": "reassess",
+      "connectionLabels": {
+        "true": {
+          "label": "поправка обесценила сам тестовый код",
+          "cycle": {
+            "cause": "Принятая поправка контракта сделала устаревшим написанный тестовый код, и его надо написать заново.",
+            "exit": "Заканчивается независимо принятым результатом, передачей в разработку или остановкой."
+          }
+        }
       }
     },
     {
@@ -1923,6 +2191,23 @@
       "connections": {
         "true": "validate-change",
         "false": "producer-completion"
+      },
+      "progressNodeId": "reassess",
+      "connectionLabels": {
+        "true": {
+          "label": "поправка обесценила прогон проверок",
+          "cycle": {
+            "cause": "Принятая поправка контракта обесценила уже прогнанные проверки, и их надо прогнать заново.",
+            "exit": "Заканчивается независимо принятым результатом, передачей в разработку или остановкой."
+          }
+        },
+        "false": {
+          "label": "поправке хватает нового завершающего прохода",
+          "cycle": {
+            "cause": "Принятая поправка не затронула ни разбор цели, ни замысел случаев, ни тесты, ни прогон: достаточно повторить завершающий проход производителя.",
+            "exit": "Заканчивается независимо принятым результатом, передачей в разработку или остановкой."
+          }
+        }
       }
     },
     {
@@ -1932,7 +2217,8 @@
         "delivery_status",
         "summary",
         "vcs_status"
-      ]
+      ],
+      "progressNodeId": "stop"
     },
     {
       "id": "end-vcs-blocked",
@@ -1943,7 +2229,8 @@
         "summary",
         "commit_status",
         "push_status"
-      ]
+      ],
+      "progressNodeId": "closure"
     },
     {
       "id": "reanalyze-target",
@@ -1999,7 +2286,8 @@
       },
       "connections": {
         "success": "route-reanalyze-ready"
-      }
+      },
+      "progressNodeId": "reanalyze"
     },
     {
       "id": "route-reanalyze-ready",
@@ -2014,6 +2302,17 @@
       "connections": {
         "true": "review-plan",
         "false": "finalize-blocked"
+      },
+      "progressNodeId": "reanalyze",
+      "connectionLabels": {
+        "true": {
+          "label": "разбор цели обновлён",
+          "cycle": {
+            "cause": "После переразбора цели план случаев изменился, и его надо снова провести через независимое ревью.",
+            "exit": "Заканчивается независимо принятым результатом, передачей в разработку или остановкой."
+          }
+        },
+        "false": "переразобрать цель нечем"
       }
     }
   ],
@@ -2120,5 +2419,116 @@
   },
   "slug": "test-generation",
   "owner": "system-moira",
-  "visibility": "public"
+  "visibility": "public",
+  "progress": {
+    "title": "Написание тестов",
+    "goal": "Добавить или обновить исполняемый тестовый код для одной разрешённой цели в существующем проекте, не трогая продуктовый код и не выходя за выданные полномочия на фиксацию изменений.",
+    "nodes": [
+      {
+        "id": "intake",
+        "label": "Приём заявки",
+        "content": {
+          "summary": "Разбирается одна заявка: репозиторий, проверяемое поведение, объём, режим работы, разрешения на изменение тестов, настроек и фикстур и отдельные решения о коммите и отправке в удалённый репозиторий; создаётся долговечный рабочий каталог. Кончается признанием заявки пригодной, передачей в разработку или остановкой."
+        }
+      },
+      {
+        "id": "plan",
+        "label": "Контракт и план",
+        "content": {
+          "summary": "Изучаются правила репозитория, фактическое поведение цели и её публичная поверхность, существующие тесты, фикстуры, каркас и команды; пишутся неизменяемый контракт задачи и план случаев — поведенческих, рисковых и граничных — с перечнем файлов, которые будут изменены."
+        }
+      },
+      {
+        "id": "plan-review",
+        "label": "Ревью плана",
+        "content": {
+          "summary": "Отдельный исполнитель читает задачу, контракт, план и сами исходники репозитория и перечисляет воспроизводимые возражения к замыслу, не правя ничего сам; возражения к плану чинят здесь же и отдают на повторное ревью. Кончается принятым планом, пересмотром контракта или остановкой."
+        }
+      },
+      {
+        "id": "implementation",
+        "label": "Написание тестов",
+        "content": {
+          "summary": "Принятый план воплощается в настоящих файлах проекта: меняются только тесты и необходимые фикстуры, настройки и записи о покрытии, переиспользуются помощники проекта и публичные поверхности. Продуктовый код не меняется никогда; точный набор изменений записывается как свидетельство."
+        }
+      },
+      {
+        "id": "completion",
+        "label": "Завершение производителем",
+        "content": {
+          "summary": "Перед проверками производитель свежим проходом сверяет контракт, принятый план, фактические изменения репозитория, поведение цели и свидетельства и закрывает обычные пропуски на стороне тестов. Кончается результатом, пригодным к прогону проверок, передачей в разработку или пересмотром контракта."
+        }
+      },
+      {
+        "id": "validation",
+        "label": "Прогон проверок",
+        "content": {
+          "summary": "На завершённых байтах запускаются адресные тесты и более широкие проверки проекта в порядке стоимости, с записью точных команд, исходов и ограничений среды. Кончается назначением виновника: ничего чинить не надо, виноваты тесты, виновато само доказательство прогона, нужна разработка или пересмотр контракта."
+        }
+      },
+      {
+        "id": "repair-tests",
+        "label": "Ремонт тестов",
+        "content": {
+          "summary": "Воспроизводятся все замечания, за которые отвечают тесты, и чинятся только разрешённые тесты, фикстуры, настройки и записи о покрытии — без правки продуктового кода и без подпорок, которые лишь изображают прохождение. Кончается изменёнными тестами, пересмотром контракта или остановкой."
+        }
+      },
+      {
+        "id": "repair-verification",
+        "label": "Ремонт доказательства прогона",
+        "content": {
+          "summary": "Когда дефект не в тестах, а в самом доказательстве — в командах, их применимости или записи исходов, — исправляется только доказательство, а тесты, фикстуры и замысел случаев остаются нетронутыми. Если более сильное доказательство вскрывает дефект самих тестов, работа уходит в их ремонт."
+        }
+      },
+      {
+        "id": "review",
+        "label": "Независимое ревью результата",
+        "content": {
+          "summary": "Отдельный исполнитель читает исходные полномочия, контракт, принятый план, фактические изменения, поведение цели, тесты и свидетельства и судит, поймают ли эти тесты настоящую поломку. Кончается принятием, назначением виновника ремонта, пересмотром контракта или остановкой."
+        }
+      },
+      {
+        "id": "reassess",
+        "label": "Пересмотр контракта",
+        "content": {
+          "summary": "Когда неверен сам выведенный контракт, а не отдельный артефакт, пишется накопительное дополнение к неизменяемому контракту, его проверяет независимый исполнитель, и называется самая ранняя стадия, которую поправка сделала устаревшей. Отсюда работа возвращается именно в эту стадию."
+        }
+      },
+      {
+        "id": "reanalyze",
+        "label": "Переразбор цели",
+        "content": {
+          "summary": "Если поправка контракта сделала устаревшим разбор самой цели, заново изучаются её поведение, публичная поверхность и принятые в проекте образцы тестов, и план случаев обновляется по новым условиям. Кончается возвратом обновлённого плана на ревью или остановкой."
+        }
+      },
+      {
+        "id": "acceptance",
+        "label": "Приёмка",
+        "content": {
+          "summary": "В интерактивном режиме принятый ревью результат показывают пользователю: он принимает его, просит доработку с конкретной обратной связью или прерывает запуск. Доработка в пределах тестов возвращает работу на завершающий проход, а затрагивающая задачу или критерии — в пересмотр контракта; в автономном режиме запуск проходит стадию только маршрутом."
+        }
+      },
+      {
+        "id": "closure",
+        "label": "Закрытие и фиксация",
+        "content": {
+          "summary": "Закрываются только независимо принятые байты тестов: выполняются обязательные для репозитория предкоммитные проверки, коммит делается лишь при выданном на него полномочии, а отправка в удалённый репозиторий — только при отдельном полномочии. Кончается полным закрытием либо остановкой на стороне фиксации при сохранённой работе."
+        }
+      },
+      {
+        "id": "handoff",
+        "label": "Передача в разработку",
+        "content": {
+          "summary": "Когда задача требует изменить продуктовый код, этот запуск его не делает: пишется правдивая передача в поток разработки с исходной задачей, собранными свидетельствами, сделанной безопасной работой, состоянием репозитория и точной причиной непригодности."
+        }
+      },
+      {
+        "id": "stop",
+        "label": "Остановка",
+        "content": {
+          "summary": "Работа кончается без принятого результата: не создан рабочий каталог, обнаружен неустранимый блокер или пользователь явно прервал запуск. Называются фактическая причина, сделанная безопасная работа, состояние репозитория и то, что позволило бы вернуться к задаче."
+        }
+      }
+    ]
+  }
 }

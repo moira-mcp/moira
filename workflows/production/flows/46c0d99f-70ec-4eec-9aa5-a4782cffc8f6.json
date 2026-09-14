@@ -3,8 +3,14 @@
   "id": "46c0d99f-70ec-4eec-9aa5-a4782cffc8f6",
   "metadata": {
     "name": "Marketing Campaign",
-    "version": "2.0.2",
-    "description": "Creates one evidence-aware, channel-ready marketing campaign package from an authorized product or offer. Captures objective, audience, requested deliverables, brand/legal constraints and evidence authority; materializes a local workspace; derives product/audience strategy, authorized competitive positioning, proof or hypothesis mapping, brand constraints, campaign materials and limitations; and requires deterministic reference checks plus genuinely independent semantic review. Complete and reviewed-limited results remain distinct, confirmed strategy/evidence/package defects return through source-specific stale cones, and invalid criteria use independently reviewed contract correction. Autonomous mode skips only final acceptance. The workflow does not publish, notify, spend budget, contact customers, launch campaigns, modify products, commit, release or deploy. Choose Content Creation for one standalone text, a research workflow for evidence discovery without campaign production, or Software Development Flow for repository implementation."
+    "version": "2.1.0",
+    "description": "Creates one evidence-aware, channel-ready marketing campaign package from an authorized product or offer. Captures objective, audience, requested deliverables, brand/legal constraints and evidence authority; materializes a local workspace; derives product/audience strategy, authorized competitive positioning, proof or hypothesis mapping, brand constraints, campaign materials and limitations; and requires deterministic reference checks plus genuinely independent semantic review. Complete and reviewed-limited results remain distinct, confirmed strategy/evidence/package defects return through source-specific stale cones, and invalid criteria use independently reviewed contract correction. Autonomous mode skips only final acceptance. The workflow does not publish, notify, spend budget, contact customers, launch campaigns, modify products, commit, release or deploy. Choose Content Creation for one standalone text, a research workflow for evidence discovery without campaign production, or Software Development Flow for repository implementation.",
+    "tags": [
+      "маркетинг",
+      "кампания",
+      "контент",
+      "запуск"
+    ]
   },
   "nodes": [
     {
@@ -12,7 +18,8 @@
       "type": "start",
       "connections": {
         "default": "intake"
-      }
+      },
+      "progressNodeId": "intake"
     },
     {
       "id": "intake",
@@ -99,7 +106,8 @@
       },
       "connections": {
         "success": "route-intake-ready"
-      }
+      },
+      "progressNodeId": "intake"
     },
     {
       "id": "route-intake-ready",
@@ -114,6 +122,11 @@
       "connections": {
         "true": "materialize-workspace",
         "false": "finalize-intake-blocked"
+      },
+      "progressNodeId": "intake",
+      "connectionLabels": {
+        "true": "заявка пригодна для кампании",
+        "false": "заявку выполнить нельзя"
       }
     },
     {
@@ -177,6 +190,10 @@
       "connections": {
         "success": "initialize-contract",
         "error": "finalize-workspace-blocked"
+      },
+      "progressNodeId": "contract",
+      "connectionLabels": {
+        "error": "рабочий каталог запуска не создан"
       }
     },
     {
@@ -283,7 +300,8 @@
       },
       "connections": {
         "success": "route-contract-ready"
-      }
+      },
+      "progressNodeId": "contract"
     },
     {
       "id": "route-contract-ready",
@@ -298,6 +316,11 @@
       "connections": {
         "true": "frame-strategy",
         "false": "finalize-blocked"
+      },
+      "progressNodeId": "contract",
+      "connectionLabels": {
+        "true": "контракт кампании записан",
+        "false": "записать контракт нечем"
       }
     },
     {
@@ -404,7 +427,8 @@
       },
       "connections": {
         "success": "route-strategy-ready"
-      }
+      },
+      "progressNodeId": "strategy"
     },
     {
       "id": "route-strategy-ready",
@@ -419,6 +443,10 @@
       "connections": {
         "true": "build-evidence",
         "false": "route-strategy-replan"
+      },
+      "progressNodeId": "strategy",
+      "connectionLabels": {
+        "true": "стратегия готова"
       }
     },
     {
@@ -434,6 +462,11 @@
       "connections": {
         "true": "reassess-contract",
         "false": "finalize-blocked"
+      },
+      "progressNodeId": "strategy",
+      "connectionLabels": {
+        "true": "стратегия упирается в критерии контракта",
+        "false": "составить стратегию нечем"
       }
     },
     {
@@ -535,7 +568,8 @@
       },
       "connections": {
         "success": "route-evidence-usable"
-      }
+      },
+      "progressNodeId": "evidence"
     },
     {
       "id": "route-evidence-usable",
@@ -562,6 +596,10 @@
       "connections": {
         "true": "create-package",
         "false": "route-evidence-replan"
+      },
+      "progressNodeId": "evidence",
+      "connectionLabels": {
+        "true": "база пригодна — полностью или с названными ограничениями"
       }
     },
     {
@@ -577,6 +615,11 @@
       "connections": {
         "true": "reassess-contract",
         "false": "finalize-blocked"
+      },
+      "progressNodeId": "evidence",
+      "connectionLabels": {
+        "true": "свидетельства упираются в критерии контракта",
+        "false": "собрать пригодную базу нечем"
       }
     },
     {
@@ -683,7 +726,8 @@
       },
       "connections": {
         "success": "route-package-ready"
-      }
+      },
+      "progressNodeId": "package"
     },
     {
       "id": "route-package-ready",
@@ -698,6 +742,10 @@
       "connections": {
         "true": "complete-package",
         "false": "route-package-replan"
+      },
+      "progressNodeId": "package",
+      "connectionLabels": {
+        "true": "материалы кампании написаны"
       }
     },
     {
@@ -713,6 +761,11 @@
       "connections": {
         "true": "reassess-contract",
         "false": "finalize-blocked"
+      },
+      "progressNodeId": "package",
+      "connectionLabels": {
+        "true": "материалы упираются в критерии контракта",
+        "false": "написать материалы нечем"
       }
     },
     {
@@ -855,7 +908,8 @@
       },
       "connections": {
         "success": "route-completion-ready"
-      }
+      },
+      "progressNodeId": "completion"
     },
     {
       "id": "route-completion-ready",
@@ -870,6 +924,10 @@
       "connections": {
         "true": "validate-package",
         "false": "route-completion-replan"
+      },
+      "progressNodeId": "completion",
+      "connectionLabels": {
+        "true": "класс результата объявлен, пакет готов к проверкам"
       }
     },
     {
@@ -885,6 +943,11 @@
       "connections": {
         "true": "reassess-contract",
         "false": "finalize-blocked"
+      },
+      "progressNodeId": "completion",
+      "connectionLabels": {
+        "true": "завершение упирается в критерии контракта",
+        "false": "довести пакет нечем"
       }
     },
     {
@@ -1047,7 +1110,8 @@
       },
       "connections": {
         "success": "route-validation-pass"
-      }
+      },
+      "progressNodeId": "validation"
     },
     {
       "id": "route-validation-pass",
@@ -1062,6 +1126,10 @@
       "connections": {
         "true": "semantic-review",
         "false": "route-validation-repair"
+      },
+      "progressNodeId": "validation",
+      "connectionLabels": {
+        "true": "детерминированная проверка пройдена"
       }
     },
     {
@@ -1077,7 +1145,8 @@
       "connections": {
         "true": "route-validation-package",
         "false": "route-validation-replan"
-      }
+      },
+      "progressNodeId": "validation"
     },
     {
       "id": "route-validation-package",
@@ -1092,6 +1161,10 @@
       "connections": {
         "true": "repair-package-validation",
         "false": "route-validation-evidence"
+      },
+      "progressNodeId": "validation",
+      "connectionLabels": {
+        "true": "виновник по проверке — материалы"
       }
     },
     {
@@ -1107,6 +1180,11 @@
       "connections": {
         "true": "repair-evidence-validation",
         "false": "repair-strategy-validation"
+      },
+      "progressNodeId": "validation",
+      "connectionLabels": {
+        "true": "виновник по проверке — свидетельства",
+        "false": "виновник по проверке — стратегия"
       }
     },
     {
@@ -1122,6 +1200,11 @@
       "connections": {
         "true": "reassess-contract",
         "false": "finalize-blocked"
+      },
+      "progressNodeId": "validation",
+      "connectionLabels": {
+        "true": "проверка упирается в критерии контракта",
+        "false": "проверить пакет нечем"
       }
     },
     {
@@ -1284,7 +1367,8 @@
       },
       "connections": {
         "success": "route-review-pass"
-      }
+      },
+      "progressNodeId": "review"
     },
     {
       "id": "route-review-pass",
@@ -1299,6 +1383,10 @@
       "connections": {
         "true": "route-mode",
         "false": "route-review-repair"
+      },
+      "progressNodeId": "review",
+      "connectionLabels": {
+        "true": "ревью приняло пакет"
       }
     },
     {
@@ -1314,7 +1402,8 @@
       "connections": {
         "true": "route-review-package",
         "false": "route-review-replan"
-      }
+      },
+      "progressNodeId": "review"
     },
     {
       "id": "route-review-package",
@@ -1329,6 +1418,10 @@
       "connections": {
         "true": "repair-package-semantic",
         "false": "route-review-evidence"
+      },
+      "progressNodeId": "review",
+      "connectionLabels": {
+        "true": "виновник по ревью — материалы"
       }
     },
     {
@@ -1344,6 +1437,11 @@
       "connections": {
         "true": "repair-evidence-semantic",
         "false": "repair-strategy-semantic"
+      },
+      "progressNodeId": "review",
+      "connectionLabels": {
+        "true": "виновник по ревью — свидетельства",
+        "false": "виновник по ревью — стратегия"
       }
     },
     {
@@ -1359,6 +1457,11 @@
       "connections": {
         "true": "reassess-contract",
         "false": "finalize-blocked"
+      },
+      "progressNodeId": "review",
+      "connectionLabels": {
+        "true": "ревью требует пересмотра контракта",
+        "false": "ревью назвало неустранимый блокер"
       }
     },
     {
@@ -1484,7 +1587,8 @@
       },
       "connections": {
         "success": "repair-package-validation-changed"
-      }
+      },
+      "progressNodeId": "repair-package"
     },
     {
       "id": "repair-package-validation-changed",
@@ -1499,6 +1603,16 @@
       "connections": {
         "true": "complete-package",
         "false": "repair-package-validation-blocked"
+      },
+      "progressNodeId": "repair-package",
+      "connectionLabels": {
+        "true": {
+          "label": "материалы исправлены по детерминированной проверке",
+          "cycle": {
+            "cause": "Проверка нашла дефекты самих материалов, и после их исправления завершающий проход и обе проверки надо пройти заново.",
+            "exit": "Заканчивается пакетом, прошедшим детерминированную проверку и независимое ревью, пересмотром контракта или остановкой."
+          }
+        }
       }
     },
     {
@@ -1514,6 +1628,11 @@
       "connections": {
         "true": "finalize-blocked",
         "false": "reassess-contract"
+      },
+      "progressNodeId": "repair-package",
+      "connectionLabels": {
+        "true": "дефект материалов неустраним",
+        "false": "ремонт материалов упирается в критерии контракта"
       }
     },
     {
@@ -1639,7 +1758,8 @@
       },
       "connections": {
         "success": "repair-package-semantic-changed"
-      }
+      },
+      "progressNodeId": "repair-package"
     },
     {
       "id": "repair-package-semantic-changed",
@@ -1654,6 +1774,16 @@
       "connections": {
         "true": "complete-package",
         "false": "repair-package-semantic-blocked"
+      },
+      "progressNodeId": "repair-package",
+      "connectionLabels": {
+        "true": {
+          "label": "материалы исправлены по ревью",
+          "cycle": {
+            "cause": "Независимое ревью нашло дефекты самих материалов, и после их исправления завершающий проход и обе проверки надо пройти заново.",
+            "exit": "Заканчивается пакетом, прошедшим детерминированную проверку и независимое ревью, пересмотром контракта или остановкой."
+          }
+        }
       }
     },
     {
@@ -1669,6 +1799,11 @@
       "connections": {
         "true": "finalize-blocked",
         "false": "reassess-contract"
+      },
+      "progressNodeId": "repair-package",
+      "connectionLabels": {
+        "true": "дефект материалов неустраним",
+        "false": "ремонт материалов упирается в критерии контракта"
       }
     },
     {
@@ -1794,7 +1929,8 @@
       },
       "connections": {
         "success": "repair-evidence-validation-changed"
-      }
+      },
+      "progressNodeId": "repair-evidence"
     },
     {
       "id": "repair-evidence-validation-changed",
@@ -1809,6 +1945,16 @@
       "connections": {
         "true": "create-package",
         "false": "repair-evidence-validation-blocked"
+      },
+      "progressNodeId": "repair-evidence",
+      "connectionLabels": {
+        "true": {
+          "label": "свидетельства исправлены по детерминированной проверке",
+          "cycle": {
+            "cause": "База свидетельств, на которую опирались материалы, изменилась, поэтому материалы собираются заново.",
+            "exit": "Заканчивается пакетом, прошедшим детерминированную проверку и независимое ревью, пересмотром контракта или остановкой."
+          }
+        }
       }
     },
     {
@@ -1824,6 +1970,11 @@
       "connections": {
         "true": "finalize-blocked",
         "false": "reassess-contract"
+      },
+      "progressNodeId": "repair-evidence",
+      "connectionLabels": {
+        "true": "дефект свидетельств неустраним",
+        "false": "ремонт свидетельств упирается в критерии контракта"
       }
     },
     {
@@ -1949,7 +2100,8 @@
       },
       "connections": {
         "success": "repair-evidence-semantic-changed"
-      }
+      },
+      "progressNodeId": "repair-evidence"
     },
     {
       "id": "repair-evidence-semantic-changed",
@@ -1964,6 +2116,16 @@
       "connections": {
         "true": "create-package",
         "false": "repair-evidence-semantic-blocked"
+      },
+      "progressNodeId": "repair-evidence",
+      "connectionLabels": {
+        "true": {
+          "label": "свидетельства исправлены по ревью",
+          "cycle": {
+            "cause": "База свидетельств, на которую опирались материалы, изменилась, поэтому материалы собираются заново.",
+            "exit": "Заканчивается пакетом, прошедшим детерминированную проверку и независимое ревью, пересмотром контракта или остановкой."
+          }
+        }
       }
     },
     {
@@ -1979,6 +2141,11 @@
       "connections": {
         "true": "finalize-blocked",
         "false": "reassess-contract"
+      },
+      "progressNodeId": "repair-evidence",
+      "connectionLabels": {
+        "true": "дефект свидетельств неустраним",
+        "false": "ремонт свидетельств упирается в критерии контракта"
       }
     },
     {
@@ -2104,7 +2271,8 @@
       },
       "connections": {
         "success": "repair-strategy-validation-changed"
-      }
+      },
+      "progressNodeId": "repair-strategy"
     },
     {
       "id": "repair-strategy-validation-changed",
@@ -2119,6 +2287,16 @@
       "connections": {
         "true": "build-evidence",
         "false": "repair-strategy-validation-blocked"
+      },
+      "progressNodeId": "repair-strategy",
+      "connectionLabels": {
+        "true": {
+          "label": "стратегия исправлена по детерминированной проверке",
+          "cycle": {
+            "cause": "Стратегия изменилась, поэтому вся выведенная из неё работа — сначала свидетельства, затем материалы — делается заново.",
+            "exit": "Заканчивается пакетом, прошедшим детерминированную проверку и независимое ревью, пересмотром контракта или остановкой."
+          }
+        }
       }
     },
     {
@@ -2134,6 +2312,11 @@
       "connections": {
         "true": "finalize-blocked",
         "false": "reassess-contract"
+      },
+      "progressNodeId": "repair-strategy",
+      "connectionLabels": {
+        "true": "дефект стратегии неустраним",
+        "false": "ремонт стратегии упирается в критерии контракта"
       }
     },
     {
@@ -2259,7 +2442,8 @@
       },
       "connections": {
         "success": "repair-strategy-semantic-changed"
-      }
+      },
+      "progressNodeId": "repair-strategy"
     },
     {
       "id": "repair-strategy-semantic-changed",
@@ -2274,6 +2458,16 @@
       "connections": {
         "true": "build-evidence",
         "false": "repair-strategy-semantic-blocked"
+      },
+      "progressNodeId": "repair-strategy",
+      "connectionLabels": {
+        "true": {
+          "label": "стратегия исправлена по ревью",
+          "cycle": {
+            "cause": "Стратегия изменилась, поэтому вся выведенная из неё работа — сначала свидетельства, затем материалы — делается заново.",
+            "exit": "Заканчивается пакетом, прошедшим детерминированную проверку и независимое ревью, пересмотром контракта или остановкой."
+          }
+        }
       }
     },
     {
@@ -2289,6 +2483,11 @@
       "connections": {
         "true": "finalize-blocked",
         "false": "reassess-contract"
+      },
+      "progressNodeId": "repair-strategy",
+      "connectionLabels": {
+        "true": "дефект стратегии неустраним",
+        "false": "ремонт стратегии упирается в критерии контракта"
       }
     },
     {
@@ -2371,7 +2570,8 @@
       },
       "connections": {
         "success": "route-reassessment-corrected"
-      }
+      },
+      "progressNodeId": "reassess"
     },
     {
       "id": "route-reassessment-corrected",
@@ -2386,6 +2586,10 @@
       "connections": {
         "true": "corrected-contract-review",
         "false": "finalize-blocked"
+      },
+      "progressNodeId": "reassess",
+      "connectionLabels": {
+        "false": "исправить контракт нечем"
       }
     },
     {
@@ -2484,7 +2688,8 @@
       },
       "connections": {
         "success": "route-contract-review-pass"
-      }
+      },
+      "progressNodeId": "reassess"
     },
     {
       "id": "route-contract-review-pass",
@@ -2499,7 +2704,8 @@
       "connections": {
         "true": "route-reentry-strategy",
         "false": "route-contract-review-blocked"
-      }
+      },
+      "progressNodeId": "reassess"
     },
     {
       "id": "route-contract-review-blocked",
@@ -2514,6 +2720,17 @@
       "connections": {
         "true": "finalize-blocked",
         "false": "reassess-contract"
+      },
+      "progressNodeId": "reassess",
+      "connectionLabels": {
+        "true": "ревью поправки назвало неустранимый блокер",
+        "false": {
+          "label": "поправка контракта вернулась на доработку",
+          "cycle": {
+            "cause": "Независимое ревью не приняло поправку и не признало её неустранимой, поэтому дополнение к контракту переписывают заново.",
+            "exit": "Заканчивается принятой поправкой или остановкой."
+          }
+        }
       }
     },
     {
@@ -2529,6 +2746,16 @@
       "connections": {
         "true": "frame-strategy",
         "false": "route-reentry-evidence"
+      },
+      "progressNodeId": "reassess",
+      "connectionLabels": {
+        "true": {
+          "label": "поправка обесценила стратегию",
+          "cycle": {
+            "cause": "Принятая поправка контракта сделала устаревшей стратегию, а вместе с ней и всю выведенную из неё работу.",
+            "exit": "Заканчивается принятым пакетом и итоговым отчётом либо остановкой."
+          }
+        }
       }
     },
     {
@@ -2544,6 +2771,16 @@
       "connections": {
         "true": "build-evidence",
         "false": "route-reentry-package"
+      },
+      "progressNodeId": "reassess",
+      "connectionLabels": {
+        "true": {
+          "label": "поправка обесценила свидетельства",
+          "cycle": {
+            "cause": "Принятая поправка контракта сделала устаревшей базу свидетельств, тогда как стратегия осталась в силе.",
+            "exit": "Заканчивается принятым пакетом и итоговым отчётом либо остановкой."
+          }
+        }
       }
     },
     {
@@ -2559,6 +2796,23 @@
       "connections": {
         "true": "create-package",
         "false": "complete-package"
+      },
+      "progressNodeId": "reassess",
+      "connectionLabels": {
+        "true": {
+          "label": "поправка обесценила материалы",
+          "cycle": {
+            "cause": "Принятая поправка контракта затронула только сами материалы кампании.",
+            "exit": "Заканчивается принятым пакетом и итоговым отчётом либо остановкой."
+          }
+        },
+        "false": {
+          "label": "поправке хватает нового завершающего прохода",
+          "cycle": {
+            "cause": "Принятая поправка не затронула ни стратегию, ни свидетельства, ни материалы: достаточно заново объявить класс результата и пройти проверки.",
+            "exit": "Заканчивается принятым пакетом и итоговым отчётом либо остановкой."
+          }
+        }
       }
     },
     {
@@ -2574,6 +2828,10 @@
       "connections": {
         "true": "interactive-acceptance",
         "false": "route-final-status"
+      },
+      "progressNodeId": "acceptance",
+      "connectionLabels": {
+        "false": "автономный режим: приёмка не проводится"
       }
     },
     {
@@ -2655,7 +2913,8 @@
       },
       "connections": {
         "success": "route-user-accept"
-      }
+      },
+      "progressNodeId": "acceptance"
     },
     {
       "id": "route-user-accept",
@@ -2670,6 +2929,10 @@
       "connections": {
         "true": "route-final-status",
         "false": "route-user-abort"
+      },
+      "progressNodeId": "acceptance",
+      "connectionLabels": {
+        "true": "пользователь принял пакет"
       }
     },
     {
@@ -2685,6 +2948,10 @@
       "connections": {
         "true": "finalize-aborted",
         "false": "route-rework-strategy"
+      },
+      "progressNodeId": "acceptance",
+      "connectionLabels": {
+        "true": "пользователь прервал запуск"
       }
     },
     {
@@ -2700,6 +2967,16 @@
       "connections": {
         "true": "frame-strategy",
         "false": "route-rework-evidence"
+      },
+      "progressNodeId": "acceptance",
+      "connectionLabels": {
+        "true": {
+          "label": "доработка: виновник — стратегия",
+          "cycle": {
+            "cause": "Пользователь запросил доработку и назвал её виновником стратегию, из которой выведена вся остальная работа.",
+            "exit": "Заканчивается принятым пользователем пакетом, прерыванием или остановкой."
+          }
+        }
       }
     },
     {
@@ -2715,6 +2992,16 @@
       "connections": {
         "true": "build-evidence",
         "false": "route-rework-package"
+      },
+      "progressNodeId": "acceptance",
+      "connectionLabels": {
+        "true": {
+          "label": "доработка: виновник — свидетельства",
+          "cycle": {
+            "cause": "Пользователь запросил доработку и назвал её виновником базу свидетельств; стратегия остаётся в силе.",
+            "exit": "Заканчивается принятым пользователем пакетом, прерыванием или остановкой."
+          }
+        }
       }
     },
     {
@@ -2730,6 +3017,23 @@
       "connections": {
         "true": "create-package",
         "false": "reassess-contract"
+      },
+      "progressNodeId": "acceptance",
+      "connectionLabels": {
+        "true": {
+          "label": "доработка: виновник — материалы",
+          "cycle": {
+            "cause": "Пользователь запросил доработку и назвал её виновником сами материалы кампании.",
+            "exit": "Заканчивается принятым пользователем пакетом, прерыванием или остановкой."
+          }
+        },
+        "false": {
+          "label": "доработка: виновник — контракт",
+          "cycle": {
+            "cause": "Пользователь назвал виновником сам контракт, поэтому доработка идёт через поправку критериев, а не через правку артефакта.",
+            "exit": "Заканчивается принятым пользователем пакетом, прерыванием или остановкой."
+          }
+        }
       }
     },
     {
@@ -2745,7 +3049,8 @@
       "connections": {
         "true": "finalize-complete",
         "false": "finalize-limited"
-      }
+      },
+      "progressNodeId": "delivery"
     },
     {
       "id": "finalize-complete",
@@ -2776,7 +3081,8 @@
       },
       "connections": {
         "success": "end"
-      }
+      },
+      "progressNodeId": "delivery"
     },
     {
       "id": "finalize-limited",
@@ -2807,7 +3113,8 @@
       },
       "connections": {
         "success": "end-limited"
-      }
+      },
+      "progressNodeId": "delivery"
     },
     {
       "id": "finalize-blocked",
@@ -2838,7 +3145,8 @@
       },
       "connections": {
         "success": "end-blocked"
-      }
+      },
+      "progressNodeId": "stop"
     },
     {
       "id": "finalize-aborted",
@@ -2869,7 +3177,8 @@
       },
       "connections": {
         "success": "end-aborted"
-      }
+      },
+      "progressNodeId": "stop"
     },
     {
       "id": "finalize-workspace-blocked",
@@ -2900,7 +3209,8 @@
       },
       "connections": {
         "success": "end-workspace-blocked"
-      }
+      },
+      "progressNodeId": "stop"
     },
     {
       "id": "end",
@@ -2910,7 +3220,8 @@
         "artifact_path",
         "campaign_summary",
         "limitation_summary"
-      ]
+      ],
+      "progressNodeId": "delivery"
     },
     {
       "id": "end-limited",
@@ -2920,7 +3231,8 @@
         "artifact_path",
         "campaign_summary",
         "limitation_summary"
-      ]
+      ],
+      "progressNodeId": "delivery"
     },
     {
       "id": "end-blocked",
@@ -2929,7 +3241,8 @@
         "terminal_status",
         "artifact_path",
         "terminal_reason"
-      ]
+      ],
+      "progressNodeId": "stop"
     },
     {
       "id": "end-aborted",
@@ -2937,7 +3250,8 @@
       "finalOutput": [
         "terminal_status",
         "artifact_path"
-      ]
+      ],
+      "progressNodeId": "stop"
     },
     {
       "id": "end-workspace-blocked",
@@ -2945,7 +3259,8 @@
       "finalOutput": [
         "terminal_status",
         "terminal_reason"
-      ]
+      ],
+      "progressNodeId": "stop"
     },
     {
       "id": "revise-process",
@@ -2980,7 +3295,8 @@
       },
       "connections": {
         "success": "reassess-contract"
-      }
+      },
+      "progressNodeId": "reassess"
     },
     {
       "id": "finalize-intake-blocked",
@@ -3009,7 +3325,8 @@
       },
       "connections": {
         "success": "end-intake-blocked"
-      }
+      },
+      "progressNodeId": "stop"
     },
     {
       "id": "end-intake-blocked",
@@ -3017,7 +3334,8 @@
       "finalOutput": [
         "terminal_status",
         "terminal_reason"
-      ]
+      ],
+      "progressNodeId": "stop"
     }
   ],
   "variableRegistry": {
@@ -3137,5 +3455,116 @@
     }
   },
   "owner": "system-moira",
-  "visibility": "public"
+  "visibility": "public",
+  "progress": {
+    "title": "Кампания",
+    "goal": "Собрать по одному разрешённому продукту готовый к каналам пакет маркетинговых материалов, где каждое существенное утверждение опирается на названное свидетельство или честно объявлено гипотезой.",
+    "nodes": [
+      {
+        "id": "intake",
+        "label": "Приём заявки",
+        "content": {
+          "summary": "Определяются одна ограниченная цель кампании, для какого решения она нужна, запрошенные каналы и материалы, переданные свидетельства и полномочия, ограничения бренда и права, режим работы. Ничего о продукте, клиентах, конкурентах и разрешениях не выдумывается: заявка либо пригодна, либо запуск останавливается ещё до создания каталога."
+        }
+      },
+      {
+        "id": "contract",
+        "label": "Рабочее пространство и контракт",
+        "content": {
+          "summary": "Создаётся локальный каталог запуска, и в нём единственный раз записывается неизменяемый контракт кампании: исходная цель, применение, объём, переданные свидетельства, ограничения и полномочия. Позднейшие поправки сюда никогда не вносятся — они живут отдельным дополнением."
+        }
+      },
+      {
+        "id": "strategy",
+        "label": "Стратегия",
+        "content": {
+          "summary": "По контракту и действующей заявке на правку пишется стратегия: правда о продукте, аудитория и её задачи, запрошенные каналы, разрешённый разбор конкурентов, позиционирование, сообщения и последствия для решения. Кончается пригодной стратегией, пересмотром контракта или остановкой."
+        }
+      },
+      {
+        "id": "evidence",
+        "label": "Свидетельства и ограничения",
+        "content": {
+          "summary": "Собираются реестр свидетельств и свод ограничений бренда и права: каждое существенное утверждение привязывается к подтверждению, к заявлению клиента, к гипотезе или к прямому пробелу. Кончается базой, пригодной полностью или с названными ограничениями, пересмотром контракта или остановкой."
+        }
+      },
+      {
+        "id": "package",
+        "label": "Материалы кампании",
+        "content": {
+          "summary": "Пишутся сами материалы, готовые к каналам: тексты с призывом к действию, указанием опоры каждого утверждения и видимыми границами применимости, а рядом — отдельный перечень ограничений пакета."
+        }
+      },
+      {
+        "id": "completion",
+        "label": "Завершение производителем",
+        "content": {
+          "summary": "Свежим проходом сверяются контракт, стратегия, свидетельства, ограничения бренда и права, материалы и перечень ограничений, и закрываются предвидимые пропуски. Здесь и только здесь объявляется класс результата — полный или ограниченный — вместе с итоговой сводкой."
+        }
+      },
+      {
+        "id": "validation",
+        "label": "Детерминированная проверка",
+        "content": {
+          "summary": "Механически проверяются наличие требуемых файлов, их разбираемость, ссылки и то, что каждое утверждение действительно указывает на запись в реестре свидетельств. Смысл здесь не оценивается: проверка либо пропускает пакет дальше, либо называет одного виновника ремонта."
+        }
+      },
+      {
+        "id": "review",
+        "label": "Независимое ревью",
+        "content": {
+          "summary": "Отдельный исполнитель читает первичные свидетельства и сам пакет и судит попадание в аудиторию, отличие от конкурентов, происхождение утверждений, цельность бренда, правовой риск и пользу для конверсии. Кончается принятием, назначением одного виновника ремонта, пересмотром контракта или остановкой."
+        }
+      },
+      {
+        "id": "repair-package",
+        "label": "Ремонт материалов",
+        "content": {
+          "summary": "Когда виновником названы сами материалы, воспроизводятся все замечания своей проверки и чинится весь подтверждённый класс дефектов в материалах и перечне ограничений. Стратегия и свидетельства при этом не меняются, а изменённый пакет идёт на новый завершающий проход."
+        }
+      },
+      {
+        "id": "repair-evidence",
+        "label": "Ремонт свидетельств",
+        "content": {
+          "summary": "Когда виновником названы свидетельства, чинится весь подтверждённый класс дефектов в реестре свидетельств и своде ограничений бренда и права. Материалы после этого собираются заново, потому что опирались на изменившуюся базу."
+        }
+      },
+      {
+        "id": "repair-strategy",
+        "label": "Ремонт стратегии",
+        "content": {
+          "summary": "Когда виновником названа стратегия, чинится весь подтверждённый класс дефектов в ней самой. Заново переделывается вся производная работа: сначала свидетельства, затем материалы — потому что и то и другое выводилось из стратегии."
+        }
+      },
+      {
+        "id": "reassess",
+        "label": "Пересмотр контракта",
+        "content": {
+          "summary": "Когда неверен сам критерий, а не артефакт, действующая заявка на правку сверяется с неизменяемым контрактом и переписывается накопительное дополнение к нему, которое затем проверяет независимый исполнитель. Принятая поправка называет самую раннюю стадию, ставшую устаревшей, и работа возвращается именно туда."
+        }
+      },
+      {
+        "id": "acceptance",
+        "label": "Приёмка",
+        "content": {
+          "summary": "В интерактивном режиме принятый ревью пакет показывают пользователю: он принимает его, прерывает запуск или называет одного виновника доработки — стратегию, свидетельства, материалы или контракт. В автономном режиме запуск проходит стадию только маршрутом, и приёмка не проводится."
+        }
+      },
+      {
+        "id": "delivery",
+        "label": "Итог",
+        "content": {
+          "summary": "По объявленному ранее классу результата пишется итоговый отчёт: полный — без переоценки пакета, ограниченный — с заметно сохранёнными ограничениями. Запуск завершается локальным пакетом: ничего не публикуется, не рассылается и не запускается в каналах."
+        }
+      },
+      {
+        "id": "stop",
+        "label": "Остановка",
+        "content": {
+          "summary": "Работа кончается без принятого пакета: непригодная заявка ещё до каталога, несозданный каталог, неустранимый блокер или прямое прерывание пользователем. Называются фактическая причина, уже сделанная полезная работа и действие для возобновления."
+        }
+      }
+    ]
+  }
 }

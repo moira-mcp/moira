@@ -75,21 +75,20 @@ A working URL is necessary but does not prove that a source is authoritative, cu
 
 ## Authority boundary
 
-Completion is local. Verified Research does not upload an artifact, send a notification, commit code, deploy, or mutate production. Use a separate authorized task when external publication or delivery is required.
+Completion is local, and the user is notified through their configured channels when the result is ready; a failed notification is reported and never replaces the result. Verified Research does not upload an artifact, commit code, deploy, or mutate production. Use a separate authorized task when external publication or delivery is required.
+
+Before any source is acquired, an independent check confirms that the planned sources and access methods stay inside the confidentiality ceiling captured with the question. Repair rounds raised by independent review are bounded: when the budget is exhausted, an autonomous run finishes with an explicitly procedural limitation and an interactive run asks once whether to continue. When no workspace can be created, the run continues from memory and its result is limited with the storage limitation named.
 
 ## Choosing a research workflow
 
 | Need | Workflow |
 | --- | --- |
 | One bounded question and one independently reviewed source-linked answer | `moira/verified-research` |
-| Repeated filesystem-first critique and improvement | `moira/iterative-research` |
-| Adaptive filesystem-or-memory operation and explicit source/privacy authority | `moira/universal-research-workflow` |
+| Repeated independent critique bounded by a repair budget, and work without a writable workspace | `moira/verified-research` |
 | Separately authorized exhaustive work over a large corpus | Deep Corpus Research |
 | Analysis of datasets already supplied or authorized | [Data Analysis](/docs/reference/workflows/data-analysis/) |
 
 ## Related
 
-- [Iterative Research](/docs/reference/workflows/iterative-research/)
-- [Universal Research Workflow](/docs/reference/workflows/universal-research-workflow/)
 - [Data Analysis](/docs/reference/workflows/data-analysis/)
 - [Workflow Templates Overview](/docs/reference/workflow-templates/)

@@ -3,8 +3,14 @@
   "id": "5495dafe-f731-4ca8-ba1b-f740f8516893",
   "metadata": {
     "name": "Telegram Setup",
-    "version": "2.0.3",
-    "description": "Interactive, secret-safe setup and verification of the current user's Moira Telegram notifications. It inspects masked existing settings, lets the user test or explicitly replace them, guides bot and chat-ID setup without storing credentials in workflow state, writes only telegram.bot_token, telegram.chat_id and telegram.enabled through the supported settings tool, verifies masked persisted state, sends a bounded secret-free test, and distinguishes handler send, user receipt, changed-evidence retry, reconfiguration, incomplete, blocked and skipped outcomes. Final output never contains the bot token or full chat ID. On an unconfigured account, start this bootstrap workflow with skipNotificationCheck: true because its own legacy test node would otherwise trigger ordinary-notification preflight. skipTelegramCheck remains a deprecated compatibility alias."
+    "version": "2.1.0",
+    "description": "Interactive, secret-safe setup and verification of the current user's Moira Telegram notifications. It inspects masked existing settings, lets the user test or explicitly replace them, guides bot and chat-ID setup without storing credentials in workflow state, writes only telegram.bot_token, telegram.chat_id and telegram.enabled through the supported settings tool, verifies masked persisted state, sends a bounded secret-free test, and distinguishes handler send, user receipt, changed-evidence retry, reconfiguration, incomplete, blocked and skipped outcomes. Final output never contains the bot token or full chat ID. On an unconfigured account, start this bootstrap workflow with skipNotificationCheck: true because its own legacy test node would otherwise trigger ordinary-notification preflight. skipTelegramCheck remains a deprecated compatibility alias.",
+    "tags": [
+      "telegram",
+      "настройка",
+      "уведомления",
+      "интеграция"
+    ]
   },
   "variableRegistry": {},
   "nodes": [
@@ -13,7 +19,8 @@
       "type": "start",
       "connections": {
         "default": "resolve-setup"
-      }
+      },
+      "progressNodeId": "intake"
     },
     {
       "id": "resolve-setup",
@@ -81,7 +88,8 @@
       },
       "connections": {
         "success": "route-skipped"
-      }
+      },
+      "progressNodeId": "intake"
     },
     {
       "id": "route-skipped",
@@ -96,6 +104,10 @@
       "connections": {
         "true": "end-skipped",
         "false": "route-blocked"
+      },
+      "progressNodeId": "intake",
+      "connectionLabels": {
+        "true": "пользователь отказался от настройки"
       }
     },
     {
@@ -111,6 +123,10 @@
       "connections": {
         "true": "end-blocked",
         "false": "route-configure"
+      },
+      "progressNodeId": "intake",
+      "connectionLabels": {
+        "true": "настройку нельзя начать"
       }
     },
     {
@@ -126,6 +142,11 @@
       "connections": {
         "true": "configure-settings",
         "false": "test-notification"
+      },
+      "progressNodeId": "intake",
+      "connectionLabels": {
+        "true": "настройки нужно задать или заменить",
+        "false": "настройки уже есть — проверяем их как есть"
       }
     },
     {
@@ -203,7 +224,8 @@
       },
       "connections": {
         "success": "route-configured"
-      }
+      },
+      "progressNodeId": "configure"
     },
     {
       "id": "route-configured",
@@ -218,6 +240,11 @@
       "connections": {
         "true": "test-notification",
         "false": "end-blocked"
+      },
+      "progressNodeId": "configure",
+      "connectionLabels": {
+        "true": "бот и чат записаны",
+        "false": "записать настройки не удалось"
       }
     },
     {
@@ -228,6 +255,10 @@
       "connections": {
         "default": "route-test-sent",
         "error": "recovery-send-error"
+      },
+      "progressNodeId": "test",
+      "connectionLabels": {
+        "error": "обработчик вернул ошибку отправки"
       }
     },
     {
@@ -243,6 +274,11 @@
       "connections": {
         "true": "confirm-received",
         "false": "recovery-not-sent"
+      },
+      "progressNodeId": "test",
+      "connectionLabels": {
+        "true": "обработчик принял отправку",
+        "false": "принятой отправки не было"
       }
     },
     {
@@ -274,7 +310,8 @@
       },
       "connections": {
         "success": "route-received"
-      }
+      },
+      "progressNodeId": "receipt"
     },
     {
       "id": "route-received",
@@ -289,6 +326,11 @@
       "connections": {
         "true": "end-success",
         "false": "recovery-not-received"
+      },
+      "progressNodeId": "receipt",
+      "connectionLabels": {
+        "true": "пользователь получил сообщение в нужном чате",
+        "false": "сообщение до пользователя не дошло"
       }
     },
     {
@@ -359,7 +401,8 @@
       },
       "connections": {
         "success": "route-retry-send-error"
-      }
+      },
+      "progressNodeId": "recovery"
     },
     {
       "id": "recovery-not-sent",
@@ -429,7 +472,8 @@
       },
       "connections": {
         "success": "route-retry-not-sent"
-      }
+      },
+      "progressNodeId": "recovery"
     },
     {
       "id": "recovery-not-received",
@@ -499,7 +543,8 @@
       },
       "connections": {
         "success": "route-retry-not-received"
-      }
+      },
+      "progressNodeId": "recovery"
     },
     {
       "id": "route-retry-send-error",
@@ -514,6 +559,16 @@
       "connections": {
         "true": "test-notification",
         "false": "route-reconfigure-send-error"
+      },
+      "progressNodeId": "recovery",
+      "connectionLabels": {
+        "true": {
+          "label": "пользователь назвал изменившееся условие — отправляем снова",
+          "cycle": {
+            "cause": "Обработчик вернул ошибку отправки, и пользователь сообщил об изменившемся условии, после которого попытку имеет смысл повторить.",
+            "exit": "Заканчивается полученным сообщением, перенастройкой бота и чата или завершением без работающих уведомлений."
+          }
+        }
       }
     },
     {
@@ -529,6 +584,17 @@
       "connections": {
         "true": "configure-settings",
         "false": "end-incomplete-send-error"
+      },
+      "progressNodeId": "recovery",
+      "connectionLabels": {
+        "true": {
+          "label": "пользователь решил задать бот и чат заново",
+          "cycle": {
+            "cause": "Ошибка отправки указывает на непригодные токен или чат, и пользователь выбрал перенастройку вместо повторной отправки.",
+            "exit": "Заканчивается полученным сообщением, невозможностью записать настройки или завершением без работающих уведомлений."
+          }
+        },
+        "false": "пользователь закончил без работающих уведомлений"
       }
     },
     {
@@ -539,7 +605,8 @@
         "configure-settings.configuration_summary",
         "recovery-send-error.recovery_action",
         "recovery-send-error.recovery_summary"
-      ]
+      ],
+      "progressNodeId": "incomplete"
     },
     {
       "id": "route-retry-not-sent",
@@ -554,6 +621,16 @@
       "connections": {
         "true": "test-notification",
         "false": "route-reconfigure-not-sent"
+      },
+      "progressNodeId": "recovery",
+      "connectionLabels": {
+        "true": {
+          "label": "пользователь назвал изменившееся условие — отправляем снова",
+          "cycle": {
+            "cause": "Принятой отправки не наблюдалось, и пользователь сообщил об изменившемся условии, после которого попытку имеет смысл повторить.",
+            "exit": "Заканчивается полученным сообщением, перенастройкой бота и чата или завершением без работающих уведомлений."
+          }
+        }
       }
     },
     {
@@ -569,6 +646,17 @@
       "connections": {
         "true": "configure-settings",
         "false": "end-incomplete-not-sent"
+      },
+      "progressNodeId": "recovery",
+      "connectionLabels": {
+        "true": {
+          "label": "пользователь решил задать бот и чат заново",
+          "cycle": {
+            "cause": "Принятой отправки не наблюдалось, и пользователь выбрал задать бот и чат заново, а не повторять попытку.",
+            "exit": "Заканчивается полученным сообщением, невозможностью записать настройки или завершением без работающих уведомлений."
+          }
+        },
+        "false": "пользователь закончил без работающих уведомлений"
       }
     },
     {
@@ -579,7 +667,8 @@
         "configure-settings.configuration_summary",
         "recovery-not-sent.recovery_action",
         "recovery-not-sent.recovery_summary"
-      ]
+      ],
+      "progressNodeId": "incomplete"
     },
     {
       "id": "route-retry-not-received",
@@ -594,6 +683,16 @@
       "connections": {
         "true": "test-notification",
         "false": "route-reconfigure-not-received"
+      },
+      "progressNodeId": "recovery",
+      "connectionLabels": {
+        "true": {
+          "label": "пользователь назвал изменившееся условие — отправляем снова",
+          "cycle": {
+            "cause": "Отправка была принята, но сообщение не дошло, и пользователь сообщил об изменившемся условии, после которого попытку имеет смысл повторить.",
+            "exit": "Заканчивается полученным сообщением, перенастройкой бота и чата или завершением без работающих уведомлений."
+          }
+        }
       }
     },
     {
@@ -609,6 +708,17 @@
       "connections": {
         "true": "configure-settings",
         "false": "end-incomplete-not-received"
+      },
+      "progressNodeId": "recovery",
+      "connectionLabels": {
+        "true": {
+          "label": "пользователь решил задать бот и чат заново",
+          "cycle": {
+            "cause": "Отправка принята, но сообщение не дошло, и пользователь выбрал задать бот и чат заново — вероятно, указан не тот чат.",
+            "exit": "Заканчивается полученным сообщением, невозможностью записать настройки или завершением без работающих уведомлений."
+          }
+        },
+        "false": "пользователь закончил без работающих уведомлений"
       }
     },
     {
@@ -619,7 +729,8 @@
         "configure-settings.configuration_summary",
         "recovery-not-received.recovery_action",
         "recovery-not-received.recovery_summary"
-      ]
+      ],
+      "progressNodeId": "incomplete"
     },
     {
       "id": "end-success",
@@ -629,7 +740,8 @@
         "configure-settings.configuration_summary",
         "confirm-received.receipt_status",
         "confirm-received.receipt_summary"
-      ]
+      ],
+      "progressNodeId": "success"
     },
     {
       "id": "end-blocked",
@@ -638,7 +750,8 @@
         "resolve-setup.setup_path",
         "resolve-setup.blocker_reason",
         "configure-settings.blocker_reason"
-      ]
+      ],
+      "progressNodeId": "blocked"
     },
     {
       "id": "end-skipped",
@@ -646,9 +759,79 @@
       "finalOutput": [
         "resolve-setup.setup_path",
         "resolve-setup.outcome_summary"
-      ]
+      ],
+      "progressNodeId": "skipped"
     }
   ],
   "owner": "system-moira",
-  "visibility": "public"
+  "visibility": "public",
+  "progress": {
+    "title": "Настройка уведомлений в Telegram",
+    "goal": "Довести уведомления Moira в Telegram до состояния, подтверждённого настоящим полученным сообщением, не сохраняя секретов в состоянии запуска.",
+    "nodes": [
+      {
+        "id": "intake",
+        "label": "Что настраиваем",
+        "content": {
+          "summary": "Пользователю объясняют, что осмотрены и при необходимости заменены будут только его собственные настройки Telegram, показывают текущие значения замаскированными, и он выбирает: проверить как есть, задать заново, отказаться или признать настройку невозможной."
+        }
+      },
+      {
+        "id": "configure",
+        "label": "Бот и чат",
+        "content": {
+          "summary": "Пользователя ведут через создание или повторное использование бота у BotFather и получение нужного идентификатора чата так, чтобы токен не попал в адресную строку, историю и артефакты; записываются только токен, идентификатор чата и признак включения, а записанное перечитывается замаскированным."
+        }
+      },
+      {
+        "id": "test",
+        "label": "Тестовая отправка",
+        "content": {
+          "summary": "Обработчик отправляет в указанный чат короткое сообщение без секретов, и дальше учитывается ровно то, что он сообщил: отправка принята, отправки не было или брошена ошибка."
+        }
+      },
+      {
+        "id": "receipt",
+        "label": "Подтверждение получения",
+        "content": {
+          "summary": "Принятая отправка не является доказательством доставки, поэтому у пользователя спрашивают, действительно ли сообщение пришло в нужный чат."
+        }
+      },
+      {
+        "id": "recovery",
+        "label": "Разбор неудачи",
+        "content": {
+          "summary": "Наблюдавшаяся причина — ошибка обработчика, непринятая отправка или неполученное сообщение — объясняется пользователю, и он выбирает одно из трёх: повторить отправку, задать бот и чат заново или закончить без работающих уведомлений."
+        }
+      },
+      {
+        "id": "success",
+        "label": "Уведомления работают",
+        "content": {
+          "summary": "Настройка завершена: тестовое сообщение дошло до нужного чата, а в итоговый результат не попадают ни токен бота, ни полный идентификатор чата."
+        }
+      },
+      {
+        "id": "incomplete",
+        "label": "Настройка не завершена",
+        "content": {
+          "summary": "Запуск закончен решением пользователя после неудачной проверки, и в итоге сохраняется, что именно наблюдалось: ошибка отправки, непринятая отправка или неполученное сообщение."
+        }
+      },
+      {
+        "id": "blocked",
+        "label": "Настройка невозможна",
+        "content": {
+          "summary": "Запуск закончен тем, что настройку нельзя ни начать, ни записать: фактическая причина названа пользователю без раскрытия секретов."
+        }
+      },
+      {
+        "id": "skipped",
+        "label": "Пропуск",
+        "content": {
+          "summary": "Пользователь отказался от осмотра и замены настроек, поэтому ничего не менялось и тестовое сообщение не отправлялось."
+        }
+      }
+    ]
+  }
 }

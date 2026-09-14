@@ -5,8 +5,13 @@
   "id": "bc9be4e1-78d3-43e0-a512-6a571c24f7e2",
   "metadata": {
     "name": "PRD Creation Workflow",
-    "version": "2.0.0",
-    "description": "Creates an independently reviewed, evidence-grounded Product Requirements Document (PRD) for a product problem, feature, change, API, page, module, or system. It inspects supplied requirements and authorized project or research evidence, records honest evidence gaps and applicability decisions, and defines problem, personas, urgency, cost of inaction, solution rationale and alternatives, in and out scope, constraints, dependencies, traceable prioritized requirements and observable acceptance criteria, linked user stories, relevant edge and recovery behavior, measurable metrics, assumptions, risks, open questions, limitations, and readiness. In one traversal-safe local workspace it writes prd-requirements.md, addressed prd-standards.md, a strict canonical prd.contract.json, and its readable prd.md projection. An independent file-backed reviewer checks evidence, traceability, completeness, internal consistency, JSON-to-Markdown equality, and authority; any finding enters repair and the same review repeats, so delivery is unreachable while known blocking gaps remain. The terminal result identifies the accepted durable PRD. This workflow creates only local PRD artifacts: it does not implement the product, modify project files, execute tests, use VCS, publish, notify, or deploy. Choose PRD Creation when the deliverable is reviewed product requirements; choose UX Design for experience design, Architecture Design for technical architecture, Test Planning or Test Generation for verification artifacts, or Software Development Flow for implementation with tests and documentation."
+    "version": "2.1.0",
+    "description": "Creates an independently reviewed, evidence-grounded Product Requirements Document (PRD) for a product problem, feature, change, API, page, module, or system. It inspects supplied requirements and authorized project or research evidence, records honest evidence gaps and applicability decisions, and defines problem, personas, urgency, cost of inaction, solution rationale and alternatives, in and out scope, constraints, dependencies, traceable prioritized requirements and observable acceptance criteria, linked user stories, relevant edge and recovery behavior, measurable metrics, assumptions, risks, open questions, limitations, and readiness. In one traversal-safe local workspace it writes prd-requirements.md, addressed prd-standards.md, a strict canonical prd.contract.json, and its readable prd.md projection. An independent file-backed reviewer checks evidence, traceability, completeness, internal consistency, JSON-to-Markdown equality, and authority; any finding enters repair and the same review repeats, so delivery is unreachable while known blocking gaps remain. The terminal result identifies the accepted durable PRD. This workflow creates only local PRD artifacts: it does not implement the product, modify project files, execute tests, use VCS, publish, notify, or deploy. Choose PRD Creation when the deliverable is reviewed product requirements; choose UX Design for experience design, Architecture Design for technical architecture, Test Planning or Test Generation for verification artifacts, or Software Development Flow for implementation with tests and documentation.",
+    "tags": [
+      "требования",
+      "продукт",
+      "документ"
+    ]
   },
   "nodes": [
     {
@@ -14,7 +19,8 @@
       "type": "start",
       "connections": {
         "default": "author"
-      }
+      },
+      "progressNodeId": "author"
     },
     {
       "id": "end",
@@ -22,7 +28,8 @@
       "finalOutput": [
         "workspace_path",
         "result_summary"
-      ]
+      ],
+      "progressNodeId": "deliver"
     },
     {
       "id": "author",
@@ -879,6 +886,10 @@
       },
       "connections": {
         "success": "review"
+      },
+      "progressNodeId": "author",
+      "connectionLabels": {
+        "success": "PRD artifacts written"
       }
     },
     {
@@ -899,7 +910,8 @@
       },
       "connections": {
         "success": "review-gate"
-      }
+      },
+      "progressNodeId": "review"
     },
     {
       "id": "review-gate",
@@ -914,6 +926,11 @@
       "connections": {
         "true": "present",
         "false": "repair"
+      },
+      "progressNodeId": "review",
+      "connectionLabels": {
+        "true": "no blocking findings",
+        "false": "review found blocking findings"
       }
     },
     {
@@ -934,7 +951,8 @@
       },
       "connections": {
         "success": "end"
-      }
+      },
+      "progressNodeId": "deliver"
     },
     {
       "id": "repair",
@@ -1787,6 +1805,16 @@
       },
       "connections": {
         "success": "review"
+      },
+      "progressNodeId": "repair",
+      "connectionLabels": {
+        "success": {
+          "label": "repaired PRD sent back for review",
+          "cycle": {
+            "cause": "The review recorded at least one blocking finding, so the confirmed defects are repaired in the canonical contract and its Markdown projection and the same review runs again.",
+            "exit": "A review that returns zero blocking findings, which routes the run to delivery."
+          }
+        }
       }
     }
   ],
@@ -1810,5 +1838,39 @@
       "minLength": 1,
       "maxLength": 2000
     }
+  },
+  "progress": {
+    "title": "PRD Creation",
+    "goal": "Produce one independently reviewed, evidence-grounded Product Requirements Document as durable local artifacts, without implementing anything.",
+    "nodes": [
+      {
+        "id": "author",
+        "label": "Author the PRD",
+        "content": {
+          "summary": "Read the authorized primary evidence, record the requested scope, evidence gaps and the standards every later role must meet, then write the canonical structured PRD and its readable projection into one workspace."
+        }
+      },
+      {
+        "id": "review",
+        "label": "Independent review",
+        "content": {
+          "summary": "A reviewer who did not write the document reads the workspace files and the primary evidence directly, checks evidence support, traceability, completeness and JSON-to-Markdown equality, and returns the count of blocking findings that decides what happens next."
+        }
+      },
+      {
+        "id": "repair",
+        "label": "Repair findings",
+        "content": {
+          "summary": "Reproduce every reported finding, fix the confirmed defects in the canonical contract and regenerate the Markdown so both agree, then send the corrected document back for another review."
+        }
+      },
+      {
+        "id": "deliver",
+        "label": "Present the PRD",
+        "content": {
+          "summary": "Confirm the review reports no blocking findings and hand over the durable PRD at its exact path with its problem, chosen scope, readiness, success metric and honest remaining limitations."
+        }
+      }
+    ]
   }
 }

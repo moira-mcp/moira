@@ -1,0 +1,25 @@
+---
+title: Agentic Screencast Video
+description: Builds one verified screencast video from a source-backed story, local materials, a free draft, selected narration and a permission-scoped MP4 handoff.
+---
+
+Agentic Screencast Video turns a stated subject into a finished video presentation. It fixes what the video must show and for whom, checks that the local environment can render and narrate, then works through facts, story, materials and narration, reviewing each artifact independently before the next one depends on it.
+
+```bash
+mcp__moira__start({
+  action: "prepare",
+  workflowId: "moira/agentic-screencast-video",
+  parentExecutionId: "none"
+})
+mcp__moira__start({ action: "execute", startAttemptId: "<Start attempt ID from prepare>" })
+```
+
+## Evidence and process
+
+Every claim that reaches the screen comes from a source the run recorded: facts are produced and independently reviewed before the story is written, and the story is reviewed before any material is captured. A free low-cost draft is built first, so the expensive steps — paid synthesis, a human recording session, the final render — start from a version the reviewer has already seen. Each review owns its repair route, and a defect returns to the artifact that caused it rather than to the beginning.
+
+Narration is a deliberate choice: synthetic voice, a human recording, or a silent cut. Paid synthesis is never entered without the user's authorization of that cost.
+
+## Authority
+
+The commit of produced files and the final handoff of the MP4 are separate permission gates: neither happens because a tool was available. The workflow does not publish the video, deploy anything, or mutate production.

@@ -54,6 +54,8 @@ moira-workflow --version
 
 ```bash
 moira-workflow ./workflow.json set-description --file ./description.txt
+moira-workflow ./workflow.json set-system-reminder --file ./reminder.txt
+moira-workflow ./workflow.json set-tags research,verification
 moira-workflow ./workflow.json set-variable-schema result --file ./result-schema.json
 ```
 

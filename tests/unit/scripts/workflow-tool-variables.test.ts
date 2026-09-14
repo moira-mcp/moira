@@ -593,6 +593,56 @@ describe("workflow-tool variables command", () => {
         fs.unlinkSync(descriptionFile);
       }
     });
+
+    test("set-system-reminder replaces the reminder from a file and none removes it", () => {
+      const workflow = {
+        metadata: { name: "Test", version: "1.0.0", description: "Description" },
+        systemReminder: "Follow the steps strictly in order.",
+        nodes: [
+          { id: "start", type: "start", connections: { default: "end" } },
+          { id: "end", type: "end" },
+        ],
+      };
+      const tmpFile = createTempWorkflow(workflow);
+      const reminderFile = path.join(os.tmpdir(), `workflow-reminder-${randomUUID()}.txt`);
+      fs.writeFileSync(reminderFile, "One step at a time.\n\nName the outcome explicitly.\n");
+      try {
+        runWorkflowTool([tmpFile, "set-system-reminder", "--file", reminderFile, "--force"]);
+        const updated = JSON.parse(fs.readFileSync(tmpFile, "utf-8"));
+        expect(updated.systemReminder).toBe("One step at a time.\n\nName the outcome explicitly.");
+        expect(updated.metadata.version).toBe("1.0.0");
+
+        runWorkflowTool([tmpFile, "set-system-reminder", "none", "--force"]);
+        const removed = JSON.parse(fs.readFileSync(tmpFile, "utf-8"));
+        expect("systemReminder" in removed).toBe(false);
+      } finally {
+        fs.unlinkSync(tmpFile);
+        fs.unlinkSync(reminderFile);
+      }
+    });
+
+    test("set-tags splits a comma list and none clears it", () => {
+      const workflow = {
+        metadata: { name: "Test", version: "1.0.0", description: "Description" },
+        nodes: [
+          { id: "start", type: "start", connections: { default: "end" } },
+          { id: "end", type: "end" },
+        ],
+      };
+      const tmpFile = createTempWorkflow(workflow);
+      try {
+        runWorkflowTool([tmpFile, "set-tags", "audio, tts,script", "--force"]);
+        const tagged = JSON.parse(fs.readFileSync(tmpFile, "utf-8"));
+        expect(tagged.metadata.tags).toEqual(["audio", "tts", "script"]);
+        expect(tagged.metadata.version).toBe("1.0.0");
+
+        runWorkflowTool([tmpFile, "set-tags", "none", "--force"]);
+        const cleared = JSON.parse(fs.readFileSync(tmpFile, "utf-8"));
+        expect("tags" in cleared.metadata).toBe(false);
+      } finally {
+        fs.unlinkSync(tmpFile);
+      }
+    });
   });
 
   describe("workflow migration commands", () => {

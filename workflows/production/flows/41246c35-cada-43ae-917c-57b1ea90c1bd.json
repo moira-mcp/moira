@@ -2,8 +2,14 @@
   "id": "41246c35-cada-43ae-917c-57b1ea90c1bd",
   "metadata": {
     "name": "Test Suite Audit",
-    "version": "4.0.1",
-    "description": "Feature-first audit of an existing project test suite against real production behavior. The flow resolves a traversal-safe workspace and authority boundary, inventories the complete in-scope source and test corpus, builds and independently reviews a production-grounded taxonomy, maps every test in deterministic independently reviewed batches, and produces reviewed coverage, redundancy, gap, weak-assertion and exact-change recommendations. Users can correct resolved scope or taxonomy without losing unaffected evidence, request analysis only, authorize only the exact reviewed mutation set, revise recommendations, or abort. If changes are authorized, it records a pre-change baseline and recovery contract, applies one logical mutation class at a time with immediate targeted checks, independently reviews the actual delta, runs all applicable broader project gates, and either repairs within authority or performs and verifies a scoped revert. Irreducible evidence or an unsafe baseline can produce only an explicitly selected limited non-mutating report. Local Markdown and self-contained HTML reports are independently reviewed before optional authorized static publication and optional configured user notification; local mode has no external side effects, and upload or notification failure remains visible. The flow preserves unrelated dirty work, never treats sampling as authorization, never reports failing changed tests as success, and never broadens access or discovers credentials. Choose Test Suite Audit to assess and optionally refactor an existing suite; use Test Planning to design strategy before implementation, Test Generation to add tests for a defined target, Data Analysis for supplied datasets, or Software Development Flow for complete product delivery."
+    "version": "4.1.0",
+    "description": "Feature-first audit of an existing project test suite against real production behavior. The flow resolves a traversal-safe workspace and authority boundary, inventories the complete in-scope source and test corpus, builds and independently reviews a production-grounded taxonomy, maps every test in deterministic independently reviewed batches, and produces reviewed coverage, redundancy, gap, weak-assertion and exact-change recommendations. Users can correct resolved scope or taxonomy without losing unaffected evidence, request analysis only, authorize only the exact reviewed mutation set, revise recommendations, or abort. If changes are authorized, it records a pre-change baseline and recovery contract, applies one logical mutation class at a time with immediate targeted checks, independently reviews the actual delta, runs all applicable broader project gates, and either repairs within authority or performs and verifies a scoped revert. Irreducible evidence or an unsafe baseline can produce only an explicitly selected limited non-mutating report. Local Markdown and self-contained HTML reports are independently reviewed before optional authorized static publication and optional configured user notification; local mode has no external side effects, and upload or notification failure remains visible. The flow preserves unrelated dirty work, never treats sampling as authorization, never reports failing changed tests as success, and never broadens access or discovers credentials. Choose Test Suite Audit to assess and optionally refactor an existing suite; use Test Planning to design strategy before implementation, Test Generation to add tests for a defined target, Data Analysis for supplied datasets, or Software Development Flow for complete product delivery.",
+    "tags": [
+      "тесты",
+      "аудит",
+      "качество",
+      "покрытие"
+    ]
   },
   "nodes": [
     {
@@ -11,7 +17,8 @@
       "type": "start",
       "connections": {
         "default": "resolve-scope"
-      }
+      },
+      "progressNodeId": "scope"
     },
     {
       "id": "resolve-scope",
@@ -25,7 +32,8 @@
       },
       "connections": {
         "success": "materialize-workspace"
-      }
+      },
+      "progressNodeId": "scope"
     },
     {
       "id": "materialize-workspace",
@@ -103,7 +111,8 @@
       ],
       "connections": {
         "success": "discover-corpus"
-      }
+      },
+      "progressNodeId": "scope"
     },
     {
       "id": "discover-corpus",
@@ -139,6 +148,10 @@
       },
       "connections": {
         "success": "review-taxonomy"
+      },
+      "progressNodeId": "scope",
+      "connectionLabels": {
+        "success": "опись корпуса и черновая таксономия написаны"
       }
     },
     {
@@ -162,7 +175,8 @@
       },
       "connections": {
         "success": "taxonomy-clean"
-      }
+      },
+      "progressNodeId": "taxonomy"
     },
     {
       "id": "taxonomy-clean",
@@ -177,6 +191,10 @@
       "connections": {
         "true": "confirm-scope-taxonomy",
         "false": "repair-taxonomy"
+      },
+      "progressNodeId": "taxonomy",
+      "connectionLabels": {
+        "true": "рецензия таксономии без замечаний"
       }
     },
     {
@@ -223,7 +241,8 @@
       },
       "connections": {
         "success": "taxonomy-repair-scope"
-      }
+      },
+      "progressNodeId": "taxonomy"
     },
     {
       "id": "taxonomy-repair-scope",
@@ -238,6 +257,16 @@
       "connections": {
         "true": "reset-for-scope",
         "false": "taxonomy-repair-irreducible"
+      },
+      "progressNodeId": "taxonomy",
+      "connectionLabels": {
+        "true": {
+          "label": "ремонт достаёт до объёма аудита",
+          "cycle": {
+            "cause": "Рецензия таксономии подтвердила дефект, чей самый ранний источник — разрешённый объём и опись корпуса, поэтому опись строится заново.",
+            "exit": "Цикл кончается, когда рецензия таксономии проходит без замечаний, либо очередной ремонт объявляет дефект неустранимым и пользователь выбирает ограниченный отчёт или прекращение."
+          }
+        }
       }
     },
     {
@@ -253,6 +282,17 @@
       "connections": {
         "true": "irreducible-decision",
         "false": "review-taxonomy"
+      },
+      "progressNodeId": "taxonomy",
+      "connectionLabels": {
+        "true": "дефект неустраним при нынешнем доступе",
+        "false": {
+          "label": "ремонт остался внутри таксономии",
+          "cycle": {
+            "cause": "Подтверждённый дефект починен в самой таксономии, и исправленная таксономия обязана снова пройти независимую рецензию.",
+            "exit": "Цикл кончается, когда рецензия таксономии не находит замечаний, либо очередной ремонт объявляет дефект неустранимым и пользователь выбирает ограниченный отчёт или прекращение."
+          }
+        }
       }
     },
     {
@@ -311,7 +351,8 @@
       },
       "connections": {
         "success": "scope-taxonomy-accepted"
-      }
+      },
+      "progressNodeId": "confirm"
     },
     {
       "id": "scope-taxonomy-accepted",
@@ -326,6 +367,10 @@
       "connections": {
         "true": "check-batches",
         "false": "apply-user-correction"
+      },
+      "progressNodeId": "confirm",
+      "connectionLabels": {
+        "true": "пользователь принял объём и таксономию"
       }
     },
     {
@@ -355,7 +400,8 @@
       },
       "connections": {
         "success": "user-correction-scope"
-      }
+      },
+      "progressNodeId": "confirm"
     },
     {
       "id": "user-correction-scope",
@@ -370,6 +416,23 @@
       "connections": {
         "true": "discover-corpus",
         "false": "review-taxonomy"
+      },
+      "progressNodeId": "confirm",
+      "connectionLabels": {
+        "true": {
+          "label": "пользователь поправил объём аудита",
+          "cycle": {
+            "cause": "Пользователь не принял показанные артефакты и назвал поправкой объём, поэтому опись корпуса строится заново по исправленным границам.",
+            "exit": "Цикл кончается, когда пользователь принимает объём и таксономию и работа уходит в разбор тестов по партиям."
+          }
+        },
+        "false": {
+          "label": "пользователь поправил таксономию",
+          "cycle": {
+            "cause": "Пользователь не принял показанные артефакты и назвал поправкой таксономию, поэтому исправленная таксономия снова идёт на независимую рецензию.",
+            "exit": "Цикл кончается, когда пользователь принимает объём и таксономию и работа уходит в разбор тестов по партиям."
+          }
+        }
       }
     },
     {
@@ -387,6 +450,10 @@
       "connections": {
         "true": "map-batch",
         "false": "analyze-suite"
+      },
+      "progressNodeId": "mapping",
+      "connectionLabels": {
+        "false": "все партии плана разобраны"
       }
     },
     {
@@ -401,7 +468,8 @@
       },
       "connections": {
         "success": "review-mapping"
-      }
+      },
+      "progressNodeId": "mapping"
     },
     {
       "id": "review-mapping",
@@ -424,7 +492,8 @@
       },
       "connections": {
         "success": "mapping-clean"
-      }
+      },
+      "progressNodeId": "mapping"
     },
     {
       "id": "mapping-clean",
@@ -439,7 +508,8 @@
       "connections": {
         "true": "increment-batch",
         "false": "repair-mapping"
-      }
+      },
+      "progressNodeId": "mapping"
     },
     {
       "id": "repair-mapping",
@@ -466,7 +536,8 @@
       },
       "connections": {
         "success": "mapping-repair-scope"
-      }
+      },
+      "progressNodeId": "mapping"
     },
     {
       "id": "mapping-repair-scope",
@@ -481,6 +552,16 @@
       "connections": {
         "true": "reset-for-scope",
         "false": "mapping-repair-taxonomy"
+      },
+      "progressNodeId": "mapping",
+      "connectionLabels": {
+        "true": {
+          "label": "ремонт разбора достаёт до объёма аудита",
+          "cycle": {
+            "cause": "Рецензия разбора партии подтвердила дефект, чей источник — объём и опись корпуса, поэтому опись строится заново, а разбор начинается с первой партии.",
+            "exit": "Цикл кончается, когда все партии плана разобраны и приняты рецензией, либо ремонт объявляет дефект неустранимым и пользователь выбирает ограниченный отчёт или прекращение."
+          }
+        }
       }
     },
     {
@@ -496,6 +577,16 @@
       "connections": {
         "true": "reset-for-taxonomy",
         "false": "mapping-repair-irreducible"
+      },
+      "progressNodeId": "mapping",
+      "connectionLabels": {
+        "true": {
+          "label": "ремонт разбора достаёт до таксономии",
+          "cycle": {
+            "cause": "Рецензия разбора партии подтвердила дефект, чей источник — таксономия, поэтому она чинится и снова проходит рецензию, а разбор начинается с первой партии.",
+            "exit": "Цикл кончается, когда все партии плана разобраны и приняты рецензией, либо ремонт объявляет дефект неустранимым и пользователь выбирает ограниченный отчёт или прекращение."
+          }
+        }
       }
     },
     {
@@ -511,6 +602,17 @@
       "connections": {
         "true": "irreducible-decision",
         "false": "review-mapping"
+      },
+      "progressNodeId": "mapping",
+      "connectionLabels": {
+        "true": "дефект неустраним при нынешнем доступе",
+        "false": {
+          "label": "ремонт остался внутри разбора партии",
+          "cycle": {
+            "cause": "Дефект починен в самом разборе текущей партии, и исправленный разбор обязан снова пройти независимую рецензию.",
+            "exit": "Цикл кончается, когда рецензия партии проходит без замечаний и счётчик переходит к следующей партии, либо ремонт объявляет дефект неустранимым."
+          }
+        }
       }
     },
     {
@@ -521,6 +623,16 @@
       ],
       "connections": {
         "default": "discover-corpus"
+      },
+      "progressNodeId": "scope",
+      "connectionLabels": {
+        "default": {
+          "label": "счётчик партий сброшен, опись строится заново",
+          "cycle": {
+            "cause": "Ремонт или поправка достали до объёма аудита, поэтому уже разобранные партии больше не действительны и разбор обязан начаться с первой.",
+            "exit": "Цикл кончается, когда построенные заново опись и таксономия проходят рецензию и подтверждение пользователем."
+          }
+        }
       }
     },
     {
@@ -531,6 +643,16 @@
       ],
       "connections": {
         "default": "review-taxonomy"
+      },
+      "progressNodeId": "taxonomy",
+      "connectionLabels": {
+        "default": {
+          "label": "счётчик партий сброшен, таксономия проверяется заново",
+          "cycle": {
+            "cause": "Ремонт достал до таксономии, поэтому уже разобранные партии больше не действительны и разбор обязан начаться с первой.",
+            "exit": "Цикл кончается, когда рецензия таксономии проходит без замечаний и разбор доходит до последней партии плана."
+          }
+        }
       }
     },
     {
@@ -556,7 +678,8 @@
       },
       "connections": {
         "success": "irreducible-limited"
-      }
+      },
+      "progressNodeId": "irreducible"
     },
     {
       "id": "irreducible-limited",
@@ -571,6 +694,11 @@
       "connections": {
         "true": "set-limited-outcome",
         "false": "set-abort-outcome"
+      },
+      "progressNodeId": "irreducible",
+      "connectionLabels": {
+        "true": "пользователь выбрал отчёт без изменений",
+        "false": "пользователь выбрал прекращение"
       }
     },
     {
@@ -581,6 +709,16 @@
       ],
       "connections": {
         "default": "check-batches"
+      },
+      "progressNodeId": "mapping",
+      "connectionLabels": {
+        "default": {
+          "label": "партия принята, счётчик переходит к следующей",
+          "cycle": {
+            "cause": "План разбора делит корпус на партии, и каждая следующая партия читается и рецензируется тем же кругом.",
+            "exit": "Цикл кончается, когда счётчик доходит до числа партий плана и работа уходит в выводы по набору."
+          }
+        }
       }
     },
     {
@@ -595,7 +733,8 @@
       },
       "connections": {
         "success": "review-analysis"
-      }
+      },
+      "progressNodeId": "analysis"
     },
     {
       "id": "review-analysis",
@@ -618,7 +757,8 @@
       },
       "connections": {
         "success": "analysis-clean"
-      }
+      },
+      "progressNodeId": "analysis"
     },
     {
       "id": "analysis-clean",
@@ -633,6 +773,10 @@
       "connections": {
         "true": "present-recommendations",
         "false": "repair-analysis"
+      },
+      "progressNodeId": "analysis",
+      "connectionLabels": {
+        "true": "рецензия выводов без замечаний"
       }
     },
     {
@@ -659,7 +803,8 @@
       },
       "connections": {
         "success": "analysis-repair-scope"
-      }
+      },
+      "progressNodeId": "analysis"
     },
     {
       "id": "analysis-repair-scope",
@@ -674,6 +819,16 @@
       "connections": {
         "true": "reset-for-scope",
         "false": "analysis-repair-taxonomy"
+      },
+      "progressNodeId": "analysis",
+      "connectionLabels": {
+        "true": {
+          "label": "ремонт выводов достаёт до объёма аудита",
+          "cycle": {
+            "cause": "Рецензия выводов подтвердила дефект, чей источник — объём и опись корпуса, поэтому опись строится заново, а разбор начинается с первой партии.",
+            "exit": "Цикл кончается, когда рецензия выводов проходит без замечаний и набор рекомендаций предъявляется пользователю."
+          }
+        }
       }
     },
     {
@@ -689,6 +844,23 @@
       "connections": {
         "true": "reset-for-taxonomy",
         "false": "review-analysis"
+      },
+      "progressNodeId": "analysis",
+      "connectionLabels": {
+        "true": {
+          "label": "ремонт выводов достаёт до таксономии",
+          "cycle": {
+            "cause": "Рецензия выводов подтвердила дефект, чей источник — таксономия, поэтому она чинится и снова проходит рецензию, а разбор начинается с первой партии.",
+            "exit": "Цикл кончается, когда рецензия выводов проходит без замечаний и набор рекомендаций предъявляется пользователю."
+          }
+        },
+        "false": {
+          "label": "ремонт остался внутри выводов",
+          "cycle": {
+            "cause": "Дефект починен в самих выводах по набору, и исправленные выводы обязаны снова пройти независимую рецензию.",
+            "exit": "Цикл кончается, когда рецензия выводов проходит без замечаний и набор рекомендаций предъявляется пользователю."
+          }
+        }
       }
     },
     {
@@ -741,7 +913,8 @@
       },
       "connections": {
         "success": "decision-abort"
-      }
+      },
+      "progressNodeId": "decision"
     },
     {
       "id": "decision-abort",
@@ -756,6 +929,10 @@
       "connections": {
         "true": "set-abort-outcome",
         "false": "decision-apply"
+      },
+      "progressNodeId": "decision",
+      "connectionLabels": {
+        "true": "пользователь прекратил работу"
       }
     },
     {
@@ -771,6 +948,10 @@
       "connections": {
         "true": "establish-baseline",
         "false": "decision-revise"
+      },
+      "progressNodeId": "decision",
+      "connectionLabels": {
+        "true": "пользователь разрешил применить ровно этот набор"
       }
     },
     {
@@ -786,6 +967,10 @@
       "connections": {
         "true": "revise-recommendations",
         "false": "set-analysis-outcome"
+      },
+      "progressNodeId": "decision",
+      "connectionLabels": {
+        "false": "пользователь выбрал только анализ"
       }
     },
     {
@@ -812,7 +997,8 @@
       },
       "connections": {
         "success": "revision-scope"
-      }
+      },
+      "progressNodeId": "decision"
     },
     {
       "id": "revision-scope",
@@ -827,6 +1013,16 @@
       "connections": {
         "true": "reset-for-scope",
         "false": "revision-taxonomy"
+      },
+      "progressNodeId": "decision",
+      "connectionLabels": {
+        "true": {
+          "label": "доработка рекомендаций достаёт до объёма аудита",
+          "cycle": {
+            "cause": "Пользователь потребовал доработать рекомендации, и правка ложится на объём и опись корпуса, поэтому опись строится заново, а разбор начинается с первой партии.",
+            "exit": "Цикл кончается, когда пользователь выбирает применение набора, только анализ или прекращение."
+          }
+        }
       }
     },
     {
@@ -842,6 +1038,23 @@
       "connections": {
         "true": "reset-for-taxonomy",
         "false": "review-analysis"
+      },
+      "progressNodeId": "decision",
+      "connectionLabels": {
+        "true": {
+          "label": "доработка рекомендаций достаёт до таксономии",
+          "cycle": {
+            "cause": "Пользователь потребовал доработать рекомендации, и правка ложится на таксономию, поэтому она чинится и снова проходит рецензию, а разбор начинается с первой партии.",
+            "exit": "Цикл кончается, когда пользователь выбирает применение набора, только анализ или прекращение."
+          }
+        },
+        "false": {
+          "label": "доработка осталась внутри выводов",
+          "cycle": {
+            "cause": "Пользователь потребовал доработать рекомендации, и правка ложится на сами выводы, поэтому они переписываются и снова идут на независимую рецензию.",
+            "exit": "Цикл кончается, когда пользователь выбирает применение набора, только анализ или прекращение."
+          }
+        }
       }
     },
     {
@@ -852,6 +1065,10 @@
       ],
       "connections": {
         "default": "end-abort"
+      },
+      "progressNodeId": "outcome",
+      "connectionLabels": {
+        "default": "итог: работа прекращена"
       }
     },
     {
@@ -862,6 +1079,10 @@
       ],
       "connections": {
         "default": "write-final-report"
+      },
+      "progressNodeId": "outcome",
+      "connectionLabels": {
+        "default": "итог: только анализ"
       }
     },
     {
@@ -872,6 +1093,10 @@
       ],
       "connections": {
         "default": "write-final-report"
+      },
+      "progressNodeId": "outcome",
+      "connectionLabels": {
+        "default": "итог: ограниченный отчёт без изменений"
       }
     },
     {
@@ -917,7 +1142,8 @@
       },
       "connections": {
         "success": "baseline-ready"
-      }
+      },
+      "progressNodeId": "baseline"
     },
     {
       "id": "baseline-ready",
@@ -932,7 +1158,8 @@
       "connections": {
         "true": "has-change-classes",
         "false": "baseline-limited-decision"
-      }
+      },
+      "progressNodeId": "baseline"
     },
     {
       "id": "has-change-classes",
@@ -947,6 +1174,11 @@
       "connections": {
         "true": "check-change-classes",
         "false": "set-no-changes-outcome"
+      },
+      "progressNodeId": "baseline",
+      "connectionLabels": {
+        "true": "есть разрешённые классы изменений",
+        "false": "применять нечего"
       }
     },
     {
@@ -972,7 +1204,8 @@
       },
       "connections": {
         "success": "baseline-limited"
-      }
+      },
+      "progressNodeId": "baseline"
     },
     {
       "id": "baseline-limited",
@@ -987,6 +1220,11 @@
       "connections": {
         "true": "set-limited-outcome",
         "false": "set-abort-outcome"
+      },
+      "progressNodeId": "baseline",
+      "connectionLabels": {
+        "true": "пользователь выбрал отчёт без изменений",
+        "false": "пользователь выбрал прекращение"
       }
     },
     {
@@ -1004,6 +1242,10 @@
       "connections": {
         "true": "apply-change-class",
         "false": "review-changes"
+      },
+      "progressNodeId": "apply",
+      "connectionLabels": {
+        "false": "все классы изменений внесены и проверены"
       }
     },
     {
@@ -1018,7 +1260,8 @@
       },
       "connections": {
         "success": "targeted-check-class"
-      }
+      },
+      "progressNodeId": "apply"
     },
     {
       "id": "targeted-check-class",
@@ -1043,7 +1286,8 @@
       },
       "connections": {
         "success": "class-check-pass"
-      }
+      },
+      "progressNodeId": "apply"
     },
     {
       "id": "class-check-pass",
@@ -1058,7 +1302,8 @@
       "connections": {
         "true": "increment-change-class",
         "false": "class-failure-decision"
-      }
+      },
+      "progressNodeId": "apply"
     },
     {
       "id": "class-failure-decision",
@@ -1083,7 +1328,8 @@
       },
       "connections": {
         "success": "class-failure-repair"
-      }
+      },
+      "progressNodeId": "apply"
     },
     {
       "id": "class-failure-repair",
@@ -1098,6 +1344,10 @@
       "connections": {
         "true": "repair-class-failure",
         "false": "revert-changes"
+      },
+      "progressNodeId": "apply",
+      "connectionLabels": {
+        "false": "пользователь выбрал откат"
       }
     },
     {
@@ -1112,6 +1362,16 @@
       },
       "connections": {
         "success": "targeted-check-class"
+      },
+      "progressNodeId": "apply",
+      "connectionLabels": {
+        "success": {
+          "label": "класс починен, нацеленные проверки повторяются",
+          "cycle": {
+            "cause": "Нацеленные проверки внесённого класса изменений упали, и пользователь выбрал починку внутри этого же класса, которая обязана прогнать те же проверки заново.",
+            "exit": "Цикл кончается, когда нацеленные проверки класса проходят и счётчик переходит к следующему классу, либо пользователь выбирает откат изменений аудита."
+          }
+        }
       }
     },
     {
@@ -1122,6 +1382,16 @@
       ],
       "connections": {
         "default": "check-change-classes"
+      },
+      "progressNodeId": "apply",
+      "connectionLabels": {
+        "default": {
+          "label": "класс внесён и проверен, счётчик переходит к следующему",
+          "cycle": {
+            "cause": "Изменения вносятся по одному логическому классу за раз, и следующий класс начинается только после успешной нацеленной проверки предыдущего.",
+            "exit": "Цикл кончается, когда счётчик доходит до числа разрешённых классов и работа уходит в рецензию внесённых изменений."
+          }
+        }
       }
     },
     {
@@ -1145,7 +1415,8 @@
       },
       "connections": {
         "success": "changes-clean"
-      }
+      },
+      "progressNodeId": "changereview"
     },
     {
       "id": "changes-clean",
@@ -1160,6 +1431,10 @@
       "connections": {
         "true": "broad-verification",
         "false": "repair-changes"
+      },
+      "progressNodeId": "changereview",
+      "connectionLabels": {
+        "true": "рецензия изменений без замечаний"
       }
     },
     {
@@ -1185,7 +1460,8 @@
       },
       "connections": {
         "success": "change-repair-contained"
-      }
+      },
+      "progressNodeId": "changereview"
     },
     {
       "id": "change-repair-contained",
@@ -1200,6 +1476,23 @@
       "connections": {
         "true": "review-changes",
         "false": "review-analysis"
+      },
+      "progressNodeId": "changereview",
+      "connectionLabels": {
+        "true": {
+          "label": "ремонт удержан внутри разрешённого набора",
+          "cycle": {
+            "cause": "Рецензия изменений нашла дефекты, и починка, не выходящая за разрешённый набор рекомендаций, обязана снова пройти ту же независимую рецензию.",
+            "exit": "Цикл кончается, когда рецензия изменений проходит без замечаний и работа уходит в широкие проверки проекта."
+          }
+        },
+        "false": {
+          "label": "ремонт выходит за разрешённый набор",
+          "cycle": {
+            "cause": "Починка потребовала изменений вне разрешённого пользователем набора рекомендаций, а расширять полномочия нельзя, поэтому работа возвращается к выводам.",
+            "exit": "Цикл кончается, когда пользователь заново решает судьбу рекомендаций: применить, оставить только анализ или прекратить."
+          }
+        }
       }
     },
     {
@@ -1225,7 +1518,8 @@
       },
       "connections": {
         "success": "verification-pass"
-      }
+      },
+      "progressNodeId": "verify"
     },
     {
       "id": "verification-pass",
@@ -1240,6 +1534,10 @@
       "connections": {
         "true": "set-applied-outcome",
         "false": "failure-decision"
+      },
+      "progressNodeId": "verify",
+      "connectionLabels": {
+        "true": "широкие проверки проекта пройдены"
       }
     },
     {
@@ -1265,7 +1563,8 @@
       },
       "connections": {
         "success": "failure-repair"
-      }
+      },
+      "progressNodeId": "verify"
     },
     {
       "id": "failure-repair",
@@ -1280,6 +1579,10 @@
       "connections": {
         "true": "repair-failure",
         "false": "revert-changes"
+      },
+      "progressNodeId": "verify",
+      "connectionLabels": {
+        "false": "пользователь выбрал откат"
       }
     },
     {
@@ -1294,6 +1597,16 @@
       },
       "connections": {
         "success": "review-changes"
+      },
+      "progressNodeId": "verify",
+      "connectionLabels": {
+        "success": {
+          "label": "починка после провала широких проверок",
+          "cycle": {
+            "cause": "Широкие проверки проекта упали, и пользователь выбрал починку внутри нынешних полномочий, а изменённая работа обязана заново пройти независимую рецензию изменений.",
+            "exit": "Цикл кончается, когда рецензия изменений и широкие проверки проходят, либо пользователь выбирает откат изменений аудита."
+          }
+        }
       }
     },
     {
@@ -1319,7 +1632,8 @@
       },
       "connections": {
         "success": "restoration-complete"
-      }
+      },
+      "progressNodeId": "revert"
     },
     {
       "id": "set-no-changes-outcome",
@@ -1329,6 +1643,10 @@
       ],
       "connections": {
         "default": "write-final-report"
+      },
+      "progressNodeId": "outcome",
+      "connectionLabels": {
+        "default": "итог: изменений не потребовалось"
       }
     },
     {
@@ -1344,6 +1662,11 @@
       "connections": {
         "true": "set-reverted-outcome",
         "false": "set-blocked-outcome"
+      },
+      "progressNodeId": "revert",
+      "connectionLabels": {
+        "true": "исходное состояние восстановлено",
+        "false": "восстановление не удалось"
       }
     },
     {
@@ -1354,6 +1677,10 @@
       ],
       "connections": {
         "default": "write-final-report"
+      },
+      "progressNodeId": "outcome",
+      "connectionLabels": {
+        "default": "итог: изменения внесены"
       }
     },
     {
@@ -1364,6 +1691,10 @@
       ],
       "connections": {
         "default": "write-final-report"
+      },
+      "progressNodeId": "outcome",
+      "connectionLabels": {
+        "default": "итог: изменения откачены"
       }
     },
     {
@@ -1374,6 +1705,10 @@
       ],
       "connections": {
         "default": "end-blocked"
+      },
+      "progressNodeId": "outcome",
+      "connectionLabels": {
+        "default": "итог: восстановление не удалось"
       }
     },
     {
@@ -1388,7 +1723,8 @@
       },
       "connections": {
         "success": "review-final-report"
-      }
+      },
+      "progressNodeId": "report"
     },
     {
       "id": "review-final-report",
@@ -1411,7 +1747,8 @@
       },
       "connections": {
         "success": "final-report-clean"
-      }
+      },
+      "progressNodeId": "report"
     },
     {
       "id": "final-report-clean",
@@ -1426,6 +1763,10 @@
       "connections": {
         "true": "initialize-delivery-state",
         "false": "repair-final-report"
+      },
+      "progressNodeId": "report",
+      "connectionLabels": {
+        "true": "рецензия отчёта без замечаний"
       }
     },
     {
@@ -1453,7 +1794,8 @@
       },
       "connections": {
         "success": "final-repair-report"
-      }
+      },
+      "progressNodeId": "report"
     },
     {
       "id": "final-repair-report",
@@ -1468,6 +1810,16 @@
       "connections": {
         "true": "review-final-report",
         "false": "final-repair-analysis"
+      },
+      "progressNodeId": "report",
+      "connectionLabels": {
+        "true": {
+          "label": "ремонт остался внутри отчёта",
+          "cycle": {
+            "cause": "Рецензия отчёта нашла дефекты в самом отчёте, и исправленный отчёт обязан снова пройти независимую рецензию.",
+            "exit": "Цикл кончается, когда рецензия отчёта проходит без замечаний и работа уходит в выдачу."
+          }
+        }
       }
     },
     {
@@ -1483,6 +1835,16 @@
       "connections": {
         "true": "review-analysis",
         "false": "final-repair-applied-kind"
+      },
+      "progressNodeId": "report",
+      "connectionLabels": {
+        "true": {
+          "label": "ремонт отчёта достаёт до выводов",
+          "cycle": {
+            "cause": "Рецензия отчёта подтвердила дефект, чей источник — сами выводы по набору, поэтому они переписываются и снова проходят независимую рецензию.",
+            "exit": "Цикл кончается, когда переписанные выводы доходят до отчёта, чья рецензия проходит без замечаний."
+          }
+        }
       }
     },
     {
@@ -1509,7 +1871,8 @@
       },
       "connections": {
         "success": "delivery-local"
-      }
+      },
+      "progressNodeId": "delivery"
     },
     {
       "id": "delivery-local",
@@ -1524,7 +1887,8 @@
       "connections": {
         "true": "end-report",
         "false": "upload-report"
-      }
+      },
+      "progressNodeId": "delivery"
     },
     {
       "id": "upload-report",
@@ -1584,7 +1948,8 @@
       },
       "connections": {
         "success": "upload-complete"
-      }
+      },
+      "progressNodeId": "delivery"
     },
     {
       "id": "upload-complete",
@@ -1599,7 +1964,8 @@
       "connections": {
         "true": "notification-requested",
         "false": "set-delivery-failed"
-      }
+      },
+      "progressNodeId": "delivery"
     },
     {
       "id": "notification-requested",
@@ -1614,7 +1980,8 @@
       "connections": {
         "true": "notify-user",
         "false": "end-report"
-      }
+      },
+      "progressNodeId": "delivery"
     },
     {
       "id": "notify-user",
@@ -1647,7 +2014,8 @@
       },
       "connections": {
         "success": "end-report"
-      }
+      },
+      "progressNodeId": "delivery"
     },
     {
       "id": "set-delivery-failed",
@@ -1657,7 +2025,8 @@
       ],
       "connections": {
         "default": "end-report"
-      }
+      },
+      "progressNodeId": "delivery"
     },
     {
       "id": "end-report",
@@ -1667,21 +2036,24 @@
         "report_path",
         "report_url",
         "notification_state"
-      ]
+      ],
+      "progressNodeId": "delivery"
     },
     {
       "id": "end-abort",
       "type": "end",
       "finalOutput": [
         "outcome"
-      ]
+      ],
+      "progressNodeId": "stop"
     },
     {
       "id": "end-blocked",
       "type": "end",
       "finalOutput": [
         "outcome"
-      ]
+      ],
+      "progressNodeId": "stop"
     },
     {
       "id": "initialize-delivery-state",
@@ -1692,7 +2064,8 @@
       ],
       "connections": {
         "default": "delivery-decision"
-      }
+      },
+      "progressNodeId": "delivery"
     },
     {
       "id": "final-repair-applied-kind",
@@ -1707,7 +2080,8 @@
       "connections": {
         "true": "final-outcome-applied",
         "false": "final-outcome-reverted"
-      }
+      },
+      "progressNodeId": "report"
     },
     {
       "id": "final-outcome-applied",
@@ -1722,6 +2096,16 @@
       "connections": {
         "true": "repair-final-applied-work",
         "false": "set-blocked-outcome"
+      },
+      "progressNodeId": "report",
+      "connectionLabels": {
+        "false": {
+          "label": "внесённой работы для починки нет",
+          "cycle": {
+            "cause": "Рецензия отчёта потребовала починить внесённую работу, но нынешний класс итога — не «изменения внесены», поэтому чинить нечего.",
+            "exit": "Цикл кончается сразу: класс итога меняется на «восстановление не удалось», и запуск завершается без отчёта."
+          }
+        }
       }
     },
     {
@@ -1736,6 +2120,16 @@
       },
       "connections": {
         "success": "review-changes"
+      },
+      "progressNodeId": "report",
+      "connectionLabels": {
+        "success": {
+          "label": "внесённая работа починена",
+          "cycle": {
+            "cause": "Рецензия отчёта нашла дефект в уже внесённой работе аудита, и починка обязана заново пройти независимую рецензию изменений и широкие проверки проекта.",
+            "exit": "Цикл кончается, когда рецензия изменений и широкие проверки проходят, класс итога объявляется заново и рецензия отчёта не находит замечаний."
+          }
+        }
       }
     },
     {
@@ -1751,6 +2145,16 @@
       "connections": {
         "true": "repair-final-reverted-work",
         "false": "set-blocked-outcome"
+      },
+      "progressNodeId": "report",
+      "connectionLabels": {
+        "false": {
+          "label": "откаченной работы для починки нет",
+          "cycle": {
+            "cause": "Рецензия отчёта потребовала починить откат, но нынешний класс итога — не «изменения откачены», поэтому чинить нечего.",
+            "exit": "Цикл кончается сразу: класс итога меняется на «восстановление не удалось», и запуск завершается без отчёта."
+          }
+        }
       }
     },
     {
@@ -1776,7 +2180,8 @@
       },
       "connections": {
         "success": "final-restoration-complete"
-      }
+      },
+      "progressNodeId": "report"
     },
     {
       "id": "final-restoration-complete",
@@ -1791,6 +2196,23 @@
       "connections": {
         "true": "set-reverted-outcome",
         "false": "set-blocked-outcome"
+      },
+      "progressNodeId": "report",
+      "connectionLabels": {
+        "true": {
+          "label": "откат доведён до конца",
+          "cycle": {
+            "cause": "Рецензия отчёта нашла дефект в откате, и после его починки класс итога объявляется заново по проверенному состоянию репозитория.",
+            "exit": "Цикл кончается, когда объявленный заново класс итога попадает в переписанный отчёт, чья рецензия проходит без замечаний."
+          }
+        },
+        "false": {
+          "label": "починить откат не удалось",
+          "cycle": {
+            "cause": "Починка отката не вернула репозиторий в состояние до аудита, поэтому объявляется класс «восстановление не удалось».",
+            "exit": "Цикл кончается сразу: запуск завершается без отчёта с явно названным незавершённым восстановлением."
+          }
+        }
       }
     }
   ],
@@ -1869,5 +2291,123 @@
   },
   "slug": "test-suite-audit",
   "owner": "system-moira",
-  "visibility": "public"
+  "visibility": "public",
+  "progress": {
+    "title": "Аудит тестового набора",
+    "goal": "Оценить существующий тестовый набор против настоящего поведения продукта и, если пользователь это разрешил, безопасно внести ровно проверенный набор изменений с честным отчётом о результате.",
+    "nodes": [
+      {
+        "id": "scope",
+        "label": "Границы и опись корпуса",
+        "content": {
+          "summary": "Определяются авторизованный проект и граница аудита, создаётся рабочий каталог запуска, и в него выписываются разрешённый объём, полная опись исходников и тестов, черновая таксономия поведения продукта и план разбора тестов по партиям."
+        }
+      },
+      {
+        "id": "taxonomy",
+        "label": "Проверка таксономии",
+        "content": {
+          "summary": "Отдельный рецензент сверяет объём, опись и таксономию с настоящим кодом; подтверждённые дефекты чинятся в их самом раннем источнике, пока рецензия не станет чистой, а препятствие, неустранимое при нынешнем доступе, уходит на решение пользователя."
+        }
+      },
+      {
+        "id": "confirm",
+        "label": "Подтверждение пользователем",
+        "content": {
+          "summary": "Пользователю показываются разрешённый объём, исключения, основание описи и принятая таксономия; он принимает их либо называет одну поправку — к объёму или к таксономии, — которая применяется и заново проходит проверку."
+        }
+      },
+      {
+        "id": "mapping",
+        "label": "Разбор тестов по партиям",
+        "content": {
+          "summary": "Партия за партией читаются настоящие тесты с их действительными проверками и сопоставляются с поведением продукта; каждая партия проходит независимую рецензию и ремонт, и стадия кончается, когда разобраны все партии плана."
+        }
+      },
+      {
+        "id": "irreducible",
+        "label": "Неустранимое препятствие",
+        "content": {
+          "summary": "Пользователю объясняется воспроизведённое свидетельство, которое нельзя разрешить при нынешнем доступе и полномочиях, и он выбирает одно из двух: правдивый отчёт без изменений или прекращение работы."
+        }
+      },
+      {
+        "id": "analysis",
+        "label": "Выводы по набору",
+        "content": {
+          "summary": "По объёму, описи, таксономии и разбору пишутся покрытие, дублирование, пробелы, слабые проверки и точный набор рекомендаций к изменениям; выводы проходят независимую рецензию и ремонт до чистого результата."
+        }
+      },
+      {
+        "id": "decision",
+        "label": "Решение по рекомендациям",
+        "content": {
+          "summary": "Пользователю предъявляется проверенный набор рекомендаций, и он выбирает: только анализ, применение ровно этого набора, доработку рекомендаций или прекращение; доработка возвращает работу к тому источнику, из которого рекомендация выросла."
+        }
+      },
+      {
+        "id": "baseline",
+        "label": "Базовая точка перед изменениями",
+        "content": {
+          "summary": "До любой правки записываются ветка, настоящее состояние рабочей копии, чужие изменения, которые надо сохранить, и порядок восстановления; если безопасной базы нет, пользователь выбирает отчёт без изменений или прекращение, а если применять нечего — объявляется итог без изменений."
+        }
+      },
+      {
+        "id": "apply",
+        "label": "Внесение изменений по классам",
+        "content": {
+          "summary": "Разрешённые изменения вносятся по одному логическому классу за раз, и каждый класс сразу проверяется нацеленными проверками до начала следующего; на провале пользователь выбирает починку в пределах того же класса или откат."
+        }
+      },
+      {
+        "id": "changereview",
+        "label": "Рецензия внесённых изменений",
+        "content": {
+          "summary": "Настоящая разница в репозитории независимо сверяется с разрешённым набором рекомендаций, базовой точкой и первоисточниками; ремонт, удержанный внутри разрешённого набора, проверяется заново, а выход за его границы возвращает работу к выводам."
+        }
+      },
+      {
+        "id": "verify",
+        "label": "Широкая проверка проекта",
+        "content": {
+          "summary": "Поверх сохранённых нацеленных свидетельств прогоняются все применимые более широкие проверки проекта; на провале пользователь выбирает починку в пределах нынешних полномочий или откат."
+        }
+      },
+      {
+        "id": "revert",
+        "label": "Откат изменений",
+        "content": {
+          "summary": "Изменения аудита возвращаются к состоянию до аудита с сохранением чужой незавершённой работы, и восстановление проверяется средствами самого проекта; неудавшееся восстановление становится отдельным итогом."
+        }
+      },
+      {
+        "id": "outcome",
+        "label": "Объявление класса итога",
+        "content": {
+          "summary": "Запуск объявляет один честный класс результата — прекращён, только анализ, ограниченный отчёт, изменений не потребовалось, изменения внесены, изменения откачены или восстановление не удалось — и именно от него зависит, пишется ли отчёт."
+        }
+      },
+      {
+        "id": "report",
+        "label": "Итоговый отчёт и его рецензия",
+        "content": {
+          "summary": "По объявленному классу итога пишутся отчёт в Markdown и самодостаточный HTML, и отдельный рецензент сверяет их с настоящим состоянием репозитория, полномочиями и всеми рабочими артефактами; ремонт направляется к настоящему владельцу дефекта — самому отчёту, выводам либо уже внесённой или откаченной работе."
+        }
+      },
+      {
+        "id": "delivery",
+        "label": "Выдача отчёта",
+        "content": {
+          "summary": "Выбирается способ выдачи: только локально без внешних действий, загрузка проверенного HTML-отчёта в разрешённое хранилище или загрузка с уведомлением пользователя; неудача загрузки остаётся видимой и не подменяет собой итог."
+        }
+      },
+      {
+        "id": "stop",
+        "label": "Прекращение без отчёта",
+        "content": {
+          "summary": "Запуск заканчивается без отчёта: пользователь прервал работу либо восстановление исходного состояния репозитория не удалось."
+        }
+      }
+    ]
+  }
 }
