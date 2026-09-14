@@ -1282,8 +1282,9 @@ The graph is the process view's detailed layer, not a separate rendering:
   gap, climbs the margin before the groups and comes in through the target block's corridor. Every
   corridor is sized before the groups are placed for the lanes it must hold (`laneCounts`,
   `corridorSize`): `GRAPH_MARGIN` and `GROUP_GAP` are floors, the margin grows with the returns and
-  a block's entry side holds the approach columns of its arrivals. Lanes sharing a corridor are
-  offset by `LANE_STEP` and centred in the room reserved for them. `GraphEdgeView` draws a routed
+  a block's entry side holds the approach columns of its arrivals. Lanes sharing a corridor are offset by
+  `LANE_STEP` (`MARGIN_LANE_STEP` in the margin, which holds one lane per return) and centred in
+  the room reserved for them. `GraphEdgeView` draws a routed
   edge as a rounded polyline (`routedPoints`, `roundedPath`); its label is shown while it is lit,
   on the first lane run.
 - **Rendering** (`components/workflow/graphNodes.tsx`): every node type is registered to
@@ -1299,9 +1300,11 @@ The graph is the process view's detailed layer, not a separate rendering:
   is drawn with its label while either chip, either card or the edge itself is hovered, everything
   else dimming meanwhile. A drawn line carries a halo in the page colour, so a crossing reads as
   one line passing over another, and every arrowhead keeps one size (`markerUnits="userSpaceOnUse"`)
-  whatever the line's width. Every edge that is drawn leaves and arrives at its own handle, and every
-  arrival at one card turns up to it in its own approach column (`APPROACH_COLUMNS` of them per
-  column of cards, the cards of one column starting at different ones), so no two lines merge. Clicking an arrival chip brings the card at the other end into view.
+  whatever the line's width. Every edge that is drawn leaves and arrives at its own handle, and an
+  arrival turns up to its card in an approach column of its own: a column of cards holds
+  `APPROACH_COLUMNS` of them, each card's arrivals take different ones and the cards of a column
+  start at different ones, so lines merge only where a card receives more arrivals than there are
+  columns, and even then they still arrive at their own handles. Clicking an arrival chip brings the card at the other end into view.
   Hovering a card lights every connection it takes part in and rings the cards at their far end.
 - **Viewport**: the graph mounts through `DiagramViewport` (`kind="graph"`). The opening placement
   uses `useOpeningPlacement`: a `focusRequest` (node id + token) or a run's `currentNodeId` fits
