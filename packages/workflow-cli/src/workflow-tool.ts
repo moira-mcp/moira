@@ -28,7 +28,9 @@
  *   set-variable <name> <value>      Set declared global in variableRegistry
  *   list-variables                   List declared globals from variableRegistry
  *   set-name <text>                  Set workflow display name
- *   set-slug <slug>                  Set workflow catalog slug (kebab-case)
+ *   set-owner <system-owner>         Set the catalog owner (system-admin | system-moira)
+ *   set-owner <system-owner>         Set the catalog owner: system-admin (private) or system-moira (public)
+  set-slug <slug>                  Set workflow catalog slug (kebab-case)
  *   set-description <text>           Set workflow description
  *   set-system-reminder <text|none>  Set or remove the per-step system reminder
  *   set-tags <tag,tag,...|none>      Set or remove catalog tags
@@ -50,6 +52,7 @@ import {
   setNodeBlock,
 } from "./workflow-process-authoring.js";
 import { deriveProcess } from "@mcp-moira/workflow-engine/process";
+import { SYSTEM_OWNER_IDS, isSystemOwner } from "@mcp-moira/shared/services/workflow-catalog";
 // Import GraphValidator directly to avoid auth dependencies from shared index
 import { GraphValidator } from "@mcp-moira/workflow-engine/validation";
 import { readExtensionRegistrySnapshot } from "@mcp-moira/workflow-engine/extensions";
@@ -1033,6 +1036,46 @@ function setVersion(workflow: WorkflowGraph, version: string): WorkflowGraph {
   workflow.metadata.version = version;
 
   console.log(c("green", `✓ Version updated: ${oldVersion || "none"} → ${version}`));
+
+  return workflow;
+}
+
+function setOwner(workflow: WorkflowGraph, owner: string): WorkflowGraph {
+  const record = workflow as unknown as Record<string, unknown>;
+  const visibility = record.visibility;
+  const expected = visibility === "public" ? "system-moira" : "system-admin";
+  if (!isSystemOwner(owner)) {
+    console.error(
+      c(
+        "red",
+        `ERROR: Catalog owner must be one of ${SYSTEM_OWNER_IDS.join(", ")}: ${owner}. A bundled flow whose owner is not a system owner is skipped on install, or lands under a private account instead of the catalog.`,
+      ),
+    );
+    process.exit(1);
+  }
+  if (typeof visibility === "string" && owner !== expected) {
+    console.error(
+      c(
+        "red",
+        `ERROR: A ${visibility} flow belongs to ${expected}, not ${owner}. Change visibility first if that is what you meant.`,
+      ),
+    );
+    process.exit(1);
+  }
+  const oldOwner = record.owner as string | undefined;
+  record.owner = owner;
+
+  console.log(c("green", "✓ Workflow owner updated"));
+  if (oldOwner) {
+    console.log(c("dim", `Old owner: ${oldOwner}`));
+  }
+  console.log(c("bright", `New owner: ${owner}`));
+  console.log(
+    c(
+      "yellow",
+      "Catalog identity is (owner, slug): the entry under the old owner stays until it is removed.",
+    ),
+  );
 
   return workflow;
 }
@@ -2173,6 +2216,21 @@ async function main(): Promise<void> {
         originalWorkflow,
         saveOptions,
       );
+      break;
+    }
+
+    case "set-owner": {
+      const owner = args
+        .slice(2)
+        .filter((argument) => !VERSION_SWITCHES.has(argument))
+        .join(" ")
+        .trim();
+      if (!owner) {
+        console.error(c("red", `Usage: set-owner <${SYSTEM_OWNER_IDS.join("|")}>`));
+        process.exit(1);
+      }
+      createBackup(config.file);
+      saveWorkflow(config.file, setOwner(workflow, owner), originalWorkflow, saveOptions);
       break;
     }
 
