@@ -28,14 +28,14 @@ the executable graph. The active block follows the current primary workflow node
 replan, and the normal multi-unit checkpoint loop reopen the corresponding earlier block without
 separate status variables. The same shared model renders the PNG attached to existing
 authorized plan/report/approval/completion user notifications; stopped notifications remain text-only
-because an arbitrary abort has no truthful single phase. Progress never changes SDF routing or its
+because a run that ends early has no truthful single phase. Progress never changes SDF routing or its
 authority boundary.
 
 The stable inactive labels stay short. While an exact implementation, validation, independent
 review, repair, or checkpoint node is current, its active-only label adds the authoritative unit,
 total, and iteration values for that role. Plan/replan nodes never reuse stale unit counters.
 
-`screenshots` captures and actually inspects the required states once. `html_report` reuses those same accepted images in a self-contained report, uploads it through Moira's Artifact API, and sends the public URL through the current user's configured communication channels; it never performs a second screenshot pass. Artifact upload failure blocks the unit. Missing channels or send failure at a reached notification node is non-blocking. Interactive plan, selected-unit, and final approvals receive attention notifications and wait in ordinary directives. Autonomous mode has no human-approval directives.
+`screenshots` captures and actually inspects the required states once. `html_report` reuses those same accepted images in a self-contained report, uploads it through Moira's Artifact API, and sends the public URL through the current user's configured communication channels; it never performs a second screenshot pass. Artifact upload failure blocks the unit. Missing channels or send failure at a reached notification node is non-blocking. Interactive plan, selected-unit, and final approvals receive attention notifications and wait in ordinary directives. Autonomous mode has no human-approval directives. Ending the whole run early is the exception and is not an approval: where a blocker cannot be cleared or a unit cannot close, the flow states what ending it now leaves incomplete and ends only on the user's explicit confirmation, which autonomous mode never infers for itself.
 
 Findings are classified as product, test/validation, evidence, documentation/projection, invalid criterion, or upstream plan/process defects. Product repair returns through producer completion. Verification-only or gate-local repair reruns only stale evidence. Mixed or invalid causes trigger quality-preserving replan rather than expanding implementation against a broken contract.
 
@@ -43,7 +43,10 @@ Every current-unit producer, validator, reviewer, repair role, checkpoint, and r
 
 When the originating request already authorizes a later caller-owned push, pull request, publication, release, or deployment, SDF records that intent through the `session` reminder API during intake. The write requires the current workflow-step revision but does not advance that revision or invalidate the presented Step attempt. The reminder is returned under `Next requested actions` on ordinary completion for both standalone and child runs. It never becomes a development-plan unit, changes `vcs_commits_authorized`, performs the effect, or grants new authority.
 
-Runtime, browser, visual, integration, performance, and full-suite checks remain conditional on the feature and repository. Permanent documentation closes with its vertical unit; final reconciliation still checks cross-unit truth and independently reviews only changed or previously uncovered documentation. The final suffix covers feature-wide validation, semantic review, requirements coverage, factual reporting, and authority-bound local VCS reconciliation. Normal and stopped endings send best-effort notifications through configured user channels.
+Runtime, browser, visual, integration, performance, and full-suite checks remain conditional on the feature and repository. Permanent documentation closes with its vertical unit; final reconciliation still checks cross-unit truth and independently reviews only changed or previously uncovered documentation. The final suffix covers feature-wide validation, semantic review, requirements coverage, factual reporting, and authority-bound local VCS reconciliation. A run ends in one of three ways, and each sends a best-effort notification through the configured
+user channels: it completes; it ends early on the user's explicit confirmation; or it finishes the
+development work while local finalization stays blocked, which is reported as such rather than as a
+complete run.
 
 ## When to use it
 
