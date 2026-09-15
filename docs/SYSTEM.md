@@ -27,6 +27,42 @@ interface IGraphStorage {
 - Executions: `.graph-storage/executions/<uuid>.json`
 - Workflows: `workflows/production/flows/<uuid>.json` — one file per flow, named by its stable UUID. Each file carries top-level catalog metadata `owner` (the owning user id) and `visibility` (`public` | `private`) alongside the graph; catalog identity is `(owner, slug)` since a slug is unique only per owner. Read via `readWorkflowCatalog()` in `packages/shared/src/services/workflow-catalog.ts`.
 
+### Shared Revision Store
+
+Versioned content belongs to one store rather than to each entity that keeps a history. Notes, global
+settings and any future versioned entity write their content as revisions of `entityRevision`
+(`packages/shared/src/database/repositories/revision-repository.ts`).
+
+```typescript
+append({ entityType, entityId, content, authorId?, maxRevisions? }): Promise<Revision>;
+latest(target): Promise<Revision | null>;
+get(target, revision): Promise<Revision | null>;
+list(target, { previewChars? }): Promise<RevisionSummary[]>;   // newest first, preview not content
+compare(target, from, to): Promise<{ from; to; parts } | null>; // line-level, null if one is gone
+deleteHistory(target): Promise<void>;
+totalSize(target): Promise<number>;
+```
+
+Consumers today: notes, global settings and playbooks.
+
+Rules a consumer has to know:
+
+- **Revisions are appended, never rewritten.** `append` derives the number from the highest stored
+  one, so a pruned tail never causes a reused number. Putting a past value back in force is a new
+  revision carrying the old content, not a rewind.
+- **Retention belongs to the consumer.** `maxRevisions` drops the oldest revisions beyond the limit;
+  omitting it keeps every revision. A note keeps the limit configured for notes, an administrative
+  setting keeps a shorter tail.
+- **Absent content is not empty content.** `content` may be null, which records an entity that had
+  no content at all — a global setting with no value falls back to its default while an empty one
+  does not.
+- **The owner deletes its own history.** `entityRevision` deliberately carries no foreign key to the
+  owning row, because one store serves entities in different tables. Nothing cascades: whoever hard
+  deletes an entity calls `deleteHistory` for it in the same operation.
+- **Reading a revision distinguishes two absences.** `get` and `compare` return null when the
+  revision is unknown or already pruned; a revision that exists with null content is a different
+  answer.
+
 ### Replay-safe execution mutations
 
 `start({ action: "prepare" })` resolves authorization, workflow version and digest, parent reference,
@@ -682,7 +718,8 @@ interface ExecutionContext {
 interface ExecutionError {
   timestamp: number; // Unix ms
   nodeId: string; // Node where error occurred
-  errorType: "validation" | "handler" | "system";
+  // "degradation" records a step that ran without behaviour text it names; it is not a failure
+  errorType: "validation" | "handler" | "system" | "degradation";
   message: string;
   input?: unknown; // Sanitized input (optional)
 }
@@ -1417,7 +1454,7 @@ Action-based tool for session-related information.
     createdAt: string;   // ISO 8601
     updatedAt: string;   // ISO 8601
     completedAt?: string; // ISO 8601
-    errorCount?: number; // Number of errors in errors array
+    errorCount?: number; // Refusals in the errors array; degradation entries are not counted
   }];
   total: number;
 }

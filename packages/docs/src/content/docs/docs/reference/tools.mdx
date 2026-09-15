@@ -99,6 +99,22 @@ The separately authenticated Web lock-creation route presents its one-time PIN t
 
 `notes` stores user-isolated, versioned text. Reads may select a retained version; deletion is soft. Save enforces the configured per-note size, total storage, retained-version, key, and tag limits. Administrators may change the active storage limits.
 
+### Playbooks
+
+`playbooks` keeps named, reusable behaviour text — a review standard, a tone of voice, a definition
+of done — in one place instead of inside the workflows that rely on it, so the same text can be
+edited once and read by an agent wherever it is needed.
+
+A name uses lower-case letters, digits and hyphens and is unique inside one account; writing under a
+name another user also has creates your own playbook rather than changing theirs. Every save writes a revision, `restore` writes a new revision
+carrying the older text, and `compare` reports the difference between two of them line by line.
+Revisions are kept up to the configured retention, and content is bounded per playbook.
+
+`visibility` publishes a playbook or makes it private again. A published playbook is readable by any
+signed-in user who names its owner and changeable only by its owner: publishing shares the text, not
+control over it. Reading somebody else's published playbook means naming them through `owner`, by handle or by user
+id.
+
 ### Hosted artifacts and workflow files
 
 `artifacts` manages public static HTML outputs with per-user count and storage quotas, per-file size limits, and expiry. Upload may associate an artifact with an execution; update and delete require ownership. The token operation creates a one-use HTTP upload grant for external upload clients. Administrators may change active quotas globally or per user.

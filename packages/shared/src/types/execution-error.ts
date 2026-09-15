@@ -8,8 +8,11 @@
  * - validation: Input validation failed (schema mismatch, missing fields)
  * - handler: Node handler threw an error (business logic error)
  * - system: System-level error (network, database, timeout)
+ * - degradation: The step ran, but without something it names — behaviour text it could not read.
+ *   Recorded so a run does not lose it silently; it is not a failure, and consumers that count
+ *   failures must not count it.
  */
-export type ExecutionErrorType = "validation" | "handler" | "system";
+export type ExecutionErrorType = "validation" | "handler" | "system" | "degradation";
 
 /**
  * Single error entry in execution error log
@@ -30,6 +33,32 @@ export interface ExecutionError {
 
   /** Agent input that caused the error (sanitized, may be truncated) */
   input?: unknown;
+}
+
+/**
+ * Whether a journal entry means the step was refused.
+ *
+ * Every consumer that reads the journal to answer "did this step fail" asks this, because the
+ * journal holds two different kinds of fact: a refusal, where the step did not happen, and a
+ * degradation, where it happened without behaviour text it names. The rule lives here rather than
+ * at each consumer, because a consumer that keeps its own copy of it audits an accepted step as a
+ * failed attempt the moment the copies disagree.
+ */
+export function isRefusal(entry: { errorType?: string }): boolean {
+  return entry.errorType !== "degradation";
+}
+
+/** How many entries in this journal are refusals. */
+export function countRefusals(entries: { errorType?: string }[] | undefined): number {
+  return (entries ?? []).filter(isRefusal).length;
+}
+
+/** The most recent refusal in this journal, or undefined when it holds none. */
+export function latestRefusal<T extends { errorType?: string }>(
+  entries: T[] | undefined,
+): T | undefined {
+  const refusals = (entries ?? []).filter(isRefusal);
+  return refusals[refusals.length - 1];
 }
 
 /**

@@ -80,6 +80,45 @@ export function createAuth(logger: ServiceLogger) {
 }
 ```
 
+## Resource Authorization
+
+**Policy**: `packages/shared/src/authorization/authorization-policy.ts`
+**Service**: `packages/shared/src/authorization/authorization-service.ts`
+
+Whether a subject may act on a resource is one decision, taken centrally, rather than a rule per
+table. The policy is pure and takes three things: the subject (acting user, whether they operate the
+installation, the groups they belong to), the resource (type, id, owner, visibility) and the action
+(`view`, `use`, `edit`, `delete`, `share`, `administer`). The service resolves those facts from the
+database and calls the policy; `can` answers one action, `canAny` answers a reading surface that
+serves both the owner and an operator.
+
+Rules:
+
+- The owner may do anything with their own resource.
+- A public resource may be read and used by any authenticated subject, and changed by none of them:
+  publishing shares content, not control.
+- Anything else requires an explicit grant. A grant's level is `use` (read and act) or `edit`
+  (additionally change); an accepted workflow invite issues `use`.
+- An administrator gets `administer` on anybody's resource and nothing more. Operating the
+  installation is not acting as the user, so an operator's own agent session cannot drive somebody
+  else's run.
+
+**Grants**: `accessGrant` addresses a resource of any type (`workflow`, `execution`, `note`,
+`artifact`, `playbook`) and names either a user or a group. Groups (`principalGroup`,
+`principalGroupMember`) exist in the model and in the decision; no product path creates them yet,
+and an empty group table changes no answer.
+
+Execution routes ask the question that matches what they do. Reading or writing a run's working
+state — its variables, its reminders, a progress-image link — asks whether the caller may act as the
+owner, and an operator does not qualify. Routes that already served both the owner and an operator —
+the run card, its progress, answering a step, its locks — ask whether the caller may reach the run at
+all.
+
+Notes and artifacts are reached only through queries that carry their owner, so no path loads
+another user's row to then refuse it. Same-owner invariants — a parent and child execution, a step
+attempt and its claimant, a progress-image token and the run it names — are integrity rules rather
+than access questions and stay where they are enforced.
+
 ## Admin Access Control
 
 **Middleware**: packages/web-backend/src/middleware/admin-middleware.ts

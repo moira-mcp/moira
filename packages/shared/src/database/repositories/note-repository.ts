@@ -12,11 +12,12 @@
 
 import { eq, and, or, isNull, like, desc, sql } from "drizzle-orm";
 import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
-import { note, noteVersion } from "../schema.js";
+import { note } from "../schema.js";
 import { createLogger } from "../../logging/logger.js";
 import type * as schema from "../schema.js";
 import { randomUUID } from "node:crypto";
 import { executeListQuery, clampPagination, type ListQueryConfig } from "../list-query-builder.js";
+import { REVISION_ENTITY_TYPES, RevisionRepository } from "./revision-repository.js";
 
 const NOTE_LIST_CONFIG: ListQueryConfig<"updatedAt" | "createdAt" | "key"> = {
   table: note,
@@ -125,8 +126,16 @@ export interface NoteStats {
 
 export class NoteRepository {
   private logger = createLogger({ component: "NoteRepository" });
+  /** Note content lives in the shared revision store; this repository owns only note metadata. */
+  private revisions: RevisionRepository;
 
-  constructor(private db: BetterSQLite3Database<typeof schema>) {}
+  constructor(private db: BetterSQLite3Database<typeof schema>) {
+    this.revisions = new RevisionRepository(db);
+  }
+
+  private revisionTarget(noteId: string) {
+    return { entityType: REVISION_ENTITY_TYPES.note, entityId: noteId } as const;
+  }
 
   // ===== List Operations =====
 
@@ -205,13 +214,9 @@ export class NoteRepository {
     // Get previews for each note (latest version content)
     const notes: NoteInfo[] = [];
     for (const row of rows) {
-      const [versionRow] = await this.db
-        .select({ value: noteVersion.value })
-        .from(noteVersion)
-        .where(and(eq(noteVersion.noteId, row.id), eq(noteVersion.version, row.currentVersion)))
-        .limit(1);
+      const current = await this.revisions.get(this.revisionTarget(row.id), row.currentVersion);
 
-      const value = versionRow?.value || "";
+      const value = current?.content || "";
       const preview = value.substring(0, 100) + (value.length > 100 ? "..." : "");
 
       notes.push({
@@ -277,17 +282,13 @@ export class NoteRepository {
     }
 
     // Get current version content
-    const [versionRow] = await this.db
-      .select({ value: noteVersion.value })
-      .from(noteVersion)
-      .where(and(eq(noteVersion.noteId, row.id), eq(noteVersion.version, row.currentVersion)))
-      .limit(1);
+    const current = await this.revisions.get(this.revisionTarget(row.id), row.currentVersion);
 
     return {
       id: row.id,
       key: row.key,
       tags: row.tags ? JSON.parse(row.tags) : [],
-      value: versionRow?.value || "",
+      value: current?.content || "",
       size: row.size,
       version: row.currentVersion,
       createdAt: (row.createdAt as Date).getTime(),
@@ -324,13 +325,9 @@ export class NoteRepository {
     }
 
     // Get specific version content
-    const [versionRow] = await this.db
-      .select({ value: noteVersion.value, size: noteVersion.size })
-      .from(noteVersion)
-      .where(and(eq(noteVersion.noteId, row.id), eq(noteVersion.version, version)))
-      .limit(1);
+    const requested = await this.revisions.get(this.revisionTarget(row.id), version);
 
-    if (!versionRow) {
+    if (!requested) {
       return null; // Version doesn't exist
     }
 
@@ -338,8 +335,8 @@ export class NoteRepository {
       id: row.id,
       key: row.key,
       tags: row.tags ? JSON.parse(row.tags) : [],
-      value: versionRow.value,
-      size: versionRow.size,
+      value: requested.content ?? "",
+      size: requested.size,
       version,
       createdAt: (row.createdAt as Date).getTime(),
       updatedAt: (row.updatedAt as Date).getTime(),
@@ -368,22 +365,13 @@ export class NoteRepository {
     }
 
     // Get all versions
-    const versions = await this.db
-      .select({
-        version: noteVersion.version,
-        size: noteVersion.size,
-        value: noteVersion.value,
-        createdAt: noteVersion.createdAt,
-      })
-      .from(noteVersion)
-      .where(eq(noteVersion.noteId, noteRow.id))
-      .orderBy(desc(noteVersion.version));
+    const revisions = await this.revisions.list(this.revisionTarget(noteRow.id));
 
-    return versions.map((v) => ({
-      version: v.version,
-      size: v.size,
-      preview: v.value.substring(0, 100) + (v.value.length > 100 ? "..." : ""),
-      createdAt: (v.createdAt as Date).getTime(),
+    return revisions.map((revision) => ({
+      version: revision.revision,
+      size: revision.size,
+      preview: revision.preview,
+      createdAt: revision.createdAt,
     }));
   }
 
@@ -458,17 +446,14 @@ export class NoteRepository {
 
     if (existingNote) {
       // Update existing note - create new version
-      const newVersion = existingNote.currentVersion + 1;
-
-      // Insert new version
-      await this.db.insert(noteVersion).values({
-        id: randomUUID(),
-        noteId: existingNote.id,
-        version: newVersion,
-        value,
-        size,
-        createdAt: now,
+      // Append the new content and let the shared store assign the revision number.
+      const appended = await this.revisions.append({
+        ...this.revisionTarget(existingNote.id),
+        content: value,
+        authorId: userId,
+        maxRevisions: maxVersions,
       });
+      const newVersion = appended.revision;
 
       // Update note metadata
       await this.db
@@ -483,9 +468,6 @@ export class NoteRepository {
           updatedAt: now,
         })
         .where(eq(note.id, existingNote.id));
-
-      // Cleanup old versions (keep max configured)
-      await this.cleanupOldVersions(existingNote.id, maxVersions);
 
       this.logger.debug("save() updated existing note", {
         id: existingNote.id,
@@ -510,44 +492,15 @@ export class NoteRepository {
       });
 
       // Insert first version
-      await this.db.insert(noteVersion).values({
-        id: randomUUID(),
-        noteId,
-        version,
-        value,
-        size,
-        createdAt: now,
+      await this.revisions.append({
+        ...this.revisionTarget(noteId),
+        content: value,
+        authorId: userId,
+        maxRevisions: maxVersions,
       });
 
       this.logger.debug("save() created new note", { id: noteId, version });
       return { id: noteId, version };
-    }
-  }
-
-  /**
-   * Cleanup old versions beyond the limit
-   */
-  private async cleanupOldVersions(
-    noteId: string,
-    maxVersions: number = MAX_VERSIONS_PER_NOTE,
-  ): Promise<void> {
-    // Get all versions ordered by version number desc
-    const versions = await this.db
-      .select({ id: noteVersion.id, version: noteVersion.version })
-      .from(noteVersion)
-      .where(eq(noteVersion.noteId, noteId))
-      .orderBy(desc(noteVersion.version));
-
-    // Delete versions beyond the limit
-    if (versions.length > maxVersions) {
-      const versionsToDelete = versions.slice(maxVersions);
-      for (const v of versionsToDelete) {
-        await this.db.delete(noteVersion).where(eq(noteVersion.id, v.id));
-      }
-      this.logger.debug("cleanupOldVersions() deleted", {
-        noteId,
-        deletedCount: versionsToDelete.length,
-      });
     }
   }
 
@@ -593,8 +546,9 @@ export class NoteRepository {
       return false;
     }
 
-    // Delete all versions first (FK constraint)
-    await this.db.delete(noteVersion).where(eq(noteVersion.noteId, noteRow.id));
+    // Drop the note's history before the note itself: the shared revision store holds no foreign
+    // key back to the note, so nothing else would remove it.
+    await this.revisions.deleteHistory(this.revisionTarget(noteRow.id));
 
     // Delete note
     await this.db.delete(note).where(eq(note.id, noteRow.id));

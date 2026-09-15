@@ -116,3 +116,5 @@ export * from "./workspaces/transfer-service.js";
 export * from "./workspaces/file-service.js";
 export * from "./workspaces/views.js";
 export * from "./workspaces/observability.js";
+
+export * from "./authorization/index.js";

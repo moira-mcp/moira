@@ -116,6 +116,44 @@ const isPublicAuthEndpoint = (url?: string): boolean => {
 /**
  * API Client Error for frontend error handling
  */
+/** One revision as a history listing shows it: metadata plus a short preview. */
+export interface RevisionSummary {
+  revision: number;
+  size: number;
+  preview: string;
+  authorId: string | null;
+  createdAt: number;
+}
+
+/** A playbook as a listing shows it, without its content. */
+export interface PlaybookSummary {
+  id: string;
+  slug: string;
+  name: string;
+  description: string | null;
+  visibility: "private" | "public";
+  ownerId: string;
+  revision: number;
+  size: number;
+  preview: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+/** A playbook with the content of its current or a past revision. */
+export interface Playbook extends PlaybookSummary {
+  content: string;
+}
+
+/** How many running executions read a playbook, and through which workflows. */
+export interface PlaybookUsage {
+  name: string;
+  executions: number;
+  workflows: { workflowId: string; name: string; executions: number }[];
+  /** False when more workflows stood on running executions than the walk inspected. */
+  complete: boolean;
+}
+
 export class ApiClientError extends Error {
   public code: ApiErrorCode;
   public status?: number;
@@ -3483,6 +3521,129 @@ export class MoiraApiClient {
       if (error instanceof ApiClientError) throw error;
       throw new ApiClientError("Failed to lock execution", ApiErrorCode.INTERNAL_ERROR);
     }
+  }
+
+  // ===== Playbooks =====
+
+  /** Wrap a transport failure the way every other method here does. */
+  private async wrapFailure<T>(what: string, call: () => Promise<T>): Promise<T> {
+    try {
+      return await call();
+    } catch (error) {
+      if (error instanceof ApiClientError) throw error;
+      throw new ApiClientError(`Failed to ${what}`, ApiErrorCode.INTERNAL_ERROR);
+    }
+  }
+
+  /** Playbooks this account owns. */
+  async getPlaybooks(params?: { search?: string; limit?: number; offset?: number }): Promise<{
+    playbooks: PlaybookSummary[];
+    total: number;
+  }> {
+    return this.wrapFailure("list playbooks", async () => {
+      const response = await this.client.get<
+        ApiResponse<{ playbooks: PlaybookSummary[]; total: number }>
+      >("/playbooks", { params });
+      return response.data.data!;
+    });
+  }
+
+  /**
+   * One playbook with its content; `revision` reads a past one and `owner` somebody else's
+   * published one.
+   */
+  async getPlaybook(
+    name: string,
+    options: { revision?: number; owner?: string } = {},
+  ): Promise<Playbook> {
+    return this.wrapFailure("get playbook", async () => {
+      const response = await this.client.get<ApiResponse<Playbook>>(
+        `/playbooks/${encodeURIComponent(name)}`,
+        { params: options },
+      );
+      return response.data.data!;
+    });
+  }
+
+  async savePlaybook(
+    name: string,
+    body: { content: string; title?: string; description?: string },
+  ): Promise<{ id: string; revision: number; created: boolean }> {
+    return this.wrapFailure("save playbook", async () => {
+      const response = await this.client.put<
+        ApiResponse<{ id: string; revision: number; created: boolean }>
+      >(`/playbooks/${encodeURIComponent(name)}`, body);
+      return response.data.data!;
+    });
+  }
+
+  async deletePlaybook(name: string): Promise<void> {
+    await this.wrapFailure("delete playbook", () =>
+      this.client.delete(`/playbooks/${encodeURIComponent(name)}`),
+    );
+  }
+
+  async getPlaybookHistory(name: string, owner?: string): Promise<RevisionSummary[]> {
+    return this.wrapFailure("get playbook history", async () => {
+      const response = await this.client.get<ApiResponse<{ revisions: RevisionSummary[] }>>(
+        `/playbooks/${encodeURIComponent(name)}/history`,
+        { params: owner ? { owner } : undefined },
+      );
+      return response.data.data!.revisions;
+    });
+  }
+
+  async restorePlaybookRevision(name: string, revision: number): Promise<void> {
+    await this.wrapFailure("restore playbook revision", () =>
+      this.client.post(`/playbooks/${encodeURIComponent(name)}/restore`, { revision }),
+    );
+  }
+
+  async setPlaybookVisibility(name: string, visibility: "private" | "public"): Promise<void> {
+    await this.wrapFailure("change playbook visibility", () =>
+      this.client.put(`/playbooks/${encodeURIComponent(name)}/visibility`, { visibility }),
+    );
+  }
+
+  /**
+   * Running executions that read this playbook right now.
+   *
+   * Asked before a change is saved: content resolves at every step, so the edit reaches these runs
+   * at their next step.
+   */
+  async getPlaybookUsage(name: string): Promise<PlaybookUsage> {
+    return this.wrapFailure("read playbook usage", async () => {
+      const response = await this.client.get<ApiResponse<PlaybookUsage>>(
+        `/playbooks/${encodeURIComponent(name)}/usage`,
+      );
+      return response.data.data!;
+    });
+  }
+
+  // ===== Global setting history =====
+
+  async getGlobalSettingHistory(key: string): Promise<RevisionSummary[]> {
+    return this.wrapFailure("get setting history", async () => {
+      const response = await this.client.get<ApiResponse<{ revisions: RevisionSummary[] }>>(
+        `/admin/global-settings/${encodeURIComponent(key)}/history`,
+      );
+      return response.data.data!.revisions;
+    });
+  }
+
+  async getGlobalSettingRevision(key: string, revision: number): Promise<string | null> {
+    return this.wrapFailure("get setting revision", async () => {
+      const response = await this.client.get<ApiResponse<{ value: string | null }>>(
+        `/admin/global-settings/${encodeURIComponent(key)}/revision/${revision}`,
+      );
+      return response.data.data!.value;
+    });
+  }
+
+  async restoreGlobalSettingRevision(key: string, revision: number): Promise<void> {
+    await this.wrapFailure("restore setting revision", () =>
+      this.client.post(`/admin/global-settings/${encodeURIComponent(key)}/restore`, { revision }),
+    );
   }
 }
 

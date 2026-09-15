@@ -7,11 +7,13 @@ import { describe, it, expect, jest, beforeEach } from "@jest/globals";
 import { GlobalSettingsService } from "@mcp-moira/shared";
 import type { GlobalSettingsRepository, GlobalSetting } from "@mcp-moira/shared";
 import type { AuditRepository } from "@mcp-moira/shared";
+import type { RevisionRepository } from "@mcp-moira/shared";
 
 describe("GlobalSettingsService", () => {
   let service: GlobalSettingsService;
   let mockGlobalSettingsRepo: jest.Mocked<GlobalSettingsRepository>;
   let mockAuditRepo: jest.Mocked<AuditRepository>;
+  let mockRevisionRepo: jest.Mocked<RevisionRepository>;
   const adminUserId = "admin-user-123";
 
   beforeEach(() => {
@@ -28,7 +30,13 @@ describe("GlobalSettingsService", () => {
       log: jest.fn<() => Promise<string>>().mockResolvedValue("audit-id-123"),
     } as unknown as jest.Mocked<AuditRepository>;
 
-    service = new GlobalSettingsService(mockGlobalSettingsRepo, mockAuditRepo);
+    mockRevisionRepo = {
+      append: jest.fn<() => Promise<unknown>>().mockResolvedValue(undefined),
+      list: jest.fn<() => Promise<unknown[]>>().mockResolvedValue([]),
+      get: jest.fn<() => Promise<unknown>>().mockResolvedValue(null),
+    } as unknown as jest.Mocked<RevisionRepository>;
+
+    service = new GlobalSettingsService(mockGlobalSettingsRepo, mockAuditRepo, mockRevisionRepo);
   });
 
   describe("setValue", () => {

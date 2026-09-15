@@ -62,6 +62,7 @@ import { useWorkflowApp } from "../hooks/useWorkflowData";
 import { useResource } from "../hooks/useResource";
 import { useSession } from "../auth/better-auth-client";
 import { apiClient, ApiClientError } from "../services/api-client";
+import { VisibilityToggle } from "../components/access/VisibilityToggle";
 import { ROUTES } from "../constants/routes";
 import type { WorkflowGraph } from "../types/workflow-types";
 import { LanesView } from "../components/run/LanesView";
@@ -405,25 +406,12 @@ export const FlowPage: React.FC = () => {
         </Button>
       )}
       {isOwner && fileInfo && (
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={handleToggleVisibility}
+        <VisibilityToggle
+          visibility={fileInfo.visibility === "public" ? "public" : "private"}
+          onChange={handleToggleVisibility}
           disabled={visibilityUpdating}
-          className="gap-1.5"
-        >
-          {fileInfo.visibility === "public" ? (
-            <>
-              <Globe className="w-3.5 h-3.5" />
-              {t("components.workflowCard.public")}
-            </>
-          ) : (
-            <>
-              <Lock className="w-3.5 h-3.5" />
-              {t("components.workflowCard.private")}
-            </>
-          )}
-        </Button>
+          testId="workflow-visibility-toggle"
+        />
       )}
       {fileInfo?.accessType === "shared" && (
         <Badge variant="secondary" className="gap-1.5" data-testid="shared-with-you-indicator">

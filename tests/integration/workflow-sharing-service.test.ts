@@ -18,6 +18,7 @@ import {
   AuditRepository,
   getSqliteInstance,
 } from "@mcp-moira/shared";
+import { AuthorizationService } from "@mcp-moira/shared";
 import { WorkflowSharingService } from "@mcp-moira/shared";
 import {
   InviteNotFoundError,
@@ -83,15 +84,11 @@ describe("WorkflowSharingService", () => {
     workflowRepo = new WorkflowRepository(db);
     auditRepo = new AuditRepository(db);
 
-    // Wire up shared access checker
-    workflowRepo.setSharedAccessChecker((workflowId, userId) =>
-      sharingRepo.hasAccess(workflowId, userId),
-    );
-
     service = new WorkflowSharingService(
       sharingRepo,
       workflowRepo,
       auditRepo,
+      new AuthorizationService(db),
       "https://test.moira.ai",
     );
 
@@ -126,7 +123,9 @@ describe("WorkflowSharingService", () => {
   afterEach(() => {
     // Cleanup test workflow and related data
     const sqlite = getSqliteInstance();
-    sqlite.prepare("DELETE FROM workflowAccess WHERE workflowId = ?").run(testWorkflowId);
+    sqlite
+      .prepare("DELETE FROM accessGrant WHERE resourceType = 'workflow' AND resourceId = ?")
+      .run(testWorkflowId);
     sqlite.prepare("DELETE FROM workflowInvite WHERE workflowId = ?").run(testWorkflowId);
     sqlite.prepare("DELETE FROM workflow WHERE id = ?").run(testWorkflowId);
   });

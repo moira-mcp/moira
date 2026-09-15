@@ -28,7 +28,44 @@ import {
   logAuditEventDirect,
   AuditAction,
   metadataRevision,
+  getAuthorizationService,
+  RESOURCE_TYPES,
+  countRefusals,
+  latestRefusal,
 } from "@mcp-moira/shared";
+
+/**
+ * Whether this user may act on the execution **as its owner would**.
+ *
+ * Used by every route that reads or writes the run's own working state. An operator of the
+ * installation does not qualify: operating Moira is not acting inside somebody's run.
+ */
+async function mayActOnExecution(
+  userId: string,
+  execution: { executionId: string; userId: string },
+): Promise<boolean> {
+  return getAuthorizationService().can(userId, "use", {
+    type: RESOURCE_TYPES.execution,
+    id: execution.executionId,
+    ownerId: execution.userId,
+  });
+}
+
+/**
+ * Whether this user may reach the execution at all: its owner acts, an operator of the installation
+ * inspects. Used only by the routes that already served both, so that the decision is one policy
+ * question instead of an `isAdmin` branch beside every check.
+ */
+async function mayReachExecution(
+  userId: string,
+  execution: { executionId: string; userId: string },
+): Promise<boolean> {
+  return getAuthorizationService().canAny(userId, ["view", "use", "administer"], {
+    type: RESOURCE_TYPES.execution,
+    id: execution.executionId,
+    ownerId: execution.userId,
+  });
+}
 
 const router = Router();
 
@@ -62,7 +99,7 @@ router.post(
     const authenticatedRequest = req as AuthenticatedRequest;
     const execution = await repository.getExecution(req.params.id);
     if (!execution) throw createApiError.notFound("Execution not found");
-    if (execution.userId !== authenticatedRequest.userId)
+    if (!(await mayActOnExecution(authenticatedRequest.userId, execution)))
       throw createApiError.unauthorized("Access denied");
     if (req.body?.theme !== undefined && !["light", "dark"].includes(req.body.theme))
       throw createApiError.validationFailed("theme must be light or dark");
@@ -102,8 +139,7 @@ router.get(
     const authenticatedRequest = req as AuthenticatedRequest;
     const execution = await repository.getExecution(req.params.id);
     if (!execution) throw createApiError.notFound("Execution not found");
-    const isAdmin = authenticatedRequest.userInfo?.isAdmin ?? false;
-    if (!isAdmin && execution.userId !== authenticatedRequest.userId) {
+    if (!(await mayReachExecution(authenticatedRequest.userId, execution))) {
       throw createApiError.unauthorized("Access denied");
     }
     const graph = await repository.getWorkflowGraph(execution.workflowId, execution.userId);
@@ -141,7 +177,7 @@ router.post(
 
     const execution = await repository.getExecution(executionId);
     if (!execution) throw createApiError.notFound(`Execution '${executionId}' not found`);
-    if (!isAdmin && execution.userId !== userId)
+    if (!(await mayReachExecution(userId, execution)))
       throw createApiError.forbidden("Access denied - not your execution", { executionId });
     if (execution.status !== "running")
       throw createApiError.badRequest(
@@ -172,7 +208,9 @@ router.post(
       );
 
     const nodeId = execution.currentNodeId;
-    const errorsBefore = execution.errors?.length ?? 0;
+    // A degradation entry says the step ran without something it names; it is not a refusal, so it
+    // must not make an accepted answer look rejected.
+    const errorsBefore = countRefusals(execution.errors);
     // The next step is presented as an agent step would present it, so the agent's outstanding
     // attempt is stale and `session current_step` hands out the attempt for the new node.
     await getExecutor().executeStep(executionId, input, undefined, {
@@ -184,7 +222,7 @@ router.post(
     const rejected =
       after.currentNodeId === nodeId &&
       after.waitingForInputNodeId === nodeId &&
-      (after.errors?.length ?? 0) > errorsBefore;
+      countRefusals(after.errors) > errorsBefore;
     await logAuditEventDirect(repository, {
       userId,
       action: rejected ? AuditAction.EXECUTION_STEP_FAIL : AuditAction.EXECUTION_STEP,
@@ -199,7 +237,7 @@ router.post(
       },
     });
     if (rejected) {
-      const last = after.errors![after.errors!.length - 1];
+      const last = latestRefusal(after.errors)!;
       throw createApiError.validationFailed(last.message, { executionId, nodeId });
     }
     const graph = await repository.getWorkflowGraph(after.workflowId, after.userId);
@@ -305,8 +343,9 @@ router.get(
         completedAt: exec.completedAt,
         error: exec.error, // deprecated, use errors array
         hasActiveLock: isLocked,
-        // Issue #386: Include error count for list view badge
-        errorCount: exec.errors?.length ?? 0,
+        // Issue #386: Include error count for list view badge. Degradation entries are not
+        // refusals, so a run that continued without a playbook does not wear an error badge.
+        errorCount: countRefusals(exec.errors),
       };
     });
 
@@ -340,7 +379,6 @@ router.get(
     const { id: executionId } = req.params;
     const authenticatedRequest = req as AuthenticatedRequest;
     const userId = authenticatedRequest.userId;
-    const isAdmin = authenticatedRequest.userInfo?.isAdmin ?? false;
 
     const execution = await repository.getExecution(executionId);
 
@@ -348,8 +386,8 @@ router.get(
       throw createApiError.notFound(`Execution '${executionId}' not found`, { executionId });
     }
 
-    // Permission check: user can only view own executions, admins see all
-    if (!isAdmin && execution.userId !== userId) {
+    // Permission check: the owner reads their own execution, an operator inspects any.
+    if (!(await mayReachExecution(userId, execution))) {
       throw createApiError.unauthorized("Access denied - not your execution", { executionId });
     }
 
@@ -412,7 +450,8 @@ router.get(
     const execution = await repository.getExecution(req.params.id);
     const userId = (req as AuthenticatedRequest).userId;
     if (!execution) throw createApiError.notFound("Execution not found");
-    if (execution.userId !== userId) throw createApiError.unauthorized("Access denied");
+    if (!(await mayActOnExecution(userId, execution)))
+      throw createApiError.unauthorized("Access denied");
     const status = req.query.status as "active" | "cancelled" | undefined;
     const search = String(req.query.search ?? "").toLowerCase();
     const reminders = (execution.reminders ?? []).filter(
@@ -502,7 +541,7 @@ router.get(
   asyncHandler(async (req: Request, res: Response) => {
     const userId = (req as AuthenticatedRequest).userId;
     const execution = await repository.getExecution(req.params.id);
-    if (!execution || execution.userId !== userId)
+    if (!execution || !(await mayActOnExecution(userId, execution)))
       throw createApiError.unauthorized("Access denied");
     const graph = await repository.getWorkflowGraph(execution.workflowId, userId);
     if (!graph) throw createApiError.notFound("Workflow not found");
@@ -533,7 +572,7 @@ router.put(
   asyncHandler(async (req: Request, res: Response) => {
     const userId = (req as AuthenticatedRequest).userId;
     const execution = await repository.getExecution(req.params.id);
-    if (!execution || execution.userId !== userId)
+    if (!execution || !(await mayActOnExecution(userId, execution)))
       throw createApiError.unauthorized("Access denied");
     const graph = await repository.getWorkflowGraph(execution.workflowId, userId);
     if (!graph) throw createApiError.notFound("Workflow not found");
@@ -762,17 +801,14 @@ router.get(
   asyncHandler(async (req: Request, res: Response) => {
     const { id: executionId } = req.params;
     const userId = (req as AuthenticatedRequest).userId;
-    const userInfo = (req as AuthenticatedRequest).userInfo;
-    const isAdmin = userInfo?.isAdmin || false;
-
     const execution = await repository.getExecution(executionId);
 
     if (!execution) {
       throw createApiError.notFound(`Execution '${executionId}' not found`, { executionId });
     }
 
-    // Permission check: user can only view locks on own executions, admins see all
-    if (!isAdmin && execution.userId !== userId) {
+    // Permission check: the owner reads locks on their own execution, an operator inspects any.
+    if (!(await mayReachExecution(userId, execution))) {
       throw createApiError.unauthorized("Access denied - not your execution", { executionId });
     }
 
@@ -809,8 +845,6 @@ router.post(
   asyncHandler(async (req: Request, res: Response) => {
     const { id: executionId, lockId } = req.params;
     const userId = (req as AuthenticatedRequest).userId;
-    const userInfo = (req as AuthenticatedRequest).userInfo;
-    const isAdmin = userInfo?.isAdmin || false;
     const { pin } = req.body;
 
     if (!pin || typeof pin !== "string") {
@@ -823,8 +857,8 @@ router.post(
       throw createApiError.notFound(`Execution '${executionId}' not found`, { executionId });
     }
 
-    // Permission check: user can only validate PIN on own executions, admins see all
-    if (!isAdmin && execution.userId !== userId) {
+    // Permission check: the owner validates on their own execution, an operator inspects any.
+    if (!(await mayReachExecution(userId, execution))) {
       throw createApiError.unauthorized("Access denied - not your execution", { executionId });
     }
 

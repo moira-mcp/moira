@@ -76,6 +76,7 @@ export const TOOL_BINDINGS = {
     return { content: formatMaterializeDelivery(files) };
   },
   notes: async (params) => (await import("./manage-notes.js")).manageNotes(params),
+  playbooks: async (params) => (await import("./manage-playbooks.js")).managePlaybooks(params),
   artifacts: async (params) => (await import("./manage-artifacts.js")).manageArtifacts(params),
   lock: async (params) => (await import("./manage-locks.js")).manageLocks(params),
 

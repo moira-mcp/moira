@@ -146,6 +146,7 @@ describe("MCP tool definitions", () => {
       "communication",
       "session",
       "notes",
+      "playbooks",
       "artifacts",
       "lock",
       "workspace_list",

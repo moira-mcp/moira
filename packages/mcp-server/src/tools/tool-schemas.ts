@@ -348,6 +348,41 @@ export const manageNotesSchema = z.object({
   tags: z.array(z.string()).optional().describe("Tags for the note (for save action, max 10 tags)"),
 });
 
+export const managePlaybooksSchema = z.object({
+  action: z
+    .enum(["list", "get", "save", "delete", "history", "compare", "restore", "visibility"])
+    .describe("Action to perform on playbooks"),
+  name: z
+    .string()
+    .optional()
+    .describe("Playbook machine name (required for every action except list)"),
+  owner: z
+    .string()
+    .optional()
+    .describe("Owner handle or id when reading someone else's public playbook; defaults to you"),
+  search: z.string().optional().describe("Search playbooks by name or description (for list)"),
+  limit: z
+    .number()
+    .min(1)
+    .max(100)
+    .optional()
+    .describe("Maximum playbooks to return (1-100, default 50)"),
+  offset: z.number().min(0).optional().describe("Pagination offset (default 0)"),
+  content: z.string().optional().describe("Playbook text (required for save)"),
+  title: z.string().optional().describe("Human-readable name (for save)"),
+  description: z.string().optional().describe("What this playbook is for (for save)"),
+  revision: z
+    .number()
+    .optional()
+    .describe("Revision number to read or restore (for get and restore)"),
+  fromRevision: z.number().optional().describe("Older revision to compare (for compare)"),
+  toRevision: z.number().optional().describe("Newer revision to compare (for compare)"),
+  visibility: z
+    .enum(["private", "public"])
+    .optional()
+    .describe("Who may read the playbook (for visibility)"),
+});
+
 export const manageArtifactsSchema = z.object({
   action: z
     .enum(["upload", "update", "delete", "list", "stats", "token"])

@@ -38,6 +38,7 @@ import { cn } from "@/lib/utils";
 import { useTranslation } from "react-i18next";
 import { displayNodeType } from "../../types/node-type-catalog";
 import { NodeSchemaReadout } from "./NodeSchemaReadout";
+import { NodePlaybookReferences, collectNodeReferences } from "./NodePlaybookReferences";
 
 interface NodeDetailSheetProps {
   open: boolean;
@@ -110,6 +111,20 @@ const Section: React.FC<{
 /**
  * Node Detail Sheet Component
  */
+/**
+ * The playbook section renders nothing when the node names none, so the heading never appears above
+ * an empty block.
+ */
+const PlaybookSection: React.FC<{ texts: (string | undefined)[] }> = ({ texts }) => {
+  const { t } = useTranslation();
+  if (collectNodeReferences(texts).length === 0) return null;
+  return (
+    <Section title={t("components.workflowGraph.nodeDetails.playbooks", "Playbooks")}>
+      <NodePlaybookReferences texts={texts} />
+    </Section>
+  );
+};
+
 export const NodeDetailSheet: React.FC<NodeDetailSheetProps> = ({
   open,
   onOpenChange,
@@ -244,6 +259,11 @@ export const NodeDetailSheet: React.FC<NodeDetailSheetProps> = ({
                 </p>
               </Section>
             )}
+
+            {/* Playbooks this node names */}
+            <PlaybookSection
+              texts={[directive, completionCondition, message, basePath, ...(filePaths ?? [])]}
+            />
 
             {/* Message - for telegram nodes */}
             {message && (

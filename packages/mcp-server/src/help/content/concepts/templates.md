@@ -352,6 +352,26 @@ Note content can contain regular template variables - they are processed after n
 {{note:greeting}}  // Resolves to "Hello, Alice!" when userName="Alice"
 ```
 
+## Playbook References
+
+Reference named, reusable behaviour text kept outside the workflow:
+
+```
+Follow this standard: {{playbook:review-standard}}
+Write in this voice: {{playbook:@jane/tone-of-voice}}
+```
+
+**Behavior:**
+
+- Resolved at every step, so editing a playbook reaches a running execution at its next step
+- Works in a directive, a completion condition, a materialized file, and a registry default
+- `[PLAYBOOK NOT AVAILABLE: name]` when it cannot be read, and the execution records that the step
+  ran without it
+- A definition naming a playbook its author cannot read is refused while editing, and a run naming
+  one is refused before it is created
+- A reference written with a leading backslash (`\{{playbook:name}}`) is literal text: it is neither
+  resolved nor checked
+
 ## Escaping
 
 To output literal curly braces, use double escaping:

@@ -939,6 +939,61 @@ Errors:
 
 Authentication: Required
 
+## Playbooks API
+
+Named, reusable behaviour text kept in one place instead of inside the workflows that rely on it.
+Content is versioned in the shared revision store; who may read or change a playbook is decided by the central authorization
+policy. All routes require authentication.
+
+### GET /api/playbooks
+
+List the playbooks this user owns. Query: `search`, `limit`, `offset`. Each entry carries the
+machine name, human name, description, visibility, current revision, size and a short preview.
+
+### GET /api/playbooks/:name
+
+Read one playbook with its content. Query: `revision` for a past revision, `owner` (handle or id) to
+read somebody else's published playbook. Returns 404 when the playbook does not exist or is not
+readable by this user — the two are deliberately indistinguishable from outside.
+
+### PUT /api/playbooks/:name
+
+Create a playbook or write a new revision of it. Body: `content` (required), `title`, `description`.
+Names are unique per account: writing under a name another user also has creates your own playbook.
+
+### DELETE /api/playbooks/:name
+
+Remove a playbook together with its revision history.
+
+### GET /api/playbooks/:name/history
+
+Revisions, newest first, with author, size, time and preview. Query: `owner`.
+
+### GET /api/playbooks/:name/compare
+
+The difference between two revisions, line by line. Query: `from`, `to` (required), `owner`.
+
+### POST /api/playbooks/:name/restore
+
+Put a past revision back in force. Body: `revision`. Restoring writes a new revision carrying the
+older text rather than rewinding the history.
+
+### PUT /api/playbooks/:name/visibility
+
+Publish a playbook or make it private again. Body: `visibility` (`private` | `public`). Requires the
+right to share the playbook, which only its owner holds: publishing shares the text, not control
+over it.
+
+### GET /api/playbooks/:name/usage
+
+How many of the caller's running executions read this playbook right now, and through which
+workflows. Asked by the editor before a change is saved: content resolves at every step, so the
+edit reaches those executions at their next step. Response: `{ name, executions, workflows:
+[{ workflowId, name, executions }], complete }`. The walk reads one definition per workflow that
+has a running execution and stops at a bounded number of definitions; `complete: false` says the
+count is a lower bound. A reference counts however its owner is spelled (plainly, by handle or by
+id); an escaped reference does not count.
+
 ## Artifacts API
 
 Static HTML artifacts hosting with quota enforcement. All operations scoped to authenticated user.
@@ -2075,7 +2130,7 @@ Response:
       createdAt: number;
       updatedAt: number;
       completedAt?: number;
-      errorCount: number; // count of errors in errors array
+      errorCount: number; // refusals in the errors array; degradation entries are not counted
     }>;
     total: number;
     limit: number;
@@ -2132,7 +2187,9 @@ Response:
       errors: Array<{
         timestamp: number;
         nodeId: string;
-        errorType: "validation" | "handler" | "system";
+        // "degradation": the step ran without something it names (unreadable playbook text);
+        // it is not a failure and is not counted as one
+        errorType: "validation" | "handler" | "system" | "degradation";
         message: string;
         input?: unknown;
       }>;
@@ -4103,6 +4160,29 @@ Errors:
 - 404: Setting not found
 
 Authentication: Required (admin role)
+
+### GET /api/admin/global-settings/:key/history
+
+Value history of one setting, newest first, from the shared revision store: `{ key, revisions:
+[{ revision, size, preview, authorId, createdAt }] }`. Empty for a setting never written since
+histories were introduced. 404 when the setting does not exist.
+
+### GET /api/admin/global-settings/:key/revision/:revision
+
+One past value: `{ key, revision, value }`. `value: null` records a revision in which the setting
+had no value at all; an unknown or already pruned revision is a 404.
+
+### GET /api/admin/global-settings/:key/compare
+
+Line-by-line difference between two revisions. Query: `from`, `to` (required). 404 when either
+revision is unknown.
+
+### POST /api/admin/global-settings/:key/restore
+
+Put a past value back in force. Body: `revision`. Restoring writes a new revision carrying the older
+value rather than rewinding the history; the change is audited like any other value change.
+
+All four require the admin role.
 
 ### POST /api/admin/global-settings/preview-prompt
 

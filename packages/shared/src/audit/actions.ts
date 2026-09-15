@@ -79,6 +79,13 @@ export enum AuditAction {
   NOTE_CREATE = "note:create",
   NOTE_UPDATE = "note:update",
   NOTE_DELETE = "note:delete",
+
+  // Playbook events
+  PLAYBOOK_CREATE = "playbook:create",
+  PLAYBOOK_UPDATE = "playbook:update",
+  PLAYBOOK_DELETE = "playbook:delete",
+  PLAYBOOK_RESTORE = "playbook:restore",
+  PLAYBOOK_VISIBILITY = "playbook:visibility",
   NOTE_RESTORE = "note:restore",
   NOTE_HARD_DELETE = "note:hard_delete",
   NOTE_LIST = "note:list",
@@ -116,6 +123,7 @@ export enum AuditAction {
   MCP_TOKEN_CREATE = "mcp:token_create",
   MCP_HELP_REQUEST = "mcp:help_request",
   MCP_NOTES_LIST = "mcp:notes_list",
+  MCP_PLAYBOOKS_LIST = "mcp:playbooks_list",
   MCP_COMMUNICATION_SEND = "mcp:communication_send",
   MCP_COMMUNICATION_GRANT_CREATE = "mcp:communication_grant_create",
   MCP_COMMUNICATION_ATTACHMENT_DELIVER = "mcp:communication_attachment_deliver",

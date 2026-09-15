@@ -12,7 +12,11 @@
 import * as crypto from "crypto";
 import { eq, and, isNull, desc, sql, aliasedTable } from "drizzle-orm";
 import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
-import { workflowInvite, workflowAccess, user } from "../schema.js";
+import { workflowInvite, accessGrant, user } from "../schema.js";
+import { RESOURCE_TYPES } from "../../authorization/authorization-policy.js";
+
+/** Every grant this repository reads or writes is a grant on a workflow. */
+const WORKFLOW_RESOURCE = eq(accessGrant.resourceType, RESOURCE_TYPES.workflow);
 import { createLogger } from "../../logging/logger.js";
 import type * as schema from "../schema.js";
 
@@ -369,10 +373,12 @@ export class WorkflowSharingRepository {
 
     this.logger.debug("grantAccess() called", { workflowId, userId, grantedBy, inviteId });
 
-    await this.db.insert(workflowAccess).values({
+    await this.db.insert(accessGrant).values({
       id,
-      workflowId,
+      resourceType: RESOURCE_TYPES.workflow,
+      resourceId: workflowId,
       userId,
+      level: "use",
       grantedBy,
       inviteId: inviteId || null,
       grantedAt: new Date(now),
@@ -388,9 +394,15 @@ export class WorkflowSharingRepository {
    */
   async hasAccess(workflowId: string, userId: string): Promise<boolean> {
     const [row] = await this.db
-      .select({ id: workflowAccess.id })
-      .from(workflowAccess)
-      .where(and(eq(workflowAccess.workflowId, workflowId), eq(workflowAccess.userId, userId)))
+      .select({ id: accessGrant.id })
+      .from(accessGrant)
+      .where(
+        and(
+          WORKFLOW_RESOURCE,
+          eq(accessGrant.resourceId, workflowId),
+          eq(accessGrant.userId, userId),
+        ),
+      )
       .limit(1);
 
     return !!row;
@@ -402,26 +414,34 @@ export class WorkflowSharingRepository {
   async getAccess(workflowId: string, userId: string): Promise<AccessInfo | null> {
     const [row] = await this.db
       .select({
-        id: workflowAccess.id,
-        workflowId: workflowAccess.workflowId,
-        userId: workflowAccess.userId,
-        grantedBy: workflowAccess.grantedBy,
-        inviteId: workflowAccess.inviteId,
-        grantedAt: workflowAccess.grantedAt,
+        id: accessGrant.id,
+        workflowId: accessGrant.resourceId,
+        userId: accessGrant.userId,
+        grantedBy: accessGrant.grantedBy,
+        inviteId: accessGrant.inviteId,
+        grantedAt: accessGrant.grantedAt,
       })
-      .from(workflowAccess)
-      .where(and(eq(workflowAccess.workflowId, workflowId), eq(workflowAccess.userId, userId)))
+      .from(accessGrant)
+      .where(
+        and(
+          WORKFLOW_RESOURCE,
+          eq(accessGrant.resourceId, workflowId),
+          eq(accessGrant.userId, userId),
+        ),
+      )
       .limit(1);
 
-    if (!row) {
+    if (!row || !row.userId) {
+      // A grant without a user is a group grant; workflow sharing issues only per-user grants.
       return null;
     }
+    const grantedUserId = row.userId;
 
     // Get user info
     const [userRow] = await this.db
       .select({ handle: user.handle, name: user.name, email: user.email })
       .from(user)
-      .where(eq(user.id, row.userId))
+      .where(eq(user.id, grantedUserId))
       .limit(1);
 
     // Get grantor info
@@ -434,7 +454,7 @@ export class WorkflowSharingRepository {
     return {
       id: row.id,
       workflowId: row.workflowId,
-      userId: row.userId,
+      userId: grantedUserId,
       userHandle: userRow?.handle || "unknown",
       userName: userRow?.name || null,
       userEmail: userRow?.email || "unknown",
@@ -456,34 +476,38 @@ export class WorkflowSharingRepository {
     // Get total count
     const countResult = await this.db
       .select({ count: sql<number>`count(*)` })
-      .from(workflowAccess)
-      .where(eq(workflowAccess.workflowId, workflowId));
+      .from(accessGrant)
+      .where(and(WORKFLOW_RESOURCE, eq(accessGrant.resourceId, workflowId)));
     const total = countResult[0]?.count ?? 0;
 
     // Get paginated results with user joins
     // Using subqueries for user info since Drizzle doesn't support multiple left joins to same table cleanly
     const rows = await this.db
       .select({
-        id: workflowAccess.id,
-        workflowId: workflowAccess.workflowId,
-        userId: workflowAccess.userId,
-        grantedBy: workflowAccess.grantedBy,
-        inviteId: workflowAccess.inviteId,
-        grantedAt: workflowAccess.grantedAt,
+        id: accessGrant.id,
+        workflowId: accessGrant.resourceId,
+        userId: accessGrant.userId,
+        grantedBy: accessGrant.grantedBy,
+        inviteId: accessGrant.inviteId,
+        grantedAt: accessGrant.grantedAt,
       })
-      .from(workflowAccess)
-      .where(eq(workflowAccess.workflowId, workflowId))
-      .orderBy(desc(workflowAccess.grantedAt))
+      .from(accessGrant)
+      .where(and(WORKFLOW_RESOURCE, eq(accessGrant.resourceId, workflowId)))
+      .orderBy(desc(accessGrant.grantedAt))
       .limit(limit)
       .offset(offset);
 
     // Fetch user info for each access record
     const accesses: AccessInfo[] = [];
     for (const row of rows) {
+      // Workflow sharing issues per-user grants only; a group grant has no user to describe.
+      if (!row.userId) continue;
+      const grantedUserId = row.userId;
+
       const [userRow] = await this.db
         .select({ handle: user.handle, name: user.name, email: user.email })
         .from(user)
-        .where(eq(user.id, row.userId))
+        .where(eq(user.id, grantedUserId))
         .limit(1);
 
       const [grantorRow] = await this.db
@@ -495,7 +519,7 @@ export class WorkflowSharingRepository {
       accesses.push({
         id: row.id,
         workflowId: row.workflowId,
-        userId: row.userId,
+        userId: grantedUserId,
         userHandle: userRow?.handle || "unknown",
         userName: userRow?.name || null,
         userEmail: userRow?.email || "unknown",
@@ -516,9 +540,9 @@ export class WorkflowSharingRepository {
    */
   async listUserAccess(userId: string): Promise<string[]> {
     const rows = await this.db
-      .select({ workflowId: workflowAccess.workflowId })
-      .from(workflowAccess)
-      .where(eq(workflowAccess.userId, userId));
+      .select({ workflowId: accessGrant.resourceId })
+      .from(accessGrant)
+      .where(and(WORKFLOW_RESOURCE, eq(accessGrant.userId, userId)));
 
     return rows.map((r) => r.workflowId);
   }
@@ -528,8 +552,14 @@ export class WorkflowSharingRepository {
    */
   async revokeAccess(workflowId: string, userId: string): Promise<boolean> {
     const result = await this.db
-      .delete(workflowAccess)
-      .where(and(eq(workflowAccess.workflowId, workflowId), eq(workflowAccess.userId, userId)));
+      .delete(accessGrant)
+      .where(
+        and(
+          WORKFLOW_RESOURCE,
+          eq(accessGrant.resourceId, workflowId),
+          eq(accessGrant.userId, userId),
+        ),
+      );
 
     return result.changes > 0;
   }
@@ -539,8 +569,8 @@ export class WorkflowSharingRepository {
    */
   async revokeAllAccess(workflowId: string): Promise<number> {
     const result = await this.db
-      .delete(workflowAccess)
-      .where(eq(workflowAccess.workflowId, workflowId));
+      .delete(accessGrant)
+      .where(and(WORKFLOW_RESOURCE, eq(accessGrant.resourceId, workflowId)));
 
     return result.changes;
   }

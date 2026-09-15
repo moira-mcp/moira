@@ -82,7 +82,6 @@ export type {
   WorkflowListResult,
   WorkflowOwnership,
   SaveWorkflowOptions as RepoSaveWorkflowOptions,
-  SharedAccessChecker,
   ValidationStatus,
   ValidationCache,
   AdminWorkflowFilter,
@@ -139,3 +138,29 @@ export type {
   AcceptInviteOptions,
   AcceptInviteResult,
 } from "./repositories/workflow-sharing-repository.js";
+
+export {
+  RevisionRepository,
+  REVISION_ENTITY_TYPES,
+  DEFAULT_REVISION_PREVIEW_CHARS,
+} from "./repositories/revision-repository.js";
+export type {
+  Revision,
+  RevisionSummary,
+  RevisionTarget,
+  RevisionEntityType,
+  AppendRevisionOptions,
+} from "./repositories/revision-repository.js";
+
+export {
+  PlaybookRepository,
+  MAX_PLAYBOOK_REVISIONS,
+  MAX_PLAYBOOK_SIZE,
+} from "./repositories/playbook-repository.js";
+export type {
+  Playbook,
+  PlaybookSummary,
+  PlaybookListResult,
+  PlaybookVisibility,
+  SavePlaybookOptions,
+} from "./repositories/playbook-repository.js";

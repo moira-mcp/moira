@@ -8,10 +8,12 @@
  * - Global reference: handle/slug (resolved at service layer)
  */
 
-import { eq, and, or, isNull, like, desc, asc, sql } from "drizzle-orm";
+import { eq, and, or, isNull, inArray, like, desc, asc, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
-import { workflow, user, workflowAccess } from "../schema.js";
+import { workflow, user, accessGrant, principalGroupMember } from "../schema.js";
+import { RESOURCE_TYPES } from "../../authorization/authorization-policy.js";
+import { AuthorizationService } from "../../authorization/authorization-service.js";
 import type { WorkflowGraph } from "@mcp-moira/workflow-engine";
 import { createLogger } from "../../logging/logger.js";
 import type * as schema from "../schema.js";
@@ -180,12 +182,6 @@ export interface SaveWorkflowOptions {
 }
 
 /**
- * Function to check if a user has shared access to a workflow
- * Used for dependency injection to avoid circular imports
- */
-export type SharedAccessChecker = (workflowId: string, userId: string) => Promise<boolean>;
-
-/**
  * Parse validation cache from DB columns into ValidationCache object
  */
 function parseValidationCache(
@@ -229,16 +225,23 @@ function parseValidationCache(
 
 export class WorkflowRepository {
   private logger = createLogger({ component: "WorkflowRepository" });
-  private sharedAccessChecker: SharedAccessChecker | null = null;
+  /** Who may read or change a workflow is decided centrally, not by this repository. */
+  private authorization: AuthorizationService;
 
-  constructor(private db: BetterSQLite3Database<typeof schema>) {}
+  constructor(private db: BetterSQLite3Database<typeof schema>) {
+    this.authorization = new AuthorizationService(db);
+  }
 
-  /**
-   * Set the shared access checker function
-   * Call this after construction to enable shared access checking
-   */
-  setSharedAccessChecker(checker: SharedAccessChecker): void {
-    this.sharedAccessChecker = checker;
+  private async mayView(
+    userId: string,
+    row: { id: string; userId: string; visibility: string | null },
+  ): Promise<boolean> {
+    return this.authorization.can(userId, "view", {
+      type: RESOURCE_TYPES.workflow,
+      id: row.id,
+      ownerId: row.userId,
+      visibility: row.visibility === "public" ? "public" : "private",
+    });
   }
 
   // ===== Slug Resolution =====
@@ -315,17 +318,9 @@ export class WorkflowRepository {
       return null;
     }
 
-    // Check access: owner can always access, others only if public
-    if (row.userId === currentUserId || row.visibility === "public") {
+    // Owner, public, an explicit grant or an operator — one decision, taken centrally.
+    if (await this.mayView(currentUserId, row)) {
       return row.id;
-    }
-
-    // Check shared access (if checker is available)
-    if (this.sharedAccessChecker) {
-      const hasSharedAccess = await this.sharedAccessChecker(row.id, currentUserId);
-      if (hasSharedAccess) {
-        return row.id;
-      }
     }
 
     return null;
@@ -501,11 +496,21 @@ export class WorkflowRepository {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const conditions: any[] = [];
 
-    // Subquery for shared access - workflows where user has been granted access
+    // Workflows an explicit grant reaches: made to the user directly, or to a group they belong to,
+    // which the policy counts exactly as much.
+    const userGroups = this.db
+      .select({ groupId: principalGroupMember.groupId })
+      .from(principalGroupMember)
+      .where(eq(principalGroupMember.userId, userId));
     const sharedAccessSubquery = this.db
-      .select({ workflowId: workflowAccess.workflowId })
-      .from(workflowAccess)
-      .where(eq(workflowAccess.userId, userId));
+      .select({ workflowId: accessGrant.resourceId })
+      .from(accessGrant)
+      .where(
+        and(
+          eq(accessGrant.resourceType, RESOURCE_TYPES.workflow),
+          or(eq(accessGrant.userId, userId), inArray(accessGrant.groupId, userGroups)),
+        ),
+      );
 
     // Visibility filter
     if (visibility === "public") {
@@ -649,17 +654,9 @@ export class WorkflowRepository {
       return null;
     }
 
-    // Check access: owner OR public OR shared
-    if (row.userId === userId || row.visibility === "public") {
+    // Owner, public, an explicit grant or an operator — one decision, taken centrally.
+    if (await this.mayView(userId, row)) {
       return JSON.parse(row.graph) as WorkflowGraph;
-    }
-
-    // Check shared access (if checker is available)
-    if (this.sharedAccessChecker) {
-      const hasSharedAccess = await this.sharedAccessChecker(row.id, userId);
-      if (hasSharedAccess) {
-        return JSON.parse(row.graph) as WorkflowGraph;
-      }
     }
 
     // User has no access to this workflow
@@ -729,24 +726,18 @@ export class WorkflowRepository {
       return null;
     }
 
-    // Determine access type
+    // Access is decided centrally; the kind of access is what this reader reports.
+    if (!(await this.mayView(userId, row))) {
+      return null;
+    }
+
     let accessType: "owner" | "shared" | "public";
     if (row.userId === userId) {
       accessType = "owner";
     } else if (row.visibility === "public") {
       accessType = "public";
-    } else if (this.sharedAccessChecker) {
-      // Check if user has shared access
-      const hasSharedAccess = await this.sharedAccessChecker(row.id, userId);
-      if (hasSharedAccess) {
-        accessType = "shared";
-      } else {
-        // User has no access to this private workflow
-        return null;
-      }
     } else {
-      // No shared access checker and not owner/public - deny access
-      return null;
+      accessType = "shared";
     }
 
     const graph = JSON.parse(row.graph) as WorkflowGraph;
@@ -834,11 +825,19 @@ export class WorkflowRepository {
   }
 
   /**
-   * Check if user can modify workflow (is owner)
+   * Whether this user may change the workflow.
+   *
+   * Decided centrally, so a grant that allows editing counts here exactly as ownership does.
    */
   async canModify(workflowId: string, userId: string): Promise<boolean> {
     const ownership = await this.getOwnership(workflowId);
-    return ownership.exists && ownership.ownerId === userId;
+    if (!ownership.exists || !ownership.id || !ownership.ownerId) return false;
+    return this.authorization.can(userId, "edit", {
+      type: RESOURCE_TYPES.workflow,
+      id: ownership.id,
+      ownerId: ownership.ownerId,
+      visibility: ownership.visibility === "public" ? "public" : "private",
+    });
   }
 
   // ===== Save Operations =====
@@ -868,8 +867,9 @@ export class WorkflowRepository {
       // ownership.exists ⟹ the lookup matched a row, so its id is present.
       const existingId = ownership.id!;
 
-      // Update existing workflow - verify user is owner OR admin bypass is enabled
-      if (ownership.ownerId !== userId && !adminBypass) {
+      // Update existing workflow: the central policy decides, and an explicit operator bypass
+      // (catalog installation, maintenance scripts) still overrides it.
+      if (!adminBypass && !(await this.canModify(existingId, userId))) {
         throw new Error(
           `Access denied: you cannot modify workflow '${existingId}' owned by another user`,
         );

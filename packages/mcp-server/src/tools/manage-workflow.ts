@@ -47,6 +47,7 @@ import {
   createLogger,
   isOperationalError,
   normalizeError,
+  getWorkflowMutationService,
 } from "@mcp-moira/shared";
 import { ERRORS, SUCCESS, formatDomainError } from "../messages/index.js";
 
@@ -110,6 +111,17 @@ export async function manageWorkflow(
 
         const validator = new GraphValidator();
         const validationResult = await validator.validateWorkflow(workflowGraph as WorkflowGraph);
+
+        const missingPlaybooks = await getWorkflowMutationService().unresolvablePlaybookReferences(
+          workflowGraph as WorkflowGraph,
+          userId,
+        );
+        if (missingPlaybooks.length > 0) {
+          return {
+            success: false,
+            error: ERRORS.workflow_validation_failed(missingPlaybooks.join("; ")),
+          };
+        }
 
         if (!validationResult.valid) {
           const errors = validationResult.errors.map((e) => e.message).join("; ");
@@ -263,6 +275,18 @@ export async function manageWorkflow(
 
         const validator = new GraphValidator();
         const validationResult = await validator.validateWorkflow(modifiedWorkflow);
+
+        const missingPlaybooksOnEdit =
+          await getWorkflowMutationService().unresolvablePlaybookReferences(
+            modifiedWorkflow,
+            userId,
+          );
+        if (missingPlaybooksOnEdit.length > 0) {
+          return {
+            success: false,
+            error: ERRORS.modified_workflow_validation_failed(missingPlaybooksOnEdit.join("; ")),
+          };
+        }
 
         if (!validationResult.valid) {
           const errors = validationResult.errors.map((e) => e.message).join("; ");

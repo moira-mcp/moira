@@ -65,14 +65,21 @@ frontend/src/
 │       ├── WorkflowVariablesPanel.tsx # Collapsible variables sidebar
 │       └── WorkflowVisualizationPage.tsx # Container component
 │   ├── QuickStartCard.tsx       # Per-client QuickStart tabs with setup instructions
-│   └── notes/                   # Notes management components
-│       ├── NoteInlineEditor.tsx # Inline expandable card editor (create/edit)
-│       └── NoteHistoryDialog.tsx # Version history modal with diff view
+│   ├── notes/                   # Notes management components
+│   │   ├── NoteInlineEditor.tsx # Inline expandable card editor (create/edit)
+│   │   └── NoteHistoryDialog.tsx # Notes' source for the shared history dialog
+│   ├── history/
+│   │   └── RevisionHistoryDialog.tsx # One version-history dialog for notes, playbooks and global settings; exports DiffView
+│   ├── access/
+│   │   └── VisibilityToggle.tsx # One control for a resource's visibility: badge when read-only, button when it can change
+│   └── playbooks/
+│       └── PlaybookEditor.tsx   # Inline playbook editor with the live-runs warning
 ├── pages/
 │   ├── Dashboard.tsx            # Home page with stat cards, Quick Start, recent ExecutionCards
 │   ├── Workflows.tsx            # Workflow explorer + viewer
 │   ├── FlowPage.tsx             # Flow page: the workflow definition as a process, edit mode for owners
 │   ├── Executions.tsx           # Execution history (ExecutionCard list/grid)
+│   ├── Playbooks.tsx            # Playbooks page (PlaybookCard list/grid, editor, shared history)
 │   ├── ExecutionInspectorPage.tsx   # User execution inspector wrapper
 │   ├── Settings.tsx             # User settings (single scrollable page)
 │   ├── settings/               # Settings sub-components
@@ -148,28 +155,30 @@ Additional: NumberTicker (Magic UI, animated counter using motion/react).
 
 Higher-level composable components in `src/components/`:
 
-| Component         | File                    | Purpose                                                                                             |
-| ----------------- | ----------------------- | --------------------------------------------------------------------------------------------------- |
-| PageHeader        | `page-header.tsx`       | Page title, description, action slot, SidebarTrigger                                                |
-| StatCard          | `stat-card.tsx`         | KPI card with label, value, icon, optional Tremor SparkAreaChart sparkline                          |
-| StatusBadge       | `status-badge.tsx`      | Execution status → semantic color mapping (running/waiting/completed/failed)                        |
-| DataListView      | `DataListView.tsx`      | Universal data list wrapper: ViewToggle, grid/list layout, ServerPagination, PageLoader, EmptyState |
-| DataTable         | `data-table/`           | @tanstack/react-table wrapper with sorting, filtering, pagination                                   |
-| CardShell         | `cards/CardShell.tsx`   | Universal card wrapper: dual-mode (compact/list), action buttons, `alwaysVisible` for list mode     |
-| Card Components   | `cards/`                | Reusable card components (ExecutionCard, NoteCard, ArtifactCard, etc.) built on CardShell           |
-| PageShell         | `PageShell.tsx`         | Page layout wrapper: title, description, loading (skeleton), error states, action slot              |
-| FilterBar         | `FilterBar.tsx`         | Standardized filter toolbar: search input, filters slot, actions slot, reset button                 |
-| LabeledFilter     | `LabeledFilter.tsx`     | Wrapper adding visible label above any filter control                                               |
-| SortSelect        | `SortSelect.tsx`        | Combined sort field+direction dropdown (e.g., "Created ↓")                                          |
-| SearchableSelect  | `SearchableSelect.tsx`  | Combobox with text search for dynamic option lists (absolute dropdown + cmdk)                       |
-| TopWorkflowsTable | `TopWorkflowsTable.tsx` | Shared DataTable for admin top workflows (AdminDashboard, AdminAnalytics)                           |
-| ServerPagination  | `ServerPagination.tsx`  | Server-side pagination (total-based or cursor-based), matches DataTable style                       |
-| EmptyState        | `empty-state.tsx`       | Centered icon + title + description + action CTA                                                    |
-| InlineError       | `inline-error.tsx`      | Alert destructive with optional retry                                                               |
-| PageLoader        | `page-loader.tsx`       | Skeleton stat cards + table rows placeholder; only before a page's first data                       |
-| RouteSkeleton     | `route-skeleton.tsx`    | In-layout skeleton while a lazily loaded page's code arrives                                        |
-| DiagramSkeleton   | `route-skeleton.tsx`    | Quiet surface while the technical graph chunk arrives (flow and run pages)                          |
-| ConfirmDialog     | `confirm-dialog.tsx`    | AlertDialog wrapper with async onConfirm, loading state, ReactNode description                      |
+| Component             | File                                | Purpose                                                                                                                                                               |
+| --------------------- | ----------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| PageHeader            | `page-header.tsx`                   | Page title, description, action slot, SidebarTrigger                                                                                                                  |
+| StatCard              | `stat-card.tsx`                     | KPI card with label, value, icon, optional Tremor SparkAreaChart sparkline                                                                                            |
+| StatusBadge           | `status-badge.tsx`                  | Execution status → semantic color mapping (running/waiting/completed/failed)                                                                                          |
+| DataListView          | `DataListView.tsx`                  | Universal data list wrapper: ViewToggle, grid/list layout, ServerPagination, PageLoader, EmptyState                                                                   |
+| DataTable             | `data-table/`                       | @tanstack/react-table wrapper with sorting, filtering, pagination                                                                                                     |
+| CardShell             | `cards/CardShell.tsx`               | Universal card wrapper: dual-mode (compact/list), action buttons, `alwaysVisible` for list mode                                                                       |
+| Card Components       | `cards/`                            | Reusable card components (ExecutionCard, NoteCard, ArtifactCard, etc.) built on CardShell                                                                             |
+| PageShell             | `PageShell.tsx`                     | Page layout wrapper: title, description, loading (skeleton), error states, action slot                                                                                |
+| FilterBar             | `FilterBar.tsx`                     | Standardized filter toolbar: search input, filters slot, actions slot, reset button                                                                                   |
+| LabeledFilter         | `LabeledFilter.tsx`                 | Wrapper adding visible label above any filter control                                                                                                                 |
+| SortSelect            | `SortSelect.tsx`                    | Combined sort field+direction dropdown (e.g., "Created ↓")                                                                                                            |
+| SearchableSelect      | `SearchableSelect.tsx`              | Combobox with text search for dynamic option lists (absolute dropdown + cmdk)                                                                                         |
+| TopWorkflowsTable     | `TopWorkflowsTable.tsx`             | Shared DataTable for admin top workflows (AdminDashboard, AdminAnalytics)                                                                                             |
+| ServerPagination      | `ServerPagination.tsx`              | Server-side pagination (total-based or cursor-based), matches DataTable style                                                                                         |
+| EmptyState            | `empty-state.tsx`                   | Centered icon + title + description + action CTA                                                                                                                      |
+| InlineError           | `inline-error.tsx`                  | Alert destructive with optional retry                                                                                                                                 |
+| PageLoader            | `page-loader.tsx`                   | Skeleton stat cards + table rows placeholder; only before a page's first data                                                                                         |
+| RouteSkeleton         | `route-skeleton.tsx`                | In-layout skeleton while a lazily loaded page's code arrives                                                                                                          |
+| DiagramSkeleton       | `route-skeleton.tsx`                | Quiet surface while the technical graph chunk arrives (flow and run pages)                                                                                            |
+| ConfirmDialog         | `confirm-dialog.tsx`                | AlertDialog wrapper with async onConfirm, loading state, ReactNode description                                                                                        |
+| RevisionHistoryDialog | `history/RevisionHistoryDialog.tsx` | Version history for anything the shared revision store versions; driven by a `RevisionHistorySource` (list, read revision, read current, restore); exports `DiffView` |
+| VisibilityToggle      | `access/VisibilityToggle.tsx`       | A resource's visibility as a badge (read-only) or a button that flips it; used by the flow page and playbooks                                                         |
 
 DataTable subcomponents: `column-header.tsx` (sortable headers), `pagination.tsx` (page nav + i18n props + aria-labels), `toolbar.tsx` (search + reset).
 
@@ -211,6 +220,7 @@ Application routes:
 /workflows (protected)             - Workflow explorer + viewer
 /workflows/:id (protected)         - Flow page (FlowPage.tsx); also /workflows/:handle/:slug
 /executions (protected)            - Execution history
+/playbooks (protected)             - Playbooks (Playbooks.tsx)
 /artifacts (protected)             - User artifacts management
 /settings (protected)              - User settings (single scrollable page with all sections)
 /admin (protected)                 - Admin dashboard with merged analytics
@@ -238,12 +248,13 @@ Application routes:
 
 Protected routes require authentication (ProtectedRoute wrapper).
 
-Sidebar navigation (6 items):
+Sidebar navigation:
 
 - Home (/)
 - Workflows (/workflows)
 - Executions (/executions)
 - Notes (/notes)
+- Playbooks (/playbooks)
 - Artifacts (/artifacts)
 - Documentation (/docs/) - external link, opens in same tab
 
@@ -361,7 +372,7 @@ Execution history at `/executions` with filtering, sorting, and pagination.
 
 **Error Display:**
 
-- ErrorCountBadge shows error count next to status (only if errors > 0)
+- ErrorCountBadge shows the refusal count next to status (only if > 0; degradation entries are not counted by the server)
 - Badge uses destructive variant with AlertTriangle icon
 
 **Pagination:**
@@ -636,7 +647,7 @@ read-only when `editable` is not set (the admin view). Test ids: `context-filter
 `context-var-input|save|cancel|expand|modal-textarea-<path>`, `variable-history-<name>`,
 `data-history-of`, `variables-cursor-note`, `context-fullscreen-button`.
 
-**Errors tab:** ExecutionErrorHistory component showing execution errors with timestamps, collapsible entries, error type badges.
+**Errors tab:** ExecutionErrorHistory component showing execution errors with timestamps, collapsible entries, error type badges. A journal entry of kind `degradation` is not an error: it says the step ran without a playbook it names. Such entries are listed in their own card ("Ran without referenced text", `execution-degradations`, one row per entry with the node and time) above the error card, counted by a separate amber tab badge (`degradations-count-badge`), and left out of the red error count.
 
 **Steps tab:** `StepProgression` lists the definition's nodes on the Block tab's `StepCard`s (`StepCardList`), ordered by the process blocks' node order and then the rest, each marked done when the shown route (up to the cursor) visited it (`data-step-done`) or current; clicking a card focuses the node in the graph.
 
@@ -649,7 +660,7 @@ second fullscreen button); read-only when `editable` is not set.
 **ExecutionErrorHistory Component:**
 
 - Displays execution errors with timestamps and details
-- Collapsible entries with error type badges (validation, handler, system)
+- Collapsible entries with error type badges (validation, handler, system); `degradation` entries render in the separate card instead
 - Relative time display ("5m ago", "2h ago")
 - Full timestamp and node ID on expand
 - Input data display with whitespace-pre-wrap
@@ -886,6 +897,34 @@ WorkflowCard displays workflows in a compact single-row format:
 
 **Tooltip:** Description appears on hover (300ms delay) via Radix UI Tooltip
 
+### Playbooks Page
+
+Playbooks at `/playbooks`: named, reusable behaviour text a workflow node references by name.
+
+- `PageShell` + `FilterBar` (search) + `DataListView` of `PlaybookCard` (CardShell, list/grid; the
+  card shows title, machine name, visibility badge, preview and `size · vN · updated`)
+- Persistent "new playbook" card and inline `PlaybookEditor` for create and edit: name (machine
+  name, read-only once created), title, description, content, `VisibilityToggle`, and the
+  reference a node would use (`{{playbook:name}}`)
+- Live-runs warning (`playbook-live-runs-warning`): the editor asks
+  `GET /api/playbooks/:name/usage` and, before the change is saved, says how many running processes
+  read this playbook; `complete: false` adds that more may be affected
+- History via the shared `RevisionHistoryDialog` (`history-playbook-<name>`), restore as a new
+  revision; delete via `ConfirmDialog`
+- Test ids: `create-playbook-button`, `new-playbook-card`, `playbook-card-<name>`,
+  `edit|history|delete-playbook-<name>`, `playbook-visibility-<name>`, `playbook-*-input`,
+  `save-playbook-button`
+
+Flow page node details (`WorkflowSidebar`, and `NodeDetailSheet` where it is used) list the
+playbooks a node names (`NodePlaybookReferences`, collected with the shared reference module so an
+escaped reference is not offered) with a link to `/playbooks?name=…&owner=…`; a playbook the viewer
+cannot read is marked "not available" (`playbook-reference-unavailable-<name>`). The Playbooks page
+reads those parameters: your own playbook opens in the editor above the list
+(`linked-playbook-editor`, independent of which page of the list is loaded), another account's
+published one is shown read-only above the list (`linked-playbook`), and an unreadable one is
+reported (`linked-playbook-missing`). Closing the slot, or starting to edit another playbook
+from the list, clears the `name`/`owner` parameters and returns the page to the plain list.
+
 ### Admin Notes Page
 
 Notes management at `/admin/notes` for persistent agent memory.
@@ -925,15 +964,18 @@ Notes management at `/admin/notes` for persistent agent memory.
   - Shows all versions from history API with "Current" badge on latest
   - Selecting historical version loads content in read-only mode (amber styling)
   - Restore button replaces Save for older versions (AlertDialog confirmation)
-  - Compare button opens NoteHistoryDialog for diff view
+  - Compare button opens the shared history dialog
 
-**Version History (NoteHistoryDialog):**
+**Version History:**
 
-- Split-pane dialog: version list (left), content/diff panel (right)
-- Tabbed right panel: Content view (raw text) and Diff view (line-by-line diff via `diff` library)
-- Color-coded diff: green for additions, red for removals
-- Compares selected version against current (latest) version
-- Restore button with AlertDialog confirmation (hidden for current version)
+`NoteHistoryDialog` only supplies a `RevisionHistorySource` (history, one version, current value,
+restore) to the shared `RevisionHistoryDialog`; the dialog itself is the same one playbooks and
+global settings use.
+
+- Split-pane dialog: version list (left), content panel (right); stacks on a narrow screen
+- Right panel tabs: Content (the selected version), Side by side (selected beside current) and
+  Diff (line-by-line via the shared `DiffView`)
+- Restore is confirmed inline in the panel header, not in a second modal (hidden for current version)
 - Relative timestamps (e.g., "2h ago"), size badges, "current" badge on latest
 
 **Quota Indicator:**
@@ -1007,7 +1049,7 @@ Supports `embedded` prop for rendering without header inside `AdminSettingsUnifi
 - Per-setting save button with loading state
 - Character count display for text areas
 - Error state with retry functionality
-- History panel: view audit log of all setting changes with rollback capability
+- Value history: the shared `RevisionHistoryDialog` over the setting's revisions (`/api/admin/global-settings/:key/history`, `/revision/:n`, `/restore`); restoring writes a new revision
 - MCP prompts: master-detail layout with System Prompt and System Reminder entries in the left panel and a full-height editor on the right (McpPromptsEditor → PromptDetailEditor)
 - MCP prompts: per-prompt inline version history with diff highlighting panel, version dropdown, and Apply button for rollback
 - MCP tool descriptions are static application contract data and are not exposed as global settings.

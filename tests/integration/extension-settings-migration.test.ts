@@ -21,6 +21,10 @@ const NEW_TABLE = "extensionSettingValue";
 const NEW_MIGRATION_TAG = "0022_extension_setting_values";
 const ATTEMPT_MIGRATION_TAG = "0024_execution_mutation_attempts";
 const WORKSPACE_MIGRATION_TAG = "0028_workspace_resources";
+const SUPERSEDED_TABLES: Array<[string, string]> = [
+  ["noteVersion", "entityRevision"],
+  ["workflowAccess", "accessGrant"],
+];
 
 function tableNames(sqlite: ReturnType<typeof Database>): string[] {
   return (
@@ -97,6 +101,15 @@ describe("Migrating a database created before the extension value store", () => 
       delete schemaAfter.workflowExecution;
       delete schemaBefore.workflow;
       delete schemaAfter.workflow;
+      // Two tables are superseded rather than kept: note history moved into the shared revision
+      // store and workflow sharing into the general access grants, each carrying its rows over.
+      for (const [superseded, successor] of SUPERSEDED_TABLES) {
+        expect(schemaBefore[superseded]).toBeDefined();
+        expect(allSchemasAfter[superseded]).toBeUndefined();
+        expect(allSchemasAfter[successor]).toBeDefined();
+        delete schemaBefore[superseded];
+        delete schemaAfter[superseded];
+      }
       expect(schemaAfter).toEqual(schemaBefore);
 
       const kept = sqlite

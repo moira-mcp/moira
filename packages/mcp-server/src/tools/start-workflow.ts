@@ -27,7 +27,10 @@ import {
   logAuditEventDirect,
   AuditAction,
   isExecutionParentReference,
+  unresolvedPlaybookReferences,
+  getPlaybookService,
 } from "@mcp-moira/shared";
+import type { WorkflowGraph } from "@mcp-moira/workflow-engine";
 import {
   checkTrustedLockDeliveryConfiguration,
   getActiveCommunicationChannelRegistry,
@@ -93,6 +96,21 @@ async function validateParentExecutionId(
   }
 
   return parentExecutionId;
+}
+
+/**
+ * Playbook references this user cannot resolve right now.
+ *
+ * Checked before the run is created: a step that names behaviour text the caller cannot read would
+ * present a placeholder instead, and finding that out mid-run costs far more than refusing the
+ * start with a sentence saying which playbook is missing.
+ */
+async function unavailablePlaybookReferences(
+  workflow: WorkflowGraph,
+  userId: string,
+): Promise<string[]> {
+  const missing = await unresolvedPlaybookReferences(workflow, userId, getPlaybookService());
+  return missing.map((reference) => reference.text);
 }
 
 /**
@@ -304,6 +322,13 @@ export async function startWorkflow(rawParams: unknown): Promise<ToolResult<stri
       } catch {
         return reject("The parent process is unavailable, foreign, or no longer running.");
       }
+    }
+    const missingPlaybooks = await unavailablePlaybookReferences(resolved.workflow, userId);
+    if (missingPlaybooks.length > 0) {
+      return reject(
+        `The workflow reads ${missingPlaybooks.length === 1 ? "a playbook" : "playbooks"} you cannot read: ` +
+          `${missingPlaybooks.join(", ")}. Create or publish ${missingPlaybooks.length === 1 ? "it" : "them"}, or run a workflow that does not reference ${missingPlaybooks.length === 1 ? "it" : "them"}.`,
+      );
     }
     if (workflowHasLockNodes(resolved.workflow.nodes)) {
       const trustedConfiguration = await checkTrustedLockDeliveryConfiguration(

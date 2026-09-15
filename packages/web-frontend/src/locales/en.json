@@ -75,7 +75,8 @@
       "artifacts": "Artifacts",
       "settings": "Settings",
       "docs": "Documentation",
-      "admin": "Admin"
+      "admin": "Admin",
+      "playbooks": "Playbooks"
     },
     "adminNav": {
       "dashboard": "Dashboard",
@@ -369,7 +370,8 @@
         "diffDescription": "Changes from v{{from}} to v{{to}}",
         "restore": "Restore",
         "restoreTitle": "Restore Version",
-        "restoreDescription": "This will create a new version with the content from version {{version}}. The current version will not be deleted."
+        "restoreDescription": "This will create a new version with the content from version {{version}}. The current version will not be deleted.",
+        "subject": "note \"{{key}}\""
       }
     },
     "artifacts": {
@@ -569,7 +571,9 @@
         "steps": "Every step the run took, in order",
         "graph": "The technical node graph with the current node focused",
         "locks": "Locks placed on this run and their history",
-        "lockActive": "A lock is active on this run"
+        "lockActive": "A lock is active on this run",
+        "degradationCount_one": "{{count}} step ran without referenced text",
+        "degradationCount_other": "{{count}} steps ran without referenced text"
       },
       "ran_one": "ran ×{{count}}",
       "ran_other": "ran ×{{count}}",
@@ -1324,6 +1328,40 @@
             "body": "The tabs show the same process in different ways: Outline as a document, Canvas as a map, Lanes as a rail, Split for what implements each block, Graph for every node. Every view starts with a note explaining what it is for."
           }
         }
+      }
+    },
+    "playbooks": {
+      "title": "Playbooks",
+      "searchPlaceholder": "Search playbooks...",
+      "noPlaybooks": "No playbooks yet",
+      "noResults": "No playbooks match this search",
+      "newCard": "New playbook",
+      "newCardHint": "Reusable behaviour text a workflow node can reference by name",
+      "actions": {
+        "create": "New playbook"
+      },
+      "history": {
+        "subject": "playbook “{{name}}”"
+      },
+      "delete": {
+        "title": "Delete playbook",
+        "description": "“{{name}}” and its whole version history will be removed. Workflows that reference it will run with a placeholder instead."
+      },
+      "editor": {
+        "name": "Name",
+        "title": "Title",
+        "description": "Description",
+        "content": "Content",
+        "invalidName": "A name uses lower-case letters, digits and hyphens, starts with a letter or digit, and is 3 to 80 characters long.",
+        "referenceHint": "Reference it from a node as {{reference}}",
+        "liveRunsTitle_one": "{{count}} running process reads this playbook",
+        "liveRunsTitle_other": "{{count}} running processes read this playbook",
+        "liveRunsHint": "Content resolves at every step, so saving reaches those processes at their next step.",
+        "liveRunsPartialHint": "Content resolves at every step, so saving reaches those processes at their next step. More processes may be affected than counted here."
+      },
+      "linked": {
+        "readOnly": "Published by another account. You can reference it, not change it.",
+        "missing": "Playbook {{reference}} is not available to you."
       }
     }
   },
@@ -2388,7 +2426,9 @@
         "subgraphId": "Subgraph ID",
         "validation": "Validation",
         "inputSchema": "Input Schema",
-        "connections": "Connections"
+        "connections": "Connections",
+        "playbooks": "Playbooks",
+        "playbookUnavailable": "not available"
       }
     },
     "executionErrors": {
@@ -2404,8 +2444,11 @@
       "errorTypes": {
         "validation": "Validation",
         "handler": "Handler",
-        "system": "System"
-      }
+        "system": "System",
+        "degradation": "Degraded"
+      },
+      "degradationTitle": "Ran without referenced text",
+      "degradationHint": "These steps ran, but without a playbook they name. The process continued with a placeholder in place of that text."
     }
   },
   "common": {
@@ -2461,11 +2504,36 @@
       "source": "Source",
       "dateFrom": "From",
       "dateTo": "To"
-    }
+    },
+    "edit": "Edit",
+    "close": "Close"
   },
   "lockedWidget": {
     "title": "{{count}} locked execution(s)",
     "showLess": "Show less",
     "showMore": "Show {{count}} more"
+  },
+  "history": {
+    "title": "Version History",
+    "description": "Version history for {{subject}}",
+    "noVersions": "No version history available",
+    "versions": "Versions",
+    "version": "Version",
+    "current": "current",
+    "content": "Content",
+    "sideBySide": "Side by side",
+    "selectedVersion": "Version {{version}}",
+    "currentVersion": "Current (v{{version}})",
+    "selectVersion": "Select a version to view its content",
+    "noContent": "Unable to load content",
+    "diff": "Diff",
+    "diffDescription": "Changes from v{{from}} to v{{to}}",
+    "restore": "Restore",
+    "restoreDescription": "This will create a new version with the content from version {{version}}. The current version will not be deleted."
+  },
+  "access": {
+    "public": "Public",
+    "private": "Private",
+    "toggleHint": "Publishing shares the content with everyone signed in; only you can change it."
   }
 }

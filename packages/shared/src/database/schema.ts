@@ -802,21 +802,68 @@ export const note = sqliteTable(
   }),
 );
 
-export const noteVersion = sqliteTable(
-  "noteVersion",
+// ===== Playbooks =====
+// Named, reusable behaviour text an author references from workflow nodes. Content lives in the
+// shared revision store; this table holds only the playbook's identity and its access metadata.
+
+export const playbook = sqliteTable(
+  "playbook",
   {
     id: text("id").primaryKey(),
-    noteId: text("noteId")
+    userId: text("userId")
       .notNull()
-      .references(() => note.id, { onDelete: "cascade" }),
-    version: integer("version").notNull(), // Version number (1, 2, 3, ...)
-    value: text("value").notNull(), // Note content
-    size: integer("size").notNull(), // Size in bytes
+      .references(() => user.id, { onDelete: "cascade" }),
+    // Machine name a workflow node references. Stable and unique per owner.
+    slug: text("slug").notNull(),
+    name: text("name").notNull(),
+    description: text("description"),
+    visibility: text("visibility").notNull().default("private"), // 'private' | 'public'
+    // Latest revision number in the shared revision store.
+    currentRevision: integer("currentRevision").notNull().default(1),
+    size: integer("size").notNull().default(0), // Current content size in bytes
+    createdAt: integer("createdAt", { mode: "timestamp_ms" }).notNull(),
+    updatedAt: integer("updatedAt", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => ({
+    // One playbook per owner and machine name, so a node's reference resolves to exactly one.
+    ownerSlugIdx: uniqueIndex("playbook_owner_slug_idx").on(table.userId, table.slug),
+  }),
+);
+
+// ===== Shared Revision Store =====
+// One history for every versioned entity in the product. Notes, global settings and playbooks all
+// keep their content revisions here instead of each owning a private history table.
+//
+// The reference to the owning row is deliberately untyped and carries no foreign key: the store
+// serves entities that live in different tables, and a per-entity constraint would reintroduce the
+// coupling this table removes. Owners delete their own history when the entity is removed.
+
+export const entityRevision = sqliteTable(
+  "entityRevision",
+  {
+    id: text("id").primaryKey(),
+    // Kind of the owning entity, e.g. "note", "global-setting", "playbook".
+    entityType: text("entityType").notNull(),
+    // Identity of the owning row inside that kind.
+    entityId: text("entityId").notNull(),
+    // Revision number, starting at 1 and increasing by one per append.
+    revision: integer("revision").notNull(),
+    // Null records a revision in which the entity had no content at all, which is different from
+    // an empty string: a global setting with no value falls back to its default, an empty one
+    // does not.
+    content: text("content"),
+    size: integer("size").notNull(), // Content size in bytes
+    // Who wrote the revision; null when the writer is the system or the account is gone.
+    authorId: text("authorId").references(() => user.id, { onDelete: "set null" }),
     createdAt: integer("createdAt", { mode: "timestamp_ms" }).notNull(),
   },
   (table) => ({
-    // Unique constraint: each note can only have one version with a given number
-    noteVersionIdx: uniqueIndex("note_version_idx").on(table.noteId, table.version),
+    // Each entity holds one row per revision number.
+    entityRevisionIdx: uniqueIndex("entity_revision_idx").on(
+      table.entityType,
+      table.entityId,
+      table.revision,
+    ),
   }),
 );
 
@@ -939,32 +986,77 @@ export const workflowInvite = sqliteTable(
 );
 
 /**
- * Workflow Access - Granted permissions from accepted invites
- * Links users to workflows they have access to
- * Permissions: view, start, copy (but not edit)
+ * Access Grant - an explicit permission for one subject on one resource.
+ *
+ * Generalizes what used to be workflow-only sharing: the same row shape now grants access to a
+ * workflow, an execution, a note, an artifact or a playbook, so a new shareable entity does not
+ * bring another table and another set of rules with it.
+ *
+ * Exactly one of `userId` and `groupId` is set. Group grants are part of the model; no product
+ * path creates them yet, and an empty group table changes no decision.
  */
-export const workflowAccess = sqliteTable(
-  "workflowAccess",
+export const accessGrant = sqliteTable(
+  "accessGrant",
   {
     id: text("id").primaryKey(),
-    workflowId: text("workflowId")
-      .notNull()
-      .references(() => workflow.id, { onDelete: "cascade" }),
-    userId: text("userId")
-      .notNull()
-      .references(() => user.id, { onDelete: "cascade" }),
+    // Kind of the resource, matching the authorization policy's resource types.
+    resourceType: text("resourceType").notNull(),
+    resourceId: text("resourceId").notNull(),
+    userId: text("userId").references(() => user.id, { onDelete: "cascade" }),
+    groupId: text("groupId").references(() => principalGroup.id, { onDelete: "cascade" }),
+    // "use" reads and acts; "edit" additionally changes the resource.
+    level: text("level").notNull().default("use"),
     grantedBy: text("grantedBy")
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
-    inviteId: text("inviteId").references(() => workflowInvite.id, { onDelete: "set null" }), // Which invite granted this
+    inviteId: text("inviteId").references(() => workflowInvite.id, { onDelete: "set null" }),
     grantedAt: integer("grantedAt", { mode: "timestamp_ms" }).notNull(),
   },
   (table) => ({
-    // Each user can only have one access record per workflow
-    userWorkflowIdx: uniqueIndex("workflow_access_user_workflow_idx").on(
-      table.workflowId,
-      table.userId,
-    ),
+    // One grant per subject and resource. The two indexes are partial on purpose: SQLite treats
+    // NULLs as distinct in a unique index, so a single index over both subject columns would let
+    // the same user be granted the same resource twice.
+    userResourceIdx: uniqueIndex("access_grant_user_resource_idx")
+      .on(table.resourceType, table.resourceId, table.userId)
+      .where(sql`${table.userId} IS NOT NULL`),
+    groupResourceIdx: uniqueIndex("access_grant_group_resource_idx")
+      .on(table.resourceType, table.resourceId, table.groupId)
+      .where(sql`${table.groupId} IS NOT NULL`),
+    subjectIdx: index("access_grant_subject_idx").on(table.userId, table.resourceType),
+  }),
+);
+
+/**
+ * A named set of users, addressable by a grant.
+ *
+ * Modelled now so that access decisions have a place for team membership from the start. No
+ * user-facing path creates groups or memberships in this version.
+ */
+export const principalGroup = sqliteTable("principalGroup", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  description: text("description"),
+  createdBy: text("createdBy")
+    .notNull()
+    .references(() => user.id, { onDelete: "cascade" }),
+  createdAt: integer("createdAt", { mode: "timestamp_ms" }).notNull(),
+});
+
+export const principalGroupMember = sqliteTable(
+  "principalGroupMember",
+  {
+    groupId: text("groupId")
+      .notNull()
+      .references(() => principalGroup.id, { onDelete: "cascade" }),
+    userId: text("userId")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    // "member" belongs to the group; "manager" may change its membership.
+    role: text("role").notNull().default("member"),
+    addedAt: integer("addedAt", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.groupId, table.userId] }),
   }),
 );
 

@@ -11,6 +11,10 @@ import { AuditRepository } from "../database/repositories/audit-repository.js";
 import { UserRepository } from "../database/repositories/user-repository.js";
 import { AccountApprovalRepository } from "../database/repositories/account-approval-repository.js";
 import { NoteRepository } from "../database/repositories/note-repository.js";
+import { RevisionRepository } from "../database/repositories/revision-repository.js";
+import { AuthorizationService } from "../authorization/authorization-service.js";
+import { PlaybookRepository } from "../database/repositories/playbook-repository.js";
+import { PlaybookService } from "./playbook-service.js";
 import { ArtifactRepository } from "../database/repositories/artifact-repository.js";
 import { WorkflowSharingRepository } from "../database/repositories/workflow-sharing-repository.js";
 import { LockRepository } from "../database/repositories/lock-repository.js";
@@ -39,7 +43,18 @@ export {
 export { ExecutionService } from "./execution-service.js";
 export { applyExecutionReminderMutation } from "./execution-reminder-domain.js";
 export { SettingsService } from "./settings-service.js";
-export { GlobalSettingsService } from "./global-settings-service.js";
+export { GlobalSettingsService, MAX_GLOBAL_SETTING_REVISIONS } from "./global-settings-service.js";
+export { PlaybookService } from "./playbook-service.js";
+export {
+  PLAYBOOK_REFERENCE_PATTERN,
+  collectPlaybookReferences,
+  collectDefinitionReferences,
+  unresolvedPlaybookReferences,
+  type PlaybookReference,
+  type PlaybookReferenceResolver,
+} from "./playbook-references.js";
+export { compareRevisionContent } from "./revision-diff.js";
+export type { RevisionDiffPart } from "./revision-diff.js";
 export { UserService } from "./user-service.js";
 export {
   NoteService,
@@ -260,10 +275,43 @@ let workflowMutationServiceInstance: WorkflowMutationService | null = null;
 let lockServiceInstance: LockService | null = null;
 let featureResolverInstance: FeatureResolver | null = null;
 let executionRetentionServiceInstance: ExecutionRetentionService | null = null;
+let authorizationServiceInstance: AuthorizationService | null = null;
+let playbookServiceInstance: PlaybookService | null = null;
 
 // Shared repository instances for cross-service wiring
 let workflowRepoInstance: WorkflowRepository | null = null;
 let sharingRepoInstance: WorkflowSharingRepository | null = null;
+
+/**
+ * The one PlaybookService instance.
+ *
+ * Playbooks are the reusable behaviour text workflow nodes reference by name.
+ */
+export function getPlaybookService(): PlaybookService {
+  if (!playbookServiceInstance) {
+    const db = getDatabase();
+    playbookServiceInstance = new PlaybookService(
+      new PlaybookRepository(db),
+      new AuditRepository(db),
+      getAuthorizationService(),
+      new UserRepository(db),
+    );
+  }
+  return playbookServiceInstance;
+}
+
+/**
+ * The one authorization service instance.
+ *
+ * Every product path that has to decide whether a subject may act on a resource asks this rather
+ * than comparing owner ids itself.
+ */
+export function getAuthorizationService(): AuthorizationService {
+  if (!authorizationServiceInstance) {
+    authorizationServiceInstance = new AuthorizationService(getDatabase());
+  }
+  return authorizationServiceInstance;
+}
 
 /**
  * Get shared WorkflowRepository instance
@@ -346,12 +394,6 @@ export function getWorkflowService(): WorkflowService {
     const auditRepo = new AuditRepository(db);
     const userRepo = new UserRepository(db);
 
-    // Wire up shared access checking
-    const sharingRepo = getSharingRepo();
-    workflowRepo.setSharedAccessChecker((workflowId, userId) =>
-      sharingRepo.hasAccess(workflowId, userId),
-    );
-
     workflowServiceInstance = new WorkflowService(workflowRepo, auditRepo, userRepo);
 
     // Wire mutation service for validation caching (Issue #463)
@@ -370,7 +412,11 @@ export function getExecutionService(): ExecutionService {
     const db = getDatabase();
     const executionRepo = new ExecutionRepository(db);
     const auditRepo = new AuditRepository(db);
-    executionServiceInstance = new ExecutionService(executionRepo, auditRepo);
+    executionServiceInstance = new ExecutionService(
+      executionRepo,
+      auditRepo,
+      getAuthorizationService(),
+    );
   }
   return executionServiceInstance;
 }
@@ -398,7 +444,11 @@ export function getGlobalSettingsService(): GlobalSettingsService {
     const db = getDatabase();
     const globalSettingsRepo = new GlobalSettingsRepository(db);
     const auditRepo = new AuditRepository(db);
-    globalSettingsServiceInstance = new GlobalSettingsService(globalSettingsRepo, auditRepo);
+    globalSettingsServiceInstance = new GlobalSettingsService(
+      globalSettingsRepo,
+      auditRepo,
+      new RevisionRepository(db),
+    );
   }
   return globalSettingsServiceInstance;
 }
@@ -495,6 +545,7 @@ export function getWorkflowSharingService(): WorkflowSharingService {
       sharingRepo,
       workflowRepo,
       auditRepo,
+      getAuthorizationService(),
       baseUrl,
     );
   }
@@ -512,7 +563,12 @@ export function getWorkflowMutationService(): WorkflowMutationService {
     const workflowRepo = getWorkflowRepo();
     const auditRepo = new AuditRepository(db);
 
-    workflowMutationServiceInstance = new WorkflowMutationService(workflowRepo, auditRepo);
+    workflowMutationServiceInstance = new WorkflowMutationService(
+      workflowRepo,
+      auditRepo,
+      undefined,
+      getPlaybookService(),
+    );
   }
   return workflowMutationServiceInstance;
 }

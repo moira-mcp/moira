@@ -5,6 +5,7 @@
 export { CardShell, type CardAction } from "./CardShell";
 export { ExecutionCard } from "./ExecutionCard";
 export { NoteCard, type NoteCardData } from "./NoteCard";
+export { PlaybookCard } from "./PlaybookCard";
 export { ArtifactCard, type ArtifactCardData } from "./ArtifactCard";
 export { AuditLogCard, type AuditLogCardData } from "./AuditLogCard";
 export { UserCard } from "./UserCard";

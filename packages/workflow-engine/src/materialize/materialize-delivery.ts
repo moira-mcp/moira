@@ -1,6 +1,9 @@
-import { metadataRevision, type WorkflowToken } from "@mcp-moira/shared";
+import { metadataRevision, type ExecutionError, type WorkflowToken } from "@mcp-moira/shared";
 import { isMaterializeNode, type WorkflowExecution, type WorkflowGraph } from "../types/index.js";
-import { renderMaterializeFiles, type RenderedMaterializeFile } from "./materialize-service.js";
+import {
+  renderMaterializeFilesWithReport,
+  type RenderedMaterializeFile,
+} from "./materialize-service.js";
 
 /**
  * Why a materialize delivery was refused. Both delivery channels answer with the same
@@ -26,6 +29,12 @@ export interface MaterializeGrantStore {
 export interface MaterializeExecutionSource {
   getExecution(executionId: string): Promise<WorkflowExecution | null>;
   getWorkflowGraph(workflowId: string, userId: string): Promise<WorkflowGraph | null>;
+  /**
+   * Record a fact about the run. Optional because a source may serve reads only; when it is
+   * absent, a playbook that failed to resolve inside a materialized file is still logged, but not
+   * attached to the execution.
+   */
+  appendError?(executionId: string, error: ExecutionError): Promise<boolean>;
 }
 
 export type MaterializeDelivery =
@@ -40,7 +49,7 @@ export type MaterializeDelivery =
  * who may read what. Rendering happens before the final authorization re-check for the same reason
  * the archive endpoint has always done it: a render failure must not consume the decision.
  *
- * Throws whatever {@link renderMaterializeFiles} throws — a rendering or size violation is a
+ * Throws whatever {@link renderMaterializeFilesWithReport} throws — a rendering or size violation is a
  * different outcome from a refusal and each caller maps it to its own transport.
  */
 export async function resolveMaterializeDelivery(
@@ -82,10 +91,28 @@ export async function resolveMaterializeDelivery(
     return { authorized: false, reason: "workflow_node_unavailable" };
   }
 
-  const files = await renderMaterializeFiles(node, graph.variableRegistry, execution.globalContext);
+  const { files, unresolvedPlaybooks } = await renderMaterializeFilesWithReport(
+    node,
+    graph.variableRegistry,
+    execution.globalContext,
+  );
 
   if (!tokens.authorizeMaterializeToken(token, execution.executionId, node.id, execution.userId)) {
     return { authorized: false, reason: "authorization_lost" };
+  }
+
+  if (unresolvedPlaybooks.length > 0) {
+    // Recorded only once the delivery is authorized: a refused download delivers nothing, and the
+    // run must not carry a note about files it never received. The placeholder lands inside a
+    // delivered file, where nobody reading the run would see it.
+    await source.appendError?.(execution.executionId, {
+      timestamp: Date.now(),
+      nodeId: node.id,
+      errorType: "degradation",
+      message:
+        `Materialized files were delivered without ${unresolvedPlaybooks.length === 1 ? "a playbook" : "playbooks"} they reference: ` +
+        unresolvedPlaybooks.map((entry) => entry.reference).join(", "),
+    });
   }
 
   return { authorized: true, files, executionId: execution.executionId, nodeId: node.id };

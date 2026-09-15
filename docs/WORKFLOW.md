@@ -17,6 +17,7 @@
 | Materialize          | Five-minute node-bound tar delivery of registry files    |
 | Step attempt         | Server-issued identity of one presented workflow step    |
 | Start attempt        | Server-issued identity of one prepared workflow start    |
+| Playbook             | Named reusable behaviour text referenced by a definition |
 
 ## Execution Management
 
@@ -53,8 +54,8 @@ mcp__moira__start({ action: "execute", startAttemptId: preparedChild.startAttemp
 
 `prepare` validates and binds the workflow version, caller, parent reference, note, and notification policy
 options to a Start attempt, but does not create an execution or run a node. The attempt expires after
-15 minutes. `execute` revalidates mutable workflow, parent, account, lock-delivery, and communication
-preconditions, consumes the attempt, and returns the Process ID, first Step attempt ID, and first
+15 minutes. `execute` revalidates mutable workflow, parent, account, playbook-readability, lock-delivery, and
+communication preconditions, consumes the attempt, and returns the Process ID, first Step attempt ID, and first
 presentation. A failed mutable precondition returns one stable `START_PRECONDITION_CHANGED` receipt
 without an execution. Repeating `execute` with the same Start attempt ID replays the exact stored response;
 creating another Start attempt is an intentional separate execution.
@@ -839,7 +840,10 @@ embedded in the issued shell command. The built-in directive explains the retry 
 context-delivery fallback below as conditional and non-preferred, and reminds the agent that delivery
 does not prove reading on either route. When the HTTP request arrives, the route reloads the
 current workflow and re-renders each archive entry path and registry-backed content with the bound
-execution context, including system variables such as `executionId`. A workflow change after
+execution context, including system variables such as `executionId`. A playbook reference inside
+that content resolves here too; one that cannot be read is replaced by
+`[PLAYBOOK NOT AVAILABLE: name]` inside the delivered file and recorded on the execution, because a
+placeholder buried in a downloaded file is otherwise invisible to everyone. A workflow change after
 issuance can therefore change the downloaded archive paths or contents, but it cannot change the
 destination in the already-issued command. Re-presenting the paused node through `current_step`
 creates a new grant and recomputes the directive without advancing the graph. The UI and the presented
@@ -1020,6 +1024,8 @@ Output stored in `upsertNoteResult` (or `outputVariable`): `{key, version, creat
 - `{{workflowId}}` - System variable: workflow ID
 - `{{userId}}` - System variable: current user ID
 - `{{note:KEY}}` - Note content reference (fetches note by key for current user)
+- `{{playbook:NAME}}` - Playbook reference (named, reusable behaviour text of the current user)
+- `{{playbook:@owner/NAME}}` - Published playbook of another account
 
 ### Dynamic Array Indexes
 
@@ -1178,6 +1184,31 @@ Apply settings from {{note:my-settings}} to the project.
 - Missing notes produce: `[NOTE NOT FOUND: KEY]`
 - Service errors produce: `[NOTE ERROR: KEY]`
 - Key supports alphanumeric, underscore, hyphen: `{{note:my-config}}`, `{{note:project_settings}}`
+
+### Playbook References
+
+Reference reusable behaviour text — a review standard, a tone of voice, a definition of done —
+without carrying it inside the directive:
+
+```
+Follow this standard: {{playbook:review-standard}}
+Write in this voice: {{playbook:@jane/tone-of-voice}}
+```
+
+**Behavior:**
+
+- Resolved at every step, so editing a playbook reaches a running execution at its next step
+- Works wherever templates are processed: a directive, a completion condition, a materialized file,
+  and the default of a registry variable
+- Names use lower-case letters, digits and hyphens; an owner may be named as `@handle/` or `id/` to
+  read that account's published playbook
+- A playbook that cannot be read produces `[PLAYBOOK NOT AVAILABLE: name]`, and the execution
+  records that the step ran without it — a step degrades openly rather than silently
+- A registry failure produces `[PLAYBOOK ERROR: name]`, recorded the same way
+- A definition naming a playbook its author cannot read is refused while editing, and a run naming
+  one is refused before it is created
+- A reference written with a leading backslash (`\{{playbook:name}}`) is literal text: it is neither
+  resolved nor checked, which is how a document explains the syntax without naming a playbook
 
 **Dynamic note keys:**
 

@@ -18,6 +18,8 @@ import { getAuditSource } from "../logging/context.js";
 import { createLogger, Component } from "../logging/logger.js";
 import { AuditAction } from "../audit/actions.js";
 import { ConflictError, ValidationError } from "../errors/index.js";
+import type { AuthorizationService } from "../authorization/authorization-service.js";
+import { RESOURCE_TYPES } from "../authorization/authorization-policy.js";
 import { metadataRevision } from "../utils/metadata-revision.js";
 import { applyExecutionReminderMutation } from "./execution-reminder-domain.js";
 
@@ -27,7 +29,18 @@ export class ExecutionService {
   constructor(
     private executionRepo: ExecutionRepository,
     private auditRepo: AuditRepository,
+    /** Who may act on an execution is decided centrally. */
+    private authorization: AuthorizationService,
   ) {}
+
+  /** Whether this user may act on the execution as its owner would. */
+  private async mayUse(userId: string, execution: { executionId: string; userId: string }) {
+    return this.authorization.can(userId, "use", {
+      type: RESOURCE_TYPES.execution,
+      id: execution.executionId,
+      ownerId: execution.userId,
+    });
+  }
 
   /**
    * List executions with filters
@@ -334,7 +347,7 @@ export class ExecutionService {
   ): Promise<ReminderMutationResult> {
     const execution = await this.executionRepo.get(executionId);
     if (!execution) throw new ValidationError("Execution must exist");
-    if (execution.userId !== userId)
+    if (!(await this.mayUse(userId, execution)))
       throw new ValidationError("Execution must belong to the authenticated user");
     if (execution.status !== "running")
       throw new ValidationError("Only running executions accept reminder mutations");

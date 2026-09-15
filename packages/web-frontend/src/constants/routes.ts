@@ -33,6 +33,7 @@ export interface RoutesShape {
   SETTINGS: string;
   INVITE_ACCEPT: string;
   NOTES: string;
+  PLAYBOOKS: string;
   ADMIN: string;
   ADMIN_USERS: string;
   ADMIN_EXECUTIONS: string;
@@ -68,6 +69,7 @@ export function buildRoutes(appPrefix: string): RoutesShape {
     SETTINGS: `${appPrefix}/settings`,
     INVITE_ACCEPT: `${appPrefix}/invites/:token`,
     NOTES: `${appPrefix}/notes`,
+    PLAYBOOKS: `${appPrefix}/playbooks`,
 
     // Admin routes
     ADMIN: admin,

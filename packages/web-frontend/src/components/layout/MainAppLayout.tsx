@@ -32,6 +32,7 @@ export const MainAppLayout: React.FC = () => {
     { path: ROUTES.WORKFLOWS, label: t("layout.nav.workflows"), icon: "⚡" },
     { path: ROUTES.EXECUTIONS, label: t("layout.nav.executions"), icon: "📊" },
     { path: ROUTES.NOTES, label: t("layout.nav.notes"), icon: "📝" },
+    { path: ROUTES.PLAYBOOKS, label: t("layout.nav.playbooks"), icon: "📘" },
     { path: `${APP_PREFIX}/artifacts`, label: t("layout.nav.artifacts"), icon: "📄" },
     { path: ROUTES.SETTINGS, label: t("layout.userMenu.settings"), icon: "⚙️" },
     { path: ROUTES.ADMIN, label: t("layout.nav.admin"), icon: "🔧", adminOnly: true },
