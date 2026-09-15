@@ -70,7 +70,10 @@ describe("workspace transfer download route", () => {
   test("consumes a claimed capability when the client aborts a partial response", async () => {
     const stream = new PassThrough();
     const service = {
-      claimDownload: jest.fn<WorkspaceTransferService["claimDownload"]>(async () => ({ record, stream })),
+      claimDownload: jest.fn<WorkspaceTransferService["claimDownload"]>(async () => ({
+        record,
+        stream,
+      })),
       consume: jest.fn<WorkspaceTransferService["consume"]>(async () => undefined),
     };
     const response = new PassThrough() as PassThrough & {

@@ -9,8 +9,6 @@
  */
 
 import { describe, expect, test } from "@jest/globals";
-import { findCatalogEntryBySlug } from "@mcp-moira/shared";
-import type { WorkflowGraph } from "@mcp-moira/workflow-engine";
 import {
   APPROACH_COLUMNS,
   GRAPH_MARGIN,
@@ -26,6 +24,8 @@ import {
   roundedPath,
   routedPoints,
 } from "../../../packages/web-frontend/src/components/workflow/graphNodes";
+import { catalogGraph } from "../../helpers/catalog-graphs.js";
+import type { WorkflowGraph as FrontendWorkflowGraph } from "../../../packages/web-frontend/src/types/workflow-types.js";
 
 // Two blocks stacked top to bottom, cards running left to right (100 wide, 60 high); block a's
 // box holds a three-lane corridor under its cards (two returns of its own and one into it) and,
@@ -55,6 +55,15 @@ const links = [
   { id: "a2.done", source: "a2", target: "b1", kind: "external" },
   { id: "b2.back", source: "b2", target: "a1", kind: "return" },
 ];
+
+/**
+ * A bundled flow as the frontend's own graph type, which requires the id the engine leaves
+ * optional. Catalog entries always carry one; the slug is the fallback so the shape is total.
+ */
+function frontendGraph(slug: string): FrontendWorkflowGraph {
+  const graph = catalogGraph(slug);
+  return { ...graph, id: graph.id ?? slug } as FrontendWorkflowGraph;
+}
 
 describe("routeLinks", () => {
   const routes = routeLinks(links, steps, groups, groupOf, "RIGHT");
@@ -153,7 +162,7 @@ describe("corridors of the bundled flows", () => {
   test.each(flows.flatMap((slug) => directions.map((d) => [slug, d] as const)))(
     "%s laid %s keeps every lane off the cards and on the canvas",
     async (slug, direction) => {
-      const graph = findCatalogEntryBySlug(slug)!.graph as WorkflowGraph;
+      const graph = frontendGraph(slug);
       const model = graphModel(graph, definitionBlocks(graph));
       const layout = await layoutGraph(model, direction);
       const groupById = new Map(layout.groups.map((g) => [g.id, g]));
@@ -216,7 +225,7 @@ describe("corridors of the bundled flows", () => {
   );
 
   test("edges arriving at one card take their own approach columns", async () => {
-    const graph = findCatalogEntryBySlug("software-development-flow")!.graph as WorkflowGraph;
+    const graph = frontendGraph("software-development-flow");
     const model = graphModel(graph, definitionBlocks(graph));
     const layout = await layoutGraph(model, "DOWN");
     const sides = new Map<string, number[]>();

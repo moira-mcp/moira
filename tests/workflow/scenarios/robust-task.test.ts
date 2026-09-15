@@ -1,6 +1,5 @@
 /** Observable scenarios for the cause-aware Robust Task. */
 
-import { findCatalogEntryBySlug } from "@mcp-moira/shared";
 import {
   AgentMessageQueue,
   GraphExecutionEngine,

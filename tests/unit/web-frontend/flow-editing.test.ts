@@ -19,6 +19,8 @@ import { definitionProgress } from "../../../packages/web-frontend/src/component
 import { orderedNodeIds } from "../../../packages/web-frontend/src/components/flow/SplitView.js";
 import { runBlocks } from "../../../packages/web-frontend/src/components/run/model.js";
 import type { WorkflowGraph } from "../../../packages/web-frontend/src/types/workflow-types.js";
+import { catalogGraph } from "../../helpers/catalog-graphs.js";
+import type { WorkflowGraph as FrontendWorkflowGraph } from "../../../packages/web-frontend/src/types/workflow-types.js";
 
 const quickTask = (): WorkflowGraph =>
   JSON.parse(JSON.stringify(findCatalogEntryBySlug("quick-task")!.graph)) as WorkflowGraph;
@@ -29,6 +31,15 @@ function firstCycleEdge(graph: WorkflowGraph): { nodeId: string; key: string } {
   const edge = process.backEdges[0];
   const dot = edge.indexOf(".");
   return { nodeId: edge.slice(0, dot), key: edge.slice(dot + 1) };
+}
+
+/**
+ * A bundled flow as the frontend's own graph type, which requires the id the engine leaves
+ * optional. Catalog entries always carry one; the slug is the fallback so the shape is total.
+ */
+function frontendGraph(slug: string): FrontendWorkflowGraph {
+  const graph = catalogGraph(slug);
+  return { ...graph, id: graph.id ?? slug } as FrontendWorkflowGraph;
 }
 
 describe("flow edit model", () => {
@@ -115,7 +126,7 @@ describe("flow edit model", () => {
     expect(progress.taskTitle).toBe(graph.metadata.name);
     expect(progress.title).toBeNull();
     // SDF's authored run title is a template ("plan r{{plan_revision}}") rendered only by a run.
-    const sdf = findCatalogEntryBySlug("software-development-flow")!.graph as WorkflowGraph;
+    const sdf = frontendGraph("software-development-flow");
     expect(sdf.progress!.title).toContain("{{");
     expect(
       definitionProgress(sdf, deriveProcess(sdf as unknown as Parameters<typeof deriveProcess>[0])!)

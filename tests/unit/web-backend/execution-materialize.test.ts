@@ -140,8 +140,14 @@ describe("GET /api/public/executions/materialize/:token", () => {
     );
 
     const responses = await Promise.all([
-      request(app).get("/api/public/executions/materialize/grant").buffer(true).parse(binaryParser as unknown as (str: string) => unknown),
-      request(app).get("/api/public/executions/materialize/grant").buffer(true).parse(binaryParser as unknown as (str: string) => unknown),
+      request(app)
+        .get("/api/public/executions/materialize/grant")
+        .buffer(true)
+        .parse(binaryParser as unknown as (str: string) => unknown),
+      request(app)
+        .get("/api/public/executions/materialize/grant")
+        .buffer(true)
+        .parse(binaryParser as unknown as (str: string) => unknown),
     ]);
     expect(responses.map((response) => response.status)).toEqual([200, 200]);
     for (const response of responses) {

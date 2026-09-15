@@ -7,7 +7,6 @@
 import { afterEach, describe, expect, test } from "@jest/globals";
 import React from "react";
 import { cleanup, render } from "@testing-library/react";
-import { findCatalogEntryBySlug } from "@mcp-moira/shared";
 import { deriveProcess, type WorkflowGraph } from "@mcp-moira/workflow-engine";
 import {
   blockById,
@@ -15,9 +14,10 @@ import {
   type RunBlock,
 } from "../../../packages/web-frontend/src/components/run/model.js";
 import { TabBadge } from "../../../packages/web-frontend/src/components/run/TabBadge.js";
+import { catalogGraph } from "../../helpers/catalog-graphs.js";
 
 function blocksOf(slug: string): { blocks: RunBlock[]; graph: WorkflowGraph } {
-  const graph = findCatalogEntryBySlug(slug)!.graph as WorkflowGraph;
+  const graph = catalogGraph(slug);
   const process = deriveProcess(graph)!;
   const blocks = process.blocks.map((block, index) => ({
     id: block.id,

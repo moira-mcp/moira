@@ -5,14 +5,14 @@
  */
 
 import { describe, expect, test } from "@jest/globals";
-import { findCatalogEntryBySlug } from "@mcp-moira/shared";
-import { deriveProcess, type WorkflowGraph } from "@mcp-moira/workflow-engine";
+import { deriveProcess } from "@mcp-moira/workflow-engine";
 import {
   buildLinks,
   linkGeometry,
   linksHeight,
 } from "../../../packages/web-frontend/src/components/run/arcs.js";
 import type { RunBlock } from "../../../packages/web-frontend/src/components/run/model.js";
+import { catalogGraph } from "../../helpers/catalog-graphs.js";
 
 const FLOWS = [
   "quick-task",
@@ -24,7 +24,7 @@ const FLOWS = [
 ];
 
 function blocksOf(slug: string): RunBlock[] {
-  const graph = findCatalogEntryBySlug(slug)!.graph as WorkflowGraph;
+  const graph = catalogGraph(slug);
   const process = deriveProcess(graph)!;
   return process.blocks.map((block, index) => ({
     id: block.id,
@@ -70,9 +70,7 @@ describe("lanes forward links", () => {
 
   test("hubs receive links like any other block", () => {
     const blocks = blocksOf("software-development-flow");
-    const process = deriveProcess(
-      findCatalogEntryBySlug("software-development-flow")!.graph as WorkflowGraph,
-    )!;
+    const process = deriveProcess(catalogGraph("software-development-flow"))!;
     const links = buildLinks(blocks);
     for (const hub of process.hubs) {
       const hubIndex = blocks.find((b) => b.id === hub)!.index;

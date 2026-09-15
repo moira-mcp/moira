@@ -137,7 +137,9 @@ describe("ReadNoteHandler", () => {
       allTags: [],
     });
 
-    mockNoteService.get.mockResolvedValue(note("single-note", "the content", { tags: ["important"], version: 3 }));
+    mockNoteService.get.mockResolvedValue(
+      note("single-note", "the content", { tags: ["important"], version: 3 }),
+    );
 
     const readNode: ReadNoteNode = {
       type: "read-note",
@@ -329,9 +331,7 @@ describe("WriteNoteHandler", () => {
     });
 
     mockNoteService.exists.mockResolvedValueOnce(false).mockResolvedValueOnce(false);
-    mockNoteService.save
-      .mockResolvedValueOnce(saved(1))
-      .mockResolvedValueOnce(saved(1));
+    mockNoteService.save.mockResolvedValueOnce(saved(1)).mockResolvedValueOnce(saved(1));
 
     const writeNode: WriteNoteNode = {
       type: "write-note",

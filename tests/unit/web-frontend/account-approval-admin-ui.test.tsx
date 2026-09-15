@@ -5,7 +5,7 @@
 import React from "react";
 import { afterEach, beforeEach, describe, expect, jest, test } from "@jest/globals";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import "@testing-library/jest-dom";
+import "@testing-library/jest-dom/jest-globals";
 import { I18nextProvider } from "react-i18next";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import i18n from "../../../packages/web-frontend/src/i18n";
@@ -126,7 +126,7 @@ describe("administrator account-approval presentation", () => {
     ["a capability-load failure", () => Promise.reject(new Error("feature probe failed"))],
   ])("forgot-password fails closed for %s", async (_name, loadFeatures) => {
     jest.spyOn(apiClient, "getFeatures").mockImplementation(loadFeatures);
-    const fetchMock = jest.fn();
+    const fetchMock = jest.fn<typeof fetch>();
     global.fetch = fetchMock as typeof fetch;
 
     renderForgotPassword();
@@ -218,7 +218,7 @@ describe("administrator account-approval presentation", () => {
 
   test("self-host detail replaces unavailable send actions with temporary-password recovery", async () => {
     jest.spyOn(apiClient, "getFeatures").mockResolvedValue(featureResponse(true));
-    const fetchMock = jest.fn(async (input: RequestInfo | URL) => {
+    const fetchMock = jest.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
       const url = String(input);
       if (url === "/api/admin/users/saas-user") {
         return {

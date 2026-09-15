@@ -1,4 +1,3 @@
-import { findCatalogEntryBySlug } from "@mcp-moira/shared";
 import {
   AgentMessageQueue,
   GraphExecutionEngine,

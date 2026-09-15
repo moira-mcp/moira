@@ -1,5 +1,4 @@
 import { describe, expect, test } from "@jest/globals";
-import { findSystemCatalogEntry } from "../../../packages/shared/src/services/workflow-catalog.js";
 import {
   GraphValidator,
   deriveProcess,

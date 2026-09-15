@@ -1023,10 +1023,7 @@ describe("software-development-flow", () => {
 
     const approval = inputSchemaOf(presentingNode(workflow, "approve-plan"));
     expect(approval.globalInputs).toEqual(["progress_plan_outcome"]);
-    expect(Object.keys(approval.properties ?? {})).toEqual([
-      "plan_approval",
-      "user_feedback",
-    ]);
+    expect(Object.keys(approval.properties ?? {})).toEqual(["plan_approval", "user_feedback"]);
     const activation = inputSchemaOf(presentingNode(workflow, "activate-reviewed-plan"));
     expect(activation.globalInputs).toEqual([
       "current_step_index",
@@ -1034,10 +1031,9 @@ describe("software-development-flow", () => {
       "vcs_commits_authorized",
       "progress_plan_outcome",
     ]);
-    expect(
-      presentingNode(workflow, "activate-reviewed-plan")
-        .directive,
-    ).toContain("exact executable unit count returned in total_steps");
+    expect(presentingNode(workflow, "activate-reviewed-plan").directive).toContain(
+      "exact executable unit count returned in total_steps",
+    );
     expect(
       workflow.nodes.find((node) => node.id === "route-plan-activation-mode")?.connections,
     ).toEqual({
@@ -1124,9 +1120,7 @@ describe("software-development-flow", () => {
     // five do — repair-plan among them, despite its single incoming edge, because any revision goes
     // back through review-plan and a blocking finding routes into it — so they answer only for the
     // units they shape, since closed units stay as executed.
-    const gate = (nodeId: string) =>
-      presentingNode(workflow, nodeId)
-        .completionCondition;
+    const gate = (nodeId: string) => presentingNode(workflow, nodeId).completionCondition;
     // Closed work stays closed, and stays where it was closed: the unit account lives at
     // step-<index>/, addressed by index and outside plan revisions, so a revision that keeps a
     // closed unit's text but shifts its index makes the executor overwrite someone else's account.
@@ -1147,9 +1141,7 @@ describe("software-development-flow", () => {
       ["revise-plan-for-replan", "closed-unit indices"],
       ["revise-plan-after-feedback", "Preserve prior revisions and completed work"],
     ] as const) {
-      expect(
-        presentingNode(workflow, nodeId).directive,
-      ).toContain(directiveClause);
+      expect(presentingNode(workflow, nodeId).directive).toContain(directiveClause);
     }
     // One wording for one obligation: the gates differ in what else they carry, but the closed-work
     // clause reads the same everywhere, so a gate that drifts is visible.
@@ -1189,9 +1181,9 @@ describe("software-development-flow", () => {
     expect(owner.completionCondition).toContain("active execution reminder");
     expect(owner.connections).toEqual({ success: "materialize-development-standards" });
     expect(gate("create-plan")).toContain("active execution reminder");
-    expect(
-      presentingNode(workflow, "create-plan").directive,
-    ).toContain("caller-owned reminders rather than plan units");
+    expect(presentingNode(workflow, "create-plan").directive).toContain(
+      "caller-owned reminders rather than plan units",
+    );
     expect(workflow.runtimePolicy?.externalVariableWrites).toBeUndefined();
 
     // The reviewer contract has one home: the finding format no longer repeats across directives.
@@ -1203,9 +1195,7 @@ describe("software-development-flow", () => {
       "review-final-semantics",
       "review-unit-completeness",
     ]) {
-      expect(
-        presentingNode(workflow, id).directive,
-      ).toContain("standards/review.md");
+      expect(presentingNode(workflow, id).directive).toContain("standards/review.md");
     }
     // Exactly one delegated review per plan unit: the per-unit gates judge locally, and only the
     // completeness review obtains independence.
@@ -1276,9 +1266,9 @@ describe("software-development-flow", () => {
       true: "route-vcs-authority",
       false: "advance-plan-revision-after-feedback",
     });
-    expect((workflow.nodes.find((node) => node.id === "end") as { finalOutput?: string[] }).finalOutput).toEqual([
-      "workspace_path",
-    ]);
+    expect(
+      (workflow.nodes.find((node) => node.id === "end") as { finalOutput?: string[] }).finalOutput,
+    ).toEqual(["workspace_path"]);
     expect(
       workflow.nodes.find((node) => node.id === "notify-workflow-complete")?.connections,
     ).toEqual({

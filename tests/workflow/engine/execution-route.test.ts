@@ -4,7 +4,7 @@
  */
 
 import { describe, expect, test } from "@jest/globals";
-import { findCatalogEntryBySlug, metadataRevision } from "@mcp-moira/shared";
+import { metadataRevision } from "@mcp-moira/shared";
 import {
   InMemoryRepository,
   adjustmentVisit,

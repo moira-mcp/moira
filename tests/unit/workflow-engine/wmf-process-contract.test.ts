@@ -6,8 +6,6 @@
  */
 
 import { describe, expect, test } from "@jest/globals";
-import { findSystemCatalogEntry } from "../../../packages/shared/src/services/workflow-catalog.js";
-import type { WorkflowGraph } from "@mcp-moira/workflow-engine";
 import { systemCatalogGraph } from "../../helpers/catalog-graphs.js";
 
 const wmf = systemCatalogGraph("workflow-management-flow", "public");

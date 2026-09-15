@@ -60,7 +60,9 @@ const MISSING_OWNER = "catalog-loader-ghost-owner";
  * at all. Asserting through a cast would read a directive off a state that has none; this says which
  * state was found instead.
  */
-function nodesOf(state: { lifecycle: string; content?: { graph: Record<string, unknown> } } | null) {
+function nodesOf(
+  state: { lifecycle: string; content?: { graph: Record<string, unknown> } } | null,
+) {
   if (!state || !state.content) {
     throw new Error(`reconciliation state carries no content: ${state?.lifecycle ?? "missing"}`);
   }

@@ -8,8 +8,6 @@
  */
 
 import { describe, expect, test } from "@jest/globals";
-import { findCatalogEntryBySlug } from "@mcp-moira/shared";
-import type { WorkflowGraph } from "@mcp-moira/workflow-engine";
 import {
   definitionBlocks,
   graphModel,
@@ -19,6 +17,7 @@ import {
   stepsOf,
 } from "../../../packages/web-frontend/src/components/run/model.js";
 import type { WorkflowGraph as FrontendGraph } from "../../../packages/web-frontend/src/types/workflow-types.js";
+import { catalogGraph } from "../../helpers/catalog-graphs.js";
 
 const FLOWS = [
   "quick-task",
@@ -28,7 +27,7 @@ const FLOWS = [
 ];
 
 function graphOf(slug: string): FrontendGraph {
-  return findCatalogEntryBySlug(slug)!.graph as WorkflowGraph as unknown as FrontendGraph;
+  return catalogGraph(slug) as unknown as FrontendGraph;
 }
 
 describe("graphModel", () => {

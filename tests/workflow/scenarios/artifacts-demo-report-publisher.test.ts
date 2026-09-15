@@ -7,7 +7,6 @@
  * Coverage target: 100% nodes (5), 100% branches
  */
 
-import { findCatalogEntryBySlug } from "@mcp-moira/shared";
 import {
   runScenario,
   type TestScenario,

@@ -1,6 +1,5 @@
 /** Behavioral scenarios for workflow-management-flow. */
 
-import { findCatalogEntryBySlug } from "@mcp-moira/shared";
 import {
   GraphExecutionEngine,
   MaterializeHandler,
@@ -115,8 +114,7 @@ function progressOutputsFor(
   input: Record<string, unknown>,
 ): Record<string, string> {
   const node = workflow.nodes.find((candidate) => candidate.id === nodeId) as
-    | { progressNodeId?: string; inputSchema?: { globalInputs?: string[] } }
-    | undefined;
+    { progressNodeId?: string; inputSchema?: { globalInputs?: string[] } } | undefined;
   const globals = node?.inputSchema?.globalInputs ?? [];
   const ownOutcome = node?.progressNodeId ? `progress_${node.progressNodeId}_outcome` : null;
   return Object.fromEntries(

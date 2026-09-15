@@ -401,7 +401,13 @@ describe("ExpressionHandler", () => {
       connections: { default: "next", error: "reject" },
     };
     const registry: VariableRegistry = {
-      declared: { type: "integer", description: "Declared target", minimum: 0, maximum: 10, default: 0 },
+      declared: {
+        type: "integer",
+        description: "Declared target",
+        minimum: 0,
+        maximum: 10,
+        default: 0,
+      },
     };
 
     const result = await handler.execute(
@@ -429,7 +435,13 @@ describe("ExpressionHandler", () => {
     };
     const registry: VariableRegistry = {
       value: { type: "integer", description: "Value", minimum: 0, maximum: 10, default: 1 },
-      dependent: { type: "integer", description: "Dependent value", minimum: 0, maximum: 10, default: 0 },
+      dependent: {
+        type: "integer",
+        description: "Dependent value",
+        minimum: 0,
+        maximum: 10,
+        default: 0,
+      },
     };
 
     const result = await handler.execute(

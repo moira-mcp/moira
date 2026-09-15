@@ -8,7 +8,6 @@
  * enabling both success and error path testing without a real database.
  */
 
-import { findCatalogEntryBySlug } from "@mcp-moira/shared";
 import {
   runScenario,
   type TestScenario,
@@ -94,7 +93,10 @@ describe("notes-demo-metrics-reporter Scenarios", () => {
   describe("Structural Validation", () => {
     it("should have valid structure", async () => {
       const validator = new GraphValidator();
-      const withId = { id: `moira/${(workflow as { slug?: string }).slug || "notes-demo-metrics-reporter"}`, ...workflow };
+      const withId = {
+        id: `moira/${(workflow as { slug?: string }).slug || "notes-demo-metrics-reporter"}`,
+        ...workflow,
+      };
       const validation = await validator.validateWorkflow(withId);
       expect(validation.valid).toBe(true);
       expect(validation.errors).toHaveLength(0);

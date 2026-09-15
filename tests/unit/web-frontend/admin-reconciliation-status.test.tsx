@@ -3,7 +3,7 @@
 import React from "react";
 import { afterEach, beforeEach, describe, expect, jest, test } from "@jest/globals";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
-import "@testing-library/jest-dom";
+import "@testing-library/jest-dom/jest-globals";
 import { I18nextProvider } from "react-i18next";
 import { MemoryRouter } from "react-router-dom";
 import i18n from "../../../packages/web-frontend/src/i18n";
@@ -29,6 +29,12 @@ const baseSystemStatus = {
 const features = {
   deploymentMode: "self-host" as const,
   mcpUrl: "http://localhost:8077/mcp",
+  emailDelivery: {
+    state: "test" as const,
+    provider: "test" as const,
+    available: true,
+    reason: null,
+  },
   features: {
     openRegistration: true,
     accountApproval: true,
@@ -118,6 +124,7 @@ describe("administrator managed-workflow reconciliation status", () => {
     });
     jest.spyOn(apiClient, "getAdminSystemStatus").mockResolvedValue(baseSystemStatus);
     jest.mocked(apiClient.getAdminStats).mockResolvedValue({
+      ...baseSystemStatus,
       totalWorkflows: 2,
       totalExecutions: 3,
       activeExecutions: 1,

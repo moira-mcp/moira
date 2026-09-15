@@ -1,6 +1,5 @@
 import { describe, expect, test } from "@jest/globals";
 import sharp from "sharp";
-import { findSystemCatalogEntry } from "../../../packages/shared/src/services/workflow-catalog.js";
 import {
   applyProgressVisibility,
   buildExecutionProgressVisualModel,
@@ -10,7 +9,6 @@ import {
   resolveProgressBlockIds,
   type ExecutionProgress,
   type WorkflowExecution,
-  type WorkflowGraph,
 } from "@mcp-moira/workflow-engine";
 import { systemCatalogGraph } from "../../helpers/catalog-graphs.js";
 

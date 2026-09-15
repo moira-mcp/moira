@@ -38,9 +38,7 @@ function executionContext(result: { data?: unknown }): {
   workflowSlug: string;
   workflowOwnerHandle: string;
 } {
-  const data = result.data as
-    | { workflowSlug?: string; workflowOwnerHandle?: string }
-    | undefined;
+  const data = result.data as { workflowSlug?: string; workflowOwnerHandle?: string } | undefined;
   if (!data?.workflowSlug) throw new Error("session execution_context response carried no slug");
   return data as { workflowSlug: string; workflowOwnerHandle: string };
 }

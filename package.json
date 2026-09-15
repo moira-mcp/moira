@@ -34,7 +34,8 @@
     "prepare:account-approval-downgrade": "tsx scripts/prepare-account-approval-downgrade.ts",
     "reconcile": "tsx scripts/reconcile-workflows.ts",
     "fix": "eslint . --fix && prettier --write .",
-    "verify": "eslint . && prettier --check . && npm run test:unit && npm run test:release-policy && npm run test:integration && npm run test:workflow",
+    "typecheck:tests": "tsc --noEmit -p tests/tsconfig.json && tsc --noEmit -p tests/tsconfig.web-frontend.json",
+    "verify": "eslint . && prettier --check . && npm run typecheck:tests && npm run test:unit && npm run test:release-policy && npm run test:integration && npm run test:workflow",
     "verify:docker": "./scripts/verify-docker.sh",
     "test:api:ci-saas": "testfold api -e ci-saas",
     "test:mcp-tools:ci-saas": "testfold mcp-tools -e ci-saas"

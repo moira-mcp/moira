@@ -8,7 +8,6 @@
  * enabling both success and error path testing without a real database.
  */
 
-import { findCatalogEntryBySlug } from "@mcp-moira/shared";
 import {
   runScenario,
   type TestScenario,

@@ -4,7 +4,6 @@ import {
   projectExecutionRun,
   type ExecutionVisit,
   type WorkflowExecution,
-  type WorkflowGraph,
 } from "@mcp-moira/workflow-engine";
 
 const workflow = systemCatalogGraph("software-development-flow", "public");

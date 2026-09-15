@@ -1,4 +1,3 @@
-import { findSystemCatalogEntry } from "@mcp-moira/shared";
 import { test, expect } from "./fixtures.js";
 import { getTestBaseUrl } from "../utils/test-config.js";
 import {

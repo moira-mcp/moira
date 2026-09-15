@@ -4,7 +4,6 @@
  * Exercises the filesystem-first Plan → Approve → Execute → Review → Accept contract.
  */
 
-import { findCatalogEntryBySlug } from "@mcp-moira/shared";
 import { GraphValidator, type WorkflowGraph } from "@mcp-moira/workflow-engine";
 import {
   runScenario,

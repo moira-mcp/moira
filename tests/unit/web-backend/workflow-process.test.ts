@@ -1,6 +1,5 @@
 import { describe, expect, test } from "@jest/globals";
 import type { WorkflowGraph } from "@mcp-moira/workflow-engine";
-import { findSystemCatalogEntry } from "../../../packages/shared/src/services/workflow-catalog.js";
 import { buildWorkflowProcessResponse } from "../../../packages/web-backend/src/services/workflow-process.js";
 import { renderWorkflowDerivation } from "../../../packages/workflow-cli/src/workflow-derive.js";
 import { formatProcessProjection } from "../../../packages/workflow-cli/src/workflow-derive.js";

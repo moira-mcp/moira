@@ -320,7 +320,9 @@ describe("MCP tool definitions", () => {
       communication.schema.safeParse({ action: "send", message: "ready", recipient: "123" })
         .success,
     ).toBe(false);
-    const schema = getToolJsonSchema(communication) as unknown as { properties: Record<string, unknown> };
+    const schema = getToolJsonSchema(communication) as unknown as {
+      properties: Record<string, unknown>;
+    };
     for (const forbidden of [
       "recipient",
       "provider",
@@ -602,7 +604,11 @@ describe("MCP tool definitions", () => {
       new Error("sqlite disk I/O error at /var/lib/moira/private.db"),
       "error",
     ],
-    ["an operational failure", new NotFoundError("Workflow not found", { workflowId: "missing-workflow" }), "warn"],
+    [
+      "an operational failure",
+      new NotFoundError("Workflow not found", { workflowId: "missing-workflow" }),
+      "warn",
+    ],
     // A domain error counts as operational only after normalization, which is the project's rule.
     ["a domain failure", new WorkflowNotFoundError("missing-workflow", "slug"), "warn"],
   ])("classifies %s the way this project classifies failures", async (_name, failure, level) => {

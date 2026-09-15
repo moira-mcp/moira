@@ -1098,9 +1098,7 @@ describe("GraphTemplateProcessor", () => {
         updatedAt: Date.now(),
       });
 
-      const processor = new GraphTemplateProcessor(
-        mockNoteService as unknown as NoteService,
-      );
+      const processor = new GraphTemplateProcessor(mockNoteService as unknown as NoteService);
       const context = mockExecutionContext({});
 
       const result = await processor.processDirectiveAsync(
@@ -1142,9 +1140,7 @@ describe("GraphTemplateProcessor", () => {
         throw new Error("Note not found");
       });
 
-      const processor = new GraphTemplateProcessor(
-        mockNoteService as unknown as NoteService,
-      );
+      const processor = new GraphTemplateProcessor(mockNoteService as unknown as NoteService);
       const context = mockExecutionContext({});
 
       const result = await processor.processDirectiveAsync(
@@ -1161,9 +1157,7 @@ describe("GraphTemplateProcessor", () => {
       const { NoteNotFoundError } = await import("@mcp-moira/shared");
       mockNoteService.get.mockRejectedValue(new NoteNotFoundError("missing-note"));
 
-      const processor = new GraphTemplateProcessor(
-        mockNoteService as unknown as NoteService,
-      );
+      const processor = new GraphTemplateProcessor(mockNoteService as unknown as NoteService);
       const context = mockExecutionContext({});
 
       const result = await processor.processDirectiveAsync("Data: {{note:missing-note}}", context);
@@ -1184,9 +1178,7 @@ describe("GraphTemplateProcessor", () => {
         updatedAt: Date.now(),
       });
 
-      const processor = new GraphTemplateProcessor(
-        mockNoteService as unknown as NoteService,
-      );
+      const processor = new GraphTemplateProcessor(mockNoteService as unknown as NoteService);
       const context = mockExecutionContext({ name: "World", greeting: "Hi" });
 
       const result = await processor.processDirectiveAsync(
@@ -1211,9 +1203,7 @@ describe("GraphTemplateProcessor", () => {
         updatedAt: Date.now(),
       });
 
-      const processor = new GraphTemplateProcessor(
-        mockNoteService as unknown as NoteService,
-      );
+      const processor = new GraphTemplateProcessor(mockNoteService as unknown as NoteService);
       const context = mockExecutionContext({});
 
       const result = await processor.processDirectiveAsync("Value: {{note:my-config}}", context);
@@ -1234,9 +1224,7 @@ describe("GraphTemplateProcessor", () => {
         updatedAt: Date.now(),
       });
 
-      const processor = new GraphTemplateProcessor(
-        mockNoteService as unknown as NoteService,
-      );
+      const processor = new GraphTemplateProcessor(mockNoteService as unknown as NoteService);
       const context = mockExecutionContext({});
 
       const result = await processor.processDirectiveAsync("Value: {{note:my_config}}", context);
@@ -1258,9 +1246,7 @@ describe("GraphTemplateProcessor", () => {
       const mockNoteService = createMockNoteService();
       mockNoteService.get.mockRejectedValue(new Error("Database connection failed"));
 
-      const processor = new GraphTemplateProcessor(
-        mockNoteService as unknown as NoteService,
-      );
+      const processor = new GraphTemplateProcessor(mockNoteService as unknown as NoteService);
       const context = mockExecutionContext({});
 
       const result = await processor.processDirectiveAsync("Data: {{note:broken-note}}", context);
@@ -1281,9 +1267,7 @@ describe("GraphTemplateProcessor", () => {
         size: 100,
       });
 
-      const processor = new GraphTemplateProcessor(
-        mockNoteService as unknown as NoteService,
-      );
+      const processor = new GraphTemplateProcessor(mockNoteService as unknown as NoteService);
       const context = mockExecutionContext({
         projectName: "mcp-moira",
       });
@@ -1311,9 +1295,7 @@ describe("GraphTemplateProcessor", () => {
         size: 100,
       });
 
-      const processor = new GraphTemplateProcessor(
-        mockNoteService as unknown as NoteService,
-      );
+      const processor = new GraphTemplateProcessor(mockNoteService as unknown as NoteService);
       const context = mockExecutionContext({
         prefix: "latest",
         suffix: "metrics",
@@ -1341,9 +1323,7 @@ describe("GraphTemplateProcessor", () => {
         size: 100,
       });
 
-      const processor = new GraphTemplateProcessor(
-        mockNoteService as unknown as NoteService,
-      );
+      const processor = new GraphTemplateProcessor(mockNoteService as unknown as NoteService);
       const context = mockExecutionContext({
         settings: { env: "production" },
       });
@@ -1362,9 +1342,7 @@ describe("GraphTemplateProcessor", () => {
       const { NoteNotFoundError } = await import("@mcp-moira/shared");
       // Note key pattern only allows alphanumeric/underscore/hyphen, so {{note:...}} with
       // placeholder won't match and will remain unresolved
-      const processor = new GraphTemplateProcessor(
-        mockNoteService as unknown as NoteService,
-      );
+      const processor = new GraphTemplateProcessor(mockNoteService as unknown as NoteService);
       const context = mockExecutionContext({});
 
       // {{missingVar}} resolves to [[UNDEFINED_VARIABLE]], making note key invalid
@@ -1392,9 +1370,7 @@ describe("GraphTemplateProcessor", () => {
         size: 100,
       });
 
-      const processor = new GraphTemplateProcessor(
-        mockNoteService as unknown as NoteService,
-      );
+      const processor = new GraphTemplateProcessor(mockNoteService as unknown as NoteService);
       const context = mockExecutionContext({
         userName: "Alice",
         prefType: "prefs",

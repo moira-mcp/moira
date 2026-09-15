@@ -5,12 +5,13 @@
 import React from "react";
 import { afterEach, describe, expect, jest, test } from "@jest/globals";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
-import "@testing-library/jest-dom";
+import "@testing-library/jest-dom/jest-globals";
 import { I18nextProvider } from "react-i18next";
 import i18n from "../../../packages/web-frontend/src/i18n";
 import {
   McpPromptsEditor,
   PROMPT_TYPES,
+  type McpPromptsEditorProps,
 } from "../../../packages/web-frontend/src/components/settings/McpPromptsEditor";
 import en from "../../../packages/web-frontend/src/locales/en.json";
 import ru from "../../../packages/web-frontend/src/locales/ru.json";
@@ -19,7 +20,7 @@ afterEach(cleanup);
 
 describe("MCP prompt editor static-description boundary", () => {
   test("offers only database-backed system prompt and reminder editing", async () => {
-    const onFetchValue = jest.fn(async (promptType: (typeof PROMPT_TYPES)[number]) => ({
+    const onFetchValue = jest.fn<McpPromptsEditorProps["onFetchValue"]>(async (promptType) => ({
       key: `mcp.${promptType}`,
       value: promptType,
     }));
