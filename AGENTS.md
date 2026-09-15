@@ -137,7 +137,9 @@ Two things have repeatedly turned a finished change into a red CI run:
 - **Every branch with an open pull request must be green on its own.** CI runs the base pull request
   too, so a stacked branch can be green while the branch under it is red — a defect whose fix lives
   one commit further up is still a red base. After rebasing a stack, run `npm run verify` on each
-  branch that has a pull request, not only on the tip.
+  branch that has a pull request, not only on the tip. Note also that `ci.yml` triggers only on pull
+  requests whose base is `master`: a pull request stacked on another branch gets no CI at all until
+  its base merges and GitHub retargets it, so until then the local gate is the only check it has.
 
 ### Test Quality Rules
 
