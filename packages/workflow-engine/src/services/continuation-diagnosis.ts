@@ -157,8 +157,13 @@ export async function unresolvedReferences(
 ): Promise<string[]> {
   const references = new Set<string>();
   for (const text of presentedTexts(node)) {
-    for (const match of text.matchAll(/\{\{\s*([^{}]+?)\s*\}\}/g)) {
-      references.add(match[1]);
+    // The body is captured whole and trimmed here rather than by padding the pattern with `\s*`
+    // around a lazy quantifier: that shape lets the engine split leading spaces between two parts of
+    // the pattern, which is quadratic on adversarial text, and this text comes from a workflow
+    // definition that a user authored.
+    for (const match of text.matchAll(/\{\{([^{}]*)\}\}/g)) {
+      const reference = match[1].trim();
+      if (reference.length > 0) references.add(reference);
     }
   }
   if (references.size === 0) return [];
