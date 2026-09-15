@@ -82,7 +82,6 @@ export type {
   WorkflowListResult,
   WorkflowOwnership,
   SaveWorkflowOptions as RepoSaveWorkflowOptions,
-  SharedAccessChecker,
   ValidationStatus,
   ValidationCache,
   AdminWorkflowFilter,

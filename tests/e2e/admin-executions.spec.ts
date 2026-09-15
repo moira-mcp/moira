@@ -38,9 +38,13 @@ test.describe("Admin Executions Page", () => {
       password: TEST_USER.password,
     });
     testUserCleanup = mcpClient.cleanup;
+    // The user is created fresh for this run and has no notification channel; this scenario is
+    // about what an operator sees, not about notifications, so the optional channel check is
+    // skipped rather than satisfied.
     ({ processId: executionId } = await startWorkflowExecutionState(
       mcpClient.client,
       TEST_WORKFLOW_ID,
+      { skipNotificationCheck: true },
     ));
   });
 

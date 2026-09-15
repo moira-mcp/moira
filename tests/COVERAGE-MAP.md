@@ -554,6 +554,16 @@ level headings classify the tracked test paths listed beneath them.
 
 - `tests/unit/workflow-engine/telegram-handler-errors.test.ts` — legacy Telegram routing/error behavior, current Settings > Notifications and directly usable Telegram Setup recovery guidance, progress images, explicit-recipient preservation, and destination/message log redaction
 
+### authorization
+
+**api**
+
+- `tests/api/execution-access-boundaries.test.ts` — the line between acting inside a run and inspecting it at the HTTP boundary: the owner reads their own variables; an operator of the installation is refused the variables, the reminders and a progress-image link of somebody else's run, and reads that run's card; an unrelated person is refused it
+
+**unit**
+
+- `tests/unit/shared/authorization.test.ts` — the central access policy: an owner's full rights on their own resource, a stranger denied every action on a private one, read and use but never change on a public one, an administrator limited to operator actions rather than the owner's hands, and grant levels honoured; the service resolving operator status from the account, finding a grant made to a group the subject belongs to, taking the wider level when a direct and a group grant both apply; a workflow read through the repository following the policy before and after a grant; a second identical grant refused by the partial unique indexes, an edit-level grant allowing a non-owner to modify a workflow while a use-level grant does not, and the migration carrying an existing workflow share over as a grant on that workflow
+
 ### versioned content
 
 **unit**

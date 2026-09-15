@@ -21,6 +21,8 @@ import {
   type AccessListResult,
 } from "../database/repositories/workflow-sharing-repository.js";
 import { getAuditSource } from "../logging/context.js";
+import type { AuthorizationService } from "../authorization/authorization-service.js";
+import { RESOURCE_TYPES } from "../authorization/authorization-policy.js";
 import { createLogger } from "../logging/logger.js";
 import { AuditAction } from "../audit/actions.js";
 import {
@@ -113,6 +115,8 @@ export class WorkflowSharingService {
     private sharingRepo: WorkflowSharingRepository,
     private workflowRepo: WorkflowRepository,
     private auditRepo: AuditRepository,
+    /** Who may share a workflow is decided centrally. */
+    private authorization: AuthorizationService,
     private baseUrl?: string, // For generating invite URLs
   ) {}
 
@@ -461,7 +465,14 @@ export class WorkflowSharingService {
       throw new WorkflowNotFoundError(workflowId, "id");
     }
 
-    if (ownership.ownerId !== userId) {
+    // Sharing a workflow is the owner's privilege; the central policy decides who holds it.
+    const mayShare = await this.authorization.can(userId, "share", {
+      type: RESOURCE_TYPES.workflow,
+      id: workflowId,
+      ownerId: ownership.ownerId ?? "",
+      visibility: ownership.visibility === "public" ? "public" : "private",
+    });
+    if (!mayShare) {
       throw new WorkflowAccessDeniedError(workflowId, userId, "write");
     }
   }

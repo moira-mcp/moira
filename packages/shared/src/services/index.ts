@@ -12,6 +12,7 @@ import { UserRepository } from "../database/repositories/user-repository.js";
 import { AccountApprovalRepository } from "../database/repositories/account-approval-repository.js";
 import { NoteRepository } from "../database/repositories/note-repository.js";
 import { RevisionRepository } from "../database/repositories/revision-repository.js";
+import { AuthorizationService } from "../authorization/authorization-service.js";
 import { ArtifactRepository } from "../database/repositories/artifact-repository.js";
 import { WorkflowSharingRepository } from "../database/repositories/workflow-sharing-repository.js";
 import { LockRepository } from "../database/repositories/lock-repository.js";
@@ -261,10 +262,24 @@ let workflowMutationServiceInstance: WorkflowMutationService | null = null;
 let lockServiceInstance: LockService | null = null;
 let featureResolverInstance: FeatureResolver | null = null;
 let executionRetentionServiceInstance: ExecutionRetentionService | null = null;
+let authorizationServiceInstance: AuthorizationService | null = null;
 
 // Shared repository instances for cross-service wiring
 let workflowRepoInstance: WorkflowRepository | null = null;
 let sharingRepoInstance: WorkflowSharingRepository | null = null;
+
+/**
+ * The one authorization service instance.
+ *
+ * Every product path that has to decide whether a subject may act on a resource asks this rather
+ * than comparing owner ids itself.
+ */
+export function getAuthorizationService(): AuthorizationService {
+  if (!authorizationServiceInstance) {
+    authorizationServiceInstance = new AuthorizationService(getDatabase());
+  }
+  return authorizationServiceInstance;
+}
 
 /**
  * Get shared WorkflowRepository instance
@@ -347,12 +362,6 @@ export function getWorkflowService(): WorkflowService {
     const auditRepo = new AuditRepository(db);
     const userRepo = new UserRepository(db);
 
-    // Wire up shared access checking
-    const sharingRepo = getSharingRepo();
-    workflowRepo.setSharedAccessChecker((workflowId, userId) =>
-      sharingRepo.hasAccess(workflowId, userId),
-    );
-
     workflowServiceInstance = new WorkflowService(workflowRepo, auditRepo, userRepo);
 
     // Wire mutation service for validation caching (Issue #463)
@@ -371,7 +380,11 @@ export function getExecutionService(): ExecutionService {
     const db = getDatabase();
     const executionRepo = new ExecutionRepository(db);
     const auditRepo = new AuditRepository(db);
-    executionServiceInstance = new ExecutionService(executionRepo, auditRepo);
+    executionServiceInstance = new ExecutionService(
+      executionRepo,
+      auditRepo,
+      getAuthorizationService(),
+    );
   }
   return executionServiceInstance;
 }
@@ -500,6 +513,7 @@ export function getWorkflowSharingService(): WorkflowSharingService {
       sharingRepo,
       workflowRepo,
       auditRepo,
+      getAuthorizationService(),
       baseUrl,
     );
   }

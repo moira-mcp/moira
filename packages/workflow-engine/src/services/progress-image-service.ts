@@ -54,6 +54,9 @@ export class ProgressImageService {
     ownerUserId: string,
     options: ProgressVisualOptions = {},
   ): Promise<ProgressImageGrant> {
+    // The caller decides whether this user may act on the execution; what this service enforces is
+    // the binding the minted token depends on — the execution it names is the one it was minted
+    // for, owned by the identity the token will carry.
     const execution = await this.repository.getExecution(executionId);
     if (!execution || execution.userId !== ownerUserId) throw new ValidationError("Access denied");
     const graph = await this.repository.getWorkflowGraph(execution.workflowId, execution.userId);

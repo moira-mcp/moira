@@ -958,32 +958,77 @@ export const workflowInvite = sqliteTable(
 );
 
 /**
- * Workflow Access - Granted permissions from accepted invites
- * Links users to workflows they have access to
- * Permissions: view, start, copy (but not edit)
+ * Access Grant - an explicit permission for one subject on one resource.
+ *
+ * Generalizes what used to be workflow-only sharing: the same row shape now grants access to a
+ * workflow, an execution, a note, an artifact or a playbook, so a new shareable entity does not
+ * bring another table and another set of rules with it.
+ *
+ * Exactly one of `userId` and `groupId` is set. Group grants are part of the model; no product
+ * path creates them yet, and an empty group table changes no decision.
  */
-export const workflowAccess = sqliteTable(
-  "workflowAccess",
+export const accessGrant = sqliteTable(
+  "accessGrant",
   {
     id: text("id").primaryKey(),
-    workflowId: text("workflowId")
-      .notNull()
-      .references(() => workflow.id, { onDelete: "cascade" }),
-    userId: text("userId")
-      .notNull()
-      .references(() => user.id, { onDelete: "cascade" }),
+    // Kind of the resource, matching the authorization policy's resource types.
+    resourceType: text("resourceType").notNull(),
+    resourceId: text("resourceId").notNull(),
+    userId: text("userId").references(() => user.id, { onDelete: "cascade" }),
+    groupId: text("groupId").references(() => principalGroup.id, { onDelete: "cascade" }),
+    // "use" reads and acts; "edit" additionally changes the resource.
+    level: text("level").notNull().default("use"),
     grantedBy: text("grantedBy")
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
-    inviteId: text("inviteId").references(() => workflowInvite.id, { onDelete: "set null" }), // Which invite granted this
+    inviteId: text("inviteId").references(() => workflowInvite.id, { onDelete: "set null" }),
     grantedAt: integer("grantedAt", { mode: "timestamp_ms" }).notNull(),
   },
   (table) => ({
-    // Each user can only have one access record per workflow
-    userWorkflowIdx: uniqueIndex("workflow_access_user_workflow_idx").on(
-      table.workflowId,
-      table.userId,
-    ),
+    // One grant per subject and resource. The two indexes are partial on purpose: SQLite treats
+    // NULLs as distinct in a unique index, so a single index over both subject columns would let
+    // the same user be granted the same resource twice.
+    userResourceIdx: uniqueIndex("access_grant_user_resource_idx")
+      .on(table.resourceType, table.resourceId, table.userId)
+      .where(sql`${table.userId} IS NOT NULL`),
+    groupResourceIdx: uniqueIndex("access_grant_group_resource_idx")
+      .on(table.resourceType, table.resourceId, table.groupId)
+      .where(sql`${table.groupId} IS NOT NULL`),
+    subjectIdx: index("access_grant_subject_idx").on(table.userId, table.resourceType),
+  }),
+);
+
+/**
+ * A named set of users, addressable by a grant.
+ *
+ * Modelled now so that access decisions have a place for team membership from the start. No
+ * user-facing path creates groups or memberships in this version.
+ */
+export const principalGroup = sqliteTable("principalGroup", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  description: text("description"),
+  createdBy: text("createdBy")
+    .notNull()
+    .references(() => user.id, { onDelete: "cascade" }),
+  createdAt: integer("createdAt", { mode: "timestamp_ms" }).notNull(),
+});
+
+export const principalGroupMember = sqliteTable(
+  "principalGroupMember",
+  {
+    groupId: text("groupId")
+      .notNull()
+      .references(() => principalGroup.id, { onDelete: "cascade" }),
+    userId: text("userId")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    // "member" belongs to the group; "manager" may change its membership.
+    role: text("role").notNull().default("member"),
+    addedAt: integer("addedAt", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.groupId, table.userId] }),
   }),
 );
 

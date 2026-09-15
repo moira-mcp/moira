@@ -16,6 +16,8 @@ import {
   createLogger,
   normalizeError,
   isOperationalError,
+  getAuthorizationService,
+  RESOURCE_TYPES,
 } from "@mcp-moira/shared";
 import { createTrustedExecutionLock, DatabaseRepository } from "@mcp-moira/workflow-engine";
 
@@ -61,7 +63,12 @@ export async function manageLocks(params: ManageLocksParams): Promise<ToolResult
         error: `Execution '${executionId}' not found`,
       };
     }
-    if (execution.userId !== userId) {
+    const mayUse = await getAuthorizationService().can(userId, "use", {
+      type: RESOURCE_TYPES.execution,
+      id: execution.executionId,
+      ownerId: execution.userId,
+    });
+    if (!mayUse) {
       return {
         success: false,
         error: `Access denied: execution belongs to another user`,

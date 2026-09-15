@@ -26,6 +26,8 @@ import {
   activeExecutionsGauge,
   workflowExecutionsTotal,
   metadataRevision,
+  getAuthorizationService,
+  RESOURCE_TYPES,
 } from "@mcp-moira/shared";
 import {
   DatabaseRepository,
@@ -38,6 +40,22 @@ import { MCPEngine } from "../core/mcp-engine.js";
 import { ERRORS, formatDomainError } from "../messages/index.js";
 
 const logger = createLogger({ component: "GetSessionInfo" });
+
+/**
+ * Whether this agent may act on the execution.
+ *
+ * The decision belongs to the central authorization policy, not to each action in this tool.
+ */
+async function mayUseExecution(
+  userId: string,
+  execution: { executionId: string; userId: string },
+): Promise<boolean> {
+  return getAuthorizationService().can(userId, "use", {
+    type: RESOURCE_TYPES.execution,
+    id: execution.executionId,
+    ownerId: execution.userId,
+  });
+}
 
 type GetSessionInfoParams = z.infer<typeof getSessionInfoHandlerSchema>;
 
@@ -320,7 +338,7 @@ export async function getSessionInfo(
           };
         }
 
-        if (execution.userId !== userId) {
+        if (!(await mayUseExecution(userId, execution))) {
           return {
             success: false,
             error: ERRORS.execution_access_denied,
@@ -429,7 +447,7 @@ export async function getSessionInfo(
           };
         }
 
-        if (execution.userId !== userId) {
+        if (!(await mayUseExecution(userId, execution))) {
           return {
             success: false,
             error: ERRORS.access_denied_to_execution,
@@ -471,7 +489,7 @@ export async function getSessionInfo(
         }
         const repository = MCPEngine.getInstance().repository;
         const execution = await repository.getExecution(executionId);
-        if (!execution || execution.userId !== userId) {
+        if (!execution || !(await mayUseExecution(userId, execution))) {
           return { success: false, error: ERRORS.execution_not_found(executionId) };
         }
         const blockingAttempt = await repository.getBlockingStartExecutionAttempt(
@@ -540,7 +558,7 @@ export async function getSessionInfo(
           };
         }
 
-        if (execution.userId !== userId) {
+        if (!(await mayUseExecution(userId, execution))) {
           return {
             success: false,
             error: ERRORS.execution_access_denied,
@@ -610,7 +628,7 @@ export async function getSessionInfo(
           return { success: false, error: ERRORS.execution_id_required("reminders") };
         const execution = await MCPEngine.getInstance().repository.getExecution(executionId);
         if (!execution) return { success: false, error: ERRORS.execution_not_found(executionId) };
-        if (execution.userId !== userId)
+        if (!(await mayUseExecution(userId, execution)))
           return { success: false, error: ERRORS.execution_access_denied };
         const search = params.search?.toLowerCase();
         const reminders = (execution.reminders ?? []).filter(
@@ -669,7 +687,7 @@ export async function getSessionInfo(
           return { success: false, error: ERRORS.execution_id_required("variables") };
         const repository = MCPEngine.getInstance().repository;
         const execution = await repository.getExecution(executionId);
-        if (!execution || execution.userId !== userId)
+        if (!execution || !(await mayUseExecution(userId, execution)))
           return { success: false, error: ERRORS.execution_access_denied };
         const graph = await repository.getWorkflowGraph(execution.workflowId, userId);
         if (!graph) return { success: false, error: "Workflow not found" };
@@ -685,7 +703,7 @@ export async function getSessionInfo(
           return { success: false, error: ERRORS.execution_id_required("progress") };
         const repository = MCPEngine.getInstance().repository;
         const execution = await repository.getExecution(executionId);
-        if (!execution || execution.userId !== userId)
+        if (!execution || !(await mayUseExecution(userId, execution)))
           return { success: false, error: ERRORS.execution_access_denied };
         const graph = await repository.getWorkflowGraph(execution.workflowId, userId);
         if (!graph) return { success: false, error: "Workflow not found" };
@@ -705,6 +723,10 @@ export async function getSessionInfo(
         if (!executionId)
           return { success: false, error: ERRORS.execution_id_required("progress-image-token") };
         const repository = MCPEngine.getInstance().repository;
+        const imageExecution = await repository.getExecution(executionId);
+        if (!imageExecution || !(await mayUseExecution(userId, imageExecution))) {
+          return { success: false, error: ERRORS.execution_access_denied };
+        }
         const { ProgressImageService } = await import("@mcp-moira/workflow-engine");
         try {
           const data = await new ProgressImageService(repository).mint(executionId, userId, {
@@ -735,7 +757,7 @@ export async function getSessionInfo(
           };
         const repository = MCPEngine.getInstance().repository;
         const execution = await repository.getExecution(executionId);
-        if (!execution || execution.userId !== userId)
+        if (!execution || !(await mayUseExecution(userId, execution)))
           return { success: false, error: ERRORS.execution_access_denied };
         const graph = await repository.getWorkflowGraph(execution.workflowId, userId);
         if (!graph) return { success: false, error: "Workflow not found" };
