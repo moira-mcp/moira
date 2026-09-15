@@ -75,7 +75,9 @@ class FakeProvider implements WorkspaceProviderAdapter {
   readonly deleteCalls = jest.fn();
 
   constructor(
-    readonly id = WORKSPACE_PROVIDER_GITHUB,
+    // A provider id the registry has never seen is a case this suite exercises, so the parameter is
+    // the adapter's id type widened to a string rather than the one built-in constant.
+    readonly id: string = WORKSPACE_PROVIDER_GITHUB,
     personalBillingOnly = true,
   ) {
     this.capabilities = {

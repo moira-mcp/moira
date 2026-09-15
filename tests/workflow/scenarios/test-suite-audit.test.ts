@@ -128,7 +128,7 @@ describe("test-suite-audit", () => {
         ),
         nodeStates: {},
         executionId,
-        workflowId: workflow.id,
+        workflowId: workflow.id ?? "test-suite-audit",
         userId: "workflow-test-user",
         _templateFragmentVars: GraphTemplateProcessor.computeFragmentVars(
           workflow.variableRegistry,

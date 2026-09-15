@@ -39,7 +39,9 @@ class VerticalGitHubClient implements GitHubWorkspaceClient {
     };
   }
 
-  async refreshToken() {
+  async refreshToken(): Promise<never> {
+    // This lifecycle never refreshes; declaring the return as `never` keeps the override inside the
+    // client's contract instead of narrowing it to void.
     throw new Error("not used");
   }
 

@@ -122,8 +122,9 @@ describe("Production catalog validation", () => {
     };
     const violations: string[] = [];
     for (const entry of entries) {
-      const workspaceDeclaration = entry.graph.variableRegistry?.workspace_path as
-        { pattern?: unknown } | undefined;
+      const registry = (entry.graph as { variableRegistry?: Record<string, unknown> })
+        .variableRegistry;
+      const workspaceDeclaration = registry?.workspace_path as { pattern?: unknown } | undefined;
       if (
         typeof workspaceDeclaration?.pattern === "string" &&
         workspaceDeclaration.pattern.endsWith("/$")

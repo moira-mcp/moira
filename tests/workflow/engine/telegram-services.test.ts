@@ -404,13 +404,15 @@ describe("Telegram Services", () => {
     beforeEach(() => {
       // Mock repository that returns telegram settings
       mockRepository = {
-        getSetting: jest.fn().mockImplementation((userId: string, key: string) => {
-          if (key === "telegram.bot_token") return Promise.resolve("123456789:ABCDEFGH");
-          if (key === "telegram.chat_id") return Promise.resolve("12345");
-          if (key === "telegram.enabled") return Promise.resolve(true);
-          return Promise.resolve(null);
-        }),
-        getWorkflow: jest.fn().mockResolvedValue({
+        getSetting: jest
+          .fn<(userId: string, key: string) => Promise<unknown>>()
+          .mockImplementation((userId: string, key: string) => {
+            if (key === "telegram.bot_token") return Promise.resolve("123456789:ABCDEFGH");
+            if (key === "telegram.chat_id") return Promise.resolve("12345");
+            if (key === "telegram.enabled") return Promise.resolve(true);
+            return Promise.resolve(null);
+          }),
+        getWorkflow: jest.fn<(workflowId: string) => Promise<unknown>>().mockResolvedValue({
           metadata: { name: "Test Workflow Name", version: "1.0.0", description: "test" },
         }),
       } as unknown as IDataRepository;
@@ -560,7 +562,9 @@ describe("Telegram Services", () => {
         mockFetch.mockResolvedValueOnce(Response.json({ ok: true, result: {} }));
 
         // Override getWorkflow to reject
-        (mockRepository.getWorkflow as jest.Mock).mockRejectedValueOnce(new Error("not found"));
+        (mockRepository.getWorkflow as jest.Mock<() => Promise<unknown>>).mockRejectedValueOnce(
+          new Error("not found"),
+        );
 
         const testNode: TelegramNotificationNode = {
           type: "telegram-notification",
@@ -713,12 +717,14 @@ describe("Telegram Services", () => {
       test("should handle missing chatId and no default", async () => {
         // Mock repository that returns bot token but no chat_id
         const repoWithoutChatId = {
-          getSetting: jest.fn().mockImplementation((userId: string, key: string) => {
-            if (key === "telegram.bot_token") return Promise.resolve("123456789:ABCDEFGH");
-            if (key === "telegram.chat_id") return Promise.resolve(null); // No default chat ID
-            if (key === "telegram.enabled") return Promise.resolve(true);
-            return Promise.resolve(null);
-          }),
+          getSetting: jest
+            .fn<(userId: string, key: string) => Promise<unknown>>()
+            .mockImplementation((userId: string, key: string) => {
+              if (key === "telegram.bot_token") return Promise.resolve("123456789:ABCDEFGH");
+              if (key === "telegram.chat_id") return Promise.resolve(null); // No default chat ID
+              if (key === "telegram.enabled") return Promise.resolve(true);
+              return Promise.resolve(null);
+            }),
         } as unknown as IDataRepository;
 
         const testNode: TelegramNotificationNode = {

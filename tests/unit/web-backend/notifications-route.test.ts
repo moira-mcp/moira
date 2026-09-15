@@ -81,7 +81,7 @@ describe("communication channel settings API", () => {
     const settingsByUser = new Map<string, Map<string, unknown>>([
       [
         "user-a",
-        new Map([
+        new Map<string, unknown>([
           ["probe.enabled", true],
           ["probe.endpoint", "private-a-endpoint"],
           ["probe.token", "private-a-token"],

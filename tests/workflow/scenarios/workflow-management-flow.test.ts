@@ -114,7 +114,9 @@ function progressOutputsFor(
   nodeId: string,
   input: Record<string, unknown>,
 ): Record<string, string> {
-  const node = workflow.nodes.find((candidate) => candidate.id === nodeId);
+  const node = workflow.nodes.find((candidate) => candidate.id === nodeId) as
+    | { progressNodeId?: string; inputSchema?: { globalInputs?: string[] } }
+    | undefined;
   const globals = node?.inputSchema?.globalInputs ?? [];
   const ownOutcome = node?.progressNodeId ? `progress_${node.progressNodeId}_outcome` : null;
   return Object.fromEntries(
