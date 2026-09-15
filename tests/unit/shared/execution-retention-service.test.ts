@@ -15,7 +15,8 @@ import path from "path";
 
 import { ExecutionRepository, ExecutionRetentionService } from "@mcp-moira/shared";
 import type { GlobalSettingsService } from "@mcp-moira/shared";
-import type { WorkflowExecution, LegacyExecutionStatus } from "@mcp-moira/shared";
+import type { LegacyExecutionStatus } from "@mcp-moira/shared";
+import type { WorkflowExecution } from "@mcp-moira/workflow-engine";
 import * as schema from "../../../packages/shared/src/database/schema.js";
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;

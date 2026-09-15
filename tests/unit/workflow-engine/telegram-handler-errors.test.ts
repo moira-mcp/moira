@@ -45,6 +45,7 @@ function createContext(overrides: Partial<ExecutionContext> = {}): ExecutionCont
     nodeStates: {},
     executionId: "test-exec-123",
     workflowId: "test-workflow",
+    userId: "test-user",
     ...overrides,
   };
 }

@@ -33,7 +33,7 @@ describe("artifacts-demo-report-publisher Scenarios", () => {
     it("should have valid structure", async () => {
       const validator = new GraphValidator();
       const withId = {
-        id: `moira/${workflow.slug || "artifacts-demo-report-publisher"}`,
+        id: `moira/${(workflow as { slug?: string }).slug || "artifacts-demo-report-publisher"}`,
         ...workflow,
       };
       const validation = await validator.validateWorkflow(withId);

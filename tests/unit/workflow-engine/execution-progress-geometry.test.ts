@@ -45,7 +45,6 @@ function flowProgress(slug: string): ExecutionProgress {
       executionId: `geometry-${slug}`,
       workflowId: workflow.id ?? slug,
       userId: "test-user",
-      currentNodeId: null,
     },
     status: "running",
     revision: 1,

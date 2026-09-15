@@ -244,7 +244,9 @@ describe("Manifest validation", () => {
     ];
 
     for (const [permissions, expected] of cases) {
-      const rejection = validateExtensionManifest(manifest({ permissions }));
+      const rejection = validateExtensionManifest(
+        manifest({ permissions } as Parameters<typeof manifest>[0]),
+      );
       expect(rejection).not.toBeNull();
       expect(rejection!.reasons.join(" ")).toContain(expected);
     }

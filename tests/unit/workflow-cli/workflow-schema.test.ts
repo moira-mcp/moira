@@ -37,6 +37,15 @@ function hasTerminalControl(value: string): boolean {
   });
 }
 
+/**
+ * Renders a graph the renderer must survive but the types forbid: labels carrying terminal escape
+ * sequences, connection names a start node cannot have. The renderer's escaping and ordering are
+ * the subject, so the fixture has to be able to say the malformed thing.
+ */
+function renderHostileWorkflow(workflow: unknown): string {
+  return renderWorkflowSchema(workflow as Parameters<typeof renderWorkflowSchema>[0]);
+}
+
 describe("workflow schema renderer", () => {
   test("should collapse a maximal linear chain into one readable basic block", () => {
     const workflow = graph([
@@ -416,7 +425,7 @@ describe("workflow schema renderer", () => {
   });
 
   test("should use locale-independent code-unit ordering for canonical labels", () => {
-    const output = renderWorkflowSchema({
+    const output = renderHostileWorkflow({
       metadata: { name: "Unicode labels", version: "1.0.0", description: "" },
       nodes: [
         {
@@ -443,7 +452,7 @@ describe("workflow schema renderer", () => {
   });
 
   test("should render workflow-authored structural tokens without terminal control bytes", () => {
-    const output = renderWorkflowSchema({
+    const output = renderHostileWorkflow({
       metadata: { name: "Name\u001b]0;title\u0007\u009b", version: "1.0.0" },
       nodes: [
         {

@@ -8,7 +8,9 @@
     // noEmit there is nothing for a root to anchor. ts-jest compiles in memory.
     "noEmit": true,
     "skipLibCheck": true,
-    "jsx": "react-jsx"
+    "jsx": "react-jsx",
+    // The tests reach two plain-JavaScript helpers under tests/scripts, typed by JSDoc.
+    "allowJs": true
   },
   "include": ["**/*.ts", "**/*.tsx"],
   // The web-frontend suites are checked by tsconfig.web-frontend.json instead: they import frontend

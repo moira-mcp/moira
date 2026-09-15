@@ -33,7 +33,7 @@ describe("artifacts-demo-dashboard-builder Scenarios", () => {
     it("should have valid structure", async () => {
       const validator = new GraphValidator();
       const withId = {
-        id: `moira/${workflow.slug || "artifacts-demo-dashboard-builder"}`,
+        id: `moira/${(workflow as { slug?: string }).slug || "artifacts-demo-dashboard-builder"}`,
         ...workflow,
       };
       const validation = await validator.validateWorkflow(withId);

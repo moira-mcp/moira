@@ -92,7 +92,7 @@ describe("quick-task scenarios", () => {
   it("is structurally and semantically valid", async () => {
     const validator = new GraphValidator();
     const validation = await validator.validateWorkflow({
-      id: `moira/${workflow.slug || "quick-task"}`,
+      id: `moira/${(workflow as { slug?: string }).slug || "quick-task"}`,
       ...workflow,
     });
 

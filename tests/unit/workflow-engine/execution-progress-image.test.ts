@@ -29,7 +29,6 @@ function bundledProgress(slug: string): ExecutionProgress {
       executionId: `image-${slug}`,
       workflowId: workflow.id ?? slug,
       userId: "test-user",
-      currentNodeId: null,
     },
     status: "running",
     revision: 1,

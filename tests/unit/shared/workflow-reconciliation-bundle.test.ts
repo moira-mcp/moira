@@ -16,6 +16,7 @@ import {
   workflowReconciliationConflictRevision,
   workflowReconciliationAgentInstructions,
   type CatalogEntry,
+  type ManagedWorkflowContent,
   type ManagedWorkflowState,
   type WorkflowReconciliationConflictRecord,
 } from "@mcp-moira/shared";
@@ -26,7 +27,7 @@ afterEach(() => {
   for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true });
 });
 
-function state(directive: string): ManagedWorkflowState {
+function state(directive: string): ManagedWorkflowState & { content: ManagedWorkflowContent } {
   return {
     lifecycle: "present",
     content: {

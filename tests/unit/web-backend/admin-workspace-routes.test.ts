@@ -1,7 +1,11 @@
 import { describe, expect, jest, test } from "@jest/globals";
 import express from "express";
 import request from "supertest";
-import { WorkspaceResourceError, type WorkspaceReadinessView } from "@mcp-moira/shared";
+import {
+  WorkspaceResourceError,
+  type WorkspaceReadinessView,
+  type WorkspaceResourceService,
+} from "@mcp-moira/shared";
 import {
   createAdminWorkspaceRoutes,
   type AdminWorkspaceServices,
@@ -56,7 +60,7 @@ describe("admin workspace control routes", () => {
   });
 
   test("validates the control body before touching the service", async () => {
-    const setControl = jest.fn();
+    const setControl = jest.fn<WorkspaceResourceService["setControl"]>();
     const app = appWith({
       observability: { readiness: async () => readiness },
       resource: { listControls: () => [], setControl },
@@ -82,7 +86,9 @@ describe("admin workspace control routes", () => {
         updatedAt: null,
       },
     ];
-    const setControl = jest.fn(async () => disabledControls);
+    const setControl = jest.fn<WorkspaceResourceService["setControl"]>(
+      async () => disabledControls,
+    );
     const response = await request(
       appWith({
         observability: {
