@@ -47,9 +47,11 @@ COPY packages/web-frontend/package.json ./packages/web-frontend/
 COPY packages/shared/package.json ./packages/shared/
 COPY packages/docs/package.json ./packages/docs/
 
-# Install dependencies with BuildKit cache mount
+# Install dependencies with BuildKit cache mount. `npm ci` reproduces the lock
+# file exactly, so an unchanged lock yields an identical layer and the build
+# stages below stay cached.
 RUN --mount=type=cache,target=/root/.npm \
-    npm install
+    npm ci
 
 # Copy library packages (needed by all)
 COPY packages/shared/ ./packages/shared/
@@ -104,6 +106,32 @@ RUN npx tsc --noEmit --project packages/mcp-server/tsconfig.json
 RUN npx tsc --noEmit --project packages/web-backend/tsconfig.json
 
 # ===================================
+# Runtime dependencies stage
+# ===================================
+# Production dependencies of the packages that run in the container. The
+# frontend and the docs site are shipped as built static files, and the build
+# and test tooling (webpack, astro, jest, playwright, eslint, drizzle-kit, …)
+# has no job at runtime, so none of it is installed here. The services run
+# through the globally installed `tsx`, which needs no local typescript.
+FROM core AS runtime-deps
+
+COPY package*.json ./
+COPY packages/workflow-engine/package.json ./packages/workflow-engine/
+COPY packages/mcp-server/package.json ./packages/mcp-server/
+COPY packages/web-backend/package.json ./packages/web-backend/
+COPY packages/web-frontend/package.json ./packages/web-frontend/
+COPY packages/shared/package.json ./packages/shared/
+COPY packages/docs/package.json ./packages/docs/
+
+RUN --mount=type=cache,target=/root/.npm \
+    npm ci --omit=dev \
+      --include-workspace-root \
+      --workspace=packages/shared \
+      --workspace=packages/workflow-engine \
+      --workspace=packages/mcp-server \
+      --workspace=packages/web-backend
+
+# ===================================
 # Final stage
 # ===================================
 FROM core AS runtime
@@ -111,16 +139,20 @@ FROM core AS runtime
 # MCP Registry: proves this image belongs to the published server entry.
 LABEL io.modelcontextprotocol.server.name="io.github.moira-mcp/moira"
 
-# Copy from base stage
+# The production-only dependency tree comes first: it is the largest layer and
+# changes only with the lock file, so a code change leaves it cached and a
+# registry push transfers only the small source layers below. Package sources
+# follow; nested node_modules that the full install created under a package
+# are dropped and replaced by the production layout from runtime-deps.
+COPY --from=runtime-deps /app/node_modules ./node_modules
 COPY --from=base /app/package*.json ./
 COPY --from=base /app/tsconfig*.json ./
-COPY --from=base /app/node_modules ./node_modules
 COPY --from=base /app/packages/shared ./packages/shared
 COPY --from=base /app/packages/workflow-engine ./packages/workflow-engine
-
-# Copy backend packages from backend-build stage
 COPY --from=backend-build /app/packages/mcp-server ./packages/mcp-server
 COPY --from=backend-build /app/packages/web-backend ./packages/web-backend
+RUN rm -rf packages/*/node_modules
+COPY --from=runtime-deps /app/packages/ ./packages/
 
 # Copy frontend builds from build stages
 COPY --from=frontend-build /app/packages/web-frontend/dist ./packages/web-frontend/dist
