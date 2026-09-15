@@ -1,4 +1,3 @@
-import { findCatalogEntryBySlug } from "@mcp-moira/shared";
 import {
   AgentMessageQueue,
   GraphExecutionEngine,
@@ -15,6 +14,7 @@ import {
   type ScenarioResult,
   type TestScenario,
 } from "../../helpers/scenario-runner.js";
+import { catalogGraph } from "../../helpers/catalog-graphs.js";
 
 const coverageResults: ScenarioResult[] = [];
 
@@ -38,7 +38,7 @@ function configureMaterialize(engine: GraphExecutionEngine): void {
 }
 
 function loadProductionWorkflow(): WorkflowGraph {
-  return structuredClone(findCatalogEntryBySlug("todo-list")!.graph) as WorkflowGraph;
+  return catalogGraph("todo-list");
 }
 
 const suppliedTasks = [
@@ -261,7 +261,7 @@ describe("todo-list minimal sequential checklist", () => {
       variables: {},
       nodeStates: {},
       executionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
-      workflowId: workflow.id,
+      workflowId: workflow.id ?? "workflow",
       userId: "workflow-test-user",
     };
     const handler = new MaterializeHandler(
@@ -280,7 +280,7 @@ describe("todo-list minimal sequential checklist", () => {
       workflow.variableRegistry,
     );
     expect(firstPresentation.action).toBe("pause");
-    expect(firstPresentation.nextNodeId).toBeUndefined();
+    expect(firstPresentation.outputPath).toBeUndefined();
     expect(firstQueue.peekNext()).toMatchObject({
       nodeId: "materialize-workflow-guide",
       completionCondition:
@@ -303,7 +303,7 @@ describe("todo-list minimal sequential checklist", () => {
       workflow.variableRegistry,
     );
     expect(secondPresentation.action).toBe("pause");
-    expect(secondPresentation.nextNodeId).toBeUndefined();
+    expect(secondPresentation.outputPath).toBeUndefined();
     expect((retryQueue.peekNext() as { directive: string }).directive).toContain(
       "workflow-guide.md",
     );

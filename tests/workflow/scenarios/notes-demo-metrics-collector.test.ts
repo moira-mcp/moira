@@ -8,7 +8,6 @@
  * enabling both success and error path testing without a real database.
  */
 
-import { findCatalogEntryBySlug } from "@mcp-moira/shared";
 import {
   runScenario,
   type TestScenario,
@@ -22,10 +21,10 @@ import {
   UpsertNoteHandler,
 } from "@mcp-moira/workflow-engine";
 import type { WorkflowGraph } from "@mcp-moira/workflow-engine";
+import { catalogGraph } from "../../helpers/catalog-graphs.js";
 
 function loadWorkflow(): WorkflowGraph {
-  return findCatalogEntryBySlug("notes-demo-metrics-collector", undefined, "workflows/examples")!
-    .graph as WorkflowGraph;
+  return catalogGraph("notes-demo-metrics-collector", { baseDir: "workflows/examples" });
 }
 
 /** Create a mock NoteService that succeeds */
@@ -77,7 +76,7 @@ describe("notes-demo-metrics-collector Scenarios", () => {
     it("should have valid structure", async () => {
       const validator = new GraphValidator();
       const withId = {
-        id: `moira/${workflow.slug || "notes-demo-metrics-collector"}`,
+        id: `moira/${(workflow as { slug?: string }).slug || "notes-demo-metrics-collector"}`,
         ...workflow,
       };
       const validation = await validator.validateWorkflow(withId);

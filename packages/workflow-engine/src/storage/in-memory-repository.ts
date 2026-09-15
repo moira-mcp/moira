@@ -25,6 +25,8 @@ import {
   createLogger,
   mapLegacyStatusArray,
   metadataRevision,
+  stepAttemptBindingMatches,
+  stepAttemptContinuationMatches,
 } from "@mcp-moira/shared";
 import { encryptValue, decryptValue } from "../utils/encryption.js";
 import type {
@@ -36,6 +38,8 @@ import type {
 } from "@mcp-moira/shared";
 import type {
   CompleteExecutionAttemptInput,
+  RecoverExecutionToNodeInput,
+  RecoverExecutionToNodeResult,
   ClaimStartExecutionAttemptInput,
   ExecutionAttempt,
   ExecutionAttemptClaimResult,
@@ -712,11 +716,7 @@ export class InMemoryRepository implements IDataRepository {
       return structuredClone(created);
     }
     const revisionOnlyStale =
-      current.state === "presented" &&
-      current.nodeId === candidate.nodeId &&
-      current.workflowId === candidate.workflowId &&
-      current.workflowVersion === candidate.workflowVersion &&
-      current.workflowDigest === candidate.workflowDigest;
+      current.state === "presented" && stepAttemptContinuationMatches(current, candidate);
     if (!revisionOnlyStale || current.executionRevision === candidate.executionRevision) {
       return structuredClone(current);
     }
@@ -758,6 +758,8 @@ export class InMemoryRepository implements IDataRepository {
       executionId: null,
       executionRevision: null,
       nodeId: null,
+      continuationDigest: null,
+      continuationFacts: null,
       state: "presented",
       ownerId: null,
       fence: 0,
@@ -945,8 +947,7 @@ export class InMemoryRepository implements IDataRepository {
     executionRevision: number;
     nodeId: string;
     workflowId: string;
-    workflowVersion: string;
-    workflowDigest: string;
+    continuationDigest: string;
     inputFingerprint: string;
     ownerId: string;
     now: number;
@@ -961,14 +962,7 @@ export class InMemoryRepository implements IDataRepository {
       return { kind: "conflict" };
     if (attempt.state === "completed" && attempt.response !== null)
       return { kind: "completed", attempt: structuredClone(attempt), response: attempt.response };
-    if (
-      attempt.executionRevision !== input.executionRevision ||
-      attempt.nodeId !== input.nodeId ||
-      attempt.workflowId !== input.workflowId ||
-      attempt.workflowVersion !== input.workflowVersion ||
-      attempt.workflowDigest !== input.workflowDigest
-    )
-      return { kind: "stale" };
+    if (!stepAttemptBindingMatches(attempt, input)) return { kind: "stale" };
     if (attempt.state === "outcome_unknown")
       return { kind: "outcome_unknown", attempt: structuredClone(attempt) };
     if (attempt.state === "executing")
@@ -1002,6 +996,45 @@ export class InMemoryRepository implements IDataRepository {
     attempt.leaseExpiresAt = now + leaseMs;
     attempt.updatedAt = now;
     return true;
+  }
+
+  async recoverExecutionToNode(
+    input: RecoverExecutionToNodeInput,
+  ): Promise<RecoverExecutionToNodeResult> {
+    const current = await this.getCurrentExecutionAttempt(
+      input.execution.executionId,
+      input.execution.userId,
+    );
+    if (current && current.state !== "presented") return "attempt_in_progress";
+
+    const stored = this.executions.get(input.execution.executionId);
+    if (!stored || stored.revision !== input.expectedExecution.revision) return "execution_changed";
+    if (
+      stored.status !== input.expectedExecution.status ||
+      stored.currentNodeId !== input.expectedExecution.currentNodeId ||
+      (stored.waitingForInputNodeId ?? null) !==
+        (input.expectedExecution.waitingForInputNodeId ?? null) ||
+      canonicalJson(stored.globalContext) !== canonicalJson(input.expectedExecution.globalContext)
+    ) {
+      return "execution_changed";
+    }
+
+    this.executions.set(input.execution.executionId, {
+      ...structuredClone(input.execution),
+      revision: stored.revision + 1,
+      updatedAt: Date.now(),
+    });
+    if (current) {
+      const attempt = this.executionAttempts.get(current.attemptId);
+      if (attempt) {
+        attempt.state = "superseded";
+        attempt.nextAttemptId = input.nextAttempt.attemptId;
+        attempt.completedAt = Date.now();
+        attempt.updatedAt = Date.now();
+      }
+    }
+    await this.createPresentedExecutionAttempt(input.nextAttempt);
+    return "recovered";
   }
 
   async completeExecutionAttempt(input: CompleteExecutionAttemptInput): Promise<boolean> {

@@ -173,7 +173,7 @@ describe("workflow schema keywords", () => {
         ledger: { type: "array", description: "ledger" },
       },
     );
-    const schema = node.inputSchema as Record<string, unknown>;
+    const schema = (node as { inputSchema?: Record<string, unknown> }).inputSchema ?? {};
 
     expect(
       SchemaValidator.validate(

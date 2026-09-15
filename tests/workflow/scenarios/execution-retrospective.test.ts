@@ -19,7 +19,7 @@ import { calculateCoverage } from "../../helpers/coverage-calculator.js";
 import { runScenario, type MockInput, type TestScenario } from "../../helpers/scenario-runner.js";
 
 const catalogEntry = findCatalogEntryBySlug("execution-retrospective")!;
-const workflow = structuredClone(catalogEntry.graph) as WorkflowGraph;
+const workflow = structuredClone(catalogEntry.graph) as unknown as WorkflowGraph;
 const reference = String(workflow.variableRegistry?.retrospective_reference?.default);
 
 type Candidate = {
@@ -1084,8 +1084,10 @@ describe("execution-retrospective validation packet", () => {
       materialize,
       context,
       queue,
-      workflow.variableRegistry ?? {},
       {} as never,
+      {} as never,
+      undefined,
+      workflow.variableRegistry ?? {},
     );
     const message = queue.flush(context.executionId).messages[0];
     expect(message.type).toBe("directive");
@@ -1102,9 +1104,10 @@ describe("execution-retrospective validation packet", () => {
         materialize,
         context,
         new AgentMessageQueue(),
-        workflow.variableRegistry ?? {},
+        {} as never,
         {} as never,
         null,
+        workflow.variableRegistry ?? {},
       ),
     ).resolves.toMatchObject({ action: "continue", outputPath: "success" });
     const objectContext = { ...context, nodeStates: {} };
@@ -1112,17 +1115,20 @@ describe("execution-retrospective validation packet", () => {
       materialize,
       objectContext,
       new AgentMessageQueue(),
-      workflow.variableRegistry ?? {},
       {} as never,
+      {} as never,
+      undefined,
+      workflow.variableRegistry ?? {},
     );
     await expect(
       handler.execute(
         materialize,
         objectContext,
         new AgentMessageQueue(),
-        workflow.variableRegistry ?? {},
+        {} as never,
         {} as never,
         {},
+        workflow.variableRegistry ?? {},
       ),
     ).resolves.toMatchObject({ action: "continue", outputPath: "success" });
   });

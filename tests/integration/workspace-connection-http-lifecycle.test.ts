@@ -39,7 +39,9 @@ class VerticalGitHubClient implements GitHubWorkspaceClient {
     };
   }
 
-  async refreshToken() {
+  async refreshToken(): Promise<never> {
+    // This lifecycle never refreshes; declaring the return as `never` keeps the override inside the
+    // client's contract instead of narrowing it to void.
     throw new Error("not used");
   }
 
@@ -103,7 +105,9 @@ describe("GitHub workspace authenticated HTTP lifecycle", () => {
     app.use("/api/integrations", createWorkspaceConnectionRoutes(service));
   });
 
-  afterEach(() => sqlite.close());
+  afterEach(() => {
+    sqlite.close();
+  });
 
   test("drives start, callback, status and disconnect without exposing callback or token secrets", async () => {
     const start = await request(app).get("/api/integrations/github/start");

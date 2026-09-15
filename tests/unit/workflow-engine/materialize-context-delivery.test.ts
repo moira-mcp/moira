@@ -144,7 +144,7 @@ describe("materialize context delivery", () => {
     const archived = await request(app)
       .get("/api/public/executions/materialize/grant")
       .buffer(true)
-      .parse(binaryParser);
+      .parse(binaryParser as unknown as (str: string) => unknown);
     expect(archived.status).toBe(200);
     const entries = await tarEntries(archived.body as Buffer);
 

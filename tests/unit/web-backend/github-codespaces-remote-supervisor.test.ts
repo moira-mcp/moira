@@ -1340,7 +1340,7 @@ if (process.env.MOIRA_TEST_HOLD_FILE_RUNNER === "1") {
   test("carries what a script leaves behind and refuses a context that would not fit", async () => {
     const value = fixture();
     mkdirSync(join(value.repository, "service"), { recursive: true });
-    const environment = {
+    const environment: Record<string, string> = {
       ...value.environment,
       MOIRA_ENVIRONMENT_ID: "life-one",
       INHERITED_TOOL: "old",

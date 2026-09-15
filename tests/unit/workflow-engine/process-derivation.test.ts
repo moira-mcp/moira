@@ -1,14 +1,14 @@
 import { describe, expect, test } from "@jest/globals";
-import { findSystemCatalogEntry } from "../../../packages/shared/src/services/workflow-catalog.js";
 import {
   GraphValidator,
   deriveProcess,
   type ProcessDiagnosticCode,
   type WorkflowGraph,
 } from "@mcp-moira/workflow-engine";
+import { systemCatalogGraph } from "../../helpers/catalog-graphs.js";
 
 function bundled(slug: string): WorkflowGraph {
-  return structuredClone(findSystemCatalogEntry(slug, "public")!.graph) as WorkflowGraph;
+  return systemCatalogGraph(slug, "public");
 }
 
 function counts(workflow: WorkflowGraph) {
@@ -228,7 +228,9 @@ describe("process derivation from the authored graph", () => {
       completionCondition: "Done",
       connections: { success: "verify" },
       connectionLabels: { success: "redone" },
-    } as WorkflowGraph["nodes"][number]);
+      // A node whose only connection is a self-retry: the derivation must report it as
+      // unconnected, and an agent-directive node cannot declare that shape in the type.
+    } as unknown as WorkflowGraph["nodes"][number]);
     (workflow.nodes[2] as { connections: Record<string, string> }).connections.false = "redo";
     const projection = deriveProcess(workflow)!;
     expect(projection.diagnostics).toEqual([]);
@@ -256,7 +258,9 @@ describe("process derivation from the authored graph", () => {
       connectionLabels: {
         retry: { label: "try again", cycle: { cause: "Not done", exit: "Done" } },
       },
-    } as WorkflowGraph["nodes"][number]);
+      // A node whose only connection is a self-retry: the derivation must report it as
+      // unconnected, and an agent-directive node cannot declare that shape in the type.
+    } as unknown as WorkflowGraph["nodes"][number]);
     const projection = deriveProcess(workflow)!;
     expect(projection.diagnostics).toEqual([
       {
@@ -326,7 +330,9 @@ describe("validator enforces the block contract through the derivation", () => {
       connectionLabels: {
         success: { label: "try again", cycle: { cause: "Not done", exit: "Done" } },
       },
-    } as WorkflowGraph["nodes"][number]);
+      // A node whose only connection is a self-retry: the derivation must report it as
+      // unconnected, and an agent-directive node cannot declare that shape in the type.
+    } as unknown as WorkflowGraph["nodes"][number]);
     const result = await validator.validateUnified(workflow);
     const errors = result.issues.filter((i) => i.severity === "error");
     expect(errors).toEqual([

@@ -220,6 +220,8 @@ export const getSessionInfoHandlerSchema = z.object({
       "executions",
       "execution_context",
       "current_step",
+      "diagnose",
+      "recover",
       "cancel-execution",
       "update-note",
       "set-parent",
@@ -238,8 +240,13 @@ export const getSessionInfoHandlerSchema = z.object({
     .string()
     .optional()
     .describe(
-      "Execution ID for execution_context, current_step, update-note, or materialize actions",
+      "Execution ID for execution_context, current_step, diagnose, recover, update-note, or materialize actions",
     ),
+  nodeId: z.string().optional().describe("Node the run must resume from (required for recover)"),
+  variableValues: z
+    .record(z.unknown())
+    .optional()
+    .describe("Variable values written into the execution context while recovering (recover only)"),
   // Parameters for executions action
   // Issue #386: 2-status model - "running" (active) and "completed" (finished)
   // Old values "waiting" and "failed" accepted for backward compatibility (mapped to new values)

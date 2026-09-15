@@ -56,8 +56,8 @@ describe("UserCommunicationService", () => {
   test("tests one registered channel through the common limits without fanning out", async () => {
     const calls: string[] = [];
     const registry = new CommunicationChannelRegistry([
-      adapter("selected", async (message) => calls.push(`selected:${message.text}`)),
-      adapter("other", async () => calls.push("other")),
+      adapter("selected", async (message) => void calls.push(`selected:${message.text}`)),
+      adapter("other", async () => void calls.push("other")),
     ]);
     const service = new UserCommunicationService(registry, { maxRequestsPerWindow: 1 });
 
@@ -289,11 +289,11 @@ describe("UserCommunicationService", () => {
   test("observes provider registry changes without replacing the shared service", async () => {
     const calls: string[] = [];
     const registry = new CommunicationChannelRegistry([
-      adapter("first", async () => calls.push("first")),
+      adapter("first", async () => void calls.push("first")),
     ]);
     const service = new UserCommunicationService(registry);
     await service.deliver({ userId: "u1", text: "one" }, repository);
-    registry.register(adapter("second", async () => calls.push("second")));
+    registry.register(adapter("second", async () => void calls.push("second")));
     const expanded = await service.deliver({ userId: "u2", text: "two" }, repository);
     expect(expanded).toMatchObject({ status: "delivered", configuredChannels: 2 });
     expect(calls).toEqual(["first", "first", "second"]);
@@ -431,7 +431,7 @@ describe("TelegramCommunicationAdapter", () => {
     } as unknown as IDataRepository;
     const service = new UserCommunicationService([
       new TelegramCommunicationAdapter(),
-      adapter("second", async (message) => secondCalls.push(message)),
+      adapter("second", async (message) => void secondCalls.push(message)),
     ]);
 
     const result = await service.deliver({ userId: "u", text: "fan out" }, repo);
@@ -803,7 +803,7 @@ describe("UserNotificationHandler", () => {
     const calls: PortableCommunicationMessage[] = [];
     const registry = getActiveCommunicationChannelRegistry();
     const channelId = "test.engine-channel";
-    registry.register(adapter(channelId, async (message) => calls.push(message)));
+    registry.register(adapter(channelId, async (message) => void calls.push(message)));
     try {
       const engine = new GraphExecutionEngine(new InMemoryRepository());
       const result = await engine.executeGraph(
@@ -851,7 +851,7 @@ describe("UserNotificationHandler", () => {
   });
 
   test("renders portable progress attachment and routes a partial result through default", async () => {
-    const deliver = jest.fn(async () => ({
+    const deliver = jest.fn<UserCommunicationService["deliver"]>(async () => ({
       status: "partial" as const,
       configuredChannels: 2,
       deliveredChannels: 1,
@@ -934,7 +934,7 @@ describe("UserNotificationHandler", () => {
   });
 
   test("never substitutes a system identity when the execution has no user", async () => {
-    const deliver = jest.fn();
+    const deliver = jest.fn<UserCommunicationService["deliver"]>();
     const handler = new UserNotificationHandler({ deliver } as unknown as UserCommunicationService);
     const queue = new AgentMessageQueue();
     const result = await handler.execute(
@@ -944,7 +944,7 @@ describe("UserNotificationHandler", () => {
         message: "x",
         connections: { default: "end", error: "failed" },
       },
-      { variables: {}, nodeStates: {}, executionId: "e", workflowId: "w" },
+      { variables: {}, nodeStates: {}, executionId: "e", workflowId: "w", userId: "" },
       queue,
       repository,
       {} as IGraphExecutionEngine,

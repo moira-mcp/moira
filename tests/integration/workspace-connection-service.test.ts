@@ -135,7 +135,9 @@ describe("WorkspaceConnectionService with real SQLite persistence", () => {
     });
   });
 
-  afterEach(() => sqlite.close());
+  afterEach(() => {
+    sqlite.close();
+  });
 
   async function connect(
     expectedState: "connected" | "installation_required" = "connected",

@@ -608,6 +608,12 @@ export const executionMutationAttempt = sqliteTable(
     workflowId: text("workflowId").notNull(),
     workflowVersion: text("workflowVersion").notNull(),
     workflowDigest: text("workflowDigest").notNull(),
+    // Step attempts only: digest of the paused run's continuation surface. Nullable because start
+    // attempts have none, and because a step attempt written before this column existed has none —
+    // a null never matches a computed digest, so such an attempt is treated as stale.
+    continuationDigest: text("continuationDigest"),
+    // The fact map that digest is computed from, so a mismatch can name which facts differ.
+    continuationFacts: text("continuationFacts"),
     requestPayload: text("requestPayload"),
     inputFingerprint: text("inputFingerprint"),
     state: text("state").notNull(),

@@ -18,6 +18,7 @@ import { createHash } from "crypto";
 import { spawnSync } from "child_process";
 import Database from "better-sqlite3";
 import { manageReconciliation } from "../../packages/mcp-server/src/tools/manage-reconciliation.js";
+import type { WorkflowGraph } from "@mcp-moira/workflow-engine";
 import { runWithMCPContext } from "../../packages/mcp-server/src/core/request-context.js";
 import express from "express";
 import request from "supertest";
@@ -52,6 +53,22 @@ const OWNER_A = "catalog-loader-owner-a";
 const OWNER_B = "catalog-loader-owner-b";
 const MISSING_OWNER = "catalog-loader-ghost-owner";
 
+/**
+ * The graph nodes of a reconciliation state that must be present.
+ *
+ * A managed state is a union on `lifecycle`, and only the present and deleted members carry content
+ * at all. Asserting through a cast would read a directive off a state that has none; this says which
+ * state was found instead.
+ */
+function nodesOf(
+  state: { lifecycle: string; content?: { graph: Record<string, unknown> } } | null,
+) {
+  if (!state || !state.content) {
+    throw new Error(`reconciliation state carries no content: ${state?.lifecycle ?? "missing"}`);
+  }
+  return state.content.graph.nodes as Array<{ directive?: string }>;
+}
+
 function entry(
   owner: string,
   slug: string,
@@ -59,7 +76,7 @@ function entry(
   visibility: "public" | "private" = "public",
   extraNodeDirective = "Do the work",
   previousSlugs?: string[],
-): CatalogEntry {
+): CatalogEntry & { graph: WorkflowGraph } {
   return {
     id: `${owner}-${slug}`,
     slug,
@@ -176,13 +193,18 @@ describe("Workflow Catalog Loader Integration", () => {
     const slug = `loader-legacy-metadata-${Date.now()}`;
     const catalogEntry = entry(OWNER_A, slug, "1.0.0");
 
+    // A graph persisted by an older version kept the catalog keys at its root. The loader must
+    // treat such a graph as unchanged, so the fixture has to carry them where a current graph never
+    // would — which is exactly what the cast says.
+    const legacyPersistedGraph = {
+      ...catalogEntry.graph,
+      slug,
+      owner: OWNER_A,
+      visibility: "public",
+    } as WorkflowGraph;
+
     await deps.mutationService.save({
-      graph: {
-        ...catalogEntry.graph,
-        slug,
-        owner: OWNER_A,
-        visibility: "public",
-      },
+      graph: legacyPersistedGraph,
       userId: OWNER_A,
       slug,
       visibility: "public",
@@ -919,16 +941,9 @@ describe("Workflow Catalog Loader Integration", () => {
         .conflicts,
     ).toBe(1);
     const nextConflict = getWorkflowReconciliationStatus(getSqliteInstance()).conflicts[0];
-    const nextPrevious = nextConflict.previous as {
-      content: { graph: { nodes: Array<{ directive?: string }> } };
-    };
-    expect(nextPrevious.content.graph.nodes[1].directive).toBe("upstream");
-    expect(
-      (nextConflict.current.content.graph.nodes as Array<{ directive?: string }>)[1].directive,
-    ).toBe("merged user + upstream");
-    expect(
-      (nextConflict.incoming.content.graph.nodes as Array<{ directive?: string }>)[1].directive,
-    ).toBe("upstream-v3");
+    expect(nodesOf(nextConflict.previous)[1].directive).toBe("upstream");
+    expect(nodesOf(nextConflict.current)[1].directive).toBe("merged user + upstream");
+    expect(nodesOf(nextConflict.incoming)[1].directive).toBe("upstream-v3");
   });
 
   test("rejects every stale resolution path without overwriting a later user edit", async () => {

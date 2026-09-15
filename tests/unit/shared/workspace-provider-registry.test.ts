@@ -22,7 +22,8 @@ function provider(id: string): WorkspaceProviderAdapter {
     create: async () => ({ outcome: "rejected", reason: "unused" }),
     listOwned: async () => [],
     getExact: async () => null,
-    stopExact: async () => "absent",
+    startExact: async () => "absent" as const,
+    stopExact: async () => "absent" as const,
     deleteExact: async () => "absent",
     probeConnector: async () => undefined,
   };

@@ -1,17 +1,21 @@
 {
   "extends": "../tsconfig.base.json",
   "compilerOptions": {
-    "module": "ES2022",
+    "module": "Node16",
     "target": "ES2022",
     "moduleResolution": "Node16",
-    "rootDir": ".",
-    // Compiled files go to tests/dist/ (if ever compiled)
-    // ts-jest compiles in-memory due to noEmit: true
-    "outDir": "./dist",
+    // No rootDir: the suites import package sources from outside tests/, and with
+    // noEmit there is nothing for a root to anchor. ts-jest compiles in memory.
     "noEmit": true,
     "skipLibCheck": true,
-    "jsx": "react-jsx"
+    "jsx": "react-jsx",
+    // The tests reach two plain-JavaScript helpers under tests/scripts, typed by JSDoc.
+    "allowJs": true
   },
   "include": ["**/*.ts", "**/*.tsx"],
-  "exclude": ["dist", "node_modules"]
+  // The web-frontend suites are checked by tsconfig.web-frontend.json instead: they import frontend
+  // sources, which are written for that package's bundler resolution and its `@/` alias and are
+  // type-checked under its own settings. Pulling them in here would check them against rules their
+  // own package does not use, and report hundreds of failures that say nothing about the tests.
+  "exclude": ["dist", "node_modules", "unit/web-frontend"]
 }

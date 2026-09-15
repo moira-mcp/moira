@@ -4,7 +4,6 @@
  * Exercises the filesystem-first Plan → Approve → Execute → Review → Accept contract.
  */
 
-import { findCatalogEntryBySlug } from "@mcp-moira/shared";
 import { GraphValidator, type WorkflowGraph } from "@mcp-moira/workflow-engine";
 import {
   runScenario,
@@ -12,9 +11,10 @@ import {
   type TestScenario,
 } from "../../helpers/scenario-runner.js";
 import { calculateCoverage, formatCoverageReport } from "../../helpers/coverage-calculator.js";
+import { catalogGraph } from "../../helpers/catalog-graphs.js";
 
 function loadProductionWorkflow(): WorkflowGraph {
-  return findCatalogEntryBySlug("quick-task")!.graph as WorkflowGraph;
+  return catalogGraph("quick-task");
 }
 
 const executionId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
@@ -91,7 +91,7 @@ describe("quick-task scenarios", () => {
   it("is structurally and semantically valid", async () => {
     const validator = new GraphValidator();
     const validation = await validator.validateWorkflow({
-      id: `moira/${workflow.slug || "quick-task"}`,
+      id: `moira/${(workflow as { slug?: string }).slug || "quick-task"}`,
       ...workflow,
     });
 

@@ -31,7 +31,8 @@ import {
   WorkflowAccessDeniedError,
 } from "@mcp-moira/shared";
 import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
-import type * as schema from "@mcp-moira/shared";
+// Typed by the schema module: the package entry also exports services, which are not tables.
+import type * as schema from "../../packages/shared/src/database/schema.js";
 
 describe("WorkflowSharingService", () => {
   let db: BetterSQLite3Database<typeof schema>;

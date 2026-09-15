@@ -18,7 +18,7 @@ import {
   analyzeVariableUsage,
   searchWorkflow,
 } from "@mcp-moira/shared";
-import type { WorkflowGraph, WorkflowNode } from "@mcp-moira/workflow-engine";
+import type { GraphNode, WorkflowGraph } from "@mcp-moira/workflow-engine";
 
 // Helper to create a minimal valid workflow
 function createWorkflow(overrides: Partial<WorkflowGraph> = {}): WorkflowGraph {
@@ -76,7 +76,7 @@ describe("WorkflowQueryService", () => {
         nodes: [
           { id: "start", type: "start" },
           { id: "end", type: "end" },
-        ] as WorkflowNode[],
+        ] as GraphNode[],
       });
       const structure = getWorkflowStructure(workflow);
 
@@ -130,7 +130,7 @@ describe("WorkflowQueryService", () => {
             connections: { default: "end" },
           },
           { id: "end", type: "end" },
-        ] as WorkflowNode[],
+        ] as GraphNode[],
       });
 
       const results = searchNodes(workflow, "files");
@@ -151,7 +151,7 @@ describe("WorkflowQueryService", () => {
             connections: { default: "end" },
           },
           { id: "end", type: "end" },
-        ] as WorkflowNode[],
+        ] as GraphNode[],
       });
 
       const results = searchNodes(workflow, "tests pass");
@@ -184,7 +184,7 @@ describe("WorkflowQueryService", () => {
             connections: { default: "end" },
           },
           { id: "end", type: "end" },
-        ] as WorkflowNode[],
+        ] as GraphNode[],
       });
 
       const results = searchNodes(workflow, "validate|verify");
@@ -202,7 +202,7 @@ describe("WorkflowQueryService", () => {
             connections: { default: "end" },
           },
           { id: "end", type: "end" },
-        ] as WorkflowNode[],
+        ] as GraphNode[],
       });
 
       const results = searchNodes(workflow, "uppercase");
@@ -220,7 +220,7 @@ describe("WorkflowQueryService", () => {
             connections: { default: "end" },
           },
           { id: "end", type: "end" },
-        ] as WorkflowNode[],
+        ] as GraphNode[],
       });
 
       const results = searchNodes(workflow, "keyword");
@@ -262,7 +262,7 @@ describe("WorkflowQueryService", () => {
           { id: "dup", type: "agent-directive", connections: { default: "end" } },
           { id: "dup", type: "agent-directive", connections: { default: "end" } },
           { id: "end", type: "end" },
-        ] as WorkflowNode[],
+        ] as GraphNode[],
       });
       const result = validateWorkflow(workflow);
 
@@ -275,7 +275,7 @@ describe("WorkflowQueryService", () => {
         nodes: [
           { id: "start", type: "start", connections: { default: "non-existent" } },
           { id: "end", type: "end" },
-        ] as WorkflowNode[],
+        ] as GraphNode[],
       });
       const result = validateWorkflow(workflow);
 
@@ -288,7 +288,7 @@ describe("WorkflowQueryService", () => {
         nodes: [
           { id: "step-1", type: "agent-directive", connections: { default: "end" } },
           { id: "end", type: "end" },
-        ] as WorkflowNode[],
+        ] as GraphNode[],
       });
       const result = validateWorkflow(workflow);
 
@@ -301,7 +301,7 @@ describe("WorkflowQueryService", () => {
         nodes: [
           { id: "start", type: "start", connections: { default: "step-1" } },
           { id: "step-1", type: "agent-directive" },
-        ] as WorkflowNode[],
+        ] as GraphNode[],
       });
       const result = validateWorkflow(workflow);
 
@@ -315,7 +315,7 @@ describe("WorkflowQueryService", () => {
           { id: "step-1", type: "agent-directive", connections: { default: "end" } },
           { id: "orphan", type: "agent-directive" }, // Not connected
           { id: "end", type: "end" },
-        ] as WorkflowNode[],
+        ] as GraphNode[],
       });
       const result = validateWorkflow(workflow);
 
@@ -330,7 +330,7 @@ describe("WorkflowQueryService", () => {
           { id: "start", type: "start", connections: { default: "end" } },
           { id: "start2", type: "start", connections: { default: "end" } },
           { id: "end", type: "end" },
-        ] as WorkflowNode[],
+        ] as GraphNode[],
       });
       const result = validateWorkflow(workflow);
 
@@ -348,7 +348,7 @@ describe("WorkflowQueryService", () => {
         nodes: [
           { id: "start", type: "start", connections: { default: "end" } },
           { id: "end", type: "end" },
-        ] as WorkflowNode[],
+        ] as GraphNode[],
       });
 
       const variables = getWorkflowVariables(workflow);
@@ -375,7 +375,7 @@ describe("WorkflowQueryService", () => {
             initialData: { variables: { legacy: { description: "Legacy", value: 1 } } },
           },
           { id: "end", type: "end" },
-        ] as WorkflowNode[],
+        ] as GraphNode[],
       });
 
       // No registry → no declared globals; initialData is not a fallback source.
@@ -393,7 +393,7 @@ describe("WorkflowQueryService", () => {
         nodes: [
           { id: "start", type: "start", connections: { default: "end" } },
           { id: "end", type: "end" },
-        ] as WorkflowNode[],
+        ] as GraphNode[],
       });
 
       const variables = getWorkflowVariables(workflow);
@@ -418,7 +418,7 @@ describe("WorkflowQueryService", () => {
             },
           },
           { id: "end", type: "end" },
-        ] as WorkflowNode[],
+        ] as GraphNode[],
       });
 
       const variables = getWorkflowVariables(workflow);
@@ -435,7 +435,7 @@ describe("WorkflowQueryService", () => {
         nodes: [
           { id: "start", type: "start", connections: { default: "end" } },
           { id: "end", type: "end" },
-        ] as WorkflowNode[],
+        ] as GraphNode[],
       });
     }
 
@@ -464,7 +464,7 @@ describe("WorkflowQueryService", () => {
         nodes: [
           { id: "start", type: "start", connections: { default: "end" } },
           { id: "end", type: "end" },
-        ] as WorkflowNode[],
+        ] as GraphNode[],
       });
 
       const afterGate = setWorkflowVariable(workflow, "gate", "yes");
@@ -511,7 +511,7 @@ describe("WorkflowQueryService", () => {
           { id: "branch-a", type: "agent-directive", connections: { default: "end" } },
           { id: "branch-b", type: "agent-directive", connections: { default: "end" } },
           { id: "end", type: "end" },
-        ] as WorkflowNode[],
+        ] as GraphNode[],
       });
 
       const graph = buildFlowGraph(workflow);
@@ -528,7 +528,7 @@ describe("WorkflowQueryService", () => {
           { id: "loop", type: "agent-directive", connections: { default: "check" } },
           { id: "check", type: "condition", connections: { true: "end", false: "loop" } },
           { id: "end", type: "end" },
-        ] as WorkflowNode[],
+        ] as GraphNode[],
       });
 
       const graph = buildFlowGraph(workflow);
@@ -572,7 +572,7 @@ describe("WorkflowQueryService", () => {
             connections: { default: "end" },
           },
           { id: "end", type: "end" },
-        ] as WorkflowNode[],
+        ] as GraphNode[],
       });
 
       const nodes = listNodesCompact(workflow, { includePreview: true, previewLength: 20 });
@@ -586,7 +586,7 @@ describe("WorkflowQueryService", () => {
         nodes: [
           { id: "start", type: "start" },
           { id: "end", type: "end" },
-        ] as WorkflowNode[],
+        ] as GraphNode[],
       });
 
       const nodes = listNodesCompact(workflow);
@@ -609,7 +609,7 @@ describe("WorkflowQueryService", () => {
             },
           },
           { id: "end", type: "end" },
-        ] as WorkflowNode[],
+        ] as GraphNode[],
       });
 
       const analysis = analyzeVariableUsage(workflow);
@@ -626,7 +626,7 @@ describe("WorkflowQueryService", () => {
         nodes: [
           { id: "start", type: "start", connections: { default: "end" } },
           { id: "end", type: "end" },
-        ] as WorkflowNode[],
+        ] as GraphNode[],
       });
 
       const analysis = analyzeVariableUsage(workflow);
@@ -652,7 +652,7 @@ describe("WorkflowQueryService", () => {
             connections: { default: "end" },
           },
           { id: "end", type: "end" },
-        ] as WorkflowNode[],
+        ] as GraphNode[],
       });
 
       const analysis = analyzeVariableUsage(workflow);
@@ -681,7 +681,7 @@ describe("WorkflowQueryService", () => {
             connections: { default: "end" },
           },
           { id: "end", type: "end" },
-        ] as WorkflowNode[],
+        ] as GraphNode[],
       });
 
       const analysis = analyzeVariableUsage(workflow);
@@ -709,7 +709,7 @@ describe("WorkflowQueryService", () => {
             connections: { default: "end" },
           },
           { id: "end", type: "end" },
-        ] as WorkflowNode[],
+        ] as GraphNode[],
       });
 
       const analysis = analyzeVariableUsage(workflow);
@@ -719,7 +719,7 @@ describe("WorkflowQueryService", () => {
     test("should find compared context paths without regex backtracking", () => {
       const workflow = createWorkflow({
         variableRegistry: {
-          review: { type: "object" },
+          review: { type: "object", description: "Review payload" },
         },
         nodes: [
           { id: "start", type: "start", connections: { default: "decision" } },
@@ -730,7 +730,7 @@ describe("WorkflowQueryService", () => {
             connections: { true: "end", false: "end" },
           },
           { id: "end", type: "end" },
-        ] as WorkflowNode[],
+        ] as GraphNode[],
       });
 
       const startedAt = performance.now();
@@ -755,7 +755,7 @@ describe("WorkflowQueryService", () => {
             connections: { default: "end" },
           },
           { id: "end", type: "end" },
-        ] as WorkflowNode[],
+        ] as GraphNode[],
       });
 
       const results = searchWorkflow(workflow, "TypeScript");
@@ -772,7 +772,7 @@ describe("WorkflowQueryService", () => {
         nodes: [
           { id: "start", type: "start", connections: { default: "end" } },
           { id: "end", type: "end" },
-        ] as WorkflowNode[],
+        ] as GraphNode[],
       });
 
       const results = searchWorkflow(workflow, "production", { includeVariables: true });
@@ -790,7 +790,7 @@ describe("WorkflowQueryService", () => {
             connections: { default: "end" },
           },
           { id: "end", type: "end" },
-        ] as WorkflowNode[],
+        ] as GraphNode[],
       });
 
       const results = searchWorkflow(workflow, "keyword", { snippetMode: true });
@@ -815,7 +815,7 @@ describe("WorkflowQueryService", () => {
             connections: { default: "end" },
           },
           { id: "end", type: "end" },
-        ] as WorkflowNode[],
+        ] as GraphNode[],
       });
 
       const results = searchWorkflow(workflow, "analyze|validate");
@@ -833,7 +833,7 @@ describe("WorkflowQueryService", () => {
             connections: { default: "end" },
           },
           { id: "end", type: "end" },
-        ] as WorkflowNode[],
+        ] as GraphNode[],
       });
 
       expect(
@@ -852,7 +852,7 @@ describe("WorkflowQueryService", () => {
             connections: { default: "end" },
           },
           { id: "end", type: "end" },
-        ] as WorkflowNode[],
+        ] as GraphNode[],
       });
 
       expect(searchWorkflow(workflow, "[unfinished").map((result) => result.nodeId)).toEqual([
@@ -871,7 +871,7 @@ describe("WorkflowQueryService", () => {
             connections: { default: "end" },
           },
           { id: "end", type: "end" },
-        ] as WorkflowNode[],
+        ] as GraphNode[],
       });
 
       const startedAt = performance.now();

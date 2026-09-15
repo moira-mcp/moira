@@ -7,7 +7,7 @@
 import React from "react";
 import { describe, test, expect, beforeEach, afterEach, jest } from "@jest/globals";
 import { render, screen, fireEvent } from "@testing-library/react";
-import "@testing-library/jest-dom";
+import "@testing-library/jest-dom/jest-globals";
 import { I18nextProvider } from "react-i18next";
 import i18n from "../../../packages/web-frontend/src/i18n";
 
@@ -25,7 +25,7 @@ jest.mock("../../../packages/web-frontend/src/services/client-logger", () => ({
 }));
 
 // Component that throws an error
-function ThrowError({ message = "Test error" }: { message?: string }) {
+function ThrowError({ message = "Test error" }: { message?: string }): never {
   throw new Error(message);
 }
 

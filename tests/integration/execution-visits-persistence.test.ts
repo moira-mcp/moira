@@ -56,7 +56,9 @@ describe("execution route log persistence", () => {
     workflowId = `wf-${randomUUID()}`;
   });
 
-  afterEach(() => sqlite.close());
+  afterEach(() => {
+    sqlite.close();
+  });
 
   it("round-trips the log through save and get, and grows it on the next save", async () => {
     const executionId = randomUUID();

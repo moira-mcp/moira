@@ -209,7 +209,7 @@ describe("extension communication channel integration", () => {
     const communicationRegistry = new CommunicationChannelRegistry();
     const delivered: ExtensionCommunicationChannelRequest[] = [];
     const client = runner({
-      deliverCommunicationChannel: async (request) => delivered.push(request),
+      deliverCommunicationChannel: async (request) => void delivered.push(request),
     });
     const reconciler = new ExtensionCommunicationChannelReconciler(communicationRegistry);
     expect(reconciler.reconcile(extensionRegistry, client)).toEqual({

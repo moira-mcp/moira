@@ -26,6 +26,8 @@ import type {
   PreparedStartExecutionAttempt,
   PresentedExecutionAttempt,
   ReconciledExecutionAttemptCounts,
+  RecoverExecutionToNodeInput,
+  RecoverExecutionToNodeResult,
   StartPreconditionCompletionResult,
 } from "../types/execution-attempt.js";
 
@@ -315,6 +317,13 @@ export interface IDataRepository {
    * `superseded` and linked to the new one; an executing or outcome-unknown attempt refuses.
    */
   supersedePresentedExecutionAttempt(attempt: PresentedExecutionAttempt): Promise<void>;
+
+  /**
+   * Move a paused execution to a node it can resume from and retire its presented attempt, in one
+   * guarded transaction. Refuses when the execution changed under the caller, and when an attempt
+   * is being executed or its outcome is unknown.
+   */
+  recoverExecutionToNode(input: RecoverExecutionToNodeInput): Promise<RecoverExecutionToNodeResult>;
   getExecutionAttempt(attemptId: string): Promise<ExecutionAttempt | null>;
   updatePresentedExecutionAttemptResponse(
     attemptId: string,
@@ -330,8 +339,7 @@ export interface IDataRepository {
     executionRevision: number;
     nodeId: string;
     workflowId: string;
-    workflowVersion: string;
-    workflowDigest: string;
+    continuationDigest: string;
     inputFingerprint: string;
     ownerId: string;
     now: number;

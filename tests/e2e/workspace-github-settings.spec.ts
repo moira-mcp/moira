@@ -108,9 +108,12 @@ test("GitHub integration exposes safe actionable states in English and Russian",
     canDisconnect: true,
   };
   await page.reload();
+  // The view carries a nullable URL; this state always sets one, and asserting that first makes the
+  // failure say "no install URL" rather than "expected null".
+  expect(data.installationUrl).not.toBeNull();
   await expect(page.getByRole("link", { name: "Install GitHub App" })).toHaveAttribute(
     "href",
-    data.installationUrl,
+    data.installationUrl!,
   );
 
   data = {

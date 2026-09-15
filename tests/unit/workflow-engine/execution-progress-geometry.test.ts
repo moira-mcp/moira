@@ -7,7 +7,6 @@
  */
 
 import { describe, expect, test } from "@jest/globals";
-import { findSystemCatalogEntry } from "../../../packages/shared/src/services/workflow-catalog.js";
 import {
   buildExecutionProgressVisualModel,
   progressTextWidth,
@@ -17,8 +16,8 @@ import {
   type ProgressVisualBox,
   type ProgressVisualModel,
   type WorkflowExecution,
-  type WorkflowGraph,
 } from "@mcp-moira/workflow-engine";
+import { systemCatalogGraph } from "../../helpers/catalog-graphs.js";
 
 const FLOWS = [
   "quick-task",
@@ -31,7 +30,7 @@ const FLOWS = [
 const WIDTHS = [720, 1280];
 
 function flowProgress(slug: string): ExecutionProgress {
-  const workflow = structuredClone(findSystemCatalogEntry(slug, "public")!.graph) as WorkflowGraph;
+  const workflow = systemCatalogGraph(slug, "public");
   const execution: WorkflowExecution = {
     executionId: `geometry-${slug}`,
     workflowId: workflow.id ?? slug,
@@ -44,7 +43,6 @@ function flowProgress(slug: string): ExecutionProgress {
       executionId: `geometry-${slug}`,
       workflowId: workflow.id ?? slug,
       userId: "test-user",
-      currentNodeId: null,
     },
     status: "running",
     revision: 1,

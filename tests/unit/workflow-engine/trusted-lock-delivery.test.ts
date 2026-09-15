@@ -36,6 +36,11 @@ describe("trusted agent-path lock delivery", () => {
       id: "test.ordinary-lock-boundary",
       provider: "test.ordinary-lock-boundary",
       capabilities: { text: true, image: true, document: true, trusted: false },
+      metadata: {
+        title: "Ordinary lock boundary",
+        origin: "builtin",
+        settingKeys: [],
+      },
       isConfigured,
       deliver,
     });

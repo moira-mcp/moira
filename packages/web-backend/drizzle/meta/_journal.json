@@ -253,6 +253,20 @@
       "when": 1789203600000,
       "tag": "0034_playbooks",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1789290000000,
+      "tag": "0035_continuation_surface_binding",
+      "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1789290060000,
+      "tag": "0036_continuation_facts",
+      "breakpoints": true
     }
   ]
 }

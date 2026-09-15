@@ -8,13 +8,18 @@ import Database from "better-sqlite3";
 import { drizzle, type BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import { WorkflowRepository } from "@mcp-moira/shared";
+import type { WorkflowGraph } from "@mcp-moira/workflow-engine";
 import path from "path";
 
 // Import all schema tables for drizzle
 import * as schema from "../../../packages/shared/src/database/schema.js";
 
-// Test workflow graph helper
-function createTestGraph(name: string, version = "1.0.0") {
+/**
+ * The smallest graph the repository accepts, typed as the real thing so a fixture cannot drift from
+ * the node shapes the engine defines: a start node carries no directive, and an end node is terminal
+ * and therefore has no connections at all.
+ */
+function createTestGraph(name: string, version = "1.0.0"): WorkflowGraph {
   return {
     id: `test-${Date.now()}`,
     metadata: {
@@ -25,15 +30,12 @@ function createTestGraph(name: string, version = "1.0.0") {
     nodes: [
       {
         id: "start",
-        type: "start" as const,
-        directive: "Test directive",
+        type: "start",
         connections: { default: "end" },
       },
       {
         id: "end",
-        type: "end" as const,
-        directive: "End",
-        connections: {},
+        type: "end",
       },
     ],
   };

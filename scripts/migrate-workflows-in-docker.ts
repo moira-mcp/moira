@@ -48,6 +48,7 @@ import {
   workflowReconciliationAgentInstructions,
   cleanupRetiredWorkflowReconciliationBundles,
 } from "@mcp-moira/shared";
+import { wouldInvalidatePausedRun } from "@mcp-moira/workflow-engine";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -130,6 +131,9 @@ async function migrate(): Promise<void> {
       userRepo,
       mutationService,
       sqlite,
+      // The judgement the paused-run warning needs: the engine's own continuation surface, so the
+      // deploy warns about exactly the runs the runtime check would later refuse.
+      wouldInvalidatePausedRun,
       force: forceUpdate,
       fatalConflicts: isSaas(),
       log: (msg) => console.log(msg),

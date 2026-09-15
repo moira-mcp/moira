@@ -7,7 +7,6 @@
  * Coverage target: 100% nodes (5), 100% branches
  */
 
-import { findCatalogEntryBySlug } from "@mcp-moira/shared";
 import {
   runScenario,
   type TestScenario,
@@ -16,10 +15,10 @@ import {
 import { calculateCoverage, formatCoverageReport } from "../../helpers/coverage-calculator.js";
 import { GraphValidator } from "@mcp-moira/workflow-engine";
 import type { WorkflowGraph } from "@mcp-moira/workflow-engine";
+import { catalogGraph } from "../../helpers/catalog-graphs.js";
 
 function loadExampleWorkflow(): WorkflowGraph {
-  return findCatalogEntryBySlug("artifacts-demo-report-publisher", undefined, "workflows/examples")!
-    .graph as WorkflowGraph;
+  return catalogGraph("artifacts-demo-report-publisher", { baseDir: "workflows/examples" });
 }
 
 describe("artifacts-demo-report-publisher Scenarios", () => {
@@ -33,7 +32,7 @@ describe("artifacts-demo-report-publisher Scenarios", () => {
     it("should have valid structure", async () => {
       const validator = new GraphValidator();
       const withId = {
-        id: `moira/${workflow.slug || "artifacts-demo-report-publisher"}`,
+        id: `moira/${(workflow as { slug?: string }).slug || "artifacts-demo-report-publisher"}`,
         ...workflow,
       };
       const validation = await validator.validateWorkflow(withId);

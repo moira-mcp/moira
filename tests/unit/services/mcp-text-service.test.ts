@@ -4,17 +4,29 @@ import type { GlobalSettingsRepository } from "@mcp-moira/shared";
 
 describe("McpTextService", () => {
   let service: McpTextService;
-  let repository: jest.Mocked<GlobalSettingsRepository>;
+  // The double, typed by what it provides rather than by the repository interface: the real
+  // getValue is generic, and a mock declared at the generic cannot take a plain implementation.
+  let repository: {
+    // `undefined` is here on purpose: the service must treat a repository that answers with nothing
+    // the same as one that answers with null, and one row below asserts exactly that.
+    getValue: jest.Mock<(key: string) => Promise<string | null | undefined>>;
+    getAll: jest.Mock;
+    get: jest.Mock;
+    getByCategory: jest.Mock;
+    setValue: jest.Mock;
+  };
 
   beforeEach(() => {
     repository = {
-      getValue: jest.fn<(key: string) => Promise<unknown>>(),
+      // The repository's getValue is generic; the service always asks for a string, so the double
+      // is typed at that instantiation rather than re-declaring the generic.
+      getValue: jest.fn<(key: string) => Promise<string | null>>(),
       getAll: jest.fn(),
       get: jest.fn(),
       getByCategory: jest.fn(),
       setValue: jest.fn(),
-    } as unknown as jest.Mocked<GlobalSettingsRepository>;
-    service = new McpTextService(repository);
+    };
+    service = new McpTextService(repository as unknown as GlobalSettingsRepository);
   });
 
   it("defines only database-backed prompt, reminder, error, and validation keys", () => {
@@ -33,7 +45,7 @@ describe("McpTextService", () => {
 
   it("loads system prompt and reminder defaults from the repository", async () => {
     repository.getValue.mockImplementation((key: string) =>
-      Promise.resolve(key === MCP_TEXT_KEYS.systemPrompt ? "prompt" : "reminder"),
+      Promise.resolve<string | null>(key === MCP_TEXT_KEYS.systemPrompt ? "prompt" : "reminder"),
     );
 
     await expect(service.getSystemPrompt()).resolves.toBe("prompt");

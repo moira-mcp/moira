@@ -28,7 +28,9 @@ describe("CommunicationAttachmentGrantService", () => {
     now = 1_800_000_000_000;
     service = new CommunicationAttachmentGrantService(db, () => now);
   });
-  afterEach(() => db.close());
+  afterEach(() => {
+    db.close();
+  });
 
   const input = (userId = "user-a") => ({
     userId,

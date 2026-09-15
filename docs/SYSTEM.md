@@ -74,8 +74,8 @@ response receipt. Replays of the same attempt return that receipt; separately pr
 intentionally create separate executions.
 
 Every paused agent-facing presentation has a server-issued `attemptId` bound to its user,
-execution revision, node, workflow version, and workflow digest. `step()` requires that identity in
-addition to the Process ID. The repository claims the attempt before any handler or graph effect in
+execution revision, node, workflow, and the run's continuation surface (described below). `step()`
+requires that identity in addition to the Process ID. The repository claims the attempt before any handler or graph effect in
 an immediate transaction, records a fingerprint of `input` plus `teleportTo`, and fences the owner
 with a monotonically increasing token. The worker opens one lease handle with an immediate
 compare-and-set renewal; a five-second heartbeat then renews the 30-second lease.
@@ -98,11 +98,93 @@ A superseded attempt is stale on `step` (never replayed), is not the current att
 evicted with old receipts; the answer is refused while an attempt is executing or outcome-unknown.
 
 For a paused execution with no persisted Step attempt, `current_step` atomically installs one without
-executing the node. A presented attempt whose node and workflow bindings still match can be rebound
-from an obsolete revision and returned as the authoritative current attempt. Executing,
-`outcome_unknown`, node-stale, and workflow-stale attempts are not rebound. `current_step` reports a
-node- or workflow-stale live presentation as `CURRENT_PRESENTATION_STALE` and never recommends its
-unusable attempt ID.
+executing the node. A presented attempt whose node and continuation
+bindings still match can be rebound from an obsolete revision and returned as the authoritative
+current attempt. Executing, `outcome_unknown`, node-stale, and continuation-stale attempts are not
+rebound. `current_step` reports such a live presentation as `CURRENT_PRESENTATION_STALE` and never
+recommends its unusable attempt ID; the error names `diagnose`, which reports which facts of the
+paused step changed.
+
+`diagnose` answers, for one owned execution, whether the run can still continue and every reason it
+cannot: the execution is not running or has no current node; the workflow definition is gone or no
+longer readable; the paused node no longer exists; the attempt is foreign, carries no continuation
+binding, or is not in the presented state; the execution moved on past its presented attempt; the
+continuation surface changed, naming the facts that changed, disappeared or appeared; the presented
+step interpolates references the context cannot resolve; the execution recorded an error. The
+references are read off everything the paused node presents through, which differs by type — an
+`agent-directive` presents its directive and completion condition, a `materialize` node its base
+path and file paths, a `lock` node its reason — so a target is not accepted on the strength of
+fields it does not have.
+
+Each cause carries `blocks`, and `continuable` is true when none of them does. A blocking cause
+means the run cannot reach its next `step()` without repair, and is what makes it eligible for
+recovery. A non-blocking cause explains what the caller is seeing while the run remains usable,
+either directly or after an ordinary `current_step` refresh: a missing presentation, a
+revision-stale presentation, an attempt another caller is executing, an unresolved reference in the
+presented text, and a recorded error. Errors in particular are append-only and are written by the
+engine's own retry path when an agent answers with the wrong shape, so treating one as blocking
+would mark every run that ever had a rejected answer permanently unrepairable. Naming the changed facts is possible because the attempt
+stores the fact map its digest is computed from — one digest per bound fact — so a mismatch can be
+attributed rather than only detected; an attempt written before that map existed reports the
+mismatch as unattributable instead of inventing an attribution. The action is read-only, audited
+like `current_step`, and is allowed on a healthy run, which reports itself continuable with no
+causes.
+
+`recover` returns a run that cannot continue to a step it can resume from. The node the caller names
+must be one a run can wait on — `agent-directive`, `teleport`, `materialize`, `lock` or `subgraph`;
+any other node is refused, because resuming "at" a node that never holds a presentation would mean
+running the workflow forward from there and calling it a repair. It moves the execution to
+that node, merges the supplied variable values into the context, and installs a fresh attempt bound
+to the current definition — so the caller's next call is an ordinary `step()`. The run then comes to
+rest on the named node and never advances past it. That is not the same as nothing running: the
+target node's own presentation path executes, which is inert for an `agent-directive`, a `teleport`
+and a `materialize` node but not for the other two — resuming at a `lock` node creates the lock and
+dispatches its approval code, and resuming at a `subgraph` node with no active child enters one.
+Both are what those nodes do when a run arrives at them, and choosing either as a recovery target is
+choosing that effect.
+
+The gate asks two separate questions. A run the engine no longer considers live is refused before
+anything else is read: a completed run is history and a cancelled run is the owner's instruction to
+stop — cancellation is stored as completion, so the two are one state — and returning either to
+`running` at an operator-named node would be resurrection rather than repair. The refusal names the
+run's status, and `diagnose` still explains why such a run cannot continue, because refusing the
+mutation must not cost the explanation. Status is never read as evidence that a run is or is not
+broken; that judgement stays where it was.
+
+Among live runs, a run is eligible only when `diagnose` reports at least one blocking cause, so the
+gate and the explanation are the same judgement. A healthy run is refused, as is a run whose only
+causes are non-blocking; every refusal leaves the execution, its attempt and its revision untouched
+and names the calls that follow. The move and the retirement of the attempt the run was holding commit in one
+transaction, guarded on the execution's revision and its expected prior state, and refuse outright
+while an attempt is being executed or its outcome is unknown. The fresh attempt is installed by that
+same transaction rather than by the presentation that follows, so a failure while rendering leaves
+the run at its target holding an attempt whose response is still null, and the run never waits on a
+node with no attempt — a state no call could leave, since presenting the
+current step refuses an execution whose waiting and current nodes disagree and stepping needs an
+attempt id. Both outcomes are audited as `EXECUTION_RECOVER`: a successful recovery with the target node and
+the variable names written, a refusal with the reason and the node that was asked for.
+
+A paused step attempt is bound to its execution revision, its node, its workflow and a digest of the
+run's **continuation surface**: everything the paused node declares, minus the inherited fields that
+describe how it is displayed rather than what it does — `metadata` (display name, description, icon,
+colour, tags, estimated duration), `progressNodeId`, `progressActiveLabel`, `progressActiveContent`
+and `connectionLabels` — together with the `variableRegistry` entries for the global names that node
+declares as inputs, which the engine inlines into the schema the agent is validated against.
+
+The surface is defined by exclusion because any node type can be the one a run is paused on:
+`agent-directive`, `teleport`, `materialize`, `lock` and `subgraph` pause deliberately, an extension
+node pauses on itself when its call fails, and a node error pauses on that node whatever its type.
+So a `materialize` node's `basePath` and `files`, a `lock` node's `reason`, a `subgraph` node's
+`graphId` and mappings, and an extension node's `config` are all bound — for those nodes they are
+the directive.
+
+The workflow version and a digest of the whole definition are recorded on the attempt for diagnosis
+but do not bind a step: a definition change invalidates a paused run only when it reaches that
+surface. A redeploy that changes workflow `metadata` (version, tags, name, description), the
+`systemReminder`, the progress projection, or any node the run is not paused on leaves the run
+continuable, as does a purely cosmetic edit to the paused node itself. An attempt carrying no
+continuation binding never matches. Start attempts are bound to the whole definition instead,
+because a start is about to execute all of it.
 
 For an executing prepared Start, that handle opens immediately after the atomic claim and before
 lifecycle metrics, audit, execution reads, or graph work. The same handle remains active through
@@ -1428,8 +1510,11 @@ Action-based tool for session-related information.
 ```typescript
 // Parameters
 {
-  action: 'user' | 'executions' | 'execution_context' | 'current_step' | 'update-note';
-  executionId?: string;  // Required for execution_context, current_step, update-note
+  action: 'user' | 'executions' | 'execution_context' | 'current_step' | 'diagnose' | 'recover'
+        | 'update-note';
+  executionId?: string;  // Required for execution_context, current_step, diagnose, recover, update-note
+  nodeId?: string;       // Required for recover: the node the run must resume from
+  variableValues?: Record<string, unknown>; // recover: values written into the execution context
   note?: string;         // Required for update-note (max 500 chars)
 }
 
@@ -1482,6 +1567,32 @@ Action-based tool for session-related information.
 
 // action: 'current_step' - Returns the authoritative current presentation
 string  // Formatted directive including Process ID and Step attempt ID
+
+// action: 'diagnose' - Reports whether a paused run can still continue, and why not
+{
+  executionId: string;
+  workflowId: string;
+  continuable: boolean;        // false when any cause blocks
+  currentNodeId: string | null;
+  currentNodeExists: boolean;  // whether that node is still in the definition
+  attempt: {                   // null when the run has no presented attempt
+    attemptId: string;
+    state: string;
+    boundNodeId: string | null;
+    boundExecutionRevision: number | null;
+    boundToCurrentDefinition: boolean;
+  } | null;
+  executionRevision: number;
+  causes: ContinuationCause[]; // each names one reason and whether it blocks
+}
+
+// action: 'recover' - Re-presents a run that cannot continue, at a node it can resume from
+{
+  executionId: string;
+  nodeId: string;
+  presentation: string;       // the rendered directive, carrying the fresh Step attempt ID
+  appliedVariables: string[]; // names written into the context by this recovery
+}
 
 // action: 'update-note' - Updates execution note
 {

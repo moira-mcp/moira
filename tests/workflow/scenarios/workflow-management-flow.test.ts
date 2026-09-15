@@ -1,6 +1,5 @@
 /** Behavioral scenarios for workflow-management-flow. */
 
-import { findCatalogEntryBySlug } from "@mcp-moira/shared";
 import {
   GraphExecutionEngine,
   MaterializeHandler,
@@ -13,11 +12,10 @@ import {
   type MockInputContext,
   type TestScenario,
 } from "../../helpers/scenario-runner.js";
+import { catalogGraph } from "../../helpers/catalog-graphs.js";
 
 function loadWorkflow(): WorkflowGraph {
-  return structuredClone(
-    findCatalogEntryBySlug("workflow-management-flow")!.graph,
-  ) as WorkflowGraph;
+  return catalogGraph("workflow-management-flow");
 }
 
 function useScenarioMaterializeGrant(engine: GraphExecutionEngine): void {
@@ -115,7 +113,8 @@ function progressOutputsFor(
   nodeId: string,
   input: Record<string, unknown>,
 ): Record<string, string> {
-  const node = workflow.nodes.find((candidate) => candidate.id === nodeId);
+  const node = workflow.nodes.find((candidate) => candidate.id === nodeId) as
+    { progressNodeId?: string; inputSchema?: { globalInputs?: string[] } } | undefined;
   const globals = node?.inputSchema?.globalInputs ?? [];
   const ownOutcome = node?.progressNodeId ? `progress_${node.progressNodeId}_outcome` : null;
   return Object.fromEntries(

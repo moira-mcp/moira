@@ -71,8 +71,6 @@ const testWorkflow: WorkflowGraph = {
       finalOutput: ["result"],
     },
   ],
-  startNodeId: "start",
-  endNodeIds: ["end"],
 };
 
 describe("CLI/MCP Parity Verification", () => {

@@ -1,14 +1,19 @@
 import express from "express";
 import request from "supertest";
 import { afterEach, describe, expect, jest, test } from "@jest/globals";
-import { resetFeatureResolver, setFeatureResolver, type Feature } from "@mcp-moira/shared";
+import {
+  resetFeatureResolver,
+  setFeatureResolver,
+  type Feature,
+  type FeatureResolver,
+} from "@mcp-moira/shared";
 import {
   requireCapability,
   requireSelectedCapability,
-} from "../../../packages/web-backend/src/middleware/capability-middleware";
-import { selectAnalyticsSurfaceCapability } from "../../../packages/web-backend/src/middleware/admin-route-capability";
-import { setupErrorMiddleware } from "../../../packages/web-backend/src/middleware/error-middleware";
-import { featuresRoutes } from "../../../packages/web-backend/src/routes/features";
+} from "../../../packages/web-backend/src/middleware/capability-middleware.js";
+import { selectAnalyticsSurfaceCapability } from "../../../packages/web-backend/src/middleware/admin-route-capability.js";
+import { setupErrorMiddleware } from "../../../packages/web-backend/src/middleware/error-middleware.js";
+import { featuresRoutes } from "../../../packages/web-backend/src/routes/features.js";
 
 afterEach(() => {
   resetFeatureResolver();
@@ -57,7 +62,9 @@ function createApp() {
 
 describe("deployment capability middleware", () => {
   test("one resolver override controls public exposure and authorization", async () => {
-    const isEnabled = jest.fn((feature: Feature) => feature === "adminAnalytics");
+    const isEnabled = jest.fn<FeatureResolver["isEnabled"]>(
+      (feature) => feature === "adminAnalytics",
+    );
     setFeatureResolver({ isEnabled });
     const { app, sideEffects } = createApp();
 
@@ -106,7 +113,9 @@ describe("deployment capability middleware", () => {
   });
 
   test("case-insensitive analytics routing cannot substitute analytics for operations", async () => {
-    const isEnabled = jest.fn((feature: Feature) => feature === "adminAnalytics");
+    const isEnabled = jest.fn<FeatureResolver["isEnabled"]>(
+      (feature) => feature === "adminAnalytics",
+    );
     setFeatureResolver({ isEnabled });
     const { app, sideEffects } = createApp();
 

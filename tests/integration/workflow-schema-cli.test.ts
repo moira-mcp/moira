@@ -8,7 +8,13 @@ import type { WorkflowGraph } from "@mcp-moira/workflow-engine";
 const CLI = path.join(process.cwd(), "packages/workflow-cli/src/workflow-tool.ts");
 const temporaryDirectories: string[] = [];
 
-function temporaryWorkflow(workflow: WorkflowGraph): string {
+/**
+ * Writes a workflow file for the CLI to read. The parameter is deliberately wider than
+ * `WorkflowGraph`: some of these fixtures are malformed on purpose — labels carrying terminal
+ * escape sequences, connection names a start node cannot have — because what is under test is how
+ * the CLI renders hostile input rather than whether the graph is valid.
+ */
+function temporaryWorkflow(workflow: WorkflowGraph | Record<string, unknown>): string {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "moira-workflow-schema-"));
   temporaryDirectories.push(directory);
   const file = path.join(directory, "workflow.json");

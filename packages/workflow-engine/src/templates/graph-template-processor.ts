@@ -40,6 +40,23 @@ export interface UnresolvedPlaybookReference {
   reason: "not-found" | "error";
 }
 
+/**
+ * The provenance set, whatever shape it arrives in.
+ *
+ * `_templateFragmentVars` is a `Set` while the engine holds the context in memory, but a context
+ * read back from storage has been through JSON, where a `Set` serializes to `{}` and loses its
+ * contents. Calling `.has` on that throws, and the substitution path catches every throw and
+ * renders the variable as undefined — so one stored context used to make *every* reference in a
+ * directive render as `[[UNDEFINED_VARIABLE]]`. A shape this function cannot read is treated as
+ * absent, which is the documented fallback: the name convention decides instead.
+ */
+function fragmentVarSet(context?: ExecutionContext): ReadonlySet<string> | undefined {
+  const value = context?._templateFragmentVars as unknown;
+  if (value instanceof Set) return value as ReadonlySet<string>;
+  if (Array.isArray(value)) return new Set(value.filter((entry) => typeof entry === "string"));
+  return undefined;
+}
+
 export class GraphTemplateProcessor {
   private logger = createLogger({ component: "GraphTemplateProcessor" });
   private _noteService: NoteService | null = null;
@@ -134,7 +151,7 @@ export class GraphTemplateProcessor {
    * are neutralized (§14 injection protection).
    */
   private isTemplateFragmentVar(varName: string, context?: ExecutionContext): boolean {
-    if (context?._templateFragmentVars?.has(varName)) return true;
+    if (fragmentVarSet(context)?.has(varName)) return true;
     return GraphTemplateProcessor.TEMPLATE_FRAGMENT_VAR.test(varName);
   }
 

@@ -1091,7 +1091,6 @@ export const edgeCaseScenarios: TestScenario[] = [
       "initial-run-tests": inputs.initialTestsRun,
       "create-initial-iteration-workspace": inputs.standardInitialIterationWorkspace,
       "implement-step": inputs.standardImplementation,
-      "create-iteration-workspace": inputs.standardIterationWorkspace,
       "restart-and-rebuild": inputs.startupSuccess,
       "analyze-implementation-changes": inputs.codeChangesWithUI,
       "analyze-code-changes": inputs.codeAnalysisWithFunctions,

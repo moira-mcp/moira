@@ -5,12 +5,18 @@
 
 import * as fs from "fs";
 import * as path from "path";
-import type { InMemoryRepository, UniversalGraphExecutor } from "@mcp-moira/workflow-engine";
+import type {
+  ExecutionContext,
+  InMemoryRepository,
+  UniversalGraphExecutor,
+} from "@mcp-moira/workflow-engine";
 import {
   InMemoryRepository as InMemoryRepositoryImpl,
   UniversalGraphExecutor as UniversalGraphExecutorImpl,
 } from "@mcp-moira/workflow-engine";
-import { MCPEngineClass } from "@mcp-moira/mcp-server";
+// Imported by path: the package's "." export is the server entry point, which does not
+// re-export the engine class.
+import { MCPEngineClass } from "../../packages/mcp-server/src/core/mcp-engine.js";
 
 // Test constants
 export const TEST_WORKFLOWS_PATH = "./tests/workflows";
@@ -72,7 +78,10 @@ export async function createTestMCPEngine(): Promise<{
  * Test utilities class
  */
 export class TestUtils {
-  static createTestContext(variables = {}, userId = "test-user-123") {
+  static createTestContext(
+    variables: Record<string, unknown> = {},
+    userId = "test-user-123",
+  ): ExecutionContext {
     return {
       variables,
       nodeStates: {},

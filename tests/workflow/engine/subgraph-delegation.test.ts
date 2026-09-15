@@ -177,6 +177,7 @@ describe("SubgraphNode Step Delegation", () => {
         },
       },
       status: "waiting" as const,
+      revision: 1,
       createdAt: Date.now(),
       updatedAt: Date.now(),
     };
@@ -197,6 +198,7 @@ describe("SubgraphNode Step Delegation", () => {
         userId: "test-user-123",
       },
       status: "waiting" as const,
+      revision: 1,
       createdAt: Date.now(),
       updatedAt: Date.now(),
     };

@@ -7,7 +7,9 @@ import { describe, test, expect, beforeEach, afterEach } from "@jest/globals";
 import { getDatabase, closeDatabase, user } from "@mcp-moira/shared";
 import { eq } from "drizzle-orm";
 import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
-import type * as schema from "@mcp-moira/shared";
+// The database is typed by the schema module, not by the package entry point: the entry also
+// exports services and helpers, which are not tables.
+import type * as schema from "../../packages/shared/src/database/schema.js";
 
 describe("User Password Reset Fields", () => {
   let db: BetterSQLite3Database<typeof schema>;

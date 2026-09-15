@@ -217,11 +217,26 @@ and the relevant external system. Do not automatically retry the mutation.
 
 ### `CURRENT_PRESENTATION_STALE`
 
-**Cause:** The persisted live attempt belongs to a different node or workflow definition and cannot
-be safely rebound to the current execution.
+**Cause:** The persisted live attempt belongs to a different node, or to a continuation surface the
+current definition no longer has: something the paused node declares about what it does changed, or
+a registry entry for a global variable it declares as an input did. It cannot be safely rebound to
+the current execution. A change that does not reach that surface does not produce this state — a
+version or tag bump, an edit to another node, or a cosmetic change to the paused node itself all
+leave the run usable.
 
-**Solution:** Do not retry the old attempt. Inspect the execution and current workflow definition;
-this state requires explicit repair or a deliberate restart rather than automatic replay.
+**Solution:** Do not retry the old attempt. Call
+`session({ action: 'diagnose', executionId: '...' })`, which names which facts of the paused step
+changed, whether its node still exists, and anything else standing between the run and its next
+step. Then repair the run with
+`session({ action: 'recover', executionId: '...', nodeId: '<node to resume from>', variableValues: { ... } })`,
+which re-presents it at the node you name with the values that step needs and returns a fresh Step
+attempt ID to continue from. Name a node a run can wait on — an agent-directive, teleport,
+materialize, lock or subgraph node; any other node is refused, because resuming there would run the
+workflow forward instead of repairing it. The run comes to rest on the node you name and never goes
+past it, but a `lock` node creates its lock and sends its approval code when the run arrives there,
+and a `subgraph` node enters its child — choose one of those as the target only when you want that.
+Recovery is also refused unless the run really cannot continue, and refused for a run that is already
+finished or cancelled, which stays that way; a refusal changes nothing.
 
 ### Agent Forgets Workflow Context
 

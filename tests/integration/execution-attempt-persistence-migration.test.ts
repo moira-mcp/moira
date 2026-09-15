@@ -5,13 +5,10 @@ import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import {
-  ExecutionAttemptRepository,
-  ExecutionRepository,
-  type ExecutionAttemptClaimResult,
-} from "@mcp-moira/shared";
+import { ExecutionAttemptRepository, ExecutionRepository } from "@mcp-moira/shared";
 import { workflowGraphDigest } from "@mcp-moira/workflow-engine";
 import type {
+  ExecutionAttemptClaimResult,
   PreparedStartExecutionAttempt,
   PresentedExecutionAttempt,
   WorkflowExecution,
@@ -82,6 +79,8 @@ function presented(): PresentedExecutionAttempt {
     workflowId: "attempt-workflow",
     workflowVersion: "1.0.0",
     workflowDigest: "digest",
+    continuationDigest: "continuation-digest",
+    continuationFacts: '{"node.directive":"digest"}',
     response: "Process ID: attempt-execution\nStep attempt ID: attempt-1\n\nTask",
     createdAt: Date.now(),
   };
@@ -175,8 +174,7 @@ describe("execution attempt migration and persistence", () => {
         executionRevision: 3,
         nodeId: "task",
         workflowId: "attempt-workflow",
-        workflowVersion: "1.0.0",
-        workflowDigest: "digest",
+        continuationDigest: "continuation-digest",
         inputFingerprint: "fingerprint",
         ownerId: "owner",
         now: Date.now(),
@@ -317,8 +315,7 @@ describe("execution attempt migration and persistence", () => {
         executionRevision: 3,
         nodeId: "task",
         workflowId: "attempt-workflow",
-        workflowVersion: "1.0.0",
-        workflowDigest: "digest",
+        continuationDigest: "continuation-digest",
         inputFingerprint: "fingerprint",
         ownerId: "first-process",
         now: 1_000,

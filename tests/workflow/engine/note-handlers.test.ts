@@ -13,32 +13,77 @@ import {
   WriteNoteNode,
   UpsertNoteNode,
 } from "@mcp-moira/workflow-engine";
-import { IGraphStorage, IGraphExecutionEngine } from "@mcp-moira/workflow-engine";
-import type { NoteService } from "@mcp-moira/shared";
+import { IDataRepository, IGraphExecutionEngine } from "@mcp-moira/workflow-engine";
+import type { Note, NoteInfo, NoteService } from "@mcp-moira/shared";
 
 // Create mock NoteService for testing
+/** A complete NoteInfo, so a list fixture is the shape the service really returns. */
+function noteInfo(key: string, overrides: Partial<NoteInfo> = {}): NoteInfo {
+  return {
+    id: `id-${key}`,
+    key,
+    tags: [],
+    size: 0,
+    currentVersion: 1,
+    preview: "",
+    createdAt: 1704067200000,
+    updatedAt: 1704067200000,
+    ...overrides,
+  };
+}
+
+/** A complete Note. Timestamps are epoch milliseconds here, as they are in storage. */
+function note(key: string, value: string, overrides: Partial<Note> = {}): Note {
+  return {
+    id: `id-${key}`,
+    key,
+    tags: [],
+    value,
+    size: Buffer.byteLength(value, "utf8"),
+    version: 1,
+    createdAt: 1704067200000,
+    updatedAt: 1704067200000,
+    ...overrides,
+  };
+}
+
+/** What `save` resolves to. */
+function saved(version: number, key = "note"): { id: string; version: number } {
+  return { id: `id-${key}`, version };
+}
+
+/**
+ * A note service whose methods are jest mocks typed from the real ones, so a test that stubs a
+ * return value is checked against what that method actually returns and a signature change here
+ * reaches the suites instead of being absorbed by a cast.
+ */
 function createMockNoteService() {
   return {
-    list: jest.fn(),
-    get: jest.fn(),
-    save: jest.fn(),
-    exists: jest.fn(),
-    delete: jest.fn(),
-    getWithVersion: jest.fn(),
-    getHistory: jest.fn(),
-    getStats: jest.fn(),
-  } as unknown as NoteService;
+    list: jest.fn<NoteService["list"]>(),
+    get: jest.fn<NoteService["get"]>(),
+    save: jest.fn<NoteService["save"]>(),
+    exists: jest.fn<NoteService["exists"]>(),
+    delete: jest.fn<NoteService["delete"]>(),
+    getWithVersion: jest.fn<NoteService["getWithVersion"]>(),
+    getHistory: jest.fn<NoteService["getHistory"]>(),
+    getStats: jest.fn<NoteService["getStats"]>(),
+  };
+}
+
+/** The same object where a NoteService is expected. */
+function asNoteService(mock: ReturnType<typeof createMockNoteService>): NoteService {
+  return mock as unknown as NoteService;
 }
 
 describe("ReadNoteHandler", () => {
   let mockNoteService: ReturnType<typeof createMockNoteService>;
   let handler: ReadNoteHandler;
-  const mockStorage = {} as IGraphStorage;
+  const mockStorage = {} as IDataRepository;
   const mockEngine = {} as IGraphExecutionEngine;
 
   beforeEach(() => {
     mockNoteService = createMockNoteService();
-    handler = new ReadNoteHandler(mockNoteService);
+    handler = new ReadNoteHandler(asNoteService(mockNoteService));
     jest.clearAllMocks();
   });
 
@@ -49,28 +94,15 @@ describe("ReadNoteHandler", () => {
   test("should read notes with tag filter", async () => {
     const context = TestUtils.createTestContext({});
 
-    (mockNoteService.list as jest.Mock).mockResolvedValue({
-      notes: [{ key: "note-1" }, { key: "note-2" }],
+    mockNoteService.list.mockResolvedValue({
+      notes: [noteInfo("note-1"), noteInfo("note-2")],
       total: 2,
+      allTags: [],
     });
 
-    (mockNoteService.get as jest.Mock)
-      .mockResolvedValueOnce({
-        key: "note-1",
-        value: "content 1",
-        tags: ["tag1"],
-        version: 1,
-        createdAt: "2024-01-01",
-        updatedAt: "2024-01-01",
-      })
-      .mockResolvedValueOnce({
-        key: "note-2",
-        value: "content 2",
-        tags: ["tag1"],
-        version: 1,
-        createdAt: "2024-01-01",
-        updatedAt: "2024-01-01",
-      });
+    mockNoteService.get
+      .mockResolvedValueOnce(note("note-1", "content 1", { tags: ["tag1"], version: 1 }))
+      .mockResolvedValueOnce(note("note-2", "content 2", { tags: ["tag1"], version: 1 }));
 
     const readNode: ReadNoteNode = {
       type: "read-note",
@@ -99,19 +131,15 @@ describe("ReadNoteHandler", () => {
   test("should read single note in singleMode", async () => {
     const context = TestUtils.createTestContext({});
 
-    (mockNoteService.list as jest.Mock).mockResolvedValue({
-      notes: [{ key: "single-note" }],
+    mockNoteService.list.mockResolvedValue({
+      notes: [noteInfo("single-note")],
       total: 1,
+      allTags: [],
     });
 
-    (mockNoteService.get as jest.Mock).mockResolvedValue({
-      key: "single-note",
-      value: "the content",
-      tags: ["important"],
-      version: 3,
-      createdAt: "2024-01-01",
-      updatedAt: "2024-01-15",
-    });
+    mockNoteService.get.mockResolvedValue(
+      note("single-note", "the content", { tags: ["important"], version: 3 }),
+    );
 
     const readNode: ReadNoteNode = {
       type: "read-note",
@@ -140,7 +168,7 @@ describe("ReadNoteHandler", () => {
   test("should process template expressions in filter", async () => {
     const context = TestUtils.createTestContext({ tagName: "dynamic-tag" });
 
-    (mockNoteService.list as jest.Mock).mockResolvedValue({ notes: [], total: 0 });
+    mockNoteService.list.mockResolvedValue({ notes: [], total: 0, allTags: [] });
 
     const readNode: ReadNoteNode = {
       type: "read-note",
@@ -160,7 +188,7 @@ describe("ReadNoteHandler", () => {
   test("should use error connection on failure", async () => {
     const context = TestUtils.createTestContext({});
 
-    (mockNoteService.list as jest.Mock).mockRejectedValue(new Error("Database error"));
+    mockNoteService.list.mockRejectedValue(new Error("Database error"));
 
     const readNode: ReadNoteNode = {
       type: "read-note",
@@ -185,7 +213,7 @@ describe("ReadNoteHandler", () => {
   test("should throw when no error connection and failure", async () => {
     const context = TestUtils.createTestContext({});
 
-    (mockNoteService.list as jest.Mock).mockRejectedValue(new Error("Database error"));
+    mockNoteService.list.mockRejectedValue(new Error("Database error"));
 
     const readNode: ReadNoteNode = {
       type: "read-note",
@@ -220,12 +248,12 @@ describe("ReadNoteHandler", () => {
 describe("WriteNoteHandler", () => {
   let mockNoteService: ReturnType<typeof createMockNoteService>;
   let handler: WriteNoteHandler;
-  const mockStorage = {} as IGraphStorage;
+  const mockStorage = {} as IDataRepository;
   const mockEngine = {} as IGraphExecutionEngine;
 
   beforeEach(() => {
     mockNoteService = createMockNoteService();
-    handler = new WriteNoteHandler(mockNoteService);
+    handler = new WriteNoteHandler(asNoteService(mockNoteService));
     jest.clearAllMocks();
   });
 
@@ -236,8 +264,8 @@ describe("WriteNoteHandler", () => {
   test("should write single note", async () => {
     const context = TestUtils.createTestContext({});
 
-    (mockNoteService.exists as jest.Mock).mockResolvedValue(false);
-    (mockNoteService.save as jest.Mock).mockResolvedValue({ version: 1 });
+    mockNoteService.exists.mockResolvedValue(false);
+    mockNoteService.save.mockResolvedValue(saved(1));
 
     const writeNode: WriteNoteNode = {
       type: "write-note",
@@ -270,8 +298,8 @@ describe("WriteNoteHandler", () => {
   test("should update existing note", async () => {
     const context = TestUtils.createTestContext({});
 
-    (mockNoteService.exists as jest.Mock).mockResolvedValue(true);
-    (mockNoteService.save as jest.Mock).mockResolvedValue({ version: 5 });
+    mockNoteService.exists.mockResolvedValue(true);
+    mockNoteService.save.mockResolvedValue(saved(5));
 
     const writeNode: WriteNoteNode = {
       type: "write-note",
@@ -302,10 +330,8 @@ describe("WriteNoteHandler", () => {
       ],
     });
 
-    (mockNoteService.exists as jest.Mock).mockResolvedValueOnce(false).mockResolvedValueOnce(false);
-    (mockNoteService.save as jest.Mock)
-      .mockResolvedValueOnce({ version: 1 })
-      .mockResolvedValueOnce({ version: 1 });
+    mockNoteService.exists.mockResolvedValueOnce(false).mockResolvedValueOnce(false);
+    mockNoteService.save.mockResolvedValueOnce(saved(1)).mockResolvedValueOnce(saved(1));
 
     const writeNode: WriteNoteNode = {
       type: "write-note",
@@ -333,8 +359,8 @@ describe("WriteNoteHandler", () => {
       noteContent: "dynamic content",
     });
 
-    (mockNoteService.exists as jest.Mock).mockResolvedValue(false);
-    (mockNoteService.save as jest.Mock).mockResolvedValue({ version: 1 });
+    mockNoteService.exists.mockResolvedValue(false);
+    mockNoteService.save.mockResolvedValue(saved(1));
 
     const writeNode: WriteNoteNode = {
       type: "write-note",
@@ -356,7 +382,7 @@ describe("WriteNoteHandler", () => {
   test("should use error connection on failure", async () => {
     const context = TestUtils.createTestContext({});
 
-    (mockNoteService.exists as jest.Mock).mockRejectedValue(new Error("Save failed"));
+    mockNoteService.exists.mockRejectedValue(new Error("Save failed"));
 
     const writeNode: WriteNoteNode = {
       type: "write-note",
@@ -402,8 +428,8 @@ describe("WriteNoteHandler", () => {
         },
       });
 
-      (mockNoteService.exists as jest.Mock).mockResolvedValue(false);
-      (mockNoteService.save as jest.Mock).mockResolvedValue({ version: 1 });
+      mockNoteService.exists.mockResolvedValue(false);
+      mockNoteService.save.mockResolvedValue(saved(1));
 
       const writeNode: WriteNoteNode = {
         type: "write-note",
@@ -415,7 +441,7 @@ describe("WriteNoteHandler", () => {
 
       await handler.execute(writeNode, context, new AgentMessageQueue(), mockStorage, mockEngine);
 
-      const savedValue = (mockNoteService.save as jest.Mock).mock.calls[0][1].value;
+      const savedValue = mockNoteService.save.mock.calls[0][1].value;
       // Should be valid JSON, not [object Object] or safeSerialize output
       const parsed = JSON.parse(savedValue);
       expect(parsed).toEqual({
@@ -430,8 +456,8 @@ describe("WriteNoteHandler", () => {
         items: ["alpha", "beta", "gamma"],
       });
 
-      (mockNoteService.exists as jest.Mock).mockResolvedValue(false);
-      (mockNoteService.save as jest.Mock).mockResolvedValue({ version: 1 });
+      mockNoteService.exists.mockResolvedValue(false);
+      mockNoteService.save.mockResolvedValue(saved(1));
 
       const writeNode: WriteNoteNode = {
         type: "write-note",
@@ -443,7 +469,7 @@ describe("WriteNoteHandler", () => {
 
       await handler.execute(writeNode, context, new AgentMessageQueue(), mockStorage, mockEngine);
 
-      const savedValue = (mockNoteService.save as jest.Mock).mock.calls[0][1].value;
+      const savedValue = mockNoteService.save.mock.calls[0][1].value;
       const parsed = JSON.parse(savedValue);
       expect(parsed).toEqual(["alpha", "beta", "gamma"]);
     });
@@ -453,8 +479,8 @@ describe("WriteNoteHandler", () => {
         message: "Hello, world!",
       });
 
-      (mockNoteService.exists as jest.Mock).mockResolvedValue(false);
-      (mockNoteService.save as jest.Mock).mockResolvedValue({ version: 1 });
+      mockNoteService.exists.mockResolvedValue(false);
+      mockNoteService.save.mockResolvedValue(saved(1));
 
       const writeNode: WriteNoteNode = {
         type: "write-note",
@@ -466,7 +492,7 @@ describe("WriteNoteHandler", () => {
 
       await handler.execute(writeNode, context, new AgentMessageQueue(), mockStorage, mockEngine);
 
-      const savedValue = (mockNoteService.save as jest.Mock).mock.calls[0][1].value;
+      const savedValue = mockNoteService.save.mock.calls[0][1].value;
       expect(savedValue).toBe("Hello, world!");
     });
 
@@ -475,8 +501,8 @@ describe("WriteNoteHandler", () => {
         count: 42,
       });
 
-      (mockNoteService.exists as jest.Mock).mockResolvedValue(false);
-      (mockNoteService.save as jest.Mock).mockResolvedValue({ version: 1 });
+      mockNoteService.exists.mockResolvedValue(false);
+      mockNoteService.save.mockResolvedValue(saved(1));
 
       const writeNode: WriteNoteNode = {
         type: "write-note",
@@ -488,7 +514,7 @@ describe("WriteNoteHandler", () => {
 
       await handler.execute(writeNode, context, new AgentMessageQueue(), mockStorage, mockEngine);
 
-      const savedValue = (mockNoteService.save as jest.Mock).mock.calls[0][1].value;
+      const savedValue = mockNoteService.save.mock.calls[0][1].value;
       expect(savedValue).toBe("42");
     });
 
@@ -497,8 +523,8 @@ describe("WriteNoteHandler", () => {
         flag: true,
       });
 
-      (mockNoteService.exists as jest.Mock).mockResolvedValue(false);
-      (mockNoteService.save as jest.Mock).mockResolvedValue({ version: 1 });
+      mockNoteService.exists.mockResolvedValue(false);
+      mockNoteService.save.mockResolvedValue(saved(1));
 
       const writeNode: WriteNoteNode = {
         type: "write-note",
@@ -510,7 +536,7 @@ describe("WriteNoteHandler", () => {
 
       await handler.execute(writeNode, context, new AgentMessageQueue(), mockStorage, mockEngine);
 
-      const savedValue = (mockNoteService.save as jest.Mock).mock.calls[0][1].value;
+      const savedValue = mockNoteService.save.mock.calls[0][1].value;
       expect(savedValue).toBe("true");
     });
 
@@ -519,8 +545,8 @@ describe("WriteNoteHandler", () => {
         name: "TestProject",
       });
 
-      (mockNoteService.exists as jest.Mock).mockResolvedValue(false);
-      (mockNoteService.save as jest.Mock).mockResolvedValue({ version: 1 });
+      mockNoteService.exists.mockResolvedValue(false);
+      mockNoteService.save.mockResolvedValue(saved(1));
 
       const writeNode: WriteNoteNode = {
         type: "write-note",
@@ -532,7 +558,7 @@ describe("WriteNoteHandler", () => {
 
       await handler.execute(writeNode, context, new AgentMessageQueue(), mockStorage, mockEngine);
 
-      const savedValue = (mockNoteService.save as jest.Mock).mock.calls[0][1].value;
+      const savedValue = mockNoteService.save.mock.calls[0][1].value;
       expect(savedValue).toBe("Project: TestProject is great");
     });
 
@@ -545,8 +571,8 @@ describe("WriteNoteHandler", () => {
         },
       });
 
-      (mockNoteService.exists as jest.Mock).mockResolvedValue(false);
-      (mockNoteService.save as jest.Mock).mockResolvedValue({ version: 1 });
+      mockNoteService.exists.mockResolvedValue(false);
+      mockNoteService.save.mockResolvedValue(saved(1));
 
       const writeNode: WriteNoteNode = {
         type: "write-note",
@@ -558,7 +584,7 @@ describe("WriteNoteHandler", () => {
 
       await handler.execute(writeNode, context, new AgentMessageQueue(), mockStorage, mockEngine);
 
-      const savedValue = (mockNoteService.save as jest.Mock).mock.calls[0][1].value;
+      const savedValue = mockNoteService.save.mock.calls[0][1].value;
       const parsed = JSON.parse(savedValue);
       expect(parsed).toEqual({ value: [1, 2, 3] });
     });
@@ -568,12 +594,12 @@ describe("WriteNoteHandler", () => {
 describe("UpsertNoteHandler", () => {
   let mockNoteService: ReturnType<typeof createMockNoteService>;
   let handler: UpsertNoteHandler;
-  const mockStorage = {} as IGraphStorage;
+  const mockStorage = {} as IDataRepository;
   const mockEngine = {} as IGraphExecutionEngine;
 
   beforeEach(() => {
     mockNoteService = createMockNoteService();
-    handler = new UpsertNoteHandler(mockNoteService);
+    handler = new UpsertNoteHandler(asNoteService(mockNoteService));
     jest.clearAllMocks();
   });
 
@@ -584,8 +610,8 @@ describe("UpsertNoteHandler", () => {
   test("should create new note when not found", async () => {
     const context = TestUtils.createTestContext({});
 
-    (mockNoteService.list as jest.Mock).mockResolvedValue({ notes: [], total: 0 });
-    (mockNoteService.save as jest.Mock).mockResolvedValue({ version: 1 });
+    mockNoteService.list.mockResolvedValue({ notes: [], total: 0, allTags: [] });
+    mockNoteService.save.mockResolvedValue(saved(1));
 
     const upsertNode: UpsertNoteNode = {
       type: "upsert-note",
@@ -622,11 +648,12 @@ describe("UpsertNoteHandler", () => {
   test("should update existing note when found", async () => {
     const context = TestUtils.createTestContext({});
 
-    (mockNoteService.list as jest.Mock).mockResolvedValue({
-      notes: [{ key: "existing-settings" }],
+    mockNoteService.list.mockResolvedValue({
+      notes: [noteInfo("existing-settings")],
       total: 1,
+      allTags: [],
     });
-    (mockNoteService.save as jest.Mock).mockResolvedValue({ version: 5 });
+    mockNoteService.save.mockResolvedValue(saved(5));
 
     const upsertNode: UpsertNoteNode = {
       type: "upsert-note",
@@ -665,8 +692,8 @@ describe("UpsertNoteHandler", () => {
       settingsContent: "project config data",
     });
 
-    (mockNoteService.list as jest.Mock).mockResolvedValue({ notes: [], total: 0 });
-    (mockNoteService.save as jest.Mock).mockResolvedValue({ version: 1 });
+    mockNoteService.list.mockResolvedValue({ notes: [], total: 0, allTags: [] });
+    mockNoteService.save.mockResolvedValue(saved(1));
 
     const upsertNode: UpsertNoteNode = {
       type: "upsert-note",
@@ -692,8 +719,8 @@ describe("UpsertNoteHandler", () => {
   test("should store result in outputVariable", async () => {
     const context = TestUtils.createTestContext({});
 
-    (mockNoteService.list as jest.Mock).mockResolvedValue({ notes: [], total: 0 });
-    (mockNoteService.save as jest.Mock).mockResolvedValue({ version: 1 });
+    mockNoteService.list.mockResolvedValue({ notes: [], total: 0, allTags: [] });
+    mockNoteService.save.mockResolvedValue(saved(1));
 
     const upsertNode: UpsertNoteNode = {
       type: "upsert-note",
@@ -720,7 +747,7 @@ describe("UpsertNoteHandler", () => {
   test("should use error connection on failure", async () => {
     const context = TestUtils.createTestContext({});
 
-    (mockNoteService.list as jest.Mock).mockRejectedValue(new Error("Search failed"));
+    mockNoteService.list.mockRejectedValue(new Error("Search failed"));
 
     const upsertNode: UpsertNoteNode = {
       type: "upsert-note",
@@ -746,7 +773,7 @@ describe("UpsertNoteHandler", () => {
   test("should throw when no error connection and failure", async () => {
     const context = TestUtils.createTestContext({});
 
-    (mockNoteService.list as jest.Mock).mockRejectedValue(new Error("Critical failure"));
+    mockNoteService.list.mockRejectedValue(new Error("Critical failure"));
 
     const upsertNode: UpsertNoteNode = {
       type: "upsert-note",
@@ -793,8 +820,8 @@ describe("UpsertNoteHandler", () => {
         },
       });
 
-      (mockNoteService.list as jest.Mock).mockResolvedValue({ notes: [], total: 0 });
-      (mockNoteService.save as jest.Mock).mockResolvedValue({ version: 1 });
+      mockNoteService.list.mockResolvedValue({ notes: [], total: 0, allTags: [] });
+      mockNoteService.save.mockResolvedValue(saved(1));
 
       const upsertNode: UpsertNoteNode = {
         type: "upsert-note",
@@ -806,7 +833,7 @@ describe("UpsertNoteHandler", () => {
 
       await handler.execute(upsertNode, context, new AgentMessageQueue(), mockStorage, mockEngine);
 
-      const savedValue = (mockNoteService.save as jest.Mock).mock.calls[0][1].value;
+      const savedValue = mockNoteService.save.mock.calls[0][1].value;
       const parsed = JSON.parse(savedValue);
       expect(parsed).toEqual({
         linesOfCode: 15000,
@@ -820,8 +847,8 @@ describe("UpsertNoteHandler", () => {
         tags: ["alpha", "beta", "gamma"],
       });
 
-      (mockNoteService.list as jest.Mock).mockResolvedValue({ notes: [], total: 0 });
-      (mockNoteService.save as jest.Mock).mockResolvedValue({ version: 1 });
+      mockNoteService.list.mockResolvedValue({ notes: [], total: 0, allTags: [] });
+      mockNoteService.save.mockResolvedValue(saved(1));
 
       const upsertNode: UpsertNoteNode = {
         type: "upsert-note",
@@ -833,7 +860,7 @@ describe("UpsertNoteHandler", () => {
 
       await handler.execute(upsertNode, context, new AgentMessageQueue(), mockStorage, mockEngine);
 
-      const savedValue = (mockNoteService.save as jest.Mock).mock.calls[0][1].value;
+      const savedValue = mockNoteService.save.mock.calls[0][1].value;
       const parsed = JSON.parse(savedValue);
       expect(parsed).toEqual(["alpha", "beta", "gamma"]);
     });
@@ -843,8 +870,8 @@ describe("UpsertNoteHandler", () => {
         content: "plain text content",
       });
 
-      (mockNoteService.list as jest.Mock).mockResolvedValue({ notes: [], total: 0 });
-      (mockNoteService.save as jest.Mock).mockResolvedValue({ version: 1 });
+      mockNoteService.list.mockResolvedValue({ notes: [], total: 0, allTags: [] });
+      mockNoteService.save.mockResolvedValue(saved(1));
 
       const upsertNode: UpsertNoteNode = {
         type: "upsert-note",
@@ -856,7 +883,7 @@ describe("UpsertNoteHandler", () => {
 
       await handler.execute(upsertNode, context, new AgentMessageQueue(), mockStorage, mockEngine);
 
-      const savedValue = (mockNoteService.save as jest.Mock).mock.calls[0][1].value;
+      const savedValue = mockNoteService.save.mock.calls[0][1].value;
       expect(savedValue).toBe("plain text content");
     });
   });

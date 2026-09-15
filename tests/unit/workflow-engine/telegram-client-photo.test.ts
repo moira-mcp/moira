@@ -3,7 +3,9 @@ import { TelegramClient } from "@mcp-moira/workflow-engine";
 import { ServiceLogger } from "@mcp-moira/shared/logging/logger";
 
 describe("TelegramClient photo transport", () => {
-  afterEach(() => jest.restoreAllMocks());
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
 
   test("sends a real PNG multipart body with caption and options", async () => {
     let captured: FormData | undefined;

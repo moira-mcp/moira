@@ -5,6 +5,8 @@ import {
   InMemoryRepository,
   MaterializeHandler,
   stepMutationFingerprint,
+  continuationFacts,
+  continuationSurfaceDigest,
   UniversalGraphExecutor,
   UserNotificationHandler,
   workflowGraphDigest,
@@ -12,6 +14,7 @@ import {
 } from "@mcp-moira/workflow-engine";
 import {
   activeExecutionsGauge,
+  canonicalJson,
   executionMutationAttemptsTotal,
   metadataRevision,
   metricsRegistry,
@@ -165,8 +168,7 @@ describe("replay-safe workflow step attempts", () => {
       executionRevision: (await other.repository.getExecution(other.executionId))!.revision,
       nodeId: "first",
       workflowId: other.graph.id!,
-      workflowVersion: other.graph.metadata.version,
-      workflowDigest: workflowGraphDigest(other.graph),
+      continuationDigest: continuationSurfaceDigest(other.graph, "first"),
       inputFingerprint: stepMutationFingerprint({}, undefined),
       ownerId: "agent-host",
       now: Date.now(),
@@ -214,6 +216,42 @@ describe("replay-safe workflow step attempts", () => {
     });
     expect(next).toContain("Second empty response");
     expect((await repository.getExecution(executionId))?.revision).toBe(execution.revision + 1);
+  });
+
+  test("a revision-stale presentation survives a metadata-only redeploy and still continues", async () => {
+    // The refresh path that rebinds a revision-only stale presentation compares the binding itself,
+    // and its verdict is observable only when the revisions differ. This is therefore the case that
+    // distinguishes a narrowed refresh path from one still comparing the whole definition: a
+    // presentation left behind at an older revision of the same node, then a benign redeploy that
+    // changes only catalog metadata, then continuation.
+    const repository = new InMemoryRepository();
+    const graph = twoEmptyStepsGraph("replay-revision-stale-metadata-only");
+    await repository.saveWorkflow(graph, USER_ID);
+    const executor = new UniversalGraphExecutor(repository);
+    const executionId = await executor.startWorkflow(graph, undefined, USER_ID);
+    await executor.executeStep(executionId);
+    const execution = (await repository.getExecution(executionId))!;
+    const coordinator = new ExecutionMutationCoordinator(repository);
+    const staleAttemptId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+    const stale = coordinator.newPresentedAttempt(execution, graph, null, staleAttemptId);
+    stale.executionRevision -= 1;
+    await repository.createPresentedExecutionAttempt(stale);
+
+    await repository.saveWorkflow(
+      { ...graph, metadata: { ...graph.metadata, version: "9.4.0", tags: ["reorganised"] } },
+      USER_ID,
+    );
+
+    const represented = await executor.presentCurrentStep(executionId);
+    expect(attemptId(represented!)).toBe(staleAttemptId);
+    expect((await repository.getExecutionAttempt(staleAttemptId))?.executionRevision).toBe(
+      execution.revision,
+    );
+    const next = await executor.executeStep(executionId, {}, undefined, {
+      userId: USER_ID,
+      attemptId: staleAttemptId,
+    });
+    expect(next).toContain("Second empty response");
   });
 
   test("non-step execution mutations preserve the current attempt and step revision", async () => {
@@ -473,7 +511,7 @@ describe("replay-safe workflow step attempts", () => {
     expect(accepted).toContain("Second empty response");
   });
 
-  test("a changed workflow invalidates its presented attempt before handler work", async () => {
+  test("a change to the paused node invalidates its presented attempt before handler work", async () => {
     const { repository, executor, graph, executionId, first } =
       await setup("replay-workflow-change");
     const graphEngine = (
@@ -488,7 +526,12 @@ describe("replay-safe workflow step attempts", () => {
       return original(...args);
     };
     await repository.saveWorkflow(
-      { ...graph, metadata: { ...graph.metadata, description: "changed after presentation" } },
+      {
+        ...graph,
+        nodes: graph.nodes.map((node) =>
+          node.id === "first" ? { ...node, directive: "A different first directive" } : node,
+        ),
+      },
       USER_ID,
     );
 
@@ -501,8 +544,56 @@ describe("replay-safe workflow step attempts", () => {
     expect(invocations).toBe(0);
   });
 
-  test("repository claims reject stale revisions, nodes, and workflow versions without mutation", async () => {
-    for (const staleBinding of ["revision", "node", "workflow-version"] as const) {
+  test("a metadata-only redeploy leaves the presented attempt usable", async () => {
+    const { repository, executor, graph, executionId, first } = await setup(
+      "replay-workflow-metadata-only",
+    );
+    await repository.saveWorkflow(
+      {
+        ...graph,
+        metadata: {
+          ...graph.metadata,
+          version: "9.4.0",
+          tags: ["reorganised"],
+          description: "changed after presentation",
+        },
+        systemReminder: "A reminder added after the run paused",
+      },
+      USER_ID,
+    );
+
+    const advanced = await executor.executeStep(executionId, {}, undefined, {
+      userId: USER_ID,
+      attemptId: attemptId(first),
+    });
+
+    expect(advanced).toContain("Second empty response");
+  });
+
+  test("a change confined to a node the run is not paused on leaves the presented attempt usable", async () => {
+    const { repository, executor, graph, executionId, first } = await setup(
+      "replay-workflow-other-node",
+    );
+    await repository.saveWorkflow(
+      {
+        ...graph,
+        nodes: graph.nodes.map((node) =>
+          node.id === "second" ? { ...node, directive: "A rewritten second directive" } : node,
+        ),
+      },
+      USER_ID,
+    );
+
+    const advanced = await executor.executeStep(executionId, {}, undefined, {
+      userId: USER_ID,
+      attemptId: attemptId(first),
+    });
+
+    expect(advanced).toContain("A rewritten second directive");
+  });
+
+  test("repository claims reject a stale revision, node, or continuation surface without mutation", async () => {
+    for (const staleBinding of ["revision", "node", "continuation-surface"] as const) {
       const { repository, graph, executionId, first } = await setup(`replay-stale-${staleBinding}`);
       const execution = (await repository.getExecution(executionId))!;
       const currentAttempt = attemptId(first);
@@ -515,8 +606,18 @@ describe("replay-safe workflow step attempts", () => {
           staleBinding === "revision" ? execution.revision + 1 : execution.revision,
         nodeId: staleBinding === "node" ? "second" : execution.currentNodeId!,
         workflowId: execution.workflowId,
-        workflowVersion: staleBinding === "workflow-version" ? "2.0.0" : graph.metadata.version,
-        workflowDigest: workflowGraphDigest(graph),
+        continuationDigest:
+          staleBinding === "continuation-surface"
+            ? continuationSurfaceDigest(
+                {
+                  ...graph,
+                  nodes: graph.nodes.map((node) =>
+                    node.id === "first" ? { ...node, directive: "A different directive" } : node,
+                  ),
+                },
+                "first",
+              )
+            : continuationSurfaceDigest(graph, "first"),
         inputFingerprint: stepMutationFingerprint({}),
         ownerId: `stale-${staleBinding}-owner`,
         now: Date.now(),
@@ -528,11 +629,37 @@ describe("replay-safe workflow step attempts", () => {
     }
   });
 
+  test("a repository claim accepts a definition whose version changed but whose continuation surface did not", async () => {
+    const { repository, graph, executionId, first } = await setup("replay-version-only-claim");
+    const execution = (await repository.getExecution(executionId))!;
+    const bumped: WorkflowGraph = {
+      ...graph,
+      metadata: { ...graph.metadata, version: "2.0.0", tags: ["reorganised"] },
+    };
+    expect(workflowGraphDigest(bumped)).not.toBe(workflowGraphDigest(graph));
+
+    const claim = await repository.claimExecutionAttempt({
+      attemptId: attemptId(first),
+      userId: USER_ID,
+      executionId,
+      executionRevision: execution.revision,
+      nodeId: execution.currentNodeId!,
+      workflowId: execution.workflowId,
+      continuationDigest: continuationSurfaceDigest(bumped, execution.currentNodeId!),
+      inputFingerprint: stepMutationFingerprint({}),
+      ownerId: "version-only-owner",
+      now: Date.now(),
+      leaseMs: 30_000,
+    });
+
+    expect(claim.kind).toBe("claimed");
+  });
+
   test("reconciliation fences only an expired lease and prevents its old owner from committing", async () => {
     const { repository, graph, executionId, first } = await setup("replay-fencing");
     const execution = (await repository.getExecution(executionId))!;
     const currentAttempt = attemptId(first);
-    const digest = (await repository.getExecutionAttempt(currentAttempt))!.workflowDigest;
+    const digest = (await repository.getExecutionAttempt(currentAttempt))!.continuationDigest!;
     const claim = await repository.claimExecutionAttempt({
       attemptId: currentAttempt,
       userId: USER_ID,
@@ -540,8 +667,7 @@ describe("replay-safe workflow step attempts", () => {
       executionRevision: execution.revision,
       nodeId: execution.currentNodeId!,
       workflowId: execution.workflowId,
-      workflowVersion: graph.metadata.version,
-      workflowDigest: digest,
+      continuationDigest: digest,
       inputFingerprint: "fingerprint",
       ownerId: "old-owner",
       now: 1_000,
@@ -574,7 +700,7 @@ describe("replay-safe workflow step attempts", () => {
     const { repository, graph, executionId, first } = await setup("replay-live-owner");
     const execution = (await repository.getExecution(executionId))!;
     const currentAttempt = attemptId(first);
-    const digest = (await repository.getExecutionAttempt(currentAttempt))!.workflowDigest;
+    const digest = (await repository.getExecutionAttempt(currentAttempt))!.continuationDigest!;
     const claim = await repository.claimExecutionAttempt({
       attemptId: currentAttempt,
       userId: USER_ID,
@@ -582,8 +708,7 @@ describe("replay-safe workflow step attempts", () => {
       executionRevision: execution.revision,
       nodeId: execution.currentNodeId!,
       workflowId: execution.workflowId,
-      workflowVersion: graph.metadata.version,
-      workflowDigest: digest,
+      continuationDigest: digest,
       inputFingerprint: "fingerprint",
       ownerId: "live-owner",
       now: 1_000,
@@ -739,7 +864,7 @@ describe("replay-safe workflow step attempts", () => {
     const { repository, graph, executionId, first } = await setup("replay-processing-timeout");
     const execution = (await repository.getExecution(executionId))!;
     const currentAttempt = attemptId(first);
-    const digest = workflowGraphDigest(graph);
+    const digest = continuationSurfaceDigest(graph, "first");
     const claim = await repository.claimExecutionAttempt({
       attemptId: currentAttempt,
       userId: USER_ID,
@@ -747,8 +872,7 @@ describe("replay-safe workflow step attempts", () => {
       executionRevision: execution.revision,
       nodeId: execution.currentNodeId!,
       workflowId: execution.workflowId,
-      workflowVersion: graph.metadata.version,
-      workflowDigest: digest,
+      continuationDigest: digest,
       inputFingerprint: stepMutationFingerprint({}),
       ownerId: "busy-owner",
       now: Date.now(),
@@ -796,8 +920,7 @@ describe("replay-safe workflow step attempts", () => {
           executionRevision: execution.revision,
           nodeId: execution.currentNodeId!,
           workflowId: execution.workflowId,
-          workflowVersion: graph.metadata.version,
-          workflowDigest: binding.workflowDigest,
+          continuationDigest: binding.continuationDigest!,
           inputFingerprint: `fingerprint-${index}`,
           ownerId: `owner-${index}`,
           now,
@@ -837,7 +960,6 @@ describe("replay-safe workflow step attempts", () => {
       const maintenance = new ExecutionAttemptMaintenance(repository, {
         now: () => now,
         reconcileIntervalMs: 10,
-        startWaitMs: 60_000,
         cleanupIntervalMs: 1_000,
       });
       stop = await maintenance.start();
@@ -1082,8 +1204,7 @@ describe("replay-safe workflow step attempts", () => {
       executionRevision: execution.revision,
       nodeId: execution.currentNodeId!,
       workflowId: execution.workflowId,
-      workflowVersion: graph.metadata.version,
-      workflowDigest: workflowGraphDigest(graph),
+      continuationDigest: continuationSurfaceDigest(graph, execution.currentNodeId!),
       inputFingerprint: stepMutationFingerprint({}),
       ownerId: "memory-owner",
       now: Date.now(),
@@ -1111,6 +1232,8 @@ describe("replay-safe workflow step attempts", () => {
           workflowId: execution.workflowId,
           workflowVersion: graph.metadata.version,
           workflowDigest: workflowGraphDigest(graph),
+          continuationDigest: continuationSurfaceDigest(graph, "second"),
+          continuationFacts: canonicalJson(continuationFacts(graph, "second")),
           response: "collision",
           createdAt: Date.now(),
         },
@@ -1132,8 +1255,7 @@ describe("replay-safe workflow step attempts", () => {
       executionRevision: execution.revision,
       nodeId: execution.currentNodeId!,
       workflowId: execution.workflowId,
-      workflowVersion: graph.metadata.version,
-      workflowDigest: workflowGraphDigest(graph),
+      continuationDigest: continuationSurfaceDigest(graph, execution.currentNodeId!),
       inputFingerprint: claimedFingerprint,
       ownerId: "memory-owner",
       now: Date.now(),
@@ -1162,6 +1284,8 @@ describe("replay-safe workflow step attempts", () => {
           workflowId: execution.workflowId,
           workflowVersion: graph.metadata.version,
           workflowDigest: workflowGraphDigest(graph),
+          continuationDigest: continuationSurfaceDigest(graph, "second"),
+          continuationFacts: canonicalJson(continuationFacts(graph, "second")),
           response: "must not exist",
           createdAt: Date.now(),
         },

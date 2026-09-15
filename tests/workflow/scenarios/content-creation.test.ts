@@ -14,7 +14,7 @@ import {
 } from "../../helpers/scenario-runner.js";
 
 const entry = findCatalogEntryBySlug("content-creation")!;
-const workflow = (): WorkflowGraph => structuredClone(entry.graph) as WorkflowGraph;
+const workflow = (): WorkflowGraph => structuredClone(entry.graph) as unknown as WorkflowGraph;
 const sentinel = "No active revision request.";
 const changed = { repair_outcome: "changed", changed_knowledge: "The reproduced class changed." };
 const completion = {

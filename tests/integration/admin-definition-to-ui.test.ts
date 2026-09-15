@@ -80,6 +80,7 @@ describe("Admin Definition to UI Integration", () => {
       required: false,
       validation: null,
       adminOnly: false,
+      protected: false,
     });
 
     // Step 2: Verify definition exists in definitions list
@@ -133,6 +134,7 @@ describe("Admin Definition to UI Integration", () => {
       required: false,
       validation: null,
       adminOnly: false,
+      protected: false,
     });
 
     // Both users can see definition

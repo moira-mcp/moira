@@ -3,6 +3,8 @@
  */
 
 import { describe, it, expect } from "@jest/globals";
+// The helper is plain JavaScript with JSDoc types; the shape it returns is declared here so
+// the assertions below are checked rather than inferred as `any`.
 import { detectTestEnv } from "../../scripts/detect-test-env.js";
 
 describe("detect-test-env", () => {

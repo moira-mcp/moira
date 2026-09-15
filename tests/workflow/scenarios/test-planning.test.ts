@@ -40,7 +40,7 @@ type PlanContract = { risks: PlanRisk[]; cases: PlanCase[] };
 const catalogEntry = findCatalogEntryBySlug("test-planning")!;
 
 function loadWorkflow(): WorkflowGraph {
-  return structuredClone(catalogEntry.graph) as WorkflowGraph;
+  return structuredClone(catalogEntry.graph) as unknown as WorkflowGraph;
 }
 
 function node(workflow: WorkflowGraph, id: string): any {

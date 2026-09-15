@@ -271,7 +271,7 @@ describe("Error Handling Flow - Log Once Validation", () => {
       expect(response.status).toBe(404);
 
       // Verify error response structure
-      const json = (await response.json()) as { success: boolean; error: string };
+      const json = (await response.json()) as { success: boolean; error: { message: string } };
       expect(json.success).toBe(false);
       expect(json.error.message).toContain("not found");
     });

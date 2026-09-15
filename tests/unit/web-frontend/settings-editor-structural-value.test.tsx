@@ -13,7 +13,7 @@
 import React from "react";
 import { afterEach, beforeAll, beforeEach, describe, expect, jest, test } from "@jest/globals";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import "@testing-library/jest-dom";
+import "@testing-library/jest-dom/jest-globals";
 import { I18nextProvider } from "react-i18next";
 import type { SettingDefinition } from "../../../packages/web-frontend/src/components/settings/SettingsEditor";
 import i18n from "../../../packages/web-frontend/src/i18n";

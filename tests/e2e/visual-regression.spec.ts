@@ -4,8 +4,8 @@
  * to establish baseline for visual regression detection.
  */
 
-import { test, expect } from "./fixtures";
-import { loginAsAdmin } from "./helpers/auth-helper";
+import { test, expect } from "./fixtures.js";
+import { loginAsAdmin } from "./helpers/auth-helper.js";
 import { getTestBaseUrl } from "../utils/test-config.js";
 
 const BASE_URL = getTestBaseUrl();

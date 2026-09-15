@@ -548,7 +548,8 @@ export async function createAuthenticatedMCPClient(
   }
 
   // Step 1+2+3: Register client, sign in, get auth code (with retry on race conditions)
-  let authCode: string;
+  // Assigned inside the retry loop below; the loop either assigns it or throws.
+  let authCode = "";
   let clientData: { client_id: string; client_secret: string } | null = null;
   const maxOAuthAttempts = 3;
   for (let oauthAttempt = 1; oauthAttempt <= maxOAuthAttempts; oauthAttempt++) {

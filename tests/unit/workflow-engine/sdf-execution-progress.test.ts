@@ -1,15 +1,12 @@
 import { describe, expect, test } from "@jest/globals";
-import { findSystemCatalogEntry } from "../../../packages/shared/src/services/workflow-catalog.js";
+import { systemCatalogGraph } from "../../helpers/catalog-graphs.js";
 import {
   projectExecutionRun,
   type ExecutionVisit,
   type WorkflowExecution,
-  type WorkflowGraph,
 } from "@mcp-moira/workflow-engine";
 
-const workflow = structuredClone(
-  findSystemCatalogEntry("software-development-flow", "public")!.graph,
-) as WorkflowGraph;
+const workflow = systemCatalogGraph("software-development-flow", "public");
 
 const progressNodeIds = [
   "intake",
@@ -91,7 +88,6 @@ function execution(
       executionId: "sdf-progress-contract",
       workflowId: workflow.id ?? "software-development-flow",
       userId: "test-user",
-      currentNodeId,
     },
     status,
     revision: 12,

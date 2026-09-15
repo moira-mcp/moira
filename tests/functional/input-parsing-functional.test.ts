@@ -6,7 +6,7 @@
 import { describe, test, expect } from "@jest/globals";
 
 // Import actual parseInputData function from production code
-import { parseInputData } from "@mcp-moira/mcp-server";
+import { parseInputData } from "../../packages/mcp-server/src/tools/execute-step.js";
 
 describe("Input Parsing Functional Tests", () => {
   test("parses null input to empty object", () => {

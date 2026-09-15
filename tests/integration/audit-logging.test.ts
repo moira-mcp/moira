@@ -16,9 +16,10 @@ describe("Audit Logging Integration", () => {
   });
 
   test("workflow:create event logged", async () => {
-    const beforeCount = (await repository.listAuditLogs({ action: AuditAction.WORKFLOW_CREATE }))
-      .length;
-
+    // Asserted as the newest entry rather than as a count: an unlimited list is capped by the
+    // repository's default page size, so once the database holds that many of one action the count
+    // stops growing and the assertion can never pass again. The neighbours below already read the
+    // newest entry for the same reason.
     await logAuditEventDirect(repository, {
       userId: testUserId,
       action: AuditAction.WORKFLOW_CREATE,
@@ -27,10 +28,11 @@ describe("Audit Logging Integration", () => {
       metadata: { name: "Test Workflow", source: "integration-test" },
     });
 
-    const afterCount = (await repository.listAuditLogs({ action: AuditAction.WORKFLOW_CREATE }))
-      .length;
+    const logs = await repository.listAuditLogs({ action: AuditAction.WORKFLOW_CREATE, limit: 1 });
 
-    expect(afterCount).toBeGreaterThanOrEqual(beforeCount + 1);
+    expect(logs.length).toBeGreaterThan(0);
+    expect(logs[0].action).toBe(AuditAction.WORKFLOW_CREATE);
+    expect(logs[0].resourceId).toBe("test-wf-123");
   });
 
   test("workflow:delete event logged", async () => {

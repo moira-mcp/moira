@@ -9,13 +9,12 @@ import { I18nextProvider } from "react-i18next";
 import React from "react";
 import i18n from "../../../packages/web-frontend/src/i18n";
 import { runBlocks } from "../../../packages/web-frontend/src/components/run/model.js";
-import type { ExecutionProgress } from "../../../packages/web-frontend/src/types/workflow-types.js";
-import { findCatalogEntryBySlug } from "../../../packages/shared/src/services/workflow-catalog.js";
+import type { ExecutionProgress } from "../../../packages/web-frontend/src/components/run/model.js";
+import { catalogGraph } from "../../helpers/catalog-graphs.js";
 import { deriveProcess } from "../../../packages/workflow-engine/src/utils/process-derivation.js";
-import type { WorkflowGraph } from "../../../packages/workflow-engine/src/types/base-types.js";
 
 function projectionOf(slug: string): ExecutionProgress {
-  const graph = findCatalogEntryBySlug(slug)!.graph as WorkflowGraph;
+  const graph = catalogGraph(slug);
   const process = deriveProcess(graph)!;
   return {
     taskTitle: graph.metadata.name,
@@ -91,6 +90,9 @@ describe("lanes view on a phone", () => {
         <LanesView
           progress={progress}
           blocks={blocks}
+          route={[]}
+          cursor={null}
+          onSetCursor={() => {}}
           selectedBlockId={null}
           onSelectBlock={() => {}}
         />

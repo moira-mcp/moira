@@ -1,10 +1,10 @@
 import { describe, expect, test } from "@jest/globals";
 import type { WorkflowGraph } from "@mcp-moira/workflow-engine";
-import { findSystemCatalogEntry } from "../../../packages/shared/src/services/workflow-catalog.js";
 import { renderWorkflowDerivation } from "../../../packages/workflow-cli/src/workflow-derive.js";
+import { systemCatalogGraph } from "../../helpers/catalog-graphs.js";
 
 function bundled(slug: string): WorkflowGraph {
-  return structuredClone(findSystemCatalogEntry(slug, "public")!.graph) as WorkflowGraph;
+  return systemCatalogGraph(slug, "public");
 }
 
 describe("moira-workflow derive", () => {

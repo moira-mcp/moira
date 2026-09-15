@@ -18,7 +18,7 @@ const catalogEntry = findCatalogEntryBySlug("user-onboarding")!;
 const childId = "11111111-1111-4111-8111-111111111111";
 
 function loadWorkflow(): WorkflowGraph {
-  return structuredClone(catalogEntry.graph) as WorkflowGraph;
+  return structuredClone(catalogEntry.graph) as unknown as WorkflowGraph;
 }
 
 function node(workflow: WorkflowGraph, id: string): any {

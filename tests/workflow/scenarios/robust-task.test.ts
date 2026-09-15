@@ -1,6 +1,5 @@
 /** Observable scenarios for the cause-aware Robust Task. */
 
-import { findCatalogEntryBySlug } from "@mcp-moira/shared";
 import {
   AgentMessageQueue,
   GraphExecutionEngine,
@@ -12,9 +11,10 @@ import {
 } from "@mcp-moira/workflow-engine";
 import { calculateCoverage } from "../../helpers/coverage-calculator.js";
 import { runScenario, type MockInput, type TestScenario } from "../../helpers/scenario-runner.js";
+import { catalogGraph } from "../../helpers/catalog-graphs.js";
 
 function loadWorkflow(): WorkflowGraph {
-  return structuredClone(findCatalogEntryBySlug("robust-task")!.graph) as WorkflowGraph;
+  return catalogGraph("robust-task");
 }
 
 function node(workflow: WorkflowGraph, id: string): any {
@@ -579,7 +579,7 @@ describe("Robust Task cause-aware contract", () => {
       variables: { workspace_path: "./moira-ws/robust-task-example-20260821-2300/" },
       nodeStates: {},
       executionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
-      workflowId: workflow.id,
+      workflowId: workflow.id ?? "workflow",
       userId: "workflow-test-user",
     };
     const handler = new MaterializeHandler(
@@ -597,7 +597,7 @@ describe("Robust Task cause-aware contract", () => {
       workflow.variableRegistry,
     );
     expect(presented.action).toBe("pause");
-    expect(presented.nextNodeId).toBeUndefined();
+    expect(presented.outputPath).toBeUndefined();
     expect(queue.peekNext()).toMatchObject({
       nodeId: "materialize-workflow-guide",
       completionCondition:
@@ -619,7 +619,7 @@ describe("Robust Task cause-aware contract", () => {
       workflow.variableRegistry,
     );
     expect(rePresentedAfterClientFailure.action).toBe("pause");
-    expect(rePresentedAfterClientFailure.nextNodeId).toBeUndefined();
+    expect(rePresentedAfterClientFailure.outputPath).toBeUndefined();
     expect(retryQueue.peekNext()).toMatchObject({
       nodeId: "materialize-workflow-guide",
       completionCondition:

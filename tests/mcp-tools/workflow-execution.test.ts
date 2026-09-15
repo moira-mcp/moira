@@ -195,8 +195,9 @@ describe("MCP Workflow Execution Tools E2E", () => {
     });
 
     expect(result.isError).toBe(true);
-    expect(result.content[0]).toMatchObject({ type: "text" });
-    const text = (result.content[0] as { type: "text"; text: string }).text;
+    const [block] = result.content as Array<{ type: string; text: string }>;
+    expect(block).toMatchObject({ type: "text" });
+    const text = block.text;
     expect(text.toLowerCase()).toMatch(/not found|expired|process/);
   });
 

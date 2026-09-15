@@ -8,7 +8,6 @@
  * enabling both success and error path testing without a real database.
  */
 
-import { findCatalogEntryBySlug } from "@mcp-moira/shared";
 import {
   runScenario,
   type TestScenario,
@@ -17,10 +16,10 @@ import {
 import { calculateCoverage, formatCoverageReport } from "../../helpers/coverage-calculator.js";
 import { GraphValidator, detectCycles, ReadNoteHandler } from "@mcp-moira/workflow-engine";
 import type { WorkflowGraph } from "@mcp-moira/workflow-engine";
+import { catalogGraph } from "../../helpers/catalog-graphs.js";
 
 function loadWorkflow(): WorkflowGraph {
-  return findCatalogEntryBySlug("notes-demo-metrics-reporter", undefined, "workflows/examples")!
-    .graph as WorkflowGraph;
+  return catalogGraph("notes-demo-metrics-reporter", { baseDir: "workflows/examples" });
 }
 
 /** Create a mock NoteService that returns metrics data */
@@ -94,7 +93,10 @@ describe("notes-demo-metrics-reporter Scenarios", () => {
   describe("Structural Validation", () => {
     it("should have valid structure", async () => {
       const validator = new GraphValidator();
-      const withId = { id: `moira/${workflow.slug || "notes-demo-metrics-reporter"}`, ...workflow };
+      const withId = {
+        id: `moira/${(workflow as { slug?: string }).slug || "notes-demo-metrics-reporter"}`,
+        ...workflow,
+      };
       const validation = await validator.validateWorkflow(withId);
       expect(validation.valid).toBe(true);
       expect(validation.errors).toHaveLength(0);

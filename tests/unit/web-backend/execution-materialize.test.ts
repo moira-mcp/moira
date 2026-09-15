@@ -20,6 +20,9 @@ const grant: WorkflowToken = {
   nodeId: "materialize",
   userId: "user-1",
   type: "materialize",
+  workflowVersion: null,
+  executionRevision: null,
+  optionsJson: null,
   expiresAt: Date.now() + TokenManager.MATERIALIZE_TTL_MS,
   used: false,
   createdAt: Date.now(),
@@ -93,6 +96,10 @@ async function firstTarEntry(buffer: Buffer): Promise<{ name: string; content: s
   });
 }
 
+/**
+ * Supertest's parser signature names its first argument a Response; what it hands over is the
+ * readable stream of the body, which is what this reads.
+ */
 function binaryParser(
   response: NodeJS.ReadableStream,
   callback: (error: Error | null, body?: Buffer) => void,
@@ -133,8 +140,14 @@ describe("GET /api/public/executions/materialize/:token", () => {
     );
 
     const responses = await Promise.all([
-      request(app).get("/api/public/executions/materialize/grant").buffer(true).parse(binaryParser),
-      request(app).get("/api/public/executions/materialize/grant").buffer(true).parse(binaryParser),
+      request(app)
+        .get("/api/public/executions/materialize/grant")
+        .buffer(true)
+        .parse(binaryParser as unknown as (str: string) => unknown),
+      request(app)
+        .get("/api/public/executions/materialize/grant")
+        .buffer(true)
+        .parse(binaryParser as unknown as (str: string) => unknown),
     ]);
     expect(responses.map((response) => response.status)).toEqual([200, 200]);
     for (const response of responses) {

@@ -214,7 +214,7 @@ export async function runScenario(
     variables: {},
     nodeStates: {},
     executionId,
-    workflowId: workflow.id,
+    workflowId: workflow.id ?? "scenario-workflow",
     userId: TEST_USER_ID,
   };
 
@@ -291,12 +291,11 @@ export async function runScenario(
       context = result.context;
 
       // Handle result
+      // The engine reports only "pause" and "complete": since issue #386 an error is recorded on
+      // the execution and the run stays alive for a retry, so there is no error action to handle.
       switch (result.action) {
         case "complete":
           status = "completed";
-          break;
-        case "error":
-          status = "failed";
           break;
         case "pause":
           if (result.nextNodeId) {

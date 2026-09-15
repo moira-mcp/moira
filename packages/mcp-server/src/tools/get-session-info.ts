@@ -33,12 +33,14 @@ import {
 import {
   DatabaseRepository,
   adjustmentVisit,
+  diagnoseContinuation,
+  recoverContinuation,
   projectExecutionRun,
   prepareExecutionVariableWrite,
   queryExecutionVariables,
 } from "@mcp-moira/workflow-engine";
 import { MCPEngine } from "../core/mcp-engine.js";
-import { ERRORS, formatDomainError } from "../messages/index.js";
+import { ERRORS, formatDomainError, formatError } from "../messages/index.js";
 
 const logger = createLogger({ component: "GetSessionInfo" });
 
@@ -155,10 +157,40 @@ type SessionInfoData =
       contextRevision: string;
     }
   | { name: string; value: unknown; revision: number; contextRevision: string }
+  | import("@mcp-moira/workflow-engine").ContinuationDiagnosis
+  | import("@mcp-moira/workflow-engine").ContinuationRecoveryResult
   | import("@mcp-moira/workflow-engine").ExecutionProgress
   | import("@mcp-moira/workflow-engine").ProgressImageGrant
   | import("./deliver-materialize.js").MaterializeDeliveryData
   | string;
+
+/**
+ * Say why a recovery was refused, and what the caller still has to supply. The ordered next calls
+ * come from the shared agent-instruction block appended to every one of these, so this text carries
+ * only what is specific to the refusal.
+ */
+function describeRecoveryRefusal(
+  refusal: import("@mcp-moira/workflow-engine").ContinuationRecoveryRefusal,
+): string {
+  switch (refusal.kind) {
+    case "execution_terminal":
+      return `RECOVERY_REFUSED: this run is already over (status '${refusal.status}'), so there is nothing to repair. Nothing was changed. Recovery repairs a run that is trying to continue and cannot; a finished or cancelled run stays finished. Start a new run instead.`;
+    case "run_not_broken":
+      return "RECOVERY_REFUSED: this run can continue without repair. Nothing was changed.";
+    case "workflow_unavailable":
+      return `RECOVERY_REFUSED: workflow ${refusal.workflowId} is no longer available, so there is no node to resume from. Nothing was changed.`;
+    case "unknown_node":
+      return `RECOVERY_REFUSED: node '${refusal.nodeId}' is not in the current workflow. Nothing was changed. Nodes available now: ${refusal.availableNodeIds.join(", ")}.`;
+    case "node_not_resumable":
+      return `RECOVERY_REFUSED: node '${refusal.nodeId}' is a '${refusal.nodeType}' node, which a run never waits on, so resuming there would run the workflow forward instead of repairing it. Nothing was changed. Resume at one of: ${refusal.resumableNodeIds.join(", ")}.`;
+    case "missing_variables":
+      return `RECOVERY_REFUSED: node '${refusal.nodeId}' would still be presented with unresolved references. Nothing was changed. Supply these in variableValues: ${refusal.references.join(", ")}.`;
+    case "attempt_in_progress":
+      return "RECOVERY_REFUSED: an agent step is in progress on this execution, or its outcome is unknown. Nothing was changed.";
+    case "execution_changed":
+      return "RECOVERY_REFUSED: the execution changed while this recovery was being prepared. Nothing was changed.";
+  }
+}
 
 export async function getSessionInfo(
   params: GetSessionInfoParams,
@@ -481,6 +513,112 @@ export async function getSessionInfo(
           success: true,
           data: formattedText,
         };
+      }
+
+      case "diagnose": {
+        if (!executionId) {
+          return { success: false, error: ERRORS.execution_id_required("diagnose") };
+        }
+
+        const repository = MCPEngine.getInstance().repository;
+        const execution = await repository.getExecution(executionId);
+        if (!execution) {
+          return { success: false, error: ERRORS.execution_not_found(executionId) };
+        }
+        if (execution.userId !== userId) {
+          return { success: false, error: ERRORS.access_denied_to_execution };
+        }
+
+        const attempt = await repository.getCurrentExecutionAttempt(executionId, userId);
+        const diagnosis = await diagnoseContinuation(repository, execution, attempt);
+
+        await logAuditEventDirect(repository as DatabaseRepository, {
+          userId,
+          action: AuditAction.MCP_SESSION_INFO,
+          resource: "execution",
+          resourceId: executionId,
+          source: "mcp",
+          metadata: { action: "diagnose" },
+        });
+
+        return { success: true, data: diagnosis };
+      }
+
+      case "recover": {
+        if (!executionId || !params.nodeId) {
+          return {
+            success: false,
+            error: formatError(
+              "executionId and nodeId are required for recover",
+              undefined,
+              "recovery_refused",
+            ),
+          };
+        }
+
+        const repository = MCPEngine.getInstance().repository;
+        const execution = await repository.getExecution(executionId);
+        if (!execution) {
+          return { success: false, error: ERRORS.execution_not_found(executionId) };
+        }
+        if (execution.userId !== userId) {
+          return { success: false, error: ERRORS.access_denied_to_execution };
+        }
+
+        const engine = MCPEngine.getInstance();
+        const recovery = await recoverContinuation(
+          repository,
+          execution,
+          params.nodeId,
+          (params.variableValues ?? {}) as Record<string, unknown>,
+          async (id) =>
+            engine.executor.executeStep(id, undefined, undefined, {
+              userId,
+              createPresentation: true,
+            }),
+        );
+
+        if (recovery.outcome === "refused") {
+          // A refused privileged mutation is recorded too. It changed nothing, which is exactly why
+          // the attempt is worth having in the trail: repeated refusals on one execution are what a
+          // reader looking for misuse of this action would go looking for, and a trail that holds
+          // only the successes cannot show them.
+          await logAuditEventDirect(repository as DatabaseRepository, {
+            userId,
+            action: AuditAction.EXECUTION_RECOVER,
+            resource: "execution",
+            resourceId: executionId,
+            source: "mcp",
+            metadata: {
+              outcome: "refused",
+              reason: recovery.refusal.kind,
+              nodeId: params.nodeId,
+            },
+          });
+          return {
+            success: false,
+            error: formatError(
+              describeRecoveryRefusal(recovery.refusal),
+              undefined,
+              "recovery_refused",
+            ),
+          };
+        }
+
+        await logAuditEventDirect(repository as DatabaseRepository, {
+          userId,
+          action: AuditAction.EXECUTION_RECOVER,
+          resource: "execution",
+          resourceId: executionId,
+          source: "mcp",
+          metadata: {
+            outcome: "recovered",
+            nodeId: recovery.result.nodeId,
+            appliedVariables: recovery.result.appliedVariables,
+          },
+        });
+
+        return { success: true, data: recovery.result };
       }
 
       case "cancel-execution": {

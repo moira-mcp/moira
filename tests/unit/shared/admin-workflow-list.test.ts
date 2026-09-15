@@ -9,21 +9,20 @@ import { drizzle } from "drizzle-orm/better-sqlite3";
 import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import { WorkflowRepository } from "@mcp-moira/shared";
+import type { GraphNode, WorkflowGraph } from "@mcp-moira/workflow-engine";
 import path from "path";
 
 import * as schema from "../../../packages/shared/src/database/schema.js";
 
-function createTestGraph(name: string, version = "1.0.0", nodeCount = 2) {
-  const nodes: Array<{
-    id: string;
-    type: "start" | "end" | "step";
-    directive: string;
-    connections: Record<string, string>;
-  }> = [
+/**
+ * A graph with `nodeCount` nodes, using node types the engine actually defines: the middle nodes are
+ * agent-directive nodes, which is what a real flow puts between its start and its end.
+ */
+function createTestGraph(name: string, version = "1.0.0", nodeCount = 2): WorkflowGraph {
+  const nodes: GraphNode[] = [
     {
       id: "start",
-      type: "start" as const,
-      directive: "Start",
+      type: "start",
       connections: nodeCount > 2 ? { default: "step-1" } : { default: "end" },
     },
   ];
@@ -31,18 +30,14 @@ function createTestGraph(name: string, version = "1.0.0", nodeCount = 2) {
   for (let i = 1; i < nodeCount - 1; i++) {
     nodes.push({
       id: `step-${i}`,
-      type: "step" as const,
+      type: "agent-directive",
       directive: `Step ${i}`,
-      connections: { default: i < nodeCount - 2 ? `step-${i + 1}` : "end" },
+      completionCondition: `Step ${i} is done`,
+      connections: { success: i < nodeCount - 2 ? `step-${i + 1}` : "end" },
     });
   }
 
-  nodes.push({
-    id: "end",
-    type: "end" as const,
-    directive: "End",
-    connections: {},
-  });
+  nodes.push({ id: "end", type: "end" });
 
   return {
     id: `test-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,

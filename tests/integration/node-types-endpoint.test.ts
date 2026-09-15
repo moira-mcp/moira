@@ -62,8 +62,12 @@ describe("GET /api/node-types over the real route", () => {
     const response = await request(app()).get("/api/node-types");
 
     expect(response.status).toBe(200);
-    const types: Array<{ type: string; title: string; extensionName?: string }> =
-      response.body.data.nodeTypes;
+    const types: Array<{
+      type: string;
+      title: string;
+      origin: string;
+      extensionName?: string;
+    }> = response.body.data.nodeTypes;
     const byType = new Map(types.map((entry) => [entry.type, entry]));
 
     // The extension's own title travels: it is not derivable from the type string.

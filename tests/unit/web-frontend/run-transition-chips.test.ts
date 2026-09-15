@@ -8,8 +8,7 @@
  */
 
 import { describe, expect, test } from "@jest/globals";
-import { findCatalogEntryBySlug } from "@mcp-moira/shared";
-import { deriveProcess, type WorkflowGraph } from "@mcp-moira/workflow-engine";
+import { deriveProcess } from "@mcp-moira/workflow-engine";
 import {
   canvasChipsOf,
   chipTitle,
@@ -23,6 +22,7 @@ import {
 import { buildArcs, buildLinks } from "../../../packages/web-frontend/src/components/run/arcs.js";
 import { layoutBlocks } from "../../../packages/web-frontend/src/components/run/layout.js";
 import type { RunBlock } from "../../../packages/web-frontend/src/components/run/model.js";
+import { catalogGraph } from "../../helpers/catalog-graphs.js";
 
 const FLOWS = [
   "quick-task",
@@ -34,7 +34,7 @@ const FLOWS = [
 ];
 
 function processOf(slug: string) {
-  const graph = findCatalogEntryBySlug(slug)!.graph as WorkflowGraph;
+  const graph = catalogGraph(slug);
   return deriveProcess(graph)!;
 }
 

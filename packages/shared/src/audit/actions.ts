@@ -49,6 +49,7 @@ export enum AuditAction {
   EXECUTION_CANCEL = "execution:cancel",
   EXECUTION_DELETE = "execution:delete",
   EXECUTION_UPDATE_CONTEXT = "execution:update_context",
+  EXECUTION_RECOVER = "execution:recover", // Re-present a broken run at a named node
 
   // Attempt events (failed user actions for observability)
   WORKFLOW_START_ATTEMPT = "workflow:start_attempt", // Failed attempt to start workflow

@@ -5,7 +5,9 @@ import { TOOL_DEFINITIONS } from "../../../packages/mcp-server/src/tools/tool-de
 
 describe("MCP registry examples", () => {
   it("runs every settings get selector through the masked read projection", async () => {
-    const settings = TOOL_DEFINITIONS.find((definition) => definition.name === "settings") as {
+    const settings = TOOL_DEFINITIONS.find(
+      (definition) => definition.name === "settings",
+    ) as unknown as {
       examples: readonly { action: "get"; category?: string; key?: string }[];
     };
     const [exact, category, all] = settings.examples;
@@ -15,7 +17,9 @@ describe("MCP registry examples", () => {
           ? { "ui.theme": "dark", "ui.other": "ignored" }
           : { "telegram.chat_id": "123" },
       ),
-      logAudit: jest.fn(async () => undefined),
+      // The read audits through the repository's own logAudit, reached by a cast in production
+      // because the read contract does not name it; the double therefore declares its arguments.
+      logAudit: jest.fn(async (_entry: Record<string, unknown>) => undefined),
     };
 
     await expect(readSettingsForMcp(repository, "user-1", "ui", exact.key)).resolves.toEqual({

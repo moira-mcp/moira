@@ -60,7 +60,9 @@ describe("Configurable note quotas", () => {
     auditRepo = new AuditRepository(db);
   });
 
-  afterEach(() => sqlite.close());
+  afterEach(() => {
+    sqlite.close();
+  });
 
   it("rejects a note larger than the configured per-note size", async () => {
     // 1 KB limit from settings; a 2 KB note must be rejected.

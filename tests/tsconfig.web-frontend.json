@@ -1,0 +1,15 @@
+{
+  // The web-frontend suites, checked the way the package they exercise is checked: bundler
+  // resolution, the `@/` alias, JSX, and the same strictness. Kept separate from tsconfig.json
+  // because those settings are incompatible with the Node16 resolution the rest of the tests use.
+  "extends": "../packages/web-frontend/tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": "..",
+    "baseUrl": "../packages/web-frontend/src",
+    "types": ["jest", "node"],
+    "lib": ["ES2022", "DOM", "DOM.Iterable"]
+  },
+  "include": ["unit/web-frontend/**/*.ts", "unit/web-frontend/**/*.tsx", "global-helpers.ts"],
+  "exclude": ["dist", "node_modules"]
+}

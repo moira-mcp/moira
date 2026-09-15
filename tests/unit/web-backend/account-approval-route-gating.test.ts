@@ -11,7 +11,7 @@ let reconciliationState: Record<string, unknown> = {
   conflicts: [],
 };
 const isEnabled = jest.fn(
-  (feature: string) =>
+  (feature: string, _context?: { userId?: string }) =>
     (feature === "accountApproval" && deployment.accountApprovalEnabled) ||
     (feature === "adminAnalytics" && deployment.adminAnalyticsEnabled),
 );

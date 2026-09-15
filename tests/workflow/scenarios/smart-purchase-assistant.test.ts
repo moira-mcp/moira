@@ -15,7 +15,7 @@ import {
 } from "../../helpers/scenario-runner.js";
 
 const entry = findCatalogEntryBySlug("smart-purchase-assistant")!;
-const graph = (): WorkflowGraph => structuredClone(entry.graph) as WorkflowGraph;
+const graph = (): WorkflowGraph => structuredClone(entry.graph) as unknown as WorkflowGraph;
 const workspace = (executionId: string) => `./moira-ws/smart-purchase-assistant-${executionId}`;
 
 function node(workflow: WorkflowGraph, id: string): any {

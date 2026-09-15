@@ -15,7 +15,7 @@
 import React from "react";
 import { afterEach, beforeAll, beforeEach, describe, expect, test } from "@jest/globals";
 import { cleanup, render, screen } from "@testing-library/react";
-import "@testing-library/jest-dom";
+import "@testing-library/jest-dom/jest-globals";
 import type { Node } from "@xyflow/react";
 import { I18nextProvider } from "react-i18next";
 import i18n from "../../../packages/web-frontend/src/i18n";

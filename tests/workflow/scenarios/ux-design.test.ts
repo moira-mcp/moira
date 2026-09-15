@@ -15,7 +15,7 @@ import {
 } from "../../helpers/scenario-runner.js";
 
 const entry = findCatalogEntryBySlug("ux-design")!;
-const workflow = (): WorkflowGraph => structuredClone(entry.graph) as WorkflowGraph;
+const workflow = (): WorkflowGraph => structuredClone(entry.graph) as unknown as WorkflowGraph;
 
 function node(graph: WorkflowGraph, id: string): any {
   const found = graph.nodes.find((candidate) => candidate.id === id);

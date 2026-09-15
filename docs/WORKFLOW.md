@@ -134,7 +134,12 @@ be downloaded repeatedly only while the execution remains waiting on that node w
 context snapshot. For every paused
 node, `current_step` returns the authoritative current Step attempt ID. When a paused execution has
 no persisted attempt, `current_step` creates a bound presentation without executing the node. A
-presented revision-only stale attempt is repaired in place; a node or workflow mismatch is not.
+presented revision-only stale attempt is repaired in place; a mismatched node or continuation
+surface is not. The continuation surface is everything the paused node declares except its display
+fields — its authoring metadata, progress block, active label and content, and connection labels —
+plus the `variableRegistry` entries for the global names it declares as inputs. A redeploy that
+changes only workflow metadata, the system reminder, another node, or the paused node's appearance
+therefore leaves the run continuable.
 Such a mismatched live presentation returns `CURRENT_PRESENTATION_STALE`, does not expose its old
 attempt as usable, and requires inspection rather than automatic replay.
 

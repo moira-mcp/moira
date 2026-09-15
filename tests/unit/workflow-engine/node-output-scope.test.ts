@@ -17,6 +17,7 @@ import {
   inlineGlobalInputs,
   type AgentDirectiveNode,
   type GraphNode,
+  type VariableRegistry,
 } from "@mcp-moira/workflow-engine";
 import { SchemaValidator } from "../../../packages/workflow-engine/src/utils/schema-validator.js";
 
@@ -74,7 +75,7 @@ describe("getNodeOutputScope", () => {
 });
 
 describe("inlineGlobalInputs", () => {
-  const registry = {
+  const registry: VariableRegistry = {
     score: { type: "number", description: "Validator score" },
     feedback: { type: "string", description: "Validator feedback" },
     gate: { type: "string", description: "Yes/no gate", enum: ["yes", "no"] },

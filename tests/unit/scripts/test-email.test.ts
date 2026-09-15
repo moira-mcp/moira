@@ -13,9 +13,9 @@ describe("test-email operator script", () => {
   it("refuses to infer a recipient when main receives no explicit option", async () => {
     const provider: EmailProvider = {
       getName: () => "test",
-      send: jest.fn(),
+      send: jest.fn<EmailProvider["send"]>(),
     };
-    const error = jest.spyOn(console, "error").mockImplementation();
+    const error = jest.spyOn(console, "error").mockImplementation(() => undefined);
 
     await main([], provider);
 
@@ -45,7 +45,7 @@ describe("test-email operator script", () => {
       },
     };
 
-    jest.spyOn(console, "log").mockImplementation();
+    jest.spyOn(console, "log").mockImplementation(() => undefined);
 
     await main(["--recipient", "operator@example.com"], provider);
 

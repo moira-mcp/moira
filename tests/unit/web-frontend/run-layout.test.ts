@@ -5,8 +5,7 @@
  */
 
 import { describe, expect, test } from "@jest/globals";
-import { findCatalogEntryBySlug } from "@mcp-moira/shared";
-import { deriveProcess, type WorkflowGraph } from "@mcp-moira/workflow-engine";
+import { deriveProcess } from "@mcp-moira/workflow-engine";
 import type { ExecutionProgress } from "@mcp-moira/workflow-engine/progress-visual";
 import {
   hubPort,
@@ -19,6 +18,7 @@ import {
   PARALLEL_CHIP_MIN,
   hubExitsOf,
 } from "../../../packages/web-frontend/src/components/run/chips.js";
+import { catalogGraph } from "../../helpers/catalog-graphs.js";
 
 const FLOWS = [
   "quick-task",
@@ -31,7 +31,7 @@ const FLOWS = [
 
 /** A run-less projection of a bundled flow: every block pending. */
 function projectionOf(slug: string): ExecutionProgress {
-  const graph = findCatalogEntryBySlug(slug)!.graph as WorkflowGraph;
+  const graph = catalogGraph(slug);
   const process = deriveProcess(graph)!;
   expect(process.diagnostics).toEqual([]);
   return {

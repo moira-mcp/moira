@@ -9,13 +9,14 @@ import { drizzle, type BetterSQLite3Database } from "drizzle-orm/better-sqlite3"
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import { WorkflowRepository, AuditRepository } from "@mcp-moira/shared";
 import { WorkflowMutationService } from "@mcp-moira/shared";
+import type { WorkflowGraph } from "@mcp-moira/workflow-engine";
 import path from "path";
 
 // Import all schema tables for drizzle
 import * as schema from "../../packages/shared/src/database/schema.js";
 
 // Test workflow graph helpers
-function createValidGraph(name: string, version = "1.0.0") {
+function createValidGraph(name: string, version = "1.0.0"): WorkflowGraph {
   return {
     id: `test-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`,
     metadata: {
@@ -26,21 +27,18 @@ function createValidGraph(name: string, version = "1.0.0") {
     nodes: [
       {
         id: "start",
-        type: "start" as const,
-        directive: "Test directive",
+        type: "start",
         connections: { default: "end" },
       },
       {
         id: "end",
-        type: "end" as const,
-        directive: "End",
-        connections: {},
+        type: "end",
       },
     ],
   };
 }
 
-function createInvalidGraph(name: string, version = "1.0.0") {
+function createInvalidGraph(name: string, version = "1.0.0"): WorkflowGraph {
   return {
     id: `test-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`,
     metadata: {
@@ -52,15 +50,13 @@ function createInvalidGraph(name: string, version = "1.0.0") {
       // Missing start node - invalid!
       {
         id: "end",
-        type: "end" as const,
-        directive: "End",
-        connections: {},
+        type: "end",
       },
     ],
   };
 }
 
-function createBrokenConnectionGraph(name: string) {
+function createBrokenConnectionGraph(name: string): WorkflowGraph {
   return {
     id: `test-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`,
     metadata: {
@@ -71,15 +67,12 @@ function createBrokenConnectionGraph(name: string) {
     nodes: [
       {
         id: "start",
-        type: "start" as const,
-        directive: "Test directive",
+        type: "start",
         connections: { default: "nonexistent-node" }, // Points to non-existent node
       },
       {
         id: "end",
-        type: "end" as const,
-        directive: "End",
-        connections: {},
+        type: "end",
       },
     ],
   };

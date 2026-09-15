@@ -34,11 +34,11 @@ function app(service: Pick<WorkspaceTransferService, "claimDownload" | "consume"
 describe("workspace transfer download route", () => {
   test("streams one private object with no-store, noindex and attachment protections", async () => {
     const service = {
-      claimDownload: jest.fn(async () => ({
+      claimDownload: jest.fn<WorkspaceTransferService["claimDownload"]>(async () => ({
         record,
         stream: Readable.from([Buffer.from([0, 255, 1, 2])]),
       })),
-      consume: jest.fn(async () => undefined),
+      consume: jest.fn<WorkspaceTransferService["consume"]>(async () => undefined),
     };
     const response = await request(app(service as never)).get(`/files/${"a".repeat(43)}`);
     expect(response.status).toBe(200);
@@ -59,7 +59,7 @@ describe("workspace transfer download route", () => {
       claimDownload: jest.fn(async () => {
         throw new Error("not found");
       }),
-      consume: jest.fn(async () => undefined),
+      consume: jest.fn<WorkspaceTransferService["consume"]>(async () => undefined),
     };
     const response = await request(app(service as never)).get(`/files/${"x".repeat(43)}`);
     expect(response.status).toBe(404);
@@ -70,8 +70,11 @@ describe("workspace transfer download route", () => {
   test("consumes a claimed capability when the client aborts a partial response", async () => {
     const stream = new PassThrough();
     const service = {
-      claimDownload: jest.fn(async () => ({ record, stream })),
-      consume: jest.fn(async () => undefined),
+      claimDownload: jest.fn<WorkspaceTransferService["claimDownload"]>(async () => ({
+        record,
+        stream,
+      })),
+      consume: jest.fn<WorkspaceTransferService["consume"]>(async () => undefined),
     };
     const response = new PassThrough() as PassThrough & {
       status: (code: number) => unknown;

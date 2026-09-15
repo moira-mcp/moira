@@ -312,6 +312,13 @@ function toConflictRecord(row: PersistedConflictRow): WorkflowReconciliationConf
 }
 
 /** Synchronous persistence boundary used by the catalog executor. */
+/** A paused run and the continuation its presented attempt is bound to. */
+export interface PausedRunBinding {
+  executionId: string;
+  nodeId: string;
+  continuationDigest: string | null;
+}
+
 export class WorkflowReconciliationRepository {
   constructor(private sqlite: Database.Database) {}
 
@@ -368,6 +375,30 @@ export class WorkflowReconciliationRepository {
       visibility: row.visibility === "public" ? "public" : "private",
       deleted: Boolean(row.deleted),
     };
+  }
+
+  /**
+   * Paused runs of one workflow, with what each one's presented attempt is bound to. Used before a
+   * catalog update is applied, to say which of them the incoming definition would invalidate.
+   *
+   * A run qualifies when it is running, waiting on the node it is currently at, and holding a
+   * presented attempt — the exact state a deploy can break. Attempts written before the continuation
+   * binding existed carry no digest; they are returned with `null`, because they are already
+   * unusable and an operator is better served by seeing them than by their silent omission.
+   */
+  listPausedRuns(workflowId: string): PausedRunBinding[] {
+    return this.sqlite
+      .prepare(
+        `SELECT e.executionId AS executionId, e.waitingForInputNodeId AS nodeId,
+                a.continuationDigest AS continuationDigest
+         FROM workflowExecution e
+         JOIN executionMutationAttempt a ON a.executionId = e.executionId
+         WHERE e.workflowId = ? AND e.state = 'running'
+           AND e.waitingForInputNodeId IS NOT NULL
+           AND e.waitingForInputNodeId = e.currentNodeId
+           AND a.operation = 'step' AND a.state = 'presented'`,
+      )
+      .all(workflowId) as PausedRunBinding[];
   }
 
   listConflicts(): WorkflowReconciliationConflictRecord[] {
