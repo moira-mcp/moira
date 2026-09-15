@@ -114,6 +114,11 @@ export default defineConfig({
               slug: "docs/concepts/notes",
             },
             {
+              label: "Playbooks",
+              translations: { ru: "Playbooks" },
+              slug: "docs/concepts/playbooks",
+            },
+            {
               label: "Artifacts",
               translations: { ru: "Артефакты" },
               slug: "docs/concepts/artifacts",

@@ -23,6 +23,7 @@ import { OAuthConsent } from "./pages/OAuthConsent";
 import { Dashboard } from "./pages/Dashboard";
 import { Workflows } from "./pages/Workflows";
 import { Notes } from "./pages/Notes";
+import { Playbooks } from "./pages/Playbooks";
 import { Artifacts } from "./pages/Artifacts";
 import { Settings } from "./pages/Settings";
 import { TestError } from "./pages/TestError";
@@ -146,6 +147,7 @@ const App: React.FC = () => {
                   <Route path="executions" element={<Executions />} />
                   <Route path="executions/:id" element={<ExecutionInspectorPage />} />
                   <Route path="notes" element={<Notes />} />
+                  <Route path="playbooks" element={<Playbooks />} />
                   <Route path="artifacts" element={<Artifacts />} />
                   <Route path="settings" element={<Settings />} />
                 </Route>

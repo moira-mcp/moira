@@ -48,6 +48,9 @@ export class AuthorizationService {
     actions: AuthorizationAction[],
     resource: AuthorizationResource,
   ): Promise<boolean> {
+    if (userId === resource.ownerId) {
+      return actions.some((action) => decideAccess({ userId }, action, resource));
+    }
     const subject = await this.subject(userId);
     const grant = await this.grantFor(subject, resource);
     return actions.some((action) => decideAccess(subject, action, resource, grant));

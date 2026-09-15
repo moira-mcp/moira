@@ -5,16 +5,15 @@
  * Located at /admin/global-settings
  *
  * Uses SettingsEditor component for unified settings editing experience.
- * Page-level features: History modal with rollback, Export/Import values
+ * Page-level features: value history (shared with notes and playbooks), Export/Import values
  *
  * Note: Schema management (definitions) is in SystemSettings (Settings Manager).
  * Note: console.error used for browser debugging of admin API errors
  */
 
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { apiClient } from "../services/api-client";
-import { formatDate } from "../components/cards/format-utils";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import {
@@ -27,16 +26,10 @@ import {
 } from "@/components/ui/dialog";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import {
-  Loader2,
-  AlertCircle,
-  History,
-  RotateCcw,
-  Download,
-  Upload,
-  Check,
-  X,
-  Plus,
-} from "lucide-react";
+  RevisionHistoryDialog,
+  type RevisionHistorySource,
+} from "@/components/history/RevisionHistoryDialog";
+import { Loader2, AlertCircle, RotateCcw, Download, Upload, Check, X, Plus } from "lucide-react";
 import { SettingsEditor, SettingDefinition } from "@/components/settings/SettingsEditor";
 import {
   McpPromptsEditor,
@@ -56,21 +49,6 @@ interface GlobalSetting {
   sortOrder: number;
   updatedAt: number;
   updatedBy: string | null;
-}
-
-interface HistoryEntry {
-  id: string;
-  userId?: string;
-  userEmail: string | null;
-  userName: string | null;
-  action: string;
-  changes?: string;
-  createdAt: number;
-}
-
-interface ParsedChanges {
-  oldValue?: string | null;
-  newValue?: string | null;
 }
 
 interface ExportData {
@@ -142,17 +120,9 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({ embedded = false }
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // History modal state
+  // Which setting's value history is open. The history itself is the shared one: a setting's
+  // values live in the same revision store as notes and playbooks, so the same dialog reads them.
   const [historySetting, setHistorySetting] = useState<GlobalSetting | null>(null);
-  const [historyEntries, setHistoryEntries] = useState<HistoryEntry[]>([]);
-  const [historyLoading, setHistoryLoading] = useState(false);
-
-  // Rollback confirmation state
-  const [rollbackEntry, setRollbackEntry] = useState<{
-    settingKey: string;
-    oldValue: string | null;
-    entryId: string;
-  } | null>(null);
 
   // Import/Export state (values only)
   const [importPreviewOpen, setImportPreviewOpen] = useState(false);
@@ -338,49 +308,8 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({ embedded = false }
     return getInheritanceLevel(key, value as string | null);
   };
 
-  const openHistoryModal = async (setting: GlobalSetting) => {
+  const openHistoryModal = (setting: GlobalSetting) => {
     setHistorySetting(setting);
-    setHistoryLoading(true);
-    setHistoryEntries([]);
-
-    try {
-      const entries = await apiClient.getSettingHistory(setting.key, 20);
-      setHistoryEntries(entries);
-    } catch (err) {
-      console.error("Failed to load setting history:", err);
-    } finally {
-      setHistoryLoading(false);
-    }
-  };
-
-  const closeHistoryModal = () => {
-    setHistorySetting(null);
-    setHistoryEntries([]);
-  };
-
-  const parseChanges = (changesJson?: string): ParsedChanges => {
-    if (!changesJson) return {};
-    try {
-      const parsed = JSON.parse(changesJson);
-      // Changes are stored as array: [{field, oldValue, newValue}]
-      // Extract the value change
-      if (Array.isArray(parsed)) {
-        const valueChange = parsed.find(
-          (c: { field?: string; oldValue?: string | null; newValue?: string | null }) =>
-            c.field === "value",
-        );
-        if (valueChange) {
-          return {
-            oldValue: valueChange.oldValue,
-            newValue: valueChange.newValue,
-          };
-        }
-      }
-      // Fallback for direct object format
-      return parsed;
-    } catch {
-      return {};
-    }
   };
 
   const truncateValue = (value: string | null | undefined, maxLength = 100): string => {
@@ -389,30 +318,23 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({ embedded = false }
     return value.substring(0, maxLength) + "...";
   };
 
-  const openRollbackConfirmation = (
-    settingKey: string,
-    oldValue: string | null,
-    entryId: string,
-  ) => {
-    setRollbackEntry({ settingKey, oldValue, entryId });
-  };
-
-  const closeRollbackConfirmation = () => {
-    setRollbackEntry(null);
-  };
-
-  const performRollback = async () => {
-    if (!rollbackEntry) return;
-
-    try {
-      await apiClient.updateGlobalSetting(rollbackEntry.settingKey, rollbackEntry.oldValue);
-      await loadSettings();
-      closeHistoryModal();
-    } catch (err) {
-      console.error("Failed to rollback setting:", err);
-      throw err;
-    }
-  };
+  /**
+   * Where one setting's value history comes from.
+   *
+   * The values live in the shared revision store, the same one notes and playbooks use, so this
+   * page reads them through the same dialog instead of reconstructing a history from the audit log.
+   */
+  const settingHistorySource = useMemo<RevisionHistorySource | null>(() => {
+    const setting = historySetting;
+    if (!setting) return null;
+    return {
+      label: setting.label || setting.key,
+      listRevisions: () => apiClient.getGlobalSettingHistory(setting.key),
+      readRevision: (revision) => apiClient.getGlobalSettingRevision(setting.key, revision),
+      readCurrent: async () => setting.value,
+      restore: (revision) => apiClient.restoreGlobalSettingRevision(setting.key, revision),
+    };
+  }, [historySetting]);
 
   // Export settings via API (includes audit logging)
   const handleExport = async () => {
@@ -733,130 +655,14 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({ embedded = false }
         onConfirm={performReset}
       />
 
-      {/* History Modal */}
-      <Dialog open={!!historySetting} onOpenChange={(open) => !open && closeHistoryModal()}>
-        <DialogContent className="max-w-2xl max-h-[80vh] flex flex-col">
-          <DialogHeader>
-            <DialogTitle>
-              <History className="h-5 w-5 inline mr-2" />
-              {t("admin.globalSettings.history.title")}
-            </DialogTitle>
-            <DialogDescription>
-              {historySetting?.label}
-              <br />
-              <span className="text-xs">
-                Key: <code className="bg-muted px-1 rounded">{historySetting?.key}</code>
-              </span>
-            </DialogDescription>
-          </DialogHeader>
-          <div className="flex-1 overflow-y-auto" data-testid="history-list">
-            {historyLoading ? (
-              <div className="flex items-center justify-center py-8">
-                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-              </div>
-            ) : historyEntries.length === 0 ? (
-              <div className="text-center py-8 text-muted-foreground">
-                {t("admin.globalSettings.history.noHistory")}
-              </div>
-            ) : (
-              <div className="space-y-4">
-                {historyEntries.map((entry, index) => {
-                  const changes = parseChanges(entry.changes);
-                  const canRollback = index > 0 && changes.oldValue !== undefined;
-
-                  return (
-                    <div
-                      key={entry.id}
-                      className="border rounded-lg p-4"
-                      data-testid={`history-entry-${entry.id}`}
-                    >
-                      <div className="flex items-start justify-between mb-2">
-                        <div>
-                          <span className="font-medium">
-                            {entry.userName ||
-                              entry.userEmail ||
-                              t("admin.globalSettings.history.system")}
-                          </span>
-                          <span className="text-sm text-muted-foreground ml-2">
-                            {formatDate(entry.createdAt)}
-                          </span>
-                        </div>
-                        {canRollback && (
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() =>
-                              openRollbackConfirmation(
-                                historySetting!.key,
-                                changes.oldValue ?? null,
-                                entry.id,
-                              )
-                            }
-                            data-testid={`rollback-${entry.id}`}
-                          >
-                            <RotateCcw className="h-4 w-4 mr-1" />
-                            {t("admin.globalSettings.history.rollback")}
-                          </Button>
-                        )}
-                      </div>
-                      <div className="text-sm space-y-2">
-                        {changes.oldValue !== undefined && (
-                          <div>
-                            <span className="text-muted-foreground">
-                              {t("admin.globalSettings.history.oldValue")}:{" "}
-                            </span>
-                            <code className="bg-destructive/10 px-1 rounded text-xs">
-                              {truncateValue(changes.oldValue)}
-                            </code>
-                          </div>
-                        )}
-                        {changes.newValue !== undefined && (
-                          <div>
-                            <span className="text-muted-foreground">
-                              {t("admin.globalSettings.history.newValue")}:{" "}
-                            </span>
-                            <code className="bg-success/10 px-1 rounded text-xs">
-                              {truncateValue(changes.newValue)}
-                            </code>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={closeHistoryModal}>
-              {t("admin.globalSettings.history.close")}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Rollback Confirmation Dialog */}
-      <ConfirmDialog
-        open={!!rollbackEntry}
-        onOpenChange={(open) => !open && closeRollbackConfirmation()}
-        title={t("admin.globalSettings.history.confirmRollback")}
-        description={
-          <>
-            {t("admin.globalSettings.history.rollbackWarning")}
-            <div className="mt-4 p-3 bg-muted rounded-lg">
-              <span className="text-sm font-medium">
-                {t("admin.globalSettings.history.restoreTo")}:
-              </span>
-              <code className="block mt-1 text-xs break-all">
-                {truncateValue(rollbackEntry?.oldValue, 200)}
-              </code>
-            </div>
-          </>
-        }
-        confirmLabel={t("admin.globalSettings.history.confirmRollbackButton")}
-        cancelLabel={t("admin.globalSettings.cancel")}
-        variant="destructive"
-        onConfirm={performRollback}
+      {/* Value history — the same dialog notes and playbooks use */}
+      <RevisionHistoryDialog
+        open={!!historySetting}
+        onClose={(restored) => {
+          setHistorySetting(null);
+          if (restored) loadSettings();
+        }}
+        source={settingHistorySource}
       />
 
       {/* Import Preview Modal */}

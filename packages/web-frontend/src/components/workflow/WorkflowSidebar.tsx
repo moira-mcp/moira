@@ -40,6 +40,7 @@ import { useTranslation } from "react-i18next";
 import { displayNodeType } from "../../types/node-type-catalog";
 import type { WorkflowGraph as WorkflowGraphType } from "../../types";
 import { NodeSchemaReadout } from "./NodeSchemaReadout";
+import { NodePlaybookReferences, collectNodeReferences } from "./NodePlaybookReferences";
 
 interface WorkflowSidebarProps {
   /** The workflow data for workflow-level info */
@@ -333,6 +334,21 @@ const NodeDetail: React.FC<{
           title={t("components.workflowGraph.nodeDetails.completionCondition", "Success Criteria")}
         >
           <p className="text-sm leading-relaxed text-muted-foreground">{completionCondition}</p>
+        </Section>
+      )}
+
+      {/* Playbooks this node names */}
+      {collectNodeReferences([
+        directive,
+        completionCondition,
+        message,
+        basePath,
+        ...(filePaths ?? []),
+      ]).length > 0 && (
+        <Section title={t("components.workflowGraph.nodeDetails.playbooks", "Playbooks")}>
+          <NodePlaybookReferences
+            texts={[directive, completionCondition, message, basePath, ...(filePaths ?? [])]}
+          />
         </Section>
       )}
 

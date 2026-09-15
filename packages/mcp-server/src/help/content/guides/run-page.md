@@ -49,8 +49,9 @@ up to it. "Show whole run" returns to the present.
 ## The panel
 
 The panel's tabs form one strip that wraps on a narrow panel instead of scrolling; hovering a tab
-says what it holds, a count badge on **Errors** gives the number of recorded errors, and a `!`
-badge on **Variables** or **Locks** means a step is waiting for your answer or a lock is active.
+says what it holds, a count badge on **Errors** gives the number of recorded errors (a second,
+amber count says how many steps ran without a playbook they name), and a `!` badge on
+**Variables** or **Locks** means a step is waiting for your answer or a lock is active.
 
 - **Block** — the selected block (the current one by default): its status, description, outcome
   text, a muted facts line (steps, how many times it ran, visits), where it leads, and its steps
@@ -63,7 +64,9 @@ badge on **Variables** or **Locks** means a step is waiting for your answer or a
   variable the workflow's `runtimePolicy` allows to be edited at the current step is an input in
   its row: change it and save. A value set from outside the flow is marked _adjusted_. The
   filter narrows both groups; the expand button opens the same panel in a larger window.
-- **Errors**, **Steps**, **Graph**, **Locks** — the execution's error history, every step of the
+- **Errors**, **Steps**, **Graph**, **Locks** — the execution's error history (and, above it, the
+  steps that ran without a playbook they name — the process continued with a placeholder in place
+  of that text, so this is not an error, but it is named with the step), every step of the
   definition on the same cards as the Block tab (block by block, the steps the run has visited
   marked completed, the current one marked), the node graph (step cards grouped by block, the
   run's block statuses as tints, the current step marked and in view when the tab opens, the fit

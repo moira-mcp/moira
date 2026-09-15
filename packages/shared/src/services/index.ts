@@ -48,6 +48,7 @@ export { PlaybookService } from "./playbook-service.js";
 export {
   PLAYBOOK_REFERENCE_PATTERN,
   collectPlaybookReferences,
+  collectDefinitionReferences,
   unresolvedPlaybookReferences,
   type PlaybookReference,
   type PlaybookReferenceResolver,

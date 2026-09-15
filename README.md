@@ -634,7 +634,7 @@ listed alongside those file-backed topics and renders directly from the typed MC
 | Area            | Covers                                                                                  | Path               |
 | --------------- | --------------------------------------------------------------------------------------- | ------------------ |
 | Getting started | Introduction, quickstart, self-hosting                                                  | `getting-started/` |
-| Concepts        | Workflows, nodes, templates, notes, artifacts                                           | `concepts/`        |
+| Concepts        | Workflows, nodes, templates, notes, playbooks, artifacts                                | `concepts/`        |
 | Guides          | Writing directives, creating & editing workflows, reading a flow and a run, extensions  | `guides/`          |
 | Reference       | Tools, input schema, magic variables, condition operators, validation, workflow catalog | `reference/`       |
 | Integration     | MCP clients, Claude Code, agent guide, Telegram setup, troubleshooting                  | `integration/`     |

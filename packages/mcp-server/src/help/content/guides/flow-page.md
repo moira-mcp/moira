@@ -48,7 +48,9 @@ The tabs above the picture switch how the same definition is shown; the choice i
 - **Block** — the selected block (the first one by default): its description, where it leads,
   and its steps as cards of one shape (the type badge in the same place, then the name, the first
   sentence and the fields it must return — the evidence Moira validates before a run continues);
-  the split mode shows the same cards with their connections.
+  the split mode shows the same cards with their connections. On the node graph, a selected step
+  that names playbooks lists them under its details with a link to each; one you cannot read is
+  marked as not available.
 - **Variables** — the variable registry as rows: every global the workflow declares with its
   type and default; open a row for its description and the whole declaration as JSON Schema.
   While editing, the type, default, description and schema are edited in the row.

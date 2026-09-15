@@ -562,7 +562,7 @@ level headings classify the tracked test paths listed beneath them.
 
 **unit**
 
-- `tests/unit/shared/authorization.test.ts` — the central access policy: an owner's full rights on their own resource, a stranger denied every action on a private one, read and use but never change on a public one, an administrator limited to operator actions rather than the owner's hands, and grant levels honoured; the service resolving operator status from the account, finding a grant made to a group the subject belongs to, taking the wider level when a direct and a group grant both apply; a workflow read through the repository following the policy before and after a grant; a second identical grant refused by the partial unique indexes, an edit-level grant allowing a non-owner to modify a workflow while a use-level grant does not, and the migration carrying an existing workflow share over as a grant on that workflow
+- `tests/unit/shared/authorization.test.ts` — the central access policy: an owner's full rights on their own resource, a stranger denied every action on a private one, read and use but never change on a public one, an administrator limited to operator actions rather than the owner's hands, and grant levels honoured; the service resolving operator status from the account, finding a grant made to a group the subject belongs to, taking the wider level when a direct and a group grant both apply; a workflow read through the repository following the policy before and after a grant, a workflow granted to a group listed for the group's member and not for a stranger; a second identical grant refused by the partial unique indexes, an edit-level grant allowing a non-owner to modify a workflow while a use-level grant does not, and the migration carrying an existing workflow share over as a grant on that workflow
 
 ### playbooks
 
@@ -572,7 +572,7 @@ level headings classify the tracked test paths listed beneath them.
 
 **unit**
 
-- `tests/unit/workflow-engine/playbook-degradation.test.ts` — a run that loses behaviour text says so: a step whose playbook cannot be read records on the execution what it ran without, a teleport step recording it the same way, and a materialized file is still delivered with a placeholder naming the playbook while the run carries the same fact — the only trace for a reference inside a downloaded file
+- `tests/unit/workflow-engine/playbook-degradation.test.ts` — a run that loses behaviour text says so: a step whose playbook cannot be read records on the execution what it ran without, a teleport step recording it the same way, a materialized file is still delivered with a placeholder naming the playbook while the run carries the same fact — the only trace for a reference inside a downloaded file — and a refused delivery records nothing
 
 **integration**
 
@@ -581,8 +581,10 @@ level headings classify the tracked test paths listed beneath them.
 
 **unit**
 
+- `tests/unit/web-frontend/shared-revision-history.test.ts` — one history interface for notes, playbooks and global settings: every consumer mounts the shared dialog and none keeps a version list, diff or restore of its own; the history view is implemented in exactly one place
+- `tests/unit/web-frontend/node-playbook-references.test.ts` — which playbooks a node offers to open: references collected from every string the node carries without duplicates, owner spelled as written, an escaped reference offered as nothing
 - `tests/unit/shared/execution-journal-refusals.test.ts` — the one rule that separates the two kinds of fact in the execution error journal: a degradation is the only entry that is not a refusal, counting skips it, and the message a consumer reports is the latest refusal rather than the latest entry
-- `tests/unit/shared/playbooks.test.ts` — the registry: content kept in the shared revision store with no private history table left in the schema, a revision per save with a past one read back, restore as a new revision, comparison of two revisions, history removed with the playbook, an unusable name refused, an owner named by handle or by user id and an unknown one refused, content beyond the size limit refused; and access — a private playbook hidden from another user, a published one shown, a stranger still refused the right to change it, an editing grant allowed to change the text but not to publish, removal kept with the owner
+- `tests/unit/shared/playbooks.test.ts` — the registry: content kept in the shared revision store with no private history table left in the schema, a revision per save with a past one read back, restore as a new revision, comparison of two revisions, history removed with the playbook, one owner's listing free of another owner's same-named playbook with the preview of the current text, removal outright with no soft-delete column left in the schema, an unusable name refused, an owner named by handle or by user id and an unknown one refused, content beyond the size limit refused; and access — a private playbook hidden from another user, a published one shown, a stranger still refused the right to change it, an editing grant allowed to change the text but not to publish, removal kept with the owner
 
 **api**
 
@@ -592,6 +594,13 @@ level headings classify the tracked test paths listed beneath them.
 
 - `tests/mcp-tools/playbook-references-tool.test.ts` — a definition naming an unknown playbook refused while editing, a run refused before it is created when the playbook disappears after the definition was accepted, and the same definition accepted once the playbook exists, with its text reaching the first step instead of the reference
 - `tests/mcp-tools/playbooks-tool.test.ts` — the agent's view: save and read back, history with comparison and restore, listing the calling account's playbooks, publishing and unpublishing, and the refusal of an unusable name
+- `tests/mcp-tools/playbook-live-runs.test.ts` — how many running processes read a playbook, asked before its text is changed: a process whose definition names it is counted and one that does not is left out, a reference naming the owner by handle is counted, and a reference the author escaped counts for nothing
+
+**e2e**
+
+- `tests/e2e/playbooks-management.spec.ts` — the playbooks screen: the sidebar leads to it, a playbook is written and changed, its history reads back through the shared dialog with a past version beside the current one, restoring writes a new version, publishing is a visible state, editing warns about exactly the running processes the change will reach, a node's reference lands on the playbook it names (yours in the editor, another account's published one read-only, an unreadable one said to be unavailable), and a playbook is removed
+- `tests/e2e/run-degradation-display.spec.ts` — a process that lost behaviour text says so on its page: after a playbook disappears mid-run the run page names what the step ran without under its own count and not as an error, both for a reference in a directive and for one inside a materialized file
+- `tests/e2e/settings-value-history.spec.ts` — a global setting's value history through the same shared dialog: two changes read back, the earlier value shows and can be restored
 
 ### versioned content
 

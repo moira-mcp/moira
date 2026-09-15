@@ -61,6 +61,7 @@ const TOPIC_ALIASES: Record<string, string> = {
   validate: "validation",
   pattern: "patterns",
   note: "notes",
+  playbook: "playbooks",
   process: "process-view",
   run: "process-view",
   blocks: "process-view",

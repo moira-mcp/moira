@@ -175,9 +175,9 @@ async function renderMaterializeFilesWith(
 
     const renderedPath = renderedPaths[index];
 
-    const rendered_ = await processor.processDirectiveAsyncWithReport(source, context);
-    unresolvedPlaybooks?.push(...rendered_.unresolvedPlaybooks);
-    const renderedContent = rendered_.text;
+    const report = await processor.processDirectiveAsyncWithReport(source, context);
+    unresolvedPlaybooks?.push(...report.unresolvedPlaybooks);
+    const renderedContent = report.text;
     const content = Buffer.from(renderedContent, "utf8");
     if (content.byteLength > MATERIALIZE_MAX_FILE_BYTES) {
       throw new ValidationError(

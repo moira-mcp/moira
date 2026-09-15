@@ -821,8 +821,6 @@ export const playbook = sqliteTable(
     // Latest revision number in the shared revision store.
     currentRevision: integer("currentRevision").notNull().default(1),
     size: integer("size").notNull().default(0), // Current content size in bytes
-    deleted: integer("deleted", { mode: "boolean" }).notNull().default(false),
-    deletedAt: integer("deletedAt", { mode: "timestamp_ms" }),
     createdAt: integer("createdAt", { mode: "timestamp_ms" }).notNull(),
     updatedAt: integer("updatedAt", { mode: "timestamp_ms" }).notNull(),
   },

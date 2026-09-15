@@ -179,6 +179,39 @@ describe("authorization service", () => {
     expect(() => grant(privateWorkflow.id, { userId: STRANGER })).toThrow(/UNIQUE/i);
   });
 
+  it("lists a workflow granted to a group for the group's member and not for a stranger", async () => {
+    const workflows = new WorkflowRepository(db);
+    const saved = await workflows.save({
+      graph: {
+        name: "Team flow",
+        nodes: [],
+        connections: [],
+        metadata: { name: "Team flow", version: "1.0.0", description: "" },
+      } as never,
+      userId: OWNER,
+    });
+    const member = "user-member";
+    addUser(member);
+    const groupId = randomUUID();
+    sqlite
+      .prepare("INSERT INTO principalGroup (id, name, createdBy, createdAt) VALUES (?, ?, ?, ?)")
+      .run(groupId, "team", OWNER, Date.now());
+    sqlite
+      .prepare(
+        "INSERT INTO principalGroupMember (groupId, userId, role, addedAt) VALUES (?, ?, 'member', ?)",
+      )
+      .run(groupId, member, Date.now());
+    grant(saved.id, { groupId });
+
+    // The list is the surface a person actually sees; a subquery that only knew direct grants would
+    // let the policy say "yes" while the list said nothing.
+    const forMember = await workflows.listWithFilters({ userId: member });
+    const forStranger = await workflows.listWithFilters({ userId: STRANGER });
+
+    expect(forMember.workflows.map((entry) => entry.id)).toContain(saved.id);
+    expect(forStranger.workflows.map((entry) => entry.id)).not.toContain(saved.id);
+  });
+
   it("lets a grant that allows editing modify the workflow", async () => {
     const workflows = new WorkflowRepository(db);
     const saved = await workflows.save({

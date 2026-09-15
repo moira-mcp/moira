@@ -8,10 +8,10 @@
  * - Global reference: handle/slug (resolved at service layer)
  */
 
-import { eq, and, or, isNull, like, desc, asc, sql } from "drizzle-orm";
+import { eq, and, or, isNull, inArray, like, desc, asc, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
-import { workflow, user, accessGrant } from "../schema.js";
+import { workflow, user, accessGrant, principalGroupMember } from "../schema.js";
 import { RESOURCE_TYPES } from "../../authorization/authorization-policy.js";
 import { AuthorizationService } from "../../authorization/authorization-service.js";
 import type { WorkflowGraph } from "@mcp-moira/workflow-engine";
@@ -496,12 +496,20 @@ export class WorkflowRepository {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const conditions: any[] = [];
 
-    // Subquery for shared access - workflows where user has been granted access
+    // Workflows an explicit grant reaches: made to the user directly, or to a group they belong to,
+    // which the policy counts exactly as much.
+    const userGroups = this.db
+      .select({ groupId: principalGroupMember.groupId })
+      .from(principalGroupMember)
+      .where(eq(principalGroupMember.userId, userId));
     const sharedAccessSubquery = this.db
       .select({ workflowId: accessGrant.resourceId })
       .from(accessGrant)
       .where(
-        and(eq(accessGrant.resourceType, RESOURCE_TYPES.workflow), eq(accessGrant.userId, userId)),
+        and(
+          eq(accessGrant.resourceType, RESOURCE_TYPES.workflow),
+          or(eq(accessGrant.userId, userId), inArray(accessGrant.groupId, userGroups)),
+        ),
       );
 
     // Visibility filter

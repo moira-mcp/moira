@@ -265,7 +265,8 @@ Notes are managed through the web interface at the Notes page (accessible from s
 - Browse notes with key, tags, size, and preview
 - Filter by tag or search by key name
 - Create, edit, and delete notes
-- View version history and restore previous versions
+- View version history — a past version on its own, beside the current one, or as a line-by-line
+  difference — and restore it; the history dialog is the same one playbooks and global settings use
 - Monitor quota usage
 
 ## Related

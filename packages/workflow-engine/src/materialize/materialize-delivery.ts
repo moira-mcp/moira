@@ -97,8 +97,14 @@ export async function resolveMaterializeDelivery(
     execution.globalContext,
   );
 
+  if (!tokens.authorizeMaterializeToken(token, execution.executionId, node.id, execution.userId)) {
+    return { authorized: false, reason: "authorization_lost" };
+  }
+
   if (unresolvedPlaybooks.length > 0) {
-    // The placeholder lands inside a delivered file, where nobody reading the run would see it.
+    // Recorded only once the delivery is authorized: a refused download delivers nothing, and the
+    // run must not carry a note about files it never received. The placeholder lands inside a
+    // delivered file, where nobody reading the run would see it.
     await source.appendError?.(execution.executionId, {
       timestamp: Date.now(),
       nodeId: node.id,
@@ -107,10 +113,6 @@ export async function resolveMaterializeDelivery(
         `Materialized files were delivered without ${unresolvedPlaybooks.length === 1 ? "a playbook" : "playbooks"} they reference: ` +
         unresolvedPlaybooks.map((entry) => entry.reference).join(", "),
     });
-  }
-
-  if (!tokens.authorizeMaterializeToken(token, execution.executionId, node.id, execution.userId)) {
-    return { authorized: false, reason: "authorization_lost" };
   }
 
   return { authorized: true, files, executionId: execution.executionId, nodeId: node.id };

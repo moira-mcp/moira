@@ -9,10 +9,40 @@
 import { Router, Request, Response } from "express";
 import { asyncHandler, createApiError } from "../middleware/error-middleware.js";
 import { AuthenticatedRequest } from "../types/express-types.js";
-import { getPlaybookService } from "@mcp-moira/shared";
+import { getPlaybookService, collectDefinitionReferences } from "@mcp-moira/shared";
+import { DatabaseRepository } from "@mcp-moira/workflow-engine";
 
 const router = Router();
 const playbooks = getPlaybookService();
+const repository = new DatabaseRepository();
+
+/**
+ * Upper bound on the workflow definitions the live-run count reads.
+ *
+ * The count is asked interactively, before a save, and reads one definition per workflow that has
+ * a running execution. Past this many definitions the answer says it is a lower bound rather than
+ * pretending to be complete.
+ */
+const MAX_INSPECTED_WORKFLOWS = 200;
+
+/**
+ * Whether a definition names this playbook, however the owner is spelled.
+ *
+ * A reference may name the owner by handle, by id, or not at all when the author owns the
+ * playbook; all of them resolve to one owner id, and that is what is compared.
+ */
+async function definitionNames(
+  definition: unknown,
+  authorId: string,
+  ownerId: string,
+  slug: string,
+): Promise<boolean> {
+  for (const reference of collectDefinitionReferences(definition)) {
+    if (reference.name !== slug) continue;
+    if ((await playbooks.resolveOwner(reference.owner, authorId)) === ownerId) return true;
+  }
+  return false;
+}
 
 /** GET /api/playbooks — the playbooks this user owns. */
 router.get(
@@ -149,6 +179,50 @@ router.put(
 
     const updated = await playbooks.setVisibility(userId, userId, req.params.name, visibility);
     res.json({ success: true, data: updated });
+  }),
+);
+
+/**
+ * GET /api/playbooks/:name/usage — running executions that read this playbook right now.
+ *
+ * Content resolves at every step, so editing a playbook changes the behaviour of runs already under
+ * way. Whoever is about to save needs that number before saving, and it cannot be computed in the
+ * browser: an execution stores a workflow id, while the reference lives inside the definition.
+ * Only the caller's own running executions are considered, and each definition is read once
+ * however many executions stand on it.
+ */
+router.get(
+  "/:name/usage",
+  asyncHandler(async (req: Request, res: Response) => {
+    const userId = (req as AuthenticatedRequest).userId;
+    const name = req.params.name;
+
+    const running = await repository.listExecutionsWithFilters({
+      userId,
+      status: ["running"],
+      limit: 1000,
+      offset: 0,
+    });
+
+    const byWorkflow = new Map<string, number>();
+    for (const execution of running.executions) {
+      byWorkflow.set(execution.workflowId, (byWorkflow.get(execution.workflowId) ?? 0) + 1);
+    }
+
+    const inspected = [...byWorkflow.keys()].slice(0, MAX_INSPECTED_WORKFLOWS);
+    const complete = inspected.length === byWorkflow.size;
+
+    let executions = 0;
+    const workflows: { workflowId: string; name: string; executions: number }[] = [];
+    for (const workflowId of inspected) {
+      const graph = await repository.getWorkflowGraph(workflowId, userId);
+      if (!graph || !(await definitionNames(graph, userId, userId, name))) continue;
+      const count = byWorkflow.get(workflowId) ?? 0;
+      executions += count;
+      workflows.push({ workflowId, name: graph.metadata?.name ?? workflowId, executions: count });
+    }
+
+    res.json({ success: true, data: { name, executions, workflows, complete } });
   }),
 );
 

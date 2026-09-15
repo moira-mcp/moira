@@ -15,7 +15,7 @@
 
 import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { useTranslation } from "react-i18next";
-import { diffLines, type Change } from "diff";
+import { DiffView } from "../history/RevisionHistoryDialog";
 import { Button } from "@/components/ui/button";
 import {
   Select,
@@ -132,37 +132,19 @@ export function parseHistoryChanges(changesJson?: string): {
   }
 }
 
-/** Inline diff view showing line-by-line changes */
-const InlineDiffView: React.FC<{ oldText: string; newText: string }> = ({ oldText, newText }) => {
-  const changes = useMemo(() => diffLines(oldText, newText), [oldText, newText]);
-
-  return (
-    <div className="font-mono text-xs leading-relaxed" data-testid="inline-diff-view">
-      {changes.map((change: Change, i: number) => {
-        const lines = change.value.split("\n");
-        if (lines[lines.length - 1] === "") lines.pop();
-
-        return lines.map((line, j) => (
-          <div
-            key={`${i}-${j}`}
-            className={
-              change.added
-                ? "bg-green-500/15 text-green-700 dark:text-green-400 border-l-2 border-green-500 pl-2"
-                : change.removed
-                  ? "bg-red-500/15 text-red-700 dark:text-red-400 border-l-2 border-red-500 pl-2"
-                  : "pl-3 text-muted-foreground"
-            }
-          >
-            <span className="select-none inline-block w-4 mr-1 text-muted-foreground/50">
-              {change.added ? "+" : change.removed ? "−" : " "}
-            </span>
-            {line || " "}
-          </div>
-        ));
-      })}
-    </div>
-  );
-};
+/**
+ * The same difference renderer the version-history dialog uses, at this editor's density.
+ *
+ * A second diff implementation would colour the same change differently on two screens.
+ */
+const InlineDiffView: React.FC<{ oldText: string; newText: string }> = ({ oldText, newText }) => (
+  <DiffView
+    oldText={oldText}
+    newText={newText}
+    testId="inline-diff-view"
+    className="font-mono text-xs leading-relaxed"
+  />
+);
 
 const PromptDetailEditor: React.FC<{
   promptType: PromptType;

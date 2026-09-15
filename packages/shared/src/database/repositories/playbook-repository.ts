@@ -13,7 +13,7 @@
 import { randomUUID } from "node:crypto";
 import { and, desc, eq, like, or, sql } from "drizzle-orm";
 import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
-import { playbook } from "../schema.js";
+import { entityRevision, playbook } from "../schema.js";
 import type * as schema from "../schema.js";
 import { createLogger } from "../../logging/logger.js";
 import {
@@ -75,8 +75,10 @@ export interface PlaybookListResult {
   total: number;
 }
 
-/** Listing-sized rendering of a playbook's current text. */
-function previewOfContent(content: string | null): string {
+type PlaybookRow = typeof playbook.$inferSelect;
+
+/** Listing-sized rendering of a playbook's text. */
+function previewOf(content: string | null): string {
   if (!content) return "";
   return content.length > DEFAULT_REVISION_PREVIEW_CHARS
     ? `${content.substring(0, DEFAULT_REVISION_PREVIEW_CHARS)}...`
@@ -95,10 +97,16 @@ export class PlaybookRepository {
     return { entityType: REVISION_ENTITY_TYPES.playbook, entityId: playbookId } as const;
   }
 
-  /** Playbooks owned by this user, newest first. */
+  /**
+   * Playbooks owned by this user, newest first.
+   *
+   * One query: the current content joins in through the revision store, so a page of playbooks
+   * costs one read rather than one per row, and the preview comes from the same text the reader
+   * would open.
+   */
   async list(filter: PlaybookListFilter): Promise<PlaybookListResult> {
     const { ownerId, search, limit = 50, offset = 0 } = filter;
-    const conditions = [eq(playbook.userId, ownerId), eq(playbook.deleted, false)];
+    const conditions = [eq(playbook.userId, ownerId)];
     if (search) {
       const pattern = `%${search}%`;
       const matches = or(
@@ -116,15 +124,25 @@ export class PlaybookRepository {
       .where(where);
 
     const rows = await this.db
-      .select()
+      .select({ row: playbook, content: entityRevision.content })
       .from(playbook)
+      .leftJoin(
+        entityRevision,
+        and(
+          eq(entityRevision.entityType, REVISION_ENTITY_TYPES.playbook),
+          eq(entityRevision.entityId, playbook.id),
+          eq(entityRevision.revision, playbook.currentRevision),
+        ),
+      )
       .where(where)
       .orderBy(desc(playbook.updatedAt))
       .limit(limit)
       .offset(offset);
 
-    const playbooks = await Promise.all(rows.map((row) => this.toSummary(row)));
-    return { playbooks, total: count?.total ?? 0 };
+    return {
+      playbooks: rows.map(({ row, content }) => this.toSummary(row, content)),
+      total: count?.total ?? 0,
+    };
   }
 
   /** One playbook by owner and machine name, with the content of a revision. */
@@ -139,21 +157,29 @@ export class PlaybookRepository {
     if (!stored) return null;
 
     return {
-      ...(await this.toSummary(row)),
+      ...this.toSummary(row, stored.content),
       revision: stored.revision,
       size: stored.size,
       content: stored.content ?? "",
     };
   }
 
-  /** One playbook by id, without its content — used where a reference is resolved. */
+  /** One playbook by id, without its content. */
   async getById(playbookId: string): Promise<PlaybookSummary | null> {
-    const [row] = await this.db
-      .select()
+    const [found] = await this.db
+      .select({ row: playbook, content: entityRevision.content })
       .from(playbook)
-      .where(and(eq(playbook.id, playbookId), eq(playbook.deleted, false)))
+      .leftJoin(
+        entityRevision,
+        and(
+          eq(entityRevision.entityType, REVISION_ENTITY_TYPES.playbook),
+          eq(entityRevision.entityId, playbook.id),
+          eq(entityRevision.revision, playbook.currentRevision),
+        ),
+      )
+      .where(eq(playbook.id, playbookId))
       .limit(1);
-    return row ? this.toSummary(row) : null;
+    return found ? this.toSummary(found.row, found.content) : null;
   }
 
   /** Create a playbook or write a new revision of an existing one. */
@@ -161,7 +187,7 @@ export class PlaybookRepository {
     const { ownerId, slug, content, name, description, visibility, authorId } = options;
     const now = new Date();
     const size = Buffer.byteLength(content, "utf8");
-    const existing = await this.row(ownerId, slug, { includeDeleted: true });
+    const existing = await this.row(ownerId, slug);
 
     const id = existing?.id ?? randomUUID();
     if (!existing) {
@@ -174,7 +200,6 @@ export class PlaybookRepository {
         visibility: visibility ?? "private",
         currentRevision: 1,
         size,
-        deleted: false,
         createdAt: now,
         updatedAt: now,
       });
@@ -195,9 +220,6 @@ export class PlaybookRepository {
         ...(visibility !== undefined ? { visibility } : {}),
         currentRevision: appended.revision,
         size,
-        // Saving over a removed playbook brings it back, as saving a note does.
-        deleted: false,
-        deletedAt: null,
         updatedAt: now,
       })
       .where(eq(playbook.id, id));
@@ -216,18 +238,11 @@ export class PlaybookRepository {
 
   /** Remove a playbook and the history that belongs to it. */
   async remove(playbookId: string): Promise<boolean> {
-    const [row] = await this.db
-      .select({ id: playbook.id })
-      .from(playbook)
-      .where(eq(playbook.id, playbookId))
-      .limit(1);
-    if (!row) return false;
-
     // The revision store keeps no foreign key back to this table; removing the history is the
     // owner's job and nothing else does it.
     await this.revisions.deleteHistory(this.revisionTarget(playbookId));
-    await this.db.delete(playbook).where(eq(playbook.id, playbookId));
-    return true;
+    const result = await this.db.delete(playbook).where(eq(playbook.id, playbookId));
+    return result.changes > 0;
   }
 
   /** Version history of a playbook, newest first. */
@@ -244,29 +259,16 @@ export class PlaybookRepository {
     return this.revisions.compare(this.revisionTarget(playbookId), from, to);
   }
 
-  private async row(
-    ownerId: string,
-    slug: string,
-    options: { includeDeleted?: boolean } = {},
-  ): Promise<typeof playbook.$inferSelect | null> {
-    const conditions = [eq(playbook.userId, ownerId), eq(playbook.slug, slug)];
-    if (!options.includeDeleted) conditions.push(eq(playbook.deleted, false));
+  private async row(ownerId: string, slug: string): Promise<PlaybookRow | null> {
     const [row] = await this.db
       .select()
       .from(playbook)
-      .where(and(...conditions))
+      .where(and(eq(playbook.userId, ownerId), eq(playbook.slug, slug)))
       .limit(1);
     return row ?? null;
   }
 
-  /**
-   * Metadata plus a short preview of the current text.
-   *
-   * The preview comes from the newest revision alone: reading the whole history to show one line
-   * would make listing a page of playbooks cost every revision of every one of them.
-   */
-  private async toSummary(row: typeof playbook.$inferSelect): Promise<PlaybookSummary> {
-    const latest = await this.revisions.latest(this.revisionTarget(row.id));
+  private toSummary(row: PlaybookRow, content: string | null): PlaybookSummary {
     return {
       id: row.id,
       slug: row.slug,
@@ -276,7 +278,7 @@ export class PlaybookRepository {
       ownerId: row.userId,
       revision: row.currentRevision,
       size: row.size,
-      preview: previewOfContent(latest?.content ?? null),
+      preview: previewOf(content),
       createdAt: (row.createdAt as Date).getTime(),
       updatedAt: (row.updatedAt as Date).getTime(),
     };

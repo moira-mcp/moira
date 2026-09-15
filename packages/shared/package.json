@@ -17,7 +17,8 @@
     "./utils/version-utils": "./src/utils/version-utils.ts",
     "./logging/logger": "./src/logging/logger.ts",
     "./config/env": "./src/config/env.ts",
-    "./errors": "./src/errors/index.ts"
+    "./errors": "./src/errors/index.ts",
+    "./services/playbook-references": "./src/services/playbook-references.ts"
   },
   "dependencies": {
     "@getbrevo/brevo": "^3.0.4",

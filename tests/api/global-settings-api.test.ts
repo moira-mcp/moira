@@ -3,7 +3,7 @@
  * Tests GET/PUT /api/admin/global-settings endpoints via Docker
  */
 
-import { describe, test, expect, beforeAll } from "@jest/globals";
+import { describe, test, expect, beforeAll, afterAll } from "@jest/globals";
 import { getTestBaseUrl } from "../utils/test-config.js";
 import {
   createTestUserViaApi,
@@ -350,6 +350,111 @@ describe("Global Settings Admin API", () => {
       });
 
       expect(res.status).toBe(403);
+    });
+
+    test("denies the value history to a non-admin user", async () => {
+      const res = await fetch(`${BASE_URL}/api/admin/global-settings/mcp.systemReminder/history`, {
+        headers: { Cookie: regularUserCookie },
+      });
+
+      expect(res.status).toBe(403);
+    });
+  });
+
+  /**
+   * A setting's value history lives in the same revision store as note and playbook content, which
+   * is what lets one screen read all three. These cover the operations that screen performs: the
+   * history itself, reading a past value, and putting one back in force.
+   */
+  describe("value history", () => {
+    const key = "mcp.systemReminder";
+    let original: string | null = null;
+
+    const setValue = async (value: string | null) => {
+      const res = await fetch(`${BASE_URL}/api/admin/global-settings/${key}`, {
+        method: "PUT",
+        headers: { Cookie: adminCookie, "Content-Type": "application/json" },
+        body: JSON.stringify({ value }),
+      });
+      expect(res.status).toBe(200);
+    };
+
+    const readHistory = async () => {
+      const res = await fetch(`${BASE_URL}/api/admin/global-settings/${key}/history`, {
+        headers: { Cookie: adminCookie },
+      });
+      expect(res.status).toBe(200);
+      const json = (await res.json()) as {
+        data: { revisions: { revision: number; preview: string; authorId: string | null }[] };
+      };
+      return json.data.revisions;
+    };
+
+    beforeAll(async () => {
+      const res = await fetch(`${BASE_URL}/api/admin/global-settings`, {
+        headers: { Cookie: adminCookie },
+      });
+      const json = (await res.json()) as any;
+      original = json.data.settings.find((s: any) => s.key === key)?.value ?? null;
+    });
+
+    afterAll(async () => {
+      await setValue(original);
+    });
+
+    test("records every change with its author and reads a past value back", async () => {
+      const first = `history probe A ${Date.now()}`;
+      const second = `history probe B ${Date.now()}`;
+      await setValue(first);
+      await setValue(second);
+
+      const revisions = await readHistory();
+      expect(revisions.length).toBeGreaterThanOrEqual(2);
+      // Newest first, and the author of a change is recorded rather than left anonymous.
+      expect(revisions[0].preview).toContain("history probe B");
+      expect(revisions[0].authorId).not.toBeNull();
+
+      const past = await fetch(
+        `${BASE_URL}/api/admin/global-settings/${key}/revision/${revisions[1].revision}`,
+        { headers: { Cookie: adminCookie } },
+      );
+      expect(past.status).toBe(200);
+      const pastJson = (await past.json()) as { data: { value: string | null } };
+      expect(pastJson.data.value).toBe(first);
+    });
+
+    test("restoring writes a new revision carrying the older value", async () => {
+      const older = `history probe C ${Date.now()}`;
+      const newer = `history probe D ${Date.now()}`;
+      await setValue(older);
+      const afterOlder = await readHistory();
+      const olderRevision = afterOlder[0].revision;
+      await setValue(newer);
+
+      const restore = await fetch(`${BASE_URL}/api/admin/global-settings/${key}/restore`, {
+        method: "POST",
+        headers: { Cookie: adminCookie, "Content-Type": "application/json" },
+        body: JSON.stringify({ revision: olderRevision }),
+      });
+      expect(restore.status).toBe(200);
+
+      const settings = await fetch(`${BASE_URL}/api/admin/global-settings`, {
+        headers: { Cookie: adminCookie },
+      });
+      const json = (await settings.json()) as any;
+      expect(json.data.settings.find((s: any) => s.key === key)?.value).toBe(older);
+
+      // The history grew rather than rewound: the newer value is still recorded.
+      const revisions = await readHistory();
+      expect(revisions[0].revision).toBeGreaterThan(olderRevision);
+      expect(revisions.some((entry) => entry.preview.includes("history probe D"))).toBe(true);
+    });
+
+    test("an unknown revision is not found rather than silently empty", async () => {
+      const res = await fetch(`${BASE_URL}/api/admin/global-settings/${key}/revision/999999`, {
+        headers: { Cookie: adminCookie },
+      });
+      expect(res.status).toBe(404);
     });
   });
 });

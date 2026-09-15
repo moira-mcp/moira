@@ -25,6 +25,7 @@ import type { WorkflowGraph as WorkflowGraphType } from "../../types";
 import type { ExecutionProgress } from "@mcp-moira/workflow-engine/progress-visual";
 import {
   ExecutionErrorHistory,
+  isRefusalEntry,
   type ExecutionErrorEntry,
   ErrorCountBadge,
 } from "./ExecutionErrorHistory";
@@ -567,7 +568,11 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
     );
   }
 
-  const errorsCount = execution.errors?.length ?? 0;
+  // Only refusals are errors. A degradation says the step ran without behaviour text it names, so
+  // it gets its own count instead of turning a healthy run red.
+  const journal = execution.errors ?? [];
+  const errorsCount = journal.filter(isRefusalEntry).length;
+  const degradationsCount = journal.length - errorsCount;
   const ModeView = MODE_COMPONENTS[mode];
   const technicalGraph = (
     <Suspense fallback={<DiagramSkeleton />}>
@@ -859,6 +864,16 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
                   label={t("pages.runPage.tabHints.errorCount", { count: errorsCount })}
                   testId="errors-count-badge"
                 />
+                {degradationsCount > 0 && (
+                  <TabBadge
+                    count={degradationsCount}
+                    tone="warning"
+                    label={t("pages.runPage.tabHints.degradationCount", {
+                      count: degradationsCount,
+                    })}
+                    testId="degradations-count-badge"
+                  />
+                )}
               </TabsTrigger>
               <TabsTrigger
                 value="steps"

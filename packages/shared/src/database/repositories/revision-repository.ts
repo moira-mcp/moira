@@ -12,7 +12,7 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { and, asc, desc, eq, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
 import { entityRevision } from "../schema.js";
 import { createLogger } from "../../logging/logger.js";
@@ -238,9 +238,12 @@ export class RevisionRepository {
     if (rows.length <= maxRevisions) return;
 
     const doomed = rows.slice(0, rows.length - maxRevisions);
-    for (const row of doomed) {
-      await this.db.delete(entityRevision).where(eq(entityRevision.id, row.id));
-    }
+    await this.db.delete(entityRevision).where(
+      inArray(
+        entityRevision.id,
+        doomed.map((row) => row.id),
+      ),
+    );
     this.logger.debug("prune() dropped oldest revisions", {
       entityType: target.entityType,
       entityId: target.entityId,

@@ -7,8 +7,6 @@ CREATE TABLE IF NOT EXISTS `playbook` (
 	`visibility` text DEFAULT 'private' NOT NULL,
 	`currentRevision` integer DEFAULT 1 NOT NULL,
 	`size` integer DEFAULT 0 NOT NULL,
-	`deleted` integer DEFAULT false NOT NULL,
-	`deletedAt` integer,
 	`createdAt` integer NOT NULL,
 	`updatedAt` integer NOT NULL,
 	FOREIGN KEY (`userId`) REFERENCES `user`(`id`) ON UPDATE no action ON DELETE cascade

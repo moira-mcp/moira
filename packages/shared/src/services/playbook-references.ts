@@ -66,12 +66,16 @@ function isEscaped(text: string, index: number): boolean {
 }
 
 /**
- * Collect references from every string inside a value.
+ * Every playbook reference anywhere inside a definition, without duplicates.
  *
  * Walking the value rather than its JSON encoding matters for escapes: JSON doubles a backslash, so
  * a reference the author escaped would read as unescaped in the encoded form and the definition
  * would be refused for documenting its own syntax.
  */
+export function collectDefinitionReferences(definition: unknown): PlaybookReference[] {
+  return collectReferencesDeep(definition);
+}
+
 function collectReferencesDeep(value: unknown, into = new Map<string, PlaybookReference>()) {
   if (typeof value === "string") {
     for (const reference of collectPlaybookReferences(value)) {
@@ -103,7 +107,7 @@ export async function unresolvedPlaybookReferences(
   userId: string,
   registry: PlaybookReferenceResolver,
 ): Promise<PlaybookReference[]> {
-  const references = collectReferencesDeep(definition);
+  const references = collectDefinitionReferences(definition);
   const missing: PlaybookReference[] = [];
 
   for (const reference of references) {

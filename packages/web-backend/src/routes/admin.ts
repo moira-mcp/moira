@@ -1352,6 +1352,119 @@ router.delete(
 );
 
 /**
+ * GET /api/admin/global-settings/:key/history - Value history of one setting, newest first
+ *
+ * The history itself lives in the shared revision store, which notes and playbooks use too; these
+ * routes only expose it, so the screen can offer the same reading, comparison and restore for a
+ * setting as it does for the other two.
+ */
+router.get(
+  "/global-settings/:key/history",
+  asyncHandler(async (req: Request, res: Response) => {
+    const { key } = req.params;
+    const globalSettingsService = getGlobalSettingsService();
+
+    const existing = await globalSettingsService.get(key);
+    if (!existing) {
+      throw createApiError.notFound(`Global setting not found: ${key}`, { key });
+    }
+
+    res.json({
+      success: true,
+      data: { key, revisions: await globalSettingsService.getHistory(key) },
+      timestamp: new Date().toISOString(),
+    });
+  }),
+);
+
+/**
+ * GET /api/admin/global-settings/:key/revision/:revision - One past value
+ *
+ * A revision that recorded no value at all answers with `value: null`, which is a different answer
+ * from a revision that is unknown or has fallen out of the retained tail; the latter is a 404.
+ */
+router.get(
+  "/global-settings/:key/revision/:revision",
+  asyncHandler(async (req: Request, res: Response) => {
+    const { key } = req.params;
+    const revision = Number(req.params.revision);
+    if (!Number.isInteger(revision)) {
+      throw createApiError.validationFailed("revision must be a revision number");
+    }
+
+    const globalSettingsService = getGlobalSettingsService();
+    const found = await globalSettingsService.getRevisionValue(key, revision);
+    if (!found) {
+      throw createApiError.notFound(`Global setting revision not found: ${key}@${revision}`, {
+        key,
+        revision,
+      });
+    }
+
+    res.json({
+      success: true,
+      data: { key, revision, value: found.value },
+      timestamp: new Date().toISOString(),
+    });
+  }),
+);
+
+/**
+ * GET /api/admin/global-settings/:key/compare - The difference between two past values
+ */
+router.get(
+  "/global-settings/:key/compare",
+  asyncHandler(async (req: Request, res: Response) => {
+    const { key } = req.params;
+    const from = Number(req.query.from);
+    const to = Number(req.query.to);
+    if (!Number.isInteger(from) || !Number.isInteger(to)) {
+      throw createApiError.validationFailed("from and to must be revision numbers");
+    }
+
+    const globalSettingsService = getGlobalSettingsService();
+    const comparison = await globalSettingsService.compareRevisions(key, from, to);
+    if (!comparison) {
+      throw createApiError.notFound(`Global setting revisions not found: ${key}`, { key });
+    }
+
+    res.json({ success: true, data: comparison, timestamp: new Date().toISOString() });
+  }),
+);
+
+/**
+ * POST /api/admin/global-settings/:key/restore - Put a past value back in force
+ *
+ * Restoring writes a new revision carrying the older value rather than rewinding the history.
+ */
+router.post(
+  "/global-settings/:key/restore",
+  asyncHandler(async (req: Request, res: Response) => {
+    const { key } = req.params;
+    const revision = Number(req.body?.revision);
+    if (!Number.isInteger(revision)) {
+      throw createApiError.validationFailed("revision must be a revision number");
+    }
+
+    const currentUserId = (req as AuthenticatedRequest).userId;
+    const globalSettingsService = getGlobalSettingsService();
+    const restored = await globalSettingsService.restoreRevision(key, revision, currentUserId);
+    if (!restored) {
+      throw createApiError.notFound(`Global setting revision not found: ${key}@${revision}`, {
+        key,
+        revision,
+      });
+    }
+
+    res.json({
+      success: true,
+      data: { key, revision, restored: true },
+      timestamp: new Date().toISOString(),
+    });
+  }),
+);
+
+/**
  * POST /api/admin/global-settings/get-scope-value - Get raw value at specific scope (no fallback)
  * Returns the raw value stored at a specific scope level (default, agent, or model)
  * Used by MCP Prompts Editor to load values for editing

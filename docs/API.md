@@ -984,6 +984,16 @@ Publish a playbook or make it private again. Body: `visibility` (`private` | `pu
 right to share the playbook, which only its owner holds: publishing shares the text, not control
 over it.
 
+### GET /api/playbooks/:name/usage
+
+How many of the caller's running executions read this playbook right now, and through which
+workflows. Asked by the editor before a change is saved: content resolves at every step, so the
+edit reaches those executions at their next step. Response: `{ name, executions, workflows:
+[{ workflowId, name, executions }], complete }`. The walk reads one definition per workflow that
+has a running execution and stops at a bounded number of definitions; `complete: false` says the
+count is a lower bound. A reference counts however its owner is spelled (plainly, by handle or by
+id); an escaped reference does not count.
+
 ## Artifacts API
 
 Static HTML artifacts hosting with quota enforcement. All operations scoped to authenticated user.
@@ -4150,6 +4160,29 @@ Errors:
 - 404: Setting not found
 
 Authentication: Required (admin role)
+
+### GET /api/admin/global-settings/:key/history
+
+Value history of one setting, newest first, from the shared revision store: `{ key, revisions:
+[{ revision, size, preview, authorId, createdAt }] }`. Empty for a setting never written since
+histories were introduced. 404 when the setting does not exist.
+
+### GET /api/admin/global-settings/:key/revision/:revision
+
+One past value: `{ key, revision, value }`. `value: null` records a revision in which the setting
+had no value at all; an unknown or already pruned revision is a 404.
+
+### GET /api/admin/global-settings/:key/compare
+
+Line-by-line difference between two revisions. Query: `from`, `to` (required). 404 when either
+revision is unknown.
+
+### POST /api/admin/global-settings/:key/restore
+
+Put a past value back in force. Body: `revision`. Restoring writes a new revision carrying the older
+value rather than rewinding the history; the change is audited like any other value change.
+
+All four require the admin role.
 
 ### POST /api/admin/global-settings/preview-prompt
 

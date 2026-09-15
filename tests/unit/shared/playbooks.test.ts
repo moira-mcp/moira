@@ -127,6 +127,35 @@ describe("playbook registry", () => {
       ).toHaveLength(0);
     });
 
+    it("lists one owner's playbooks only, with the preview of the current text", async () => {
+      // Two accounts, the same name: a listing that lost its owner filter while being rewritten as
+      // one query would show both and look right on a single account.
+      await playbooks.save(OWNER, { slug: "review-standard", content: "Mine, first wording." });
+      await playbooks.save(STRANGER, { slug: "review-standard", content: "Theirs." });
+      await playbooks.save(OWNER, { slug: "review-standard", content: "Mine, second wording." });
+
+      const listed = await playbooks.list(OWNER);
+
+      expect(listed.total).toBe(1);
+      expect(listed.playbooks.map((entry) => entry.ownerId)).toEqual([OWNER]);
+      expect(listed.playbooks[0].preview).toBe("Mine, second wording.");
+      expect(listed.playbooks[0].revision).toBe(2);
+    });
+
+    it("removes a playbook outright: no soft-delete column, nothing left to list or read", async () => {
+      const columns = (
+        sqlite.prepare("PRAGMA table_info(playbook)").all() as { name: string }[]
+      ).map((column) => column.name);
+      expect(columns).not.toContain("deleted");
+      expect(columns).not.toContain("deletedAt");
+
+      await playbooks.save(OWNER, { slug: "temporary", content: "text" });
+      await playbooks.remove(OWNER, OWNER, "temporary");
+
+      expect((await playbooks.list(OWNER)).total).toBe(0);
+      expect(await playbooks.get(OWNER, OWNER, "temporary")).toBeNull();
+    });
+
     it("refuses a name a workflow node could not reference", async () => {
       await expect(playbooks.save(OWNER, { slug: "No Spaces", content: "x" })).rejects.toThrow(
         /lower-case letters/,

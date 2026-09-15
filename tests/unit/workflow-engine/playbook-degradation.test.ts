@@ -177,4 +177,27 @@ describe("a materialized file that cannot read a playbook", () => {
     expect(appended).toHaveLength(1);
     expect(appended[0].message).toContain("missing-standard");
   });
+
+  test("records nothing when the delivery itself is refused", async () => {
+    // A download that loses its authorization delivers no file, so the run must not carry a note
+    // about files it never received; the record follows the delivery, not the render.
+    const appended: ExecutionError[] = [];
+    const source = {
+      getExecution: async () => execution,
+      getWorkflowGraph: async () => materializeGraph(),
+      appendError: async (_executionId: string, error: ExecutionError) => {
+        appended.push(error);
+        return true;
+      },
+    };
+
+    const delivery = await resolveMaterializeDelivery(
+      "grant",
+      { validateToken: () => grant, authorizeMaterializeToken: () => false } as never,
+      source as never,
+    );
+
+    expect(delivery).toEqual({ authorized: false, reason: "authorization_lost" });
+    expect(appended).toHaveLength(0);
+  });
 });
