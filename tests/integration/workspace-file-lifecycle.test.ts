@@ -67,10 +67,11 @@ class FakeFileTransport implements WorkspaceFileTransport {
     return this.result;
   }
 
-  async inspectFile() {
+  /** Overridden per test; by default it answers with whatever `result` the fake is carrying. */
+  inspectFile: WorkspaceFileTransport["inspectFile"] = async () => {
     this.inspectCalls();
     return this.result;
-  }
+  };
 }
 
 function fixture() {
@@ -229,11 +230,11 @@ describe("durable workspace file operations", () => {
       expect(value.transport.inspectCalls).not.toHaveBeenCalled();
       transferPolicy = policy;
       const inspectFile = value.transport.inspectFile.bind(value.transport);
-      value.transport.inspectFile = async () => {
+      value.transport.inspectFile = async (...args) => {
         expect(
           value.sqlite.prepare("SELECT state, declaredSize FROM workspaceTransfer").all(),
         ).toEqual([{ state: "reserved", declaredSize: 16 }]);
-        return inspectFile();
+        return inspectFile(...args);
       };
       value.transport.result = {
         action: "download",
@@ -289,9 +290,9 @@ describe("durable workspace file operations", () => {
         expected: { exists: false },
       });
       const inspectFile = value.transport.inspectFile.bind(value.transport);
-      value.transport.inspectFile = async () => {
+      value.transport.inspectFile = async (...args) => {
         value.sqlite.exec("DELETE FROM workspaceConnectionRepository");
-        return inspectFile();
+        return inspectFile(...args);
       };
       await expect(value.service.reconcile("user-1", started.operation.id)).rejects.toMatchObject({
         code: "WORKSPACE_AUTHORIZATION_REQUIRED",
@@ -424,7 +425,7 @@ describe("durable workspace file operations", () => {
       "unavailable connector",
       "user-1",
       "workspace-1",
-      (value: ReturnType<typeof fixture>) => {
+      (value: ReturnType<typeof fixture>): void => {
         value.transport.available = false;
       },
       "input.bin",
@@ -433,28 +434,28 @@ describe("durable workspace file operations", () => {
       "invalid path",
       "user-1",
       "workspace-1",
-      (_value: ReturnType<typeof fixture>) => undefined,
+      (_value: ReturnType<typeof fixture>): void => undefined,
       "../input.bin",
     ],
     [
       "foreign",
       "user-2",
       "workspace-1",
-      (_value: ReturnType<typeof fixture>) => undefined,
+      (_value: ReturnType<typeof fixture>): void => undefined,
       "input.bin",
     ],
     [
       "missing",
       "user-1",
       "workspace-missing",
-      (_value: ReturnType<typeof fixture>) => undefined,
+      (_value: ReturnType<typeof fixture>): void => undefined,
       "input.bin",
     ],
     [
       "stopped",
       "user-1",
       "workspace-1",
-      (value: ReturnType<typeof fixture>) => {
+      (value: ReturnType<typeof fixture>): void => {
         value.sqlite
           .prepare(
             "UPDATE workspaceResource SET state = 'stopped', desiredState = 'stopped' WHERE id = 'workspace-1'",
@@ -467,7 +468,7 @@ describe("durable workspace file operations", () => {
       "disabled",
       "user-1",
       "workspace-1",
-      (value: ReturnType<typeof fixture>) => {
+      (value: ReturnType<typeof fixture>): void => {
         new WorkspaceResourceRepository(value.sqlite).setControl({
           scope: "global",
           disabled: true,
@@ -483,7 +484,7 @@ describe("durable workspace file operations", () => {
       "busy",
       "user-1",
       "workspace-1",
-      (value: ReturnType<typeof fixture>) => {
+      (value: ReturnType<typeof fixture>): void => {
         value.repository.reserve({
           userId: "user-1",
           resourceId: "workspace-1",
@@ -844,7 +845,17 @@ describe("durable workspace file operations", () => {
         result: null,
       });
       // Capacity is released: the same workspace accepts new work again.
-      value.transport.result = { action: "stat", path: "src/file.bin", exists: false };
+      value.transport.result = {
+        action: "stat",
+        stat: {
+          path: "src/file.bin",
+          type: "file",
+          size: 0,
+          mode: 0o644,
+          modifiedAt: now,
+          version: null,
+        },
+      };
       const next = await value.service.execute("user-1", "workspace-1", {
         action: "stat",
         path: "src/file.bin",

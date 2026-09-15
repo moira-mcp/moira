@@ -238,7 +238,7 @@ export function calculateCoverage(
       : undefined;
 
   return {
-    workflowId: workflow.id,
+    workflowId: workflow.id ?? "unnamed-workflow",
     totalNodes: allNodeIds.length,
     visitedNodes,
     unvisitedNodes,

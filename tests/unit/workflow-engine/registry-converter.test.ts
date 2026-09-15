@@ -3,13 +3,19 @@
  */
 import { describe, test, expect } from "@jest/globals";
 import { convertWorkflowToRegistry, inferRegistryType } from "@mcp-moira/workflow-engine";
+import type { VariableDefinition, WorkflowGraph } from "@mcp-moira/workflow-engine";
 
-function flow(vars?: Record<string, { description?: string; value?: unknown }>) {
+function flow(vars?: Record<string, VariableDefinition>): WorkflowGraph {
   return {
     id: "wf-1",
     metadata: { name: "WF", version: "1.0.0", description: "" },
     nodes: [
-      { type: "start", id: "start", initialData: vars ? { variables: vars } : undefined },
+      {
+        type: "start",
+        id: "start",
+        connections: { default: "end" },
+        initialData: vars ? { variables: vars } : undefined,
+      },
       { type: "end", id: "end" },
     ],
   };
@@ -62,7 +68,7 @@ describe("convertWorkflowToRegistry", () => {
   });
 
   test("missing-tolerant: no start node yields an empty registry", () => {
-    const { workflow, changed, variableCount } = convertWorkflowToRegistry({
+    const { workflow, changed, variableCount } = convertWorkflowToRegistry<WorkflowGraph>({
       id: "wf",
       metadata: { name: "n", version: "1.0.0", description: "" },
       nodes: [{ type: "end", id: "end" }],

@@ -262,7 +262,7 @@ describe("todo-list minimal sequential checklist", () => {
       variables: {},
       nodeStates: {},
       executionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
-      workflowId: workflow.id,
+      workflowId: workflow.id ?? "workflow",
       userId: "workflow-test-user",
     };
     const handler = new MaterializeHandler(
@@ -281,7 +281,7 @@ describe("todo-list minimal sequential checklist", () => {
       workflow.variableRegistry,
     );
     expect(firstPresentation.action).toBe("pause");
-    expect(firstPresentation.nextNodeId).toBeUndefined();
+    expect(firstPresentation.outputPath).toBeUndefined();
     expect(firstQueue.peekNext()).toMatchObject({
       nodeId: "materialize-workflow-guide",
       completionCondition:
@@ -304,7 +304,7 @@ describe("todo-list minimal sequential checklist", () => {
       workflow.variableRegistry,
     );
     expect(secondPresentation.action).toBe("pause");
-    expect(secondPresentation.nextNodeId).toBeUndefined();
+    expect(secondPresentation.outputPath).toBeUndefined();
     expect((retryQueue.peekNext() as { directive: string }).directive).toContain(
       "workflow-guide.md",
     );

@@ -5,13 +5,10 @@ import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import {
-  ExecutionAttemptRepository,
-  ExecutionRepository,
-  type ExecutionAttemptClaimResult,
-} from "@mcp-moira/shared";
+import { ExecutionAttemptRepository, ExecutionRepository } from "@mcp-moira/shared";
 import { workflowGraphDigest } from "@mcp-moira/workflow-engine";
 import type {
+  ExecutionAttemptClaimResult,
   PreparedStartExecutionAttempt,
   PresentedExecutionAttempt,
   WorkflowExecution,

@@ -580,7 +580,7 @@ describe("Robust Task cause-aware contract", () => {
       variables: { workspace_path: "./moira-ws/robust-task-example-20260821-2300/" },
       nodeStates: {},
       executionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
-      workflowId: workflow.id,
+      workflowId: workflow.id ?? "workflow",
       userId: "workflow-test-user",
     };
     const handler = new MaterializeHandler(
@@ -598,7 +598,7 @@ describe("Robust Task cause-aware contract", () => {
       workflow.variableRegistry,
     );
     expect(presented.action).toBe("pause");
-    expect(presented.nextNodeId).toBeUndefined();
+    expect(presented.outputPath).toBeUndefined();
     expect(queue.peekNext()).toMatchObject({
       nodeId: "materialize-workflow-guide",
       completionCondition:
@@ -620,7 +620,7 @@ describe("Robust Task cause-aware contract", () => {
       workflow.variableRegistry,
     );
     expect(rePresentedAfterClientFailure.action).toBe("pause");
-    expect(rePresentedAfterClientFailure.nextNodeId).toBeUndefined();
+    expect(rePresentedAfterClientFailure.outputPath).toBeUndefined();
     expect(retryQueue.peekNext()).toMatchObject({
       nodeId: "materialize-workflow-guide",
       completionCondition:

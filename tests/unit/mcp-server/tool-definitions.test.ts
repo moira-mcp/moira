@@ -16,6 +16,7 @@ import {
   getToolReferenceModel,
   resolveToolDescription,
   renderToolReference,
+  type McpToolName,
 } from "../../../packages/mcp-server/src/tools/tool-definitions.js";
 import {
   workspaceDownloadRequestSchema,
@@ -191,7 +192,7 @@ describe("MCP tool definitions", () => {
     ).toBe(false);
     // The published exec schema is one flat root object: every form's fields are visible,
     // only the shared identity is required, and the strict request union decides the form.
-    const publishedExec = getToolJsonSchema(definition("workspace_exec")) as {
+    const publishedExec = getToolJsonSchema(definition("workspace_exec")) as unknown as {
       type: string;
       required: string[];
       properties: Record<string, unknown>;
@@ -271,7 +272,7 @@ describe("MCP tool definitions", () => {
     expect(download.safeParse({ ...resume, file_name: "../result.bin" }).success).toBe(false);
     const publishedDownload = getToolJsonSchema(
       TOOL_DEFINITIONS.find((definition) => definition.name === "workspace_download")!,
-    ) as { required: string[] };
+    ) as unknown as { required: string[] };
     expect(publishedDownload.required.slice().sort()).toEqual([
       "file_name",
       "mime_type",
@@ -319,7 +320,7 @@ describe("MCP tool definitions", () => {
       communication.schema.safeParse({ action: "send", message: "ready", recipient: "123" })
         .success,
     ).toBe(false);
-    const schema = getToolJsonSchema(communication) as { properties: Record<string, unknown> };
+    const schema = getToolJsonSchema(communication) as unknown as { properties: Record<string, unknown> };
     for (const forbidden of [
       "recipient",
       "provider",
@@ -426,7 +427,7 @@ describe("MCP tool definitions", () => {
     for (const action of ["list-nodes", "get-nodes", "analyze-variables", "set-visibility"]) {
       expect(getToolOperations(manage)).toContain(action);
     }
-    const manageJsonSchema = getToolJsonSchema(manage) as {
+    const manageJsonSchema = getToolJsonSchema(manage) as unknown as {
       properties?: { workflow?: { type?: string }; changes?: { type?: string } };
     };
     expect(manageJsonSchema.properties?.workflow?.type).toBe("object");
@@ -444,7 +445,7 @@ describe("MCP tool definitions", () => {
         .transform((value) => value.length)
         .pipe(z.number()),
     });
-    const projected = getToolJsonSchema({ schema }) as {
+    const projected = getToolJsonSchema({ schema }) as unknown as {
       properties: { choice: unknown; piped: unknown };
     };
     const sdkSemantics = zodToJsonSchema(schema, {
@@ -463,7 +464,7 @@ describe("MCP tool definitions", () => {
     expect(settings.schema.safeParse({ action: "get", key: "   " }).success).toBe(false);
     expect(settings.schema.safeParse({ action: "get", category: "   " }).success).toBe(false);
 
-    const projected = getToolJsonSchema(settings) as {
+    const projected = getToolJsonSchema(settings) as unknown as {
       properties: {
         key: { minLength?: number; pattern?: string };
         category: { minLength?: number; pattern?: string };
@@ -595,13 +596,13 @@ describe("MCP tool definitions", () => {
     }
   });
 
-  it.each([
+  it.each<[string, Error, "error" | "warn"]>([
     [
       "an unexpected failure",
       new Error("sqlite disk I/O error at /var/lib/moira/private.db"),
       "error",
     ],
-    ["an operational failure", new NotFoundError("Workflow", "missing-workflow"), "warn"],
+    ["an operational failure", new NotFoundError("Workflow not found", { workflowId: "missing-workflow" }), "warn"],
     // A domain error counts as operational only after normalization, which is the project's rule.
     ["a domain failure", new WorkflowNotFoundError("missing-workflow", "slug"), "warn"],
   ])("classifies %s the way this project classifies failures", async (_name, failure, level) => {
@@ -738,8 +739,9 @@ describe("MCP tool definitions", () => {
         },
       });
       expect(result.isError).toBe(true);
-      expect(result.content[0]).toMatchObject({ type: "text" });
-      const errorText = (result.content[0] as { type: "text"; text: string }).text;
+      const [firstBlock] = result.content as Array<{ type: string; text: string }>;
+      expect(firstBlock).toMatchObject({ type: "text" });
+      const errorText = firstBlock.text;
       expect(errorText).toContain("Unrecognized key");
       expect(errorText).toContain("workflowId");
       expect(errorText).not.toContain("must-not-be-read");
