@@ -134,6 +134,12 @@ Two things have repeatedly turned a finished change into a red CI run:
   contributor's checkout fails admin-surface assertions with 403 that CI never sees, and a green
   local API run proves nothing about CI either. `npm run verify:docker` is the comparable one: it
   selects the CI environment explicitly instead of overwriting yours.
+- **CI runs on Linux; your machine probably does not.** A test that reaches the host — `/proc`, file
+  modes, path case, a platform-specific branch in the code it drives — can pass locally and fail
+  there. The workspace supervisor's environment identity is the live example: on Linux it comes from
+  the kernel and the `MOIRA_ENVIRONMENT_ID` override is deliberately ignored, so a test that changed
+  that variable to simulate a restart passed on macOS and failed in CI. Drive such behaviour through
+  state the code reads on every platform, or run the check in a Linux container before pushing.
 - **Every branch with an open pull request must be green on its own.** CI runs the base pull request
   too, so a stacked branch can be green while the branch under it is red — a defect whose fix lives
   one commit further up is still a red base. After rebasing a stack, run `npm run verify` on each

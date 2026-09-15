@@ -69,6 +69,27 @@ function fixture() {
   };
 }
 
+/**
+ * Make what is stored look as if an earlier life of the environment wrote it.
+ *
+ * The environment's identity comes from the running Linux kernel wherever those sources exist, so a
+ * test cannot move the environment to another life by setting a variable — on Linux the variable is
+ * deliberately powerless. What a test can do is state the other half of the comparison: that the
+ * stored file was written by a life that is not this one, which is exactly the situation the
+ * behaviour is about, and it reads the same on every platform.
+ */
+function storeForeignLife(path: string): void {
+  const foreign = "0".repeat(64);
+  const raw = readFileSync(path, "utf8");
+  if (!raw.trimStart().startsWith("{")) {
+    writeFileSync(path, foreign, { mode: 0o600 });
+    return;
+  }
+  const stored = JSON.parse(raw) as Record<string, unknown>;
+  stored.environment = foreign;
+  writeFileSync(path, `${JSON.stringify(stored)}\n`, { mode: 0o600 });
+}
+
 function request(
   environment: NodeJS.ProcessEnv,
   value: Record<string, unknown>,
@@ -1281,25 +1302,23 @@ if (process.env.MOIRA_TEST_HOLD_FILE_RUNNER === "1") {
     >;
     expect(other.stdout).toBe(`${realpathSync(value.repository)}|none`);
 
-    // The stored context belongs to this life of the environment: in another it is refused, and a
-    // session that was never opened is refused too.
+    // The stored context belongs to the life of the environment that opened it: one written by an
+    // earlier life is refused, and a session that was never opened is refused too.
+    storeForeignLife(join(value.stateRoot, "sessions", "build.json"));
     await expect(
-      request(
-        { ...environment, MOIRA_ENVIRONMENT_ID: "life-two" },
-        {
-          action: "execute",
-          version: 1,
-          remoteMarker: marker("e"),
-          repositoryFullName: "owner/repository",
-          argv: observe,
-          stdin: "",
-          timeoutMs: 10_000,
-          maxStdoutBytes: 4096,
-          maxStderrBytes: 4096,
-          maxRetainedBytes: 1024 * 1024,
-          session: "build",
-        },
-      ),
+      request(environment, {
+        action: "execute",
+        version: 1,
+        remoteMarker: marker("e"),
+        repositoryFullName: "owner/repository",
+        argv: observe,
+        stdin: "",
+        timeoutMs: 10_000,
+        maxStdoutBytes: 4096,
+        maxStderrBytes: 4096,
+        maxRetainedBytes: 1024 * 1024,
+        session: "build",
+      }),
     ).resolves.toEqual({ state: "session_unavailable" });
     await expect(
       request(environment, {
@@ -1461,10 +1480,9 @@ if (process.env.MOIRA_TEST_HOLD_FILE_RUNNER === "1") {
   test("names a command whose workspace restarted under it, and not one that failed inside this life", async () => {
     const value = fixture();
     const marker = (character: string) => `moira-op-${character.repeat(32)}`;
-    const firstLife = { ...value.environment, MOIRA_ENVIRONMENT_ID: "life-one" };
-    const secondLife = { ...value.environment, MOIRA_ENVIRONMENT_ID: "life-two" };
+    const environment = { ...value.environment, MOIRA_ENVIRONMENT_ID: "life-one" };
     const start = (remoteMarker: string) =>
-      request(firstLife, {
+      request(environment, {
         action: "execute",
         version: 1,
         remoteMarker,
@@ -1493,22 +1511,24 @@ if (process.env.MOIRA_TEST_HOLD_FILE_RUNNER === "1") {
     }
     await new Promise((resolveWait) => setTimeout(resolveWait, 200));
 
-    // The required state: the same absence of a result means a restart in a later life and a
-    // supervisor that failed inside this one. The recorded life is what separates them.
+    // The required state: the same absence of a result means one thing when the operation belongs to
+    // this life and another when it belongs to an earlier one. The recorded life is what separates
+    // them, so it is asked about first as it stands and then as a restart would have left it.
     await expect(
-      request(secondLife, { action: "inspect", version: 1, remoteMarker: marker("d") }),
-    ).resolves.toEqual({ state: "interrupted" });
-    await expect(
-      request(firstLife, { action: "inspect", version: 1, remoteMarker: marker("d") }),
+      request(environment, { action: "inspect", version: 1, remoteMarker: marker("d") }),
     ).resolves.toMatchObject({
       state: "failed",
       stderr: "operation supervisor exited without a result",
     });
+    storeForeignLife(join(directory, "environment"));
+    await expect(
+      request(environment, { action: "inspect", version: 1, remoteMarker: marker("d") }),
+    ).resolves.toEqual({ state: "interrupted" });
   });
 
   test("counts only the sessions this life can use and lets a dead one free its slot", async () => {
     const value = fixture();
-    const life = (id: string) => ({ ...value.environment, MOIRA_ENVIRONMENT_ID: id });
+    const environment = { ...value.environment, MOIRA_ENVIRONMENT_ID: "life-one" };
     const marker = (index: number) => `moira-op-${index.toString(16).padStart(32, "0")}`;
     const open = (environment: NodeJS.ProcessEnv, session: string, remoteMarker: string) =>
       request(environment, {
@@ -1528,21 +1548,25 @@ if (process.env.MOIRA_TEST_HOLD_FILE_RUNNER === "1") {
 
     // Fill the workspace's sessions in one life of the environment.
     for (let index = 0; index < 16; index++) {
-      await expect(open(life("first"), `session-${index}`, marker(index))).resolves.toEqual({
+      await expect(open(environment, `session-${index}`, marker(index))).resolves.toEqual({
         state: "running",
       });
     }
-    await expect(open(life("first"), "one-too-many", marker(100))).resolves.toEqual({
+    await expect(open(environment, "one-too-many", marker(100))).resolves.toEqual({
       state: "session_limit",
       limit: "sessions",
     });
 
-    // After a restart none of them can be used, so none of them holds a slot any more.
-    await expect(open(life("second"), "fresh", marker(101))).resolves.toEqual({ state: "running" });
+    // A restart leaves every one of those files behind, written by a life that has ended. None of
+    // them can be used any more, so none of them holds a slot either.
+    for (let index = 0; index < 16; index++) {
+      storeForeignLife(join(value.stateRoot, "sessions", `session-${index}.json`));
+    }
+    await expect(open(environment, "fresh", marker(101))).resolves.toEqual({ state: "running" });
 
     // A session left by an earlier life is removed by the call that ends it, rather than lingering.
     await expect(
-      request(life("second"), {
+      request(environment, {
         action: "execute",
         version: 1,
         remoteMarker: marker(102),
