@@ -228,7 +228,7 @@ packages/web-backend/           # Express API server (internal port 4201)
 packages/web-frontend/src/      # React UI components (static build served by nginx)
 config/             # Docker deployment configuration
 ├── docker-compose.yml  # 4-service Docker setup
-├── Dockerfile          # Single-stage Node.js build
+├── Dockerfile          # Multi-stage build: deps → frontend/docs/backend builds → runtime-deps (prod only) → runtime
 ├── supervisord.conf    # Process manager (init-database → services)
 ├── nginx.conf          # Reverse proxy configuration
 ├── environment.env     # Environment variables template
