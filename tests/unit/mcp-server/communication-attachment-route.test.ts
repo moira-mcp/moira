@@ -30,6 +30,15 @@ function createGrantTable(db: Database.Database): void {
   )`);
 }
 
+/** The text of a tool result's first content block, which these assertions always read. */
+function firstText(result: { content: Array<{ type: string }> }): string {
+  const [block] = result.content;
+  if (!block || block.type !== "text") {
+    throw new Error(`expected a text content block, got ${block?.type ?? "nothing"}`);
+  }
+  return (block as { type: "text"; text: string }).text;
+}
+
 interface ObservedDelivery {
   text: string;
   bytes: Buffer;
@@ -129,6 +138,8 @@ describe("communication delivery boundaries", () => {
       ) as Request;
       source.get = ((name: string) => headers[name.toLowerCase()]) as Request["get"];
       const result: RawResult = { status: 200, body: undefined, reads: 0 };
+      // Only the three members the route touches; `response` is referred to by name inside the
+      // methods because `this` on an object literal is not the double's own type.
       const response = {
         headersSent: false,
         status(code: number) {
@@ -137,7 +148,7 @@ describe("communication delivery boundaries", () => {
         },
         json(body: unknown) {
           result.body = body;
-          this.headersSent = true;
+          response.headersSent = true;
           return this;
         },
       } as unknown as Response;
@@ -170,7 +181,7 @@ describe("communication delivery boundaries", () => {
     const result = await runWithMCPContext({ userId: "user-a" }, () =>
       handler({ action: "send", message: "Configured delivery" }),
     );
-    expect(JSON.parse(result.content[0].text)).toEqual(
+    expect(JSON.parse(firstText(result))).toEqual(
       expect.objectContaining({ status: "delivered", deliveredChannels: 1 }),
     );
     expect(deliveries).toEqual([{ text: "Configured delivery", bytes: Buffer.alloc(0) }]);
@@ -185,7 +196,7 @@ describe("communication delivery boundaries", () => {
         sizeBytes: 4,
       }),
     );
-    expect(JSON.parse(grantResult.content[0].text)).toEqual(
+    expect(JSON.parse(firstText(grantResult))).toEqual(
       expect.objectContaining({
         requiredHeaders: expect.objectContaining({
           Authorization: "Bearer <valid MCP credential for the same user>",
@@ -219,7 +230,13 @@ describe("communication delivery boundaries", () => {
 
   it("refuses malformed bodies before provider work and releases the grant for retry", async () => {
     const { mint, invoke, validHeaders, deliveries } = harness();
-    const cases = [
+    const cases: Array<{
+      headers: Record<string, string>;
+      chunks: Buffer[];
+      status: number;
+      error: string;
+      reads: number;
+    }> = [
       {
         headers: { "content-type": "text/plain" },
         chunks: [Buffer.from("test")],

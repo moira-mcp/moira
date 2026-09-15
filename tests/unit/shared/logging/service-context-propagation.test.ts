@@ -18,7 +18,6 @@ import {
 describe("Service Context Propagation", () => {
   // Reset global service before each test
   beforeEach(() => {
-    // @ts-expect-error - accessing private for test reset
     setGlobalService(undefined as unknown as Service);
   });
 
