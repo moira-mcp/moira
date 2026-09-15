@@ -14,6 +14,7 @@ import { AgentMessageQueue } from "../services/agent-message-queue.js";
 import { INodeHandler } from "../interfaces/core-interfaces.js";
 import { IDataRepository } from "../interfaces/data-repository.js";
 import { IGraphExecutionEngine } from "../interfaces/graph-execution-engine.js";
+import { recordUnresolvedPlaybooks } from "../templates/playbook-degradation.js";
 import { GraphTemplateProcessor } from "../templates/graph-template-processor.js";
 import { SchemaValidator } from "../utils/schema-validator.js";
 import { createLogger, InternalError, ValidationError } from "@mcp-moira/shared";
@@ -67,14 +68,23 @@ export class AgentDirectiveHandler implements INodeHandler {
     if (input === undefined || input === null) {
       // Process templates in directive ({{userName}}, {{context.variables}}, {{note:KEY}}, etc.)
       // Using async version to support note references
-      const processedDirective = await this.templateProcessor.processDirectiveAsync(
+      const directiveResult = await this.templateProcessor.processDirectiveAsyncWithReport(
         agentNode.directive,
         context,
       );
+      const processedDirective = directiveResult.text;
 
-      const processedCompletion = await this.templateProcessor.processDirectiveAsync(
+      const completionResult = await this.templateProcessor.processDirectiveAsyncWithReport(
         agentNode.completionCondition,
         context,
+      );
+      const processedCompletion = completionResult.text;
+
+      await recordUnresolvedPlaybooks(
+        [...directiveResult.unresolvedPlaybooks, ...completionResult.unresolvedPlaybooks],
+        agentNode.id,
+        context.executionId,
+        repository,
       );
 
       this.logger.debug("Adding processed directive to message queue", {

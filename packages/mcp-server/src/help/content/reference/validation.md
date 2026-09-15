@@ -241,11 +241,30 @@ Fix it one of two ways:
 - Add a `default` to the variable in `variableRegistry`.
 - Have an upstream node write the variable via its `globalInputs` before the node that references it.
 
+## Playbook Reference Validation
+
+A definition that names a playbook with `{{playbook:name}}` is accepted only when the author can
+read that playbook: their own, or another account's published one. An unreadable reference is a
+blocking error wherever a definition is written — the `manage` tool refuses to create or edit, and a
+definition saved through the API is stored as invalid — and the message names the playbook and the
+three ways out: create it, publish it, or remove the reference.
+
+The same rule runs once more when a run is started, because a playbook can disappear between the
+last edit and the start. `start` refuses before the execution exists rather than presenting a step
+whose behaviour text is missing.
+
+A reference written with a leading backslash (`\{{playbook:name}}`) is literal text and is not
+checked — that is how a document can explain the syntax without naming a playbook.
+
 ## Injection Safety
 
 Substituted variable and data VALUES are never re-executed as templates. When the engine interpolates a value into a `directive` or `message`, that value is treated as a literal string — brace syntax originating from substituted data is neutralized and not re-parsed.
 
 This means templates only ever execute in author-controlled static node fields, not in values that arrive from agent input or external data.
+
+Playbook content follows the same boundary. Your own playbook is author-controlled text and is
+processed like the rest of your definition; a playbook belonging to another account is neutralized
+before substitution, so published text cannot execute templates inside your run.
 
 :::danger
 Do not echo untrusted input containing `{{...}}` into a directive. Declare the variables you need

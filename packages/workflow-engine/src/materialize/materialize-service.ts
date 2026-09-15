@@ -2,7 +2,10 @@ import { Buffer } from "node:buffer";
 import { posix } from "node:path";
 import { pack } from "tar-stream";
 import type { ExecutionContext, MaterializeNode, VariableRegistry } from "../types/index.js";
-import { GraphTemplateProcessor } from "../templates/graph-template-processor.js";
+import {
+  GraphTemplateProcessor,
+  type UnresolvedPlaybookReference,
+} from "../templates/graph-template-processor.js";
 import { ValidationError } from "@mcp-moira/shared";
 
 export const MATERIALIZE_MAX_FILES = 100;
@@ -112,12 +115,48 @@ export async function renderMaterializePaths(
   return renderedPaths;
 }
 
+/**
+ * Render a materialize node's files, reporting any playbook reference that could not be resolved.
+ *
+ * A file's text can name a playbook, and there the usual placeholder never reaches the agent's
+ * directive — the substitution happens inside a file it downloads. The caller therefore needs the
+ * list to record the degradation where a person can see it.
+ */
+export async function renderMaterializeFilesWithReport(
+  node: MaterializeNode,
+  registry: VariableRegistry | undefined,
+  executionContext: ExecutionContext,
+): Promise<{
+  files: RenderedMaterializeFile[];
+  unresolvedPlaybooks: UnresolvedPlaybookReference[];
+}> {
+  const processor = new GraphTemplateProcessor();
+  const unresolvedPlaybooks: UnresolvedPlaybookReference[] = [];
+  const files = await renderMaterializeFilesWith(
+    processor,
+    node,
+    registry,
+    executionContext,
+    unresolvedPlaybooks,
+  );
+  return { files, unresolvedPlaybooks };
+}
+
 export async function renderMaterializeFiles(
   node: MaterializeNode,
   registry: VariableRegistry | undefined,
   executionContext: ExecutionContext,
 ): Promise<RenderedMaterializeFile[]> {
-  const processor = new GraphTemplateProcessor();
+  return renderMaterializeFilesWith(new GraphTemplateProcessor(), node, registry, executionContext);
+}
+
+async function renderMaterializeFilesWith(
+  processor: GraphTemplateProcessor,
+  node: MaterializeNode,
+  registry: VariableRegistry | undefined,
+  executionContext: ExecutionContext,
+  unresolvedPlaybooks?: UnresolvedPlaybookReference[],
+): Promise<RenderedMaterializeFile[]> {
   const context = createTemplateContext(registry, executionContext);
   const renderedPaths = await renderMaterializePaths(node, registry, executionContext);
   const rendered: RenderedMaterializeFile[] = [];
@@ -136,7 +175,9 @@ export async function renderMaterializeFiles(
 
     const renderedPath = renderedPaths[index];
 
-    const renderedContent = await processor.processDirectiveAsync(source, context);
+    const rendered_ = await processor.processDirectiveAsyncWithReport(source, context);
+    unresolvedPlaybooks?.push(...rendered_.unresolvedPlaybooks);
+    const renderedContent = rendered_.text;
     const content = Buffer.from(renderedContent, "utf8");
     if (content.byteLength > MATERIALIZE_MAX_FILE_BYTES) {
       throw new ValidationError(

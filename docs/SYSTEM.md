@@ -718,7 +718,8 @@ interface ExecutionContext {
 interface ExecutionError {
   timestamp: number; // Unix ms
   nodeId: string; // Node where error occurred
-  errorType: "validation" | "handler" | "system";
+  // "degradation" records a step that ran without behaviour text it names; it is not a failure
+  errorType: "validation" | "handler" | "system" | "degradation";
   message: string;
   input?: unknown; // Sanitized input (optional)
 }
@@ -1453,7 +1454,7 @@ Action-based tool for session-related information.
     createdAt: string;   // ISO 8601
     updatedAt: string;   // ISO 8601
     completedAt?: string; // ISO 8601
-    errorCount?: number; // Number of errors in errors array
+    errorCount?: number; // Refusals in the errors array; degradation entries are not counted
   }];
   total: number;
 }

@@ -566,8 +566,22 @@ level headings classify the tracked test paths listed beneath them.
 
 ### playbooks
 
+**workflow**
+
+- `tests/workflow/engine/playbook-references.test.ts` — the reference form (`{{playbook:name}}` and `{{playbook:@owner/name}}`, duplicates collapsed, unrelated syntax ignored) and its resolution: the current text substituted, the text re-read on the next step so an edit reaches a running execution, one read however often a step names the same playbook, another account's published playbook by owner, a reference carried by a registry variable default, an escaped reference skipped, no bundled flow naming a playbook (which would make it unstartable for everyone), another account's text neutralised so it cannot run as a template while your own expands, a visible placeholder plus a report when it cannot be read, the report belonging to one presentation rather than the processor, and the step surviving a registry failure
+
 **unit**
 
+- `tests/unit/workflow-engine/playbook-degradation.test.ts` — a run that loses behaviour text says so: a step whose playbook cannot be read records on the execution what it ran without, a teleport step recording it the same way, and a materialized file is still delivered with a placeholder naming the playbook while the run carries the same fact — the only trace for a reference inside a downloaded file
+
+**integration**
+
+- `tests/integration/playbook-reference-validation.test.ts` — a definition naming a playbook the author cannot read is marked invalid with a message naming it, the same definition becomes valid once the playbook exists, an escaped reference is ignored so a definition may document the syntax, another author's private playbook is refused, and a definition without references is unaffected
+- `tests/integration/degradation-is-not-a-failed-step.test.ts` — in a repair loop, where the run legitimately returns to the node it came from, a playbook that disappears mid-run leaves a placeholder and a degradation record without auditing the step as a failed attempt and without giving the agent's own run listing an error count, while a rejected answer on the same node is still audited as a failed attempt
+
+**unit**
+
+- `tests/unit/shared/execution-journal-refusals.test.ts` — the one rule that separates the two kinds of fact in the execution error journal: a degradation is the only entry that is not a refusal, counting skips it, and the message a consumer reports is the latest refusal rather than the latest entry
 - `tests/unit/shared/playbooks.test.ts` — the registry: content kept in the shared revision store with no private history table left in the schema, a revision per save with a past one read back, restore as a new revision, comparison of two revisions, history removed with the playbook, an unusable name refused, an owner named by handle or by user id and an unknown one refused, content beyond the size limit refused; and access — a private playbook hidden from another user, a published one shown, a stranger still refused the right to change it, an editing grant allowed to change the text but not to publish, removal kept with the owner
 
 **api**
@@ -576,6 +590,7 @@ level headings classify the tracked test paths listed beneath them.
 
 **mcp-tools**
 
+- `tests/mcp-tools/playbook-references-tool.test.ts` — a definition naming an unknown playbook refused while editing, a run refused before it is created when the playbook disappears after the definition was accepted, and the same definition accepted once the playbook exists, with its text reaching the first step instead of the reference
 - `tests/mcp-tools/playbooks-tool.test.ts` — the agent's view: save and read back, history with comparison and restore, listing the calling account's playbooks, publishing and unpublishing, and the refusal of an unusable name
 
 ### versioned content

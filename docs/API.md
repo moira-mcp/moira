@@ -2120,7 +2120,7 @@ Response:
       createdAt: number;
       updatedAt: number;
       completedAt?: number;
-      errorCount: number; // count of errors in errors array
+      errorCount: number; // refusals in the errors array; degradation entries are not counted
     }>;
     total: number;
     limit: number;
@@ -2177,7 +2177,9 @@ Response:
       errors: Array<{
         timestamp: number;
         nodeId: string;
-        errorType: "validation" | "handler" | "system";
+        // "degradation": the step ran without something it names (unreadable playbook text);
+        // it is not a failure and is not counted as one
+        errorType: "validation" | "handler" | "system" | "degradation";
         message: string;
         input?: unknown;
       }>;

@@ -5,9 +5,23 @@
 
 import { Router, Request, Response } from "express";
 import { asyncHandler, createApiError } from "../middleware/error-middleware.js";
-import { auditLog, user, getDatabase, workflowExecution } from "@mcp-moira/shared";
+import { auditLog, user, getDatabase, workflowExecution, countRefusals } from "@mcp-moira/shared";
 import { DatabaseRepository } from "@mcp-moira/workflow-engine";
 import { and, gte, lte, count, desc, sql, countDistinct, eq, type SQL } from "drizzle-orm";
+
+/**
+ * Whether a completed execution failed.
+ *
+ * A degradation entry records that a step ran without behaviour text it names; the run still did
+ * what it was asked. Counting it as a failure would turn a missing playbook into a red number on
+ * the operator's dashboard.
+ */
+function completedWithFailure(execution: {
+  status?: string;
+  errors?: { errorType?: string }[];
+}): boolean {
+  return execution.status === "completed" && countRefusals(execution.errors) > 0;
+}
 
 const router = Router();
 const repository = new DatabaseRepository();
@@ -81,9 +95,7 @@ router.get(
     const completedExecutions = filteredExecutions.filter((e) => e.status === "completed").length;
 
     // Failed executions (Issue #386: executions that completed with errors)
-    const failedExecutions = filteredExecutions.filter(
-      (e) => e.status === "completed" && e.errors && e.errors.length > 0,
-    ).length;
+    const failedExecutions = filteredExecutions.filter((e) => completedWithFailure(e)).length;
 
     res.json({
       success: true,
@@ -119,9 +131,7 @@ router.get(
     // Calculate success rate
     // Issue #386: "failed" = completed with errors, "success" = completed without errors
     const completed = filteredExecutions.filter((e) => e.status === "completed").length;
-    const failed = filteredExecutions.filter(
-      (e) => e.status === "completed" && e.errors && e.errors.length > 0,
-    ).length;
+    const failed = filteredExecutions.filter((e) => completedWithFailure(e)).length;
     const successful = completed - failed;
     const successRate = completed > 0 ? (successful / completed) * 100 : 0;
 
@@ -135,7 +145,7 @@ router.get(
       if (exec.status === "completed") {
         byWorkflow[exec.workflowId].completed++;
         // Issue #386: count as failed if has errors
-        if (exec.errors && exec.errors.length > 0) {
+        if (completedWithFailure({ status: "completed", errors: exec.errors })) {
           byWorkflow[exec.workflowId].failed++;
         }
       }
@@ -155,7 +165,7 @@ router.get(
       if (exec.status === "completed") {
         overTime[date].completed++;
         // Issue #386: count as failed if has errors
-        if (exec.errors && exec.errors.length > 0) {
+        if (completedWithFailure({ status: "completed", errors: exec.errors })) {
           overTime[date].failed++;
         }
       }
@@ -235,7 +245,7 @@ router.get(
           workflowCounts[exec.workflowId].durations.push(exec.completedAt - exec.createdAt);
         }
         // Issue #386: count as failed if has errors
-        if (exec.errors && exec.errors.length > 0) {
+        if (completedWithFailure({ status: "completed", errors: exec.errors })) {
           workflowCounts[exec.workflowId].failed++;
         }
       }

@@ -10,7 +10,15 @@
  */
 
 import { ExecutionContext } from "../types/index.js";
-import { createLogger, getNoteService, NoteService, NoteNotFoundError } from "@mcp-moira/shared";
+import {
+  createLogger,
+  getNoteService,
+  getPlaybookService,
+  collectPlaybookReferences,
+  NoteService,
+  NoteNotFoundError,
+  PlaybookService,
+} from "@mcp-moira/shared";
 
 export interface GraphTemplateContext {
   variables: Record<string, unknown>;
@@ -20,15 +28,37 @@ export interface GraphTemplateContext {
   currentNodeId?: string;
 }
 
+/**
+ * One unresolved playbook reference, recorded so a run can say what it lost.
+ *
+ * A reference that cannot be resolved does not stop the step — the agent gets a placeholder — but
+ * the run must not degrade silently, and for a reference inside a materialized file the placeholder
+ * never reaches the directive at all.
+ */
+export interface UnresolvedPlaybookReference {
+  reference: string;
+  reason: "not-found" | "error";
+}
+
 export class GraphTemplateProcessor {
   private logger = createLogger({ component: "GraphTemplateProcessor" });
   private _noteService: NoteService | null = null;
+  private _playbookService: PlaybookService | null = null;
 
   /**
    * @param noteService - Optional NoteService for testing. If not provided, will use singleton.
+   * @param playbookService - Optional PlaybookService for testing.
    */
-  constructor(noteService?: NoteService) {
+  constructor(noteService?: NoteService, playbookService?: PlaybookService) {
     this._noteService = noteService || null;
+    this._playbookService = playbookService || null;
+  }
+
+  private get playbookService(): PlaybookService {
+    if (!this._playbookService) {
+      this._playbookService = getPlaybookService();
+    }
+    return this._playbookService;
   }
 
   /**
@@ -243,6 +273,30 @@ export class GraphTemplateProcessor {
    * then {{note:latest-metrics-mcp-moira}} resolves in next iteration
    */
   async processDirectiveAsync(directive: string, context: ExecutionContext): Promise<string> {
+    return (await this.processDirectiveAsyncWithReport(directive, context)).text;
+  }
+
+  /**
+   * Same as {@link processDirectiveAsync}, plus the playbook references this call could not
+   * resolve.
+   *
+   * The report belongs to one presentation, not to the processor: handlers are shared between
+   * concurrent executions, so a list kept on the instance would attach one run's loss to another.
+   */
+  async processDirectiveAsyncWithReport(
+    directive: string,
+    context: ExecutionContext,
+  ): Promise<{ text: string; unresolvedPlaybooks: UnresolvedPlaybookReference[] }> {
+    const unresolvedPlaybooks: UnresolvedPlaybookReference[] = [];
+    const text = await this.processDirectiveAsyncInternal(directive, context, unresolvedPlaybooks);
+    return { text, unresolvedPlaybooks };
+  }
+
+  private async processDirectiveAsyncInternal(
+    directive: string,
+    context: ExecutionContext,
+    unresolvedPlaybooks: UnresolvedPlaybookReference[],
+  ): Promise<string> {
     if (!directive || typeof directive !== "string") {
       return directive;
     }
@@ -263,6 +317,9 @@ export class GraphTemplateProcessor {
 
       // Then resolve note references (async) - handles {{note:KEY}}
       processed = await this.processNoteReferences(processed, context);
+
+      // And playbook references - handles {{playbook:NAME}} and {{playbook:@owner/NAME}}
+      processed = await this.processPlaybookReferences(processed, context, unresolvedPlaybooks);
 
       iterations++;
     }
@@ -338,6 +395,71 @@ export class GraphTemplateProcessor {
           });
         }
       }
+    }
+
+    return result;
+  }
+
+  /**
+   * Process `{{playbook:NAME}}` and `{{playbook:@owner/NAME}}` references.
+   *
+   * A playbook is named, reusable behaviour text. The reference is resolved at every step rather
+   * than once per run, so editing a playbook reaches a running execution at its next step.
+   *
+   * A reference that cannot be resolved — the playbook does not exist, or this user may not read
+   * it — is replaced with a visible placeholder and recorded, so the run degrades openly instead of
+   * quietly losing the text. Identical references in one pass cost one read.
+   */
+  private async processPlaybookReferences(
+    directive: string,
+    context: ExecutionContext,
+    unresolvedPlaybooks: UnresolvedPlaybookReference[],
+  ): Promise<string> {
+    const references = collectPlaybookReferences(directive);
+    if (references.length === 0) return directive;
+
+    let result = directive;
+
+    for (const reference of references) {
+      const { owner, name } = reference;
+      const fullMatch = `{{playbook:${reference.text}}}`;
+
+      let replacement: string;
+      try {
+        const ownerId = await this.playbookService.resolveOwner(owner, context.userId);
+        const playbook = ownerId
+          ? await this.playbookService.get(context.userId, ownerId, name)
+          : null;
+
+        if (playbook) {
+          // Another account's text is data, not authoring: it may not be re-read as template
+          // syntax, or a published playbook would run as a template inside somebody else's run
+          // (§14). Your own playbook is authoring and expands as the rest of your definition does.
+          replacement =
+            ownerId === context.userId
+              ? playbook.content
+              : this.neutralizeValueBraces(playbook.content);
+        } else {
+          replacement = `[PLAYBOOK NOT AVAILABLE: ${reference.text}]`;
+          unresolvedPlaybooks.push({ reference: reference.text, reason: "not-found" });
+          this.logger.warn("Playbook reference not available", {
+            name,
+            owner,
+            userId: context.userId,
+          });
+        }
+      } catch (error) {
+        replacement = `[PLAYBOOK ERROR: ${reference.text}]`;
+        unresolvedPlaybooks.push({ reference: reference.text, reason: "error" });
+        this.logger.error("Playbook reference error", {
+          name,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+
+      // One read per distinct reference: `collectPlaybookReferences` already removed duplicates,
+      // and every occurrence of this one is replaced at once.
+      result = result.split(fullMatch).join(replacement);
     }
 
     return result;

@@ -45,6 +45,13 @@ export { applyExecutionReminderMutation } from "./execution-reminder-domain.js";
 export { SettingsService } from "./settings-service.js";
 export { GlobalSettingsService, MAX_GLOBAL_SETTING_REVISIONS } from "./global-settings-service.js";
 export { PlaybookService } from "./playbook-service.js";
+export {
+  PLAYBOOK_REFERENCE_PATTERN,
+  collectPlaybookReferences,
+  unresolvedPlaybookReferences,
+  type PlaybookReference,
+  type PlaybookReferenceResolver,
+} from "./playbook-references.js";
 export { compareRevisionContent } from "./revision-diff.js";
 export type { RevisionDiffPart } from "./revision-diff.js";
 export { UserService } from "./user-service.js";
@@ -555,7 +562,12 @@ export function getWorkflowMutationService(): WorkflowMutationService {
     const workflowRepo = getWorkflowRepo();
     const auditRepo = new AuditRepository(db);
 
-    workflowMutationServiceInstance = new WorkflowMutationService(workflowRepo, auditRepo);
+    workflowMutationServiceInstance = new WorkflowMutationService(
+      workflowRepo,
+      auditRepo,
+      undefined,
+      getPlaybookService(),
+    );
   }
   return workflowMutationServiceInstance;
 }

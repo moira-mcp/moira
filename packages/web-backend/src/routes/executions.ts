@@ -30,6 +30,8 @@ import {
   metadataRevision,
   getAuthorizationService,
   RESOURCE_TYPES,
+  countRefusals,
+  latestRefusal,
 } from "@mcp-moira/shared";
 
 /**
@@ -206,7 +208,9 @@ router.post(
       );
 
     const nodeId = execution.currentNodeId;
-    const errorsBefore = execution.errors?.length ?? 0;
+    // A degradation entry says the step ran without something it names; it is not a refusal, so it
+    // must not make an accepted answer look rejected.
+    const errorsBefore = countRefusals(execution.errors);
     // The next step is presented as an agent step would present it, so the agent's outstanding
     // attempt is stale and `session current_step` hands out the attempt for the new node.
     await getExecutor().executeStep(executionId, input, undefined, {
@@ -218,7 +222,7 @@ router.post(
     const rejected =
       after.currentNodeId === nodeId &&
       after.waitingForInputNodeId === nodeId &&
-      (after.errors?.length ?? 0) > errorsBefore;
+      countRefusals(after.errors) > errorsBefore;
     await logAuditEventDirect(repository, {
       userId,
       action: rejected ? AuditAction.EXECUTION_STEP_FAIL : AuditAction.EXECUTION_STEP,
@@ -233,7 +237,7 @@ router.post(
       },
     });
     if (rejected) {
-      const last = after.errors![after.errors!.length - 1];
+      const last = latestRefusal(after.errors)!;
       throw createApiError.validationFailed(last.message, { executionId, nodeId });
     }
     const graph = await repository.getWorkflowGraph(after.workflowId, after.userId);
@@ -339,8 +343,9 @@ router.get(
         completedAt: exec.completedAt,
         error: exec.error, // deprecated, use errors array
         hasActiveLock: isLocked,
-        // Issue #386: Include error count for list view badge
-        errorCount: exec.errors?.length ?? 0,
+        // Issue #386: Include error count for list view badge. Degradation entries are not
+        // refusals, so a run that continued without a playbook does not wear an error badge.
+        errorCount: countRefusals(exec.errors),
       };
     });
 

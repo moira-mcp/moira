@@ -98,6 +98,26 @@ Directive references: `"Create development plan following {{planning_standards}}
 | **Purpose**        | Guide agent behavior         | Pass data between steps  |
 | **Changes**        | Only when workflow is edited | Every execution          |
 
+## Static Configuration or a Playbook
+
+A registry default holds text that belongs to this workflow and changes with it. A **playbook** holds
+named behaviour text that lives on its own: a review standard, a tone of voice, a definition of done.
+A node names one with `{{playbook:review-standard}}`, or `{{playbook:@owner/name}}` for another
+account's published one.
+
+Choose a playbook when the same text serves more than one workflow, or when the person who should
+change it does not edit workflows: editing a playbook changes behaviour without touching the graph,
+and the reference resolves at every step, so a running execution picks the change up at its next
+step.
+
+Choose a registry default when the text belongs to this workflow alone, or when it is a template
+fragment computed from the run's own variables. A default can itself carry a playbook reference,
+which is how a declared variable delivers shared text to a node that reads the variable.
+
+A reference to a playbook the author cannot read is refused while editing and before a run starts. If
+one becomes unreadable mid-run, the step continues with a visible placeholder and the execution
+records that it ran without that text.
+
 ## When the Text Needs an Address
 
 A registry default is the source of the text in every case. What changes with the size and role of

@@ -34,6 +34,8 @@ import {
   executionMutationAttemptsTotal,
   activeExecutionsGauge,
   workflowExecutionsTotal,
+  countRefusals,
+  latestRefusal,
 } from "@mcp-moira/shared";
 import type { ServiceLogger } from "@mcp-moira/shared";
 import { getUserContext } from "./request-context.js";
@@ -337,7 +339,9 @@ class MCPEngineClass {
       const nodeIdBefore = executionBefore?.currentNodeId ?? null;
       const statusBefore = executionBefore?.status ?? null;
       const workflowId = executionBefore?.workflowId;
-      const errorCountBefore = executionBefore?.errors?.length ?? 0;
+      // Only a refusal says the step did not happen; a degradation entry appears on a step that
+      // ran, and counting it would audit an accepted answer as a failed attempt.
+      const refusalsBefore = countRefusals(executionBefore?.errors);
 
       // Refuse a foreign or unavailable capability before reading lock or workflow details. The
       // executor repeats the full revision/node/digest binding check atomically at claim time.
@@ -405,7 +409,7 @@ class MCPEngineClass {
       const executionAfter = await this.executor.getExecutionState(processId);
       const nodeIdAfter = executionAfter?.currentNodeId ?? null;
       const statusAfter = executionAfter?.status ?? null;
-      const errorCountAfter = executionAfter?.errors?.length ?? 0;
+      const refusalsAfter = countRefusals(executionAfter?.errors);
 
       // Determine what happened and log appropriately
       // ARCHITECTURE: Log EVERY user action, not just successful ones
@@ -419,10 +423,10 @@ class MCPEngineClass {
           toNodeId: nodeIdAfter,
           input,
         });
-      } else if (errorCountAfter > errorCountBefore) {
+      } else if (refusalsAfter > refusalsBefore) {
         // New error appeared but no exception thrown (validation error case)
         // This is the key fix for Step 11: validation errors are now logged to audit
-        const latestError = executionAfter?.errors?.[errorCountAfter - 1];
+        const latestError = latestRefusal(executionAfter?.errors);
         await this.logStepAttempt(processId, userId, {
           workflowId,
           nodeId: nodeIdBefore,

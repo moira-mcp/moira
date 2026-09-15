@@ -28,6 +28,7 @@ import {
   metadataRevision,
   getAuthorizationService,
   RESOURCE_TYPES,
+  countRefusals,
 } from "@mcp-moira/shared";
 import {
   DatabaseRepository,
@@ -274,8 +275,10 @@ export async function getSessionInfo(
               createdAt: new Date(exec.createdAt).toISOString(),
               updatedAt: new Date(exec.updatedAt).toISOString(),
               completedAt: exec.completedAt ? new Date(exec.completedAt).toISOString() : undefined,
-              // Issue #386: Include error count for list view
-              errorCount: exec.errors?.length ?? 0,
+              // Issue #386: Include error count for list view. A degradation entry is not a
+              // refusal, so a run that continued without a playbook reports no errors here —
+              // the same answer the web list gives for the same run.
+              errorCount: countRefusals(exec.errors),
               ...(blockingAttempt
                 ? {
                     blockingAttempt: {

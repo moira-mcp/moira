@@ -343,6 +343,11 @@ Replay-safety entries use resource `execution_attempt` and the reserved Process 
 They do not record the Start or Step attempt ID, input, fingerprint, response, owner, or fencing
 token. A successful start lifecycle still emits exactly one separate `EXECUTION_START` event.
 
+A `degradation` entry in the execution error journal is not a refusal and produces no attempt event:
+the step ran, it merely ran without behaviour text it names. Consumers that read the journal to
+decide whether a step failed skip those entries, so a run that lost a playbook is not audited as a
+failed attempt.
+
 **Note:** Three audit actions cover all execute-step scenarios. Replay classification reuses
 `EXECUTION_STEP_ATTEMPT` without changing the successful transition record:
 

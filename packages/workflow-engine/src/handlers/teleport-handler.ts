@@ -10,6 +10,7 @@ import { AgentMessageQueue } from "../services/agent-message-queue.js";
 import { INodeHandler } from "../interfaces/core-interfaces.js";
 import { IDataRepository } from "../interfaces/data-repository.js";
 import { IGraphExecutionEngine } from "../interfaces/graph-execution-engine.js";
+import { recordUnresolvedPlaybooks } from "../templates/playbook-degradation.js";
 import { GraphTemplateProcessor } from "../templates/graph-template-processor.js";
 import { SchemaValidator } from "../utils/schema-validator.js";
 import { createLogger, InternalError, ValidationError } from "@mcp-moira/shared";
@@ -32,7 +33,7 @@ export class TeleportHandler implements INodeHandler {
     node: GraphNode,
     context: ExecutionContext,
     messageQueue: AgentMessageQueue,
-    _repository: IDataRepository,
+    repository: IDataRepository,
     _engine: IGraphExecutionEngine,
     input?: unknown,
   ): Promise<NodeExecutionResult> {
@@ -53,14 +54,23 @@ export class TeleportHandler implements INodeHandler {
 
     // First call (no input) - show directive to agent
     if (input === undefined || input === null) {
-      const processedDirective = await this.templateProcessor.processDirectiveAsync(
+      const directiveResult = await this.templateProcessor.processDirectiveAsyncWithReport(
         teleportNode.directive,
         context,
       );
+      const processedDirective = directiveResult.text;
 
-      const processedCompletion = await this.templateProcessor.processDirectiveAsync(
+      const completionResult = await this.templateProcessor.processDirectiveAsyncWithReport(
         teleportNode.completionCondition,
         context,
+      );
+      const processedCompletion = completionResult.text;
+
+      await recordUnresolvedPlaybooks(
+        [...directiveResult.unresolvedPlaybooks, ...completionResult.unresolvedPlaybooks],
+        teleportNode.id,
+        context.executionId,
+        repository,
       );
 
       messageQueue.addMessage(
