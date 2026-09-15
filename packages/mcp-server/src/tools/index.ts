@@ -12,6 +12,7 @@ export { manageSettings } from "./manage-settings.js";
 export { createWorkflowToken } from "./create-workflow-token.js";
 export { getSessionInfo } from "./get-session-info.js";
 export { manageNotes, manageNotesSchema } from "./manage-notes.js";
+export { managePlaybooks, managePlaybooksSchema } from "./manage-playbooks.js";
 export { manageArtifacts, manageArtifactsSchema } from "./manage-artifacts.js";
 export { manageLocks, manageLocksSchema } from "./manage-locks.js";
 

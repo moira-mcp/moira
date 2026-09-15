@@ -13,6 +13,8 @@ import { AccountApprovalRepository } from "../database/repositories/account-appr
 import { NoteRepository } from "../database/repositories/note-repository.js";
 import { RevisionRepository } from "../database/repositories/revision-repository.js";
 import { AuthorizationService } from "../authorization/authorization-service.js";
+import { PlaybookRepository } from "../database/repositories/playbook-repository.js";
+import { PlaybookService } from "./playbook-service.js";
 import { ArtifactRepository } from "../database/repositories/artifact-repository.js";
 import { WorkflowSharingRepository } from "../database/repositories/workflow-sharing-repository.js";
 import { LockRepository } from "../database/repositories/lock-repository.js";
@@ -42,6 +44,9 @@ export { ExecutionService } from "./execution-service.js";
 export { applyExecutionReminderMutation } from "./execution-reminder-domain.js";
 export { SettingsService } from "./settings-service.js";
 export { GlobalSettingsService, MAX_GLOBAL_SETTING_REVISIONS } from "./global-settings-service.js";
+export { PlaybookService } from "./playbook-service.js";
+export { compareRevisionContent } from "./revision-diff.js";
+export type { RevisionDiffPart } from "./revision-diff.js";
 export { UserService } from "./user-service.js";
 export {
   NoteService,
@@ -263,10 +268,29 @@ let lockServiceInstance: LockService | null = null;
 let featureResolverInstance: FeatureResolver | null = null;
 let executionRetentionServiceInstance: ExecutionRetentionService | null = null;
 let authorizationServiceInstance: AuthorizationService | null = null;
+let playbookServiceInstance: PlaybookService | null = null;
 
 // Shared repository instances for cross-service wiring
 let workflowRepoInstance: WorkflowRepository | null = null;
 let sharingRepoInstance: WorkflowSharingRepository | null = null;
+
+/**
+ * The one PlaybookService instance.
+ *
+ * Playbooks are the reusable behaviour text workflow nodes reference by name.
+ */
+export function getPlaybookService(): PlaybookService {
+  if (!playbookServiceInstance) {
+    const db = getDatabase();
+    playbookServiceInstance = new PlaybookService(
+      new PlaybookRepository(db),
+      new AuditRepository(db),
+      getAuthorizationService(),
+      new UserRepository(db),
+    );
+  }
+  return playbookServiceInstance;
+}
 
 /**
  * The one authorization service instance.

@@ -43,6 +43,8 @@ deleteHistory(target): Promise<void>;
 totalSize(target): Promise<number>;
 ```
 
+Consumers today: notes, global settings and playbooks.
+
 Rules a consumer has to know:
 
 - **Revisions are appended, never rewritten.** `append` derives the number from the highest stored

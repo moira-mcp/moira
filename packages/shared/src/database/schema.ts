@@ -802,6 +802,36 @@ export const note = sqliteTable(
   }),
 );
 
+// ===== Playbooks =====
+// Named, reusable behaviour text an author references from workflow nodes. Content lives in the
+// shared revision store; this table holds only the playbook's identity and its access metadata.
+
+export const playbook = sqliteTable(
+  "playbook",
+  {
+    id: text("id").primaryKey(),
+    userId: text("userId")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    // Machine name a workflow node references. Stable and unique per owner.
+    slug: text("slug").notNull(),
+    name: text("name").notNull(),
+    description: text("description"),
+    visibility: text("visibility").notNull().default("private"), // 'private' | 'public'
+    // Latest revision number in the shared revision store.
+    currentRevision: integer("currentRevision").notNull().default(1),
+    size: integer("size").notNull().default(0), // Current content size in bytes
+    deleted: integer("deleted", { mode: "boolean" }).notNull().default(false),
+    deletedAt: integer("deletedAt", { mode: "timestamp_ms" }),
+    createdAt: integer("createdAt", { mode: "timestamp_ms" }).notNull(),
+    updatedAt: integer("updatedAt", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => ({
+    // One playbook per owner and machine name, so a node's reference resolves to exactly one.
+    ownerSlugIdx: uniqueIndex("playbook_owner_slug_idx").on(table.userId, table.slug),
+  }),
+);
+
 // ===== Shared Revision Store =====
 // One history for every versioned entity in the product. Notes, global settings and playbooks all
 // keep their content revisions here instead of each owning a private history table.

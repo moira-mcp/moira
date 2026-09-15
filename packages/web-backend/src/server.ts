@@ -77,6 +77,7 @@ import { adminAnalyticsRoutes } from "./routes/admin-analytics.js";
 import clientLogsRoutes from "./routes/client-logs.js";
 import { monitoringTestRoutes } from "./routes/monitoring-test.js";
 import { notesRoutes } from "./routes/notes.js";
+import { playbooksRoutes } from "./routes/playbooks.js";
 import { artifactsRoutes } from "./routes/artifacts.js";
 import { artifactTokenRoutes } from "./routes/artifact-tokens.js";
 import { staticArtifactsRoutes } from "./routes/static-artifacts.js";
@@ -405,6 +406,7 @@ class MoiraApiServer {
     this.app.use("/api/notifications", apiLimiter, requireAuth, notificationsRoutes);
     this.app.use("/api/stats", apiLimiter, requireAuth, statsRoutes);
     this.app.use("/api/notes", apiLimiter, requireAuth, notesRoutes);
+    this.app.use("/api/playbooks", apiLimiter, requireAuth, playbooksRoutes);
     this.app.use("/api/artifacts", apiLimiter, requireAuth, artifactsRoutes);
     this.app.use("/api/tokens", apiLimiter, tokenRoutes); // requireVerifiedAuth inside routes
     // Authenticate and authorize the administrator namespace once. Specific

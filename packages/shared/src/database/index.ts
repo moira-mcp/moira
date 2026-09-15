@@ -151,3 +151,16 @@ export type {
   RevisionEntityType,
   AppendRevisionOptions,
 } from "./repositories/revision-repository.js";
+
+export {
+  PlaybookRepository,
+  MAX_PLAYBOOK_REVISIONS,
+  MAX_PLAYBOOK_SIZE,
+} from "./repositories/playbook-repository.js";
+export type {
+  Playbook,
+  PlaybookSummary,
+  PlaybookListResult,
+  PlaybookVisibility,
+  SavePlaybookOptions,
+} from "./repositories/playbook-repository.js";

@@ -564,6 +564,20 @@ level headings classify the tracked test paths listed beneath them.
 
 - `tests/unit/shared/authorization.test.ts` — the central access policy: an owner's full rights on their own resource, a stranger denied every action on a private one, read and use but never change on a public one, an administrator limited to operator actions rather than the owner's hands, and grant levels honoured; the service resolving operator status from the account, finding a grant made to a group the subject belongs to, taking the wider level when a direct and a group grant both apply; a workflow read through the repository following the policy before and after a grant; a second identical grant refused by the partial unique indexes, an edit-level grant allowing a non-owner to modify a workflow while a use-level grant does not, and the migration carrying an existing workflow share over as a grant on that workflow
 
+### playbooks
+
+**unit**
+
+- `tests/unit/shared/playbooks.test.ts` — the registry: content kept in the shared revision store with no private history table left in the schema, a revision per save with a past one read back, restore as a new revision, comparison of two revisions, history removed with the playbook, an unusable name refused, an owner named by handle or by user id and an unknown one refused, content beyond the size limit refused; and access — a private playbook hidden from another user, a published one shown, a stranger still refused the right to change it, an editing grant allowed to change the text but not to publish, removal kept with the owner
+
+**api**
+
+- `tests/api/playbooks-api.test.ts` — the same life through HTTP: revisions written and a past one read, history and comparison, restore, publication making the playbook readable by another account, and a reader writing the same name getting their own playbook rather than changing the author's
+
+**mcp-tools**
+
+- `tests/mcp-tools/playbooks-tool.test.ts` — the agent's view: save and read back, history with comparison and restore, listing the calling account's playbooks, publishing and unpublishing, and the refusal of an unusable name
+
 ### versioned content
 
 **unit**

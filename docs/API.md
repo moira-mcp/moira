@@ -939,6 +939,51 @@ Errors:
 
 Authentication: Required
 
+## Playbooks API
+
+Named, reusable behaviour text kept in one place instead of inside the workflows that rely on it.
+Content is versioned in the shared revision store; who may read or change a playbook is decided by the central authorization
+policy. All routes require authentication.
+
+### GET /api/playbooks
+
+List the playbooks this user owns. Query: `search`, `limit`, `offset`. Each entry carries the
+machine name, human name, description, visibility, current revision, size and a short preview.
+
+### GET /api/playbooks/:name
+
+Read one playbook with its content. Query: `revision` for a past revision, `owner` (handle or id) to
+read somebody else's published playbook. Returns 404 when the playbook does not exist or is not
+readable by this user — the two are deliberately indistinguishable from outside.
+
+### PUT /api/playbooks/:name
+
+Create a playbook or write a new revision of it. Body: `content` (required), `title`, `description`.
+Names are unique per account: writing under a name another user also has creates your own playbook.
+
+### DELETE /api/playbooks/:name
+
+Remove a playbook together with its revision history.
+
+### GET /api/playbooks/:name/history
+
+Revisions, newest first, with author, size, time and preview. Query: `owner`.
+
+### GET /api/playbooks/:name/compare
+
+The difference between two revisions, line by line. Query: `from`, `to` (required), `owner`.
+
+### POST /api/playbooks/:name/restore
+
+Put a past revision back in force. Body: `revision`. Restoring writes a new revision carrying the
+older text rather than rewinding the history.
+
+### PUT /api/playbooks/:name/visibility
+
+Publish a playbook or make it private again. Body: `visibility` (`private` | `public`). Requires the
+right to share the playbook, which only its owner holds: publishing shares the text, not control
+over it.
+
 ## Artifacts API
 
 Static HTML artifacts hosting with quota enforcement. All operations scoped to authenticated user.

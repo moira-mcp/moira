@@ -10,6 +10,7 @@ import {
   manageArtifactsSchema,
   manageLocksSchema,
   manageNotesSchema,
+  managePlaybooksSchema,
   manageReconciliationSchema,
   manageWorkflowSchema,
   settingsSchema,
@@ -315,6 +316,22 @@ export const TOOL_DEFINITIONS = [
       ru: {
         summary: "Хранит и возвращает версионируемые заметки.",
         result: "Данные заметок для выбранной операции.",
+      },
+    },
+  }),
+  defineTool({
+    name: "playbooks",
+    schema: managePlaybooksSchema,
+    responsePolicy: "json",
+    examples: [{ action: "list", limit: 20, offset: 0 }],
+    documentation: {
+      en: {
+        summary: "Keep named, reusable behaviour text an agent can read where it is needed.",
+        result: "Action-specific playbook data.",
+      },
+      ru: {
+        summary: "Хранит именованный переиспользуемый текст поведения для чтения агентом.",
+        result: "Данные playbook для выбранной операции.",
       },
     },
   }),
