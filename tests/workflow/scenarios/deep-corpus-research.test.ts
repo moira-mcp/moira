@@ -14,7 +14,7 @@ import {
 } from "../../helpers/scenario-runner.js";
 
 const entry = findCatalogEntryBySlug("deep-corpus-research")!;
-const graph = (): WorkflowGraph => structuredClone(entry.graph) as WorkflowGraph;
+const graph = (): WorkflowGraph => structuredClone(entry.graph) as unknown as WorkflowGraph;
 
 function node(id: string): any {
   const found = graph().nodes.find((candidate) => candidate.id === id);

@@ -16,10 +16,10 @@ import {
 import { calculateCoverage, formatCoverageReport } from "../../helpers/coverage-calculator.js";
 import { GraphValidator } from "@mcp-moira/workflow-engine";
 import type { WorkflowGraph } from "@mcp-moira/workflow-engine";
+import { catalogGraph } from "../../helpers/catalog-graphs.js";
 
 function loadExampleWorkflow(): WorkflowGraph {
-  return findCatalogEntryBySlug("artifacts-demo-report-publisher", undefined, "workflows/examples")!
-    .graph as WorkflowGraph;
+  return catalogGraph("artifacts-demo-report-publisher", { baseDir: "workflows/examples" });
 }
 
 describe("artifacts-demo-report-publisher Scenarios", () => {

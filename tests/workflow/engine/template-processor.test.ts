@@ -5,6 +5,7 @@
 
 import { describe, test, expect, jest } from "@jest/globals";
 import { GraphTemplateProcessor, ExecutionContext } from "@mcp-moira/workflow-engine";
+import type { NoteService } from "@mcp-moira/shared";
 
 // Shorthand for undefined placeholder
 const UNDEF = GraphTemplateProcessor.UNDEFINED_PLACEHOLDER;
@@ -1067,16 +1068,20 @@ describe("GraphTemplateProcessor", () => {
 
   describe("{{note:KEY}} references (async)", () => {
     // Mock NoteService for testing
+    /**
+     * Note-service methods as mocks typed from the real ones, so a stubbed return value is checked
+     * against what that method actually resolves to instead of being accepted as anything.
+     */
     function createMockNoteService() {
       return {
-        get: jest.fn(),
-        list: jest.fn(),
-        save: jest.fn(),
-        exists: jest.fn(),
-        delete: jest.fn(),
+        get: jest.fn<NoteService["get"]>(),
+        list: jest.fn<NoteService["list"]>(),
+        save: jest.fn<NoteService["save"]>(),
+        exists: jest.fn<NoteService["exists"]>(),
+        delete: jest.fn<NoteService["delete"]>(),
         getVersion: jest.fn(),
         getVersions: jest.fn(),
-        getStats: jest.fn(),
+        getStats: jest.fn<NoteService["getStats"]>(),
       };
     }
 
@@ -1094,7 +1099,7 @@ describe("GraphTemplateProcessor", () => {
       });
 
       const processor = new GraphTemplateProcessor(
-        mockNoteService as unknown as import("@mcp-moira/shared").NoteService,
+        mockNoteService as unknown as NoteService,
       );
       const context = mockExecutionContext({});
 
@@ -1138,7 +1143,7 @@ describe("GraphTemplateProcessor", () => {
       });
 
       const processor = new GraphTemplateProcessor(
-        mockNoteService as unknown as import("@mcp-moira/shared").NoteService,
+        mockNoteService as unknown as NoteService,
       );
       const context = mockExecutionContext({});
 
@@ -1157,7 +1162,7 @@ describe("GraphTemplateProcessor", () => {
       mockNoteService.get.mockRejectedValue(new NoteNotFoundError("missing-note"));
 
       const processor = new GraphTemplateProcessor(
-        mockNoteService as unknown as import("@mcp-moira/shared").NoteService,
+        mockNoteService as unknown as NoteService,
       );
       const context = mockExecutionContext({});
 
@@ -1180,7 +1185,7 @@ describe("GraphTemplateProcessor", () => {
       });
 
       const processor = new GraphTemplateProcessor(
-        mockNoteService as unknown as import("@mcp-moira/shared").NoteService,
+        mockNoteService as unknown as NoteService,
       );
       const context = mockExecutionContext({ name: "World", greeting: "Hi" });
 
@@ -1207,7 +1212,7 @@ describe("GraphTemplateProcessor", () => {
       });
 
       const processor = new GraphTemplateProcessor(
-        mockNoteService as unknown as import("@mcp-moira/shared").NoteService,
+        mockNoteService as unknown as NoteService,
       );
       const context = mockExecutionContext({});
 
@@ -1230,7 +1235,7 @@ describe("GraphTemplateProcessor", () => {
       });
 
       const processor = new GraphTemplateProcessor(
-        mockNoteService as unknown as import("@mcp-moira/shared").NoteService,
+        mockNoteService as unknown as NoteService,
       );
       const context = mockExecutionContext({});
 
@@ -1254,7 +1259,7 @@ describe("GraphTemplateProcessor", () => {
       mockNoteService.get.mockRejectedValue(new Error("Database connection failed"));
 
       const processor = new GraphTemplateProcessor(
-        mockNoteService as unknown as import("@mcp-moira/shared").NoteService,
+        mockNoteService as unknown as NoteService,
       );
       const context = mockExecutionContext({});
 
@@ -1271,15 +1276,13 @@ describe("GraphTemplateProcessor", () => {
         value: '{"data": "test"}',
         version: 1,
         tags: [],
-        userId: "test-user-123",
-        createdAt: new Date(),
-        updatedAt: new Date(),
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
         size: 100,
-        isDeleted: false,
       });
 
       const processor = new GraphTemplateProcessor(
-        mockNoteService as unknown as import("@mcp-moira/shared").NoteService,
+        mockNoteService as unknown as NoteService,
       );
       const context = mockExecutionContext({
         projectName: "mcp-moira",
@@ -1303,15 +1306,13 @@ describe("GraphTemplateProcessor", () => {
         value: "latest data",
         version: 1,
         tags: [],
-        userId: "test-user-123",
-        createdAt: new Date(),
-        updatedAt: new Date(),
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
         size: 100,
-        isDeleted: false,
       });
 
       const processor = new GraphTemplateProcessor(
-        mockNoteService as unknown as import("@mcp-moira/shared").NoteService,
+        mockNoteService as unknown as NoteService,
       );
       const context = mockExecutionContext({
         prefix: "latest",
@@ -1335,15 +1336,13 @@ describe("GraphTemplateProcessor", () => {
         value: "prod config",
         version: 1,
         tags: [],
-        userId: "test-user-123",
-        createdAt: new Date(),
-        updatedAt: new Date(),
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
         size: 100,
-        isDeleted: false,
       });
 
       const processor = new GraphTemplateProcessor(
-        mockNoteService as unknown as import("@mcp-moira/shared").NoteService,
+        mockNoteService as unknown as NoteService,
       );
       const context = mockExecutionContext({
         settings: { env: "production" },
@@ -1364,7 +1363,7 @@ describe("GraphTemplateProcessor", () => {
       // Note key pattern only allows alphanumeric/underscore/hyphen, so {{note:...}} with
       // placeholder won't match and will remain unresolved
       const processor = new GraphTemplateProcessor(
-        mockNoteService as unknown as import("@mcp-moira/shared").NoteService,
+        mockNoteService as unknown as NoteService,
       );
       const context = mockExecutionContext({});
 
@@ -1388,15 +1387,13 @@ describe("GraphTemplateProcessor", () => {
         value: "dark mode",
         version: 1,
         tags: [],
-        userId: "test-user-123",
-        createdAt: new Date(),
-        updatedAt: new Date(),
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
         size: 100,
-        isDeleted: false,
       });
 
       const processor = new GraphTemplateProcessor(
-        mockNoteService as unknown as import("@mcp-moira/shared").NoteService,
+        mockNoteService as unknown as NoteService,
       );
       const context = mockExecutionContext({
         userName: "Alice",

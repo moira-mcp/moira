@@ -15,7 +15,7 @@ import {
 } from "../../helpers/scenario-runner.js";
 
 const entry = findCatalogEntryBySlug("startup-idea-validation")!;
-const workflow = (): WorkflowGraph => structuredClone(entry.graph) as WorkflowGraph;
+const workflow = (): WorkflowGraph => structuredClone(entry.graph) as unknown as WorkflowGraph;
 const workspace = (executionId: string) => `./moira-ws/startup-idea-validation-${executionId}`;
 
 function node(graph: WorkflowGraph, id: string): any {

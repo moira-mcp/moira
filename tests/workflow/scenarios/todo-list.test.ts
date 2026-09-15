@@ -15,6 +15,7 @@ import {
   type ScenarioResult,
   type TestScenario,
 } from "../../helpers/scenario-runner.js";
+import { catalogGraph } from "../../helpers/catalog-graphs.js";
 
 const coverageResults: ScenarioResult[] = [];
 
@@ -38,7 +39,7 @@ function configureMaterialize(engine: GraphExecutionEngine): void {
 }
 
 function loadProductionWorkflow(): WorkflowGraph {
-  return structuredClone(findCatalogEntryBySlug("todo-list")!.graph) as WorkflowGraph;
+  return catalogGraph("todo-list");
 }
 
 const suppliedTasks = [

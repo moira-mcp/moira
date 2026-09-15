@@ -16,11 +16,12 @@ import {
   type WorkflowExecution,
   type WorkflowGraph,
 } from "@mcp-moira/workflow-engine";
+import { catalogGraph } from "../../helpers/catalog-graphs.js";
 
 const USER = "route-user";
 
 function bundled(slug: string): WorkflowGraph {
-  return structuredClone(findCatalogEntryBySlug(slug)!.graph) as WorkflowGraph;
+  return catalogGraph(slug);
 }
 
 async function runner(workflow: WorkflowGraph) {

@@ -19,7 +19,7 @@ import { calculateCoverage } from "../../helpers/coverage-calculator.js";
 import { runScenario, type MockInput, type TestScenario } from "../../helpers/scenario-runner.js";
 
 const catalogEntry = findCatalogEntryBySlug("execution-retrospective")!;
-const workflow = structuredClone(catalogEntry.graph) as WorkflowGraph;
+const workflow = structuredClone(catalogEntry.graph) as unknown as WorkflowGraph;
 const reference = String(workflow.variableRegistry?.retrospective_reference?.default);
 
 type Candidate = {

@@ -12,10 +12,11 @@ import {
   type WorkflowExecution,
   type WorkflowGraph,
 } from "@mcp-moira/workflow-engine";
+import { systemCatalogGraph } from "../../helpers/catalog-graphs.js";
 
 /** The progress of a bundled flow's run that has not started: every block pending, the full process. */
 function bundledProgress(slug: string): ExecutionProgress {
-  const workflow = structuredClone(findSystemCatalogEntry(slug, "public")!.graph) as WorkflowGraph;
+  const workflow = systemCatalogGraph(slug, "public");
   const execution: WorkflowExecution = {
     executionId: `image-${slug}`,
     workflowId: workflow.id ?? slug,

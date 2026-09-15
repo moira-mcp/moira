@@ -12,9 +12,10 @@ import {
   type TestScenario,
 } from "../../helpers/scenario-runner.js";
 import { calculateCoverage, formatCoverageReport } from "../../helpers/coverage-calculator.js";
+import { catalogGraph } from "../../helpers/catalog-graphs.js";
 
 function loadProductionWorkflow(): WorkflowGraph {
-  return findCatalogEntryBySlug("quick-task")!.graph as WorkflowGraph;
+  return catalogGraph("quick-task");
 }
 
 const executionId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";

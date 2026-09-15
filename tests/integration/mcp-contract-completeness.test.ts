@@ -9,6 +9,20 @@ import { manageSettings } from "../../packages/mcp-server/src/tools/manage-setti
 import { manageWorkflow } from "../../packages/mcp-server/src/tools/manage-workflow.js";
 
 const suffix = `${Date.now()}`;
+/**
+ * The payload of a tool result that must have succeeded.
+ *
+ * A tool answers with `data` optional, because a failure carries an error instead. Reading through
+ * that with `?.` or a cast makes an unexpected failure show up as "undefined has no property x";
+ * this says which call failed and why.
+ */
+function payload<T>(result: { success: boolean; data?: unknown; error?: unknown }): T {
+  if (!result.success || result.data === undefined) {
+    throw new Error(`tool call failed: ${JSON.stringify(result.error ?? result)}`);
+  }
+  return result.data as T;
+}
+
 const TEST_USER_ID = `contract-completeness-${suffix}`;
 const ADMIN_USER_ID = `contract-completeness-admin-${suffix}`;
 const SEARCH_PREFIX = `Contract completeness ${suffix}`;
@@ -183,16 +197,14 @@ describe("complete MCP manage, settings, and list contracts", () => {
       data: { "telegram.bot_token": "[encrypted]" },
     });
 
-    const category = await get({ category: "notifications" });
-    expect(category.success).toBe(true);
-    expect(category.data["telegram.bot_token"]).toBe("[encrypted]");
-    expect(Object.keys(category.data).every((key) => key.startsWith("telegram."))).toBe(true);
+    const category = payload<Record<string, unknown>>(await get({ category: "notifications" }));
+    expect(category["telegram.bot_token"]).toBe("[encrypted]");
+    expect(Object.keys(category).every((key) => key.startsWith("telegram."))).toBe(true);
 
-    const all = await get({});
-    expect(all.success).toBe(true);
-    expect(all.data["ui.theme"]).toBe("dark");
-    expect(all.data["telegram.bot_token"]).toBe("[encrypted]");
-    expect(all.data).not.toHaveProperty("mcp.systemReminder");
+    const all = payload<Record<string, unknown>>(await get({}));
+    expect(all["ui.theme"]).toBe("dark");
+    expect(all["telegram.bot_token"]).toBe("[encrypted]");
+    expect(all).not.toHaveProperty("mcp.systemReminder");
 
     const adminCategory = await get({ category: "mcp" });
     expect(adminCategory).toEqual({ success: true, data: {} });
@@ -285,7 +297,7 @@ describe("complete MCP manage, settings, and list contracts", () => {
       }),
     );
 
-    const last = await list(first.data.nextOffset);
+    const last = await list(payload<{ nextOffset: number }>(first).nextOffset);
     expect(last.success).toBe(true);
     expect(last.data).toEqual(
       expect.objectContaining({

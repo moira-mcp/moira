@@ -13,11 +13,10 @@ import {
   type MockInputContext,
   type TestScenario,
 } from "../../helpers/scenario-runner.js";
+import { catalogGraph } from "../../helpers/catalog-graphs.js";
 
 function loadWorkflow(): WorkflowGraph {
-  return structuredClone(
-    findCatalogEntryBySlug("workflow-management-flow")!.graph,
-  ) as WorkflowGraph;
+  return catalogGraph("workflow-management-flow");
 }
 
 function useScenarioMaterializeGrant(engine: GraphExecutionEngine): void {

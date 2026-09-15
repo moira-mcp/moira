@@ -19,6 +19,7 @@ import {
   type WorkflowExecution,
   type WorkflowGraph,
 } from "@mcp-moira/workflow-engine";
+import { systemCatalogGraph } from "../../helpers/catalog-graphs.js";
 
 const FLOWS = [
   "quick-task",
@@ -31,7 +32,7 @@ const FLOWS = [
 const WIDTHS = [720, 1280];
 
 function flowProgress(slug: string): ExecutionProgress {
-  const workflow = structuredClone(findSystemCatalogEntry(slug, "public")!.graph) as WorkflowGraph;
+  const workflow = systemCatalogGraph(slug, "public");
   const execution: WorkflowExecution = {
     executionId: `geometry-${slug}`,
     workflowId: workflow.id ?? slug,

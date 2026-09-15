@@ -6,9 +6,10 @@ import {
   type ProcessDiagnosticCode,
   type WorkflowGraph,
 } from "@mcp-moira/workflow-engine";
+import { systemCatalogGraph } from "../../helpers/catalog-graphs.js";
 
 function bundled(slug: string): WorkflowGraph {
-  return structuredClone(findSystemCatalogEntry(slug, "public")!.graph) as WorkflowGraph;
+  return systemCatalogGraph(slug, "public");
 }
 
 function counts(workflow: WorkflowGraph) {

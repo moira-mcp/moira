@@ -14,7 +14,7 @@ import {
 } from "../../helpers/scenario-runner.js";
 
 const entry = findCatalogEntryBySlug("test-generation")!;
-const workflow = (): WorkflowGraph => structuredClone(entry.graph) as WorkflowGraph;
+const workflow = (): WorkflowGraph => structuredClone(entry.graph) as unknown as WorkflowGraph;
 const workspace = (id: string) => `./moira-ws/test-generation-${id}`;
 
 function terminal(

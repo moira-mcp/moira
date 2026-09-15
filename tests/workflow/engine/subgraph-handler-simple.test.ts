@@ -41,7 +41,8 @@ describe("SubgraphNodeHandler - Basic Tests", () => {
       deleteExecution: jest.fn(),
       listExecutions: jest.fn(),
       listUserExecutions: jest.fn(),
-    } as IDataRepository;
+      // A partial double: the subgraph handler reaches only these methods.
+    } as unknown as IDataRepository;
 
     // Create mock engine with proper typing
     mockEngine = {
@@ -54,7 +55,8 @@ describe("SubgraphNodeHandler - Basic Tests", () => {
           workflowId: "child-workflow",
         },
       }),
-    } as IGraphExecutionEngine;
+      // A partial double: the handler calls executeGraph and nothing else.
+    } as unknown as IGraphExecutionEngine;
 
     handler = new SubgraphNodeHandler();
   });

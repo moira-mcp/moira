@@ -59,6 +59,7 @@ function execResult(value: {
   stdoutTotalBytes?: number;
   stderrTotalBytes?: number;
   outputLimitExceeded?: boolean;
+  sessionCaptureDropped?: boolean;
 }): WorkspaceOperationResult {
   return {
     state: value.state,
@@ -68,6 +69,7 @@ function execResult(value: {
     stdoutTotalBytes: value.stdoutTotalBytes ?? Buffer.byteLength(value.stdout),
     stderrTotalBytes: value.stderrTotalBytes ?? Buffer.byteLength(value.stderr),
     outputLimitExceeded: value.outputLimitExceeded ?? false,
+    sessionCaptureDropped: value.sessionCaptureDropped ?? false,
   };
 }
 
@@ -76,7 +78,7 @@ class FakeTransport implements WorkspaceOperationTransport {
   async health() {
     return { ok: this.available, reason: null };
   }
-  executeResult: WorkspaceOperationResult | { state: "running" } = execResult({
+  executeResult: Awaited<ReturnType<WorkspaceOperationTransport["execute"]>> = execResult({
     state: "succeeded",
     stdout: "ok",
     stderr: "",
@@ -89,8 +91,7 @@ class FakeTransport implements WorkspaceOperationTransport {
   throwInspect = false;
   throwFinalize = false;
   /** Defaults to the execute outcome; set when a test needs inspect to differ from dispatch. */
-  inspectResult: WorkspaceOperationResult | { state: "running" } | { state: "interrupted" } | null =
-    null;
+  inspectResult: Awaited<ReturnType<WorkspaceOperationTransport["inspect"]>> | null = null;
   lastWorkspace: Parameters<WorkspaceOperationTransport["execute"]>[1] | null = null;
   lastRequest: Parameters<WorkspaceOperationTransport["execute"]>[3] | null = null;
   executeGate: Promise<void> | null = null;
@@ -127,7 +128,13 @@ class FakeTransport implements WorkspaceOperationTransport {
     this.lastInspectedOperation = operation;
     if (this.throwInspect) throw new Error("ssh response lost");
     if (this.inspectObservation) await this.inspectObservation();
-    return this.inspectResult ?? this.executeResult;
+    if (this.inspectResult) return this.inspectResult;
+    // An execute answer that inspect cannot give — a session limit is decided at dispatch — never
+    // reaches here in practice; reporting it as still running keeps the fake inside its contract.
+    return this.executeResult.state === "session_limit" ||
+      this.executeResult.state === "session_unavailable"
+      ? { state: "running" as const }
+      : this.executeResult;
   }
 
   async cancel() {
@@ -995,7 +1002,7 @@ describe("durable direct workspace operations", () => {
   );
 
   test.each([
-    ["foreign", "user-2", "workspace-1", (_value: ReturnType<typeof fixture>) => undefined],
+    ["foreign", "user-2", "workspace-1", (_value: ReturnType<typeof fixture>): void => undefined],
     [
       "unavailable connector",
       "user-1",
@@ -1004,7 +1011,12 @@ describe("durable direct workspace operations", () => {
         value.transport.available = false;
       },
     ],
-    ["missing", "user-1", "workspace-missing", (_value: ReturnType<typeof fixture>) => undefined],
+    [
+      "missing",
+      "user-1",
+      "workspace-missing",
+      (_value: ReturnType<typeof fixture>): void => undefined,
+    ],
     [
       "stopped",
       "user-1",
@@ -1126,11 +1138,15 @@ describe("durable direct workspace operations", () => {
       createdAt: now,
       updatedAt: now,
     } as const;
+    // Only the input path is exercised here, so the double carries the three methods this call
+    // reaches and says that it is partial rather than claiming to be the transfer service.
     const transfers = {
       claimInput: jest.fn(async () => ({ record, bytes })),
       release: jest.fn(),
       consume: jest.fn(async () => undefined),
-    };
+    } as unknown as NonNullable<
+      ConstructorParameters<typeof WorkspaceOperationService>[0]["transfers"]
+    >;
     const service = new WorkspaceOperationService({
       repository: value.repository,
       transport: value.transport,
@@ -1168,7 +1184,9 @@ describe("durable direct workspace operations", () => {
       }),
       release: jest.fn(),
       consume: jest.fn(async () => undefined),
-    };
+    } as unknown as NonNullable<
+      ConstructorParameters<typeof WorkspaceOperationService>[0]["transfers"]
+    >;
     const service = new WorkspaceOperationService({
       repository: value.repository,
       transport: value.transport,
@@ -1221,7 +1239,9 @@ describe("durable direct workspace operations", () => {
         claimInput: jest.fn(async () => ({ record, bytes: Buffer.from([1, 2, 3, 4]) })),
         release: jest.fn(),
         consume: jest.fn(async () => undefined),
-      };
+      } as unknown as NonNullable<
+        ConstructorParameters<typeof WorkspaceOperationService>[0]["transfers"]
+      >;
       const mismatchService = new WorkspaceOperationService({
         repository: value.repository,
         transport: value.transport,

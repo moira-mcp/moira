@@ -33,7 +33,7 @@ const initialDecision = "Decide whether the checkout change is ready for a contr
 const revisedDecision = "Decide whether the checkout change is ready for a full launch";
 
 function loadWorkflow(): WorkflowGraph {
-  return structuredClone(catalogEntry.graph) as WorkflowGraph;
+  return structuredClone(catalogEntry.graph) as unknown as WorkflowGraph;
 }
 
 function node(workflow: WorkflowGraph, id: string): any {

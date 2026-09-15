@@ -8,8 +8,9 @@
 import { describe, expect, test } from "@jest/globals";
 import { findSystemCatalogEntry } from "../../../packages/shared/src/services/workflow-catalog.js";
 import type { WorkflowGraph } from "@mcp-moira/workflow-engine";
+import { systemCatalogGraph } from "../../helpers/catalog-graphs.js";
 
-const wmf = findSystemCatalogEntry("workflow-management-flow", "public")!.graph as WorkflowGraph;
+const wmf = systemCatalogGraph("workflow-management-flow", "public");
 const reference = wmf.variableRegistry!.workflow_reference_progress.default as string;
 const directive = (id: string): string =>
   (wmf.nodes.find((node) => node.id === id) as { directive: string }).directive;

@@ -22,10 +22,10 @@ import {
   UpsertNoteHandler,
 } from "@mcp-moira/workflow-engine";
 import type { WorkflowGraph } from "@mcp-moira/workflow-engine";
+import { catalogGraph } from "../../helpers/catalog-graphs.js";
 
 function loadWorkflow(): WorkflowGraph {
-  return findCatalogEntryBySlug("notes-demo-metrics-collector", undefined, "workflows/examples")!
-    .graph as WorkflowGraph;
+  return catalogGraph("notes-demo-metrics-collector", { baseDir: "workflows/examples" });
 }
 
 /** Create a mock NoteService that succeeds */

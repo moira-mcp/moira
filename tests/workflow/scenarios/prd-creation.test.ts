@@ -20,7 +20,7 @@ type PrdContract = Record<string, unknown>;
 const catalogEntry = findCatalogEntryBySlug("prd-creation")!;
 
 function loadWorkflow(): WorkflowGraph {
-  return structuredClone(catalogEntry.graph) as WorkflowGraph;
+  return structuredClone(catalogEntry.graph) as unknown as WorkflowGraph;
 }
 
 function node(workflow: WorkflowGraph, id: string): any {

@@ -14,7 +14,7 @@ import {
 } from "../../helpers/scenario-runner.js";
 
 const entry = findCatalogEntryBySlug("workflow-presentation-generator")!;
-const workflow = (): WorkflowGraph => structuredClone(entry.graph) as WorkflowGraph;
+const workflow = (): WorkflowGraph => structuredClone(entry.graph) as unknown as WorkflowGraph;
 const sentinel = "No active revision request.";
 const completion = {
   completion_outcome: "ready",

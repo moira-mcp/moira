@@ -14,7 +14,7 @@ import {
 } from "../../helpers/scenario-runner.js";
 
 const entry = findCatalogEntryBySlug("architecture-design-flow")!;
-const workflow = (): WorkflowGraph => structuredClone(entry.graph) as WorkflowGraph;
+const workflow = (): WorkflowGraph => structuredClone(entry.graph) as unknown as WorkflowGraph;
 const sentinel = "No active revision request.";
 const changed = {
   repair_outcome: "changed",

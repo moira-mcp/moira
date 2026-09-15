@@ -8,8 +8,7 @@ import {
 } from "@mcp-moira/workflow-engine";
 
 const workflow = structuredClone(
-  findSystemCatalogEntry("software-development-flow", "public")!.graph,
-) as WorkflowGraph;
+  systemCatalogGraph("software-development-flow", "public"));
 
 const progressNodeIds = [
   "intake",

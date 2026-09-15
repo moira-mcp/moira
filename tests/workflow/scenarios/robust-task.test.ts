@@ -12,9 +12,10 @@ import {
 } from "@mcp-moira/workflow-engine";
 import { calculateCoverage } from "../../helpers/coverage-calculator.js";
 import { runScenario, type MockInput, type TestScenario } from "../../helpers/scenario-runner.js";
+import { catalogGraph } from "../../helpers/catalog-graphs.js";
 
 function loadWorkflow(): WorkflowGraph {
-  return structuredClone(findCatalogEntryBySlug("robust-task")!.graph) as WorkflowGraph;
+  return catalogGraph("robust-task");
 }
 
 function node(workflow: WorkflowGraph, id: string): any {

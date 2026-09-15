@@ -30,7 +30,9 @@ export function createMockStorage(): IDataRepository {
     listExecutions: jest.fn(),
     getWorkflowWithValidation: jest.fn(),
     listWorkflowsWithValidation: jest.fn(),
-  } as IDataRepository;
+    // Only the methods the suites that use this double actually call are implemented, so the double
+    // is deliberately partial and says so here rather than pretending to be the whole repository.
+  } as unknown as IDataRepository;
 }
 
 // createMockEngine УДАЛЕН - используй только real GraphExecutionEngine!
