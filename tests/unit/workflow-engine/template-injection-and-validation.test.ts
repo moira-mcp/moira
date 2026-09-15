@@ -206,6 +206,36 @@ describe("§14 fragment-var detection (provenance ∪ name convention)", () => {
     );
   });
 
+  test("a context read back from storage still resolves its variables", () => {
+    // `_templateFragmentVars` is a Set in memory and `{}` after JSON, because that is what a Set
+    // serializes to. Calling `.has` on that throws, and the substitution path catches every throw
+    // and renders the variable undefined — so one stored context used to make every reference in a
+    // directive render as the undefined placeholder, not merely lose the fragment hint.
+    const processor = new GraphTemplateProcessor();
+    const live = ctx({ email_body: "Hi {{name}}", name: "Bob" });
+    (live as unknown as { _templateFragmentVars: Set<string> })._templateFragmentVars = new Set([
+      "email_body",
+    ]);
+
+    const stored = JSON.parse(JSON.stringify(live)) as typeof live;
+
+    const out = processor.processDirective("{{name}} says {{email_body}}", stored);
+    expect(out).toContain("Bob");
+    expect(out).not.toContain("UNDEFINED_VARIABLE");
+  });
+
+  test("a fragment set that survived storage as an array is still honoured", () => {
+    // Callers that persist the hint deliberately write it as an array, which is the only JSON shape
+    // that can carry the names at all; it must mean the same thing as the live Set.
+    const processor = new GraphTemplateProcessor();
+    const context = ctx({ email_body: "Hi {{name}}", name: "Bob" });
+    (context as unknown as { _templateFragmentVars: unknown })._templateFragmentVars = [
+      "email_body",
+    ];
+
+    expect(processor.processDirective("{{email_body}}", context)).toBe("Hi Bob");
+  });
+
   test("without the fragment set, the same oddly-named var is neutralized (nested template stays literal)", () => {
     const processor = new GraphTemplateProcessor();
     const out = processor.processDirective(

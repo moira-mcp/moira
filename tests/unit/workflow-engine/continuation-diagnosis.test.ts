@@ -224,7 +224,7 @@ describe("every cause a paused run can be refused for", () => {
     // A run that finished reports both this and its status; nothing else in the vocabulary covers
     // "there is no step to continue", so without this row the cause could be deleted or demoted to
     // non-blocking with every other row still green.
-    const nowhere: WorkflowExecution = { ...execution, currentNodeId: undefined };
+    const nowhere: WorkflowExecution = { ...execution, currentNodeId: null };
 
     const diagnosis = await diagnoseContinuation(repository, nowhere, presented);
 

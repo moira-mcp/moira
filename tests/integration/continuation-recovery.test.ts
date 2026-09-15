@@ -322,6 +322,22 @@ describe("recovering a run that cannot continue", () => {
     expect(JSON.stringify(entry ?? {})).toContain("review");
   });
 
+  test("a refused recovery is audited as a refusal, with the reason", async () => {
+    // The refusal changed nothing, which is why it is worth recording: repeated refusals on one
+    // execution are what a reader looking for misuse of a privileged action would search for, and a
+    // trail holding only the successes cannot show them.
+    const { executionId } = await pausedRun("recovery-refusal-audited");
+
+    await recover(executionId, "review", { target: "staging" });
+
+    const logs = await new AuditRepository(getDatabase()).list({
+      action: AuditAction.EXECUTION_RECOVER,
+    });
+    const entry = logs.find((log) => log.resourceId === executionId);
+    expect(entry).toBeDefined();
+    expect(JSON.stringify(entry ?? {})).toContain("run_not_broken");
+  });
+
   test("another owner's execution is refused and nothing about it is revealed", async () => {
     const { executionId } = await pausedRun("recovery-foreign-owner");
 

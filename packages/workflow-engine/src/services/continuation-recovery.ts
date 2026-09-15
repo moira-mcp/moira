@@ -89,7 +89,11 @@ export interface ContinuationRecoveryResult {
   nodeId: string;
   /** The rendered presentation of the target node, carrying the fresh Step attempt ID. */
   presentation: string;
-  /** Variable names this recovery wrote into the execution context. */
+  /**
+   * The variable names this recovery merged into the execution context — every name the caller
+   * supplied, whether or not the value differed from the one already there. It is what was written,
+   * not a diff of what changed.
+   */
   appliedVariables: string[];
 }
 

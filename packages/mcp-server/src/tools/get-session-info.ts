@@ -579,6 +579,22 @@ export async function getSessionInfo(
         );
 
         if (recovery.outcome === "refused") {
+          // A refused privileged mutation is recorded too. It changed nothing, which is exactly why
+          // the attempt is worth having in the trail: repeated refusals on one execution are what a
+          // reader looking for misuse of this action would go looking for, and a trail that holds
+          // only the successes cannot show them.
+          await logAuditEventDirect(repository as DatabaseRepository, {
+            userId,
+            action: AuditAction.EXECUTION_RECOVER,
+            resource: "execution",
+            resourceId: executionId,
+            source: "mcp",
+            metadata: {
+              outcome: "refused",
+              reason: recovery.refusal.kind,
+              nodeId: params.nodeId,
+            },
+          });
           return {
             success: false,
             error: formatError(
@@ -596,6 +612,7 @@ export async function getSessionInfo(
           resourceId: executionId,
           source: "mcp",
           metadata: {
+            outcome: "recovered",
             nodeId: recovery.result.nodeId,
             appliedVariables: recovery.result.appliedVariables,
           },

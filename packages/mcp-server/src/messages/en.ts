@@ -260,8 +260,8 @@ Do NOT reuse the unavailable attempt ID or blindly apply its input to the curren
 AGENT INSTRUCTIONS:
 1. This run was NOT changed
 2. Call session({ action: 'diagnose', executionId: '<Process ID>' }) and read the blocking causes
-3. Call session({ action: 'recover', executionId: '<Process ID>', nodeId: '<node to resume from>', variableValues: { ... } }) again with what the refusal says is missing
-Recovery only touches a run that cannot continue without it. A run the diagnosis reports continuable is refused on purpose: continue it with session current_step and step instead. The refusal changed nothing, so retrying it costs nothing; ask the user only for a value you cannot determine yourself.`,
+3. Call session({ action: 'recover', executionId: '<Process ID>', nodeId: '<node to resume from>', variableValues: { ... } }) again with what the refusal says is missing — unless the refusal says this run is already over, in which case there is nothing to retry
+Recovery only touches a run that is trying to continue and cannot. A run the diagnosis reports continuable is refused on purpose: continue it with session current_step and step instead. A completed or cancelled run is refused too and stays finished: start a new run rather than retrying. Otherwise the refusal changed nothing, so retrying it costs nothing; ask the user only for a value you cannot determine yourself.`,
 
   outcome_unknown: `
 AGENT INSTRUCTIONS:

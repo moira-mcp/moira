@@ -53,6 +53,12 @@ npm run test:api:ci-saas
 npm run test:mcp-tools:ci-saas
 
 echo "🏠 Self-host container on port $SELF_HOST_PORT for the two self-host-only API files"
+# Start from an empty database every time. CI always has one; a contributor's machine keeps this
+# directory between runs, and a database left by an earlier checkout carries that checkout's applied
+# migrations — so a renumbered or amended migration is re-applied against a schema that already has
+# it, the container starts degraded, and the suite fails with errors that have nothing to do with
+# the change under test.
+rm -rf data-self-host
 mkdir -p data-self-host
 docker run --name "$SELF_HOST" -p "$SELF_HOST_PORT:80" --env-file .env.ci \
   -v "$(pwd)/workflows:/app/workflows" -v "$(pwd)/data-self-host:/app/data" \

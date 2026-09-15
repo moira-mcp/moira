@@ -110,7 +110,11 @@ cannot: the execution is not running or has no current node; the workflow defini
 longer readable; the paused node no longer exists; the attempt is foreign, carries no continuation
 binding, or is not in the presented state; the execution moved on past its presented attempt; the
 continuation surface changed, naming the facts that changed, disappeared or appeared; the presented
-step interpolates references the context cannot resolve; the execution recorded an error.
+step interpolates references the context cannot resolve; the execution recorded an error. The
+references are read off everything the paused node presents through, which differs by type — an
+`agent-directive` presents its directive and completion condition, a `materialize` node its base
+path and file paths, a `lock` node its reason — so a target is not accepted on the strength of
+fields it does not have.
 
 Each cause carries `blocks`, and `continuable` is true when none of them does. A blocking cause
 means the run cannot reach its next `step()` without repair, and is what makes it eligible for
@@ -157,8 +161,8 @@ same transaction rather than by the presentation that follows, so a failure whil
 the run at its target holding an attempt whose response is still null, and the run never waits on a
 node with no attempt — a state no call could leave, since presenting the
 current step refuses an execution whose waiting and current nodes disagree and stepping needs an
-attempt id. Recovery is audited as `EXECUTION_RECOVER` with the target node and the variable names
-written.
+attempt id. Both outcomes are audited as `EXECUTION_RECOVER`: a successful recovery with the target node and
+the variable names written, a refusal with the reason and the node that was asked for.
 
 A paused step attempt is bound to its execution revision, its node, its workflow and a digest of the
 run's **continuation surface**: everything the paused node declares, minus the inherited fields that

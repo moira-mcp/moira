@@ -35,6 +35,19 @@ function graph(): WorkflowGraph {
         completionCondition: "Reviewed",
         connections: { success: "end" },
       },
+      {
+        type: "materialize",
+        id: "deliver",
+        basePath: "./out/{{release_dir}}",
+        files: [{ path: "notes.md", from: "notes_source" }],
+        connections: { success: "end" },
+      },
+      {
+        type: "lock",
+        id: "approve",
+        reason: "Approve the {{release_name}} release",
+        connections: { unlocked: "end" },
+      },
       { type: "end", id: "end" },
     ],
   };
@@ -99,6 +112,8 @@ describe("refusing to recover a run that does not need it", () => {
     const refusal = outcome.outcome === "refused" ? outcome.refusal : null;
     expect(refusal?.kind).toBe("unknown_node");
     expect(refusal && "availableNodeIds" in refusal ? refusal.availableNodeIds : []).toEqual([
+      "approve",
+      "deliver",
       "end",
       "review",
       "start",
@@ -115,6 +130,25 @@ describe("refusing to recover a run that does not need it", () => {
     expect(refusal?.kind).toBe("missing_variables");
     expect(refusal && "references" in refusal ? refusal.references : []).toEqual(["target"]);
   });
+
+  test.each([
+    ["materialize", "deliver", ["release_dir"]],
+    ["lock", "approve", ["release_name"]],
+  ])(
+    "a %s target is refused for the references it presents through, not only for a directive",
+    async (_type, nodeId, expected) => {
+      // These two types present through fields an agent-directive does not have — a base path and
+      // file paths, and a lock reason. Reading only directive and completionCondition would accept
+      // the target and then present it carrying a placeholder.
+      await breakRun();
+
+      const outcome = await recoverContinuation(repository, execution, nodeId, {}, present);
+
+      const refusal = outcome.outcome === "refused" ? outcome.refusal : null;
+      expect(refusal?.kind).toBe("missing_variables");
+      expect(refusal && "references" in refusal ? refusal.references : []).toEqual(expected);
+    },
+  );
 
   test("a recovery is refused while another caller is executing the attempt", async () => {
     // Claim the attempt the way an agent's step does, then break the run: the claim holds, so
@@ -175,6 +209,8 @@ describe("refusing to recover a run that does not need it", () => {
     const refusal = outcome.outcome === "refused" ? outcome.refusal : null;
     expect(refusal?.kind).toBe("node_not_resumable");
     expect(refusal && "resumableNodeIds" in refusal ? refusal.resumableNodeIds : []).toEqual([
+      "approve",
+      "deliver",
       "review",
       "task",
     ]);

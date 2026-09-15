@@ -95,9 +95,50 @@ export interface ContinuationDiagnosis {
 }
 
 /**
+ * Every authored string a pausing node renders when it is presented to an agent.
+ *
+ * Only the fields that reach the agent belong here: they are the ones an unresolved reference would
+ * actually damage. The list follows the handlers that pause, so a node type added to that set
+ * without being added here reports no references rather than the wrong ones — visible as a target
+ * that recovery accepts and that then presents with a placeholder, not as a silent wrong answer.
+ */
+function presentedTexts(node: GraphNode): string[] {
+  const strings = (value: unknown): string[] =>
+    typeof value === "string" && value.length > 0 ? [value] : [];
+  const fields = node as {
+    directive?: unknown;
+    completionCondition?: unknown;
+    reason?: unknown;
+    basePath?: unknown;
+    files?: unknown;
+  };
+
+  const texts = [
+    ...strings(fields.directive),
+    ...strings(fields.completionCondition),
+    ...strings(fields.reason),
+    ...strings(fields.basePath),
+  ];
+
+  if (Array.isArray(fields.files)) {
+    // A file's path is authored text and may interpolate; its content is not authored here at all,
+    // it is named by `from` and read from the registry, so an absent source is a different failure
+    // than an unresolved reference and is not this function's subject.
+    for (const file of fields.files) {
+      texts.push(...strings((file as { path?: unknown })?.path));
+    }
+  }
+  return texts;
+}
+
+/**
  * References the paused step would present unresolved.
  *
- * The references themselves are read off the node's directive and completion condition, but whether
+ * The references are read off everything the node presents through, which is not the same set of
+ * fields for every type that can pause: an `agent-directive` presents its directive and completion
+ * condition, a `materialize` node its base path and the paths of its files, and a
+ * `lock` node its reason. Reading only the first two would let a run be recovered to a target whose
+ * text still carries a reference nothing can resolve. Whether
  * each one resolves is decided by rendering it through the engine's own template processor against
  * the run's context: an unresolved reference renders to the processor's undefined placeholder. That
  * keeps one owner for what a reference means — a second resolver here would drift from the one that
@@ -114,13 +155,8 @@ export async function unresolvedReferences(
   execution: WorkflowExecution,
   registry: VariableRegistry | undefined,
 ): Promise<string[]> {
-  const texts = [
-    (node as { directive?: unknown }).directive,
-    (node as { completionCondition?: unknown }).completionCondition,
-  ].filter((text): text is string => typeof text === "string" && text.length > 0);
-
   const references = new Set<string>();
-  for (const text of texts) {
+  for (const text of presentedTexts(node)) {
     for (const match of text.matchAll(/\{\{\s*([^{}]+?)\s*\}\}/g)) {
       references.add(match[1]);
     }
