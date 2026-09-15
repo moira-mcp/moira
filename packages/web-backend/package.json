@@ -5,13 +5,14 @@
   "main": "src/server.ts",
   "type": "module",
   "exports": {
-    ".": "./src/server.ts"
+    ".": "./src/server.ts",
+    "./services": "./src/services/index.ts"
   },
   "scripts": {},
   "dependencies": {
     "@mcp-moira/shared": "*",
     "@mcp-moira/workflow-engine": "*",
-    "multer": "^2.2.0"
+    "multer": "^2.3.0"
   },
   "devDependencies": {
     "@types/multer": "^2.2.0"

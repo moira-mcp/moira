@@ -24,6 +24,7 @@ import {
   isOperationalError,
   getNodeEnv,
   getRequestContext,
+  sanitizeRequestUrl,
 } from "@mcp-moira/shared";
 import { logger } from "../utils/logger.js";
 import { sanitizeErrorMessage } from "../utils/error-sanitizer.js";
@@ -104,11 +105,13 @@ export function setupErrorMiddleware() {
 
     // Add request context to all errors
     if (apiError.details) {
+      const requestUrl = req.originalUrl || req.url || req.path;
+      const sensitiveRequest = sanitizeRequestUrl(requestUrl) !== requestUrl;
       apiError.details.requestContext = {
         method: req.method,
-        path: req.path,
-        query: req.query,
-        params: req.params,
+        path: sensitiveRequest ? sanitizeRequestUrl(req.path) : req.path,
+        query: sensitiveRequest ? {} : req.query,
+        params: sensitiveRequest ? {} : req.params,
         timestamp,
       };
     }

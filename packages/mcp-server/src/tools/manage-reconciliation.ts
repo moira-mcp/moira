@@ -11,10 +11,15 @@ import {
   WorkflowReconciliationRepository,
   resolveWorkflowReconciliation,
   WorkflowReconciliationStaleError,
+  createLogger,
+  isOperationalError,
+  normalizeError,
   user,
 } from "@mcp-moira/shared";
 import { getUserContext } from "../core/request-context.js";
 import { sanitizeMcpError } from "../utils/error-sanitizer.js";
+
+const logger = createLogger({ component: "MCPTools" });
 
 export async function manageReconciliation(params: z.infer<typeof manageReconciliationSchema>) {
   try {
@@ -123,6 +128,12 @@ export async function manageReconciliation(params: z.infer<typeof manageReconcil
         isError: true,
       };
     }
+    // This tool answers its own failures, so the registration wrapper never sees them: without
+    // this the sanitized message would again be the only trace of a failure. The level follows the
+    // same boundary rule the wrapper uses.
+    logger[isOperationalError(normalizeError(error)) ? "warn" : "error"]("MCP tool failed", error, {
+      tool: "reconciliation",
+    });
     return {
       content: [{ type: "text" as const, text: `Error: ${sanitizeMcpError(error)}` }],
       isError: true,

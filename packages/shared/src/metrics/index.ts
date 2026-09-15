@@ -271,5 +271,86 @@ export const materializeDownloadsTotal = new promClient.Counter({
   registers: [metricsRegistry],
 });
 
+/**
+ * Cloud workspace metrics. Every label is a closed enumeration (provider, action,
+ * kind, state, code); user, workspace and operation identifiers are never labels.
+ */
+export const workspaceConnectionEventsTotal = new promClient.Counter({
+  name: "moira_workspace_connection_events_total",
+  help: "Workspace provider connection audit events by provider and action",
+  labelNames: ["provider", "action"],
+  registers: [metricsRegistry],
+});
+
+export const workspaceLifecycleEventsTotal = new promClient.Counter({
+  name: "moira_workspace_lifecycle_events_total",
+  help: "Workspace lifecycle audit events by provider, action and resulting state",
+  labelNames: ["provider", "action", "state"],
+  registers: [metricsRegistry],
+});
+
+export const workspaceOperationEventsTotal = new promClient.Counter({
+  name: "moira_workspace_operation_events_total",
+  help: "Workspace operation audit events by provider, kind, action and state",
+  labelNames: ["provider", "kind", "action", "state"],
+  registers: [metricsRegistry],
+});
+
+export const workspaceOperationDurationSeconds = new promClient.Histogram({
+  name: "moira_workspace_operation_duration_seconds",
+  help: "Seconds from operation reservation to its terminal state",
+  labelNames: ["kind", "state"],
+  buckets: [0.5, 1, 2.5, 5, 10, 30, 60, 120, 300, 600, 900],
+  registers: [metricsRegistry],
+});
+
+export const workspaceRejectionsTotal = new promClient.Counter({
+  name: "moira_workspace_rejections_total",
+  help: "Workspace requests refused before provider contact by bounded error code",
+  labelNames: ["code"],
+  registers: [metricsRegistry],
+});
+
+export const workspaceReconciliationDueGauge = new promClient.Gauge({
+  name: "moira_workspace_reconciliation_due",
+  help: "Workspace records currently waiting for reconciliation",
+  labelNames: ["kind"],
+  registers: [metricsRegistry],
+});
+
+export const workspaceReconciliationOldestDueAgeSeconds = new promClient.Gauge({
+  name: "moira_workspace_reconciliation_oldest_due_age_seconds",
+  help: "Age of the oldest workspace record waiting for reconciliation",
+  labelNames: ["kind"],
+  registers: [metricsRegistry],
+});
+
+export const workspaceActiveGauge = new promClient.Gauge({
+  name: "moira_workspace_active",
+  help: "Active workspace resources and operations across the instance",
+  labelNames: ["kind"],
+  registers: [metricsRegistry],
+});
+
+export const workspaceTransferLiveBytesGauge = new promClient.Gauge({
+  name: "moira_workspace_transfer_live_bytes",
+  help: "Bytes currently reserved or held by private workspace transfers",
+  registers: [metricsRegistry],
+});
+
+export const workspaceConnectorAvailableGauge = new promClient.Gauge({
+  name: "moira_workspace_connector_available",
+  help: "1 when the credential-bearing workspace connector answers its health probe",
+  labelNames: ["provider"],
+  registers: [metricsRegistry],
+});
+
+export const workspaceReadyGauge = new promClient.Gauge({
+  name: "moira_workspace_ready",
+  help: "1 when the instance can accept new workspace work for the provider",
+  labelNames: ["provider"],
+  registers: [metricsRegistry],
+});
+
 // Re-export prom-client types for convenience
 export { Counter, Gauge, Histogram, Registry } from "prom-client";

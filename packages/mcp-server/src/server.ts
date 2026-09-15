@@ -42,8 +42,14 @@ import {
   getWorkflowReconciliationStatusSummary,
   formatWorkflowReconciliationNotice,
   CommunicationAttachmentGrantService,
+  getWorkspaceResourcePolicy,
+  projectPublicWorkspaceReadiness,
   logAuditEvent,
 } from "@mcp-moira/shared";
+import {
+  getWorkspaceObservabilityService,
+  getWorkspaceTransferService,
+} from "@mcp-moira/web-backend/services";
 
 // Get monorepo version from root package.json (#196)
 export const MCP_SERVER_VERSION: string = getMcpServerVersion() || "0.0.0";
@@ -65,6 +71,7 @@ import { mcpLimiter } from "./middleware/rate-limit-middleware.js";
 
 import { buildReconciliationAwareInstructions } from "./reconciliation-aware-server.js";
 import { registerTools } from "./tools/register-tools.js";
+import { workspaceToolLogContext } from "./tools/manage-workspaces.js";
 import {
   getCatalogInitializeRequest,
   requireRevisionStampBeforeInitializeResult,
@@ -73,6 +80,7 @@ import { evaluateMcpToolsRevision } from "./auth/mcp-tools-revision.js";
 import { MCP_TOOLS_REVISION, TOOL_DEFINITIONS } from "./tools/tool-definitions.js";
 import { CommunicationAttachmentInflightLimiter } from "./communication-attachment-inflight.js";
 import { createCommunicationAttachmentHandler } from "./communication-attachment-route.js";
+import { createWorkspaceTransferDownloadHandler } from "./workspace-transfer-route.js";
 
 // Initialize logger
 const logger = createLogger({ component: "MCPServer" });
@@ -431,7 +439,9 @@ async function handleAuthenticatedMcpRequest(
 
   await runWithMCPContext(userContext, async () => {
     if (toolName && toolArgs) {
-      const { inputData, resourceIds } = sanitizeInput(toolArgs);
+      const { inputData, resourceIds } = toolName.startsWith("workspace_")
+        ? workspaceToolLogContext(toolName, toolArgs)
+        : sanitizeInput(toolArgs);
       updateContext({ operation: `mcp:${toolName}`, inputData, resourceIds });
     }
     await transport.handleRequest(req, res, req.body);
@@ -451,6 +461,7 @@ const app = express();
 
 const attachmentGrantService = new CommunicationAttachmentGrantService();
 const attachmentInflight = new CommunicationAttachmentInflightLimiter();
+const workspaceTransferService = getWorkspaceTransferService();
 
 // Prometheus metrics middleware FIRST
 app.use(metricsMiddleware());
@@ -479,6 +490,11 @@ app.post(
     audit: logAuditEvent,
     logger,
   }),
+);
+app.get(
+  "/api/workspaces/transfers/:token",
+  mcpLimiter,
+  createWorkspaceTransferDownloadHandler(workspaceTransferService),
 );
 
 app.use(express.json({ limit: "10mb" }));
@@ -535,14 +551,20 @@ app.post("/mcp", mcpLimiter, async (req: Request, res: Response) => {
 });
 
 // Health check endpoint
-app.get("/health", (req: Request, res: Response) => {
+app.get("/health", async (req: Request, res: Response) => {
   const reconciliation = getWorkflowReconciliationStatusSummary(getSqliteInstance());
+  // Public liveness surface: the cached decision with only the readiness state,
+  // never operator detail; a stalled connector cannot hang this endpoint.
+  const workspaces = projectPublicWorkspaceReadiness(
+    await getWorkspaceObservabilityService().snapshot(),
+  );
   res.json({
-    status: reconciliation.status === "ok" ? "healthy" : "degraded",
+    status: reconciliation.status === "ok" && !workspaces.degraded ? "healthy" : "degraded",
     timestamp: new Date().toISOString(),
     mode: "stateless",
     version: MCP_SERVER_VERSION,
     reconciliation,
+    workspaces,
   });
 });
 
@@ -554,6 +576,8 @@ async function main() {
     const stopAttemptMaintenance = await new ExecutionAttemptMaintenance(
       new DatabaseRepository(),
     ).start();
+    // Keep this process's readiness decision and gauges current between requests.
+    getWorkspaceObservabilityService().start(getWorkspaceResourcePolicy().reconcileIntervalMs);
 
     // The MCP and API servers are separate processes, so each owns a registry and runner client.
     // This process is the single writer of the snapshot consumed by tools outside the container.
@@ -605,6 +629,7 @@ async function main() {
     process.on("SIGINT", () => {
       logger.info("Received SIGINT, shutting down HTTP server");
       stopAttemptMaintenance();
+      getWorkspaceObservabilityService().stop();
       httpServer.close(() => {
         try {
           closeDatabase();
@@ -621,6 +646,7 @@ async function main() {
     process.on("SIGTERM", () => {
       logger.info("Received SIGTERM, shutting down HTTP server");
       stopAttemptMaintenance();
+      getWorkspaceObservabilityService().stop();
       httpServer.close(() => {
         try {
           closeDatabase();

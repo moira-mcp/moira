@@ -84,8 +84,15 @@ import { workflowSharingRoutes } from "./routes/workflow-sharing.js";
 import { inviteAcceptRoutes } from "./routes/invite-accept.js";
 import { tokenRoutes } from "./routes/tokens.js";
 import { adminTokenRoutes } from "./routes/admin-tokens.js";
+import { createWorkspaceConnectionRoutes } from "./routes/workspace-connections.js";
+import { createWorkspaceManagementRoutes } from "./routes/workspace-management.js";
+import { createAdminWorkspaceRoutes } from "./routes/admin-workspaces.js";
 import { mcpClientAutoRegister } from "./middleware/mcp-client-auto-register.js";
 import { auth } from "./auth.js";
+import { getWorkspaceResourceService } from "./services/workspace-resource-service.js";
+import { getWorkspaceOperationService } from "./services/workspace-operation-service.js";
+import { getWorkspaceObservabilityService } from "./services/workspace-services.js";
+import { getWorkspaceResourcePolicy } from "@mcp-moira/shared";
 
 // ES module compatibility
 const __filename = fileURLToPath(import.meta.url);
@@ -386,6 +393,13 @@ class MoiraApiServer {
     this.app.use("/api/invites", apiLimiter, optionalAuth, inviteAcceptRoutes); // Auth optional for GET, checked inside for POST
     this.app.use("/api/executions", apiLimiter, requireAuth, executionRoutes);
     this.app.use("/api/settings", apiLimiter, requireAuth, settingsRoutes);
+    this.app.use(
+      "/api/integrations/github/workspaces",
+      apiLimiter,
+      requireAuth,
+      createWorkspaceManagementRoutes(),
+    );
+    this.app.use("/api/integrations", apiLimiter, requireAuth, createWorkspaceConnectionRoutes());
     this.app.use("/api/node-types", apiLimiter, requireAuth, nodeTypesRoutes);
     this.app.use("/api/oauth/consent", apiLimiter, requireAuth, oauthConsentRoutes);
     this.app.use("/api/notifications", apiLimiter, requireAuth, notificationsRoutes);
@@ -404,6 +418,7 @@ class MoiraApiServer {
       requireCapability("operationsDevelopment"),
       monitoringTestRoutes,
     );
+    this.app.use("/api/admin/workspaces", createAdminWorkspaceRoutes());
     this.app.use("/api/admin", adminUserSecurityRoutes);
     this.app.use("/api/admin", requireAdminRouteCapability, adminRoutes);
 
@@ -461,6 +476,9 @@ class MoiraApiServer {
       // Start periodic execution-retention cleanup (no-op unless
       // executions.retention_days > 0).
       getExecutionRetentionService().start();
+      getWorkspaceResourceService()?.start();
+      getWorkspaceOperationService()?.start();
+      getWorkspaceObservabilityService().start(getWorkspaceResourcePolicy().reconcileIntervalMs);
 
       // Establish this process's extension state. The API server and the MCP server run as
       // separate processes, so each needs its own registry and its own runner client: without them
@@ -535,6 +553,10 @@ class MoiraApiServer {
         signal,
         uptime: process.uptime(),
       });
+
+      getWorkspaceResourceService()?.stop();
+      getWorkspaceOperationService()?.stop();
+      getWorkspaceObservabilityService().stop();
 
       // Close metrics server
       if (this.metricsServer) {

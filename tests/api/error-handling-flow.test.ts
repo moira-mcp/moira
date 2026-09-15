@@ -17,7 +17,7 @@
  */
 
 import { describe, test, expect, beforeAll } from "@jest/globals";
-import { getTestBaseUrl, getAdminCredentials } from "../utils/test-config.js";
+import { getTestBaseUrl, getAdminCredentials, getTestRequestOrigin } from "../utils/test-config.js";
 import { createTestUserViaApi, formatSessionCookie, signInUser } from "../utils/mcp-auth.js";
 import { dockerExecSync } from "../utils/docker-command.js";
 
@@ -84,7 +84,7 @@ function ensureInternalCookieJar(): void {
     "-H",
     // The origin must be the host the container advertises (MOIRA_HOST), which is the
     // test base URL; saas mode refuses any other origin with INVALID_ORIGIN.
-    `Origin: ${BASE_URL}`,
+    `Origin: ${getTestRequestOrigin()}`,
     "--data-binary",
     JSON.stringify({ email, password, rememberMe: true }),
     "-o",

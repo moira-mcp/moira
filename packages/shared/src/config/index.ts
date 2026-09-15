@@ -39,6 +39,13 @@ export {
   getBetterAuthSecret,
   getGitHubClientId,
   getGitHubClientSecret,
+  getWorkspaceGitHubAppClientId,
+  getWorkspaceGitHubAppClientSecret,
+  getWorkspaceGitHubAppCallbackUrl,
+  getWorkspaceGitHubAppInstallUrl,
+  getWorkspaceCredentialVaultKey,
+  getWorkspaceCredentialVaultKeyVersion,
+  getWorkspaceResourcePolicy,
   // Telegram
   getTelegramEncryptionKey,
   getTelegramApiTimeout,

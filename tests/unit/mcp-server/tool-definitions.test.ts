@@ -17,8 +17,60 @@ import {
   resolveToolDescription,
   renderToolReference,
 } from "../../../packages/mcp-server/src/tools/tool-definitions.js";
-import { registerTools } from "../../../packages/mcp-server/src/tools/register-tools.js";
+import {
+  workspaceDownloadRequestSchema,
+  workspaceExecRequestSchema,
+} from "../../../packages/mcp-server/src/tools/tool-schemas.js";
+import {
+  registerTools,
+  setToolFailureReporterForTests,
+} from "../../../packages/mcp-server/src/tools/register-tools.js";
 import { TOOL_BINDINGS } from "../../../packages/mcp-server/src/tools/tool-bindings.js";
+import { ServiceLogger } from "../../../packages/shared/src/logging/logger.js";
+import { NotFoundError } from "../../../packages/shared/src/errors/app-error.js";
+import { WorkflowNotFoundError } from "../../../packages/shared/src/errors/domain-errors.js";
+
+/**
+ * Observes the records the production reporters emit: the logger call itself, with its level, so a
+ * test sees what an operator would see rather than only the seam the reporter passes through.
+ */
+function captureLoggerRecords(): {
+  emitted: Array<{ level: string; message: string; error: unknown; meta?: unknown }>;
+  reported: Array<{ toolName: string; error: unknown }>;
+  restore: () => void;
+} {
+  const emitted: Array<{ level: string; message: string; error: unknown; meta?: unknown }> = [];
+  const original = { error: ServiceLogger.prototype.error, warn: ServiceLogger.prototype.warn };
+  for (const level of ["error", "warn"] as const) {
+    ServiceLogger.prototype[level] = function capture(
+      message: string,
+      error?: unknown,
+      meta?: unknown,
+    ) {
+      emitted.push({ level, message, error, meta });
+    } as (typeof ServiceLogger.prototype)[typeof level];
+  }
+  return {
+    emitted,
+    reported: [],
+    restore: () => {
+      ServiceLogger.prototype.error = original.error;
+      ServiceLogger.prototype.warn = original.warn;
+    },
+  };
+}
+
+function replaceToolBinding(
+  name: keyof typeof TOOL_BINDINGS,
+  binding: (typeof TOOL_BINDINGS)[keyof typeof TOOL_BINDINGS],
+): () => void {
+  const bindings = TOOL_BINDINGS as Record<string, unknown>;
+  const previous = bindings[name];
+  bindings[name] = binding;
+  return () => {
+    bindings[name] = previous;
+  };
+}
 
 function dereferenceLocalJsonSchema(schema: unknown): unknown {
   const root = structuredClone(schema) as Record<string, unknown>;
@@ -96,7 +148,154 @@ describe("MCP tool definitions", () => {
       "notes",
       "artifacts",
       "lock",
+      "workspace_list",
+      "workspace_create",
+      "workspace_get",
+      "workspace_start",
+      "workspace_stop",
+      "workspace_delete",
+      "workspace_exec",
+      "workspace_stat",
+      "workspace_search",
+      "workspace_read",
+      "workspace_write",
+      "workspace_apply_patch",
+      "workspace_upload",
+      "workspace_download",
     ]);
+  });
+
+  it("publishes closed workspace schemas without chat, session, auth, or provider controls", () => {
+    const definition = (name: string) =>
+      TOOL_DEFINITIONS.find((candidate) => candidate.name === name)!;
+    const forbidden = [
+      "chat_id",
+      "session_id",
+      "user_id",
+      "oauth_state",
+      "provider_token",
+      "ssh_key",
+      "capability",
+    ];
+    for (const name of MCP_TOOL_NAMES.filter((candidate) => candidate.startsWith("workspace_"))) {
+      const serializedSchema = JSON.stringify(getToolJsonSchema(definition(name)));
+      for (const field of forbidden) expect(serializedSchema).not.toContain(`"${field}"`);
+    }
+
+    expect(
+      definition("workspace_delete").schema.safeParse({
+        workspace_id: "00000000-0000-4000-8000-000000000000",
+        expected_generation: 2,
+      }).success,
+    ).toBe(false);
+    // The published exec schema is one flat root object: every form's fields are visible,
+    // only the shared identity is required, and the strict request union decides the form.
+    const publishedExec = getToolJsonSchema(definition("workspace_exec")) as {
+      type: string;
+      required: string[];
+      properties: Record<string, unknown>;
+    };
+    expect(publishedExec.type).toBe("object");
+    expect(publishedExec.required).toEqual(["workspace_id"]);
+    expect(Object.keys(publishedExec.properties).sort()).toEqual([
+      "argv",
+      "cwd",
+      "max_stderr_bytes",
+      "max_stdout_bytes",
+      "operation_id",
+      "stdin_file",
+      "stdin_text",
+      "timeout_seconds",
+      "workspace_id",
+    ]);
+    expect(
+      workspaceExecRequestSchema.safeParse({
+        workspace_id: "00000000-0000-4000-8000-000000000000",
+        argv: ["node", "script.js"],
+        timeout_seconds: 30,
+        stdin_file: {
+          file_id: "sediment://file_00000000000000000000000000000000",
+          download_url: "https://oaiusercontent.com/file",
+          file_name: "input.bin",
+          mime_type: "application/octet-stream",
+        },
+      }).success,
+    ).toBe(true);
+    expect(
+      workspaceExecRequestSchema.safeParse({
+        workspace_id: "00000000-0000-4000-8000-000000000000",
+        argv: ["node", "script.js"],
+        timeout_seconds: 30,
+        stdin_text: "input",
+        stdin_file: {
+          file_id: "sediment://file_123",
+          download_url: "https://oaiusercontent.com/file",
+        },
+      }).success,
+    ).toBe(false);
+    expect(
+      workspaceExecRequestSchema.safeParse({
+        workspace_id: "00000000-0000-4000-8000-000000000000",
+        operation_id: "00000000-0000-4000-8000-000000000001",
+        argv: ["npm", "test"],
+        timeout_seconds: 30,
+      }).success,
+    ).toBe(false);
+    expect(
+      definition("workspace_exec").schema.safeParse({
+        workspace_id: "00000000-0000-4000-8000-000000000000",
+        chat_id: "c1",
+      }).success,
+    ).toBe(false);
+  });
+
+  it("requires bounded output metadata for download recovery and rejects mixing it with a new path", () => {
+    const download = workspaceDownloadRequestSchema;
+    const resume = {
+      workspace_id: "00000000-0000-4000-8000-000000000000",
+      operation_id: "00000000-0000-4000-8000-000000000001",
+      file_name: "result.bin",
+      mime_type: "application/octet-stream",
+    };
+    expect(download.safeParse(resume).success).toBe(true);
+    expect(download.safeParse({ ...resume, path: "new.bin" }).success).toBe(false);
+    expect(download.safeParse({ ...resume, max_bytes: 0 }).success).toBe(false);
+    expect(download.safeParse({ ...resume, file_name: "../result.bin" }).success).toBe(false);
+    const publishedDownload = getToolJsonSchema(
+      TOOL_DEFINITIONS.find((definition) => definition.name === "workspace_download")!,
+    ) as { required: string[] };
+    expect(publishedDownload.required.slice().sort()).toEqual([
+      "file_name",
+      "mime_type",
+      "workspace_id",
+    ]);
+  });
+
+  it("publishes native file metadata and optional file details at the top-level MCP boundary", async () => {
+    const published = await inspectPublishedContract("native file handoff");
+    for (const [name, field] of [
+      ["workspace_exec", "stdin_file"],
+      ["workspace_upload", "file"],
+    ]) {
+      const tool = published.tools.find((candidate) => candidate.name === name)!;
+      expect(tool._meta).toEqual({ "openai/fileParams": [field] });
+      const schema = dereferenceLocalJsonSchema(tool.inputSchema) as {
+        properties: Record<string, { required: string[]; properties: Record<string, unknown> }>;
+      };
+      expect(schema.properties[field].required.slice().sort()).toEqual(["download_url", "file_id"]);
+      expect(schema.properties[field].properties).toEqual(
+        expect.objectContaining({
+          file_name: expect.any(Object),
+          mime_type: expect.any(Object),
+        }),
+      );
+    }
+    const changed = TOOL_DEFINITIONS.map((definition) => ({ ...definition, _meta: undefined }));
+    expect(computeContractRevision(getToolContractProjection(changed))).not.toBe(
+      MCP_TOOLS_REVISION,
+    );
+    expect(renderToolReference("en")).toContain('"openai/fileParams"');
+    expect(renderToolReference("ru")).toContain('"stdin_file"');
   });
 
   it("publishes a strict communication contract without authority controls", () => {
@@ -344,6 +543,127 @@ describe("MCP tool definitions", () => {
     expect(computeContractRevision(changedAgentDescription)).not.toBe(
       computeContractRevision(projection),
     );
+  });
+
+  it("records a suppressed tool failure server-side while the caller keeps the sanitized text", async () => {
+    // A message the sanitizer suppresses is exactly the case that used to leave no trace.
+    const failure = new Error("sqlite disk I/O error at /var/lib/moira/private.db");
+    const restoreBinding = replaceToolBinding("list", async () => {
+      throw failure;
+    });
+    const records = captureLoggerRecords();
+    const restoreReporter = setToolFailureReporterForTests((toolName, error) => {
+      records.reported.push({ toolName, error });
+    });
+    const server = new McpServer(
+      { name: "tool-failure-test", version: "1.0.0" },
+      { capabilities: { tools: {} } },
+    );
+    registerTools(server, undefined, () => null);
+    const client = new Client({ name: "tool-failure-client", version: "1.0.0" }, {});
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    try {
+      await server.connect(serverTransport);
+      await client.connect(clientTransport);
+
+      const result = (await client.callTool({
+        name: "list",
+        arguments: { search: "private search term" },
+      })) as { isError?: boolean; content: Array<{ text: string }> };
+
+      expect(result.isError).toBe(true);
+      expect(result.content[0]?.text).toBe("Error: Internal server error");
+      expect(JSON.stringify(result)).not.toMatch(/sqlite|private\.db|private search term/);
+      expect(records.reported).toEqual([{ toolName: "list", error: failure }]);
+      expect(JSON.stringify(records.reported.map(({ toolName }) => toolName))).not.toContain(
+        "private search term",
+      );
+    } finally {
+      restoreBinding();
+      restoreReporter();
+      records.restore();
+      await client.close();
+      await server.close();
+    }
+  });
+
+  it.each([
+    [
+      "an unexpected failure",
+      new Error("sqlite disk I/O error at /var/lib/moira/private.db"),
+      "error",
+    ],
+    ["an operational failure", new NotFoundError("Workflow", "missing-workflow"), "warn"],
+    // A domain error counts as operational only after normalization, which is the project's rule.
+    ["a domain failure", new WorkflowNotFoundError("missing-workflow", "slug"), "warn"],
+  ])("classifies %s the way this project classifies failures", async (_name, failure, level) => {
+    // The default reporter is left in place: the level it chooses is the property under test.
+    const restoreBinding = replaceToolBinding("list", async () => {
+      throw failure;
+    });
+    const records = captureLoggerRecords();
+    const server = new McpServer(
+      { name: "tool-level-test", version: "1.0.0" },
+      { capabilities: { tools: {} } },
+    );
+    registerTools(server, undefined, () => null);
+    const client = new Client({ name: "tool-level-client", version: "1.0.0" }, {});
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    try {
+      await server.connect(serverTransport);
+      await client.connect(clientTransport);
+
+      const result = (await client.callTool({
+        name: "list",
+        arguments: { search: "private search term" },
+      })) as { isError?: boolean };
+
+      expect(result.isError).toBe(true);
+      expect(records.emitted).toEqual([
+        { level, message: "MCP tool failed", error: failure, meta: { tool: "list" } },
+      ]);
+    } finally {
+      restoreBinding();
+      records.restore();
+      await client.close();
+      await server.close();
+    }
+  });
+
+  it("records a failure from the tool that answers its own failures", async () => {
+    // reconciliation catches internally and returns a sanitized result, so the registration
+    // wrapper never sees it: the record has to come from the tool itself.
+    const records = captureLoggerRecords();
+    const server = new McpServer(
+      { name: "tool-own-failure-test", version: "1.0.0" },
+      { capabilities: { tools: {} } },
+    );
+    registerTools(server, undefined, () => null);
+    const client = new Client({ name: "tool-own-failure-client", version: "1.0.0" }, {});
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    try {
+      await server.connect(serverTransport);
+      await client.connect(clientTransport);
+
+      const result = (await client.callTool({
+        name: "reconciliation",
+        arguments: { action: "status" },
+      })) as { isError?: boolean; content: Array<{ text: string }> };
+
+      expect(result.isError).toBe(true);
+      expect(records.emitted).toEqual([
+        {
+          level: "error",
+          message: "MCP tool failed",
+          error: expect.any(Error),
+          meta: { tool: "reconciliation" },
+        },
+      ]);
+    } finally {
+      records.restore();
+      await client.close();
+      await server.close();
+    }
   });
 
   it("publishes the complete catalog with static descriptions through MCP", async () => {

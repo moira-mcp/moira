@@ -15,6 +15,23 @@ export enum AuditAction {
   USER_REVOKE_SESSION = "user:revoke_session",
   USER_REVOKE_OAUTH_CONSENT = "user:revoke_oauth_consent",
 
+  // Workspace provider connections (metadata only; credentials are never audit payloads)
+  WORKSPACE_CONNECTION_START = "workspace:connection_start",
+  WORKSPACE_CONNECTION_COMPLETE = "workspace:connection_complete",
+  WORKSPACE_CONNECTION_REFRESH_FAILED = "workspace:connection_refresh_failed",
+  WORKSPACE_CONNECTION_DISCONNECT = "workspace:connection_disconnect",
+  WORKSPACE_RESOURCE_CREATE = "workspace:resource_create",
+  WORKSPACE_RESOURCE_CREATE_PENDING = "workspace:resource_create_pending",
+  WORKSPACE_RESOURCE_CREATE_REJECTED = "workspace:resource_create_rejected",
+  WORKSPACE_RESOURCE_CLEANUP = "workspace:resource_cleanup",
+  WORKSPACE_RESOURCE_START = "workspace:resource_start",
+  WORKSPACE_RESOURCE_STOP = "workspace:resource_stop",
+  WORKSPACE_RESOURCE_DELETE = "workspace:resource_delete",
+  WORKSPACE_OPERATION_RESERVE = "workspace:operation_reserve",
+  WORKSPACE_OPERATION_RECONCILE = "workspace:operation_reconcile",
+  WORKSPACE_OPERATION_TERMINAL = "workspace:operation_terminal",
+  WORKSPACE_CONTROL_UPDATE = "workspace:control_update",
+
   // Workflow events
   WORKFLOW_CREATE = "workflow:create",
   WORKFLOW_EDIT = "workflow:edit",

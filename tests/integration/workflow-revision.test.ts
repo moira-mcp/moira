@@ -17,7 +17,26 @@ import type { WorkflowGraph } from "@mcp-moira/workflow-engine";
 import * as schema from "../../packages/shared/src/database/schema.js";
 
 const MIGRATIONS = path.resolve(process.cwd(), "packages/web-backend/drizzle");
+const REVISION_TAG = "0026_workflow_revision";
 const OWNER = "revision-owner";
+
+/**
+ * A copy of the migration folder whose journal stops just before `tag`, so migrating against it
+ * produces the database as it stood before that migration regardless of what was added after it.
+ */
+function migrationsBefore(directory: string, tag: string): string {
+  const target = path.join(directory, `before-${tag}`);
+  fs.cpSync(MIGRATIONS, target, { recursive: true });
+  const journalPath = path.join(target, "meta/_journal.json");
+  const journal = JSON.parse(fs.readFileSync(journalPath, "utf8")) as {
+    entries: Array<{ tag: string }>;
+  };
+  const index = journal.entries.findIndex((entry) => entry.tag === tag);
+  if (index < 1) throw new Error(`${tag} is absent from the migration journal`);
+  journal.entries = journal.entries.slice(0, index);
+  fs.writeFileSync(journalPath, `${JSON.stringify(journal, null, 2)}\n`);
+  return target;
+}
 
 function graph(name: string, directive = "Do the work"): WorkflowGraph {
   return {
@@ -58,17 +77,9 @@ describe("workflow definition revision", () => {
     const file = new Database(path.join(directory, "moira.db"));
     try {
       file.exec("PRAGMA foreign_keys = OFF");
-      migrate(drizzle(file), { migrationsFolder: MIGRATIONS });
-      const journal = JSON.parse(
-        fs.readFileSync(path.join(MIGRATIONS, "meta/_journal.json"), "utf8"),
-      ) as { entries: Array<{ tag: string; when: number }> };
-      const revisionMigration = journal.entries.find(
-        (entry) => entry.tag === "0026_workflow_revision",
-      )!;
-      file.exec("ALTER TABLE workflow DROP COLUMN revision");
-      file
-        .prepare("DELETE FROM __drizzle_migrations WHERE created_at >= ?")
-        .run(revisionMigration.when);
+      // A database as it was before this migration: the journal is cut just before it, so every
+      // later migration — including ones added after it — stays unapplied and untouched here.
+      migrate(drizzle(file), { migrationsFolder: migrationsBefore(directory, REVISION_TAG) });
       const now = Date.now();
       file
         .prepare(

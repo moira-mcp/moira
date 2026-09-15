@@ -19,6 +19,9 @@ ENV WEB_FRONTEND_PORT=3002
 # Install system dependencies
 RUN apk add --no-cache \
     git \
+    github-cli=2.97.0-r1 \
+    openssh-client-default=10.3_p1-r1 \
+    util-linux-misc=2.42.3-r1 \
     curl \
     nginx \
     supervisor \
@@ -94,10 +97,10 @@ RUN --mount=type=cache,id=astro-docs-${BUILD_ID},target=/app/packages/docs/node_
 # ===================================
 FROM base AS backend-build
 
+COPY packages/web-backend/ ./packages/web-backend/
 COPY packages/mcp-server/ ./packages/mcp-server/
 RUN npx tsc --noEmit --project packages/mcp-server/tsconfig.json
 
-COPY packages/web-backend/ ./packages/web-backend/
 RUN npx tsc --noEmit --project packages/web-backend/tsconfig.json
 
 # ===================================

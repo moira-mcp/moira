@@ -14,10 +14,24 @@ describe("sanitizeRequestUrl", () => {
     expect(sanitizeRequestUrl("/api/workflows/example")).toBe("/api/workflows/example");
   });
 
+  test("redacts private workspace transfer capabilities", () => {
+    expect(sanitizeRequestUrl("/api/workspaces/transfers/private-capability?download=true")).toBe(
+      "/api/workspaces/transfers/[REDACTED]?download=true",
+    );
+  });
+
   test("redacts progress image grants including filename suffixes", () => {
     expect(
       sanitizeRequestUrl("/api/public/execution-progress-image/secret-token?download=true"),
     ).toBe("/api/public/execution-progress-image/[REDACTED]?download=true");
+  });
+
+  test("redacts GitHub callback code and state as one sensitive query", () => {
+    const safe = sanitizeRequestUrl(
+      "/api/integrations/github/callback?code=github-secret-code&state=browser-secret-state",
+    );
+    expect(safe).toBe("/api/integrations/github/callback?[REDACTED]");
+    expect(safe).not.toMatch(/github-secret-code|browser-secret-state/);
   });
 
   test("request logger emits the redacted URL rather than the materialize grant", async () => {
