@@ -297,7 +297,8 @@ describe("production LockHandler trusted-delivery lifecycle", () => {
     expect(result.data).not.toHaveProperty("pin");
     expect(JSON.stringify(result)).not.toContain(deliveredPin);
     const active = await lockService.getActiveLock(executionId);
-    expect(active?.id).toBe(result.data.lockId);
+    // `lock` answers with one member of a union; this is the created-lock member.
+    expect(active?.id).toBe((result.data as { lockId: string }).lockId);
     expect(active?.pin).not.toBe(deliveredPin);
     await expect(lockService.validatePin(active!.id, deliveredPin)).resolves.toEqual({
       valid: true,

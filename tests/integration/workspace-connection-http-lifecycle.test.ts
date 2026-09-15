@@ -103,7 +103,9 @@ describe("GitHub workspace authenticated HTTP lifecycle", () => {
     app.use("/api/integrations", createWorkspaceConnectionRoutes(service));
   });
 
-  afterEach(() => sqlite.close());
+  afterEach(() => {
+    sqlite.close();
+  });
 
   test("drives start, callback, status and disconnect without exposing callback or token secrets", async () => {
     const start = await request(app).get("/api/integrations/github/start");

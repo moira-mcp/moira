@@ -6,7 +6,7 @@
  * deadline, a result that violates the declared schema, and an outright process crash.
  */
 
-import { defineExtension, defineNode } from "@mcp-moira/extension-sdk";
+import { defineExtension, defineNode, type JsonObject } from "@mcp-moira/extension-sdk";
 
 const behave = defineNode({
   type: "probe.behave",
@@ -25,7 +25,7 @@ const behave = defineNode({
         break;
 
       case "hang":
-        return await new Promise((resolve) => {
+        return await new Promise<JsonObject>((resolve) => {
           // Observes cancellation instead of ignoring it, so the caller can tell whether the
           // deadline actually reached the handler.
           signal.addEventListener("abort", () => {

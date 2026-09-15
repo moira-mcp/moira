@@ -506,8 +506,10 @@ describe("replay-safe workflow start attempts", () => {
       MCPEngine.resetInstance();
       const repository = new InMemoryRepository();
       const workflow = graph(id);
+      // Narrowed on the node type rather than its id: only a start node has a `default`
+      // connection, so this is also what makes the rewrite type-correct.
       workflow.nodes = workflow.nodes.map((current) =>
-        current.id === "start" ? { ...current, connections: { default: "gate" } } : current,
+        current.type === "start" ? { ...current, connections: { default: "gate" } } : current,
       );
       workflow.nodes.splice(1, 0, node);
       await repository.saveWorkflow(workflow, USER_ID);

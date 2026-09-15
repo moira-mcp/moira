@@ -57,7 +57,9 @@ describe("ExecutionRepository revisioned context persistence", () => {
     workflowId = `wf-${randomUUID()}`;
   });
 
-  afterEach(() => sqlite.close());
+  afterEach(() => {
+    sqlite.close();
+  });
 
   it("merges selected variable keys and preserves unmentioned keys", async () => {
     const executionId = randomUUID();

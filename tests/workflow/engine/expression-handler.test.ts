@@ -5,7 +5,11 @@
 
 import { describe, test, expect } from "@jest/globals";
 import { ExpressionHandler, AgentMessageQueue, ExpressionNode } from "@mcp-moira/workflow-engine";
-import { IDataRepository, IGraphExecutionEngine } from "@mcp-moira/workflow-engine";
+import type {
+  IDataRepository,
+  IGraphExecutionEngine,
+  VariableRegistry,
+} from "@mcp-moira/workflow-engine";
 
 describe("ExpressionHandler", () => {
   const handler = new ExpressionHandler();
@@ -185,12 +189,13 @@ describe("ExpressionHandler", () => {
 
     const error = await handler
       .execute(expressionNode, context, new AgentMessageQueue(), mockStorage, mockEngine)
-      .catch((caught) => caught as { context?: Record<string, unknown> });
+      .then(() => null)
+      .catch((caught: { context?: Record<string, unknown> }) => caught);
 
-    expect(error.context).toEqual(
+    expect(error?.context).toEqual(
       expect.objectContaining({ nodeId: "private-expression", expressionIndex: 0 }),
     );
-    expect(error.context).not.toHaveProperty("expression");
+    expect(error?.context).not.toHaveProperty("expression");
   });
 
   test("should use error connection if available", async () => {
@@ -395,8 +400,8 @@ describe("ExpressionHandler", () => {
       expressions: ["declared = 1", "undeclared = 2"],
       connections: { default: "next", error: "reject" },
     };
-    const registry = {
-      declared: { type: "integer", minimum: 0, maximum: 10, default: 0 },
+    const registry: VariableRegistry = {
+      declared: { type: "integer", description: "Declared target", minimum: 0, maximum: 10, default: 0 },
     };
 
     const result = await handler.execute(
@@ -422,9 +427,9 @@ describe("ExpressionHandler", () => {
       expressions: ["value = 11", "value = 2", "dependent = value + 1"],
       connections: { default: "next", error: "reject" },
     };
-    const registry = {
-      value: { type: "integer", minimum: 0, maximum: 10, default: 1 },
-      dependent: { type: "integer", minimum: 0, maximum: 10, default: 0 },
+    const registry: VariableRegistry = {
+      value: { type: "integer", description: "Value", minimum: 0, maximum: 10, default: 1 },
+      dependent: { type: "integer", description: "Dependent value", minimum: 0, maximum: 10, default: 0 },
     };
 
     const result = await handler.execute(

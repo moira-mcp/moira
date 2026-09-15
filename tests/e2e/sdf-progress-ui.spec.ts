@@ -7,6 +7,7 @@ import {
   startWorkflowExecution,
 } from "../utils/mcp-auth.js";
 import { loginAsAdmin } from "./helpers/auth-helper.js";
+import { systemCatalogGraph } from "../helpers/catalog-graphs.js";
 
 const BASE_URL = getTestBaseUrl();
 
@@ -14,7 +15,7 @@ test("renders live SDF progress in the image endpoint and on the run page", asyn
   const authenticated = await createAuthenticatedMCPClient();
 
   try {
-    const workflow = findSystemCatalogEntry("software-development-flow", "public")!.graph;
+    const workflow = systemCatalogGraph("software-development-flow", "public");
     const started = await startWorkflowExecution(
       authenticated.client,
       "moira/software-development-flow",

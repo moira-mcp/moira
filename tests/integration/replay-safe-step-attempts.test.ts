@@ -960,7 +960,6 @@ describe("replay-safe workflow step attempts", () => {
       const maintenance = new ExecutionAttemptMaintenance(repository, {
         now: () => now,
         reconcileIntervalMs: 10,
-        startWaitMs: 60_000,
         cleanupIntervalMs: 1_000,
       });
       stop = await maintenance.start();

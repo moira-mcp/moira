@@ -35,7 +35,9 @@ describe("Execution retention", () => {
     repo = new ExecutionRepository(db);
   });
 
-  afterEach(() => sqlite.close());
+  afterEach(() => {
+    sqlite.close();
+  });
 
   function makeExec(opts: {
     status: "running" | "completed";

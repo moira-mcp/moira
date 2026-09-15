@@ -136,7 +136,7 @@ describe("deployment-mode auth behavior", () => {
     });
     expect(sessionBefore.status).toBe(200);
 
-    const pendingAuthCapabilities = [
+    const pendingAuthCapabilities: Array<{ path: string; init: RequestInit }> = [
       {
         path: "/api/auth/update-user",
         init: {
