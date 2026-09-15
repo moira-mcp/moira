@@ -1,4 +1,4 @@
-import { describe, expect, jest, test } from "@jest/globals";
+import { describe, expect, test } from "@jest/globals";
 import { spawn as spawnProcess } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { resolve } from "node:path";
@@ -14,18 +14,21 @@ import {
 import type { WorkspaceOperationRecord, WorkspaceResourceRecord } from "@mcp-moira/shared";
 
 function requestHarness(responder: (body: unknown, options: RequestOptions) => unknown) {
-  const calls: Array<{ options: RequestOptions; body: string }> = [];
+  const calls: Array<{ options: RequestOptions; body: string; timeoutMs: number | null }> = [];
   const requestImpl = (
     options: RequestOptions,
     callback: (response: IncomingMessage) => void,
   ): ClientRequest => {
     const request = new EventEmitter() as ClientRequest;
+    let timeoutMs: number | null = null;
     Object.assign(request, {
-      setTimeout: jest.fn(),
+      setTimeout: (milliseconds: number) => {
+        timeoutMs = milliseconds;
+      },
       destroy: (error?: Error) => queueMicrotask(() => request.emit("error", error)),
       end: (payload?: Buffer) => {
         const body = payload?.toString("utf8") ?? "";
-        calls.push({ options, body });
+        calls.push({ options, body, timeoutMs });
         const response = new EventEmitter() as IncomingMessage;
         response.statusCode = 200;
         callback(response);
@@ -103,6 +106,10 @@ describe("GitHub Codespaces connector boundary", () => {
         stdoutBase64: Buffer.from("partial").toString("base64"),
         stderrBase64: Buffer.from("expected").toString("base64"),
         exitCode: 23,
+        stdoutBytes: 90_000,
+        stderrBytes: 8,
+        outputLimitExceeded: false,
+        sessionCaptureDropped: false,
       }),
     }));
     const connector = new GitHubCodespacesConnector(harness.requestImpl);
@@ -114,12 +121,18 @@ describe("GitHub Codespaces connector boundary", () => {
         timeoutMs: 5_000,
         maxStdoutBytes: 4096,
         maxStderrBytes: 4096,
+        maxRetainedBytes: 64 * 1024 * 1024,
       }),
     ).resolves.toEqual({
       state: "failed",
       stdout: "partial",
       stderr: "expected",
       exitCode: 23,
+      // The payload is a prefix; the complete size travels with it so a caller knows what is left.
+      stdoutTotalBytes: 90_000,
+      stderrTotalBytes: 8,
+      outputLimitExceeded: false,
+      sessionCaptureDropped: false,
     });
     const body = JSON.parse(harness.calls[0].body);
     expect(body.job.argv).toEqual(["printf", "%s", "a value;$(false)"]);
@@ -148,6 +161,10 @@ describe("GitHub Codespaces connector boundary", () => {
       stdoutBase64: Buffer.alloc(8 * 1024 * 1024).toString("base64"),
       stderrBase64: Buffer.alloc(8 * 1024 * 1024).toString("base64"),
       exitCode: 23,
+      stdoutBytes: 8 * 1024 * 1024,
+      stderrBytes: 8 * 1024 * 1024,
+      outputLimitExceeded: false,
+      sessionCaptureDropped: false,
     });
     const maximumWireResult = encodeConnectorResponse({
       value: remoteWireResult.toString("utf8"),
@@ -488,6 +505,154 @@ describe("GitHub Codespaces connector boundary", () => {
     ).rejects.toThrow(/Codespace/);
   });
 
+  test("reads a retained output range and refuses one the remote did not answer exactly", async () => {
+    const harness = requestHarness((body) => ({
+      value: JSON.stringify(
+        (body as { job: { action: string } }).job.action === "output"
+          ? {
+              action: "output",
+              stream: "stdout",
+              offset: 128,
+              totalBytes: 5_000,
+              bytesBase64: Buffer.from("tail bytes").toString("base64"),
+            }
+          : { state: "running" },
+      ),
+    }));
+    const connector = new GitHubCodespacesConnector(harness.requestImpl);
+    await expect(
+      connector.readOutput("ghu_topsecret", workspace, operation, {
+        stream: "stdout",
+        offset: 128,
+        length: 64,
+      }),
+    ).resolves.toEqual({
+      stream: "stdout",
+      offset: 128,
+      totalBytes: 5_000,
+      bytes: Buffer.from("tail bytes"),
+    });
+    expect(JSON.parse(harness.calls[0].body).job).toMatchObject({
+      action: "output",
+      stream: "stdout",
+      offset: 128,
+      length: 64,
+    });
+    // Every operation job is framed alike, so the caller waits at least as long as the sidecar,
+    // which must still open a session into the Codespace before it can answer.
+    await connector.inspect("ghu_topsecret", workspace, operation);
+    expect(harness.calls[0].timeoutMs).toBe(harness.calls[1].timeoutMs);
+    expect(harness.calls[0].timeoutMs).toBeGreaterThanOrEqual(120_000);
+    expect(JSON.stringify(harness.calls[0].options)).not.toContain("ghu_topsecret");
+
+    // A range that begins past the end of the stream is an answer, not a failure.
+    const pastEnd = new GitHubCodespacesConnector(
+      requestHarness(() => ({
+        value: JSON.stringify({
+          action: "output",
+          stream: "stdout",
+          offset: 9_000,
+          totalBytes: 5_000,
+          bytesBase64: "",
+        }),
+      })).requestImpl,
+    );
+    await expect(
+      pastEnd.readOutput("ghu_topsecret", workspace, operation, {
+        stream: "stdout",
+        offset: 9_000,
+        length: 64,
+      }),
+    ).resolves.toMatchObject({ totalBytes: 5_000, bytes: Buffer.alloc(0) });
+
+    const mismatched = new GitHubCodespacesConnector(
+      requestHarness(() => ({
+        value: JSON.stringify({
+          action: "output",
+          stream: "stderr",
+          offset: 128,
+          totalBytes: 5_000,
+          bytesBase64: "",
+        }),
+      })).requestImpl,
+    );
+    await expect(
+      mismatched.readOutput("ghu_topsecret", workspace, operation, {
+        stream: "stdout",
+        offset: 128,
+        length: 64,
+      }),
+    ).rejects.toThrow(/invalid output range/);
+  });
+
+  test("maps the remote session answers to their transport shapes", async () => {
+    for (const [remote, expected] of [
+      [{ state: "session_unavailable" }, { state: "session_unavailable" }],
+      [
+        { state: "session_limit", limit: "sessions" },
+        { state: "session_limit", limit: "sessions" },
+      ],
+      [{ state: "session_limit" }, { state: "session_limit", limit: "context" }],
+      [
+        { state: "session_ended" },
+        {
+          state: "succeeded",
+          stdout: "",
+          stderr: "",
+          exitCode: 0,
+          stdoutTotalBytes: 0,
+          stderrTotalBytes: 0,
+          outputLimitExceeded: false,
+          sessionCaptureDropped: false,
+        },
+      ],
+    ] as const) {
+      const connector = new GitHubCodespacesConnector(
+        requestHarness(() => ({ value: JSON.stringify(remote) })).requestImpl,
+      );
+      await expect(
+        connector.execute("ghu_topsecret", workspace, operation, {
+          argv: ["true"],
+          cwd: ".",
+          stdin: { kind: "inline", bytes: new Uint8Array() },
+          timeoutMs: 5_000,
+          maxStdoutBytes: 4096,
+          maxStderrBytes: 4096,
+          maxRetainedBytes: 1024 * 1024,
+          session: "build",
+        }),
+      ).resolves.toEqual(expected);
+    }
+  });
+
+  test("carries an operation lost to a restart as its own state and refuses it on dispatch", async () => {
+    const connector = new GitHubCodespacesConnector(
+      requestHarness(() => ({ value: JSON.stringify({ state: "interrupted" }) })).requestImpl,
+    );
+
+    // An inspection may legitimately learn that the workspace restarted under the command.
+    await expect(connector.inspect("ghu_topsecret", workspace, operation)).resolves.toEqual({
+      state: "interrupted",
+    });
+    await expect(connector.cancel("ghu_topsecret", workspace, operation)).resolves.toEqual({
+      state: "interrupted",
+    });
+
+    // A dispatch cannot: an operation that was just created cannot belong to an earlier life, so
+    // that answer is a broken remote side rather than a state the caller should see.
+    await expect(
+      connector.execute("ghu_topsecret", workspace, operation, {
+        argv: ["true"],
+        cwd: ".",
+        stdin: { kind: "inline", bytes: new Uint8Array() },
+        timeoutMs: 5_000,
+        maxStdoutBytes: 4096,
+        maxStderrBytes: 4096,
+        maxRetainedBytes: 1024 * 1024,
+      }),
+    ).rejects.toThrow(/was not created/);
+  });
+
   test("rejects a malformed remote terminal envelope", async () => {
     const harness = requestHarness(() => ({
       value: JSON.stringify({
@@ -495,6 +660,10 @@ describe("GitHub Codespaces connector boundary", () => {
         stdoutBase64: "not-base64",
         stderrBase64: "",
         exitCode: 0,
+        stdoutBytes: 10,
+        stderrBytes: 0,
+        outputLimitExceeded: false,
+        sessionCaptureDropped: false,
       }),
     }));
     const connector = new GitHubCodespacesConnector(harness.requestImpl);

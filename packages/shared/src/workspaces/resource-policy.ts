@@ -33,17 +33,23 @@ export function evaluateWorkspaceResourcePolicy(
   if (enabledValue !== undefined && !["true", "false"].includes(enabledValue)) {
     throw new Error("WORKSPACE_CODESPACES_ENABLED must be true or false");
   }
-  const maxActivePerUser = integer("WORKSPACE_MAX_ACTIVE_PER_USER", 1, 1, 64);
-  const maxActiveGlobal = integer("WORKSPACE_MAX_ACTIVE_GLOBAL", 4, 1, 1024);
+  // Moira holds nothing per workspace: the connector opens a fresh socket request per call and
+  // keeps no session, so these ceilings bound provider cost rather than a local resource. The
+  // shipped per-user value lets one person carry several tasks at once; the instance value is a
+  // multiple of it, so a single user cannot exhaust the instance alone.
+  const maxActivePerUser = integer("WORKSPACE_MAX_ACTIVE_PER_USER", 4, 1, 64);
+  const maxActiveGlobal = integer("WORKSPACE_MAX_ACTIVE_GLOBAL", 16, 1, 1024);
+  // A command started in the background holds its slot for as long as it runs, so the shipped
+  // per-user ceiling has to leave room for ordinary work beside one or two long commands.
   const maxConcurrentOperationsPerUser = integer(
     "WORKSPACE_MAX_CONCURRENT_OPERATIONS_PER_USER",
-    2,
+    8,
     1,
     32,
   );
   const maxConcurrentOperationsGlobal = integer(
     "WORKSPACE_MAX_CONCURRENT_OPERATIONS_GLOBAL",
-    20,
+    32,
     1,
     256,
   );
@@ -77,6 +83,50 @@ export function evaluateWorkspaceResourcePolicy(
     1,
     4096,
   );
+  // The response payload bound and the retained-output ceiling are different jobs: the first bounds
+  // one answer, the second bounds the workspace disk a command may fill before it is stopped. A
+  // retained ceiling below a payload bound would make the payload unreachable.
+  const retainedOutputBytes = scaledInteger(
+    "WORKSPACE_MAX_RETAINED_OUTPUT_MB",
+    64,
+    1024 ** 2,
+    1,
+    4096,
+  );
+  const maxOperationStdoutBytes = scaledInteger(
+    "WORKSPACE_MAX_OPERATION_STDOUT_KB",
+    1024,
+    1024,
+    1,
+    8192,
+  );
+  const maxOperationStderrBytes = scaledInteger(
+    "WORKSPACE_MAX_OPERATION_STDERR_KB",
+    256,
+    1024,
+    1,
+    8192,
+  );
+  // A command started in the background is bounded by its own ceiling, which is a workspace-side
+  // lifetime rather than a response deadline and is therefore expressed in hours. Its shipped value
+  // matches the longest idle lifetime a workspace can be given, since a command stops with its
+  // workspace; its minimum of one hour already exceeds any bounded-command ceiling.
+  const backgroundOperationMs = scaledInteger(
+    "WORKSPACE_MAX_BACKGROUND_OPERATION_HOURS",
+    4,
+    3_600_000,
+    1,
+    24,
+  );
+  // A workspace that fell asleep is started by the operation that needs it, and that operation waits
+  // rather than failing. The wait is bounded so a caller is never held indefinitely by a provider
+  // that is slow or stuck; its shipped value is the time a Codespace normally needs to resume.
+  const startWaitMs = scaledInteger("WORKSPACE_START_WAIT_SECONDS", 180, 1000, 5, 900);
+  if (retainedOutputBytes < Math.max(maxOperationStdoutBytes, maxOperationStderrBytes)) {
+    throw new Error(
+      "WORKSPACE_MAX_RETAINED_OUTPUT_MB cannot be lower than a configured response payload bound",
+    );
+  }
   if (maxActiveGlobal < maxActivePerUser) {
     throw new Error(
       "WORKSPACE_MAX_ACTIVE_GLOBAL cannot be lower than WORKSPACE_MAX_ACTIVE_PER_USER",
@@ -114,18 +164,15 @@ export function evaluateWorkspaceResourcePolicy(
     cleanupDeadlineMs: scaledInteger("WORKSPACE_CLEANUP_DEADLINE_MINUTES", 15, 60_000),
     claimLeaseMs: scaledInteger("WORKSPACE_CLAIM_LEASE_SECONDS", 30, 1000),
     reconcileIntervalMs: scaledInteger("WORKSPACE_RECONCILE_INTERVAL_SECONDS", 30, 1000),
+    startWaitMs,
     maxConcurrentOperationsPerUser,
     maxConcurrentOperationsGlobal,
     maxOperationInputBytes: scaledInteger("WORKSPACE_MAX_OPERATION_INPUT_KB", 1024, 1024, 1, 4096),
-    maxOperationStdoutBytes: scaledInteger(
-      "WORKSPACE_MAX_OPERATION_STDOUT_KB",
-      1024,
-      1024,
-      1,
-      8192,
-    ),
-    maxOperationStderrBytes: scaledInteger("WORKSPACE_MAX_OPERATION_STDERR_KB", 256, 1024, 1, 8192),
+    maxOperationStdoutBytes,
+    maxOperationStderrBytes,
+    maxRetainedOutputBytes: retainedOutputBytes,
     maxOperationMs: scaledInteger("WORKSPACE_MAX_OPERATION_SECONDS", 900, 1000, 1, 900),
+    maxBackgroundOperationMs: backgroundOperationMs,
     maxTransferFileBytes,
     maxTransferBytesPerUser,
     maxTransferBytesGlobal,

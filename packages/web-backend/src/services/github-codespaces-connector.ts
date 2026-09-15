@@ -4,6 +4,8 @@ import type {
   WorkspaceFileRequest,
   WorkspaceFileResult,
   WorkspaceFileTransport,
+  WorkspaceOperationOutputRequest,
+  WorkspaceOperationOutputResult,
   WorkspaceOperationRecord,
   WorkspaceOperationResult,
   WorkspaceOperationTransport,
@@ -28,6 +30,7 @@ const FILE_RESULT_ACTIONS = new Set([
   "apply_patch",
   "download",
 ]);
+const MAX_JOB_WAIT_MS = 15 * 60_000;
 const MAX_FILE_BYTES = 4 * 1024 * 1024;
 const MAX_FILE_PATH_BYTES = 4096;
 const MAX_PATCH_SUMMARY_BYTES = 4 * 1024;
@@ -165,7 +168,12 @@ export class GitHubCodespacesConnector
     workspace: WorkspaceResourceRecord,
     operation: WorkspaceOperationRecord,
     request: WorkspaceExecRequest,
-  ): Promise<WorkspaceOperationResult | { state: "running" }> {
+  ): Promise<
+    | WorkspaceOperationResult
+    | { state: "running" }
+    | { state: "session_unavailable" }
+    | { state: "session_limit"; limit: "context" | "sessions" }
+  > {
     if (request.stdin.kind !== "inline") {
       throw new Error("Referenced operation input is not materialized by this transport version");
     }
@@ -174,39 +182,61 @@ export class GitHubCodespacesConnector
       version: 1,
       remoteMarker: operation.remoteMarker,
       repositoryFullName: workspace.repositoryFullName,
-      argv: request.argv,
-      cwd: request.cwd,
+      ...(request.argv !== undefined ? { argv: request.argv } : {}),
+      ...(request.cwd !== undefined ? { cwd: request.cwd } : {}),
+      ...(request.session !== undefined ? { session: request.session } : {}),
+      ...(request.sessionStart !== undefined ? { sessionStart: request.sessionStart } : {}),
+      ...(request.sessionEnd !== undefined ? { sessionEnd: request.sessionEnd } : {}),
+      ...(request.script !== undefined ? { script: request.script } : {}),
+      ...(request.env !== undefined ? { env: request.env } : {}),
       stdin: Buffer.from(request.stdin.bytes).toString("base64"),
       timeoutMs: request.timeoutMs,
       maxStdoutBytes: request.maxStdoutBytes,
       maxStderrBytes: request.maxStderrBytes,
+      maxRetainedBytes: request.maxRetainedBytes,
     });
-    if (result.state === "absent") throw new Error("Remote operation was not created");
+    if (result.state === "absent" || result.state === "interrupted") {
+      throw new Error("Remote operation was not created");
+    }
     return result;
   }
 
-  inspect(
+  async inspect(
     credential: string,
     workspace: WorkspaceResourceRecord,
     operation: WorkspaceOperationRecord,
-  ) {
-    return this.operationJob(credential, workspace, operation, {
+  ): Promise<
+    WorkspaceOperationResult | { state: "running" } | { state: "absent" } | { state: "interrupted" }
+  > {
+    // Only a dispatch can be refused for its session; an inspection of an existing operation
+    // cannot, so that answer is not part of this contract.
+    const result = await this.operationJob(credential, workspace, operation, {
       action: "inspect",
       version: 1,
       remoteMarker: operation.remoteMarker,
     });
+    if (result.state === "session_unavailable" || result.state === "session_limit") {
+      throw new Error("Codespace operation transport returned an invalid result");
+    }
+    return result;
   }
 
-  cancel(
+  async cancel(
     credential: string,
     workspace: WorkspaceResourceRecord,
     operation: WorkspaceOperationRecord,
-  ) {
-    return this.operationJob(credential, workspace, operation, {
+  ): Promise<
+    WorkspaceOperationResult | { state: "running" } | { state: "absent" } | { state: "interrupted" }
+  > {
+    const result = await this.operationJob(credential, workspace, operation, {
       action: "cancel",
       version: 1,
       remoteMarker: operation.remoteMarker,
     });
+    if (result.state === "session_unavailable" || result.state === "session_limit") {
+      throw new Error("Codespace operation transport returned an invalid result");
+    }
+    return result;
   }
 
   async finalize(
@@ -220,6 +250,43 @@ export class GitHubCodespacesConnector
       remoteMarker: operation.remoteMarker,
     });
     if (result.state !== "absent") throw new Error("Remote operation cleanup is incomplete");
+  }
+
+  async readOutput(
+    credential: string,
+    workspace: WorkspaceResourceRecord,
+    operation: WorkspaceOperationRecord,
+    request: WorkspaceOperationOutputRequest,
+  ): Promise<WorkspaceOperationOutputResult | { state: "absent" }> {
+    const value = await this.submitOperationJob(credential, workspace, operation, {
+      action: "output",
+      version: 1,
+      remoteMarker: operation.remoteMarker,
+      stream: request.stream,
+      offset: request.offset,
+      length: request.length,
+    });
+    if (value.state === "absent" && hasExactKeys(value, ["state"])) return { state: "absent" };
+    const bytes =
+      typeof value.bytesBase64 === "string" ? Buffer.from(value.bytesBase64, "base64") : null;
+    if (
+      !hasExactKeys(value, ["action", "stream", "offset", "totalBytes", "bytesBase64"]) ||
+      value.action !== "output" ||
+      value.stream !== request.stream ||
+      value.offset !== request.offset ||
+      !bytes ||
+      bytes.toString("base64") !== value.bytesBase64 ||
+      !nonnegativeInteger(value.totalBytes) ||
+      bytes.length > Math.min(request.length, Math.max(0, value.totalBytes - request.offset))
+    ) {
+      throw new Error("Codespace operation transport returned an invalid output range");
+    }
+    return {
+      stream: request.stream,
+      offset: request.offset,
+      totalBytes: value.totalBytes,
+      bytes,
+    };
   }
 
   async executeFile(
@@ -541,12 +608,17 @@ export class GitHubCodespacesConnector
           deleted === summary.deletedBytes;
   }
 
-  private async operationJob(
+  /**
+   * Submits one operation job and returns its decoded envelope. Every operation job is framed here,
+   * so the client budget always matches the sidecar's, which allows the job's own timeout plus the
+   * time it needs to open a session into the Codespace.
+   */
+  private async submitOperationJob(
     credential: string,
     workspace: WorkspaceResourceRecord,
     operation: WorkspaceOperationRecord,
     job: Record<string, unknown>,
-  ): Promise<WorkspaceOperationResult | { state: "running" } | { state: "absent" }> {
+  ): Promise<Record<string, unknown>> {
     if (!workspace.providerResourceName || workspace.id !== operation.resourceId) {
       throw new Error("Invalid workspace operation identity");
     }
@@ -559,19 +631,68 @@ export class GitHubCodespacesConnector
         resourceName: workspace.providerResourceName,
         job,
       },
-      Number(job.timeoutMs ?? this.requestTimeoutMs) + 120_000,
+      // A dispatch returns as soon as the remote runner is proven alive, so the budget covers the
+      // session and the handshake, never the command's own lifetime.
+      Math.min(Number(job.timeoutMs ?? this.requestTimeoutMs), MAX_JOB_WAIT_MS) + 120_000,
     )) as { value?: string };
     if (typeof result.value !== "string" || result.value.includes(credential)) {
       throw new Error("Codespace operation transport is unavailable");
     }
-    const value = JSON.parse(result.value) as Record<string, unknown>;
-    if (value.state === "running" || value.state === "absent") return { state: value.state };
+    return JSON.parse(result.value) as Record<string, unknown>;
+  }
+
+  private async operationJob(
+    credential: string,
+    workspace: WorkspaceResourceRecord,
+    operation: WorkspaceOperationRecord,
+    job: Record<string, unknown>,
+  ): Promise<
+    | WorkspaceOperationResult
+    | { state: "running" }
+    | { state: "absent" }
+    | { state: "interrupted" }
+    | { state: "session_unavailable" }
+    | { state: "session_limit"; limit: "context" | "sessions" }
+  > {
+    const value = await this.submitOperationJob(credential, workspace, operation, job);
+    if (
+      value.state === "running" ||
+      value.state === "absent" ||
+      value.state === "interrupted" ||
+      value.state === "session_unavailable"
+    ) {
+      return {
+        state: value.state as "running" | "absent" | "interrupted" | "session_unavailable",
+      };
+    }
+    if (value.state === "session_limit") {
+      const limit = value.limit === "sessions" ? "sessions" : "context";
+      return { state: "session_limit", limit };
+    }
+    if (value.state === "session_ended") {
+      // Ending a session runs no command, so it is reported as an operation that succeeded with
+      // nothing to show.
+      return {
+        state: "succeeded",
+        stdout: "",
+        stderr: "",
+        exitCode: 0,
+        stdoutTotalBytes: 0,
+        stderrTotalBytes: 0,
+        outputLimitExceeded: false,
+        sessionCaptureDropped: false,
+      };
+    }
     if (
       typeof value.state !== "string" ||
       !TERMINAL_OPERATION_STATES.has(value.state) ||
       typeof value.stdoutBase64 !== "string" ||
       typeof value.stderrBase64 !== "string" ||
-      !(value.exitCode === null || Number.isInteger(value.exitCode))
+      !(value.exitCode === null || Number.isInteger(value.exitCode)) ||
+      !nonnegativeInteger(value.stdoutBytes) ||
+      !nonnegativeInteger(value.stderrBytes) ||
+      typeof value.outputLimitExceeded !== "boolean" ||
+      typeof value.sessionCaptureDropped !== "boolean"
     ) {
       throw new Error("Codespace operation transport returned an invalid result");
     }
@@ -581,7 +702,9 @@ export class GitHubCodespacesConnector
       stdout.toString("base64") !== value.stdoutBase64 ||
       stderr.toString("base64") !== value.stderrBase64 ||
       stdout.length > operation.stdoutLimitBytes ||
-      stderr.length > operation.stderrLimitBytes
+      stderr.length > operation.stderrLimitBytes ||
+      stdout.length > (value.stdoutBytes as number) ||
+      stderr.length > (value.stderrBytes as number)
     ) {
       throw new Error("Codespace operation transport exceeded its result contract");
     }
@@ -590,6 +713,10 @@ export class GitHubCodespacesConnector
       stdout: stdout.toString("utf8"),
       stderr: stderr.toString("utf8"),
       exitCode: value.exitCode as number | null,
+      stdoutTotalBytes: value.stdoutBytes as number,
+      stderrTotalBytes: value.stderrBytes as number,
+      outputLimitExceeded: value.outputLimitExceeded as boolean,
+      sessionCaptureDropped: value.sessionCaptureDropped as boolean,
     };
   }
 

@@ -92,6 +92,8 @@ export interface WorkspaceResourcePolicy {
   maxActiveGlobal: number;
   createThrottleMs: number;
   remoteTtlMs: number;
+  /** How long an operation may wait for a stopped workspace it started to become usable. */
+  startWaitMs: number;
   persistentRetentionMs?: number;
   createDeadlineMs: number;
   cleanupDeadlineMs: number;
@@ -100,9 +102,14 @@ export interface WorkspaceResourcePolicy {
   maxConcurrentOperationsPerUser?: number;
   maxConcurrentOperationsGlobal?: number;
   maxOperationInputBytes?: number;
+  /** Response payload bounds. They bound what a call returns, never how long a command runs. */
   maxOperationStdoutBytes?: number;
   maxOperationStderrBytes?: number;
+  /** Disk a single command's retained output may occupy in the workspace before it is stopped. */
+  maxRetainedOutputBytes?: number;
   maxOperationMs?: number;
+  /** How long a command started in the background may run in the workspace. */
+  maxBackgroundOperationMs?: number;
   maxTransferFileBytes?: number;
   maxTransferBytesPerUser?: number;
   maxTransferBytesGlobal?: number;
@@ -147,12 +154,14 @@ export type WorkspaceResourceErrorCode =
   | "WORKSPACE_PROVIDER_DISABLED"
   | "WORKSPACE_PROVIDER_UNAVAILABLE"
   | "WORKSPACE_POLICY_LIMIT"
+  | "WORKSPACE_SESSION_UNAVAILABLE"
   | "WORKSPACE_OPERATION_BUSY"
   | "WORKSPACE_AUTHORIZATION_REQUIRED"
   | "WORKSPACE_RESULT_EXPIRED"
   | "WORKSPACE_CREATE_REJECTED"
   | "WORKSPACE_CREATE_PENDING"
   | "WORKSPACE_NOT_RUNNING"
+  | "WORKSPACE_START_TIMEOUT"
   | "WORKSPACE_GENERATION_CONFLICT"
   | "WORKSPACE_RESOURCE_INVALID"
   | "WORKSPACE_NOT_FOUND";
@@ -206,19 +215,61 @@ export type WorkspaceByteSource =
     };
 
 export interface WorkspaceExecRequest {
-  argv: readonly string[];
-  cwd: string;
+  /** Absent only for a script command or a call that just ends a session. */
+  argv?: readonly string[];
+  /** Text run by the workspace's own shell inside a session; its end state is captured. */
+  script?: string;
+  /** Ends the named session after this call, removing its stored context. */
+  sessionEnd?: boolean;
+  /** Absent means the session's working directory, or the repository root without a session. */
+  cwd?: string;
+  /** Names a session whose working directory and variables this command continues. */
+  session?: string;
+  /** Opens the named session instead of continuing it. */
+  sessionStart?: boolean;
+  /** Variables to apply to this command and, in a session, to the ones that follow it. */
+  env?: Readonly<Record<string, string>>;
   stdin: WorkspaceByteSource;
-  timeoutMs: number;
+  /** Absent means the mode's own default: an ordinary bounded duration, or the background ceiling. */
+  timeoutMs?: number;
+  /** Response payload bounds; the command is not stopped for reaching them. */
   maxStdoutBytes?: number;
   maxStderrBytes?: number;
+  /** Retained-output ceiling, resolved from policy before dispatch. */
+  maxRetainedBytes?: number;
+  /**
+   * Starts the command so that it keeps running past any single request. It is the same operation,
+   * collected later by its own identity; only its ceiling and its deadline differ.
+   */
+  background?: boolean;
 }
 
 export interface WorkspaceOperationResult {
   state: "succeeded" | "failed" | "cancelled" | "timed_out";
+  /** Response payload: the beginning of the stream, bounded by the operation's payload limit. */
   stdout: string;
   stderr: string;
   exitCode: number | null;
+  /** Complete size of each retained stream, whatever the payload above carries. */
+  stdoutTotalBytes: number;
+  stderrTotalBytes: number;
+  /** True when the workspace's retained-output ceiling stopped the command. */
+  outputLimitExceeded: boolean;
+  /** True when a script's end state would not fit the session's stored-context ceiling. */
+  sessionCaptureDropped: boolean;
+}
+
+export interface WorkspaceOperationOutputRequest {
+  stream: "stdout" | "stderr";
+  offset: number;
+  length: number;
+}
+
+export interface WorkspaceOperationOutputResult {
+  stream: "stdout" | "stderr";
+  offset: number;
+  totalBytes: number;
+  bytes: Buffer;
 }
 
 export interface WorkspaceOperationResponse {
@@ -236,22 +287,46 @@ export interface WorkspaceOperationTransport extends WorkspaceTransportAvailabil
     workspace: WorkspaceResourceRecord,
     operation: WorkspaceOperationRecord,
     request: WorkspaceExecRequest,
-  ): Promise<WorkspaceOperationResult | { state: "running" }>;
+  ): Promise<
+    | WorkspaceOperationResult
+    | { state: "running" }
+    | { state: "session_unavailable" }
+    | { state: "session_limit"; limit: "context" | "sessions" }
+  >;
   inspect(
     credential: string,
     workspace: WorkspaceResourceRecord,
     operation: WorkspaceOperationRecord,
-  ): Promise<WorkspaceOperationResult | { state: "running" } | { state: "absent" }>;
+  ): Promise<
+    | WorkspaceOperationResult
+    | { state: "running" }
+    | { state: "absent" }
+    /** The operation belongs to an earlier life of the workspace: it was lost to a restart. */
+    | { state: "interrupted" }
+  >;
   cancel(
     credential: string,
     workspace: WorkspaceResourceRecord,
     operation: WorkspaceOperationRecord,
-  ): Promise<WorkspaceOperationResult | { state: "running" } | { state: "absent" }>;
+  ): Promise<
+    WorkspaceOperationResult | { state: "running" } | { state: "absent" } | { state: "interrupted" }
+  >;
   finalize(
     credential: string,
     workspace: WorkspaceResourceRecord,
     operation: WorkspaceOperationRecord,
   ): Promise<void>;
+  /**
+   * Reads a range of a command's retained output. The retained streams live beside the operation's
+   * remote result and are removed by the same finalize, so a range is readable exactly as long as
+   * the result is.
+   */
+  readOutput(
+    credential: string,
+    workspace: WorkspaceResourceRecord,
+    operation: WorkspaceOperationRecord,
+    request: WorkspaceOperationOutputRequest,
+  ): Promise<WorkspaceOperationOutputResult | { state: "absent" }>;
 }
 
 export interface WorkspaceFileVersion {
@@ -399,9 +474,16 @@ export interface WorkspaceTransferRecord {
 }
 
 export class WorkspaceResourceError extends Error {
+  /**
+   * `message` stays the operator-facing sentence that reaches logs and audit. `detail` is the
+   * optional agent-safe addition: the refusing code decides what a caller may be told about its
+   * own refusal, so no transport has to classify an error it did not raise. A detail carries no
+   * workspace, user, repository or other caller identity.
+   */
   constructor(
     public readonly code: WorkspaceResourceErrorCode,
     message: string,
+    public readonly detail?: string,
   ) {
     super(message);
     this.name = "WorkspaceResourceError";

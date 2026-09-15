@@ -8,6 +8,7 @@ import {
   mkdirSync,
   readFileSync,
   readdirSync,
+  realpathSync,
   renameSync,
   rmSync,
   statSync,
@@ -66,6 +67,27 @@ function fixture() {
     stateRoot,
     repository,
   };
+}
+
+/**
+ * Make what is stored look as if an earlier life of the environment wrote it.
+ *
+ * The environment's identity comes from the running Linux kernel wherever those sources exist, so a
+ * test cannot move the environment to another life by setting a variable — on Linux the variable is
+ * deliberately powerless. What a test can do is state the other half of the comparison: that the
+ * stored file was written by a life that is not this one, which is exactly the situation the
+ * behaviour is about, and it reads the same on every platform.
+ */
+function storeForeignLife(path: string): void {
+  const foreign = "0".repeat(64);
+  const raw = readFileSync(path, "utf8");
+  if (!raw.trimStart().startsWith("{")) {
+    writeFileSync(path, foreign, { mode: 0o600 });
+    return;
+  }
+  const stored = JSON.parse(raw) as Record<string, unknown>;
+  stored.environment = foreign;
+  writeFileSync(path, `${JSON.stringify(stored)}\n`, { mode: 0o600 });
 }
 
 function request(
@@ -1056,6 +1078,7 @@ if (process.env.MOIRA_TEST_HOLD_FILE_RUNNER === "1") {
         timeoutMs: 5_000,
         maxStdoutBytes: 4096,
         maxStderrBytes: 4096,
+        maxRetainedBytes: 1024 * 1024,
       }),
     ).resolves.toEqual({ state: "running" });
     const terminal = {
@@ -1063,6 +1086,10 @@ if (process.env.MOIRA_TEST_HOLD_FILE_RUNNER === "1") {
       stdout: "argument with spaces;$(false)|native stdin",
       stderr: "err",
       exitCode,
+      stdoutBytes: "argument with spaces;$(false)|native stdin".length,
+      stderrBytes: 3,
+      outputLimitExceeded: false,
+      sessionCaptureDropped: false,
     };
     await expect(inspectUntilTerminal(value.environment, remoteMarker)).resolves.toEqual(terminal);
     await expect(
@@ -1093,6 +1120,7 @@ if (process.env.MOIRA_TEST_HOLD_FILE_RUNNER === "1") {
         timeoutMs: 5_000,
         maxStdoutBytes: 4096,
         maxStderrBytes: 4096,
+        maxRetainedBytes: 1024 * 1024,
       }),
     ).resolves.toEqual({ state: "running" });
     await expect(inspectUntilTerminal(value.environment, remoteMarker)).resolves.toEqual({
@@ -1100,7 +1128,459 @@ if (process.env.MOIRA_TEST_HOLD_FILE_RUNNER === "1") {
       stdout: "fast\n",
       stderr: "",
       exitCode: 0,
+      stdoutBytes: 5,
+      stderrBytes: 0,
+      outputLimitExceeded: false,
+      sessionCaptureDropped: false,
     });
+  });
+
+  test("keeps a noisy command's own outcome and every byte it printed", async () => {
+    const value = fixture();
+    const remoteMarker = `moira-op-${"7".repeat(32)}`;
+    // Far more than the response payload may carry, ending with a marker that only a reader of
+    // the last bytes can see, and then an exit code and standard error of the command's own.
+    const script =
+      "for(let i=0;i<200;i++)process.stdout.write('x'.repeat(1024));" +
+      "process.stdout.write('TAIL');process.stderr.write('real failure');process.exitCode=7";
+    await request(value.environment, {
+      action: "execute",
+      version: 1,
+      remoteMarker,
+      repositoryFullName: "owner/repository",
+      argv: [process.execPath, "-e", script],
+      cwd: ".",
+      stdin: "",
+      timeoutMs: 10_000,
+      maxStdoutBytes: 4096,
+      maxStderrBytes: 4096,
+      maxRetainedBytes: 1024 * 1024,
+    });
+    const terminal = (await inspectUntilTerminal(value.environment, remoteMarker)) as Record<
+      string,
+      unknown
+    >;
+    const totalStdout = 200 * 1024 + 4;
+    expect(terminal).toMatchObject({
+      state: "failed",
+      exitCode: 7,
+      stderr: "real failure",
+      stdoutBytes: totalStdout,
+      outputLimitExceeded: false,
+    });
+    // The payload is a bounded prefix of the real stream, not a replacement for it.
+    expect(Buffer.byteLength(terminal.stdout as string)).toBe(4096);
+
+    const tail = (await request(value.environment, {
+      action: "output",
+      version: 1,
+      remoteMarker,
+      stream: "stdout",
+      offset: totalStdout - 4,
+      length: 64,
+    })) as { totalBytes: number; bytesBase64: string; offset: number; stream: string };
+    expect(tail).toMatchObject({
+      stream: "stdout",
+      offset: totalStdout - 4,
+      totalBytes: totalStdout,
+    });
+    expect(Buffer.from(tail.bytesBase64, "base64").toString("utf8")).toBe("TAIL");
+
+    const middle = (await request(value.environment, {
+      action: "output",
+      version: 1,
+      remoteMarker,
+      stream: "stdout",
+      offset: 4096,
+      length: 8,
+    })) as { bytesBase64: string };
+    expect(Buffer.from(middle.bytesBase64, "base64").toString("utf8")).toBe("x".repeat(8));
+
+    // A read that starts at the end answers with no bytes and the current size, so a caller can
+    // find the end of a stream without provoking an error.
+    for (const offset of [12, 4096]) {
+      const past = (await request(value.environment, {
+        action: "output",
+        version: 1,
+        remoteMarker,
+        stream: "stderr",
+        offset,
+        length: 64,
+      })) as { totalBytes: number; bytesBase64: string };
+      expect(past).toMatchObject({ totalBytes: 12, bytesBase64: "" });
+    }
+
+    await expect(
+      request(value.environment, { action: "finalize", version: 1, remoteMarker }),
+    ).resolves.toEqual({ state: "absent" });
+    // Cleanup removes the retained streams with the result they belong to.
+    await expect(
+      request(value.environment, {
+        action: "output",
+        version: 1,
+        remoteMarker,
+        stream: "stdout",
+        offset: 0,
+        length: 8,
+      }),
+    ).resolves.toEqual({ state: "absent" });
+  });
+
+  test("accepts a command whose own timer outlives any request", async () => {
+    const value = fixture();
+    const remoteMarker = `moira-op-${"8".repeat(32)}`;
+    // Three hours is far past the bound a single request could wait for; the command itself is
+    // short, so the test observes admission and collection rather than elapsed time.
+    await expect(
+      request(value.environment, {
+        action: "execute",
+        version: 1,
+        remoteMarker,
+        repositoryFullName: "owner/repository",
+        argv: ["/bin/echo", "long"],
+        cwd: ".",
+        stdin: "",
+        timeoutMs: 3 * 60 * 60_000,
+        maxStdoutBytes: 4096,
+        maxStderrBytes: 4096,
+        maxRetainedBytes: 1024 * 1024,
+      }),
+    ).resolves.toEqual({ state: "running" });
+    await expect(inspectUntilTerminal(value.environment, remoteMarker)).resolves.toMatchObject({
+      state: "succeeded",
+      stdout: "long\n",
+      exitCode: 0,
+    });
+  });
+
+  test("carries a session's directory and variables and refuses one from an earlier life", async () => {
+    const value = fixture();
+    mkdirSync(join(value.repository, "packages"), { recursive: true });
+    const environment = { ...value.environment, MOIRA_ENVIRONMENT_ID: "life-one" };
+    const observe = [
+      process.execPath,
+      "-e",
+      "process.stdout.write(process.cwd()+'|'+(process.env.SESSION_VARIABLE??'none'))",
+    ];
+    const run = async (remoteMarker: string, extra: Record<string, unknown>) => {
+      await request(environment, {
+        action: "execute",
+        version: 1,
+        remoteMarker,
+        repositoryFullName: "owner/repository",
+        argv: observe,
+        stdin: "",
+        timeoutMs: 10_000,
+        maxStdoutBytes: 4096,
+        maxStderrBytes: 4096,
+        maxRetainedBytes: 1024 * 1024,
+        ...extra,
+      });
+      return inspectUntilTerminal(environment, remoteMarker);
+    };
+    const marker = (character: string) => `moira-op-${character.repeat(32)}`;
+
+    // The opening call establishes the context its command runs in.
+    const opened = (await run(marker("a"), {
+      session: "build",
+      sessionStart: true,
+      cwd: "packages",
+      env: { SESSION_VARIABLE: "carried" },
+    })) as Record<string, string>;
+    expect(opened.stdout).toBe(`${realpathSync(join(value.repository, "packages"))}|carried`);
+
+    // A later command in the same session names neither and observes both.
+    const continued = (await run(marker("b"), { session: "build" })) as Record<string, string>;
+    expect(continued.stdout).toBe(`${realpathSync(join(value.repository, "packages"))}|carried`);
+
+    // A command outside the session observes neither, and a second session is independent.
+    const outside = (await run(marker("c"), {})) as Record<string, string>;
+    expect(outside.stdout).toBe(`${realpathSync(value.repository)}|none`);
+    const other = (await run(marker("d"), { session: "other", sessionStart: true })) as Record<
+      string,
+      string
+    >;
+    expect(other.stdout).toBe(`${realpathSync(value.repository)}|none`);
+
+    // The stored context belongs to the life of the environment that opened it: one written by an
+    // earlier life is refused, and a session that was never opened is refused too.
+    storeForeignLife(join(value.stateRoot, "sessions", "build.json"));
+    await expect(
+      request(environment, {
+        action: "execute",
+        version: 1,
+        remoteMarker: marker("e"),
+        repositoryFullName: "owner/repository",
+        argv: observe,
+        stdin: "",
+        timeoutMs: 10_000,
+        maxStdoutBytes: 4096,
+        maxStderrBytes: 4096,
+        maxRetainedBytes: 1024 * 1024,
+        session: "build",
+      }),
+    ).resolves.toEqual({ state: "session_unavailable" });
+    await expect(
+      request(environment, {
+        action: "execute",
+        version: 1,
+        remoteMarker: marker("f"),
+        repositoryFullName: "owner/repository",
+        argv: observe,
+        stdin: "",
+        timeoutMs: 10_000,
+        maxStdoutBytes: 4096,
+        maxStderrBytes: 4096,
+        maxRetainedBytes: 1024 * 1024,
+        session: "never-opened",
+      }),
+    ).resolves.toEqual({ state: "session_unavailable" });
+  });
+
+  test("carries what a script leaves behind and refuses a context that would not fit", async () => {
+    const value = fixture();
+    mkdirSync(join(value.repository, "service"), { recursive: true });
+    const environment = {
+      ...value.environment,
+      MOIRA_ENVIRONMENT_ID: "life-one",
+      INHERITED_TOOL: "old",
+      REMOVE_ME: "present",
+    };
+    const marker = (character: string) => `moira-op-${character.repeat(32)}`;
+    const send = (remoteMarker: string, extra: Record<string, unknown>) =>
+      request(environment, {
+        action: "execute",
+        version: 1,
+        remoteMarker,
+        repositoryFullName: "owner/repository",
+        stdin: "",
+        timeoutMs: 20_000,
+        maxStdoutBytes: 4096,
+        maxStderrBytes: 4096,
+        maxRetainedBytes: 1024 * 1024,
+        ...extra,
+      });
+    const observe = [
+      process.execPath,
+      "-e",
+      "process.stdout.write([require('node:path').basename(process.cwd()),process.env.TOOL_HOME??'none',process.env.INHERITED_TOOL??'gone',process.env.REMOVE_ME??'gone',process.env.PATH.split(':')[0]].join('|'))",
+    ];
+
+    // A script activates something: it changes directory, adds a variable, changes an inherited one
+    // and removes another.
+    await send(marker("1"), {
+      session: "build",
+      sessionStart: true,
+      script:
+        "cd service\nexport TOOL_HOME=/opt/tool\nexport INHERITED_TOOL=new\nexport PATH=/opt/tool/bin:$PATH\nunset REMOVE_ME\n",
+    });
+    expect(await inspectUntilTerminal(environment, marker("1"))).toMatchObject({
+      state: "succeeded",
+      sessionCaptureDropped: false,
+    });
+
+    // An ordinary argv command in that session sees every one of those changes and nothing else.
+    await send(marker("2"), { session: "build", argv: observe });
+    const continued = (await inspectUntilTerminal(environment, marker("2"))) as Record<
+      string,
+      string
+    >;
+    expect(continued.stdout).toBe("service|/opt/tool|new|gone|/opt/tool/bin");
+
+    // A command outside the session is untouched by all of it.
+    await send(marker("3"), { argv: observe });
+    const outside = (await inspectUntilTerminal(environment, marker("3"))) as Record<
+      string,
+      string
+    >;
+    expect(outside.stdout).toBe(
+      "repository|none|old|present|/opt/tool/bin".replace(
+        "/opt/tool/bin",
+        environment.PATH!.split(":")[0],
+      ),
+    );
+
+    // A call whose declared context would not fit the stored-context ceiling is refused, and the
+    // session it names still works afterwards.
+    const oversized = Object.fromEntries(
+      Array.from({ length: 40 }, (_, index) => [`BIG_${index}`, "x".repeat(4000)]),
+    );
+    await expect(
+      send(marker("4"), { session: "build", argv: observe, env: oversized }),
+    ).resolves.toEqual({ state: "session_limit", limit: "context" });
+    await send(marker("5"), { session: "build", argv: observe });
+    expect(
+      ((await inspectUntilTerminal(environment, marker("5"))) as Record<string, string>).stdout,
+    ).toBe("service|/opt/tool|new|gone|/opt/tool/bin");
+
+    // The stored context holds only what the script touched: an inherited variable it never named
+    // is absent from the file, which is what keeps the workspace's own environment out of it.
+    const storedSession = JSON.parse(
+      readFileSync(join(value.stateRoot, "sessions", "build.json"), "utf8"),
+    ) as { env: Record<string, string | null> };
+    expect(Object.keys(storedSession.env).sort()).toEqual([
+      "INHERITED_TOOL",
+      "PATH",
+      "REMOVE_ME",
+      "TOOL_HOME",
+    ]);
+    expect(JSON.stringify(storedSession)).not.toContain("MOIRA_ENVIRONMENT_ID");
+
+    // A script that fails still leaves its end state behind, while one that ends the shell itself
+    // cannot report an end state at all and the answer says its capture was dropped.
+    await send(marker("8"), {
+      session: "build",
+      script: "export AFTER_FAILURE=kept\nfalse\n",
+    });
+    expect(await inspectUntilTerminal(environment, marker("8"))).toMatchObject({
+      state: "failed",
+      exitCode: 1,
+      sessionCaptureDropped: false,
+    });
+    await send(marker("c"), { session: "build", script: "export NEVER_SEEN=x\nexit 3\n" });
+    expect(await inspectUntilTerminal(environment, marker("c"))).toMatchObject({
+      state: "failed",
+      exitCode: 3,
+      sessionCaptureDropped: true,
+    });
+    await send(marker("9"), {
+      session: "build",
+      argv: [process.execPath, "-e", "process.stdout.write(process.env.AFTER_FAILURE??'lost')"],
+    });
+    expect(
+      ((await inspectUntilTerminal(environment, marker("9"))) as Record<string, string>).stdout,
+    ).toBe("kept");
+
+    await send(marker("a"), {
+      session: "build",
+      script: `export TOO_LONG=${"x".repeat(5000)}\n`,
+    });
+    expect(await inspectUntilTerminal(environment, marker("a"))).toMatchObject({
+      state: "succeeded",
+      sessionCaptureDropped: true,
+    });
+    // The session still works, with the context it had before that script.
+    await send(marker("b"), {
+      session: "build",
+      argv: [process.execPath, "-e", "process.stdout.write(process.env.TOOL_HOME??'none')"],
+    });
+    expect(
+      ((await inspectUntilTerminal(environment, marker("b"))) as Record<string, string>).stdout,
+    ).toBe("/opt/tool");
+
+    // Ending the session frees its slot and removes the stored context, so naming it is refused.
+    await expect(send(marker("6"), { session: "build", sessionEnd: true })).resolves.toEqual({
+      state: "session_ended",
+    });
+    await expect(send(marker("7"), { session: "build", argv: observe })).resolves.toEqual({
+      state: "session_unavailable",
+    });
+  });
+
+  test("names a command whose workspace restarted under it, and not one that failed inside this life", async () => {
+    const value = fixture();
+    const marker = (character: string) => `moira-op-${character.repeat(32)}`;
+    const environment = { ...value.environment, MOIRA_ENVIRONMENT_ID: "life-one" };
+    const start = (remoteMarker: string) =>
+      request(environment, {
+        action: "execute",
+        version: 1,
+        remoteMarker,
+        repositoryFullName: "owner/repository",
+        argv: [process.execPath, "-e", "setTimeout(() => {}, 300000)"],
+        stdin: "",
+        timeoutMs: 300_000,
+        maxStdoutBytes: 1024,
+        maxStderrBytes: 1024,
+        maxRetainedBytes: 1024 * 1024,
+      });
+
+    await expect(start(marker("d"))).resolves.toEqual({ state: "running" });
+    // A restart leaves the operation's files and identity behind and takes every process with it.
+    const directory = join(value.stateRoot, marker("d"));
+    const identity = JSON.parse(readFileSync(join(directory, "pid"), "utf8")) as { pid: number };
+    const runner = JSON.parse(readFileSync(join(directory, "runner-pid"), "utf8")) as {
+      pid: number;
+    };
+    for (const pid of [identity.pid, runner.pid]) {
+      try {
+        process.kill(-pid, "SIGKILL");
+      } catch {
+        process.kill(pid, "SIGKILL");
+      }
+    }
+    await new Promise((resolveWait) => setTimeout(resolveWait, 200));
+
+    // The required state: the same absence of a result means one thing when the operation belongs to
+    // this life and another when it belongs to an earlier one. The recorded life is what separates
+    // them, so it is asked about first as it stands and then as a restart would have left it.
+    await expect(
+      request(environment, { action: "inspect", version: 1, remoteMarker: marker("d") }),
+    ).resolves.toMatchObject({
+      state: "failed",
+      stderr: "operation supervisor exited without a result",
+    });
+    storeForeignLife(join(directory, "environment"));
+    await expect(
+      request(environment, { action: "inspect", version: 1, remoteMarker: marker("d") }),
+    ).resolves.toEqual({ state: "interrupted" });
+  });
+
+  test("counts only the sessions this life can use and lets a dead one free its slot", async () => {
+    const value = fixture();
+    const environment = { ...value.environment, MOIRA_ENVIRONMENT_ID: "life-one" };
+    const marker = (index: number) => `moira-op-${index.toString(16).padStart(32, "0")}`;
+    const open = (environment: NodeJS.ProcessEnv, session: string, remoteMarker: string) =>
+      request(environment, {
+        action: "execute",
+        version: 1,
+        remoteMarker,
+        repositoryFullName: "owner/repository",
+        argv: ["/bin/echo", "open"],
+        stdin: "",
+        timeoutMs: 10_000,
+        maxStdoutBytes: 4096,
+        maxStderrBytes: 4096,
+        maxRetainedBytes: 1024 * 1024,
+        session,
+        sessionStart: true,
+      });
+
+    // Fill the workspace's sessions in one life of the environment.
+    for (let index = 0; index < 16; index++) {
+      await expect(open(environment, `session-${index}`, marker(index))).resolves.toEqual({
+        state: "running",
+      });
+    }
+    await expect(open(environment, "one-too-many", marker(100))).resolves.toEqual({
+      state: "session_limit",
+      limit: "sessions",
+    });
+
+    // A restart leaves every one of those files behind, written by a life that has ended. None of
+    // them can be used any more, so none of them holds a slot either.
+    for (let index = 0; index < 16; index++) {
+      storeForeignLife(join(value.stateRoot, "sessions", `session-${index}.json`));
+    }
+    await expect(open(environment, "fresh", marker(101))).resolves.toEqual({ state: "running" });
+
+    // A session left by an earlier life is removed by the call that ends it, rather than lingering.
+    await expect(
+      request(environment, {
+        action: "execute",
+        version: 1,
+        remoteMarker: marker(102),
+        repositoryFullName: "owner/repository",
+        stdin: "",
+        timeoutMs: 10_000,
+        maxStdoutBytes: 4096,
+        maxStderrBytes: 4096,
+        maxRetainedBytes: 1024 * 1024,
+        session: "session-0",
+        sessionEnd: true,
+      }),
+    ).resolves.toEqual({ state: "session_ended" });
+    expect(existsSync(join(value.stateRoot, "sessions", "session-0.json"))).toBe(false);
   });
 
   test("reports cancellation only after the foreground process group is absent", async () => {
@@ -1123,6 +1603,7 @@ if (process.env.MOIRA_TEST_HOLD_FILE_RUNNER === "1") {
       timeoutMs: 30_000,
       maxStdoutBytes: 4096,
       maxStderrBytes: 4096,
+      maxRetainedBytes: 1024 * 1024,
     });
     for (let attempt = 0; attempt < 40 && !existsSync(effectPath); attempt++) {
       await new Promise((resolveWait) => setTimeout(resolveWait, 10));
@@ -1176,15 +1657,25 @@ if (process.env.MOIRA_TEST_HOLD_FILE_RUNNER === "1") {
       stdout: "",
       stderr: "operation supervisor exited without a result",
       exitCode: null,
+      stdoutBytes: 0,
+      stderrBytes: 0,
+      outputLimitExceeded: false,
+      sessionCaptureDropped: false,
     });
   });
 
   test.each([
-    ["output", "setInterval(()=>process.stdout.write('x'.repeat(1024)),0)", 5_000, 64, "failed"],
-    ["timeout", "setInterval(()=>{},1000)", 50, 4096, "timed_out"],
+    [
+      "retained output",
+      "setInterval(()=>process.stdout.write('x'.repeat(1024)),0)",
+      5_000,
+      16 * 1024,
+      "failed",
+    ],
+    ["timeout", "setInterval(()=>{},1000)", 50, 1024 * 1024, "timed_out"],
   ] as const)(
     "enforces the %s bound on the remote foreground group",
-    async (_name, script, timeoutMs, outputLimitBytes, expectedState) => {
+    async (_name, script, timeoutMs, retainedLimitBytes, expectedState) => {
       const value = fixture();
       const remoteMarker = `moira-op-${expectedState === "failed" ? "3" : "4".repeat(32)}`.padEnd(
         "moira-op-".length + 32,
@@ -1199,11 +1690,18 @@ if (process.env.MOIRA_TEST_HOLD_FILE_RUNNER === "1") {
         cwd: ".",
         stdin: "",
         timeoutMs,
-        maxStdoutBytes: outputLimitBytes,
-        maxStderrBytes: 4096,
+        maxStdoutBytes: 64,
+        maxStderrBytes: 64,
+        maxRetainedBytes: retainedLimitBytes,
       });
       const result = await inspectUntilTerminal(value.environment, remoteMarker);
       expect(result.state).toBe(expectedState);
+      // Only the retained ceiling stops a command for its volume, and it says so instead of
+      // presenting itself as the command's own failure.
+      expect(result.outputLimitExceeded).toBe(expectedState === "failed");
+      if (expectedState === "failed") {
+        expect(result.stdoutBytes).toBe(retainedLimitBytes);
+      }
     },
   );
 });

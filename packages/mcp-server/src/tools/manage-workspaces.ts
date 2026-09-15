@@ -176,7 +176,7 @@ export interface WorkspaceToolServices {
   > | null;
   operation: Pick<
     WorkspaceOperationService,
-    "execute" | "executeNativeReference" | "get" | "reconcile"
+    "execute" | "executeNativeReference" | "get" | "reconcile" | "readOutput" | "cancel"
   > | null;
   file: Pick<
     WorkspaceFileService,
@@ -202,6 +202,8 @@ const SAFE_ERROR_MESSAGES: Record<string, string> = {
   WORKSPACE_PROVIDER_DISABLED: "Cloud workspace operations are disabled.",
   WORKSPACE_PROVIDER_UNAVAILABLE: "The cloud workspace provider is unavailable.",
   WORKSPACE_POLICY_LIMIT: "A workspace quota, concurrency, size or time limit was reached.",
+  WORKSPACE_SESSION_UNAVAILABLE:
+    "The named command session is not available in this workspace's current life.",
   WORKSPACE_OPERATION_BUSY:
     "Workspace operation capacity is busy; wait for pending operations before retrying.",
   WORKSPACE_RESULT_EXPIRED:
@@ -210,6 +212,8 @@ const SAFE_ERROR_MESSAGES: Record<string, string> = {
   WORKSPACE_CREATE_REJECTED: "Workspace creation was rejected.",
   WORKSPACE_CREATE_PENDING: "Workspace creation or cleanup is still pending.",
   WORKSPACE_NOT_RUNNING: "The workspace is not ready and running.",
+  WORKSPACE_START_TIMEOUT:
+    "The workspace was started for this call but is still starting; retry the same call shortly.",
   WORKSPACE_GENERATION_CONFLICT:
     "The workspace or its authorization changed; refresh workspace state before continuing.",
   WORKSPACE_RESOURCE_INVALID: "The workspace input or current authorization is invalid.",
@@ -219,6 +223,10 @@ const SAFE_ERROR_MESSAGES: Record<string, string> = {
     "The requested range is not UTF-8 text; use workspace_download for binary bytes.",
   WORKSPACE_OPERATION_PENDING: "The workspace operation has not reached a terminal result.",
   WORKSPACE_OPERATION_FAILED: "The workspace command failed; inspect its output and exit code.",
+  WORKSPACE_OPERATION_INTERRUPTED:
+    "The workspace restarted while this command was running, so its process did not survive and it produced no result. The files it had already written are still there; run the command again.",
+  WORKSPACE_OPERATION_OUTPUT_LIMIT:
+    "The command was stopped because its retained output reached the workspace ceiling; its output up to that point remains readable.",
   WORKSPACE_OPERATION_CANCELLED: "The workspace operation was cancelled.",
   WORKSPACE_OPERATION_TIMED_OUT: "The workspace operation reached its execution deadline.",
   WORKSPACE_FILE_REJECTED:
@@ -271,9 +279,17 @@ function projectWorkspace(workspace: WorkspaceResourceRecord): Record<string, un
   return { ...projectWorkspaceSummary(workspace) };
 }
 
+/** An operation whose life ended with the workspace it ran in, rather than with its own command. */
+function interruptedByRestart(operation: WorkspaceOperationRecord): boolean {
+  return operation.state === "failed" && operation.lastOutcome === "workspace_restarted";
+}
+
 function projectOperation(response: WorkspaceOperationResponse | WorkspaceFileOperationResponse) {
   const { operation } = response;
   return {
+    // A command that ended because its workspace restarted is not a command that failed; the caller
+    // has to be able to tell them apart to decide whether running it again is safe.
+    ...(interruptedByRestart(operation) ? { interrupted_by_restart: true } : {}),
     operation_id: operation.id,
     workspace_id: operation.resourceId,
     kind: operation.kind,
@@ -292,6 +308,16 @@ function projectExecResult(result: NonNullable<WorkspaceOperationResponse["resul
     stdout: result.stdout,
     stderr: result.stderr,
     exit_code: result.exitCode,
+    // A script's end state is carried into its session unless it would not fit the ceiling, which
+    // the caller is told rather than left to discover.
+    session_capture_dropped: result.sessionCaptureDropped,
+    // The payload above is the beginning of each stream; the complete streams stay in the
+    // workspace and are read by range with workspace_read and this operation's identifier.
+    stdout_total_bytes: result.stdoutTotalBytes,
+    stderr_total_bytes: result.stderrTotalBytes,
+    stdout_truncated: Buffer.byteLength(result.stdout) < result.stdoutTotalBytes,
+    stderr_truncated: Buffer.byteLength(result.stderr) < result.stderrTotalBytes,
+    output_limit_exceeded: result.outputLimitExceeded,
   };
 }
 
@@ -303,9 +329,11 @@ function operationResult(
   const code =
     projectionError ??
     (operation.state === "failed"
-      ? operation.kind === "exec"
-        ? "WORKSPACE_OPERATION_FAILED"
-        : "WORKSPACE_FILE_REJECTED"
+      ? operation.interrupted_by_restart
+        ? "WORKSPACE_OPERATION_INTERRUPTED"
+        : operation.kind === "exec"
+          ? "WORKSPACE_OPERATION_FAILED"
+          : "WORKSPACE_FILE_REJECTED"
       : operation.state === "cancelled"
         ? "WORKSPACE_OPERATION_CANCELLED"
         : operation.state === "timed_out"
@@ -589,6 +617,34 @@ export async function executeWorkspaceTool<Name extends WorkspaceToolName>(
       return errorResult("WORKSPACE_NOT_CONFIGURED", ready.settingsUrl);
     }
 
+    if (name === "workspace_read" && "stream" in params) {
+      const input = params as Extract<
+        WorkspaceToolParams["workspace_read"],
+        { stream: "stdout" | "stderr" }
+      >;
+      // The workspace is named in the request, so a mismatch is refused here exactly as the resume
+      // path refuses one, rather than silently answering about another workspace's command.
+      const owning = services.operation.get(userId, input.operation_id);
+      if (!owning || owning.resourceId !== input.workspace_id || owning.kind !== "exec") {
+        return errorResult("WORKSPACE_NOT_FOUND");
+      }
+      const output = await services.operation.readOutput(userId, input.operation_id, {
+        stream: input.stream,
+        offset: input.offset,
+        length: input.length,
+      });
+      return jsonResult({
+        output: {
+          operation_id: input.operation_id,
+          stream: output.stream,
+          offset: output.offset,
+          total_bytes: output.totalBytes,
+          text: output.bytes.toString("utf8"),
+          truncated: output.offset + output.bytes.length < output.totalBytes,
+        },
+      });
+    }
+
     if ("operation_id" in params) {
       const resumableKind: Partial<Record<WorkspaceToolName, WorkspaceOperationRecord["kind"]>> = {
         workspace_exec: "exec",
@@ -629,12 +685,24 @@ export async function executeWorkspaceTool<Name extends WorkspaceToolName>(
           : operationResult(operation, null);
       }
       if (name === "workspace_exec") {
+        const input = params as Extract<
+          WorkspaceToolParams["workspace_exec"],
+          { operation_id: string }
+        >;
+        if (input.cancel) {
+          const cancelled = await services.operation.cancel(userId, input.operation_id);
+          return operationResult(
+            projectOperation(cancelled),
+            cancelled.result ? projectExecResult(cancelled.result) : null,
+          );
+        }
         const result = await services.operation.reconcile(userId, params.operation_id);
         const operation = services.operation.get(userId, params.operation_id);
         if (!operation) return errorResult("WORKSPACE_NOT_FOUND");
         return operationResult(
           projectOperation({ operation, result }),
           result ? projectExecResult(result) : null,
+          result?.outputLimitExceeded ? "WORKSPACE_OPERATION_OUTPUT_LIMIT" : undefined,
         );
       }
       const response = await services.file.reconcile(userId, params.operation_id);
@@ -680,15 +748,28 @@ export async function executeWorkspaceTool<Name extends WorkspaceToolName>(
       case "workspace_exec": {
         const input = params as WorkspaceNewToolParams<"workspace_exec">;
         const request = {
-          argv: input.argv,
-          cwd: input.cwd,
-          timeoutMs: input.timeout_seconds * 1000,
+          ...(input.argv !== undefined ? { argv: input.argv } : {}),
+          ...(input.script !== undefined ? { script: input.script } : {}),
+          ...(input.cwd !== undefined ? { cwd: input.cwd } : {}),
+          ...(input.session !== undefined
+            ? {
+                session: input.session,
+                sessionStart: input.session_start,
+                sessionEnd: input.session_end,
+              }
+            : {}),
+          ...(input.env !== undefined ? { env: input.env } : {}),
+          // Absent stays absent: the service applies the default the requested mode implies.
+          ...(input.timeout_seconds !== undefined
+            ? { timeoutMs: input.timeout_seconds * 1000 }
+            : {}),
           ...(input.max_stdout_bytes !== undefined
             ? { maxStdoutBytes: input.max_stdout_bytes }
             : {}),
           ...(input.max_stderr_bytes !== undefined
             ? { maxStderrBytes: input.max_stderr_bytes }
             : {}),
+          background: input.background,
         };
         const response =
           "stdin_file" in input
@@ -708,6 +789,7 @@ export async function executeWorkspaceTool<Name extends WorkspaceToolName>(
         return operationResult(
           projectOperation(response),
           response.result ? projectExecResult(response.result) : null,
+          response.result?.outputLimitExceeded ? "WORKSPACE_OPERATION_OUTPUT_LIMIT" : undefined,
         );
       }
       case "workspace_stat":
@@ -815,6 +897,9 @@ export async function executeWorkspaceTool<Name extends WorkspaceToolName>(
           "WORKSPACE_CREATE_PENDING",
           "WORKSPACE_NOT_RUNNING",
         ].includes(error.code),
+        // Only the refusing code decides what the caller may be told; the boundary forwards the
+        // bounded detail it already declared safe and never derives one from the error code.
+        error instanceof WorkspaceResourceError ? error.detail : undefined,
       );
     }
     reportUnexpectedFailure(name, error);

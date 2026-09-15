@@ -12,7 +12,10 @@ import {
   WorkspaceResourceRepository,
   WorkspaceTransferRepository,
   WorkspaceTransferService,
+  WorkspaceResourceError,
   type WorkspaceOperationAuditEvent,
+  type WorkspaceOperationOutputRequest,
+  type WorkspaceOperationOutputResult,
   type WorkspaceOperationResult,
   type WorkspaceOperationTransport,
   type WorkspaceResourcePolicy,
@@ -33,25 +36,52 @@ const policy: WorkspaceResourcePolicy = {
   cleanupDeadlineMs: 30_000,
   claimLeaseMs: 5_000,
   reconcileIntervalMs: 60_000,
+  startWaitMs: 60_000,
   maxConcurrentOperationsPerUser: 1,
   maxConcurrentOperationsGlobal: 2,
   maxOperationInputBytes: 1024,
   maxOperationStdoutBytes: 1024,
   maxOperationStderrBytes: 512,
+  maxRetainedOutputBytes: 32 * 1024 * 1024,
   maxOperationMs: 60_000,
+  maxBackgroundOperationMs: 4 * 60 * 60_000,
 };
+
+/**
+ * A terminal exec result as the transport reports it: the payload, plus the complete size of each
+ * retained stream. Tests that do not exercise truncation let the payload be the whole stream.
+ */
+function execResult(value: {
+  state: WorkspaceOperationResult["state"];
+  stdout: string;
+  stderr: string;
+  exitCode: number | null;
+  stdoutTotalBytes?: number;
+  stderrTotalBytes?: number;
+  outputLimitExceeded?: boolean;
+}): WorkspaceOperationResult {
+  return {
+    state: value.state,
+    stdout: value.stdout,
+    stderr: value.stderr,
+    exitCode: value.exitCode,
+    stdoutTotalBytes: value.stdoutTotalBytes ?? Buffer.byteLength(value.stdout),
+    stderrTotalBytes: value.stderrTotalBytes ?? Buffer.byteLength(value.stderr),
+    outputLimitExceeded: value.outputLimitExceeded ?? false,
+  };
+}
 
 class FakeTransport implements WorkspaceOperationTransport {
   available = true;
   async health() {
     return { ok: this.available, reason: null };
   }
-  executeResult: WorkspaceOperationResult | { state: "running" } = {
+  executeResult: WorkspaceOperationResult | { state: "running" } = execResult({
     state: "succeeded",
     stdout: "ok",
     stderr: "",
     exitCode: 0,
-  };
+  });
   cancelResult: WorkspaceOperationResult | { state: "running" } | { state: "absent" } = {
     state: "running",
   };
@@ -59,7 +89,8 @@ class FakeTransport implements WorkspaceOperationTransport {
   throwInspect = false;
   throwFinalize = false;
   /** Defaults to the execute outcome; set when a test needs inspect to differ from dispatch. */
-  inspectResult: WorkspaceOperationResult | { state: "running" } | null = null;
+  inspectResult: WorkspaceOperationResult | { state: "running" } | { state: "interrupted" } | null =
+    null;
   lastWorkspace: Parameters<WorkspaceOperationTransport["execute"]>[1] | null = null;
   lastRequest: Parameters<WorkspaceOperationTransport["execute"]>[3] | null = null;
   executeGate: Promise<void> | null = null;
@@ -104,6 +135,28 @@ class FakeTransport implements WorkspaceOperationTransport {
     return this.cancelResult;
   }
 
+  outputResult: WorkspaceOperationOutputResult | { state: "absent" } = {
+    stream: "stdout",
+    offset: 0,
+    totalBytes: 0,
+    bytes: Buffer.alloc(0),
+  };
+  lastOutputOperation: string | null = null;
+  lastOutputRequest: WorkspaceOperationOutputRequest | null = null;
+  readonly readOutputCalls = jest.fn();
+
+  async readOutput(
+    _credential: string,
+    _workspace: Parameters<WorkspaceOperationTransport["readOutput"]>[1],
+    operation: Parameters<WorkspaceOperationTransport["readOutput"]>[2],
+    request: WorkspaceOperationOutputRequest,
+  ) {
+    this.readOutputCalls();
+    this.lastOutputOperation = operation.id;
+    this.lastOutputRequest = request;
+    return this.outputResult;
+  }
+
   async finalize() {
     this.finalizeCalls();
     if (this.throwFinalize) throw new Error("remote cleanup unavailable");
@@ -146,10 +199,28 @@ function fixture() {
   let currentNow = now;
   // The settle window is exercised for its attempts, not for real elapsed time.
   const settleDelays: number[] = [];
+  // The lifecycle authority an operation borrows to wake a sleeping workspace. The fake wakes it by
+  // the same state change the real service converges to, and counts what the operation asked for.
+  const lifecycle = {
+    calls: [] as string[],
+    refusal: null as WorkspaceResourceError | null,
+    ensureRunning: jest.fn(async (userId: string, workspaceId: string) => {
+      lifecycle.calls.push(workspaceId);
+      if (lifecycle.refusal) throw lifecycle.refusal;
+      sqlite
+        .prepare(
+          `UPDATE workspaceResource SET state = 'usable', desiredState = 'running',
+           observedState = 'running' WHERE id = ? AND userId = ?`,
+        )
+        .run(workspaceId, userId);
+      return new WorkspaceResourceRepository(sqlite).getOwned(userId, workspaceId)!;
+    }),
+  };
   const service = new WorkspaceOperationService({
     repository,
     transport,
     credentials,
+    lifecycle,
     policy: () => policy,
     now: () => currentNow,
     delay: async (milliseconds) => {
@@ -167,6 +238,7 @@ function fixture() {
     transport,
     credentials,
     service,
+    lifecycle,
     advance: (milliseconds: number) => {
       currentNow += milliseconds;
     },
@@ -286,17 +358,376 @@ describe("durable direct workspace operations", () => {
     },
   );
 
+  test("keeps a background command running past the call and collects it by its own identity", async () => {
+    const value = fixture();
+    try {
+      // The connector answers "running" for a dispatch; a background command is expected to stay
+      // that way well past the call that started it.
+      value.transport.executeResult = { state: "running" };
+      value.transport.inspectResult = { state: "running" };
+      const started = await value.service.execute("user-1", "workspace-1", {
+        argv: ["npm", "run", "build"],
+        cwd: ".",
+        stdin: { kind: "inline", bytes: new Uint8Array() },
+        timeoutMs: 2 * 60 * 60_000,
+        background: true,
+      });
+      expect(started.operation.state).toBe("running");
+      expect(started.result).toBeNull();
+      // The answer is not delayed by a settle window the command cannot satisfy.
+      expect(value.settleDelays).toEqual([]);
+      expect(value.transport.inspectCalls).toHaveBeenCalledTimes(0);
+      // Its deadline is its own lifetime, not a request's, so reconciliation will not cancel it.
+      expect(started.operation.deadlineAt).toBe(now + 2 * 60 * 60_000);
+      expect(value.transport.lastRequest?.background).toBe(true);
+
+      // It stays observable while it runs, without a second dispatch.
+      await expect(value.service.reconcile("user-1", started.operation.id)).resolves.toBeNull();
+      expect(value.service.get("user-1", started.operation.id)?.state).toBe("running");
+
+      value.transport.inspectResult = execResult({
+        state: "succeeded",
+        stdout: "built",
+        stderr: "",
+        exitCode: 0,
+      });
+      await expect(value.service.reconcile("user-1", started.operation.id)).resolves.toMatchObject({
+        state: "succeeded",
+        stdout: "built",
+      });
+      expect(value.transport.executeCalls).toHaveBeenCalledTimes(1);
+    } finally {
+      value.sqlite.close();
+    }
+  });
+
+  test("gives a command the duration its mode implies and keeps its result for that long", async () => {
+    const value = fixture();
+    try {
+      value.transport.executeResult = { state: "running" };
+      // A caller that names no duration and asks for the background gets the whole ceiling, not
+      // the ordinary default that would kill its build minutes in.
+      const background = await value.service.execute("user-1", "workspace-1", {
+        argv: ["npm", "run", "build"],
+        cwd: ".",
+        stdin: { kind: "inline", bytes: new Uint8Array() },
+        background: true,
+      });
+      expect(value.transport.lastRequest?.timeoutMs).toBe(policy.maxBackgroundOperationMs);
+      expect(background.operation.deadlineAt).toBe(now + policy.maxBackgroundOperationMs!);
+
+      // Its result outlives the cleanup window a short command gets, because the command itself
+      // was allowed to take far longer than that window.
+      value.transport.inspectResult = execResult({
+        state: "succeeded",
+        stdout: "built",
+        stderr: "",
+        exitCode: 0,
+      });
+      await value.service.reconcile("user-1", background.operation.id);
+      expect(value.service.get("user-1", background.operation.id)?.resultExpiresAt).toBe(
+        now + policy.maxBackgroundOperationMs!,
+      );
+
+      // A bounded command keeps the ordinary cleanup window.
+      value.transport.executeResult = execResult({
+        state: "succeeded",
+        stdout: "quick",
+        stderr: "",
+        exitCode: 0,
+      });
+      const bounded = await value.service.execute("user-1", "workspace-1", {
+        argv: ["echo", "quick"],
+        cwd: ".",
+        stdin: { kind: "inline", bytes: new Uint8Array() },
+        timeoutMs: 5_000,
+      });
+      expect(value.service.get("user-1", bounded.operation.id)?.resultExpiresAt).toBe(
+        now + policy.cleanupDeadlineMs,
+      );
+      // A long command's lifetime is granted when it starts running, not when it is reserved, so a
+      // reservation that never dispatches is reaped on its own short deadline.
+      const reservation = value.repository.reserve({
+        userId: "user-1",
+        resourceId: "workspace-1",
+        inputBytes: 0,
+        stdoutLimitBytes: 1024,
+        stderrLimitBytes: 1024,
+        deadlineAt: now + 15 * 60_000,
+        policy,
+        now,
+      });
+      const reservedId = reservation.operation!.id;
+      expect(value.repository.getOwned("user-1", reservedId)?.deadlineAt).toBe(now + 15 * 60_000);
+      expect(
+        value.repository.beginDispatch(
+          "user-1",
+          reservedId,
+          reservation.operation!.resourceGeneration,
+          "claim-1",
+          now + 60_000,
+          now,
+          now + policy.maxBackgroundOperationMs!,
+        ),
+      ).toBe(true);
+      expect(value.repository.getOwned("user-1", reservedId)?.deadlineAt).toBe(
+        now + policy.maxBackgroundOperationMs!,
+      );
+    } finally {
+      value.sqlite.close();
+    }
+  });
+
+  test("refuses a session that would exceed its ceiling and keeps the caller's command forms honest", async () => {
+    const value = fixture();
+    try {
+      value.transport.executeResult = { state: "session_limit", limit: "context" };
+      await expect(
+        value.service.execute("user-1", "workspace-1", {
+          argv: ["true"],
+          cwd: ".",
+          stdin: { kind: "inline", bytes: new Uint8Array() },
+          timeoutMs: 5_000,
+          session: "build",
+          env: { BIG: "x" },
+        }),
+      ).rejects.toMatchObject({
+        code: "WORKSPACE_POLICY_LIMIT",
+        detail: expect.stringContaining("stored context"),
+      });
+      value.transport.executeResult = { state: "session_limit", limit: "sessions" };
+      await expect(
+        value.service.execute("user-1", "workspace-1", {
+          argv: ["true"],
+          cwd: ".",
+          stdin: { kind: "inline", bytes: new Uint8Array() },
+          timeoutMs: 5_000,
+          session: "another",
+          sessionStart: true,
+        }),
+      ).rejects.toMatchObject({
+        code: "WORKSPACE_POLICY_LIMIT",
+        detail: expect.stringContaining("open sessions"),
+      });
+      // Both refusals end their operation rather than leaving capacity held, and the stored record
+      // says why, so a later audit read does not read them as cancellations the caller asked for.
+      expect(
+        value.service.list("user-1", "workspace-1").map((operation) => operation.lastOutcome),
+      ).toEqual(["session_limit", "session_limit"]);
+
+      // A caller names one kind of work: argv, a script inside a session, or ending a session.
+      for (const invalid of [
+        { argv: ["true"], script: "echo hello", session: "build" },
+        { script: "echo hello" },
+        {},
+      ]) {
+        await expect(
+          value.service.execute("user-1", "workspace-1", {
+            cwd: ".",
+            stdin: { kind: "inline", bytes: new Uint8Array() },
+            timeoutMs: 5_000,
+            ...invalid,
+          }),
+        ).rejects.toMatchObject({ code: "WORKSPACE_RESOURCE_INVALID" });
+      }
+    } finally {
+      value.sqlite.close();
+    }
+  });
+
+  test("refuses a command whose session is gone without running it", async () => {
+    const value = fixture();
+    try {
+      value.transport.executeResult = { state: "session_unavailable" };
+      const before = value.service.list("user-1", "workspace-1").length;
+      await expect(
+        value.service.execute("user-1", "workspace-1", {
+          argv: ["npm", "test"],
+          cwd: ".",
+          stdin: { kind: "inline", bytes: new Uint8Array() },
+          timeoutMs: 5_000,
+          session: "build",
+        }),
+      ).rejects.toMatchObject({
+        code: "WORKSPACE_SESSION_UNAVAILABLE",
+        detail: expect.stringContaining("session"),
+      });
+      // The operation exists and is over; no command ran and no capacity stays held.
+      const operations = value.service.list("user-1", "workspace-1");
+      expect(operations).toHaveLength(before + 1);
+      expect(operations[operations.length - 1]).toMatchObject({
+        state: "cancelled",
+        exitCode: null,
+        outputBytes: 0,
+        lastOutcome: "session_unavailable",
+      });
+      expect(value.transport.executeCalls).toHaveBeenCalledTimes(1);
+
+      // A malformed session or variable is refused before anything is reserved.
+      for (const invalid of [
+        { session: "../escape" },
+        { env: { "not a name": "x" } },
+        { env: Object.fromEntries(Array.from({ length: 65 }, (_, index) => [`V${index}`, "x"])) },
+      ]) {
+        await expect(
+          value.service.execute("user-1", "workspace-1", {
+            argv: ["true"],
+            cwd: ".",
+            stdin: { kind: "inline", bytes: new Uint8Array() },
+            timeoutMs: 5_000,
+            ...invalid,
+          }),
+        ).rejects.toMatchObject({ code: "WORKSPACE_RESOURCE_INVALID" });
+      }
+      expect(value.service.list("user-1", "workspace-1")).toHaveLength(before + 1);
+    } finally {
+      value.sqlite.close();
+    }
+  });
+
+  test("bounds each kind of command by its own ceiling and says which one was met", async () => {
+    const value = fixture();
+    try {
+      await expect(
+        value.service.execute("user-1", "workspace-1", {
+          argv: ["sleep", "3600"],
+          cwd: ".",
+          stdin: { kind: "inline", bytes: new Uint8Array() },
+          timeoutMs: policy.maxOperationMs! + 1,
+        }),
+      ).rejects.toMatchObject({
+        code: "WORKSPACE_POLICY_LIMIT",
+        detail: expect.stringContaining("background"),
+      });
+      await expect(
+        value.service.execute("user-1", "workspace-1", {
+          argv: ["sleep", "99999"],
+          cwd: ".",
+          stdin: { kind: "inline", bytes: new Uint8Array() },
+          timeoutMs: policy.maxBackgroundOperationMs! + 1,
+          background: true,
+        }),
+      ).rejects.toMatchObject({
+        code: "WORKSPACE_POLICY_LIMIT",
+        detail: expect.stringContaining("hours"),
+      });
+      // A duration the bounded command refuses is admitted in the background.
+      value.transport.executeResult = { state: "running" };
+      const started = await value.service.execute("user-1", "workspace-1", {
+        argv: ["sleep", "3600"],
+        cwd: ".",
+        stdin: { kind: "inline", bytes: new Uint8Array() },
+        timeoutMs: policy.maxOperationMs! + 1,
+        background: true,
+      });
+      expect(started.operation.state).toBe("running");
+
+      // A background command is stopped the same way any other operation is.
+      value.transport.cancelResult = execResult({
+        state: "cancelled",
+        stdout: "",
+        stderr: "",
+        exitCode: null,
+      });
+      const cancelled = await value.service.cancel("user-1", started.operation.id);
+      expect(cancelled.operation.state).toBe("cancelled");
+      expect(value.transport.cancelCalls).toHaveBeenCalledTimes(1);
+    } finally {
+      value.sqlite.close();
+    }
+  });
+
+  test("reports a truncated payload with its complete size and serves any retained range", async () => {
+    const value = fixture();
+    try {
+      // The command printed far more than one answer may carry, and finished on its own terms.
+      value.transport.executeResult = execResult({
+        state: "failed",
+        stdout: "first bytes",
+        stderr: "real failure",
+        exitCode: 7,
+        stdoutTotalBytes: 900_000,
+      });
+      const dispatched = await value.service.execute("user-1", "workspace-1", {
+        argv: ["build"],
+        cwd: ".",
+        stdin: { kind: "inline", bytes: new Uint8Array() },
+        timeoutMs: 5_000,
+      });
+      expect(dispatched.result).toMatchObject({
+        exitCode: 7,
+        stderr: "real failure",
+        stdoutTotalBytes: 900_000,
+        outputLimitExceeded: false,
+      });
+      // The recorded size is the whole stream, not the part the answer carried.
+      expect(value.service.get("user-1", dispatched.operation.id)?.outputBytes).toBe(
+        900_000 + "real failure".length,
+      );
+      // The retained ceiling travelled with the dispatch; the payload bound did not become one.
+      expect(value.transport.lastRequest?.maxRetainedBytes).toBe(policy.maxRetainedOutputBytes);
+
+      value.transport.outputResult = {
+        stream: "stdout",
+        offset: 899_990,
+        totalBytes: 900_000,
+        bytes: Buffer.from("last bytes"),
+      };
+      await expect(
+        value.service.readOutput("user-1", dispatched.operation.id, {
+          stream: "stdout",
+          offset: 899_990,
+          length: 64,
+        }),
+      ).resolves.toMatchObject({ totalBytes: 900_000, bytes: Buffer.from("last bytes") });
+      expect(value.transport.lastOutputOperation).toBe(dispatched.operation.id);
+      expect(value.transport.readOutputCalls).toHaveBeenCalledTimes(1);
+
+      // An unavailable connector is refused as that, before any credential is fetched.
+      value.transport.available = false;
+      await expect(
+        value.service.readOutput("user-1", dispatched.operation.id, {
+          stream: "stdout",
+          offset: 0,
+          length: 64,
+        }),
+      ).rejects.toMatchObject({ code: "WORKSPACE_PROVIDER_UNAVAILABLE" });
+      expect(value.transport.readOutputCalls).toHaveBeenCalledTimes(1);
+      value.transport.available = true;
+
+      // Another user's operation is not readable, and output that cleanup already removed is
+      // reported as expired rather than as an empty stream.
+      await expect(
+        value.service.readOutput("user-2", dispatched.operation.id, {
+          stream: "stdout",
+          offset: 0,
+          length: 64,
+        }),
+      ).rejects.toMatchObject({ code: "WORKSPACE_NOT_FOUND" });
+      value.transport.outputResult = { state: "absent" };
+      await expect(
+        value.service.readOutput("user-1", dispatched.operation.id, {
+          stream: "stdout",
+          offset: 0,
+          length: 64,
+        }),
+      ).rejects.toMatchObject({ code: "WORKSPACE_RESULT_EXPIRED" });
+    } finally {
+      value.sqlite.close();
+    }
+  });
+
   test("returns the result of a command that finishes during the settle window", async () => {
     const value = fixture();
     try {
       // The connector always answers "running" for an exec; the outcome appears moments later.
       value.transport.executeResult = { state: "running" };
-      value.transport.inspectResult = {
+      value.transport.inspectResult = execResult({
         state: "succeeded",
         stdout: "immediate",
         stderr: "",
         exitCode: 0,
-      };
+      });
       const dispatched = await value.service.execute("user-1", "workspace-1", {
         argv: ["printf", "immediate"],
         cwd: ".",
@@ -305,12 +736,14 @@ describe("durable direct workspace operations", () => {
       });
 
       expect(dispatched.operation.state).toBe("succeeded");
-      expect(dispatched.result).toEqual({
-        state: "succeeded",
-        stdout: "immediate",
-        stderr: "",
-        exitCode: 0,
-      });
+      expect(dispatched.result).toEqual(
+        execResult({
+          state: "succeeded",
+          stdout: "immediate",
+          stderr: "",
+          exitCode: 0,
+        }),
+      );
       expect(value.transport.executeCalls).toHaveBeenCalledTimes(1);
       expect(value.transport.inspectCalls).toHaveBeenCalledTimes(1);
       expect(value.settleDelays).toEqual([150]);
@@ -339,12 +772,12 @@ describe("durable direct workspace operations", () => {
       // Bounded: the window makes a fixed small number of attempts and then gives up.
       expect(value.settleDelays).toEqual([150, 350, 750]);
 
-      value.transport.inspectResult = {
+      value.transport.inspectResult = execResult({
         state: "succeeded",
         stdout: "late",
         stderr: "",
         exitCode: 0,
-      };
+      });
       await expect(
         value.service.reconcile("user-1", dispatched.operation.id),
       ).resolves.toMatchObject({ state: "succeeded", stdout: "late" });
@@ -846,12 +1279,12 @@ describe("durable direct workspace operations", () => {
   test("preserves argv boundaries and exact exit 23 without persisting command or stdin", async () => {
     const value = fixture();
     try {
-      value.transport.executeResult = {
+      value.transport.executeResult = execResult({
         state: "failed",
         stdout: "partial output",
         stderr: "expected failure",
         exitCode: 23,
-      };
+      });
       const stdin = new TextEncoder().encode("opaque input");
       const operation = await value.service.execute("user-1", "workspace-1", {
         argv: ["printf", "%s", "argument with spaces;$(false)"],
@@ -865,12 +1298,14 @@ describe("durable direct workspace operations", () => {
         outputBytes: Buffer.byteLength("partial output") + Buffer.byteLength("expected failure"),
         inputBytes: stdin.byteLength,
       });
-      expect(operation.result).toEqual({
-        state: "failed",
-        stdout: "partial output",
-        stderr: "expected failure",
-        exitCode: 23,
-      });
+      expect(operation.result).toEqual(
+        execResult({
+          state: "failed",
+          stdout: "partial output",
+          stderr: "expected failure",
+          exitCode: 23,
+        }),
+      );
       expect(value.transport.lastWorkspace?.machine).toEqual({
         name: "basic",
         displayName: "Basic",
@@ -983,12 +1418,12 @@ describe("durable direct workspace operations", () => {
         stdin: { kind: "inline", bytes: new Uint8Array() },
         timeoutMs: 5_000,
       });
-      value.transport.executeResult = {
+      value.transport.executeResult = execResult({
         state: "succeeded",
         stdout: "raced result",
         stderr: "",
         exitCode: 0,
-      };
+      });
 
       // The background reconciler stores the identical outcome while this caller is still
       // inspecting, so the caller's own write finds the row already terminal.
@@ -999,12 +1434,14 @@ describe("durable direct workspace operations", () => {
         return background;
       };
 
-      await expect(value.service.reconcile("user-1", started.operation.id)).resolves.toEqual({
-        state: "succeeded",
-        stdout: "raced result",
-        stderr: "",
-        exitCode: 0,
-      });
+      await expect(value.service.reconcile("user-1", started.operation.id)).resolves.toEqual(
+        execResult({
+          state: "succeeded",
+          stdout: "raced result",
+          stderr: "",
+          exitCode: 0,
+        }),
+      );
       await expect(background!).resolves.toBe(true);
       expect(value.repository.getOwned("user-1", started.operation.id)).toMatchObject({
         state: "succeeded",
@@ -1026,12 +1463,12 @@ describe("durable direct workspace operations", () => {
         stdin: { kind: "inline", bytes: new Uint8Array() },
         timeoutMs: 5_000,
       });
-      value.transport.executeResult = {
+      value.transport.executeResult = execResult({
         state: "succeeded",
         stdout: "background result",
         stderr: "background warning",
         exitCode: 0,
-      };
+      });
 
       await expect(value.service.reconcileOnce("user-1")).resolves.toBe(true);
       expect(value.repository.getOwned("user-1", started.operation.id)).toMatchObject({
@@ -1040,12 +1477,14 @@ describe("durable direct workspace operations", () => {
       });
       expect(value.transport.finalizeCalls).not.toHaveBeenCalled();
       await expect(value.service.reconcileOnce("user-1")).resolves.toBe(false);
-      await expect(value.service.reconcile("user-1", started.operation.id)).resolves.toEqual({
-        state: "succeeded",
-        stdout: "background result",
-        stderr: "background warning",
-        exitCode: 0,
-      });
+      await expect(value.service.reconcile("user-1", started.operation.id)).resolves.toEqual(
+        execResult({
+          state: "succeeded",
+          stdout: "background result",
+          stderr: "background warning",
+          exitCode: 0,
+        }),
+      );
       expect(value.transport.finalizeCalls).not.toHaveBeenCalled();
 
       value.advance(policy.cleanupDeadlineMs + 1);
@@ -1281,30 +1720,6 @@ describe("durable direct workspace operations", () => {
     }
   });
 
-  test("blocks a desired-stopped workspace before credential or connector contact", async () => {
-    const value = fixture();
-    try {
-      value.sqlite
-        .prepare(
-          `UPDATE workspaceResource SET state = 'stopped', desiredState = 'stopped',
-           observedState = 'stopped' WHERE id = 'workspace-1'`,
-        )
-        .run();
-      await expect(
-        value.service.execute("user-1", "workspace-1", {
-          argv: ["true"],
-          cwd: ".",
-          stdin: { kind: "inline", bytes: new Uint8Array() },
-          timeoutMs: 1_000,
-        }),
-      ).rejects.toMatchObject({ code: "WORKSPACE_NOT_RUNNING" });
-      expect(value.credentials.getCredential).not.toHaveBeenCalled();
-      expect(value.transport.executeCalls).not.toHaveBeenCalled();
-    } finally {
-      value.sqlite.close();
-    }
-  });
-
   test("fences dispatch when the kill switch wins after reservation", async () => {
     const value = fixture();
     try {
@@ -1357,12 +1772,12 @@ describe("durable direct workspace operations", () => {
       const pending = await value.service.cancel("user-1", running.operation.id);
       expect(pending.operation.state).toBe("cancel_pending");
 
-      value.transport.cancelResult = {
+      value.transport.cancelResult = execResult({
         state: "cancelled",
         stdout: "",
         stderr: "",
         exitCode: null,
-      };
+      });
       const terminal = await value.service.cancel("user-1", running.operation.id);
       expect(terminal.operation.state).toBe("cancelled");
       expect(terminal.result?.state).toBe("cancelled");
@@ -1405,6 +1820,93 @@ describe("durable direct workspace operations", () => {
         ),
       ).rejects.toMatchObject({ code: "WORKSPACE_GENERATION_CONFLICT" });
       expect(value.transport.inspectCalls).not.toHaveBeenCalled();
+    } finally {
+      value.sqlite.close();
+    }
+  });
+
+  test("starts a sleeping workspace for the command that needs it and refuses when it cannot", async () => {
+    const value = fixture();
+    const command = {
+      argv: ["pwd"],
+      cwd: ".",
+      stdin: { kind: "inline" as const, bytes: new Uint8Array() },
+      timeoutMs: 1000,
+    };
+    try {
+      const sleep = () =>
+        value.sqlite
+          .prepare("UPDATE workspaceResource SET state = 'stopped', desiredState = 'stopped'")
+          .run();
+
+      // Without a lifecycle authority the same sleeping workspace refuses, which is what separates
+      // "the command woke it" from "it was awake all along".
+      sleep();
+      const withoutLifecycle = new WorkspaceOperationService({
+        repository: value.repository,
+        transport: value.transport,
+        credentials: value.credentials,
+        policy: () => policy,
+      });
+      await expect(
+        withoutLifecycle.execute("user-1", "workspace-1", command),
+      ).rejects.toMatchObject({ code: "WORKSPACE_NOT_RUNNING" });
+      expect(value.credentials.getCredential).not.toHaveBeenCalled();
+      expect(value.transport.executeCalls).not.toHaveBeenCalled();
+
+      const response = await value.service.execute("user-1", "workspace-1", command);
+
+      expect(response.result).toMatchObject({ state: "succeeded" });
+      expect(value.lifecycle.calls).toEqual(["workspace-1"]);
+      expect(value.transport.executeCalls).toHaveBeenCalledTimes(1);
+      expect(
+        value.sqlite.prepare("SELECT state FROM workspaceResource WHERE id = 'workspace-1'").get(),
+      ).toEqual({ state: "usable" });
+
+      // A workspace that is awake is not woken again for the next command.
+      await value.service.execute("user-1", "workspace-1", command);
+      expect(value.lifecycle.calls).toEqual(["workspace-1"]);
+
+      // A workspace that does not become usable in time refuses with that, and the refusal holds no
+      // capacity: no operation row is left behind for it.
+      sleep();
+      const before = value.repository.listOwned("user-1", "workspace-1").length;
+      value.lifecycle.refusal = new WorkspaceResourceError(
+        "WORKSPACE_START_TIMEOUT",
+        "Workspace did not become usable in time",
+        "The workspace was started but was not usable within 180 seconds",
+      );
+      await expect(value.service.execute("user-1", "workspace-1", command)).rejects.toMatchObject({
+        code: "WORKSPACE_START_TIMEOUT",
+      });
+      expect(value.repository.listOwned("user-1", "workspace-1").length).toBe(before);
+    } finally {
+      value.sqlite.close();
+    }
+  });
+
+  test("names a command lost to a workspace restart instead of reporting its own failure", async () => {
+    const value = fixture();
+    try {
+      value.transport.executeResult = { state: "running" };
+      const response = await value.service.execute("user-1", "workspace-1", {
+        argv: ["sleep", "300"],
+        cwd: ".",
+        stdin: { kind: "inline" as const, bytes: new Uint8Array() },
+        background: true,
+      });
+      const operationId = response.operation.id;
+
+      // The workspace restarted: the operation's directory survived, its process did not.
+      value.transport.inspectResult = { state: "interrupted" };
+      const result = await value.service.reconcile("user-1", operationId);
+
+      expect(result).toMatchObject({ state: "failed", exitCode: null });
+      const stored = value.service.get("user-1", operationId)!;
+      expect(stored.state).toBe("failed");
+      // The recorded reason is what a later read uses to tell a restart from a cancellation the
+      // caller asked for and from a command that failed on its own.
+      expect(stored.lastOutcome).toBe("workspace_restarted");
     } finally {
       value.sqlite.close();
     }

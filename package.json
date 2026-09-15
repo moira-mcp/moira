@@ -33,7 +33,11 @@
     "docker:stop": ". ./.env.local && docker stop ${DOCKER_CONTAINER_NAME} || true",
     "prepare:account-approval-downgrade": "tsx scripts/prepare-account-approval-downgrade.ts",
     "reconcile": "tsx scripts/reconcile-workflows.ts",
-    "fix": "eslint . --fix && prettier --write ."
+    "fix": "eslint . --fix && prettier --write .",
+    "verify": "eslint . && prettier --check . && npm run test:unit && npm run test:release-policy && npm run test:integration && npm run test:workflow",
+    "verify:docker": "./scripts/verify-docker.sh",
+    "test:api:ci-saas": "testfold api -e ci-saas",
+    "test:mcp-tools:ci-saas": "testfold mcp-tools -e ci-saas"
   },
   "lint-staged": {
     "*.{js,ts,tsx,astro}": [

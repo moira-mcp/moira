@@ -231,7 +231,11 @@ describe("website workspace management routes", () => {
           throw new WorkspaceResourceError("WORKSPACE_GENERATION_CONFLICT", "generation 9 != 3");
         }),
         create: jest.fn(async () => {
-          throw new WorkspaceResourceError("WORKSPACE_POLICY_LIMIT", "limit detail");
+          throw new WorkspaceResourceError(
+            "WORKSPACE_POLICY_LIMIT",
+            "limit detail",
+            "This Moira instance is at its ceiling of 16 active workspaces.",
+          );
         }),
       },
     });
@@ -256,7 +260,9 @@ describe("website workspace management routes", () => {
       .post("/api/integrations/github/workspaces")
       .send({ repository_id: "42", ref: "main" });
     expect(limited.status).toBe(429);
+    // The operator sentence stays private; the bounded detail the refusal declared safe is shown.
     expect(limited.text).not.toContain("limit detail");
+    expect(limited.body.error.message).toContain("ceiling of 16 active workspaces");
   });
 
   test("returns a workspace with its recent metadata-only operations", async () => {

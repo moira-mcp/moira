@@ -48,6 +48,20 @@ const apiEnvironments = {
       API_TEST_TARGET: "saas",
     },
   },
+  // CI's primary container: the same image in the same deployment mode as `.env.ci`, which is
+  // saas. It exists so a contributor can reproduce CI's API and MCP runs without overwriting
+  // their own `.env.local`, which is what CI itself does to the runner's checkout.
+  "ci-saas": {
+    envFile: ".env.ci",
+    urlExtractor: (content) => {
+      const port = parseEnvVar(content, "DOCKER_PORT");
+      return port ? `http://localhost:${port}` : undefined;
+    },
+    env: {
+      REMOTE_DOCKER_CONTEXT: "",
+      API_TEST_TARGET: "saas",
+    },
+  },
   ci: {
     envFile: ".env.ci",
     urlExtractor: () => "http://localhost:3031",

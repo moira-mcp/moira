@@ -26,6 +26,10 @@ export DOCKER_BUILDKIT=1
 ENABLE_RATE_LIMIT=false
 REMOTE_MODE=false
 DRY_RUN=false
+# The environment this container is built and run with. The default is the contributor's own
+# `.env.local`; `--env-file .env.ci` reproduces the environment CI builds and tests in, which is a
+# different deployment mode and therefore a different set of passing tests.
+ENV_FILE=.env.local
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
@@ -42,6 +46,14 @@ while [[ $# -gt 0 ]]; do
             ENABLE_RATE_LIMIT=true
             shift
             ;;
+        --env-file)
+            if [ -z "$2" ]; then
+                echo "--env-file needs a path"
+                exit 1
+            fi
+            ENV_FILE="$2"
+            shift 2
+            ;;
         --dry-run)
             DRY_RUN=true
             shift
@@ -53,6 +65,8 @@ while [[ $# -gt 0 ]]; do
             echo "  --remote        Remote mode: build/run Docker on PC via SSH context"
             echo "  --local         Local mode: build/run Docker on Mac"
             echo "  --rate-limit    Enable rate limiting (disabled by default for dev)"
+            echo "  --env-file <p>  Environment to build and run with (default .env.local);"
+            echo "                  use .env.ci to reproduce what CI builds and tests"
             echo "  --dry-run       Print docker commands without executing them"
             echo "  --help          Show this help"
             echo ""
@@ -138,20 +152,34 @@ check_remote_connectivity() {
 # --- Load environment configuration ---
 echo "🔧 Loading environment configuration..."
 
-# Load .env.local file
-# NOTE: source executes the file as bash — .env files must contain only KEY=value assignments
-if [ -f .env.local ]; then
-    source .env.local
-    echo "✅ Loaded .env.local"
+# Load the selected environment file.
+# The values are assigned rather than executed: a value may legitimately contain spaces, and
+# sourcing such a file runs its second word as a command instead of setting the variable.
+load_env_file() {
+    local file=$1 line key value
+    while IFS= read -r line || [ -n "$line" ]; do
+        line=${line%$'\r'}
+        case "$line" in ''|'#'*) continue ;; esac
+        case "$line" in *=*) ;; *) continue ;; esac
+        key=${line%%=*}
+        value=${line#*=}
+        case "$key" in *[!A-Za-z0-9_]*) continue ;; esac
+        export "$key=$value"
+    done < "$file"
+}
+
+if [ -f "$ENV_FILE" ]; then
+    load_env_file "$ENV_FILE"
+    echo "✅ Loaded $ENV_FILE"
 else
-    echo "❌ .env.local file not found!"
+    echo "❌ $ENV_FILE file not found!"
     exit 1
 fi
 
 # Load remote config if in remote mode
 if [ "$REMOTE_MODE" = "true" ]; then
     if [ -f .env.remote ]; then
-        source .env.remote
+        load_env_file .env.remote
         echo "✅ Loaded .env.remote"
     else
         echo "❌ .env.remote file not found!"
@@ -178,7 +206,7 @@ fi
 required_vars=("DOCKER_IMAGE_NAME" "DOCKER_CONTAINER_NAME" "DOCKER_PORT")
 for var in "${required_vars[@]}"; do
     if [ -z "${!var}" ]; then
-        echo "❌ Required variable $var not set in .env.local"
+        echo "❌ Required variable $var not set in $ENV_FILE"
         exit 1
     fi
 done
@@ -314,7 +342,7 @@ fi
 # Build run command arguments
 RUN_ARGS=(
     run --name "$DOCKER_CONTAINER_NAME" -p "$DOCKER_PORT:80"
-    --env-file .env.local
+    --env-file "$ENV_FILE"
     -e MCP_PORT=3000
     -e WEB_BACKEND_PORT=3001
     -e WEB_FRONTEND_PORT=3002

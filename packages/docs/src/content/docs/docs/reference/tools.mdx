@@ -128,8 +128,44 @@ is absent from it while `workspace_get` still answers for its `workspace_id`. `w
 `generation`, so a stale call cannot delete a changed workspace.
 
 `workspace_exec` runs argv as data (no shell interpolation) in a repository-relative `cwd` with a
-timeout (`timeout_seconds`, default 300) and optional per-stream output limits, and returns bounded `stdout`, `stderr` and the exact
-`exit_code`. Supply at most one stdin form: `stdin_text` for UTF-8 text or `stdin_file` for a native
+timeout (`timeout_seconds`, optional) and optional per-stream output limits, and returns bounded `stdout`, `stderr` and the exact
+`exit_code`. Those limits bound the answer, not the command: a command that prints more keeps
+running, keeps its own exit code and keeps its own `stderr`, and the result reports each stream's
+complete size and whether the payload was truncated. The whole output stays in the workspace until
+the operation is cleaned up, and any range of it is read with `workspace_read`. A command is stopped
+for its volume only if its retained output reaches the workspace ceiling, which is reported as that
+rather than as the command's own failure. For work that outlives one request, such as a full build or
+test suite, pass `background: true`: the call returns a running operation at once, the command keeps
+running in the workspace under a much larger ceiling, its output is readable by range while it runs,
+and its result is collected later with the same `operation_id`, which stays collectible for at least
+as long as the command was allowed to run. Omitting `timeout_seconds` gives a bounded command 300
+seconds and a background command its whole ceiling.
+
+Consecutive commands can share a working context. Open a session with `session` and
+`session_start: true`, then name the same `session` on later commands: it remembers the `cwd` a call
+names and the variables a call passes in `env`, and applies both to every command that continues it.
+A command without a session is unaffected. Inside a session you may send `script` instead of `argv`:
+it runs under the workspace's own shell, and the directory it ends in and the variables it added,
+changed or removed are carried to the commands that follow, which is how activating a toolchain or a
+virtual environment survives. An `argv` command is never run through a shell, and one call carries one
+kind of work. End a session with `session_end: true`, alone or with a command; ending frees its slot
+and removes what it stored. A workspace holds a bounded number of open sessions, and once it is full the next
+`session_start` is refused with that ceiling named and asks you to end one rather than retry or open
+another workspace. A session's stored context is bounded too, a call that would exceed it is
+refused with that ceiling named, and a script carries its end state whether it
+succeeded or failed, while one whose end state would not fit, one that ends its own shell with `exit`
+and one that was stopped report `session_capture_dropped` instead of leaving a session you cannot use. A session belongs to the
+workspace's current life: after the workspace stops and starts again, naming it returns
+`WORKSPACE_SESSION_UNAVAILABLE` and a new session must be opened, as it does for a session that was
+never opened. What a session stores stays in the workspace and is never returned. Stop either kind by calling the tool
+with only `workspace_id`, `operation_id` and `cancel: true`. A command stops with its workspace, so a
+long one needs a workspace whose idle lifetime outlasts it. A workspace that went to sleep does not
+have to be started first: the call that needs it starts it and then runs, within a bounded wait. If it
+does not finish starting in time the call returns `WORKSPACE_START_TIMEOUT`, which names that wait and
+asks you to retry; a workspace that cannot start at all is refused by what it is. A command whose
+workspace restarted under it is reported as `WORKSPACE_OPERATION_INTERRUPTED`, with
+`interrupted_by_restart` on the operation, rather than as a failure of its own: the files it had
+already written are still there, it produced no result, and running it again is the remedy. Supply at most one stdin form: `stdin_text` for UTF-8 text or `stdin_file` for a native
 ChatGPT file reference; the file's bytes reach the process without base64 in the conversation.
 Failed, timed-out and cancelled commands and rejected file edits are returned as tool errors that
 keep `operation_id` and the available output. A command that finishes quickly returns its terminal
@@ -137,7 +173,10 @@ result from the same call that started it; one that is still running returns a n
 `state`, which is not a success. Call the same tool again with only `workspace_id` and
 `operation_id` to obtain the stored outcome without running the command or mutation twice.
 
-`workspace_read` returns UTF-8 text with `offset`, `total_size` and `sha256`; `length` defaults to
+`workspace_read` returns UTF-8 text with `offset` and `total_size`, plus `sha256` for a repository
+file; give `path` for a file, or `operation_id` and `stream` for a command's retained `stdout` or
+`stderr`, naming the workspace that command belongs to. A read that starts at or past the end of a
+stream returns no text and the stream's current size. `length` defaults to
 64 KiB, and `workspace_search` defaults to 100 matches within 64 KiB of results, so naming only the
 workspace, path and query is a complete call. Search covers repository content and skips the
 repository's own `.git` directory, and it refuses a search rooted at or inside that directory; a
@@ -153,7 +192,10 @@ HTTPS link expires automatically and is never repeated in the JSON result.
 The agent runs as the ordinary Codespace user with that environment's repository, network and
 configured secrets. Moira bounds its own concurrency, input/output size, time and quotas and
 protects the Moira server and other users; it does not sandbox the workspace from the agent its
-owner authorized.
+owner authorized. A user may hold several workspaces at once, and a creation refused by a ceiling
+says which one refused it: your own active-workspace ceiling, the instance-wide one, or the interval
+between creations. The refusal names that ceiling's configured value and never names another user or
+their workspaces.
 
 ### Runtime help
 

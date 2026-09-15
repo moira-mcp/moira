@@ -44,6 +44,7 @@ const basePolicy: WorkspaceResourcePolicy = {
   cleanupDeadlineMs: 1,
   claimLeaseMs: 30_000,
   reconcileIntervalMs: 1,
+  startWaitMs: 60_000,
   maxTransferFileBytes: 1024,
   maxTransferBytesPerUser: 1024,
   maxTransferBytesGlobal: 2048,

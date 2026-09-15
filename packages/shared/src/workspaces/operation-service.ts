@@ -3,6 +3,8 @@ import { settleAfterDispatch } from "./settle-after-dispatch.js";
 import { requireWorkspaceTransportAvailable } from "./transport-availability.js";
 import type {
   WorkspaceExecRequest,
+  WorkspaceOperationOutputRequest,
+  WorkspaceOperationOutputResult,
   WorkspaceOperationRecord,
   WorkspaceOperationResponse,
   WorkspaceOperationResult,
@@ -21,11 +23,51 @@ import type {
   WorkspaceTransferHandle,
   WorkspaceTransferService,
 } from "./transfer-service.js";
+import { startOnUse, type WorkspaceLifecycleStarter } from "./start-on-use.js";
 
 const CONNECTOR_MAX_INPUT_BYTES = 4 * 1024 * 1024;
 const CONNECTOR_MAX_OUTPUT_BYTES = 8 * 1024 * 1024;
 const CONNECTOR_MAX_TIMEOUT_MS = 15 * 60_000;
+const CONNECTOR_MAX_BACKGROUND_TIMEOUT_MS = 24 * 60 * 60_000;
+const DEFAULT_BACKGROUND_TIMEOUT_MS = 4 * 60 * 60_000;
+const DEFAULT_BOUNDED_TIMEOUT_MS = 300_000;
+// A reservation that is never dispatched is reaped on this deadline, whatever the command's own
+// lifetime would have been.
+const RESERVATION_DEADLINE_MS = 15 * 60_000;
+const CONNECTOR_MAX_RETAINED_OUTPUT_BYTES = 4 * 1024 * 1024 * 1024;
+const MAX_OUTPUT_RANGE_BYTES = 4 * 1024 * 1024;
+const DEFAULT_RETAINED_OUTPUT_BYTES = 64 * 1024 * 1024;
 const MAX_WORKSPACE_CWD_BYTES = 4096;
+const MAX_SESSION_VARIABLES = 64;
+const MAX_SCRIPT_BYTES = 64 * 1024;
+const MAX_ENVIRONMENT_VALUE_LENGTH = 4096;
+
+/**
+ * The disk one command's retained output may occupy in the workspace. It is the only output bound
+ * that stops a command; the payload bounds only decide how much of it a single answer carries.
+ */
+function retainedOutputBytes(policy: WorkspaceResourcePolicy): number {
+  return Math.min(
+    policy.maxRetainedOutputBytes ?? DEFAULT_RETAINED_OUTPUT_BYTES,
+    CONNECTOR_MAX_RETAINED_OUTPUT_BYTES,
+  );
+}
+
+/** A terminal outcome for an operation that ended without running a command. */
+function terminalWithoutCommand(
+  state: WorkspaceOperationResult["state"],
+): WorkspaceOperationResult {
+  return {
+    state,
+    stdout: "",
+    stderr: "",
+    exitCode: null,
+    stdoutTotalBytes: 0,
+    stderrTotalBytes: 0,
+    outputLimitExceeded: false,
+    sessionCaptureDropped: false,
+  };
+}
 
 function isTerminalOperationState(
   state: WorkspaceOperationRecord["state"],
@@ -51,26 +93,60 @@ export interface WorkspaceOperationAuditEvent {
 function validateRequest(
   request: WorkspaceExecRequest,
   policy: WorkspaceResourcePolicy,
-): { inputBytes: number; stdoutLimitBytes: number; stderrLimitBytes: number } {
+): {
+  inputBytes: number;
+  stdoutLimitBytes: number;
+  stderrLimitBytes: number;
+  timeoutMs: number;
+} {
+  // A call carries exactly one kind of work: argv, a script, or ending a session and nothing else.
+  const forms = [request.argv !== undefined, request.script !== undefined].filter(Boolean).length;
+  if (forms > 1 || (forms === 0 && !request.sessionEnd)) {
+    throw new WorkspaceResourceError(
+      "WORKSPACE_RESOURCE_INVALID",
+      "Command form is invalid",
+      "Give argv, or a script inside a session, or end a session with neither.",
+    );
+  }
+  if (request.script !== undefined && request.session === undefined) {
+    throw new WorkspaceResourceError(
+      "WORKSPACE_RESOURCE_INVALID",
+      "A script requires a session",
+      "A script runs in a session so that what it leaves behind can be carried; name one.",
+    );
+  }
   if (
-    request.argv.length === 0 ||
-    request.argv.length > 128 ||
-    request.argv.some(
-      (value) =>
-        typeof value !== "string" ||
-        value.length === 0 ||
-        Buffer.byteLength(value) > 16_384 ||
-        value.includes("\0"),
-    )
+    request.script !== undefined &&
+    (request.script.length === 0 || Buffer.byteLength(request.script) > MAX_SCRIPT_BYTES)
+  ) {
+    throw new WorkspaceResourceError(
+      "WORKSPACE_RESOURCE_INVALID",
+      "Script is invalid",
+      `A script is between 1 and ${MAX_SCRIPT_BYTES} bytes.`,
+    );
+  }
+  if (
+    request.argv !== undefined &&
+    (request.argv.length === 0 ||
+      request.argv.length > 128 ||
+      request.argv.some(
+        (value) =>
+          typeof value !== "string" ||
+          value.length === 0 ||
+          Buffer.byteLength(value) > 16_384 ||
+          value.includes("\0"),
+      ))
   ) {
     throw new WorkspaceResourceError("WORKSPACE_RESOURCE_INVALID", "Invalid command arguments");
   }
+  const requestedCwd = request.cwd;
   if (
-    Buffer.byteLength(request.cwd, "utf8") > MAX_WORKSPACE_CWD_BYTES ||
-    request.cwd.startsWith("/") ||
-    (request.cwd !== "." &&
-      request.cwd.split("/").some((part) => part === ".." || part === "." || part === "")) ||
-    request.cwd.includes("\0")
+    requestedCwd !== undefined &&
+    (Buffer.byteLength(requestedCwd, "utf8") > MAX_WORKSPACE_CWD_BYTES ||
+      requestedCwd.startsWith("/") ||
+      (requestedCwd !== "." &&
+        requestedCwd.split("/").some((part) => part === ".." || part === "." || part === "")) ||
+      requestedCwd.includes("\0"))
   ) {
     throw new WorkspaceResourceError(
       "WORKSPACE_RESOURCE_INVALID",
@@ -91,15 +167,54 @@ function validateRequest(
   ) {
     throw new WorkspaceResourceError("WORKSPACE_POLICY_LIMIT", "Operation input exceeds its limit");
   }
-  if (
-    request.timeoutMs < 1 ||
-    request.timeoutMs >
-      Math.min(policy.maxOperationMs ?? CONNECTOR_MAX_TIMEOUT_MS, CONNECTOR_MAX_TIMEOUT_MS)
-  ) {
+  // A bounded command is killed at its timeout inside one request's horizon; a background command
+  // is bounded by a workspace-side lifetime instead. The two ceilings are different numbers for
+  // different jobs, and the refusal says which one the caller met.
+  const ceilingMs = request.background
+    ? Math.min(
+        policy.maxBackgroundOperationMs ?? DEFAULT_BACKGROUND_TIMEOUT_MS,
+        CONNECTOR_MAX_BACKGROUND_TIMEOUT_MS,
+      )
+    : Math.min(policy.maxOperationMs ?? CONNECTOR_MAX_TIMEOUT_MS, CONNECTOR_MAX_TIMEOUT_MS);
+  // A caller that names no duration gets the one its mode implies: a bounded command's ordinary
+  // default, a background command its whole ceiling. Otherwise background would mean "returns
+  // immediately and is killed in five minutes".
+  const timeoutMs =
+    request.timeoutMs ??
+    (request.background ? ceilingMs : Math.min(DEFAULT_BOUNDED_TIMEOUT_MS, ceilingMs));
+  if (timeoutMs < 1 || timeoutMs > ceilingMs) {
     throw new WorkspaceResourceError(
       "WORKSPACE_POLICY_LIMIT",
       "Operation timeout exceeds its limit",
+      request.background
+        ? `A background command may run for at most ${Math.floor(ceilingMs / 3_600_000)} hours.`
+        : `A command may run for at most ${Math.floor(ceilingMs / 1000)} seconds; start it in the background to run longer.`,
     );
+  }
+  if (request.session !== undefined && !/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(request.session)) {
+    throw new WorkspaceResourceError(
+      "WORKSPACE_RESOURCE_INVALID",
+      "Session name is invalid",
+      "A session name is 1 to 64 characters of letters, digits, hyphen or underscore.",
+    );
+  }
+  if (request.env !== undefined) {
+    const variables = Object.entries(request.env);
+    if (
+      variables.length > MAX_SESSION_VARIABLES ||
+      variables.some(
+        ([name, value]) =>
+          !/^[A-Za-z_][A-Za-z0-9_]{0,127}$/.test(name) ||
+          typeof value !== "string" ||
+          value.length > MAX_ENVIRONMENT_VALUE_LENGTH,
+      )
+    ) {
+      throw new WorkspaceResourceError(
+        "WORKSPACE_RESOURCE_INVALID",
+        "Session variables are invalid",
+        `At most ${MAX_SESSION_VARIABLES} variables, each a valid name with a value of at most ${MAX_ENVIRONMENT_VALUE_LENGTH} characters.`,
+      );
+    }
   }
   const stdoutLimitBytes = request.maxStdoutBytes ?? policy.maxOperationStdoutBytes ?? 1024 * 1024;
   const stderrLimitBytes = request.maxStderrBytes ?? policy.maxOperationStderrBytes ?? 256 * 1024;
@@ -118,7 +233,7 @@ function validateRequest(
       "Operation output exceeds its limit",
     );
   }
-  return { inputBytes, stdoutLimitBytes, stderrLimitBytes };
+  return { inputBytes, stdoutLimitBytes, stderrLimitBytes, timeoutMs };
 }
 
 export class WorkspaceOperationService {
@@ -136,6 +251,11 @@ export class WorkspaceOperationService {
       audit?: (event: WorkspaceOperationAuditEvent) => Promise<void> | void;
       transfers?: Pick<WorkspaceTransferService, "ingest" | "claimInput" | "release" | "consume">;
       nativeFetcher?: WorkspaceNativeReferenceFetcher;
+      /**
+       * Starts a workspace that is asleep so the work about to reach it does not fail. Absent where
+       * no lifecycle authority is wired, in which case a stopped workspace is refused as before.
+       */
+      lifecycle?: WorkspaceLifecycleStarter;
     },
   ) {}
 
@@ -233,6 +353,66 @@ export class WorkspaceOperationService {
     return (this.dependencies.now ?? Date.now)();
   }
 
+  /**
+   * Reads a range of a command's retained output. The read carries no operation of its own: it is a
+   * bounded control request fenced by the same ownership, generation and authorization rules as any
+   * other call against the operation, and the bytes disappear when the operation's remote outcome is
+   * cleaned up.
+   */
+  async readOutput(
+    userId: string,
+    operationId: string,
+    request: WorkspaceOperationOutputRequest,
+  ): Promise<WorkspaceOperationOutputResult> {
+    if (
+      !["stdout", "stderr"].includes(request.stream) ||
+      !Number.isSafeInteger(request.offset) ||
+      request.offset < 0 ||
+      !Number.isSafeInteger(request.length) ||
+      request.length < 1 ||
+      request.length > MAX_OUTPUT_RANGE_BYTES
+    ) {
+      throw new WorkspaceResourceError("WORKSPACE_POLICY_LIMIT", "Output range is invalid");
+    }
+    const { operation, workspace } = this.dependencies.repository.requireResultContext(
+      userId,
+      operationId,
+      this.dependencies.policy(),
+      this.now(),
+    );
+    if (operation.kind !== "exec") {
+      throw new WorkspaceResourceError(
+        "WORKSPACE_RESOURCE_INVALID",
+        "Only a command operation retains output",
+      );
+    }
+    await requireWorkspaceTransportAvailable(this.dependencies.transport);
+    const credential = await this.dependencies.credentials.getCredential(
+      userId,
+      operation.provider,
+    );
+    const result = await this.dependencies.transport.readOutput(
+      credential,
+      workspace,
+      operation,
+      request,
+    );
+    // Authority is proven again after the awaits, the way every other result-bearing call does.
+    this.dependencies.repository.requireResultContext(
+      userId,
+      operationId,
+      this.dependencies.policy(),
+      this.now(),
+    );
+    if ("state" in result) {
+      throw new WorkspaceResourceError(
+        "WORKSPACE_RESULT_EXPIRED",
+        "Retained operation output is no longer available",
+      );
+    }
+    return result;
+  }
+
   list(userId: string, workspaceId: string): WorkspaceOperationRecord[] {
     return this.dependencies.repository.listOwned(userId, workspaceId);
   }
@@ -252,16 +432,24 @@ export class WorkspaceOperationService {
 
   private async reserve(userId: string, workspaceId: string, request: WorkspaceExecRequest) {
     const policy = this.dependencies.policy();
-    const { inputBytes, stdoutLimitBytes, stderrLimitBytes } = validateRequest(request, policy);
-    const reservation = this.dependencies.repository.reserve({
-      userId,
-      resourceId: workspaceId,
-      inputBytes,
-      stdoutLimitBytes,
-      stderrLimitBytes,
-      deadlineAt: this.now() + request.timeoutMs,
+    const { inputBytes, stdoutLimitBytes, stderrLimitBytes, timeoutMs } = validateRequest(
+      request,
       policy,
-      now: this.now(),
+    );
+    const reserveOnce = () =>
+      this.dependencies.repository.reserve({
+        userId,
+        resourceId: workspaceId,
+        inputBytes,
+        stdoutLimitBytes,
+        stderrLimitBytes,
+        deadlineAt: this.now() + Math.min(timeoutMs, RESERVATION_DEADLINE_MS),
+        policy,
+        now: this.now(),
+      });
+    const reservation = await startOnUse(reserveOnce, this.dependencies.lifecycle, {
+      userId,
+      workspaceId,
     });
     if (reservation.outcome !== "reserved" || !reservation.operation || !reservation.workspace) {
       const code =
@@ -288,7 +476,7 @@ export class WorkspaceOperationService {
       await this.emit("terminal", this.dependencies.repository.getOwned(userId, operation.id)!);
       throw error;
     }
-    return { policy, stdoutLimitBytes, stderrLimitBytes, operation, workspace };
+    return { policy, stdoutLimitBytes, stderrLimitBytes, timeoutMs, operation, workspace };
   }
 
   private async executePrepared(
@@ -296,9 +484,18 @@ export class WorkspaceOperationService {
     request: WorkspaceExecRequest,
     prepared: Awaited<ReturnType<WorkspaceOperationService["reserve"]>>,
   ): Promise<WorkspaceOperationResponse> {
-    const { policy, stdoutLimitBytes, stderrLimitBytes, operation, workspace } = prepared;
+    const {
+      policy,
+      stdoutLimitBytes,
+      stderrLimitBytes,
+      timeoutMs: resolvedTimeoutMs,
+      operation,
+      workspace,
+    } = prepared;
     let terminalResult: WorkspaceOperationResult | null = null;
     let terminalEmitted = false;
+    let sessionUnavailable = false;
+    let sessionLimit: "context" | "sessions" | null = null;
     let remoteContacted = false;
     let claimedInput: WorkspaceTransferRecord | null = null;
     let preDispatchOutcome = "credential_unavailable_before_dispatch";
@@ -350,6 +547,9 @@ export class WorkspaceOperationService {
           randomUUID(),
           dispatchNow + Math.max(policy.claimLeaseMs, 60_000),
           dispatchNow,
+          // The command's own lifetime starts when it actually starts, so an undispatched
+          // reservation is reaped on the short deadline it was reserved with.
+          dispatchNow + resolvedTimeoutMs,
         )
       ) {
         if (claimedInput) this.dependencies.transfers?.release(claimedInput);
@@ -363,8 +563,10 @@ export class WorkspaceOperationService {
       if (claimedInput) await this.dependencies.transfers!.consume(claimedInput);
       const result = await this.dependencies.transport.execute(credential, workspace, operation, {
         ...materializedRequest,
+        timeoutMs: resolvedTimeoutMs,
         maxStdoutBytes: stdoutLimitBytes,
         maxStderrBytes: stderrLimitBytes,
+        maxRetainedBytes: retainedOutputBytes(policy),
       });
       this.dependencies.repository.recordConnectorRunning(
         userId,
@@ -372,16 +574,39 @@ export class WorkspaceOperationService {
         operation.resourceGeneration,
         this.now(),
       );
-      if (result.state === "running") {
+      if (result.state === "session_limit") {
+        // The stored record says why this operation ended, so a later audit read does not mistake
+        // it for a cancellation the caller asked for.
+        this.complete(userId, operation, terminalWithoutCommand("cancelled"), "session_limit");
+        terminalEmitted = true;
+        sessionLimit = result.limit;
+        await this.emit("terminal", this.dependencies.repository.getOwned(userId, operation.id)!);
+      } else if (result.state === "session_unavailable") {
+        // The command never ran, so the operation ends without one; the refusal is raised after
+        // this block so it reaches the caller instead of the recovery path below.
+        this.complete(
+          userId,
+          operation,
+          terminalWithoutCommand("cancelled"),
+          "session_unavailable",
+        );
+        terminalEmitted = true;
+        sessionUnavailable = true;
+        await this.emit("terminal", this.dependencies.repository.getOwned(userId, operation.id)!);
+      } else if (result.state === "running") {
         this.dependencies.repository.markRunning(
           userId,
           operation.id,
           operation.resourceGeneration,
           this.now(),
         );
-        terminalResult = await settleAfterDispatch(this.dependencies.delay, () =>
-          this.reconcile(userId, operation.id),
-        );
+        // A background command is expected to outlive this call, so waiting for it to settle would
+        // only delay the running answer the caller asked for.
+        terminalResult = request.background
+          ? null
+          : await settleAfterDispatch(this.dependencies.delay, () =>
+              this.reconcile(userId, operation.id),
+            );
         // Whichever path stored the outcome has already emitted its terminal event.
         terminalEmitted = terminalResult !== null;
       } else {
@@ -406,6 +631,22 @@ export class WorkspaceOperationService {
         );
         await this.emit("terminal", this.dependencies.repository.getOwned(userId, operation.id)!);
       }
+    }
+    if (sessionLimit) {
+      throw new WorkspaceResourceError(
+        "WORKSPACE_POLICY_LIMIT",
+        "Workspace session limit reached",
+        sessionLimit === "sessions"
+          ? "This workspace already holds the maximum number of open sessions. End one before opening another."
+          : "The session's stored context would exceed its ceiling. Pass fewer or smaller variables, or open a new session.",
+      );
+    }
+    if (sessionUnavailable) {
+      throw new WorkspaceResourceError(
+        "WORKSPACE_SESSION_UNAVAILABLE",
+        "Workspace session is unavailable",
+        "That session belongs to an earlier life of this workspace or was never opened. Open a new session for this workspace.",
+      );
     }
     const current = this.dependencies.repository.getOwned(userId, operation.id)!;
     if (terminalResult && !terminalEmitted) await this.emit("terminal", current);
@@ -478,7 +719,9 @@ export class WorkspaceOperationService {
           this.now(),
         );
         if (retained.state === "running") return null;
-        if (retained.state === "absent") {
+        if (retained.state === "absent" || retained.state === "interrupted") {
+          // Nothing of this operation survives in the workspace, either because it was cleaned up
+          // or because the workspace restarted; its stored result is already the whole truth.
           this.dependencies.repository.markRemoteFinalized(userId, operation.id, this.now());
           return null;
         }
@@ -494,13 +737,21 @@ export class WorkspaceOperationService {
         this.now(),
       );
       if (result.state === "running") return null;
+      if (result.state === "interrupted") {
+        // The workspace restarted under the command: its files survived, its process did not.
+        return await this.completeObserved(
+          userId,
+          operation,
+          terminalWithoutCommand("failed"),
+          "workspace_restarted",
+        );
+      }
       if (result.state === "absent") {
-        return await this.completeObserved(userId, operation, {
-          state: cancel ? "cancelled" : "failed",
-          stdout: "",
-          stderr: "",
-          exitCode: null,
-        });
+        return await this.completeObserved(
+          userId,
+          operation,
+          terminalWithoutCommand(cancel ? "cancelled" : "failed"),
+        );
       }
       return await this.completeObserved(userId, operation, result);
     } catch (error) {
@@ -620,13 +871,15 @@ export class WorkspaceOperationService {
           shouldCancel ? "remote_cancel_pending" : "remote_running",
           this.now(),
         );
-      } else if (result.state === "absent") {
-        const terminal = this.complete(operation.userId, operation, {
-          state: shouldCancel ? "cancelled" : "failed",
-          stdout: "",
-          stderr: "",
-          exitCode: null,
-        });
+      } else if (result.state === "interrupted" || result.state === "absent") {
+        const terminal = this.complete(
+          operation.userId,
+          operation,
+          terminalWithoutCommand(
+            result.state === "interrupted" ? "failed" : shouldCancel ? "cancelled" : "failed",
+          ),
+          result.state === "interrupted" ? "workspace_restarted" : undefined,
+        );
         if (terminal) {
           await this.emit(
             "terminal",
@@ -688,8 +941,9 @@ export class WorkspaceOperationService {
     userId: string,
     operation: WorkspaceOperationRecord,
     result: WorkspaceOperationResult,
+    lastOutcome?: string,
   ): Promise<WorkspaceOperationResult | null> {
-    const terminal = this.complete(userId, operation, result);
+    const terminal = this.complete(userId, operation, result, lastOutcome);
     if (terminal) {
       await this.emit("terminal", this.dependencies.repository.getOwned(userId, operation.id)!);
       return terminal;
@@ -702,6 +956,7 @@ export class WorkspaceOperationService {
     userId: string,
     operation: WorkspaceOperationRecord,
     result: WorkspaceOperationResult,
+    lastOutcome?: string,
   ): WorkspaceOperationResult | null {
     const now = this.now();
     return this.dependencies.repository.complete(
@@ -711,9 +966,20 @@ export class WorkspaceOperationService {
       result,
       operation.stdoutLimitBytes,
       operation.stderrLimitBytes,
-      now + this.dependencies.policy().cleanupDeadlineMs,
+      now + this.resultRetentionMs(operation),
       now,
+      lastOutcome,
     );
+  }
+
+  /**
+   * A result stays collectible at least as long as the command was allowed to take. A command that
+   * may run for hours cannot be one whose outcome disappears minutes after it ends, and an ordinary
+   * bounded command keeps the cleanup window it always had.
+   */
+  private resultRetentionMs(operation: WorkspaceOperationRecord): number {
+    const cleanupDeadlineMs = this.dependencies.policy().cleanupDeadlineMs;
+    return Math.max(cleanupDeadlineMs, operation.deadlineAt - operation.createdAt);
   }
 
   private projectRetainedResult(
@@ -724,14 +990,14 @@ export class WorkspaceOperationService {
     const stateMatches =
       result.state === operation.state ||
       (operation.state === "cancelled" && result.state === "succeeded");
-    const stdoutBytes = Buffer.byteLength(result.stdout);
-    const stderrBytes = Buffer.byteLength(result.stderr);
+    // The stored byte count is the complete retained size, so a re-observed result must agree with
+    // it while its payload stays within the response bounds.
     if (
       !stateMatches ||
       result.exitCode !== operation.exitCode ||
-      stdoutBytes > operation.stdoutLimitBytes ||
-      stderrBytes > operation.stderrLimitBytes ||
-      stdoutBytes + stderrBytes !== operation.outputBytes
+      Buffer.byteLength(result.stdout) > operation.stdoutLimitBytes ||
+      Buffer.byteLength(result.stderr) > operation.stderrLimitBytes ||
+      result.stdoutTotalBytes + result.stderrTotalBytes !== operation.outputBytes
     ) {
       return null;
     }

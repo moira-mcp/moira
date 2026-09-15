@@ -283,7 +283,9 @@ describe("recorded route of real runs", () => {
     });
     await run.step();
     await run.step({ health_outcome: "external_blocker", progress_intake_outcome: "Blocked" });
-    await run.step({ blocker_decision: "abort", progress_intake_outcome: "Aborted" });
+    // Ending the whole run is an explicit decision of its own in this flow; aborting a step is not
+    // one of its values.
+    await run.step({ blocker_decision: "end_workflow", progress_intake_outcome: "Ended" });
 
     const execution = await run.execution();
     expect(execution.status).toBe("completed");

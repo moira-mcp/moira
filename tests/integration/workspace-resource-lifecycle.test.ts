@@ -12,6 +12,7 @@ import {
   WorkspaceResourceError,
   WorkspaceResourceRepository,
   WorkspaceResourceService,
+  evaluateWorkspaceResourcePolicy,
   type WorkspaceCreateProviderResult,
   type WorkspaceMachine,
   type WorkspaceProviderAdapter,
@@ -43,6 +44,7 @@ const policy: WorkspaceResourcePolicy = {
   cleanupDeadlineMs: 30_000,
   claimLeaseMs: 5_000,
   reconcileIntervalMs: 60_000,
+  startWaitMs: 60_000,
 };
 
 class FakeProvider implements WorkspaceProviderAdapter {
@@ -137,9 +139,13 @@ class FakeProvider implements WorkspaceProviderAdapter {
     if (this.resource) this.resource = { ...this.resource, state: "shutdown" };
     return "accepted" as const;
   }
+  /** A provider that accepts a start without the workspace becoming available yet. */
+  startStaysPending = false;
   async startExact() {
     this.startCalls();
-    if (this.resource) this.resource = { ...this.resource, state: "available" };
+    if (this.resource && !this.startStaysPending) {
+      this.resource = { ...this.resource, state: "available" };
+    }
     this.startObservation?.();
     if (this.startGate) await this.startGate;
     return "accepted" as const;
@@ -217,6 +223,9 @@ function fixture(policyOverrides: Partial<WorkspaceResourcePolicy> = {}) {
       },
       policy: () => effectivePolicy,
       now: () => currentTime,
+      delay: async (milliseconds) => {
+        currentTime += milliseconds;
+      },
       audit: (event) => {
         audits.push(event);
       },
@@ -1020,6 +1029,37 @@ describe("durable persistent workspace lifecycle", () => {
     }
   });
 
+  test("lets one user hold several workspaces under the shipped ceilings", async () => {
+    // The shipped ceilings are the subject: a value that was merely raised but still refuses the
+    // second workspace, or a refusal that repeats the generic quota sentence, fails here.
+    const shipped = evaluateWorkspaceResourcePolicy(() => undefined);
+    const value = fixture({
+      maxActivePerUser: shipped.maxActivePerUser,
+      maxActiveGlobal: shipped.maxActiveGlobal,
+      createThrottleMs: 0,
+    });
+    try {
+      expect(shipped.maxActivePerUser).toBeGreaterThan(1);
+      for (let index = 0; index < shipped.maxActivePerUser; index += 1) {
+        value.provider.resourceName = `silver-space-${index}`;
+        const created = await value.service.create("user-1", "301", `refs/heads/task-${index}`);
+        expect(created.resource.state).toBe("usable");
+      }
+      expect(value.service.listResources("user-1")).toHaveLength(shipped.maxActivePerUser);
+
+      value.provider.resourceName = "silver-space-over";
+      await expect(
+        value.service.create("user-1", "301", "refs/heads/one-too-many"),
+      ).rejects.toMatchObject({
+        code: "WORKSPACE_POLICY_LIMIT",
+        detail: expect.stringContaining(String(shipped.maxActivePerUser)),
+      });
+      expect(value.provider.createCalls).toHaveBeenCalledTimes(shipped.maxActivePerUser);
+    } finally {
+      value.sqlite.close();
+    }
+  });
+
   test("distinguishes create throttle, per-user concurrency and global concurrency", async () => {
     const throttled = fixture({
       maxActivePerUser: 2,
@@ -1033,7 +1073,10 @@ describe("durable persistent workspace lifecycle", () => {
       throttled.provider.createOutcome = "accepted";
       await expect(
         throttled.service.create("user-1", "301", "refs/heads/main"),
-      ).rejects.toMatchObject({ code: "WORKSPACE_POLICY_LIMIT" });
+      ).rejects.toMatchObject({
+        code: "WORKSPACE_POLICY_LIMIT",
+        detail: expect.stringContaining("throttled"),
+      });
     } finally {
       throttled.sqlite.close();
     }
@@ -1043,7 +1086,10 @@ describe("durable persistent workspace lifecycle", () => {
       await perUser.service.create("user-1", "301", "refs/heads/main");
       await expect(
         perUser.service.create("user-1", "301", "refs/heads/other"),
-      ).rejects.toMatchObject({ code: "WORKSPACE_POLICY_LIMIT" });
+      ).rejects.toMatchObject({
+        code: "WORKSPACE_POLICY_LIMIT",
+        detail: expect.stringContaining("per-user ceiling"),
+      });
     } finally {
       perUser.sqlite.close();
     }
@@ -1054,9 +1100,16 @@ describe("durable persistent workspace lifecycle", () => {
     });
     try {
       await global.service.create("user-1", "301", "refs/heads/main");
-      await expect(global.service.create("user-2", "302", "refs/heads/main")).rejects.toMatchObject(
-        { code: "WORKSPACE_POLICY_LIMIT" },
+      const instanceRefusal = await global.service.create("user-2", "302", "refs/heads/main").then(
+        () => null,
+        (error: WorkspaceResourceError) => error,
       );
+      expect(instanceRefusal).toMatchObject({
+        code: "WORKSPACE_POLICY_LIMIT",
+        detail: expect.stringContaining("instance"),
+      });
+      // The refused caller learns that the instance is full, never who occupies it.
+      expect(instanceRefusal?.detail).not.toMatch(/user-1|301|owner\/repository/);
     } finally {
       global.sqlite.close();
     }
@@ -1296,6 +1349,71 @@ describe("durable persistent workspace lifecycle", () => {
       });
       expect(value.provider.stopCalls).not.toHaveBeenCalled();
       expect(value.provider.deleteCalls).not.toHaveBeenCalled();
+    } finally {
+      value.sqlite.close();
+    }
+  });
+
+  test("wakes a stopped workspace for the work that needs it and refuses one that cannot wake", async () => {
+    const value = fixture();
+    try {
+      const created = await value.service.create("user-1", "301", "refs/heads/main");
+      await value.service.stopWorkspace("user-1", created.resource.id);
+      // The required state is that the command's own call woke the workspace. The wrong state that
+      // looks the same is a workspace that happened to be awake already, so the stopped state is
+      // observed immediately before the call and the provider's start is counted.
+      expect(value.repository.getOwned("user-1", created.resource.id)?.state).toBe("stopped");
+      const startsBefore = value.provider.startCalls.mock.calls.length;
+
+      const running = await value.service.ensureRunning("user-1", created.resource.id);
+
+      expect(running).toMatchObject({ state: "usable", desiredState: "running" });
+      expect(value.provider.startCalls.mock.calls.length).toBe(startsBefore + 1);
+
+      // A workspace that is already usable is not started again.
+      await value.service.ensureRunning("user-1", created.resource.id);
+      expect(value.provider.startCalls.mock.calls.length).toBe(startsBefore + 1);
+
+      await value.service.deleteWorkspace(
+        "user-1",
+        created.resource.id,
+        value.repository.getOwned("user-1", created.resource.id)!.generation,
+      );
+      const startsAfterDelete = value.provider.startCalls.mock.calls.length;
+      await expect(
+        value.service.ensureRunning("user-1", created.resource.id),
+      ).rejects.toMatchObject({
+        code: "WORKSPACE_NOT_RUNNING",
+        detail: expect.stringContaining("deleted"),
+      });
+      expect(value.provider.startCalls.mock.calls.length).toBe(startsAfterDelete);
+    } finally {
+      value.sqlite.close();
+    }
+  });
+
+  test("refuses by the wait it exhausted when a started workspace never becomes usable", async () => {
+    const value = fixture({ startWaitMs: 120_000, reconcileIntervalMs: 30_000 });
+    try {
+      const created = await value.service.create("user-1", "301", "refs/heads/main");
+      await value.service.stopWorkspace("user-1", created.resource.id);
+      value.provider.startStaysPending = true;
+
+      await expect(
+        value.service.ensureRunning("user-1", created.resource.id),
+      ).rejects.toMatchObject({
+        code: "WORKSPACE_START_TIMEOUT",
+        detail: expect.stringContaining("120 seconds"),
+      });
+
+      // The wait is bounded by time, and so is what it costs the provider: convergence re-asserts
+      // the start each interval, and four intervals of thirty seconds fit inside two minutes while
+      // the fifth does not, so one caller cannot turn one command into unbounded provider traffic.
+      expect(value.provider.startCalls.mock.calls.length).toBe(5);
+      expect(value.repository.getOwned("user-1", created.resource.id)).toMatchObject({
+        desiredState: "running",
+        state: "start_pending",
+      });
     } finally {
       value.sqlite.close();
     }

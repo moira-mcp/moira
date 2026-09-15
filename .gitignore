@@ -109,3 +109,5 @@ issues-todo.json
 # Load tests
 load-tests/results/
 moira-ws/
+
+data-self-host/

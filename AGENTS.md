@@ -106,6 +106,47 @@ Test databases:
 If a script does not support what you need, say so and propose extending the
 script — do not work around it with direct `npx` calls.
 
+### Before you push
+
+```bash
+npm run verify           # the gate, minus anything that needs Docker
+npm run verify:docker    # the Docker half, in the environment CI uses
+```
+
+`npm run verify` runs what CI runs, in CI's order, and stops at the first failure: ESLint, the
+Prettier check, the unit suite, the release-policy check and the integration suite — plus the
+workflow suite, which CI does not run at all, so a bundled-flow regression is only ever caught
+here. Push only after it passes. `npm run fix` writes formatting; it is not a check, and a tree
+where it was never run fails CI's Prettier step.
+
+`npm run verify:docker` builds the image and runs the Docker-backed half: the self-host
+reconciliation lifecycle, the API and MCP tool suites against the primary container, and the two
+self-host-only API files against a self-host container. Run it when the change touches anything the
+container serves — the MCP tools, the HTTP API, the Dockerfile, migrations, startup or the bundled
+catalog — and after any change to a published tool contract. It takes several minutes and leaves no
+container behind.
+
+Two things have repeatedly turned a finished change into a red CI run:
+
+- **The local and CI deployment modes differ.** `.env.local` is `self-host`; `.env.ci` is `saas`,
+  and CI copies it over `.env` in every job and over `.env.local` as well in the Docker job. So
+  `npm run test:api` in a
+  contributor's checkout fails admin-surface assertions with 403 that CI never sees, and a green
+  local API run proves nothing about CI either. `npm run verify:docker` is the comparable one: it
+  selects the CI environment explicitly instead of overwriting yours.
+- **CI runs on Linux; your machine probably does not.** A test that reaches the host — `/proc`, file
+  modes, path case, a platform-specific branch in the code it drives — can pass locally and fail
+  there. The workspace supervisor's environment identity is the live example: on Linux it comes from
+  the kernel and the `MOIRA_ENVIRONMENT_ID` override is deliberately ignored, so a test that changed
+  that variable to simulate a restart passed on macOS and failed in CI. Drive such behaviour through
+  state the code reads on every platform, or run the check in a Linux container before pushing.
+- **Every branch with an open pull request must be green on its own.** CI runs the base pull request
+  too, so a stacked branch can be green while the branch under it is red — a defect whose fix lives
+  one commit further up is still a red base. After rebasing a stack, run `npm run verify` on each
+  branch that has a pull request, not only on the tip. Note also that `ci.yml` triggers only on pull
+  requests whose base is `master`: a pull request stacked on another branch gets no CI at all until
+  its base merges and GitHub retargets it, so until then the local gate is the only check it has.
+
 ### Test Quality Rules
 
 Tests are the only regression guard between sessions. Every test must verify

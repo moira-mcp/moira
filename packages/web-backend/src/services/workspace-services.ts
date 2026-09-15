@@ -231,6 +231,9 @@ function initializeWorkspaceServices(): WorkspaceServices {
       policy: getWorkspaceResourcePolicy,
       transfers: transfer,
       nativeFetcher,
+      lifecycle: {
+        ensureRunning: (userId, workspaceId) => resource!.ensureRunning(userId, workspaceId),
+      },
       audit: operationAudit(auditRepository),
     });
     file = new WorkspaceFileService({
@@ -247,6 +250,9 @@ function initializeWorkspaceServices(): WorkspaceServices {
       policy: getWorkspaceResourcePolicy,
       transfers: transfer,
       nativeFetcher,
+      lifecycle: {
+        ensureRunning: (userId, workspaceId) => resource!.ensureRunning(userId, workspaceId),
+      },
       audit: operationAudit(auditRepository),
     });
   }

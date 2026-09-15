@@ -186,6 +186,8 @@ export class WorkspaceResourceService {
       >;
       policy: () => WorkspaceResourcePolicy;
       now?: () => number;
+      /** Injected so waiting for a start costs no real time in tests. */
+      delay?: (milliseconds: number) => Promise<void>;
       audit?: (event: WorkspaceResourceAuditEvent) => Promise<void> | void;
       controlAudit?: (event: WorkspaceControlAuditEvent) => Promise<void> | void;
     },
@@ -389,7 +391,9 @@ export class WorkspaceResourceService {
       policy,
       this.now(),
     );
-    if (capacity) throw new WorkspaceResourceError("WORKSPACE_POLICY_LIMIT", capacity.reason);
+    if (capacity) {
+      throw new WorkspaceResourceError("WORKSPACE_POLICY_LIMIT", capacity.reason, capacity.detail);
+    }
     const health = await provider.health();
     if (health.state !== "available") {
       throw new WorkspaceResourceError(
@@ -442,6 +446,7 @@ export class WorkspaceResourceService {
           ? "WORKSPACE_PROVIDER_DISABLED"
           : "WORKSPACE_POLICY_LIMIT",
         reservation.reason,
+        reservation.outcome === "limit" ? reservation.detail : undefined,
       );
     }
     const initial = reservation.resource;
@@ -658,6 +663,56 @@ export class WorkspaceResourceService {
       throw new WorkspaceResourceError("WORKSPACE_NOT_FOUND", "Workspace was not found");
     }
     return workspace;
+  }
+
+  /**
+   * Make a workspace usable for work that is about to reach it. A workspace that is already usable is
+   * returned untouched; one that is merely asleep is started and waited for, because an agent's
+   * command should not fail for a workspace that went idle between two calls. The wait is bounded by
+   * policy and a workspace that cannot start is refused by what it actually is.
+   */
+  async ensureRunning(userId: string, resourceId: string): Promise<WorkspaceResourceRecord> {
+    const current = this.getWorkspace(userId, resourceId);
+    if (current.state === "usable" && current.desiredState === "running") return current;
+    if (
+      current.retentionPolicy !== "persistent" ||
+      ["deleted", "rejected", "delete_pending", "cleanup_pending"].includes(current.state) ||
+      current.desiredState === "deleted"
+    ) {
+      throw new WorkspaceResourceError(
+        "WORKSPACE_NOT_RUNNING",
+        "Workspace cannot be started",
+        `This workspace is ${current.state} and cannot be started; create a new one.`,
+      );
+    }
+    const started = await this.startWorkspace(userId, resourceId);
+    if (started.state === "usable") return started;
+    const policy = this.dependencies.policy();
+    const deadline = this.now() + policy.startWaitMs;
+    const interval = Math.max(1000, Math.min(policy.reconcileIntervalMs, policy.startWaitMs));
+    while (this.now() < deadline) {
+      await this.delay(interval);
+      const pending = this.getWorkspace(userId, resourceId);
+      if (pending.state === "usable" && pending.desiredState === "running") return pending;
+      if (pending.desiredState !== "running") break;
+      await this.applyPersistentLifecycle(pending);
+      const observed = this.getWorkspace(userId, resourceId);
+      if (observed.state === "usable" && observed.desiredState === "running") return observed;
+    }
+    const final = this.getWorkspace(userId, resourceId);
+    if (final.state === "usable" && final.desiredState === "running") return final;
+    throw new WorkspaceResourceError(
+      "WORKSPACE_START_TIMEOUT",
+      "Workspace did not become usable in time",
+      `The workspace was started but was not usable within ${Math.floor(
+        policy.startWaitMs / 1000,
+      )} seconds; retry the command once it has finished starting.`,
+    );
+  }
+
+  private async delay(milliseconds: number): Promise<void> {
+    if (this.dependencies.delay) return this.dependencies.delay(milliseconds);
+    await new Promise((resolveValue) => setTimeout(resolveValue, milliseconds));
   }
 
   async startWorkspace(userId: string, resourceId: string): Promise<WorkspaceResourceRecord> {

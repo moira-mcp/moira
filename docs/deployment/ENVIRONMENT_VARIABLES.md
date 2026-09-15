@@ -173,8 +173,8 @@ docker compose --profile workspaces up -d
 | `WORKSPACE_MAX_CPU_CORES`                      |       4 | Maximum selected Linux machine CPU cores                    |
 | `WORKSPACE_MAX_MEMORY_GB`                      |       8 | Maximum selected machine memory                             |
 | `WORKSPACE_MAX_STORAGE_GB`                     |      32 | Maximum selected machine storage                            |
-| `WORKSPACE_MAX_ACTIVE_PER_USER`                |       1 | Active resource reservations per user; maximum 64           |
-| `WORKSPACE_MAX_ACTIVE_GLOBAL`                  |       4 | Instance-wide active resource reservations; maximum 1024    |
+| `WORKSPACE_MAX_ACTIVE_PER_USER`                |       4 | Active resource reservations per user; maximum 64           |
+| `WORKSPACE_MAX_ACTIVE_GLOBAL`                  |      16 | Instance-wide active resource reservations; maximum 1024    |
 | `WORKSPACE_CREATE_THROTTLE_SECONDS`            |      60 | Minimum interval between creation reservations              |
 | `WORKSPACE_REMOTE_TTL_MINUTES`                 |     120 | Codespaces idle timeout requested at creation; minimum 5    |
 | `WORKSPACE_PERSISTENT_RETENTION_DAYS`          |      30 | Provider retention requested for stopped workspaces; max 30 |
@@ -182,12 +182,15 @@ docker compose --profile workspaces up -d
 | `WORKSPACE_CLEANUP_DEADLINE_MINUTES`           |      15 | Lifecycle cleanup deadline and result retention             |
 | `WORKSPACE_CLAIM_LEASE_SECONDS`                |      30 | Cross-process reconciliation claim lease                    |
 | `WORKSPACE_RECONCILE_INTERVAL_SECONDS`         |      30 | Background reconciliation interval                          |
-| `WORKSPACE_MAX_CONCURRENT_OPERATIONS_PER_USER` |       2 | Concurrent direct operations per user; maximum 32           |
-| `WORKSPACE_MAX_CONCURRENT_OPERATIONS_GLOBAL`   |      20 | Instance-wide concurrent direct operations; maximum 256     |
+| `WORKSPACE_START_WAIT_SECONDS`                 |     180 | Wait for a workspace an operation started; 5 to 900         |
+| `WORKSPACE_MAX_CONCURRENT_OPERATIONS_PER_USER` |       8 | Concurrent direct operations per user; maximum 32           |
+| `WORKSPACE_MAX_CONCURRENT_OPERATIONS_GLOBAL`   |      32 | Instance-wide concurrent direct operations; maximum 256     |
 | `WORKSPACE_MAX_OPERATION_INPUT_KB`             |    1024 | Direct-operation stdin; maximum 4096 KiB                    |
-| `WORKSPACE_MAX_OPERATION_STDOUT_KB`            |    1024 | Stdout per operation; maximum 8192 KiB                      |
-| `WORKSPACE_MAX_OPERATION_STDERR_KB`            |     256 | Stderr per operation; maximum 8192 KiB                      |
-| `WORKSPACE_MAX_OPERATION_SECONDS`              |     900 | Direct-operation duration; maximum 900 seconds              |
+| `WORKSPACE_MAX_OPERATION_STDOUT_KB`            |    1024 | Stdout carried by one answer; maximum 8192 KiB              |
+| `WORKSPACE_MAX_OPERATION_STDERR_KB`            |     256 | Stderr carried by one answer; maximum 8192 KiB              |
+| `WORKSPACE_MAX_RETAINED_OUTPUT_MB`             |      64 | Retained output per stream, in the workspace; maximum 4096  |
+| `WORKSPACE_MAX_OPERATION_SECONDS`              |     900 | Bounded-command duration; maximum 900 seconds               |
+| `WORKSPACE_MAX_BACKGROUND_OPERATION_HOURS`     |       4 | Background-command duration; maximum 24 hours               |
 | `WORKSPACE_MAX_TRANSFER_FILE_MB`               |       4 | File/native payload ceiling; maximum 4 MiB                  |
 | `WORKSPACE_MAX_TRANSFER_TOTAL_MB_PER_USER`     |     100 | Live private-transfer bytes per user; maximum 1024 MiB      |
 | `WORKSPACE_MAX_TRANSFER_TOTAL_MB_GLOBAL`       |    1024 | Instance live private-transfer bytes; maximum 16384 MiB     |
@@ -454,8 +457,8 @@ WORKSPACE_CODESPACES_ENABLED=true
 WORKSPACE_MAX_CPU_CORES=4
 WORKSPACE_MAX_MEMORY_GB=8
 WORKSPACE_MAX_STORAGE_GB=32
-WORKSPACE_MAX_ACTIVE_PER_USER=1
-WORKSPACE_MAX_ACTIVE_GLOBAL=4
+WORKSPACE_MAX_ACTIVE_PER_USER=4
+WORKSPACE_MAX_ACTIVE_GLOBAL=16
 WORKSPACE_CREATE_THROTTLE_SECONDS=60
 WORKSPACE_REMOTE_TTL_MINUTES=120
 WORKSPACE_PERSISTENT_RETENTION_DAYS=30
@@ -463,12 +466,15 @@ WORKSPACE_CREATE_DEADLINE_MINUTES=15
 WORKSPACE_CLEANUP_DEADLINE_MINUTES=15
 WORKSPACE_CLAIM_LEASE_SECONDS=30
 WORKSPACE_RECONCILE_INTERVAL_SECONDS=30
-WORKSPACE_MAX_CONCURRENT_OPERATIONS_PER_USER=2
-WORKSPACE_MAX_CONCURRENT_OPERATIONS_GLOBAL=20
+WORKSPACE_START_WAIT_SECONDS=180
+WORKSPACE_MAX_CONCURRENT_OPERATIONS_PER_USER=8
+WORKSPACE_MAX_CONCURRENT_OPERATIONS_GLOBAL=32
 WORKSPACE_MAX_OPERATION_INPUT_KB=1024
 WORKSPACE_MAX_OPERATION_STDOUT_KB=1024
 WORKSPACE_MAX_OPERATION_STDERR_KB=256
+WORKSPACE_MAX_RETAINED_OUTPUT_MB=64
 WORKSPACE_MAX_OPERATION_SECONDS=900
+WORKSPACE_MAX_BACKGROUND_OPERATION_HOURS=4
 WORKSPACE_MAX_TRANSFER_FILE_MB=4
 WORKSPACE_MAX_TRANSFER_TOTAL_MB_PER_USER=100
 WORKSPACE_MAX_TRANSFER_TOTAL_MB_GLOBAL=1024

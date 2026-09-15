@@ -35,6 +35,7 @@ const policy: WorkspaceResourcePolicy = {
   cleanupDeadlineMs: 30_000,
   claimLeaseMs: 5_000,
   reconcileIntervalMs: 60_000,
+  startWaitMs: 60_000,
   maxConcurrentOperationsGlobal: 20,
 };
 const config: WorkspaceGitHubConfigStatus = {

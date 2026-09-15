@@ -27,7 +27,7 @@ function truncateUtf8(value: string, maximumBytes: number): string {
   return "";
 }
 
-interface ReserveOperationResult {
+export interface ReserveOperationResult {
   outcome: "reserved" | "not_found" | "not_running" | "disabled" | "busy";
   operation?: WorkspaceOperationRecord;
   workspace?: WorkspaceResourceRecord;
@@ -371,6 +371,11 @@ export class WorkspaceOperationRepository {
     );
   }
 
+  /**
+   * A reservation is short-lived by design: it is reaped by its own deadline if the process that
+   * made it never dispatches. The command's real lifetime is granted here, once it is actually
+   * running, so a crash before dispatch never holds a slot for the length of a long command.
+   */
   beginDispatch(
     userId: string,
     operationId: string,
@@ -378,12 +383,14 @@ export class WorkspaceOperationRepository {
     claimId: string,
     claimExpiresAt: number,
     now: number,
+    deadlineAt?: number,
   ): boolean {
     return (
       this.sqlite
         .prepare(
           `UPDATE workspaceOperation SET state = 'reconcile_pending',
-           lastOutcome = 'dispatch_submitted', claimId = ?, claimExpiresAt = ?, updatedAt = ?
+           lastOutcome = 'dispatch_submitted', claimId = ?, claimExpiresAt = ?, updatedAt = ?,
+           deadlineAt = MAX(deadlineAt, ?)
            WHERE id = ? AND userId = ? AND resourceGeneration = ? AND state = 'reserved'
              AND deadlineAt > ?
              AND EXISTS (SELECT 1 FROM workspaceResource resource
@@ -402,8 +409,16 @@ export class WorkspaceOperationRepository {
                WHERE control.disabled = 1
                  AND control.scope IN ('global', 'provider:' || workspaceOperation.provider))`,
         )
-        .run(claimId, claimExpiresAt, now, operationId, userId, expectedGeneration, now).changes ===
-      1
+        .run(
+          claimId,
+          claimExpiresAt,
+          now,
+          deadlineAt ?? 0,
+          operationId,
+          userId,
+          expectedGeneration,
+          now,
+        ).changes === 1
     );
   }
 
@@ -434,6 +449,7 @@ export class WorkspaceOperationRepository {
     maxStderrBytes: number,
     resultExpiresAt: number,
     now: number,
+    lastOutcome = "remote_terminal",
   ): WorkspaceOperationResult | null {
     const stdout = truncateUtf8(result.stdout, maxStdoutBytes);
     const stderr = truncateUtf8(result.stderr, maxStderrBytes);
@@ -452,16 +468,18 @@ export class WorkspaceOperationRepository {
     const changed = this.sqlite
       .prepare(
         `UPDATE workspaceOperation SET state = ?, outputBytes = ?, exitCode = ?,
-           resultExpiresAt = ?, lastOutcome = 'remote_terminal',
+           resultExpiresAt = ?, lastOutcome = ?,
            claimId = NULL, claimExpiresAt = NULL, updatedAt = ?
            WHERE id = ? AND userId = ? AND resourceGeneration = ?
              AND state IN ('reserved', 'running', 'cancel_pending', 'reconcile_pending')`,
       )
       .run(
         terminalState,
-        Buffer.byteLength(stdout) + Buffer.byteLength(stderr),
+        // The recorded size is the command's complete output, not the part this answer carried.
+        result.stdoutTotalBytes + result.stderrTotalBytes,
         result.exitCode,
         resultExpiresAt,
+        lastOutcome,
         now,
         operationId,
         userId,

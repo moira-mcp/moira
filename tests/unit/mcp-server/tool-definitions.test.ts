@@ -199,10 +199,17 @@ describe("MCP tool definitions", () => {
     expect(publishedExec.required).toEqual(["workspace_id"]);
     expect(Object.keys(publishedExec.properties).sort()).toEqual([
       "argv",
+      "background",
+      "cancel",
       "cwd",
+      "env",
       "max_stderr_bytes",
       "max_stdout_bytes",
       "operation_id",
+      "script",
+      "session",
+      "session_end",
+      "session_start",
       "stdin_file",
       "stdin_text",
       "timeout_seconds",

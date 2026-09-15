@@ -639,9 +639,46 @@ const workspaceExecStartSchema = z
           .max(16 * 1024),
       )
       .min(1)
-      .max(128),
-    cwd: z.string().max(4096).default("."),
-    timeout_seconds: z.number().int().min(1).max(900).default(300),
+      .max(128)
+      .optional(),
+    script: z
+      .string()
+      .min(1)
+      .max(64 * 1024)
+      .optional()
+      .describe("Shell script run inside a session; what it leaves behind is carried forward"),
+    session_end: z
+      .boolean()
+      .default(false)
+      .describe("End the named session after this call, or alone with no command"),
+    // Absent means the session's working directory, or the repository root without a session.
+    cwd: z.string().max(4096).optional(),
+    session: z
+      .string()
+      .regex(/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/)
+      .optional()
+      .describe("Continue the working directory and variables of this named session"),
+    session_start: z
+      .boolean()
+      .default(false)
+      .describe("Open the named session instead of continuing it"),
+    env: z
+      .record(z.string().regex(/^[A-Za-z_][A-Za-z0-9_]{0,127}$/), z.string().max(4096))
+      .optional()
+      .describe("Variables for this command, and for later commands in the same session"),
+    // Absent means the mode's own default: an ordinary bounded duration, or the whole background
+    // ceiling. The upper value is that ceiling; a bounded command is refused above its own, smaller
+    // one with a message naming it.
+    timeout_seconds: z
+      .number()
+      .int()
+      .min(1)
+      .max(24 * 60 * 60)
+      .optional(),
+    background: z
+      .boolean()
+      .default(false)
+      .describe("Keep the command running past this request; collect it later by operation_id"),
     max_stdout_bytes: z
       .number()
       .int()
@@ -660,7 +697,9 @@ const workspaceExecStartSchema = z
 export const workspaceExecRequestSchema = z.union([
   workspaceExecStartSchema.extend({ stdin_text: z.string().optional() }),
   workspaceExecStartSchema.extend({ stdin_file: workspaceNativeFileSchema }),
-  workspaceOperationResumeSchema,
+  // Resuming a command also stops one: the same operation identity, asked to end instead of to
+  // report. A background command is stopped this way.
+  workspaceOperationResumeSchema.extend({ cancel: z.boolean().default(false) }),
 ]);
 
 export const workspaceStatRequestSchema = z.union([
@@ -687,18 +726,27 @@ export const workspaceSearchRequestSchema = z.union([
   workspaceOperationResumeSchema,
 ]);
 
+const workspaceReadRangeSchema = z.object({
+  offset: z.number().int().min(0).default(0),
+  length: z
+    .number()
+    .int()
+    .min(1)
+    .max(4 * 1024 * 1024)
+    .default(64 * 1024),
+});
+
 export const workspaceReadRequestSchema = z.union([
-  z
-    .object({
+  workspaceReadRangeSchema
+    .extend({ workspace_id: workspaceIdSchema, path: workspacePathSchema })
+    .strict(),
+  // Retained command output: the same range read addressed to a command instead of a file. It is
+  // matched before the resume form, which carries no stream.
+  workspaceReadRangeSchema
+    .extend({
       workspace_id: workspaceIdSchema,
-      path: workspacePathSchema,
-      offset: z.number().int().min(0).default(0),
-      length: z
-        .number()
-        .int()
-        .min(1)
-        .max(4 * 1024 * 1024)
-        .default(64 * 1024),
+      operation_id: z.string().uuid().describe("Command operation whose retained output is read"),
+      stream: z.enum(["stdout", "stderr"]),
     })
     .strict(),
   workspaceOperationResumeSchema,

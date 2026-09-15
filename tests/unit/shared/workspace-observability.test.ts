@@ -39,6 +39,7 @@ const policy: WorkspaceResourcePolicy = {
   cleanupDeadlineMs: 30_000,
   claimLeaseMs: 5_000,
   reconcileIntervalMs: 30_000,
+  startWaitMs: 60_000,
   maxConcurrentOperationsGlobal: 20,
   maxTransferBytesGlobal: 1024 ** 3,
 };
@@ -312,11 +313,17 @@ describe("workspace observability", () => {
       2_500,
     );
     recordWorkspaceRejection("WORKSPACE_POLICY_LIMIT");
+    recordWorkspaceRejection("WORKSPACE_START_TIMEOUT");
     recordWorkspaceRejection("NOT_A_CLOSED_CODE");
 
     const rendered = await metricsRegistry.metrics();
     expect(rendered).toContain(
       'moira_workspace_connection_events_total{provider="github-codespaces",action="refresh_failed"} 1',
+    );
+    // A workspace that did not start in time is a bounded refusal like the others, so it is
+    // counted under its own closed label rather than disappearing as an unknown code.
+    expect(rendered).toContain(
+      'moira_workspace_rejections_total{code="WORKSPACE_START_TIMEOUT"} 1',
     );
     expect(rendered).not.toMatch(/connection-private|provider_rejected_refresh/);
     expect(rendered).toContain(

@@ -24,6 +24,17 @@ import { Worker } from "node:worker_threads";
 const VERSION = 1;
 const MAX_CONTROL_BYTES = 8 * 1024 * 1024;
 const MAX_RESULT_BYTES = 8 * 1024 * 1024;
+// Complete output is retained beside the result, so a range read is bounded like a file read and
+// the retained streams themselves are bounded by what the caller declares, never by the payload.
+// A command runs detached inside the workspace, so its own timer is bounded by the workspace's
+// usefulness rather than by any request. Job requests remain bounded separately by the connector.
+const MAX_OPERATION_TIMEOUT_MS = 24 * 60 * 60_000;
+const MAX_RETAINED_OUTPUT_BYTES = 4 * 1024 * 1024 * 1024;
+const MAX_OUTPUT_RANGE_BYTES = 4 * 1024 * 1024;
+const OUTPUT_STREAMS = new Map([
+  ["stdout", "stdout.log"],
+  ["stderr", "stderr.log"],
+]);
 const MARKER = /^moira-op-[a-f0-9]{32}$/;
 const REPOSITORY = /^[A-Za-z0-9_.-]{1,100}\/([A-Za-z0-9_.-]{1,100})$/;
 const TERMINAL = new Set(["succeeded", "failed", "cancelled", "timed_out"]);
@@ -48,6 +59,20 @@ const STATE_ROOT = process.env.MOIRA_OPERATION_STATE_DIR
   ? resolve(process.env.MOIRA_OPERATION_STATE_DIR)
   : join(homedir(), ".local", "state", "moira", "operations");
 const WORKSPACES_ROOT = resolve(process.env.MOIRA_WORKSPACES_ROOT || "/workspaces");
+// A session outlives the commands that use it, so it lives beside the operation directories rather
+// than inside one of them, and it is removed with the workspace rather than with an operation.
+const SESSION_ROOT = join(STATE_ROOT, "sessions");
+const SESSION_NAME = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
+const MAX_SESSION_BYTES = 64 * 1024;
+const MAX_SESSION_VARIABLES = 64;
+const MAX_SESSIONS_PER_WORKSPACE = 16;
+const MAX_SESSION_VALUE_LENGTH = 4096;
+const MAX_SCRIPT_BYTES = 64 * 1024;
+const ENVIRONMENT_NAME = /^[A-Za-z_][A-Za-z0-9_]{0,127}$/;
+// A shell sets these for itself; they describe the shell rather than anything the script changed.
+const SHELL_OWNED_VARIABLES = new Set(["PWD", "OLDPWD", "SHLVL", "_"]);
+/** Marks a variable a script removed, so a later command in the session does not see it again. */
+const REMOVED = null;
 const DESCRIPTOR_ROOT = process.platform === "linux" ? "/proc/self/fd" : "/dev/fd";
 
 const REGEX_WORKER = String.raw`
@@ -91,28 +116,45 @@ function validateExecution(request) {
   const match = request.repositoryFullName?.match(REPOSITORY);
   if (
     !match ||
-    !Array.isArray(request.argv) ||
-    request.argv.length < 1 ||
-    request.argv.length > 128 ||
-    request.argv.some(
-      (value) =>
-        typeof value !== "string" || !value || value.length > 16_384 || value.includes("\0"),
-    ) ||
-    typeof request.cwd !== "string" ||
-    Buffer.byteLength(request.cwd, "utf8") > 4096 ||
-    request.cwd.startsWith("/") ||
-    (request.cwd !== "." &&
-      request.cwd.split("/").some((part) => !part || part === "." || part === "..")) ||
+    (request.argv !== undefined && request.argv !== null && !Array.isArray(request.argv)) ||
+    (request.script === undefined &&
+      !request.sessionEnd &&
+      (!Array.isArray(request.argv) || request.argv.length < 1)) ||
+    (request.script !== undefined &&
+      (typeof request.script !== "string" ||
+        request.script.length < 1 ||
+        Buffer.byteLength(request.script, "utf8") > MAX_SCRIPT_BYTES ||
+        request.argv !== undefined)) ||
+    (request.argv !== undefined &&
+      request.argv !== null &&
+      (request.argv.length > 128 ||
+        request.argv.some(
+          (value) =>
+            typeof value !== "string" || !value || value.length > 16_384 || value.includes("\0"),
+        ))) ||
+    (request.cwd !== undefined &&
+      (typeof request.cwd !== "string" ||
+        Buffer.byteLength(request.cwd, "utf8") > 4096 ||
+        request.cwd.startsWith("/") ||
+        (request.cwd !== "." &&
+          request.cwd.split("/").some((part) => !part || part === "." || part === "..")))) ||
+    (request.session !== undefined && !SESSION_NAME.test(request.session)) ||
+    (request.sessionStart !== undefined && typeof request.sessionStart !== "boolean") ||
+    (request.sessionEnd !== undefined && typeof request.sessionEnd !== "boolean") ||
+    (request.script !== undefined && request.session === undefined) ||
     typeof request.stdin !== "string" ||
     !Number.isSafeInteger(request.timeoutMs) ||
     request.timeoutMs < 1 ||
-    request.timeoutMs > 15 * 60_000 ||
+    request.timeoutMs > MAX_OPERATION_TIMEOUT_MS ||
     !Number.isSafeInteger(request.maxStdoutBytes) ||
     request.maxStdoutBytes < 1 ||
     request.maxStdoutBytes > MAX_RESULT_BYTES ||
     !Number.isSafeInteger(request.maxStderrBytes) ||
     request.maxStderrBytes < 1 ||
-    request.maxStderrBytes > MAX_RESULT_BYTES
+    request.maxStderrBytes > MAX_RESULT_BYTES ||
+    !Number.isSafeInteger(request.maxRetainedBytes) ||
+    request.maxRetainedBytes < Math.max(request.maxStdoutBytes, request.maxStderrBytes) ||
+    request.maxRetainedBytes > MAX_RETAINED_OUTPUT_BYTES
   ) {
     fail("invalid execution request");
   }
@@ -121,6 +163,156 @@ function validateExecution(request) {
     fail("invalid execution input");
   }
   return { repositoryName: match[1], stdin };
+}
+
+/**
+ * Identifies the workspace's current running environment. It changes when that environment is
+ * restarted or replaced, which is what binds a session to the life it was opened in. On Linux it is
+ * the kernel's boot identity together with the start time of the first process; elsewhere only an
+ * explicit override can establish it, which is how the suite exercises two different lives.
+ */
+async function environmentIdentity() {
+  if (process.platform === "linux") {
+    // Where the running environment can identify itself it does, and an override never outranks it.
+    const bootId = await readFile("/proc/sys/kernel/random/boot_id", "utf8").catch(() => null);
+    const firstProcess = await linuxStartTime(1);
+    if (!bootId || firstProcess === null) return null;
+    return createHash("sha256").update(`${bootId.trim()}|${firstProcess}`).digest("hex");
+  }
+  const override = process.env.MOIRA_ENVIRONMENT_ID;
+  return override ? createHash("sha256").update(`override:${override}`).digest("hex") : null;
+}
+
+function sessionPath(name) {
+  if (!SESSION_NAME.test(name ?? "")) fail("invalid session name");
+  return join(SESSION_ROOT, `${name}.json`);
+}
+
+function validateSessionEnvironment(value, allowRemovals = false) {
+  if (value === undefined) return {};
+  if (!value || typeof value !== "object" || Array.isArray(value))
+    fail("invalid session variables");
+  const entries = Object.entries(value);
+  if (entries.length > MAX_SESSION_VARIABLES) fail("invalid session variables");
+  for (const [name, entry] of entries) {
+    const removal = allowRemovals && entry === REMOVED;
+    if (
+      !ENVIRONMENT_NAME.test(name) ||
+      (!removal && (typeof entry !== "string" || entry.length > MAX_SESSION_VALUE_LENGTH))
+    ) {
+      fail("invalid session variables");
+    }
+  }
+  return Object.fromEntries(entries);
+}
+
+/**
+ * Resolves the context a command runs in. A session that was opened in an earlier life of this
+ * environment is refused rather than resumed, and so is one that was never opened: an agent must be
+ * able to tell "your context is gone" from "your context is here".
+ */
+/** Applies a stored context to an environment: a value sets a variable, a removal takes it away. */
+function applyContext(base, context) {
+  const applied = { ...base };
+  for (const [name, value] of Object.entries(context)) {
+    if (value === REMOVED) delete applied[name];
+    else applied[name] = value;
+  }
+  return applied;
+}
+
+/**
+ * Counts the sessions this life of the environment can actually use. A file written by an earlier
+ * life is not a session any more: it cannot be continued, so it must not hold a slot either.
+ */
+async function countSessions(identity) {
+  let entries;
+  try {
+    entries = await readdir(SESSION_ROOT);
+  } catch (error) {
+    if (error?.code === "ENOENT") return 0;
+    throw error;
+  }
+  let live = 0;
+  for (const entry of entries) {
+    if (!entry.endsWith(".json")) continue;
+    const stored = await readBoundedJson(join(SESSION_ROOT, entry), MAX_SESSION_BYTES).catch(
+      () => null,
+    );
+    if (stored?.environment === identity) live += 1;
+  }
+  return live;
+}
+
+/**
+ * A stored context must fit the same bounds when it is written as when it is read, or a session
+ * becomes unusable the moment it exceeds them. A call that would cross a ceiling is refused, and the
+ * previous context survives untouched.
+ */
+function withinStoredContextBounds(identity, cwd, context) {
+  return (
+    Object.keys(context).length <= MAX_SESSION_VARIABLES &&
+    Buffer.byteLength(JSON.stringify({ environment: identity, cwd, env: context }), "utf8") <=
+      MAX_SESSION_BYTES
+  );
+}
+
+async function resolveSession(request) {
+  const requested = validateSessionEnvironment(request.env);
+  if (!request.session) return { cwd: request.cwd ?? ".", env: requested, store: null, end: null };
+  const identity = await environmentIdentity();
+  if (identity === null) return null;
+  const path = sessionPath(request.session);
+  // Ending a session removes whatever stands under that name, including a file an earlier life of
+  // this environment left behind, so a dead session can never hold a slot no call can free.
+  if (request.sessionEnd && !request.argv && !request.script) {
+    return { ended: true, end: async () => rm(path, { force: true }) };
+  }
+  const stored = request.sessionStart
+    ? null
+    : await readBoundedJson(path, MAX_SESSION_BYTES).catch((error) => {
+        if (error?.code === "ENOENT") return undefined;
+        throw error;
+      });
+  if (stored === undefined) return null;
+  if (stored && stored.environment !== identity) return null;
+  if (request.sessionStart) {
+    const current = await readBoundedJson(path, MAX_SESSION_BYTES).catch(() => null);
+    const replacing = current?.environment === identity;
+    if (!replacing && (await countSessions(identity)) >= MAX_SESSIONS_PER_WORKSPACE) {
+      return { limit: "sessions" };
+    }
+  }
+  const context = { ...validateSessionEnvironment(stored?.env, true), ...requested };
+  const cwd = request.cwd ?? stored?.cwd ?? ".";
+  if (!withinStoredContextBounds(identity, cwd, context)) return { limit: "context" };
+  return {
+    cwd,
+    context,
+    env: applyContext({}, context),
+    /**
+     * Stores the context this command ran with, plus whatever a script left behind. A capture keeps
+     * only the difference from the environment the script started with, so the workspace's own
+     * environment never enters the file.
+     */
+    store: async (captured) => {
+      const merged = captured ? { ...context, ...captured.context } : context;
+      const finalCwd = captured?.cwd ?? cwd;
+      if (!withinStoredContextBounds(identity, finalCwd, merged)) return { limit: "context" };
+      await mkdir(SESSION_ROOT, { recursive: true, mode: 0o700 });
+      const temporary = `${path}.${randomBytes(8).toString("hex")}`;
+      await writeFile(
+        temporary,
+        JSON.stringify({ environment: identity, cwd: finalCwd, env: merged }),
+        { mode: 0o600 },
+      );
+      await rename(temporary, path);
+      return null;
+    },
+    end: async () => {
+      await rm(path, { force: true });
+    },
+  };
 }
 
 async function verifyRepository(request, repositoryName) {
@@ -1307,17 +1499,39 @@ function capture(executable, argv) {
 
 const RUNNER = String.raw`
 const {spawn}=require("node:child_process");
-const {access,readFile,rename,writeFile}=require("node:fs/promises");
+const {createWriteStream}=require("node:fs");
+const {access,readFile,rename,rm,writeFile}=require("node:fs/promises");
 const startTimeOf=async(path)=>{try{const value=await readFile(path,'utf8');const field=value.slice(value.lastIndexOf(') ')+2).split(' ')[19]??null;return /^[0-9]+$/.test(field)?field:null}catch{return null}};
-(async()=>{let raw="";for await(const chunk of process.stdin)raw+=chunk;const input=JSON.parse(raw);const out=[];const err=[];let stdoutBytes=0;let stderrBytes=0;let terminal=false;let outputExceeded=false;let timedOut=false;
+(async()=>{let raw="";for await(const chunk of process.stdin)raw+=chunk;const input=JSON.parse(raw);
+// The payload prefix is what a response may carry; the file beside it keeps the complete stream.
+// Only the retained ceiling stops the command, so an ordinary noisy command keeps its own exit
+// code and its own standard error.
+const prefix={stdout:[],stderr:[]};const prefixBytes={stdout:0,stderr:0};const total={stdout:0,stderr:0};
+const sink={stdout:createWriteStream(input.stdoutPath,{mode:0o600}),stderr:createWriteStream(input.stderrPath,{mode:0o600})};
+for(const stream of ["stdout","stderr"])sink[stream].on("error",()=>{});
+let terminal=false;let retainedExceeded=false;let timedOut=false;
 let runnerStartTime=null;if(process.platform==="linux"){runnerStartTime=await startTimeOf('/proc/self/stat');if(runnerStartTime===null)throw new Error("invalid runner start time")}
 await writeFile(input.runnerPidPath,JSON.stringify({pid:process.pid,startTime:runnerStartTime}),{mode:0o600});
-const child=spawn(input.argv[0],input.argv.slice(1),{cwd:input.cwd,env:process.env,detached:true,stdio:["pipe","pipe","pipe"]});
-const collect=(target,stream)=>(chunk)=>{if(stream==="stdout")stdoutBytes+=chunk.length;else stderrBytes+=chunk.length;const limit=stream==="stdout"?input.maxStdoutBytes:input.maxStderrBytes;if((stream==="stdout"?stdoutBytes:stderrBytes)>limit){outputExceeded=true;try{process.kill(-child.pid,"SIGKILL")}catch{}}else target.push(Buffer.from(chunk));};
+const childEnv={...process.env};
+for(const [name,value] of Object.entries(input.env??{})){if(value===null)delete childEnv[name];else childEnv[name]=value}
+// A script runs under the workspace's own shell, sourced so that its directory changes and exports
+// take effect in that shell, and the shell then reports where it ended and what it ended with. An
+// argv command is spawned exactly as before, with no shell anywhere near it.
+const spawned=input.script
+?spawn("/bin/sh",["-c",'. "$1"; __moira_status=$?; { pwd; "$2" -e "process.stdout.write(JSON.stringify(process.env))"; } > "$3"; exit $__moira_status',"sh",input.script,process.execPath,input.capturePath],{cwd:input.cwd,env:childEnv,detached:true,stdio:["pipe","pipe","pipe"]})
+:spawn(input.argv[0],input.argv.slice(1),{cwd:input.cwd,env:childEnv,detached:true,stdio:["pipe","pipe","pipe"]});
+const child=spawned;
+const payloadLimit=(stream)=>stream==="stdout"?input.maxStdoutBytes:input.maxStderrBytes;
+const collect=(stream)=>(chunk)=>{if(retainedExceeded)return;const buffer=Buffer.from(chunk);
+const room=input.maxRetainedBytes-total[stream];const kept=buffer.length>room?buffer.subarray(0,room):buffer;
+if(kept.length>0){total[stream]+=kept.length;sink[stream].write(kept);
+const headroom=payloadLimit(stream)-prefixBytes[stream];
+if(headroom>0){const head=kept.length>headroom?kept.subarray(0,headroom):kept;prefix[stream].push(head);prefixBytes[stream]+=head.length}}
+if(buffer.length>room){retainedExceeded=true;try{process.kill(-child.pid,"SIGKILL")}catch{}}};
 // Output collection, exit observation and pipe-error tolerance are installed before any
 // await: a command that exits immediately must not close before the runner is listening,
 // and writing its stdin after it exited must not abort the runner without a result.
-child.stdout.on("data",collect(out,"stdout"));child.stderr.on("data",collect(err,"stderr"));
+child.stdout.on("data",collect("stdout"));child.stderr.on("data",collect("stderr"));
 child.on("error",()=>{});for(const stream of [child.stdin,child.stdout,child.stderr])stream.on("error",()=>{});
 const timer=setTimeout(()=>{if(terminal)return;timedOut=true;try{process.kill(-child.pid,"SIGKILL")}catch{}},input.timeoutMs);timer.unref();
 const closed=new Promise((resolveClose)=>child.once("close",(code)=>{terminal=true;clearTimeout(timer);resolveClose(code)}));
@@ -1327,37 +1541,121 @@ try{child.stdin.end(Buffer.from(input.stdin,"base64"))}catch{}
 const startTime=process.platform==="linux"?await startTimeOf('/proc/'+child.pid+'/stat'):null;
 await writeFile(input.pidPath,JSON.stringify({pid:child.pid,startTime}),{mode:0o600});
 const code=await closed;let cancelled=false;try{await access(input.cancelPath);cancelled=true}catch{}
-const state=cancelled?"cancelled":outputExceeded?"failed":timedOut?"timed_out":code===0?"succeeded":"failed";
-const stderr=outputExceeded?Buffer.from("output limit exceeded"):Buffer.concat(err);
-await writeFile(input.resultTempPath,JSON.stringify({state,stdout:Buffer.concat(out).toString("base64"),stderr:stderr.toString("base64"),exitCode:Number.isInteger(code)?code:null}),{mode:0o600});await rename(input.resultTempPath,input.resultPath);
+// The retained streams must be complete on disk before the result announces their size.
+await Promise.all(["stdout","stderr"].map((stream)=>new Promise((done)=>{sink[stream].end(done)})));
+const state=cancelled?"cancelled":timedOut?"timed_out":retainedExceeded?"failed":code===0?"succeeded":"failed";
+// What the script left behind is the difference from the environment it started with, and only that.
+let captureDropped=false;
+if(input.session&&input.script&&(state==="succeeded"||state==="failed")){
+try{
+const raw=await readFile(input.capturePath,"utf8");
+const split=raw.indexOf("\n");
+const endedIn=raw.slice(0,split);
+const ended=JSON.parse(raw.slice(split+1));
+const shellOwned=new Set(input.shellOwned);
+const difference={};
+// A capture obeys every rule the reader applies, name and value alike, so a stored context can
+// always be read back; anything the reader would refuse means the capture is dropped instead.
+const nameRule=new RegExp(input.session.namePattern);
+let refused=false;
+const keep=(name,value)=>{if(!nameRule.test(name)||(value!==null&&(typeof value!=="string"||value.length>input.session.maxValueLength))){refused=true;return}difference[name]=value};
+for(const [name,value] of Object.entries(ended))if(!shellOwned.has(name)&&childEnv[name]!==value)keep(name,value);
+for(const name of Object.keys(childEnv))if(!shellOwned.has(name)&&!(name in ended))keep(name,null);
+// The shell reports the path it actually stands in, which may differ from the configured root by a
+// symbolic link, so both sides are resolved before they are compared.
+const {realpathSync}=require("node:fs");const {relative:relativeTo}=require("node:path");
+let relative=null;try{const inside=relativeTo(realpathSync(input.repositoryRoot),realpathSync(endedIn));relative=inside===""?".":(inside.startsWith("..")?null:inside)}catch{relative=null}
+const merged={...input.session.context,...difference};
+const cwd=relative??input.session.cwd;
+const encoded=JSON.stringify({environment:input.session.identity,cwd,env:merged});
+if(!refused&&Object.keys(merged).length<=input.session.maxVariables&&Buffer.byteLength(encoded,"utf8")<=input.session.maxBytes){
+const temporary=input.session.path+"."+Math.random().toString(16).slice(2);
+await writeFile(temporary,encoded,{mode:0o600});await rename(temporary,input.session.path);
+}else captureDropped=true;
+}catch{captureDropped=true}
+}
+else if(input.session&&input.script)captureDropped=true;
+if(input.session&&input.sessionEnd)await rm(input.session.path,{force:true}).catch(()=>{});
+await writeFile(input.resultTempPath,JSON.stringify({state,stdout:Buffer.concat(prefix.stdout).toString("base64"),stderr:Buffer.concat(prefix.stderr).toString("base64"),exitCode:Number.isInteger(code)?code:null,stdoutBytes:total.stdout,stderrBytes:total.stderr,outputLimitExceeded:retainedExceeded,sessionCaptureDropped:captureDropped}),{mode:0o600});await rename(input.resultTempPath,input.resultPath);
 })().catch(async()=>{process.exitCode=1});`;
 
 async function execute(request) {
   const directory = validateBase(request);
   const { repositoryName } = validateExecution(request);
-  const cwd = await verifyRepository(request, repositoryName);
+  const session = await resolveSession(request);
+  // A command whose session belongs to an earlier life of this environment does not run at all.
+  if (session === null) return { state: "session_unavailable" };
+  if (session.limit) return { state: "session_limit", limit: session.limit };
+  // Ending a session is answered here: the stored context is removed and nothing is dispatched.
+  if (session.ended) {
+    await session.end?.();
+    return { state: "session_ended" };
+  }
+  const cwd = await verifyRepository({ ...request, cwd: session.cwd }, repositoryName);
   await mkdir(dirname(directory), { recursive: true, mode: 0o700 });
   await mkdir(directory, { mode: 0o700 });
+  // The life of the environment the command runs in, so a later inspection can tell a command whose
+  // workspace restarted underneath it from a supervisor that exited without publishing a result.
+  const life = await environmentIdentity();
+  if (life) await writeFile(join(directory, "environment"), life, { mode: 0o600 });
   const pidPath = join(directory, "pid");
   const runnerPidPath = join(directory, "runner-pid");
+  const stdoutPath = join(directory, OUTPUT_STREAMS.get("stdout"));
+  const stderrPath = join(directory, OUTPUT_STREAMS.get("stderr"));
   const resultPath = join(directory, "result.json");
   const resultTempPath = join(directory, "result.tmp");
   const cancelPath = join(directory, "cancel-requested");
+  const capturePath = join(directory, "session-capture.json");
+  let scriptPath = null;
+  if (request.script !== undefined) {
+    scriptPath = join(directory, "script.sh");
+    await writeFile(scriptPath, request.script, { mode: 0o600 });
+  }
   const runner = spawn(process.execPath, ["-e", RUNNER], {
     detached: true,
     stdio: ["pipe", "ignore", "ignore"],
     env: process.env,
   });
+  // The session is recorded only once its command is about to run, so a refused request leaves the
+  // stored context exactly as it was. What a script leaves behind is merged when it ends.
+  const stored = await session.store?.();
+  if (stored?.limit) {
+    runner.kill("SIGKILL");
+    await rm(directory, { recursive: true, force: true });
+    return { state: "session_limit", limit: stored.limit };
+  }
   runner.stdin.end(
     JSON.stringify({
-      argv: request.argv,
+      argv: request.argv ?? null,
+      script: scriptPath,
+      capturePath,
+      shellOwned: [...SHELL_OWNED_VARIABLES],
+      sessionEnd: Boolean(request.sessionEnd),
+      repositoryRoot: join(WORKSPACES_ROOT, repositoryName),
+      session: session.store
+        ? {
+            path: sessionPath(request.session),
+            identity: await environmentIdentity(),
+            context: session.context,
+            cwd: session.cwd,
+            maxVariables: MAX_SESSION_VARIABLES,
+            maxBytes: MAX_SESSION_BYTES,
+            maxValueLength: MAX_SESSION_VALUE_LENGTH,
+            namePattern: ENVIRONMENT_NAME.source,
+          }
+        : null,
       cwd,
+      // The context travels as it is stored, so a removal reaches the child as a removal.
+      env: session.context ?? session.env,
       stdin: request.stdin,
       timeoutMs: request.timeoutMs,
       maxStdoutBytes: request.maxStdoutBytes,
       maxStderrBytes: request.maxStderrBytes,
+      maxRetainedBytes: request.maxRetainedBytes,
       pidPath,
       runnerPidPath,
+      stdoutPath,
+      stderrPath,
       resultPath,
       resultTempPath,
       cancelPath,
@@ -1397,6 +1695,10 @@ async function readResult(directory) {
       stdoutBase64: value.stdout,
       stderrBase64: value.stderr,
       exitCode: Number.isInteger(value.exitCode) ? value.exitCode : null,
+      stdoutBytes: Number.isSafeInteger(value.stdoutBytes) ? value.stdoutBytes : 0,
+      stderrBytes: Number.isSafeInteger(value.stderrBytes) ? value.stderrBytes : 0,
+      outputLimitExceeded: value.outputLimitExceeded === true,
+      sessionCaptureDropped: value.sessionCaptureDropped === true,
     };
   } catch (error) {
     if (error?.code !== "ENOENT") throw error;
@@ -1445,6 +1747,21 @@ async function readOptionalProcessIdentity(directory, fileName) {
   }
 }
 
+/**
+ * Whether this operation belongs to an earlier life of the environment. A command's processes do not
+ * survive a workspace restart while its state directory does, so a recorded life that is not the
+ * current one is what separates a restart from a supervisor that failed inside this life.
+ */
+async function lostWithEnvironment(directory) {
+  const recorded = await readFile(join(directory, "environment"), "utf8").catch((error) => {
+    if (error?.code === "ENOENT") return null;
+    throw error;
+  });
+  if (!recorded) return false;
+  const current = await environmentIdentity();
+  return Boolean(current) && recorded.trim() !== current;
+}
+
 async function inspect(request) {
   const directory = validateBase(request);
   try {
@@ -1457,11 +1774,16 @@ async function inspect(request) {
     if (runnerIdentity && (await processExists(runnerIdentity))) return { state: "running" };
     const publishedAfterRunnerExit = await readResult(directory);
     if (publishedAfterRunnerExit) return publishedAfterRunnerExit;
+    if (await lostWithEnvironment(directory)) return { state: "interrupted" };
     return {
       state: "failed",
       stdoutBase64: "",
       stderrBase64: Buffer.from("operation supervisor exited without a result").toString("base64"),
       exitCode: null,
+      stdoutBytes: 0,
+      stderrBytes: 0,
+      outputLimitExceeded: false,
+      sessionCaptureDropped: false,
     };
   } catch (error) {
     if (error?.code === "ENOENT") return { state: "absent" };
@@ -1491,9 +1813,77 @@ async function cancel(request) {
   }
   await new Promise((resolveValue) => setTimeout(resolveValue, 100));
   if (await processExists(identity)) return { state: "running" };
-  const result = { state: "cancelled", stdoutBase64: "", stderrBase64: "", exitCode: null };
-  await writeFile(join(directory, "result.json"), JSON.stringify(result), { mode: 0o600 });
+  const result = {
+    state: "cancelled",
+    stdoutBase64: "",
+    stderrBase64: "",
+    exitCode: null,
+    stdoutBytes: await retainedSize(directory, "stdout"),
+    stderrBytes: await retainedSize(directory, "stderr"),
+    outputLimitExceeded: false,
+    sessionCaptureDropped: false,
+  };
+  // A cancelled command still produced whatever it printed; the published result names those
+  // sizes so the retained streams stay readable by range until cleanup removes them.
+  await writeFile(
+    join(directory, "result.json"),
+    JSON.stringify({
+      state: result.state,
+      stdout: "",
+      stderr: "",
+      exitCode: null,
+      stdoutBytes: result.stdoutBytes,
+      stderrBytes: result.stderrBytes,
+      outputLimitExceeded: false,
+    }),
+    { mode: 0o600 },
+  );
   return result;
+}
+
+async function retainedSize(directory, stream) {
+  try {
+    const value = await stat(join(directory, OUTPUT_STREAMS.get(stream)));
+    return value.isFile() ? value.size : 0;
+  } catch {
+    return 0;
+  }
+}
+
+async function readOutput(request) {
+  const directory = validateBase(request);
+  const fileName = OUTPUT_STREAMS.get(request.stream);
+  if (
+    !fileName ||
+    !Number.isSafeInteger(request.offset) ||
+    request.offset < 0 ||
+    !Number.isSafeInteger(request.length) ||
+    request.length < 1 ||
+    request.length > MAX_OUTPUT_RANGE_BYTES
+  ) {
+    fail("invalid output range");
+  }
+  let handle = null;
+  try {
+    handle = await open(join(directory, fileName), "r");
+    const totalBytes = (await handle.stat()).size;
+    // A read that starts at or past the end is answered with no bytes and the true size, which is
+    // how a caller learns where the stream currently ends without an error.
+    const bytes = Buffer.alloc(Math.max(0, Math.min(request.length, totalBytes - request.offset)));
+    if (bytes.length > 0) await handle.read(bytes, 0, bytes.length, request.offset);
+    return {
+      action: "output",
+      stream: request.stream,
+      offset: request.offset,
+      totalBytes,
+      bytesBase64: bytes.toString("base64"),
+    };
+  } catch (error) {
+    if (error?.code === "ENOENT") return { state: "absent" };
+    throw error;
+  } finally {
+    await handle?.close();
+  }
 }
 
 async function finalize(request) {
@@ -1509,6 +1899,7 @@ export async function runRequest(request) {
   if (request.action === "inspect") return inspect(request);
   if (request.action === "cancel") return cancel(request);
   if (request.action === "finalize") return finalize(request);
+  if (request.action === "output") return readOutput(request);
   if (request.action === "file-execute") return fileExecute(request);
   if (request.action === "file-inspect") return fileInspect(request);
   fail("unsupported supervisor action");

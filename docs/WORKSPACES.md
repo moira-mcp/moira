@@ -85,6 +85,15 @@ desired and observed state, retention policy and lifecycle generation.
 - Start records desired running state before provider contact. While that
   generation remains current, the official GitHub CLI may restore a Codespace
   that stopped outside Moira.
+- An operation addressed to a workspace that is not running starts it and then
+  runs, so work does not fail because the workspace idled out between two calls.
+  The wait for that start is bounded by `WORKSPACE_START_WAIT_SECONDS`; exceeding
+  it is `WORKSPACE_START_TIMEOUT`, which names the wait and asks the caller to
+  retry once the workspace has finished starting. A workspace that cannot start —
+  deleted, rejected or being deleted — is refused by that condition without the
+  provider being asked to start it, and a start never bypasses a concurrency,
+  kind or generation check: the reservation that follows is the same one as
+  before. Explicitly starting a workspace remains available and unchanged.
 - Stop records desired stopped state, advances the generation, cancels or
   reconciles older operations and stops the exact Codespace. It preserves the
   workspace and repository data.
@@ -149,15 +158,64 @@ terminal or absent state, or an explicit workspace stop/delete terminates the
 provider environment. A reservation abandoned before dispatch expires without
 connector contact; dispatch intent is durable before a remote command can start.
 
+A command's complete standard output and standard error are written into its own
+remote operation directory as it runs. The per-stream response limits bound only
+what an answer carries; they neither stop the command nor replace its standard
+error. One bound does stop a command: `WORKSPACE_MAX_RETAINED_OUTPUT_MB` is the
+disk a single command's retained output may occupy in the workspace, and passing
+it kills the foreground process group and is reported as reaching that ceiling
+rather than as the command's own failure.
+
 When background reconciliation observes a terminal command, it records only
 bounded result metadata in SQLite and retains the remote stdout/stderr file for
-the configured cleanup window. Caller reconciliation can read the same result
+the configured cleanup window, or for as long as the command itself was allowed
+to run when that is longer. A result therefore stays collectible for at least the
+command's own permitted duration, which is what makes an unattended background
+command safe to collect late. Caller reconciliation can read the same result
 repeatedly during that window. Only after the window expires may background
 cleanup finalize the remote operation directory; failed finalization remains a
 durable, idempotently retried obligation.
 
+A terminal result reports the complete size of each stream next to its bounded
+payload, so a caller knows what the answer omitted. Any range of a retained
+stream is read with `workspace_read` by naming the command's `operation_id` and
+`stream` instead of a path. That read is a bounded control request rather than a
+new operation: it creates no operation record, is fenced by the same ownership,
+resource-generation and authorization rules as every other call against that
+operation, requires the named workspace to own that command, and returns
+`WORKSPACE_RESULT_EXPIRED` once cleanup has removed the streams with the result.
+A read that starts at or past the end of a stream returns no bytes and the
+stream's current size, which is how a caller finds where a stream ends.
+
+A command may also be started in the background. It is the same operation, the
+same single dispatch and the same resume path; only its ceiling and its deadline
+differ. It is admitted against `WORKSPACE_MAX_BACKGROUND_OPERATION_HOURS` instead
+of `WORKSPACE_MAX_OPERATION_SECONDS`, its deadline is that lifetime so background
+reconciliation observes it rather than cancelling it, and the dispatching call
+returns as soon as the remote runner is proven alive, without the settle window a
+bounded command uses. A caller that names no duration receives the one its mode
+implies: 300 seconds for a bounded command, the whole ceiling for a background
+one. The lifetime is granted when the command starts running, so a reservation
+that never dispatches is reaped within fifteen minutes whatever it asked for. Its output is readable by range while it runs, and it is
+stopped by resuming it with a cancellation request. A command that outlives the
+workspace's idle lifetime stops with the workspace, so the two values belong
+together.
+
+A workspace restart takes every process with it and leaves the operation files
+behind. The workspace records the life of the environment each command is
+dispatched in, and an inspection that finds no result, no live process and a
+different life reports the operation as interrupted; the operation becomes
+terminal with `workspace_restarted` recorded as why it ended, which is distinct
+both from a cancellation the caller asked for and from a command that failed on
+its own. The caller sees that distinction: the operation carries
+`interrupted_by_restart` and the answer is `WORKSPACE_OPERATION_INTERRUPTED`
+rather than the generic command failure. A file operation is not reported this way: it is replayed from its
+journal instead, which is what keeps an interrupted write recoverable.
+
 The fixed connector ceilings are 4 MiB of raw input, 8 MiB for each output
-stream and 15 minutes per command. Runtime policy may lower these ceilings but
+stream and 15 minutes for a bounded command; a background command's own timer may
+run up to a day. A remote job request is bounded separately and never waits for a
+command to end. Runtime policy may lower these ceilings but
 cannot raise them. An argv contains 1–128 non-empty arguments; each argument is
 at most 16 KiB, and the relative cwd is at most 4096 bytes.
 
@@ -280,10 +338,56 @@ action result. Failed, cancelled and timed-out commands and rejected file edits 
 returned as tool errors (`isError: true`) that keep the operation identity and any
 bounded output. A pending or `reconcile_pending` envelope is not a success: calling
 the same tool again with only `workspace_id` and `operation_id` reconciles that
-operation without dispatching a second command, write, upload or download.
+operation without dispatching a second command, write, upload or download. The
+same resume call with `cancel: true` stops a command instead of reporting it.
 
-`workspace_exec` accepts argv as data, a repository-relative `cwd`,
-`timeout_seconds` (default 300), optional per-stream output limits and exactly one optional stdin
+Consecutive commands share a working context through a named session. A caller
+opens one with `session` and `session_start: true` and continues it by naming
+`session` alone. The session remembers the `cwd` a call names and the variables a
+call passes in `env`, and applies both to every command that continues it; a
+command without a session is unaffected.
+
+Inside a session a caller may send `script` instead of `argv`. The script is run
+by the workspace's own shell and sourced, so its directory changes and exports
+take effect, and the session then keeps the directory it ended in together with
+the variables it added, changed or removed. A removal is remembered as a removal,
+so a later command does not see a variable the script took away. Only the
+difference from the environment the script started in is kept, never the whole
+inherited environment, which is what keeps the workspace's own environment out of
+the stored file; the few variables a shell maintains for itself are excluded. An
+argv command is never run through a shell, and a call carries exactly one kind of
+work: `argv`, a `script` inside a session, or ending a session with neither.
+
+`session_end: true` ends the named session, alone or alongside a command. Ending
+frees the session's slot and removes its stored context. A workspace holds at most
+sixteen sessions of its current life, and opening one past that is refused with
+that ceiling named; a session left by an earlier life holds no slot and is removed
+by the call that ends it.
+
+A script is at most 64 KiB of text, and the stored context is bounded by 64
+variables and 64 KiB, enforced where it is written. A call whose declared context would cross that is refused as a bounded
+policy outcome naming the stored-context ceiling, and the previous context
+survives. A script whose end state fits is stored whether the script succeeded or failed;
+one whose end state would not fit, or a script that ended its own shell with
+`exit` or was stopped before it finished, carries nothing and the result says
+`session_capture_dropped` rather than leaving a session that later commands
+cannot use. A capture obeys every rule the stored context is read back under, so a
+variable whose name or value the context cannot hold drops the capture instead of
+wedging the session.
+
+A session belongs to the workspace life it was opened in. The remote side stores it
+beside the operation directories in the workspace's own state root, together with
+the identity of the running environment, which on Linux is the kernel boot identity
+and the first process's start time; an explicit override is honoured only where
+those sources do not exist. A command naming a session from an earlier life,
+or one that was never opened, is refused with `WORKSPACE_SESSION_UNAVAILABLE` and
+does not run. The stored context never returns to the caller. A session name is
+validated data, never a path: the remote side builds the path from a name it has
+accepted, and a session's stored working directory is resolved by the same rule that
+refuses any escape from the repository.
+
+`workspace_exec` accepts argv as data, an optional repository-relative `cwd`,
+`timeout_seconds`, `background`, `session`, `session_start`, `session_end`, `env`, `script`, optional per-stream output limits and exactly one optional stdin
 form: `stdin_text` (UTF-8) or `stdin_file`, a native ChatGPT file reference. The
 registry publishes `_meta["openai/fileParams"]` for `stdin_file` and for
 `workspace_upload.file`; inside a reference only `file_id` and `download_url` are
@@ -291,8 +395,8 @@ required, while `file_name`, `mime_type` and `size_bytes` are optional. Native i
 goes directly through the one-call native execution path and is never staged through
 the public upload tool; neither the file ID nor the temporary URL is echoed back.
 
-`workspace_read` returns UTF-8 text with offset, total size and SHA-256; `length`
-defaults to 64 KiB, and `workspace_search` defaults to 100 matches within 64 KiB of
+`workspace_read` returns UTF-8 text with offset, total size and, for a repository
+file, SHA-256; `length` defaults to 64 KiB, and `workspace_search` defaults to 100 matches within 64 KiB of
 result bytes, so a call that names only the workspace, path and query is complete.
 A range that is not valid UTF-8 returns `WORKSPACE_BINARY_READ_REQUIRES_DOWNLOAD`
 instead of base64. `workspace_write` replaces a file atomically from UTF-8 text under an explicit
@@ -303,7 +407,13 @@ the content-free summary. `workspace_download` returns the private transfer as a
 
 Known connection, workspace, state, policy and provider failures become bounded tool
 errors with `code`, safe `message` and `retryable`; setup and authorization failures
-add only the same-origin `settings_url`. Input that matches no strict request form
+add only the same-origin `settings_url`. A refusal that knows a bounded fact the caller
+may act on adds it to that message: a creation refused by `WORKSPACE_POLICY_LIMIT` names
+whether the per-user active ceiling, the instance-wide active ceiling or the creation
+throttle stopped it, and that ceiling's configured value. The addition never names a
+user, workspace or repository, so a caller refused by instance capacity learns only that
+the instance is full. The website management API adds the same sentence to its own
+message for the same refusals. Input that matches no strict request form
 returns `WORKSPACE_REQUEST_INVALID` whose message names the offending field paths
 and the generic schema issue (for example `expected: Required`), never the
 submitted values. Unexpected failures return the generic
@@ -482,8 +592,8 @@ not supplied:
 | `WORKSPACE_MAX_CPU_CORES`                      |       4 | Maximum selected Linux machine CPU cores                     |
 | `WORKSPACE_MAX_MEMORY_GB`                      |       8 | Maximum selected machine memory                              |
 | `WORKSPACE_MAX_STORAGE_GB`                     |      32 | Maximum selected machine storage                             |
-| `WORKSPACE_MAX_ACTIVE_PER_USER`                |       1 | Active resource reservations per user                        |
-| `WORKSPACE_MAX_ACTIVE_GLOBAL`                  |       4 | Active resource reservations across the instance             |
+| `WORKSPACE_MAX_ACTIVE_PER_USER`                |       4 | Active resource reservations per user                        |
+| `WORKSPACE_MAX_ACTIVE_GLOBAL`                  |      16 | Active resource reservations across the instance             |
 | `WORKSPACE_CREATE_THROTTLE_SECONDS`            |      60 | Minimum interval between creation reservations               |
 | `WORKSPACE_REMOTE_TTL_MINUTES`                 |     120 | Codespaces idle timeout requested at creation                |
 | `WORKSPACE_PERSISTENT_RETENTION_DAYS`          |      30 | Codespaces stopped-workspace retention requested at creation |
@@ -491,12 +601,15 @@ not supplied:
 | `WORKSPACE_CLEANUP_DEADLINE_MINUTES`           |      15 | Lifecycle cleanup deadline and terminal-result retention     |
 | `WORKSPACE_CLAIM_LEASE_SECONDS`                |      30 | Cross-process reconciliation claim lease                     |
 | `WORKSPACE_RECONCILE_INTERVAL_SECONDS`         |      30 | Background reconciliation interval                           |
-| `WORKSPACE_MAX_CONCURRENT_OPERATIONS_PER_USER` |       2 | Direct operations per user                                   |
-| `WORKSPACE_MAX_CONCURRENT_OPERATIONS_GLOBAL`   |      20 | Direct operations across the instance                        |
+| `WORKSPACE_START_WAIT_SECONDS`                 |     180 | Wait for a workspace an operation started; 5 to 900          |
+| `WORKSPACE_MAX_CONCURRENT_OPERATIONS_PER_USER` |       8 | Direct operations per user                                   |
+| `WORKSPACE_MAX_CONCURRENT_OPERATIONS_GLOBAL`   |      32 | Direct operations across the instance                        |
 | `WORKSPACE_MAX_OPERATION_INPUT_KB`             |    1024 | Maximum direct-operation stdin                               |
-| `WORKSPACE_MAX_OPERATION_STDOUT_KB`            |    1024 | Maximum stdout                                               |
-| `WORKSPACE_MAX_OPERATION_STDERR_KB`            |     256 | Maximum stderr                                               |
-| `WORKSPACE_MAX_OPERATION_SECONDS`              |     900 | Maximum direct-operation duration                            |
+| `WORKSPACE_MAX_OPERATION_STDOUT_KB`            |    1024 | Stdout carried by one answer                                 |
+| `WORKSPACE_MAX_OPERATION_STDERR_KB`            |     256 | Stderr carried by one answer                                 |
+| `WORKSPACE_MAX_RETAINED_OUTPUT_MB`             |      64 | Retained output per stream before a command is stopped       |
+| `WORKSPACE_MAX_OPERATION_SECONDS`              |     900 | Maximum bounded-command duration                             |
+| `WORKSPACE_MAX_BACKGROUND_OPERATION_HOURS`     |       4 | Maximum background-command duration                          |
 | `WORKSPACE_MAX_TRANSFER_FILE_MB`               |       4 | Maximum native or file payload; maximum 4 MiB                |
 | `WORKSPACE_MAX_TRANSFER_TOTAL_MB_PER_USER`     |     100 | Live private-transfer bytes per user                         |
 | `WORKSPACE_MAX_TRANSFER_TOTAL_MB_GLOBAL`       |    1024 | Live private-transfer bytes across the instance              |
