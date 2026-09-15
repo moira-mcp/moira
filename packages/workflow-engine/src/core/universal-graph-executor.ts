@@ -34,6 +34,7 @@ import {
   ValidationError,
   ConflictError,
   executionMutationAttemptsTotal,
+  stepAttemptBindingMatches,
 } from "@mcp-moira/shared";
 
 import type { ExtensionRegistry } from "../extensions/extension-registry.js";
@@ -570,15 +571,9 @@ export class UniversalGraphExecutor implements IGraphExecutor {
       currentAttempt.response,
       currentAttempt.attemptId,
     );
-    const bindingMatches =
-      currentAttempt.executionRevision === expectedAttempt.executionRevision &&
-      currentAttempt.nodeId === expectedAttempt.nodeId &&
-      currentAttempt.workflowId === expectedAttempt.workflowId &&
-      currentAttempt.workflowVersion === expectedAttempt.workflowVersion &&
-      currentAttempt.workflowDigest === expectedAttempt.workflowDigest;
-    if (!bindingMatches) {
+    if (!stepAttemptBindingMatches(currentAttempt, expectedAttempt)) {
       throw new ConflictError(
-        "CURRENT_PRESENTATION_STALE: the persisted step attempt belongs to a different node or workflow definition. Do not use or retry that attempt; inspect the execution and workflow before continuing.",
+        "CURRENT_PRESENTATION_STALE: the persisted step attempt belongs to a different node, workflow, or continuation surface. Do not use or retry that attempt. Call session({ action: 'diagnose', executionId }) to see exactly which facts of the paused step changed before continuing.",
         {
           executionId,
           attemptId: currentAttempt.attemptId,
@@ -586,6 +581,10 @@ export class UniversalGraphExecutor implements IGraphExecutor {
           attemptNodeId: currentAttempt.nodeId,
           workflowId: execution.workflowId,
           attemptWorkflowId: currentAttempt.workflowId,
+          // The continuation surface, not the workflow version, decides whether a paused run may
+          // still continue; the version is reported only to identify the definitions involved.
+          continuationDigest: expectedAttempt.continuationDigest,
+          attemptContinuationDigest: currentAttempt.continuationDigest,
           workflowVersion: graph.metadata.version,
           attemptWorkflowVersion: currentAttempt.workflowVersion,
         },

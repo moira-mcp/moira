@@ -15,6 +15,7 @@ import type {
   WorkflowExecution,
 } from "../types/index.js";
 import { canonicalJson } from "../extensions/declared-schema.js";
+import { continuationFacts, continuationSurfaceDigest } from "./continuation-surface.js";
 
 export const EXECUTION_ATTEMPT_LEASE_MS = 30_000;
 export const EXECUTION_ATTEMPT_HEARTBEAT_MS = 5_000;
@@ -80,6 +81,8 @@ export class ExecutionMutationCoordinator {
       workflowId: execution.workflowId,
       workflowVersion: graph.metadata.version,
       workflowDigest: workflowGraphDigest(graph),
+      continuationDigest: continuationSurfaceDigest(graph, execution.currentNodeId),
+      continuationFacts: canonicalJson(continuationFacts(graph, execution.currentNodeId)),
       response,
       createdAt: this.now(),
     };
@@ -256,8 +259,7 @@ export class ExecutionMutationCoordinator {
       executionRevision: execution.revision,
       nodeId: execution.currentNodeId,
       workflowId: execution.workflowId,
-      workflowVersion: graph.metadata.version,
-      workflowDigest: workflowGraphDigest(graph),
+      continuationDigest: continuationSurfaceDigest(graph, execution.currentNodeId),
       inputFingerprint,
       ownerId: this.ownerId,
       now: this.now(),

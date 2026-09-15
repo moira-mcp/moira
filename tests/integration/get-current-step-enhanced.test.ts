@@ -280,11 +280,22 @@ describe("get_current_step Enhanced", () => {
 
   test.each([
     { binding: "node", patch: { nodeId: "obsolete-task" } },
-    { binding: "workflow version", patch: { workflowVersion: "0.9.0" } },
-    { binding: "workflow digest", patch: { workflowDigest: "0".repeat(64) } },
+    { binding: "continuation surface", patch: { continuationDigest: "0".repeat(64) } },
+    // An attempt persisted before the continuation binding existed carries none. Absence must be
+    // refused rather than read as agreement, which is the clause a narrowed binding most easily
+    // loses.
+    { binding: "absent continuation surface", patch: { continuationDigest: null } },
   ])(
     "current_step reports a stale $binding binding without recommending its ID",
-    async ({ binding, patch }: { binding: string; patch: Partial<PresentedExecutionAttempt> }) => {
+    async ({
+      binding,
+      patch,
+    }: {
+      binding: string;
+      patch: Partial<Omit<PresentedExecutionAttempt, "continuationDigest">> & {
+        continuationDigest?: string | null;
+      };
+    }) => {
       const workflow: WorkflowGraph = {
         id: `test-binding-stale-current-step-${binding.replaceAll(" ", "-")}-${Date.now()}`,
         metadata: { name: "Binding-stale current step", version: "1.0.0", description: "Recovery" },

@@ -293,6 +293,7 @@ forbidden audit payloads.
 - `EXECUTION_CANCEL` - execution cancelled
 - `EXECUTION_DELETE` - execution deleted
 - `EXECUTION_UPDATE_CONTEXT` - execution context changed
+- `EXECUTION_RECOVER` - a run that could not continue was re-presented at a named node, with that node and the variable names written recorded
 
 **Logged via:** MCPEngine (for MCP tools: EXECUTION_START, EXECUTION_STEP, EXECUTION_COMPLETE, EXECUTION_STEP_FAIL). ExecutionService provides database operations but does NOT log audit events - MCPEngine is the single audit logging point for MCP execution operations. REST API routes log EXECUTION_DELETE, EXECUTION_CANCEL, EXECUTION_UPDATE_CONTEXT separately.
 

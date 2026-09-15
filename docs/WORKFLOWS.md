@@ -113,7 +113,20 @@ Process:
 5. Reads active, soft-deleted, and hard-absent current states and validates every selected graph
 6. Stops workflow/baseline writes when any identity conflicts and exits non-zero; self-host also
    publishes the local recovery bundle before the guard restores the database
-7. Verifies captured workflow and baseline inputs, then applies a conflict-free immutable plan and
+7. Names, before applying anything and reporting it through the loader's own log, every paused run
+   the update would leave unable to continue — the workflow, the execution, the node it is paused on,
+   and whether the cause is a replacement it can be recovered from or a removal it cannot — so the
+   operator decides knowingly. Every workflow the plan will write is examined, whether it is being
+   replaced or removed; an entry skipped as unchanged, older or conflicted writes nothing and is not
+   examined. For a replacement the verdict is the engine's continuation surface, so the list holds
+   exactly the runs the runtime check would later refuse rather than every paused run of a changed
+   workflow; for a removal every paused run of it is named, because none can continue. The warning is
+   advisory: it never fails a deploy that would otherwise succeed. A run named for a replacement can
+   be repaired afterwards with `session diagnose` followed by `session recover`; one named for a
+   removal cannot. It is produced only when the caller supplies that judgement; the deploy
+   script does, and the result reports whether it was evaluated at all, so silence never means "not
+   checked"
+8. Verifies captured workflow and baseline inputs, then applies a conflict-free immutable plan and
    all baseline changes in one transaction
 
 ### Execution

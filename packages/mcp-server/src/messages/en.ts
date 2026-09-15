@@ -256,6 +256,13 @@ AGENT INSTRUCTIONS:
 3. Discard the unavailable presentation and continue from the returned directive and input schema
 Do NOT reuse the unavailable attempt ID or blindly apply its input to the current presentation. No user guidance is required unless the current directive requires a user decision.`,
 
+  recovery_refused: `
+AGENT INSTRUCTIONS:
+1. This run was NOT changed
+2. Call session({ action: 'diagnose', executionId: '<Process ID>' }) and read the blocking causes
+3. Call session({ action: 'recover', executionId: '<Process ID>', nodeId: '<node to resume from>', variableValues: { ... } }) again with what the refusal says is missing
+Recovery only touches a run that cannot continue without it. A run the diagnosis reports continuable is refused on purpose: continue it with session current_step and step instead. The refusal changed nothing, so retrying it costs nothing; ask the user only for a value you cannot determine yourself.`,
+
   outcome_unknown: `
 AGENT INSTRUCTIONS:
 1. STOP before retrying this workflow mutation because its effects may already have occurred
@@ -325,6 +332,7 @@ Do NOT continue independently. Do NOT ignore this error.`,
  * Error categories that map to specific agent instructions
  */
 export type ErrorCategory =
+  | "recovery_refused"
   | "stale_attempt"
   | "processing_attempt"
   | "conflicting_attempt"

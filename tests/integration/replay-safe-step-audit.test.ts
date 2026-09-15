@@ -7,6 +7,7 @@ import {
   user,
 } from "@mcp-moira/shared";
 import {
+  continuationSurfaceDigest,
   DatabaseRepository,
   ExecutionMutationCoordinator,
   stepMutationFingerprint,
@@ -105,8 +106,7 @@ describe("replay-safe step audit classification", () => {
         executionRevision: secondExecution.revision,
         nodeId: secondExecution.currentNodeId!,
         workflowId: secondExecution.workflowId,
-        workflowVersion: stored.metadata.version,
-        workflowDigest: workflowGraphDigest(stored),
+        continuationDigest: continuationSurfaceDigest(stored, secondExecution.currentNodeId!),
         inputFingerprint: stepMutationFingerprint({}),
         ownerId: "busy-audit-owner",
         now: Date.now(),

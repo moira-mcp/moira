@@ -25,5 +25,8 @@ export {
   type NotificationMessage,
   type AgentMessage,
 } from "./agent-message-queue.js";
+export * from "./continuation-diagnosis.js";
+export * from "./continuation-recovery.js";
+export * from "./continuation-surface.js";
 export * from "./execution-mutation-coordinator.js";
 export * from "./execution-attempt-maintenance.js";

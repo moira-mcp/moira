@@ -339,6 +339,15 @@ database has not been migrated. Temporarily set `MOIRA_IMAGE` to a previous vers
 [GitHub Releases](https://github.com/moira-mcp/moira/releases), run `docker compose up -d`, and return
 to `latest` after a corrected release.
 
+An upgrade that changes a bundled workflow can leave a run that was paused inside it unable to
+continue. Startup names those runs before applying the update — the workflow, the execution and the
+node each is paused on — so they appear in `docker compose logs moira` while the old definitions are
+still in place. The warning never stops an upgrade. A run invalidated because its workflow changed
+can be repaired afterwards with `session({ action: 'diagnose', ... })` followed by
+`session({ action: 'recover', ... })`; a run whose workflow the upgrade removes cannot, since no
+definition remains to resume against, and the line says which case it is. No warning means no paused
+run would be affected.
+
 When conflict detection has produced a local bundle under `data/.moira-reconciliation/pending`,
 follow its `AGENT INSTRUCTIONS` with one-off Compose CLI containers. The CLI itself does not stop or
 restart services and does not replace the database snapshot. It uses only local files—never

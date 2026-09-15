@@ -154,9 +154,14 @@ At Docker container startup, `scripts/migrate-workflows-in-docker.ts` runs:
 3. Plans every identity before writing. Upstream-only changes advance the managed workflow; user-only
    changes are preserved; two-sided self-host changes retain previous/current/incoming candidates in
    a local recovery bundle and fail initialization.
-4. Applies a conflict-free plan and all baseline changes in one SQLite transaction after verifying
+4. Reports every paused run the update would leave unable to continue, naming its workflow,
+   execution and paused node, while the stored definitions are still the old ones. Advisory: it never
+   fails a deploy. A run invalidated by a replacement is repairable afterwards through
+   `session diagnose` and `session recover`; a run whose workflow is being removed is not, because no
+   definition remains to resume against, and the report says which it is.
+5. Applies a conflict-free plan and all baseline changes in one SQLite transaction after verifying
    that the captured workflow and baseline inputs are still current.
-5. Exits non-zero on unresolved conflicts. The self-host startup guard restores the coherent
+6. Exits non-zero on unresolved conflicts. The self-host startup guard restores the coherent
    database and prompt manifest while retaining the local bundle, then stops the container without
    an automatic restart loop; SaaS deployment preflight stops before production swap.
 

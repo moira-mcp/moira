@@ -40,6 +40,8 @@ import type {
 } from "../types/base-types.js";
 import type {
   CompleteExecutionAttemptInput,
+  RecoverExecutionToNodeInput,
+  RecoverExecutionToNodeResult,
   ClaimStartExecutionAttemptInput,
   ExecutionAttempt,
   ExecutionAttemptClaimResult,
@@ -427,6 +429,12 @@ export class DatabaseRepository implements IDataRepository {
 
   async completeExecutionAttempt(input: CompleteExecutionAttemptInput): Promise<boolean> {
     return this.executionAttemptRepo.complete(input);
+  }
+
+  async recoverExecutionToNode(
+    input: RecoverExecutionToNodeInput,
+  ): Promise<RecoverExecutionToNodeResult> {
+    return this.executionAttemptRepo.recoverToNode(input);
   }
 
   async markExecutionAttemptOutcomeUnknown(

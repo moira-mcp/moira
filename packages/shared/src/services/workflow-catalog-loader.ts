@@ -68,6 +68,37 @@ export type EntryOutcome =
   | "invalid-workflow"
   | "invalid-version";
 
+/**
+ * A paused run a pending catalog update would leave unable to continue, named so an operator can
+ * decide knowingly rather than discover it afterwards.
+ */
+export interface InvalidatedPausedRun {
+  owner: string;
+  slug: string;
+  workflowId: string;
+  executionId: string;
+  /** The node the run is paused on, which is what the update reaches. */
+  nodeId: string;
+  /**
+   * `replaced` — the definition changes under the run in a way it cannot continue across. Such a run
+   * can be repaired afterwards with `session recover`.
+   *
+   * `removed` — the workflow itself goes away. Every paused run of it is invalidated, and none can be
+   * recovered, because there is no definition left to resume against. This is the one an operator
+   * most needs to see before the deploy, not after.
+   */
+  reason: "replaced" | "removed";
+}
+
+/**
+ * What this plan would do to paused runs. `evaluated: false` means no judgement was supplied by the
+ * caller, so nothing was checked — distinct from an empty list, which means nothing would break.
+ */
+export interface PausedRunImpact {
+  evaluated: boolean;
+  invalidated: InvalidatedPausedRun[];
+}
+
 export interface CatalogLoadResult {
   installed: number;
   updated: number;
@@ -84,6 +115,7 @@ export interface CatalogLoadResult {
     outcome: EntryOutcome;
     classification?: ReconciliationClassification;
   }>;
+  pausedRunImpact: PausedRunImpact;
 }
 
 export interface CatalogUserRepo {
@@ -97,9 +129,27 @@ export interface CatalogMutationService {
   }>;
 }
 
+/**
+ * Whether replacing a workflow with `incomingGraph` would stop a run paused on `nodeId` from
+ * continuing, given what its attempt is bound to.
+ *
+ * Injected rather than imported: the judgement is the workflow engine's continuation surface, and
+ * the engine depends on this package rather than the other way round. Supplying it is what turns the
+ * warning on; a caller that does not gets no warning and no claim of one. It must be the engine's
+ * own computation — a second rule here would let the gate warn about runs that keep working and stay
+ * silent about runs that break, which is worse than not warning at all.
+ */
+export type PausedRunInvalidationCheck = (input: {
+  incomingGraph: WorkflowGraph;
+  nodeId: string;
+  boundContinuationDigest: string | null;
+}) => boolean;
+
 export interface CatalogLoadDeps {
   userRepo: CatalogUserRepo;
   mutationService: CatalogMutationService;
+  /** Enables the paused-run warning; see PausedRunInvalidationCheck. */
+  wouldInvalidatePausedRun?: PausedRunInvalidationCheck;
   sqlite?: Database.Database;
   force?: boolean;
   fatalConflicts?: boolean;
@@ -128,6 +178,7 @@ function emptyResult(): CatalogLoadResult {
     skippedMissingOwner: 0,
     invalid: 0,
     outcomes: [],
+    pausedRunImpact: { evaluated: false, invalidated: [] },
   };
 }
 
@@ -275,6 +326,7 @@ export async function planCatalogEntries(
   const baselines = repository.listBaselines();
   const identities = buildIdentities(entries, baselines, deps.reconcileRemovals !== false);
   const result = emptyResult();
+  result.pausedRunImpact.evaluated = Boolean(deps.wouldInvalidatePausedRun);
   const applyPlan: WorkflowReconciliationApplyPlan = {
     preconditions: [],
     conflictPreconditions: [],
@@ -435,6 +487,38 @@ export async function planCatalogEntries(
         state: incoming,
         validation: incomingValidation,
       });
+      // Only a workflow that is actually being replaced can invalidate anything: an entry skipped as
+      // unchanged, older or conflicted writes nothing, so it breaks nothing.
+      const incomingGraph =
+        incoming.lifecycle === "present"
+          ? (incoming.content.graph as unknown as WorkflowGraph)
+          : null;
+      if (deps.wouldInvalidatePausedRun && currentRow?.id) {
+        for (const run of repository.listPausedRuns(currentRow.id)) {
+          // A removal takes every paused run with it — there is no definition left to resume
+          // against, so no judgement is needed and no repair exists. A replacement is judged run by
+          // run against the incoming definition.
+          const reason = incomingGraph
+            ? deps.wouldInvalidatePausedRun({
+                incomingGraph,
+                nodeId: run.nodeId,
+                boundContinuationDigest: run.continuationDigest,
+              })
+              ? ("replaced" as const)
+              : null
+            : ("removed" as const);
+          if (reason) {
+            result.pausedRunImpact.invalidated.push({
+              owner: identity.owner,
+              slug: identity.slug,
+              workflowId: currentRow.id,
+              executionId: run.executionId,
+              nodeId: run.nodeId,
+              reason,
+            });
+          }
+        }
+      }
     }
     if (decision.advanceBaseline) {
       applyPlan.baselines.push({
@@ -450,7 +534,33 @@ export async function planCatalogEntries(
   if (result.invalid > 0) {
     throw new CatalogPreflightError(result);
   }
+  // Reported here, in the planning pass, because a list of runs an update will break is only a
+  // decision the operator can act on while the update has not been applied. Printing it after the
+  // write would describe damage rather than offer a choice.
+  reportPausedRunImpact(result.pausedRunImpact, deps.log);
   return { result, applyPlan };
+}
+
+/**
+ * Tell the operator, before anything is written, which paused runs this update would leave unable to
+ * continue — and, when no judgement was supplied, that the question was not asked at all. Silence
+ * from this function must always mean "nothing would break", never "nobody checked".
+ */
+function reportPausedRunImpact(impact: PausedRunImpact, log?: (message: string) => void): void {
+  if (!log) return;
+  if (!impact.evaluated) {
+    log("  Paused runs: not evaluated (no invalidation judgement supplied to the loader)");
+    return;
+  }
+  if (impact.invalidated.length === 0) return;
+  log(`  ⚠️  Paused runs this update would leave unable to continue: ${impact.invalidated.length}`);
+  for (const run of impact.invalidated) {
+    log(
+      run.reason === "removed"
+        ? `     ${run.owner}/${run.slug}: execution ${run.executionId} paused at ${run.nodeId} — the workflow is being removed, so this run cannot be recovered`
+        : `     ${run.owner}/${run.slug}: execution ${run.executionId} paused at ${run.nodeId} — recoverable with session diagnose, then session recover`,
+    );
+  }
 }
 
 export async function installCatalogEntries(

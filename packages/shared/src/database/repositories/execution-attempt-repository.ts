@@ -10,10 +10,16 @@ import type {
   PreparedStartExecutionAttempt,
   PresentedExecutionAttempt,
   ReconciledExecutionAttemptCounts,
+  RecoverExecutionToNodeInput,
+  RecoverExecutionToNodeResult,
   StartPreconditionCompletionResult,
   WorkflowExecution,
 } from "@mcp-moira/workflow-engine";
 import type { ExecutionError } from "../../types/execution-error.js";
+import {
+  stepAttemptBindingMatches,
+  stepAttemptContinuationMatches,
+} from "../../types/step-attempt-binding.js";
 
 type AttemptRow = {
   attemptId: string;
@@ -26,6 +32,8 @@ type AttemptRow = {
   workflowId: string;
   workflowVersion: string;
   workflowDigest: string;
+  continuationDigest: string | null;
+  continuationFacts: string | null;
   requestPayload: string | null;
   inputFingerprint: string | null;
   state: "presented" | "executing" | "completed" | "outcome_unknown" | "superseded";
@@ -355,8 +363,9 @@ export class ExecutionAttemptRepository {
       .prepare(
         `INSERT INTO executionMutationAttempt (
           attemptId, operation, userId, executionId, executionRevision, nodeId,
-          workflowId, workflowVersion, workflowDigest, state, response, createdAt, updatedAt
-        ) VALUES (?, 'step', ?, ?, ?, ?, ?, ?, ?, 'presented', ?, ?, ?)`,
+          workflowId, workflowVersion, workflowDigest, continuationDigest, continuationFacts,
+          state, response, createdAt, updatedAt
+        ) VALUES (?, 'step', ?, ?, ?, ?, ?, ?, ?, ?, ?, 'presented', ?, ?, ?)`,
       )
       .run(
         attempt.attemptId,
@@ -367,6 +376,8 @@ export class ExecutionAttemptRepository {
         attempt.workflowId,
         attempt.workflowVersion,
         attempt.workflowDigest,
+        attempt.continuationDigest,
+        attempt.continuationFacts,
         attempt.response,
         attempt.createdAt,
         attempt.createdAt,
@@ -412,29 +423,20 @@ export class ExecutionAttemptRepository {
           return created;
         }
         const revisionOnlyStale =
-          current.state === "presented" &&
-          current.nodeId === candidate.nodeId &&
-          current.workflowId === candidate.workflowId &&
-          current.workflowVersion === candidate.workflowVersion &&
-          current.workflowDigest === candidate.workflowDigest;
+          current.state === "presented" && stepAttemptContinuationMatches(current, candidate);
         if (!revisionOnlyStale || current.executionRevision === candidate.executionRevision) {
           return current;
         }
         const changed = this.sqlite
           .prepare(
             `UPDATE executionMutationAttempt SET executionRevision = ?, updatedAt = ?
-             WHERE attemptId = ? AND state = 'presented' AND executionRevision IS ?
-               AND nodeId = ? AND workflowId = ? AND workflowVersion = ? AND workflowDigest = ?`,
+             WHERE attemptId = ? AND state = 'presented' AND executionRevision IS ?`,
           )
           .run(
             candidate.executionRevision,
             candidate.createdAt,
             current.attemptId,
             current.executionRevision,
-            candidate.nodeId,
-            candidate.workflowId,
-            candidate.workflowVersion,
-            candidate.workflowDigest,
           );
         if (changed.changes !== 1) {
           const authoritative = this.getCurrent(candidate.executionId, candidate.userId);
@@ -492,8 +494,7 @@ export class ExecutionAttemptRepository {
     executionRevision: number;
     nodeId: string;
     workflowId: string;
-    workflowVersion: string;
-    workflowDigest: string;
+    continuationDigest: string;
     inputFingerprint: string;
     ownerId: string;
     now: number;
@@ -514,13 +515,7 @@ export class ExecutionAttemptRepository {
         if (row.state === "completed" && row.response !== null) {
           return { kind: "completed", attempt: asAttempt(row), response: row.response };
         }
-        const bindingMatches =
-          row.executionRevision === input.executionRevision &&
-          row.nodeId === input.nodeId &&
-          row.workflowId === input.workflowId &&
-          row.workflowVersion === input.workflowVersion &&
-          row.workflowDigest === input.workflowDigest;
-        if (!bindingMatches) return { kind: "stale" };
+        if (!stepAttemptBindingMatches(row, input)) return { kind: "stale" };
         if (row.state === "outcome_unknown")
           return { kind: "outcome_unknown", attempt: asAttempt(row) };
         if (row.state === "executing") return { kind: "processing", attempt: asAttempt(row) };
@@ -577,6 +572,63 @@ export class ExecutionAttemptRepository {
         )
         .run(now, now + leaseMs, now, attemptId, ownerId, fence).changes === 1
     );
+  }
+
+  /**
+   * Move a paused execution to a node it can resume from and retire the attempt it was holding.
+   * One transaction, guarded on the execution exactly as a step completion is: the caller's read of
+   * the execution must still be what is stored, or the move is refused rather than applied to a
+   * state the caller never saw. An attempt that is being executed, or whose outcome is unknown, is
+   * refused too — recovery must not race a caller that may still commit.
+   *
+   * The retired attempt is marked superseded and linked to the fresh one installed for the target in
+   * the same transaction, so the run always holds an attempt. Rendering that attempt's text happens
+   * afterwards through the ordinary presentation path; if it never happens, the run is still usable
+   * from the attempt written here.
+   */
+  recoverToNode(input: RecoverExecutionToNodeInput): RecoverExecutionToNodeResult {
+    return this.sqlite
+      .transaction((): RecoverExecutionToNodeResult => {
+        const current = this.getCurrent(input.execution.executionId, input.execution.userId);
+        if (current && current.state !== "presented") return "attempt_in_progress";
+
+        const execution = serializeExecution(input.execution);
+        const expected = serializeExecution(input.expectedExecution);
+        const now = Date.now();
+        const update = this.sqlite
+          .prepare(
+            `UPDATE workflowExecution SET state = ?, currentNodeId = ?, waitingForInputNodeId = ?,
+               context = ?, updatedAt = ?, revision = revision + 1
+             WHERE executionId = ? AND revision = ? AND state = ?
+               AND currentNodeId IS ? AND waitingForInputNodeId IS ? AND context = ?`,
+          )
+          .run(
+            execution.state,
+            execution.currentNodeId,
+            execution.waitingForInputNodeId,
+            execution.context,
+            now,
+            input.execution.executionId,
+            input.expectedExecution.revision,
+            expected.state,
+            expected.currentNodeId,
+            expected.waitingForInputNodeId,
+            expected.context,
+          );
+        if (update.changes !== 1) return "execution_changed";
+
+        if (current) {
+          this.sqlite
+            .prepare(
+              `UPDATE executionMutationAttempt SET state = 'superseded', nextAttemptId = ?,
+                 completedAt = ?, updatedAt = ? WHERE attemptId = ? AND state = 'presented'`,
+            )
+            .run(input.nextAttempt.attemptId, now, now, current.attemptId);
+        }
+        this.createPresented(input.nextAttempt);
+        return "recovered";
+      })
+      .immediate();
   }
 
   complete(input: CompleteExecutionAttemptInput): boolean {

@@ -140,7 +140,10 @@ describe("MCP Messages Module", () => {
           category === "stale_attempt" ||
           category === "processing_attempt" ||
           category === "conflicting_attempt" ||
-          category === "invalid_step_attempt"
+          category === "invalid_step_attempt" ||
+          // A refused recovery changed nothing and names the calls that follow, so the agent acts
+          // on it rather than stopping at a user boundary.
+          category === "recovery_refused"
         )
           continue;
         expect(instructions.toLowerCase()).toContain("stop");
@@ -149,6 +152,7 @@ describe("MCP Messages Module", () => {
       expect(AGENT_INSTRUCTIONS.processing_attempt.toLowerCase()).not.toContain("stop");
       expect(AGENT_INSTRUCTIONS.conflicting_attempt.toLowerCase()).not.toContain("stop");
       expect(AGENT_INSTRUCTIONS.invalid_step_attempt.toLowerCase()).not.toContain("stop");
+      expect(AGENT_INSTRUCTIONS.recovery_refused.toLowerCase()).not.toContain("stop");
     });
 
     it("should contain numbered steps", () => {
