@@ -4,13 +4,13 @@
  */
 
 import { jest } from "@jest/globals";
-import { IGraphStorage, WorkflowGraph } from "@mcp-moira/workflow-engine";
+import { IDataRepository, WorkflowGraph } from "@mcp-moira/workflow-engine";
 import { AgentMessageQueue } from "@mcp-moira/workflow-engine";
 
 /**
  * Create standardized mock storage for consistent testing
  */
-export function createMockStorage(): IGraphStorage {
+export function createMockStorage(): IDataRepository {
   return {
     getWorkflow: jest
       .fn<(workflowId: string) => Promise<WorkflowGraph | null>>()
@@ -30,7 +30,7 @@ export function createMockStorage(): IGraphStorage {
     listExecutions: jest.fn(),
     getWorkflowWithValidation: jest.fn(),
     listWorkflowsWithValidation: jest.fn(),
-  } as IGraphStorage;
+  } as IDataRepository;
 }
 
 // createMockEngine УДАЛЕН - используй только real GraphExecutionEngine!

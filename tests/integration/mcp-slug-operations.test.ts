@@ -16,6 +16,35 @@ import { DatabaseRepository } from "@mcp-moira/workflow-engine";
 import { getDatabase, user } from "@mcp-moira/shared";
 import type { WorkflowGraph } from "@mcp-moira/workflow-engine";
 
+/**
+ * The `session` tool answers with a union, one member per action, so a test has to say which member
+ * it asked for. These two read the members these tests use and fail loudly when the response is not
+ * that member — which is the failure a plain cast would hide.
+ */
+interface ListedExecution {
+  executionId: string;
+  note?: string | null;
+  workflowSlug: string;
+  workflowOwnerHandle: string;
+}
+
+function listedExecutions(result: { data?: unknown }): ListedExecution[] {
+  const data = result.data as { executions?: ListedExecution[] } | undefined;
+  if (!data?.executions) throw new Error("session executions response carried no executions");
+  return data.executions;
+}
+
+function executionContext(result: { data?: unknown }): {
+  workflowSlug: string;
+  workflowOwnerHandle: string;
+} {
+  const data = result.data as
+    | { workflowSlug?: string; workflowOwnerHandle?: string }
+    | undefined;
+  if (!data?.workflowSlug) throw new Error("session execution_context response carried no slug");
+  return data as { workflowSlug: string; workflowOwnerHandle: string };
+}
+
 const TEST_USER_ID = "test-slug-operations-user";
 const TEST_USER_HANDLE = "test-slug-user";
 
@@ -294,17 +323,15 @@ describe("MCP Slug Operations Integration Tests", () => {
       });
 
       expect(result.success).toBe(true);
-      expect(result.data).toBeDefined();
-      expect(result.data.executions.length).toBeGreaterThan(0);
+      const listed = listedExecutions(result);
+      expect(listed.length).toBeGreaterThan(0);
 
       // Find our test execution
-      const testExecution = result.data.executions.find(
-        (e: { note?: string }) => e.note === "Test execution for slug check",
-      );
+      const testExecution = listed.find((e) => e.note === "Test execution for slug check");
 
       expect(testExecution).toBeDefined();
-      expect(testExecution.workflowSlug).toBe(workflowSlug);
-      expect(testExecution.workflowOwnerHandle).toBe(TEST_USER_HANDLE);
+      expect(testExecution?.workflowSlug).toBe(workflowSlug);
+      expect(testExecution?.workflowOwnerHandle).toBe(TEST_USER_HANDLE);
     });
 
     test("execution_context includes workflowSlug and workflowOwnerHandle", async () => {
@@ -327,8 +354,9 @@ describe("MCP Slug Operations Integration Tests", () => {
         });
       });
 
-      expect(executions.data.executions.length).toBeGreaterThan(0);
-      const executionId = executions.data.executions[0].executionId;
+      const listed = listedExecutions(executions);
+      expect(listed.length).toBeGreaterThan(0);
+      const executionId = listed[0].executionId;
 
       // Get execution context
       const result = await runWithMCPContext({ userId: TEST_USER_ID }, async () => {
@@ -339,9 +367,9 @@ describe("MCP Slug Operations Integration Tests", () => {
       });
 
       expect(result.success).toBe(true);
-      expect(result.data).toBeDefined();
-      expect(result.data.workflowSlug).toBe(workflowSlug);
-      expect(result.data.workflowOwnerHandle).toBe(TEST_USER_HANDLE);
+      const context = executionContext(result);
+      expect(context.workflowSlug).toBe(workflowSlug);
+      expect(context.workflowOwnerHandle).toBe(TEST_USER_HANDLE);
     });
   });
 

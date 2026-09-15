@@ -21,6 +21,7 @@ import {
   type ExecutionContext,
   type INodeHandler,
   type MaterializeNode,
+  type VariableRegistry,
   type WorkflowGraph,
 } from "@mcp-moira/workflow-engine";
 
@@ -40,7 +41,7 @@ const node: MaterializeNode = {
   connections: { success: "end" },
 };
 
-const registry = {
+const registry: VariableRegistry = {
   readme: { type: "string", description: "README source", default: "# {{name}}" },
   name: { type: "string", description: "Name", default: "default name" },
   folder: { type: "string", description: "Destination folder", default: "generated" },
@@ -68,6 +69,28 @@ async function untar(buffer: Buffer): Promise<Map<string, Buffer>> {
   return result;
 }
 
+/**
+ * A deliberately invalid edit to a cloned graph.
+ *
+ * These fixtures exist to be rejected, so the value being written is one the node type forbids by
+ * construction — an inline content string, a connection map with no success edge. The subject under
+ * test is the validator, and the type system has to stand aside for the test to state its case.
+ */
+function breakMaterializeNode(
+  graph: WorkflowGraph,
+  change: Record<string, unknown>,
+): WorkflowGraph {
+  Object.assign(materializeNodeOf(graph), change);
+  return graph;
+}
+
+/** The materialize node of a cloned graph, so a fixture edit names the node instead of an index. */
+function materializeNodeOf(graph: WorkflowGraph): MaterializeNode {
+  const found = graph.nodes.find((candidate) => candidate.type === "materialize");
+  if (!found || found.type !== "materialize") throw new Error("graph has no materialize node");
+  return found;
+}
+
 function readCapturedArgv(path: string): string[] {
   return readFileSync(path).toString("utf8").split("\0").slice(0, -1);
 }
@@ -81,7 +104,7 @@ describe("materialize node", () => {
         { path: "plans/.keep", content: "" as const },
       ],
     };
-    const workflow = {
+    const workflow: WorkflowGraph = {
       metadata: { name: "Test", version: "1.0.0", description: "Test" },
       variableRegistry: registry,
       nodes: [
@@ -93,17 +116,20 @@ describe("materialize node", () => {
     expect((await new GraphValidator().validateUnified(workflow)).valid).toBe(true);
 
     const exactCount = structuredClone(workflow);
-    exactCount.nodes[1].files = Array.from({ length: MATERIALIZE_MAX_FILES }, (_, index) => ({
-      path: `${index}.txt`,
-      from: "readme",
-    }));
+    materializeNodeOf(exactCount).files = Array.from(
+      { length: MATERIALIZE_MAX_FILES },
+      (_, index) => ({
+        path: `${index}.txt`,
+        from: "readme",
+      }),
+    );
     expect((await new GraphValidator().validateUnified(exactCount)).valid).toBe(true);
     const overCount = structuredClone(exactCount);
-    overCount.nodes[1].files.push({ path: "overflow.txt", from: "readme" });
+    materializeNodeOf(overCount).files.push({ path: "overflow.txt", from: "readme" });
     expect((await new GraphValidator().validateUnified(overCount)).valid).toBe(false);
 
     const inlineContent = structuredClone(workflow);
-    inlineContent.nodes[1].files = [{ path: "inline", content: "inline data" }];
+    breakMaterializeNode(inlineContent, { files: [{ path: "inline", content: "inline data" }] });
     const inlineResult = await new GraphValidator().validateUnified(inlineContent);
     expect(inlineResult.valid).toBe(false);
     expect(inlineResult.issues.some((issue) => JSON.stringify(issue).includes("content"))).toBe(
@@ -111,25 +137,25 @@ describe("materialize node", () => {
     );
 
     const missingSuccess = structuredClone(workflow);
-    missingSuccess.nodes[1].connections = {};
+    breakMaterializeNode(missingSuccess, { connections: {} });
     const connectionResult = await new GraphValidator().validateUnified(missingSuccess);
     expect(connectionResult.valid).toBe(false);
     expect(connectionResult.issues.some((issue) => issue.message.includes("success"))).toBe(true);
 
     const unknownBase = structuredClone(workflow);
-    unknownBase.nodes[1].basePath = "{{unknownBase}}";
+    materializeNodeOf(unknownBase).basePath = "{{unknownBase}}";
     const unknownBaseResult = await new GraphValidator().validateUnified(unknownBase);
     expect(unknownBaseResult.valid).toBe(false);
     expect(unknownBaseResult.issues.some((issue) => issue.field === "basePath")).toBe(true);
 
     const unknownPath = structuredClone(workflow);
-    unknownPath.nodes[1].files = [{ path: "{{unknownPath}}", from: "readme" }];
+    materializeNodeOf(unknownPath).files = [{ path: "{{unknownPath}}", from: "readme" }];
     const unknownPathResult = await new GraphValidator().validateUnified(unknownPath);
     expect(unknownPathResult.valid).toBe(false);
     expect(unknownPathResult.issues.some((issue) => issue.field === "files[0].path")).toBe(true);
 
     const missingDefault = structuredClone(workflow);
-    Reflect.deleteProperty(missingDefault.variableRegistry.readme, "default");
+    Reflect.deleteProperty(missingDefault.variableRegistry!.readme, "default");
     const missingDefaultResult = await new GraphValidator().validateUnified(missingDefault);
     expect(missingDefaultResult.valid).toBe(false);
     expect(
@@ -139,7 +165,7 @@ describe("materialize node", () => {
     ).toBe(true);
 
     const nonStringDefault = structuredClone(workflow);
-    Object.assign(nonStringDefault.variableRegistry, {
+    Object.assign(nonStringDefault.variableRegistry!, {
       readme: {
         type: "number",
         description: "Invalid materialize source",
@@ -174,7 +200,7 @@ describe("materialize node", () => {
       [{ path: "unknown", from: "undeclared" }],
     ]) {
       const candidate = structuredClone(workflow);
-      candidate.nodes[1].files = files;
+      breakMaterializeNode(candidate, { files });
       expect((await new GraphValidator().validateUnified(candidate)).valid).toBe(false);
     }
   });

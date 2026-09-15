@@ -2,6 +2,7 @@ import { describe, expect, it, jest } from "@jest/globals";
 import {
   WorkspaceResourceError,
   type WorkspaceOperationRecord,
+  type WorkspaceOperationResult,
   type WorkspaceResourceRecord,
 } from "@mcp-moira/shared";
 
@@ -225,19 +226,16 @@ function services(overrides: Partial<WorkspaceToolServices> = {}): WorkspaceTool
 }
 
 /** A terminal exec result as the service reports it, payload plus complete retained sizes. */
-function execResult(value: {
-  state: "succeeded" | "failed" | "cancelled" | "timed_out";
-  stdout: string;
-  stderr: string;
-  exitCode: number | null;
-  stdoutTotalBytes?: number;
-  outputLimitExceeded?: boolean;
-}) {
+function execResult(
+  value: Pick<WorkspaceOperationResult, "state" | "stdout" | "stderr" | "exitCode"> &
+    Partial<WorkspaceOperationResult>,
+): WorkspaceOperationResult {
   return {
     ...value,
     stdoutTotalBytes: value.stdoutTotalBytes ?? Buffer.byteLength(value.stdout),
-    stderrTotalBytes: Buffer.byteLength(value.stderr),
+    stderrTotalBytes: value.stderrTotalBytes ?? Buffer.byteLength(value.stderr),
     outputLimitExceeded: value.outputLimitExceeded ?? false,
+    sessionCaptureDropped: value.sessionCaptureDropped ?? false,
   };
 }
 
@@ -290,7 +288,7 @@ describe("workspace MCP adapter", () => {
     const listed = await executeWorkspaceTool("workspace_list", {}, USER_ID, dependencies);
     const fetched = await executeWorkspaceTool(
       "workspace_get",
-      { workspace_id: WORKSPACE_ID },
+      parseWorkspaceToolParams("workspace_get", { workspace_id: WORKSPACE_ID }),
       USER_ID,
       dependencies,
     );
@@ -320,19 +318,23 @@ describe("workspace MCP adapter", () => {
     const dependencies = services();
     const created = await executeWorkspaceTool(
       "workspace_create",
-      { repository_id: "42", ref: "main" },
+      parseWorkspaceToolParams("workspace_create", { repository_id: "42", ref: "main" }),
       USER_ID,
       dependencies,
     );
     const stopped = await executeWorkspaceTool(
       "workspace_stop",
-      { workspace_id: WORKSPACE_ID },
+      parseWorkspaceToolParams("workspace_stop", { workspace_id: WORKSPACE_ID }),
       USER_ID,
       dependencies,
     );
     const deleted = await executeWorkspaceTool(
       "workspace_delete",
-      { workspace_id: WORKSPACE_ID, expected_generation: 4, confirm_delete: true },
+      parseWorkspaceToolParams("workspace_delete", {
+        workspace_id: WORKSPACE_ID,
+        expected_generation: 4,
+        confirm_delete: true,
+      }),
       USER_ID,
       dependencies,
     );
@@ -347,19 +349,19 @@ describe("workspace MCP adapter", () => {
     const dependencies = services();
     await executeWorkspaceTool(
       "workspace_exec",
-      {
+      parseWorkspaceToolParams("workspace_exec", {
         workspace_id: WORKSPACE_ID,
         argv: ["node", "script.js"],
         cwd: ".",
         timeout_seconds: 30,
         stdin_text: "hello",
-      },
+      }),
       USER_ID,
       dependencies,
     );
     const native = await executeWorkspaceTool(
       "workspace_exec",
-      {
+      parseWorkspaceToolParams("workspace_exec", {
         workspace_id: WORKSPACE_ID,
         argv: ["node", "script.js"],
         cwd: ".",
@@ -371,7 +373,7 @@ describe("workspace MCP adapter", () => {
           mime_type: "application/octet-stream",
           size_bytes: 12,
         },
-      },
+      }),
       USER_ID,
       dependencies,
     );
@@ -401,21 +403,23 @@ describe("workspace MCP adapter", () => {
 
   it("reconciles a returned operation ID without dispatching a duplicate command", async () => {
     let current: WorkspaceOperationRecord = { ...operation("exec"), state: "reconcile_pending" };
-    const execute = jest.fn();
-    const reconcile = jest.fn(async () => {
-      current = { ...operation("exec"), state: "succeeded" as const };
-      return execResult({
-        state: "succeeded" as const,
-        stdout: "recovered\n",
-        stderr: "",
-        exitCode: 0,
-      });
-    });
+    const execute = jest.fn<NonNullable<WorkspaceToolServices["operation"]>["execute"]>();
+    const reconcile = jest.fn<NonNullable<WorkspaceToolServices["operation"]>["reconcile"]>(
+      async () => {
+        current = { ...operation("exec"), state: "succeeded" as const };
+        return execResult({
+          state: "succeeded" as const,
+          stdout: "recovered\n",
+          stderr: "",
+          exitCode: 0,
+        });
+      },
+    );
     const base = services();
     const dependencies = services({
       operation: {
         ...base.operation!,
-        get: jest.fn(() => current),
+        get: jest.fn<NonNullable<WorkspaceToolServices["operation"]>["get"]>(() => current),
         reconcile,
         execute,
       },
@@ -423,7 +427,10 @@ describe("workspace MCP adapter", () => {
 
     const resumed = await executeWorkspaceTool(
       "workspace_exec",
-      { workspace_id: WORKSPACE_ID, operation_id: OPERATION_ID },
+      parseWorkspaceToolParams("workspace_exec", {
+        workspace_id: WORKSPACE_ID,
+        operation_id: OPERATION_ID,
+      }),
       USER_ID,
       dependencies,
     );
@@ -446,7 +453,12 @@ describe("workspace MCP adapter", () => {
       const base = services();
       const response = await executeWorkspaceTool(
         "workspace_exec",
-        { workspace_id: WORKSPACE_ID, argv: ["node", "test.js"], cwd: ".", timeout_seconds: 30 },
+        parseWorkspaceToolParams("workspace_exec", {
+          workspace_id: WORKSPACE_ID,
+          argv: ["node", "test.js"],
+          cwd: ".",
+          timeout_seconds: 30,
+        }),
         USER_ID,
         services({
           operation: {
@@ -474,12 +486,15 @@ describe("workspace MCP adapter", () => {
     const base = services();
     const response = await executeWorkspaceTool(
       "workspace_exec",
-      { workspace_id: WORKSPACE_ID, operation_id: OPERATION_ID },
+      parseWorkspaceToolParams("workspace_exec", {
+        workspace_id: WORKSPACE_ID,
+        operation_id: OPERATION_ID,
+      }),
       USER_ID,
       services({
         operation: {
           ...base.operation!,
-          get: jest.fn(() => current),
+          get: jest.fn<NonNullable<WorkspaceToolServices["operation"]>["get"]>(() => current),
           reconcile: jest.fn(async () => {
             current = {
               ...operation("exec"),
@@ -510,14 +525,23 @@ describe("workspace MCP adapter", () => {
     const base = services();
     const response = await executeWorkspaceTool(
       "workspace_write",
-      { workspace_id: WORKSPACE_ID, path: "source.txt", text: "new", expected: { exists: false } },
+      parseWorkspaceToolParams("workspace_write", {
+        workspace_id: WORKSPACE_ID,
+        path: "source.txt",
+        text: "new",
+        expected: { exists: false },
+      }),
       USER_ID,
       services({
         file: {
           ...base.file!,
-          execute: jest.fn(async () => ({
-            operation: { ...operation("write"), state: "failed" },
-            result: { action: "write", state: "failed", code: "WORKSPACE_FILE_REJECTED" },
+          execute: jest.fn<NonNullable<WorkspaceToolServices["file"]>["execute"]>(async () => ({
+            operation: { ...operation("write"), state: "failed" as const },
+            result: {
+              action: "write" as const,
+              state: "failed" as const,
+              code: "WORKSPACE_FILE_REJECTED",
+            },
           })),
         },
       }),
@@ -552,12 +576,12 @@ describe("workspace MCP adapter", () => {
     });
     const resumed = await executeWorkspaceTool(
       "workspace_download",
-      {
+      parseWorkspaceToolParams("workspace_download", {
         workspace_id: WORKSPACE_ID,
         operation_id: OPERATION_ID,
         file_name: "result.bin",
         mime_type: "application/octet-stream",
-      },
+      }),
       USER_ID,
       dependencies,
     );
@@ -618,13 +642,18 @@ describe("workspace MCP adapter", () => {
     const dependencies = services({ file: { ...base.file!, execute } });
     const read = await executeWorkspaceTool(
       "workspace_read",
-      { workspace_id: WORKSPACE_ID, path: "src/index.ts", offset: 0, length: 5 },
+      parseWorkspaceToolParams("workspace_read", {
+        workspace_id: WORKSPACE_ID,
+        path: "src/index.ts",
+        offset: 0,
+        length: 5,
+      }),
       USER_ID,
       dependencies,
     );
     const patched = await executeWorkspaceTool(
       "workspace_apply_patch",
-      {
+      parseWorkspaceToolParams("workspace_apply_patch", {
         workspace_id: WORKSPACE_ID,
         files: [
           {
@@ -633,13 +662,13 @@ describe("workspace MCP adapter", () => {
             edits: [{ start: 0, end: 5, text: "hello!" }],
           },
         ],
-      },
+      }),
       USER_ID,
       dependencies,
     );
     const uploaded = await executeWorkspaceTool(
       "workspace_upload",
-      {
+      parseWorkspaceToolParams("workspace_upload", {
         workspace_id: WORKSPACE_ID,
         path: "input.txt",
         file: {
@@ -650,19 +679,19 @@ describe("workspace MCP adapter", () => {
           size_bytes: 12,
         },
         expected: { exists: false },
-      },
+      }),
       USER_ID,
       dependencies,
     );
     const downloaded = await executeWorkspaceTool(
       "workspace_download",
-      {
+      parseWorkspaceToolParams("workspace_download", {
         workspace_id: WORKSPACE_ID,
         path: "result.txt",
         max_bytes: 1024,
         file_name: "result.txt",
         mime_type: "text/plain",
-      },
+      }),
       USER_ID,
       dependencies,
     );
@@ -714,12 +743,12 @@ describe("workspace MCP adapter", () => {
       const fromStatus = await executeWorkspaceTool("workspace_list", {}, USER_ID, statusBroken);
       const fromService = await executeWorkspaceTool(
         "workspace_write",
-        {
+        parseWorkspaceToolParams("workspace_write", {
           workspace_id: WORKSPACE_ID,
           path: "private/source.ts",
           text: "secret source",
           expected: { exists: false },
-        },
+        }),
         USER_ID,
         serviceBroken,
       );
@@ -759,7 +788,12 @@ describe("workspace MCP adapter", () => {
     });
     const executed = await executeWorkspaceTool(
       "workspace_exec",
-      { workspace_id: WORKSPACE_ID, argv: ["build"], cwd: ".", timeout_seconds: 60 },
+      parseWorkspaceToolParams("workspace_exec", {
+        workspace_id: WORKSPACE_ID,
+        argv: ["build"],
+        cwd: ".",
+        timeout_seconds: 60,
+      }),
       USER_ID,
       noisy,
     );
@@ -849,7 +883,12 @@ describe("workspace MCP adapter", () => {
     });
     const halted = await executeWorkspaceTool(
       "workspace_exec",
-      { workspace_id: WORKSPACE_ID, argv: ["flood"], cwd: ".", timeout_seconds: 60 },
+      parseWorkspaceToolParams("workspace_exec", {
+        workspace_id: WORKSPACE_ID,
+        argv: ["flood"],
+        cwd: ".",
+        timeout_seconds: 60,
+      }),
       USER_ID,
       stopped,
     );
@@ -905,7 +944,7 @@ describe("workspace MCP adapter", () => {
     });
     const refused = await executeWorkspaceTool(
       "workspace_create",
-      { repository_id: "42", ref: "main" },
+      parseWorkspaceToolParams("workspace_create", { repository_id: "42", ref: "main" }),
       USER_ID,
       named,
     );
@@ -923,7 +962,7 @@ describe("workspace MCP adapter", () => {
     });
     const generic = await executeWorkspaceTool(
       "workspace_create",
-      { repository_id: "42", ref: "main" },
+      parseWorkspaceToolParams("workspace_create", { repository_id: "42", ref: "main" }),
       USER_ID,
       unnamed,
     );
@@ -952,7 +991,7 @@ describe("workspace MCP adapter", () => {
     });
     const setup = await executeWorkspaceTool(
       "workspace_start",
-      { workspace_id: WORKSPACE_ID },
+      parseWorkspaceToolParams("workspace_start", { workspace_id: WORKSPACE_ID }),
       USER_ID,
       disconnected,
     );
@@ -967,7 +1006,7 @@ describe("workspace MCP adapter", () => {
     });
     const missing = await executeWorkspaceTool(
       "workspace_get",
-      { workspace_id: WORKSPACE_ID },
+      parseWorkspaceToolParams("workspace_get", { workspace_id: WORKSPACE_ID }),
       USER_ID,
       foreign,
     );
@@ -991,7 +1030,12 @@ describe("workspace MCP adapter", () => {
     });
     const unreadable = await executeWorkspaceTool(
       "workspace_read",
-      { workspace_id: WORKSPACE_ID, path: "asset.bin", offset: 0, length: 2 },
+      parseWorkspaceToolParams("workspace_read", {
+        workspace_id: WORKSPACE_ID,
+        path: "asset.bin",
+        offset: 0,
+        length: 2,
+      }),
       USER_ID,
       binary,
     );

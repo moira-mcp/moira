@@ -9,7 +9,7 @@ import { TelegramClient } from "@mcp-moira/workflow-engine";
 import { TelegramNotificationHandler, AgentMessageQueue } from "@mcp-moira/workflow-engine";
 import { TelegramConfig, TelegramErrorType, SendMessageParams } from "@mcp-moira/workflow-engine";
 import { TelegramNotificationNode, ExecutionContext } from "@mcp-moira/workflow-engine";
-import { IGraphStorage, IGraphExecutionEngine } from "@mcp-moira/workflow-engine";
+import { IDataRepository, IGraphExecutionEngine } from "@mcp-moira/workflow-engine";
 
 // Mock fetch for HTTP client tests
 const mockFetch = jest.fn() as jest.MockedFunction<typeof fetch>;
@@ -394,7 +394,7 @@ describe("Telegram Services", () => {
     let handler: TelegramNotificationHandler;
     let _mockClient: TelegramClient;
     let context: ExecutionContext;
-    let mockRepository: IGraphStorage;
+    let mockRepository: IDataRepository;
 
     const validConfig: TelegramConfig = {
       botToken: "123456789:ABCDEFGH",
@@ -413,7 +413,7 @@ describe("Telegram Services", () => {
         getWorkflow: jest.fn().mockResolvedValue({
           metadata: { name: "Test Workflow Name", version: "1.0.0", description: "test" },
         }),
-      } as unknown as IGraphStorage;
+      } as unknown as IDataRepository;
 
       _mockClient = new TelegramClient(validConfig);
       handler = new TelegramNotificationHandler();
@@ -719,7 +719,7 @@ describe("Telegram Services", () => {
             if (key === "telegram.enabled") return Promise.resolve(true);
             return Promise.resolve(null);
           }),
-        } as unknown as IGraphStorage;
+        } as unknown as IDataRepository;
 
         const testNode: TelegramNotificationNode = {
           type: "telegram-notification",

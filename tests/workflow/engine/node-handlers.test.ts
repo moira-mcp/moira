@@ -21,7 +21,7 @@ import {
   TeleportNode,
   ConditionBuilder,
 } from "@mcp-moira/workflow-engine";
-import { IGraphStorage, IGraphExecutionEngine } from "@mcp-moira/workflow-engine";
+import { IDataRepository, IGraphExecutionEngine } from "@mcp-moira/workflow-engine";
 
 describe("Node Handlers", () => {
   describe("StartNodeHandler", () => {
@@ -40,7 +40,7 @@ describe("Node Handlers", () => {
         connections: { default: "next-node" },
       };
 
-      const mockStorage = {} as IGraphStorage;
+      const mockStorage = {} as IDataRepository;
       const mockEngine = {} as IGraphExecutionEngine;
       const result = await handler.execute(
         startNode,
@@ -71,7 +71,7 @@ describe("Node Handlers", () => {
         connections: { default: "next" },
       };
 
-      const mockStorage = {} as IGraphStorage;
+      const mockStorage = {} as IDataRepository;
       const mockEngine = {} as IGraphExecutionEngine;
       const result = await handler.execute(
         startNode,
@@ -104,7 +104,7 @@ describe("Node Handlers", () => {
         finalOutput: ["result", "score"],
       };
 
-      const mockStorage = {} as IGraphStorage;
+      const mockStorage = {} as IDataRepository;
       const mockEngine = {} as IGraphExecutionEngine;
       const result = await handler.execute(
         endNode,
@@ -135,7 +135,7 @@ describe("Node Handlers", () => {
         id: "end",
       };
 
-      const mockStorage = {} as IGraphStorage;
+      const mockStorage = {} as IDataRepository;
       const mockEngine = {} as IGraphExecutionEngine;
       const result = await handler.execute(
         endNode,
@@ -167,7 +167,7 @@ describe("Node Handlers", () => {
         },
       };
 
-      const mockStorage = {} as IGraphStorage;
+      const mockStorage = {} as IDataRepository;
       const mockEngine = {} as IGraphExecutionEngine;
       const result = await handler.execute(
         conditionNode,
@@ -199,7 +199,7 @@ describe("Node Handlers", () => {
         },
       };
 
-      const mockStorage = {} as IGraphStorage;
+      const mockStorage = {} as IDataRepository;
       const mockEngine = {} as IGraphExecutionEngine;
       const result = await handler.execute(
         conditionNode,
@@ -235,7 +235,7 @@ describe("Node Handlers", () => {
         },
       };
 
-      const mockStorage = {} as IGraphStorage;
+      const mockStorage = {} as IDataRepository;
       const mockEngine = {} as IGraphExecutionEngine;
       const result = await handler.execute(
         conditionNode,
@@ -283,7 +283,7 @@ describe("Node Handlers", () => {
         },
       };
 
-      const mockStorage = {} as IGraphStorage;
+      const mockStorage = {} as IDataRepository;
       const mockEngine = {} as IGraphExecutionEngine;
       const result = await handler.execute(
         conditionNode,
@@ -327,7 +327,7 @@ describe("Node Handlers", () => {
         },
       };
 
-      const mockStorage = {} as IGraphStorage;
+      const mockStorage = {} as IDataRepository;
       const mockEngine = {} as IGraphExecutionEngine;
       const result = await handler.execute(
         conditionNode,
@@ -364,7 +364,7 @@ describe("Node Handlers", () => {
         },
       };
 
-      const mockStorage = {} as IGraphStorage;
+      const mockStorage = {} as IDataRepository;
       const mockEngine = {} as IGraphExecutionEngine;
       const result = await handler.execute(
         conditionNode,
@@ -400,7 +400,7 @@ describe("Node Handlers", () => {
         connections: { success: "next" },
       };
 
-      const mockStorage = {} as IGraphStorage;
+      const mockStorage = {} as IDataRepository;
       const mockEngine = {} as IGraphExecutionEngine;
       const result = await handler.execute(agentNode, context, mockQueue, mockStorage, mockEngine);
 
@@ -428,7 +428,7 @@ describe("Node Handlers", () => {
         connections: { success: "next" },
       };
 
-      const mockStorage = {} as IGraphStorage;
+      const mockStorage = {} as IDataRepository;
       const mockEngine = {} as IGraphExecutionEngine;
       const result = await handler.execute(agentNode, context, mockQueue, mockStorage, mockEngine, {
         userName: "TestUser",
@@ -457,7 +457,7 @@ describe("Node Handlers", () => {
         connections: { success: "next" },
       };
 
-      const mockStorage = {} as IGraphStorage;
+      const mockStorage = {} as IDataRepository;
       const mockEngine = {} as IGraphExecutionEngine;
 
       // Validation errors should be thrown, not queued
@@ -488,7 +488,7 @@ describe("Node Handlers", () => {
         connections: { success: "plan-node" },
       };
 
-      const mockStorage = {} as IGraphStorage;
+      const mockStorage = {} as IDataRepository;
       const mockEngine = {} as IGraphExecutionEngine;
       const result = await handler.execute(
         teleportNode,
@@ -525,7 +525,7 @@ describe("Node Handlers", () => {
         connections: { success: "next" },
       };
 
-      const mockStorage = {} as IGraphStorage;
+      const mockStorage = {} as IDataRepository;
       const mockEngine = {} as IGraphExecutionEngine;
       const result = await handler.execute(
         teleportNode,
@@ -560,7 +560,7 @@ describe("Node Handlers", () => {
         connections: { success: "next" },
       };
 
-      const mockStorage = {} as IGraphStorage;
+      const mockStorage = {} as IDataRepository;
       const mockEngine = {} as IGraphExecutionEngine;
 
       await expect(
@@ -584,7 +584,7 @@ describe("Node Handlers", () => {
         connections: { success: "next" },
       };
 
-      const mockStorage = {} as IGraphStorage;
+      const mockStorage = {} as IDataRepository;
       const mockEngine = {} as IGraphExecutionEngine;
       await handler.execute(teleportNode, context, mockQueue, mockStorage, mockEngine);
 
@@ -611,7 +611,7 @@ describe("Node Handlers", () => {
         connections: { success: "next" },
       };
 
-      const mockStorage = {} as IGraphStorage;
+      const mockStorage = {} as IDataRepository;
       const mockEngine = {} as IGraphExecutionEngine;
 
       // With no inputSchema, non-empty objects should be rejected (empty schema)

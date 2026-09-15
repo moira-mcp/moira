@@ -11,7 +11,9 @@ import {
   MaterializeHandler,
   detectCycles,
   projectExecutionRun,
+  type AgentDirectiveNode,
   type ExecutionVisit,
+  type TeleportNode,
   type WorkflowGraph,
 } from "@mcp-moira/workflow-engine";
 import { calculateCoverage, exportCoverageReport } from "../../helpers/coverage-calculator.js";
@@ -26,10 +28,39 @@ const COVERAGE_ARTIFACTS_DIR = path.join(process.cwd(), "test-results/artifacts/
 const exclusiveResponseShape =
   /(?:^|[\n.!?]\s+)Return only\b|(?:^|[\n.!?]\s+)Return [^.\n]+ only\.(?:\s|$)/i;
 
+/** The two node types this flow presents to an agent, and the only ones these assertions read. */
+type PresentingNode = AgentDirectiveNode | TeleportNode;
+
+/**
+ * The presenting node with this id.
+ *
+ * Failing here rather than asserting against `undefined` is the point: when a node is renamed or
+ * removed, the test should say which node the flow no longer has, not compare a missing directive
+ * against an expected substring and leave the reader to work out why.
+ */
+function presentingNode(workflow: WorkflowGraph, id: string): PresentingNode {
+  const node = workflow.nodes.find((candidate) => candidate.id === id);
+  if (!node || (node.type !== "agent-directive" && node.type !== "teleport")) {
+    throw new Error(`workflow has no agent-directive or teleport node "${id}"`);
+  }
+  return node;
+}
+
+/** The parts of a node's input schema these assertions read. */
+interface ReadableInputSchema {
+  globalInputs?: string[];
+  required?: string[];
+  properties?: Record<string, { type?: string; enum?: string[]; default?: unknown }>;
+}
+
+function inputSchemaOf(node: PresentingNode): ReadableInputSchema {
+  return (node.inputSchema ?? {}) as ReadableInputSchema;
+}
+
 function loadWorkflow(): WorkflowGraph {
   return structuredClone(
     findCatalogEntryBySlug("software-development-flow")!.graph,
-  ) as WorkflowGraph;
+  ) as unknown as WorkflowGraph;
 }
 
 function useScenarioMaterializeGrant(engine: GraphExecutionEngine): void {
@@ -120,8 +151,8 @@ function ordinaryInputs(): Record<string, MockInput> {
 }
 
 function progressOutputsFor(workflow: WorkflowGraph, nodeId: string): Record<string, string> {
-  const node = workflow.nodes.find((candidate) => candidate.id === nodeId);
-  const globals = node?.inputSchema?.globalInputs ?? [];
+  const node = presentingNode(workflow, nodeId);
+  const globals = inputSchemaOf(node).globalInputs ?? [];
   return Object.fromEntries(
     globals
       .filter((name) => name.startsWith("progress_"))
@@ -132,7 +163,7 @@ function progressOutputsFor(workflow: WorkflowGraph, nodeId: string): Record<str
         if (nodeId === "review-unit-completeness" && name === "progress_checkpoint_outcome") {
           return [name, "Checkpoint is not applicable without local commit authority"];
         }
-        return [name, `${node?.progressNodeId ?? "workflow"}: ${nodeId} completed`];
+        return [name, `${node.progressNodeId ?? "workflow"}: ${nodeId} completed`];
       }),
   );
 }
@@ -968,11 +999,12 @@ describe("software-development-flow", () => {
     for (const node of visibleWaitingNodes.filter(
       (candidate) => candidate.type === "agent-directive" || candidate.type === "teleport",
     )) {
-      const outcomes = (node.inputSchema?.globalInputs ?? []).filter((name) =>
+      const schema = inputSchemaOf(node as PresentingNode);
+      const outcomes = (schema.globalInputs ?? []).filter((name) =>
         /^progress_\w+_outcome$/.test(name),
       );
       expect(outcomes.length).toBeGreaterThan(0);
-      for (const name of outcomes) expect(node.inputSchema?.required).toContain(name);
+      for (const name of outcomes) expect(schema.required).toContain(name);
       const set = written.get(node.progressNodeId!) ?? new Set<string>();
       outcomes.forEach((name) => set.add(name));
       written.set(node.progressNodeId!, set);
@@ -983,32 +1015,27 @@ describe("software-development-flow", () => {
       Object.fromEntries(Object.entries(blockOutcomes).map(([b, v]) => [b, [...v].sort()])),
     );
     expect(
-      workflow.nodes.find((node) => node.id === "review-unit-completeness")?.inputSchema
-        ?.globalInputs,
+      inputSchemaOf(presentingNode(workflow, "review-unit-completeness")).globalInputs,
     ).toContain("progress_checkpoint_outcome");
     expect(workflow.nodes.find((node) => node.id === "notify-workflow-stopped")).not.toHaveProperty(
       "attachProgressImage",
     );
 
-    const approval = workflow.nodes.find((node) => node.id === "approve-plan") as {
-      inputSchema: { globalInputs?: string[]; properties: Record<string, unknown> };
-    };
-    expect(approval.inputSchema.globalInputs).toEqual(["progress_plan_outcome"]);
-    expect(Object.keys(approval.inputSchema.properties)).toEqual([
+    const approval = inputSchemaOf(presentingNode(workflow, "approve-plan"));
+    expect(approval.globalInputs).toEqual(["progress_plan_outcome"]);
+    expect(Object.keys(approval.properties ?? {})).toEqual([
       "plan_approval",
       "user_feedback",
     ]);
-    const activation = workflow.nodes.find((node) => node.id === "activate-reviewed-plan") as {
-      inputSchema: { globalInputs: string[] };
-    };
-    expect(activation.inputSchema.globalInputs).toEqual([
+    const activation = inputSchemaOf(presentingNode(workflow, "activate-reviewed-plan"));
+    expect(activation.globalInputs).toEqual([
       "current_step_index",
       "total_steps",
       "vcs_commits_authorized",
       "progress_plan_outcome",
     ]);
     expect(
-      (workflow.nodes.find((node) => node.id === "activate-reviewed-plan") as { directive: string })
+      presentingNode(workflow, "activate-reviewed-plan")
         .directive,
     ).toContain("exact executable unit count returned in total_steps");
     expect(
@@ -1018,32 +1045,22 @@ describe("software-development-flow", () => {
       false: "activate-reviewed-plan",
     });
 
-    const preparation = workflow.nodes.find(
-      (node) => node.id === "prepare-plan-unit-implementation",
-    ) as {
-      inputSchema: {
-        properties: {
-          visual_mode: { enum: string[] };
-          approval_required: { type: string };
-        };
-      };
-    };
-    expect(preparation.inputSchema.properties.visual_mode.enum).toEqual([
+    const preparation = inputSchemaOf(presentingNode(workflow, "prepare-plan-unit-implementation"));
+    expect(preparation.properties?.visual_mode.enum).toEqual([
       "disabled",
       "screenshots",
       "html_report",
     ]);
-    expect(preparation.inputSchema.properties.approval_required.type).toBe("boolean");
+    expect(preparation.properties?.approval_required.type).toBe("boolean");
 
-    const sharedReplan = workflow.nodes.find((node) => node.id === "revise-plan-for-replan");
-    const teleportReplan = workflow.nodes.find((node) => node.id === "revise-plan-for-teleport");
-    expect(sharedReplan?.directive).not.toContain("{{teleport-replan.replan_rationale}}");
-    expect(teleportReplan?.directive).toContain("{{teleport-replan.replan_rationale}}");
+    const sharedReplan = presentingNode(workflow, "revise-plan-for-replan");
+    const teleportReplan = presentingNode(workflow, "revise-plan-for-teleport");
+    expect(sharedReplan.directive).not.toContain("{{teleport-replan.replan_rationale}}");
+    expect(teleportReplan.directive).toContain("{{teleport-replan.replan_rationale}}");
     expect(workflow.nodes.find((node) => node.id === "teleport-replan")?.connections).toEqual({
       success: "advance-plan-revision-for-teleport",
     });
-    const teleportSchema = workflow.nodes.find((node) => node.id === "teleport-replan")
-      ?.inputSchema as {
+    const teleportSchema = presentingNode(workflow, "teleport-replan").inputSchema as {
       additionalProperties: boolean;
       required: string[];
       properties: { replan_rationale: { type: string; minLength: number; maxLength: number } };
@@ -1056,16 +1073,16 @@ describe("software-development-flow", () => {
       maxLength: 8000,
     });
 
-    const completion = workflow.nodes.find((node) => node.id === "complete-plan-unit");
-    expect(completion?.directive).toContain(
+    const completion = presentingNode(workflow, "complete-plan-unit");
+    expect(completion.directive).toContain(
       "Finish every reproducible producer-owned executable omission",
     );
-    expect(completion?.directive).toContain("Do not mutate permanent project documentation");
-    const implementation = workflow.nodes.find((node) => node.id === "implement-plan-unit");
-    expect(implementation?.completionCondition).toContain(
+    expect(completion.directive).toContain("Do not mutate permanent project documentation");
+    const implementation = presentingNode(workflow, "implement-plan-unit");
+    expect(implementation.completionCondition).toContain(
       "permanent project documentation remains deferred to update-unit-documentation",
     );
-    expect(implementation?.completionCondition).not.toContain("tests and documentation");
+    expect(implementation.completionCondition).not.toContain("tests and documentation");
 
     // The engine materializes standards once, and every reader receives the canonical path.
     const standardsVars = [
@@ -1108,17 +1125,14 @@ describe("software-development-flow", () => {
     // back through review-plan and a blocking finding routes into it — so they answer only for the
     // units they shape, since closed units stay as executed.
     const gate = (nodeId: string) =>
-      (workflow.nodes.find((node) => node.id === nodeId) as { completionCondition: string })
+      presentingNode(workflow, nodeId)
         .completionCondition;
     // Closed work stays closed, and stays where it was closed: the unit account lives at
     // step-<index>/, addressed by index and outside plan revisions, so a revision that keeps a
     // closed unit's text but shifts its index makes the executor overwrite someone else's account.
     // repair-plan carries it in both halves because it edits the revision in place; the four
     // revise-* nodes already say it in their directives, so only their gates were missing it.
-    const repairPlan = workflow.nodes.find((node) => node.id === "repair-plan") as {
-      directive: string;
-      completionCondition: string;
-    };
+    const repairPlan = presentingNode(workflow, "repair-plan");
     expect(repairPlan.directive).toContain(
       "completed units at their originating revision and index",
     );
@@ -1134,7 +1148,7 @@ describe("software-development-flow", () => {
       ["revise-plan-after-feedback", "Preserve prior revisions and completed work"],
     ] as const) {
       expect(
-        (workflow.nodes.find((node) => node.id === nodeId) as { directive: string }).directive,
+        presentingNode(workflow, nodeId).directive,
       ).toContain(directiveClause);
     }
     // One wording for one obligation: the gates differ in what else they carry, but the closed-work
@@ -1166,17 +1180,17 @@ describe("software-development-flow", () => {
         "every unit it shapes fixes what must become true, the evidence that would accept it, and what it depends on rather than carrying the deliverable",
       );
     }
-    const owner = workflow.nodes.find((node) => node.id === "capture-task-and-context");
-    expect(owner?.directive).toContain("./moira-ws/software-development-flow-{task-name}");
-    expect(owner?.directive).toContain(
+    const owner = presentingNode(workflow, "capture-task-and-context");
+    expect(owner.directive).toContain("./moira-ws/software-development-flow-{task-name}");
+    expect(owner.directive).toContain(
       "Preserve authorized caller-owned follow-ups as execution reminders",
     );
-    expect(owner?.directive).toContain("without adding them to development units");
-    expect(owner?.completionCondition).toContain("active execution reminder");
-    expect(owner?.connections).toEqual({ success: "materialize-development-standards" });
+    expect(owner.directive).toContain("without adding them to development units");
+    expect(owner.completionCondition).toContain("active execution reminder");
+    expect(owner.connections).toEqual({ success: "materialize-development-standards" });
     expect(gate("create-plan")).toContain("active execution reminder");
     expect(
-      (workflow.nodes.find((node) => node.id === "create-plan") as { directive: string }).directive,
+      presentingNode(workflow, "create-plan").directive,
     ).toContain("caller-owned reminders rather than plan units");
     expect(workflow.runtimePolicy?.externalVariableWrites).toBeUndefined();
 
@@ -1190,16 +1204,13 @@ describe("software-development-flow", () => {
       "review-unit-completeness",
     ]) {
       expect(
-        (workflow.nodes.find((node) => node.id === id) as { directive: string }).directive,
+        presentingNode(workflow, id).directive,
       ).toContain("standards/review.md");
     }
     // Exactly one delegated review per plan unit: the per-unit gates judge locally, and only the
     // completeness review obtains independence.
     for (const id of ["review-test-adequacy", "review-architecture"]) {
-      const gate = workflow.nodes.find((node) => node.id === id) as {
-        directive: string;
-        completionCondition: string;
-      };
+      const gate = presentingNode(workflow, id);
       expect(gate.directive).toContain("later completeness review owns independent unit review");
       expect(gate.completionCondition).not.toContain("Independent");
       expect(`${gate.directive} ${gate.completionCondition}`).not.toContain("fallback");
@@ -1265,7 +1276,7 @@ describe("software-development-flow", () => {
       true: "route-vcs-authority",
       false: "advance-plan-revision-after-feedback",
     });
-    expect(workflow.nodes.find((node) => node.id === "end")?.finalOutput).toEqual([
+    expect((workflow.nodes.find((node) => node.id === "end") as { finalOutput?: string[] }).finalOutput).toEqual([
       "workspace_path",
     ]);
     expect(
@@ -1280,32 +1291,30 @@ describe("software-development-flow", () => {
     });
     expect(workflow.nodes.filter((node) => node.type === "lock")).toEqual([]);
 
-    const checkpoint = workflow.nodes.find((node) => node.id === "checkpoint-plan-unit");
-    expect(checkpoint?.directive).toContain("include only task-owned unit changes");
-    expect(checkpoint?.directive).toContain("complete without an empty commit");
-    expect(checkpoint?.directive).toContain("leave this node incomplete");
-    expect(checkpoint?.inputSchema?.properties).toEqual({});
-    expect(checkpoint?.connections).toEqual({ success: "route-plan-complete" });
+    const checkpoint = presentingNode(workflow, "checkpoint-plan-unit");
+    expect(checkpoint.directive).toContain("include only task-owned unit changes");
+    expect(checkpoint.directive).toContain("complete without an empty commit");
+    expect(checkpoint.directive).toContain("leave this node incomplete");
+    expect(inputSchemaOf(checkpoint).properties).toEqual({});
+    expect(checkpoint.connections).toEqual({ success: "route-plan-complete" });
 
-    const runtime = workflow.nodes.find((node) => node.id === "validate-runtime");
-    expect(runtime?.directive).toContain("unit's current `visual_mode`");
-    expect(runtime?.directive).toContain("create and inspect one set");
-    expect(runtime?.directive).toContain("HTML reporting reuses that exact set");
-    const unitReview = workflow.nodes.find((node) => node.id === "review-plan-unit-with-user");
-    expect(unitReview?.directive).toContain("do not decide materiality again");
-    expect(unitReview?.directive).toContain("Do not create or upload reports");
-    const reportProducer = workflow.nodes.find(
-      (node) => node.id === "create-and-upload-step-report",
-    );
-    expect(reportProducer?.directive).toContain("agentic-report@latest");
-    expect(reportProducer?.directive).toContain("Reuse the exact screenshots already captured");
-    expect(reportProducer?.directive).toContain("Do not capture again");
-    expect(reportProducer?.directive).toContain("leave the node incomplete");
-    const finalSemanticReview = workflow.nodes.find((node) => node.id === "review-final-semantics");
-    expect(finalSemanticReview?.directive).toContain("applicable visual-report or acceptance fact");
-    expect(finalSemanticReview?.directive).toContain("permanent document");
-    expect(finalSemanticReview?.directive).toContain("final-reviews/NNN/review.md");
-    expect(finalSemanticReview?.inputSchema?.required).toEqual([
+    const runtime = presentingNode(workflow, "validate-runtime");
+    expect(runtime.directive).toContain("unit's current `visual_mode`");
+    expect(runtime.directive).toContain("create and inspect one set");
+    expect(runtime.directive).toContain("HTML reporting reuses that exact set");
+    const unitReview = presentingNode(workflow, "review-plan-unit-with-user");
+    expect(unitReview.directive).toContain("do not decide materiality again");
+    expect(unitReview.directive).toContain("Do not create or upload reports");
+    const reportProducer = presentingNode(workflow, "create-and-upload-step-report");
+    expect(reportProducer.directive).toContain("agentic-report@latest");
+    expect(reportProducer.directive).toContain("Reuse the exact screenshots already captured");
+    expect(reportProducer.directive).toContain("Do not capture again");
+    expect(reportProducer.directive).toContain("leave the node incomplete");
+    const finalSemanticReview = presentingNode(workflow, "review-final-semantics");
+    expect(finalSemanticReview.directive).toContain("applicable visual-report or acceptance fact");
+    expect(finalSemanticReview.directive).toContain("permanent document");
+    expect(finalSemanticReview.directive).toContain("final-reviews/NNN/review.md");
+    expect(inputSchemaOf(finalSemanticReview).required).toEqual([
       "review_outcome",
       "gaps_count",
       "review_file",
@@ -1313,7 +1322,7 @@ describe("software-development-flow", () => {
     ]);
     expect(
       (
-        finalSemanticReview?.inputSchema as {
+        finalSemanticReview.inputSchema as {
           properties: { review_file: { pattern: string }; gaps_count: { minimum: number } };
         }
       ).properties,
@@ -1321,9 +1330,9 @@ describe("software-development-flow", () => {
       review_file: { pattern: "final-reviews/[0-9]{3}/review\\.md$" },
       gaps_count: { minimum: 0 },
     });
-    const finalSemanticRepair = workflow.nodes.find((node) => node.id === "repair-final-semantics");
-    expect(finalSemanticRepair?.directive).toContain("{{review-final-semantics.review_file}}");
-    expect(finalSemanticRepair?.inputSchema?.required).toEqual([
+    const finalSemanticRepair = presentingNode(workflow, "repair-final-semantics");
+    expect(finalSemanticRepair.directive).toContain("{{review-final-semantics.review_file}}");
+    expect(inputSchemaOf(finalSemanticRepair).required).toEqual([
       "repair_outcome",
       "result_file",
       "progress_finalize_outcome",
@@ -1340,15 +1349,15 @@ describe("software-development-flow", () => {
       true: "advance-plan-revision-for-replan",
       false: "validate-feature-wide",
     });
-    const finalReport = workflow.nodes.find((node) => node.id === "create-final-report");
-    expect(finalReport?.directive).toContain("the exact numeric final review");
-    expect(`${finalSemanticReview?.directive} ${finalReport?.directive}`).not.toContain(
+    const finalReport = presentingNode(workflow, "create-final-report");
+    expect(finalReport.directive).toContain("the exact numeric final review");
+    expect(`${finalSemanticReview.directive} ${finalReport.directive}`).not.toContain(
       "accepted visual report",
     );
     // Both answers route somewhere observable, so a unit is never concluded with a value that means
     // nothing to the engine.
     expect(
-      (unitReview?.inputSchema as { properties: { acceptance_decision: { enum: string[] } } })
+      (unitReview.inputSchema as { properties: { acceptance_decision: { enum: string[] } } })
         .properties.acceptance_decision.enum,
     ).toEqual(["accepted", "rejected"]);
 

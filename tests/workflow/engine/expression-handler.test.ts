@@ -5,11 +5,11 @@
 
 import { describe, test, expect } from "@jest/globals";
 import { ExpressionHandler, AgentMessageQueue, ExpressionNode } from "@mcp-moira/workflow-engine";
-import { IGraphStorage, IGraphExecutionEngine } from "@mcp-moira/workflow-engine";
+import { IDataRepository, IGraphExecutionEngine } from "@mcp-moira/workflow-engine";
 
 describe("ExpressionHandler", () => {
   const handler = new ExpressionHandler();
-  const mockStorage = {} as IGraphStorage;
+  const mockStorage = {} as IDataRepository;
   const mockEngine = {} as IGraphExecutionEngine;
 
   test("should return correct node type", () => {

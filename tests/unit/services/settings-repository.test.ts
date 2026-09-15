@@ -30,6 +30,7 @@ describe("Settings Repository (InMemory)", () => {
         required: false,
         validation: null,
         adminOnly: false,
+        protected: false,
         createdAt: now,
         updatedAt: now,
       });
@@ -74,6 +75,7 @@ describe("Settings Repository (InMemory)", () => {
           required: false,
           validation: null,
           adminOnly: false,
+        protected: false,
           createdAt: now,
           updatedAt: now,
         },
@@ -87,6 +89,7 @@ describe("Settings Repository (InMemory)", () => {
           required: false,
           validation: null,
           adminOnly: false,
+        protected: false,
           createdAt: now,
           updatedAt: now,
         },
@@ -100,6 +103,7 @@ describe("Settings Repository (InMemory)", () => {
           required: false,
           validation: null,
           adminOnly: false,
+        protected: false,
           createdAt: now,
           updatedAt: now,
         },
@@ -146,6 +150,7 @@ describe("Settings Repository (InMemory)", () => {
         required: false,
         validation: null,
         adminOnly: false,
+        protected: false,
         createdAt: now,
         updatedAt: now,
       });
@@ -174,6 +179,7 @@ describe("Settings Repository (InMemory)", () => {
         required: false,
         validation: null,
         adminOnly: false,
+        protected: false,
         createdAt: now,
         updatedAt: now,
       });
@@ -188,6 +194,7 @@ describe("Settings Repository (InMemory)", () => {
         required: false,
         validation: null,
         adminOnly: false,
+        protected: false,
         createdAt: now,
         updatedAt: now,
       });
@@ -216,6 +223,7 @@ describe("Settings Repository (InMemory)", () => {
         required: false,
         validation: null,
         adminOnly: false,
+        protected: false,
         createdAt: now,
         updatedAt: now,
       });
@@ -248,6 +256,7 @@ describe("Settings Repository (InMemory)", () => {
         required: false,
         validation: null,
         adminOnly: false,
+        protected: false,
         createdAt: now,
         updatedAt: now,
       });
@@ -263,6 +272,7 @@ describe("Settings Repository (InMemory)", () => {
         required: false,
         validation: null,
         adminOnly: false,
+        protected: false,
         createdAt: now,
         updatedAt: now,
       });
@@ -278,6 +288,7 @@ describe("Settings Repository (InMemory)", () => {
         required: false,
         validation: null,
         adminOnly: false,
+        protected: false,
         createdAt: now,
         updatedAt: now,
       });
