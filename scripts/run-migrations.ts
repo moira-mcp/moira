@@ -87,6 +87,9 @@ if (protectedExists && !noteTableExists) {
   sqlite.exec(`CREATE UNIQUE INDEX IF NOT EXISTS "note_user_key_idx" ON "note" ("userId","key");`);
   console.log("  ✅ Created note_user_key_idx");
 
+  // Migration 0002 created a per-note history table. Migration 0027 moves that content into the
+  // shared revision store and drops this table, so this repair only has to restore the shape 0002
+  // left behind; the later migration then runs over it as it would on any other database.
   sqlite.exec(`
     CREATE TABLE IF NOT EXISTS "noteVersion" (
       "id" text PRIMARY KEY NOT NULL,

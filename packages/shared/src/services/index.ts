@@ -11,6 +11,7 @@ import { AuditRepository } from "../database/repositories/audit-repository.js";
 import { UserRepository } from "../database/repositories/user-repository.js";
 import { AccountApprovalRepository } from "../database/repositories/account-approval-repository.js";
 import { NoteRepository } from "../database/repositories/note-repository.js";
+import { RevisionRepository } from "../database/repositories/revision-repository.js";
 import { ArtifactRepository } from "../database/repositories/artifact-repository.js";
 import { WorkflowSharingRepository } from "../database/repositories/workflow-sharing-repository.js";
 import { LockRepository } from "../database/repositories/lock-repository.js";
@@ -39,7 +40,7 @@ export {
 export { ExecutionService } from "./execution-service.js";
 export { applyExecutionReminderMutation } from "./execution-reminder-domain.js";
 export { SettingsService } from "./settings-service.js";
-export { GlobalSettingsService } from "./global-settings-service.js";
+export { GlobalSettingsService, MAX_GLOBAL_SETTING_REVISIONS } from "./global-settings-service.js";
 export { UserService } from "./user-service.js";
 export {
   NoteService,
@@ -398,7 +399,11 @@ export function getGlobalSettingsService(): GlobalSettingsService {
     const db = getDatabase();
     const globalSettingsRepo = new GlobalSettingsRepository(db);
     const auditRepo = new AuditRepository(db);
-    globalSettingsServiceInstance = new GlobalSettingsService(globalSettingsRepo, auditRepo);
+    globalSettingsServiceInstance = new GlobalSettingsService(
+      globalSettingsRepo,
+      auditRepo,
+      new RevisionRepository(db),
+    );
   }
   return globalSettingsServiceInstance;
 }

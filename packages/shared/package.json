@@ -21,6 +21,7 @@
   },
   "dependencies": {
     "@getbrevo/brevo": "^3.0.4",
+    "diff": "^8.0.3",
     "dotenv": "^17.2.3",
     "nodemailer": "^9.1.1",
     "prom-client": "^15.1.3",

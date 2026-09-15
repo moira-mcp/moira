@@ -554,6 +554,12 @@ level headings classify the tracked test paths listed beneath them.
 
 - `tests/unit/workflow-engine/telegram-handler-errors.test.ts` — legacy Telegram routing/error behavior, current Settings > Notifications and directly usable Telegram Setup recovery guidance, progress images, explicit-recipient preservation, and destination/message log redaction
 
+### versioned content
+
+**unit**
+
+- `tests/unit/shared/revision-store.test.ts` — the shared revision store behind notes, global settings and playbooks: revision numbering and immutability of a written revision, byte sizes, histories kept apart per entity type, a bounded tail that drops the oldest without reusing a number, listing with previews instead of content, line-level comparison of two revisions and the distinction between a missing revision and no difference, history deletion and total size; notes storing content in the shared store with no per-note history table left in the schema and losing their revisions on hard delete; global-setting value history with its author, restore as a new revision, a cleared value restored as no value rather than an empty string, comparison of two past values, refusal to restore an absent revision, bounded tail; and the migration carrying existing note versions over with their numbers, content, authors and times
+
 ### notes
 
 **unit**

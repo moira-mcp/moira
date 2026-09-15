@@ -802,21 +802,40 @@ export const note = sqliteTable(
   }),
 );
 
-export const noteVersion = sqliteTable(
-  "noteVersion",
+// ===== Shared Revision Store =====
+// One history for every versioned entity in the product. Notes, global settings and playbooks all
+// keep their content revisions here instead of each owning a private history table.
+//
+// The reference to the owning row is deliberately untyped and carries no foreign key: the store
+// serves entities that live in different tables, and a per-entity constraint would reintroduce the
+// coupling this table removes. Owners delete their own history when the entity is removed.
+
+export const entityRevision = sqliteTable(
+  "entityRevision",
   {
     id: text("id").primaryKey(),
-    noteId: text("noteId")
-      .notNull()
-      .references(() => note.id, { onDelete: "cascade" }),
-    version: integer("version").notNull(), // Version number (1, 2, 3, ...)
-    value: text("value").notNull(), // Note content
-    size: integer("size").notNull(), // Size in bytes
+    // Kind of the owning entity, e.g. "note", "global-setting", "playbook".
+    entityType: text("entityType").notNull(),
+    // Identity of the owning row inside that kind.
+    entityId: text("entityId").notNull(),
+    // Revision number, starting at 1 and increasing by one per append.
+    revision: integer("revision").notNull(),
+    // Null records a revision in which the entity had no content at all, which is different from
+    // an empty string: a global setting with no value falls back to its default, an empty one
+    // does not.
+    content: text("content"),
+    size: integer("size").notNull(), // Content size in bytes
+    // Who wrote the revision; null when the writer is the system or the account is gone.
+    authorId: text("authorId").references(() => user.id, { onDelete: "set null" }),
     createdAt: integer("createdAt", { mode: "timestamp_ms" }).notNull(),
   },
   (table) => ({
-    // Unique constraint: each note can only have one version with a given number
-    noteVersionIdx: uniqueIndex("note_version_idx").on(table.noteId, table.version),
+    // Each entity holds one row per revision number.
+    entityRevisionIdx: uniqueIndex("entity_revision_idx").on(
+      table.entityType,
+      table.entityId,
+      table.revision,
+    ),
   }),
 );
 

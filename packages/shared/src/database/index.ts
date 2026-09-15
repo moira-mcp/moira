@@ -139,3 +139,16 @@ export type {
   AcceptInviteOptions,
   AcceptInviteResult,
 } from "./repositories/workflow-sharing-repository.js";
+
+export {
+  RevisionRepository,
+  REVISION_ENTITY_TYPES,
+  DEFAULT_REVISION_PREVIEW_CHARS,
+} from "./repositories/revision-repository.js";
+export type {
+  Revision,
+  RevisionSummary,
+  RevisionTarget,
+  RevisionEntityType,
+  AppendRevisionOptions,
+} from "./repositories/revision-repository.js";
