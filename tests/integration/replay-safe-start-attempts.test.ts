@@ -411,6 +411,8 @@ describe("replay-safe workflow start attempts", () => {
     });
     expect(claim.kind).toBe("claimed");
     const executingBefore = await repository.getExecution(prepared.reservedExecutionId);
+    // The claim's raw insert stamps the definition version the run started on.
+    expect(executingBefore?.workflowVersion).toBe(workflow.metadata.version);
     expect(
       await repository.cancelExecutionWithStartAttempt(
         prepared.reservedExecutionId,

@@ -27,6 +27,13 @@ import type {
 } from "./execution-progress-contract.js";
 import { EXECUTION_PROGRESS_TEXT_LIMITS } from "./execution-progress-contract.js";
 import { deriveProcess, type ProcessProjection } from "./process-derivation.js";
+import {
+  blockTimings,
+  itemIndexResolver,
+  resolveBlockList,
+  variablesObject,
+  type PassSelector,
+} from "./execution-progress-lists.js";
 export type {
   ExecutionBlockStatus,
   ExecutionProgress,
@@ -38,6 +45,37 @@ export type {
 
 /** Node types that route without doing a block's work; their visits are not passes. */
 const ROUTING_NODE_TYPES: ReadonlySet<string> = new Set(["start", "condition", "expression"]);
+
+/**
+ * Which visits count as passes of which block: a visit of a working step, or of any node in a
+ * block made of routing nodes alone; adjustments are never passes. The same rule the status
+ * projection counts iterations with.
+ */
+export function passSelector(
+  process: ProcessProjection,
+  nodeTypes: ReadonlyMap<string, string>,
+): PassSelector {
+  const owner = new Map<string, string>();
+  for (const block of process.blocks) for (const id of block.nodeIds) owner.set(id, block.id);
+  // An end node does no work either: its visit is a pass only in a block that has no working
+  // step at all, so a completed run's end does not add a zero-length pass to its last block.
+  const isNonWorking = (nodeId: string) => {
+    const type = nodeTypes.get(nodeId) ?? "";
+    return ROUTING_NODE_TYPES.has(type) || type === "end";
+  };
+  const nonWorkingOnly = new Set(
+    process.blocks.filter((block) => block.nodeIds.every(isNonWorking)).map((block) => block.id),
+  );
+  return {
+    blockOf: (nodeId) => owner.get(nodeId),
+    isPass: (visit) => {
+      if (visit.adjusted) return false;
+      const blockId = owner.get(visit.nodeId);
+      if (!blockId) return false;
+      return !isNonWorking(visit.nodeId) || nonWorkingOnly.has(blockId);
+    },
+  };
+}
 
 function enforceResolvedLimit(value: string, maxLength: number, field: string): string {
   if ([...value].length > maxLength) {
@@ -260,6 +298,8 @@ export function projectRoute(
       ...(visit.adjusted ? { adjusted: true } : {}),
       ...(visit.actor ? { actor: visit.actor } : {}),
       ...(loop ? { loop: true } : {}),
+      ...(visit.enteredAt !== undefined ? { enteredAt: visit.enteredAt } : {}),
+      ...(visit.leftAt !== undefined ? { leftAt: visit.leftAt } : {}),
     };
   });
 }
@@ -342,6 +382,8 @@ export interface ProjectExecutionRunOptions {
    * last recorded visit projects the whole route, as if no cursor were given.
    */
   at?: number;
+  /** The moment open passes are measured to; defaults to the wall clock. */
+  now?: number;
 }
 
 /**
@@ -407,12 +449,16 @@ export function projectExecutionRun(
   let statuses: Map<string, { status: ExecutionBlockStatus; iterations: number; visits: number }>;
   let activeNodeId: string | null;
   let activePrimaryNodeId: string | null;
+  let openVisitSeq: number | null = null;
   if (routeRecorded) {
     statuses = blockStatuses(process, nodeTypes, execution, visits);
     const last = [...visits].reverse().find(closesOrIsEngine) ?? visits[0];
     const stoppedOnWait = last.exitKey === null && Boolean(last.waited);
     activeNodeId = finished && !stoppedOnWait ? null : (owner.get(last.nodeId) ?? null);
     activePrimaryNodeId = finished && !stoppedOnWait ? null : last.nodeId;
+    // The pass the run is on is open only while the run is there: not on a finished run's
+    // last visit unless it stopped on a wait.
+    if (last.exitKey === null && (!finished || stoppedOnWait)) openVisitSeq = last.seq;
   } else {
     diagnostics.push("No route was recorded for this execution");
     const currentBlock = finished ? null : (currentPrimaryNode?.progressNodeId ?? null);
@@ -449,6 +495,44 @@ export function projectExecutionRun(
   const activeLabelNode =
     activePrimaryNodeId === execution.currentNodeId ? currentPrimaryNode : undefined;
 
+  // Timings and bound lists: the variables at the cursor, the passes of every block, and — for
+  // a bound block — the item each pass worked on.
+  const now = options.now ?? Date.now();
+  const variableStates = projectVariables(workflow, execution, visits, cursor);
+  const variablesAtCursor = variablesObject(variableStates);
+  const bindings = new Map(
+    definition.nodes.filter((node) => node.list).map((node) => [node.id, node.list!]),
+  );
+  const itemResolvers = new Map(
+    [...bindings].map(([blockId, binding]) => [
+      blockId,
+      itemIndexResolver(binding, variableStates, variablesAtCursor),
+    ]),
+  );
+  const timings = blockTimings(
+    process.blocks.map((block) => block.id),
+    visits,
+    passSelector(process, nodeTypes),
+    openVisitSeq,
+    now,
+    (blockId, visit) => itemResolvers.get(blockId)?.(visit) ?? null,
+  );
+  const lists = new Map(
+    [...bindings].map(([blockId, binding]) => {
+      const itemDurations = new Map<number, number>();
+      for (const pass of timings.get(blockId)?.passes ?? []) {
+        if (pass.itemIndex === null || pass.durationMs === null) continue;
+        itemDurations.set(
+          pass.itemIndex,
+          (itemDurations.get(pass.itemIndex) ?? 0) + pass.durationMs,
+        );
+      }
+      const resolved = resolveBlockList(binding, variablesAtCursor, itemDurations);
+      if (resolved.diagnostic) diagnostics.push(`Block '${blockId}': ${resolved.diagnostic}`);
+      return [blockId, resolved.list];
+    }),
+  );
+
   const nodes = definition.nodes.map((node, index): ExecutionProgressNode => {
     const run = statuses.get(node.id) ?? { status: "pending", iterations: 0, visits: 0 };
     const primaryNodeIds = primaryNodesByBlock.get(node.id) ?? [];
@@ -482,6 +566,13 @@ export function projectExecutionRun(
       primaryNodeIds,
       focusNodeId,
       content,
+      timing: timings.get(node.id) ?? {
+        passes: [],
+        totalMs: null,
+        currentMs: null,
+        recorded: false,
+      },
+      list: lists.get(node.id) ?? null,
     };
   });
 
@@ -532,14 +623,16 @@ export function projectExecutionRun(
     activeNodeId,
     nodes,
     workflowVersion: workflow.metadata.version,
+    executionWorkflowVersion: execution.workflowVersion ?? null,
     executionRevision: execution.revision,
     executionStatus: execution.status,
     diagnostics,
     process,
     route: projectRoute(process, visits),
-    variables: projectVariables(workflow, execution, visits, cursor),
+    variables: variableStates,
     routeRecorded,
     cursor,
     source: "trace",
+    projectedAt: now,
   };
 }

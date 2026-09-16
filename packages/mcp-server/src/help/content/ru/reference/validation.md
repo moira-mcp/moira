@@ -37,6 +37,12 @@ Workflow валидируются против определения JSON Schem
   записывающей нодой; каждое нарушение — ошибка со стабильным кодом (`unowned-node`,
   `unknown-block`, `empty-block`, `empty-description`, `unlabeled-edge`, `unexplained-cycle`,
   `outcome-duplicate`, `outcome-unowned`, `unconnected-block`)
+- **Привязки блока к списку** - Привязка `list` блока называет хотя бы один из `items`, `current`
+  и `total` и только поля `items`, `title`, `current`, `done`, `total` и `indexBase` (`0` или
+  `1`). Каждый из `items`, `current`, `done` и `total` — путь переменной, корень которого
+  является объявленной глобальной переменной или id ноды; неизвестный корень — ошибка,
+  называющая блок, поле и путь. `title` — путь внутри одного элемента, поэтому без `items` он
+  тоже ошибка
 - **Case маршрутизации** - Каждый case узла `condition` или `agent-directive` проверяется так, как
   описано ниже в разделе _Диагностика маршрутизации_
 - **Типы узлов расширений** - Для типов из live-реестра расширений или опубликованного snapshot

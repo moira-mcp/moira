@@ -328,6 +328,33 @@ describe("process derivation from the authored graph", () => {
     expect(projection.blocks[1].transitions[0].cycle).toBeDefined();
   });
 
+  test.each<[string, Record<string, unknown>, string[]]>([
+    [
+      "an items path rooted in an undeclared name",
+      { items: "plan.units" },
+      ["nodes[0].list.items"],
+    ],
+    [
+      "a title without items",
+      { current: "progress_work_outcome", title: "name" },
+      ["nodes[0].list.title"],
+    ],
+    [
+      "a counter rooted in a node id (a node-local output)",
+      { current: "do.step", total: "do.total" },
+      [],
+    ],
+    ["declared globals only", { current: "progress_work_outcome" }, []],
+  ])("validating a list binding with %s", async (_name, list, errorFields) => {
+    const workflow = synthetic();
+    workflow.metadata.description = "Synthetic process";
+    (workflow.progress!.nodes[0] as { list?: unknown }).list = list;
+    const result = await new GraphValidator().validateUnified(workflow);
+    const listIssues = result.issues.filter((issue) => issue.field?.startsWith("nodes[0].list"));
+    expect(listIssues.map((issue) => issue.field)).toEqual(errorFields);
+    expect(listIssues.every((issue) => issue.severity === "error")).toBe(true);
+  });
+
   test("a hub is a block that at least three blocks lead into", () => {
     expect(deriveProcess(bundled("quick-task"))!.hubs).toEqual([]);
   });

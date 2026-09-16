@@ -48,6 +48,8 @@ function progress(active = 1): ExecutionProgress {
     ],
     activeNodeId: `n${active}`,
     workflowVersion: "1.0.0",
+    executionWorkflowVersion: "1.0.0",
+    projectedAt: 0,
     executionRevision: 3,
     executionStatus: "running",
     diagnostics: [],
@@ -68,6 +70,8 @@ function progress(active = 1): ExecutionProgress {
       connections: { default: index === 2 ? "n0" : `n${index + 1}` },
       primaryNodeIds: [`p${index}`],
       focusNodeId: `p${index}`,
+      timing: { passes: [], totalMs: null, currentMs: null, recorded: false },
+      list: null,
       content: {
         summary:
           index === 0
@@ -414,6 +418,8 @@ describe("execution progress visual model and PNG", () => {
       connections: { default: index === 4 ? "s0" : `s${index + 1}` },
       primaryNodeIds: [`p${index}`],
       focusNodeId: `p${index}`,
+      timing: { passes: [], totalMs: null, currentMs: null, recorded: false },
+      list: null,
       content: {
         summary: index === 0 ? "Tall ".repeat(30) : "Short",
         details: [],

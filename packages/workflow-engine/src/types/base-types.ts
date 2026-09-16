@@ -101,6 +101,8 @@ export interface WorkflowExecution {
   note?: string | null; // User-provided note for identification (max 500 chars)
   parentExecutionId?: string | null; // Links to parent execution for continuation
   revision: number; // Workflow-step generation; metadata targets use independent revisions
+  /** `metadata.version` of the definition the run started on; absent for runs recorded before it was stamped. */
+  workflowVersion?: string | null;
   reminders?: ExecutionReminder[]; // Durable caller follow-ups returned at completion
   visits?: ExecutionVisit[]; // Append-only route log written by the executor on every node transition
   createdAt: number;
@@ -126,6 +128,10 @@ export interface ExecutionVisit {
   waited?: boolean;
   adjusted?: boolean;
   actor?: { role: ExecutionVisitActorRole; userId: string };
+  /** Epoch ms when the node was entered (for a waiting node: when its directive was presented). */
+  enteredAt?: number;
+  /** Epoch ms when the node was left through `exitKey`; absent while the visit is open. */
+  leftAt?: number;
 }
 
 export interface ExecutionReminder {

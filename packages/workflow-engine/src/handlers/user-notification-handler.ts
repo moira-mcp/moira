@@ -10,6 +10,8 @@ import type { AgentMessageQueue } from "../services/agent-message-queue.js";
 import { getActiveUserCommunicationService } from "../services/user-communication-provider.js";
 import type { UserCommunicationService } from "../services/user-communication.js";
 import { renderExecutionProgressImage } from "../utils/execution-progress-image.js";
+import { boundListLine } from "../utils/execution-progress-lists.js";
+import { projectExecutionRun } from "../utils/execution-run-projection.js";
 import { withInFlightVisit } from "../utils/execution-visits.js";
 
 export class UserNotificationHandler implements INodeHandler {
@@ -43,7 +45,7 @@ export class UserNotificationHandler implements INodeHandler {
 
     try {
       let text = this.templateProcessor.processDirective(node.message, context);
-      text = await this.addProcessInfoFooter(text, context, repository);
+      text = await this.addProcessInfoFooter(text, context, repository, node.id);
       let attachment;
       if (node.attachProgressImage) {
         attachment = await this.renderProgressAttachment(node, context, repository);
@@ -136,15 +138,27 @@ export class UserNotificationHandler implements INodeHandler {
     message: string,
     context: ExecutionContext,
     repository: IDataRepository,
+    nodeId: string,
   ): Promise<string> {
     const processId = context.executionId ? context.executionId.substring(0, 8) : "unknown";
     let workflowName = context.workflowId || "unknown";
+    let listLine = "";
     try {
       const workflow = await repository.getWorkflow(context.workflowId, context.userId);
       if (workflow?.metadata?.name) workflowName = workflow.metadata.name;
+      const graph = await repository.getWorkflowGraph(context.workflowId, context.userId);
+      if (graph?.progress?.nodes.some((block) => block.list)) {
+        const persisted = await repository.getExecution(context.executionId);
+        if (persisted) {
+          const line = boundListLine(
+            projectExecutionRun(graph, withInFlightVisit(persisted, nodeId)),
+          );
+          if (line) listLine = `\n${line}`;
+        }
+      }
     } catch {
       // The workflow identifier is an intentional non-secret fallback.
     }
-    return `${message}\n\n---\n📋 Process: ${processId}\n🔄 Workflow: ${workflowName}\n🤖 via MCP Moira`;
+    return `${message}\n\n---\n📋 Process: ${processId}\n🔄 Workflow: ${workflowName}${listLine}\n🤖 via MCP Moira`;
   }
 }

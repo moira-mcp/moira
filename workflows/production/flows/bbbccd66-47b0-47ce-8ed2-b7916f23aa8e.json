@@ -2,7 +2,7 @@
   "id": "be95cedc-35ec-4314-87ce-331ac3d11579",
   "metadata": {
     "name": "Robust Task",
-    "version": "9.4.0",
+    "version": "9.5.0",
     "description": "Executes one complex authorized task through durable planning, canonical materialized guidance, cause-owned recovery and independently reviewed delivery without imposing a software-specific lifecycle. It creates an execution-correlated workspace, captures the complete task and authority, materializes one domain-neutral guide, produces and independently reviews a current plan, executes plan steps with concise durable evidence and materially changed retry attempts, and preserves restartable immutable history across context loss. Cause-aware step and final reviews separate result defects from evidence/projection defects and upstream plan or criterion defects; result and evidence repair have bounded budgets, while spreading or invalid work enters material replanning instead of false success. Autonomous mode skips only human waits; interactive mode keeps plan and recovery decisions. Outcomes distinguish complete and truthfully incomplete work and expose stable artifacts rather than process narration. Choose Robust Task for critical or long-running general work that needs recovery; use Quick Task for a bounded non-development task, Todo List for a supplied checklist, or Software Development Flow for one complete repository implementation lifecycle.",
     "tags": [
       "задача",
@@ -1918,6 +1918,10 @@
         },
         "connections": {
           "default": "step-review"
+        },
+        "list": {
+          "current": "current_step",
+          "total": "total_steps"
         }
       },
       {

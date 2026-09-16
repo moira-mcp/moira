@@ -200,8 +200,8 @@ export class ExecutionAttemptRepository {
             `INSERT INTO workflowExecution (
               executionId, workflowId, userId, state, currentNodeId, waitingForInputNodeId,
               context, error, errors, note, parentExecutionId, revision, reminders, visits,
-              createdAt, updatedAt, completedAt
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              workflowVersion, createdAt, updatedAt, completedAt
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           )
           .run(
             input.execution.executionId,
@@ -218,6 +218,7 @@ export class ExecutionAttemptRepository {
             input.execution.revision,
             execution.reminders,
             execution.visits,
+            input.execution.workflowVersion ?? null,
             input.execution.createdAt,
             execution.updatedAt,
             execution.completedAt,

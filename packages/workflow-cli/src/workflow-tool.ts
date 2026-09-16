@@ -51,6 +51,7 @@ import {
   editBlock,
   setConnectionLabel,
   setNodeBlock,
+  parseListBinding,
 } from "./workflow-process-authoring.js";
 import { deriveProcess } from "@mcp-moira/workflow-engine/process";
 import { SYSTEM_OWNER_IDS, isSystemOwner } from "@mcp-moira/shared/services/workflow-catalog";
@@ -1711,10 +1712,11 @@ ${c("cyan", "Commands:")}
                                    Label a connection; --cause/--exit explain it as a return
   clear-label <node> <key>         Remove a connection label
   set-block <node> <block>         Move a node to a progress block (progressNodeId)
-  add-block <id> <label> <summary> [--outcome <tpl>] [--next <text>] [--after <block>]
+  add-block <id> <label> <summary> [--outcome <tpl>] [--next <text>] [--after <block>] [--list <json>]
                                    Add a progress block (appended, or right after --after)
-  edit-block <id> [--label <t>] [--summary <t>] [--outcome <tpl|none>] [--next <t|none>]
-                                   Edit a progress block's label, description, outcome or next
+  edit-block <id> [--label <t>] [--summary <t>] [--outcome <tpl|none>] [--next <t|none>] [--list <json|none>]
+                                   Edit a progress block's label, description, outcome, next or
+                                   list binding ({"items","title","current","done","total","indexBase"})
   validate                         Validate workflow
   variables [--usage]              Analyze all workflow variables
   get-variable <name>              Get declared global from variableRegistry
@@ -2139,7 +2141,7 @@ async function main(): Promise<void> {
             const [id, label, ...summary] = positional;
             if (!id || !label || summary.length === 0) {
               throw new Error(
-                "Usage: add-block <id> <label> <summary> [--outcome <tpl>] [--next <text>] [--after <block>]",
+                "Usage: add-block <id> <label> <summary> [--outcome <tpl>] [--next <text>] [--after <block>] [--list <json>]",
               );
             }
             mutated = addBlock(
@@ -2150,6 +2152,8 @@ async function main(): Promise<void> {
                 summary: summary.join(" "),
                 outcome: option("--outcome"),
                 next: option("--next"),
+                list:
+                  option("--list") !== undefined ? parseListBinding(option("--list")!) : undefined,
               },
               option("--after"),
             );
@@ -2159,7 +2163,7 @@ async function main(): Promise<void> {
             const [id] = positional;
             if (!id) {
               throw new Error(
-                "Usage: edit-block <id> [--label <t>] [--summary <t>] [--outcome <tpl|none>] [--next <t|none>]",
+                "Usage: edit-block <id> [--label <t>] [--summary <t>] [--outcome <tpl|none>] [--next <t|none>] [--list <json|none>]",
               );
             }
             const none = (value: string | undefined): string | undefined =>
@@ -2169,6 +2173,8 @@ async function main(): Promise<void> {
               summary: option("--summary"),
               outcome: none(option("--outcome")),
               next: none(option("--next")),
+              list:
+                option("--list") !== undefined ? parseListBinding(option("--list")!) : undefined,
             });
           }
         }

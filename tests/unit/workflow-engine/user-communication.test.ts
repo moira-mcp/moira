@@ -933,6 +933,98 @@ describe("UserNotificationHandler", () => {
     expect(renderedFor).toEqual([{ currentNodeId: "notify", lastVisitNode: "notify" }]);
   });
 
+  test("the footer names done/total and the current item of the bound list nearest the run", async () => {
+    const deliver = jest.fn(async () => ({
+      status: "delivered" as const,
+      configuredChannels: 1,
+      deliveredChannels: 1,
+      channels: [{ channelId: "telegram", status: "delivered" as const }],
+    }));
+    const handler = new UserNotificationHandler({ deliver } as unknown as UserCommunicationService);
+    const node: UserNotificationNode = {
+      type: "user-notification",
+      id: "notify",
+      message: "Checkpoint",
+      connections: { default: "end" },
+    };
+    const graph = {
+      metadata: { name: "Example", version: "1.0.0", description: "x" },
+      variableRegistry: {
+        tasks: { type: "array", description: "tasks" },
+        current_task: { type: "number", description: "cursor" },
+      },
+      progress: {
+        nodes: [
+          {
+            id: "work",
+            label: "Work",
+            list: { items: "tasks", title: "action", current: "current_task" },
+          },
+          { id: "report", label: "Report" },
+        ],
+      },
+      nodes: [
+        { id: "start", type: "start", progressNodeId: "work", connections: { default: "task" } },
+        {
+          id: "task",
+          type: "agent-directive",
+          progressNodeId: "work",
+          directive: "Do",
+          completionCondition: "Done",
+          connections: { success: "notify" },
+          connectionLabels: { success: "done" },
+        },
+        {
+          id: "notify",
+          type: "user-notification",
+          progressNodeId: "report",
+          message: "Checkpoint",
+          connections: { default: "end" },
+        },
+        { id: "end", type: "end", progressNodeId: "report" },
+      ],
+    };
+    const tasks = [{ action: "Write it" }, { action: "Ship it" }];
+    const repo = {
+      getWorkflowGraph: async () => graph,
+      getExecution: async () => ({
+        revision: 1,
+        status: "running",
+        currentNodeId: "task",
+        globalContext: { variables: { tasks, current_task: 2 }, nodeStates: {} },
+        visits: [
+          { seq: 0, nodeId: "start", exitKey: "default", changes: { tasks, current_task: 1 } },
+          {
+            seq: 1,
+            nodeId: "task",
+            exitKey: "success",
+            changes: { current_task: 2 },
+            waited: true,
+          },
+        ],
+      }),
+      getWorkflow: async () => ({ metadata: graph.metadata }),
+    } as unknown as IDataRepository;
+    await handler.execute(
+      node,
+      {
+        variables: { tasks, current_task: 2 },
+        nodeStates: {},
+        executionId: "12345678-rest",
+        workflowId: "workflow-id",
+        userId: "user-1",
+      },
+      new AgentMessageQueue(),
+      repo,
+      {} as IGraphExecutionEngine,
+    );
+    const text = (deliver.mock.calls as unknown as Array<[{ text: string }]>)[0][0].text;
+    // The notification's own block binds nothing; the line comes from the checklist block the
+    // route just left, and an unbound block adds no count of its own.
+    expect(text).toContain("📝 1/2: Ship it");
+    expect(text.match(/📝/gu)).toHaveLength(1);
+  });
+
   test("never substitutes a system identity when the execution has no user", async () => {
     const deliver = jest.fn<UserCommunicationService["deliver"]>();
     const handler = new UserNotificationHandler({ deliver } as unknown as UserCommunicationService);

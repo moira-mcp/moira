@@ -98,15 +98,21 @@ moira-workflow ./workflow.json update notify --progress-node-id review --attach-
 ```
 
 У контракта блоков есть собственные команды: привязать ноду к блоку, добавить или изменить блок с
-его описанием, подписать связь, выходящую из блока, и объяснить возврат причиной цикла и условием
+его описанием, привязать блок к списку, который проходят его шаги, подписать связь, выходящую из
+блока, и объяснить возврат причиной цикла и условием
 его завершения. Каждая запись сообщает, сколько диагностик контракта блоков осталось, поэтому flow
 размечается итеративно, пока `derive` не покажет ни одной; `--no-version-bump` сохраняет версию
-во время итераций.
+во время итераций. Флаг `--list`, который принимают `add-block` и `edit-block`, задаёт привязку
+как JSON (`items`, `title`, `current`, `done`, `total`, `indexBase`), а `--list none` её удаляет;
+неизвестное поле, пустой путь, `indexBase` не `0` и не `1`, а также привязка без `items`,
+`current` и `total` отклоняются при записи.
 
 ```bash
 moira-workflow ./workflow.json set-block route-plan-approval plan
 moira-workflow ./workflow.json add-block deliver "Deliver" "Hand the result over" --after execute
 moira-workflow ./workflow.json edit-block deliver --summary "Present the result"
+moira-workflow ./workflow.json edit-block work \
+  --list '{"items":"tasks","title":"action","current":"current_task","total":"total_tasks"}'
 moira-workflow ./workflow.json set-label check-plan-approved approved "plan approved"
 moira-workflow ./workflow.json set-label route-review default "review found defects" \
   --cause "The independent review reported blocking findings." --exit "The review passes."

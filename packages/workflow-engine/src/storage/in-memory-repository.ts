@@ -366,6 +366,28 @@ export class InMemoryRepository implements IDataRepository {
       .map((e) => ({ ...e }));
   }
 
+  async listExecutionsByWorkflowVersion(
+    workflowId: string,
+    workflowVersion: string,
+  ): Promise<WorkflowExecution[]> {
+    return Array.from(this.executions.values())
+      .filter((e) => e.workflowId === workflowId && e.workflowVersion === workflowVersion)
+      .map((e) => ({ ...e }));
+  }
+
+  async summarizeExecutionsByWorkflowVersion(
+    workflowId: string,
+    workflowVersion: string,
+  ): Promise<{ count: number; lastUpdatedAt: number | null; unstamped: number }> {
+    const all = Array.from(this.executions.values()).filter((e) => e.workflowId === workflowId);
+    const stamped = all.filter((e) => e.workflowVersion === workflowVersion);
+    return {
+      count: stamped.length,
+      lastUpdatedAt: stamped.length ? Math.max(...stamped.map((e) => e.updatedAt)) : null,
+      unstamped: all.filter((e) => !e.workflowVersion).length,
+    };
+  }
+
   async listExecutionsWithFilters(filter: ExecutionFilter): Promise<ExecutionListResult> {
     const {
       userId,

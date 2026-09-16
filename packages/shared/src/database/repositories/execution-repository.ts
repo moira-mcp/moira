@@ -118,6 +118,7 @@ export class ExecutionRepository {
         revision: execution.revision,
         reminders: remindersJson,
         visits: visitsJson,
+        workflowVersion: execution.workflowVersion ?? null,
         createdAt,
         updatedAt,
         completedAt,
@@ -198,6 +199,7 @@ export class ExecutionRepository {
       revision: row.revision,
       reminders,
       visits,
+      workflowVersion: row.workflowVersion ?? null,
       createdAt: row.createdAt ? (row.createdAt as Date).getTime() : Date.now(),
       updatedAt: row.updatedAt ? (row.updatedAt as Date).getTime() : Date.now(),
       completedAt: row.completedAt ? (row.completedAt as Date).getTime() : undefined,
@@ -213,6 +215,53 @@ export class ExecutionRepository {
       .orderBy(workflowExecution.createdAt);
 
     return rows.map((row) => this.rowToExecution(row));
+  }
+
+  async listByWorkflowVersion(
+    workflowId: string,
+    workflowVersion: string,
+  ): Promise<WorkflowExecution[]> {
+    const rows = await this.db
+      .select()
+      .from(workflowExecution)
+      .where(
+        and(
+          eq(workflowExecution.workflowId, workflowId),
+          eq(workflowExecution.workflowVersion, workflowVersion),
+        ),
+      )
+      .orderBy(workflowExecution.createdAt);
+    return rows.map((row) => this.rowToExecution(row));
+  }
+
+  async summarizeByWorkflowVersion(
+    workflowId: string,
+    workflowVersion: string,
+  ): Promise<{ count: number; lastUpdatedAt: number | null; unstamped: number }> {
+    const [stamped] = await this.db
+      .select({ count: sql<number>`count(*)`, last: sql<number | null>`max(updatedAt)` })
+      .from(workflowExecution)
+      .where(
+        and(
+          eq(workflowExecution.workflowId, workflowId),
+          eq(workflowExecution.workflowVersion, workflowVersion),
+        ),
+      );
+    const [unstamped] = await this.db
+      .select({ count: sql<number>`count(*)` })
+      .from(workflowExecution)
+      .where(
+        and(
+          eq(workflowExecution.workflowId, workflowId),
+          isNull(workflowExecution.workflowVersion),
+        ),
+      );
+    return {
+      count: Number(stamped?.count ?? 0),
+      lastUpdatedAt:
+        stamped?.last === null || stamped?.last === undefined ? null : Number(stamped.last),
+      unstamped: Number(unstamped?.count ?? 0),
+    };
   }
 
   async listByUser(userId: string): Promise<WorkflowExecution[]> {

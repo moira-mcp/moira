@@ -216,7 +216,8 @@ expands real node IDs, canonically ordered labelled connections, routing cases (
 <condition>`) and node expressions, declared local/global
 outputs, final outputs, subgraph mappings, automatic-node output variables, context references,
 basic blocks, cyclic regions, and the complete progress definition with its ordered blocks, any
-legacy display edges still stored on them, and node-to-block mappings. It distinguishes normal
+legacy display edges still stored on them, a `LIST` line under each block that binds a list, and
+node-to-block mappings. It distinguishes normal
 start reachability, explicit teleport-only regions, and disconnected roots/components. Every
 source node and connection is emitted exactly once; coverage footers make omissions visible. The command does not interpret
 workflow-specific meaning, execute workflow content, or write the source file.
@@ -270,6 +271,11 @@ moira-workflow <flow>.json set-block route-plan-approval plan
 moira-workflow <flow>.json add-block deliver "Deliver" "Hand the result over" --after execute \
   --outcome "{{progress_result_outcome}}" --next "Done"
 moira-workflow <flow>.json edit-block deliver --summary "Present the result" --next none
+
+# Bind a block to the list its steps work through, or remove the binding
+moira-workflow <flow>.json edit-block work \
+  --list '{"items":"tasks","title":"action","current":"current_task","total":"total_tasks"}'
+moira-workflow <flow>.json edit-block work --list none
 ```
 
 These commands apply one mutation of the process block contract each, behind the normal backup and
@@ -277,8 +283,12 @@ content-version behaviour (`--no-version-bump`, an alias of `--force`, keeps the
 refuse an unknown node, connection key or block, an empty label or summary, a duplicate block id,
 and a return with only one of `--cause`/`--exit`, leaving the file unchanged. After a successful
 write the command re-derives the process and prints whether the block contract is satisfied or how
-many diagnostics remain (`derive` lists them). `edit-block` accepts `none` for `--outcome` and
-`--next` to remove the field. Annotate a flow iteratively: own every node, label every edge
+many diagnostics remain (`derive` lists them). `edit-block` accepts `none` for `--outcome`,
+`--next` and `--list` to remove the field. `--list`, accepted by `add-block` and `edit-block`,
+takes the binding as a JSON object of `items`, `title`, `current`, `done`, `total` and
+`indexBase` (`docs/WORKFLOW.md`); the value is checked on write and rejected for an unknown field,
+a path that is not a non-empty string, an `indexBase` other than `0` or `1`, and a binding naming
+none of `items`, `current` or `total`. Annotate a flow iteratively: own every node, label every edge
 `derive` reports as unlabelled, explain every return, then `validate`.
 
 ### set-progress - Set or remove static execution progress

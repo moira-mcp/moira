@@ -96,15 +96,21 @@ moira-workflow ./workflow.json update notify --progress-node-id review --attach-
 ```
 
 The block contract has its own commands: own a node by a block, add or edit a block with its
-description, label a connection that leaves a block, and explain a return with the cause of the
-loop and the condition that ends it. Each write reports how many block-contract diagnostics
+description, bind a block to the list its steps work through, label a connection that leaves a
+block, and explain a return with the cause of the loop and the condition that ends it. Each write
+reports how many block-contract diagnostics
 remain, so a flow is annotated iteratively until `derive` shows none; `--no-version-bump` keeps
-the version while iterating.
+the version while iterating. `--list`, accepted by `add-block` and `edit-block`, takes the binding
+as JSON (`items`, `title`, `current`, `done`, `total`, `indexBase`) and `--list none` removes it;
+an unknown field, an empty path, an `indexBase` other than `0` or `1` and a binding naming none of
+`items`, `current` or `total` are refused on write.
 
 ```bash
 moira-workflow ./workflow.json set-block route-plan-approval plan
 moira-workflow ./workflow.json add-block deliver "Deliver" "Hand the result over" --after execute
 moira-workflow ./workflow.json edit-block deliver --summary "Present the result"
+moira-workflow ./workflow.json edit-block work \
+  --list '{"items":"tasks","title":"action","current":"current_task","total":"total_tasks"}'
 moira-workflow ./workflow.json set-label check-plan-approved approved "plan approved"
 moira-workflow ./workflow.json set-label route-review default "review found defects" \
   --cause "The independent review reported blocking findings." --exit "The review passes."

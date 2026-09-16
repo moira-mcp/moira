@@ -339,6 +339,55 @@ describe("recorded route of real runs", () => {
     expect(projected.route.find((entry) => entry.exitKey === TELEPORT_EXIT_KEY)?.blockId).toBe(
       "work",
     );
+    // The bundled binding resolves on a real run: the work block reads the revised checklist
+    // (one task) through `tasks`/`action` and its counters, finished after the run completed.
+    const work = projected.nodes.find((node) => node.id === "work")!;
+    expect(work.list).toMatchObject({
+      total: 1,
+      done: 1,
+      current: null,
+      items: [{ index: 0, title: "Create the file", done: true, current: false }],
+    });
+    expect(work.timing.recorded).toBe(true);
+    // Three working passes: the executed task, the teleported revision wait and the task re-check.
+    expect(work.timing.passes.length).toBe(3);
+  });
+
+  test("a real run stamps the definition version and times every visit from presentation to transition", async () => {
+    const workflow = bundled("quick-task");
+    const { step, execution, project } = await runner(workflow);
+    const before = Date.now();
+    await step();
+    await step(quickTaskInputs["get-task"]("autonomous"));
+    const paused = await execution();
+    expect(paused.workflowVersion).toBe(workflow.metadata.version);
+    const visits = paused.visits!;
+    // Every closed visit was left no earlier than it was entered; the open wait has no leftAt.
+    for (const visit of visits) {
+      expect(visit.enteredAt).toBeGreaterThanOrEqual(before);
+      if (visit.exitKey !== null) expect(visit.leftAt).toBeGreaterThanOrEqual(visit.enteredAt!);
+      else expect(visit.leftAt).toBeUndefined();
+    }
+    const first = visits.find((visit) => visit.nodeId === "get-task")!;
+    expect(first.exitKey).toBe("success");
+    const projected = await project();
+    const scope = projected.nodes.find((node) => node.id === "scope")!;
+    expect(scope.timing.recorded).toBe(true);
+    expect(scope.timing.passes[0]).toMatchObject({ nodeId: "get-task", open: false });
+    expect(scope.timing.passes[0].durationMs).toBe(first.leftAt! - first.enteredAt!);
+    const open = projected.nodes.find((node) => node.status === "waiting")!;
+    expect(open.timing.currentMs).toBeGreaterThanOrEqual(0);
+    expect(projected.executionWorkflowVersion).toBe(workflow.metadata.version);
+    // The bundled Quick Task binding is counters only, zero-based: before any plan exists the
+    // execute block shows 0 done and no total (total_steps has no default until planning).
+    const execute = projected.nodes.find((node) => node.id === "execute")!;
+    expect(execute.list).toEqual({
+      items: null,
+      done: 0,
+      total: null,
+      current: 0,
+      currentTitle: null,
+    });
   });
 
   test("an execution without a recorded route infers nothing", async () => {

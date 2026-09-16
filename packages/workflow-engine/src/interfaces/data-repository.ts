@@ -230,6 +230,21 @@ export interface IDataRepository {
    */
   listExecutionsWithFilters(filter: ExecutionFilter): Promise<ExecutionListResult>;
 
+  /** Every execution of a workflow that started on the given definition version. */
+  listExecutionsByWorkflowVersion(
+    workflowId: string,
+    workflowVersion: string,
+  ): Promise<WorkflowExecution[]>;
+
+  /**
+   * Cheap summary of a version's executions for cache validation: how many there are, when the
+   * latest was updated, and how many executions of the workflow carry no version stamp at all.
+   */
+  summarizeExecutionsByWorkflowVersion(
+    workflowId: string,
+    workflowVersion: string,
+  ): Promise<{ count: number; lastUpdatedAt: number | null; unstamped: number }>;
+
   /**
    * Delete execution
    */

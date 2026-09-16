@@ -323,14 +323,35 @@ version, execution revision, execution status and diagnostics, plus:
   (completed passes through the block's working steps), `visits`, `currentNodeId` (for the active
   or waiting block) and the coarse `state` (`completed | current | pending`) derived from
   `status` for older clients;
+- per block: `timing` — `passes` (each `seq`, `nodeId`, `enteredAt`, `leftAt`, `durationMs`,
+  `open`, `itemIndex`), `totalMs`, `currentMs` and `recorded`. A pass is a visit of a block's
+  working step (routing and end nodes are passes only when the block consists of them
+  alone, and an adjustment visit is never a pass); the open pass is
+  the one the run is on and is measured to `projectedAt`. `totalMs` sums every measured pass, the
+  open one included, `currentMs` is the open pass so far, and `recorded` is false for a run whose
+  visits carry no timestamps — such durations are `null`, never `0`;
+- per block: `list` — the bound list resolved from the run's variables at the cursor:
+  `items` (each `index`, `title`, `done`, `current`, `durationMs`) or `null`, plus `done`,
+  `total`, `current` and `currentTitle`. The whole field is `null` when the block declares no
+  binding or the binding resolved to nothing (the projection then carries a diagnostic), and
+  `items` is `null` for a counters-only
+  binding; a pass counts toward the item its `current` path pointed at when the pass began;
 - `process`: the derived process (blocks, transitions with labels and cycles, hubs, diagnostics),
   the same object `GET /api/workflows/:id/process` returns;
 - `route`: the recorded visits in order — `seq`, `nodeId`, `blockId`, `exitKey`, the names of
-  what the visit `changed`, `waited`, `adjusted` with its `actor`, and `loop` on a repeated node
-  or a re-entered block;
+  what the visit `changed`, `waited`, `adjusted` with its `actor`, `loop` on a repeated node
+  or a re-entered block, and `enteredAt`/`leftAt` (epoch ms; `leftAt` absent while the visit is
+  open, both absent on visits recorded without timestamps);
 - `variables`: every global variable and node-local output (`nodeId.field`) with its current
   value, its history (`seq`, `nodeId`, `value`, `adjusted`) and whether the current value came
   from an adjustment;
+- `executionWorkflowVersion`: the `metadata.version` stamped on the execution when it started
+  (`null` for a run recorded without the stamp), beside `workflowVersion` — the version of the
+  definition the projection used;
+- `projectedAt`: epoch ms the projection was made at, the moment open passes are measured to;
+- `statistics`: the typical durations of `executionWorkflowVersion`, the run itself excluded —
+  the same object `GET /api/workflows/:id/statistics` returns — or `null` when the run carries no
+  version stamp;
 - `routeRecorded`, `cursor` and `source: "trace"`.
 
 Statuses are projected from the route the engine recorded, never inferred from block order: a
@@ -419,6 +440,23 @@ description, outcome template, owned node ids, transitions with label, optional 
 `{ cause, exit }` and the authored edges behind them), hub block ids, node-level back-edges and the
 block-contract diagnostics, or `null` for a workflow without `progress`. It carries nothing about
 any execution; the CLI `derive` command prints the same derivation.
+
+`GET /api/workflows/:id/statistics?version=<semver>` (id or slug) returns how long each block
+typically takes over the runs that started on one definition version — the current
+`metadata.version` when `version` is omitted or blank. It carries `workflowId`,
+`workflowVersion`, `sampledRuns`, `versionNotRecorded`, `computedAt` and `blocks`: per block
+`blockId`, the duration samples `pass` and `run`, `typicalPasses`, and `items` — one entry per
+list position with its `index`, `title` and the same sample fields. A duration sample is
+`sampleCount`, `medianMs`, `p25Ms`, `p75Ms`, `minMs` and `maxMs`. `pass` samples single measured
+passes, `run` sums a run's measured passes through the block, and `run` together with
+`typicalPasses` (the median number of passes)
+counts completed runs only. The sample is every execution stamped with that version, projected
+onto the current process and joined by block id; an execution without a version stamp is counted
+in `versionNotRecorded` and never sampled. `items` holds one entry per bound-list position a pass
+was attributed to, and is empty for a block with no such pass. The aggregate is cached and
+recomputed when the count or the latest update of that version's runs changes.
+
+Authentication: Required
 
 The local definition CLI authors policy with
 `moira-workflow <file> set-variable-write-policy <name> <node-ids|all|none>` and discovers it with

@@ -2,7 +2,7 @@
   "id": "93609982-70c9-4089-b8c9-19815d8da87b",
   "metadata": {
     "name": "Todo List",
-    "version": "3.7.0",
+    "version": "3.8.0",
     "description": "Executes a finite caller-owned checklist sequentially with minimal orchestration. It materializes one canonical domain-neutral guide before intake, requires every substantive agent responsibility to read it, and keeps checklist, evidence, progress, revision and authority rules in one source without suppressing requested inventories, metrics or log analysis. It accepts an already supplied typed task list or gathers one bounded list, separates content ownership from dependency ordering, derives total and one-based cursor in the engine, projects exactly the current task, advances only after concise verified evidence, and asks for no approval between items. A guarded mid-run revision preserves completed positions and resumes from an explicit task number while the engine recomputes derived state. Todo List intentionally has no plan-design review, per-item retry budget, recovery protocol, aggregate result report or final semantic reviewer. Choose it when the caller already knows the checklist and needs durable cursor progress; use Quick Task when a bounded task needs planning and independent review, Robust Task for retry/recovery and critical work, or Software Development Flow for repository implementation.",
     "tags": [
       "чеклист",
@@ -354,6 +354,12 @@
           "summary": "Perform or correct the remaining checklist work",
           "outcome": "{{progress_execution_outcome}}",
           "next": "Continue, revise the remaining checklist when necessary, or finish"
+        },
+        "list": {
+          "items": "tasks",
+          "title": "action",
+          "current": "current_task",
+          "total": "total_tasks"
         }
       }
     ]
