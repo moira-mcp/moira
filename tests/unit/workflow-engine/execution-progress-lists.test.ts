@@ -319,6 +319,52 @@ describe("pass timings", () => {
     expect(later.totalMs).toBe(2_500);
   });
 
+  test("a pass before the cursor's first write is attributed by the registry default, not by the cursor's final value", () => {
+    // current_task defaults to 1 in the registry: the first pass (before the run wrote the cursor)
+    // belongs to item 0; the second, written to 2 before it began, to item 1.
+    const run = execution(
+      [
+        {
+          seq: 0,
+          nodeId: "start",
+          exitKey: "default",
+          changes: { tasks, total_tasks: 3 },
+          enteredAt: T,
+          leftAt: T,
+        },
+        {
+          seq: 1,
+          nodeId: "task",
+          exitKey: "success",
+          changes: { current_task: 2 },
+          waited: true,
+          enteredAt: T,
+          leftAt: T + 100,
+        },
+        {
+          seq: 2,
+          nodeId: "task",
+          exitKey: "success",
+          changes: { current_task: 3 },
+          waited: true,
+          enteredAt: T + 100,
+          leftAt: T + 400,
+        },
+        { seq: 3, nodeId: "end", exitKey: null, changes: {}, enteredAt: T + 400, leftAt: T + 400 },
+      ],
+      { tasks, total_tasks: 3, current_task: 3 },
+      "completed",
+    );
+    const work = projectExecutionRun(graph(), run, { now: T + 400 })!.nodes[0];
+    expect(work.timing.passes.map((pass) => pass.itemIndex)).toEqual([0, 1]);
+    expect(work.list!.items!.map((item) => item.durationMs)).toEqual([100, 300, null]);
+    // Without a default nothing is attributed before the first write.
+    const definition = graph();
+    definition.variableRegistry!.current_task = { type: "number", description: "cursor" };
+    const bare = projectExecutionRun(definition, run, { now: T + 400 })!.nodes[0];
+    expect(bare.timing.passes.map((pass) => pass.itemIndex)).toEqual([null, 1]);
+  });
+
   test("a run recorded without timestamps reports null durations, never zero", () => {
     const run = execution(
       [

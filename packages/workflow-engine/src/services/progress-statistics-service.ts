@@ -1,8 +1,11 @@
 /**
- * Serves per-version duration statistics with a cache that a finished or updated run of that
- * version refreshes: the cache key is the workflow, the version and the excluded run; the entry
- * is valid while the repository's summary of that version's runs (count and latest update) is
- * unchanged, so a request never scans the executions twice for the same state.
+ * Serves per-version duration statistics with a cache that a newly finished run of that version
+ * refreshes: the sample is one user's completed runs of the version (a public workflow is run by
+ * many users, and one user's runs — their list item titles among them — are not another's
+ * statistics); the cache key is the workflow, the version, the user and the excluded run; the
+ * entry is valid while the repository's summary of that sample (completed count, latest
+ * completion, unstamped count) is unchanged, so stepping runs do not invalidate it and a request
+ * never scans the executions twice for the same state.
  */
 
 import type { IDataRepository } from "../interfaces/data-repository.js";
@@ -25,19 +28,23 @@ export class ProgressStatisticsService {
 
   constructor(private readonly repository: IDataRepository) {}
 
-  /** Statistics of one definition version; `excludeExecutionId` leaves the asking run out. */
+  /**
+   * Statistics of one definition version over `userId`'s completed runs; `excludeExecutionId`
+   * leaves the asking run out.
+   */
   async forVersion(
     workflowId: string,
     workflow: WorkflowGraph,
     workflowVersion: string,
-    options: { excludeExecutionId?: string; now?: number } = {},
+    options: { userId: string; excludeExecutionId?: string; now?: number },
   ): Promise<WorkflowVersionStatistics> {
     const summary = await this.repository.summarizeExecutionsByWorkflowVersion(
       workflowId,
       workflowVersion,
+      options.userId,
     );
-    const key = `${workflowId}@${workflowVersion}|${options.excludeExecutionId ?? ""}`;
-    const signature = `${summary.count}:${summary.lastUpdatedAt ?? 0}:${summary.unstamped}`;
+    const key = `${workflowId}@${workflowVersion}|${options.userId}|${options.excludeExecutionId ?? ""}`;
+    const signature = `${summary.count}:${summary.lastCompletedAt ?? 0}:${summary.unstamped}`;
     const cached = ProgressStatisticsService.cache.get(key);
     if (cached && cached.signature === signature) {
       // Re-insert so the entry becomes the newest (insertion order is the eviction order).
@@ -48,12 +55,14 @@ export class ProgressStatisticsService {
     const executions = await this.repository.listExecutionsByWorkflowVersion(
       workflowId,
       workflowVersion,
+      options.userId,
     );
     const value = computeVersionStatistics(workflow, workflowVersion, executions, {
       excludeExecutionId: options.excludeExecutionId,
       now: options.now,
       workflowId,
     });
+    // The listing holds stamped runs only; the unstamped count comes from the summary.
     value.versionNotRecorded = summary.unstamped;
     ProgressStatisticsService.cache.delete(key);
     ProgressStatisticsService.cache.set(key, { signature, value });

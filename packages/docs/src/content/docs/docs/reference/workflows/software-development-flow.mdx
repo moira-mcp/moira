@@ -50,7 +50,7 @@ complete run.
 
 ## Execution progress
 
-The run's progress map is derived from the executable graph: every node belongs to one stage, every stage-leaving edge is labelled, and every return explains its cause and exit. The implementation stage binds the plan's counters — `current_step_index` as the unit in progress and `total_steps` as the unit count — so a run reports how many plan units are done out of how many, with the time each pass through the stage took, from the same progress data the run page, the exported image and the `session progress` action read.
+The run's progress map is derived from the executable graph: every node belongs to one stage, every stage-leaving edge is labelled, and every return explains its cause and exit. The implementation stage binds the plan's counters — `current_step_index` as the unit in progress and `total_steps` as the unit count — so the run's progress data (`session progress` and the execution progress API) reports how many plan units are done out of how many and how long each pass through the stage took.
 
 ## When to use it
 

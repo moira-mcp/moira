@@ -269,15 +269,17 @@ export class DatabaseRepository implements IDataRepository {
   async listExecutionsByWorkflowVersion(
     workflowId: string,
     workflowVersion: string,
+    userId: string,
   ): Promise<WorkflowExecution[]> {
-    return await this.executionRepo.listByWorkflowVersion(workflowId, workflowVersion);
+    return await this.executionRepo.listByWorkflowVersion(workflowId, workflowVersion, userId);
   }
 
   async summarizeExecutionsByWorkflowVersion(
     workflowId: string,
     workflowVersion: string,
-  ): Promise<{ count: number; lastUpdatedAt: number | null; unstamped: number }> {
-    return await this.executionRepo.summarizeByWorkflowVersion(workflowId, workflowVersion);
+    userId: string,
+  ): Promise<{ count: number; lastCompletedAt: number | null; unstamped: number }> {
+    return await this.executionRepo.summarizeByWorkflowVersion(workflowId, workflowVersion, userId);
   }
 
   async deleteExecution(executionId: string): Promise<void> {

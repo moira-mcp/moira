@@ -763,8 +763,13 @@ describe("runtime execution variables", () => {
     );
     expect(statisticsResponse.status).toBe(200);
     const statisticsBody = (await statisticsResponse.json()) as { data: Record<string, unknown> };
-    // Asked for the workflow rather than from a run, the sample includes this run.
-    expect(statisticsBody.data).toMatchObject({ workflowVersion: "1.0.0", sampledRuns: 1 });
+    // Only completed runs are sampled, so this waiting run is in neither sample; the workflow
+    // route answers for the caller's own runs of that version.
+    expect(statisticsBody.data).toMatchObject({
+      workflowVersion: "1.0.0",
+      sampledRuns: 0,
+      versionNotRecorded: 0,
+    });
 
     const denied = await fetch(`${getTestBaseUrl()}/api/executions/${executionId}/progress`, {
       headers: { Cookie: `better-auth.session_token=${foreignCookie}` },

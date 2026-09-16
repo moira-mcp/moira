@@ -43,12 +43,8 @@ import {
 const router = Router();
 
 /**
- * GET /api/workflows/:id/process — the derived block view of the saved workflow (blocks,
- * labelled transitions, returns, diagnostics). `process` is null for a workflow without `progress`.
- */
-/**
- * GET /api/workflows/:id/statistics?version=<semver> — typical block durations over the runs that
- * started on that definition version (the current version when none is given).
+ * GET /api/workflows/:id/statistics?version=<semver> — typical block durations over the caller's
+ * completed runs that started on that definition version (the current version when none is given).
  */
 router.get(
   "/:id/statistics",
@@ -66,11 +62,16 @@ router.get(
       resolved!.workflowId,
       info.workflow,
       version,
+      { userId },
     );
     res.json({ success: true, data: statistics, timestamp: new Date().toISOString() });
   }),
 );
 
+/**
+ * GET /api/workflows/:id/process — the derived block view of the saved workflow (blocks,
+ * labelled transitions, returns, diagnostics). `process` is null for a workflow without `progress`.
+ */
 router.get(
   "/:id/process",
   asyncHandler(async (req: Request, res: Response) => {

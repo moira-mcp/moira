@@ -217,9 +217,11 @@ export class ExecutionRepository {
     return rows.map((row) => this.rowToExecution(row));
   }
 
+  /** One user's completed runs of a workflow that started on the given definition version. */
   async listByWorkflowVersion(
     workflowId: string,
     workflowVersion: string,
+    userId: string,
   ): Promise<WorkflowExecution[]> {
     const rows = await this.db
       .select()
@@ -227,6 +229,8 @@ export class ExecutionRepository {
       .where(
         and(
           eq(workflowExecution.workflowId, workflowId),
+          eq(workflowExecution.userId, userId),
+          eq(workflowExecution.state, "completed"),
           eq(workflowExecution.workflowVersion, workflowVersion),
         ),
       )
@@ -234,31 +238,34 @@ export class ExecutionRepository {
     return rows.map((row) => this.rowToExecution(row));
   }
 
+  /**
+   * Cache signature of that sample: how many completed runs, when the latest completed, and how
+   * many of the user's completed runs of the workflow carry no version stamp.
+   */
   async summarizeByWorkflowVersion(
     workflowId: string,
     workflowVersion: string,
-  ): Promise<{ count: number; lastUpdatedAt: number | null; unstamped: number }> {
+    userId: string,
+  ): Promise<{ count: number; lastCompletedAt: number | null; unstamped: number }> {
+    const owned = and(
+      eq(workflowExecution.workflowId, workflowId),
+      eq(workflowExecution.userId, userId),
+      eq(workflowExecution.state, "completed"),
+    );
     const [stamped] = await this.db
-      .select({ count: sql<number>`count(*)`, last: sql<number | null>`max(updatedAt)` })
+      .select({
+        count: sql<number>`count(*)`,
+        last: sql<number | null>`max(coalesce(completedAt, updatedAt))`,
+      })
       .from(workflowExecution)
-      .where(
-        and(
-          eq(workflowExecution.workflowId, workflowId),
-          eq(workflowExecution.workflowVersion, workflowVersion),
-        ),
-      );
+      .where(and(owned, eq(workflowExecution.workflowVersion, workflowVersion)));
     const [unstamped] = await this.db
       .select({ count: sql<number>`count(*)` })
       .from(workflowExecution)
-      .where(
-        and(
-          eq(workflowExecution.workflowId, workflowId),
-          isNull(workflowExecution.workflowVersion),
-        ),
-      );
+      .where(and(owned, isNull(workflowExecution.workflowVersion)));
     return {
       count: Number(stamped?.count ?? 0),
-      lastUpdatedAt:
+      lastCompletedAt:
         stamped?.last === null || stamped?.last === undefined ? null : Number(stamped.last),
       unstamped: Number(unstamped?.count ?? 0),
     };
