@@ -876,6 +876,7 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
                 {mountedViews.current.has("map") && (
                   <div className={cn("lg:h-full", mode !== "map" && "hidden")}>
                     <MapView
+                      onFocusNode={focusNode}
                       toolbarExtra={runControls}
                       toolbarTrailing={runTrailing}
                       progress={shownProgress}

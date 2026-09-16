@@ -6,7 +6,7 @@
 
 import { useSyncExternalStore } from "react";
 
-export type LayoutPreset = "default" | "compact" | "flow";
+export type LayoutPreset = "default" | "compact" | "flow" | "vertical";
 
 export const LAYOUT_PRESETS: ReadonlyArray<{ id: LayoutPreset; label: string; hint: string }> = [
   {
@@ -23,6 +23,11 @@ export const LAYOUT_PRESETS: ReadonlyArray<{ id: LayoutPreset; label: string; hi
     id: "flow",
     label: "По потоку",
     hint: "Вертикальное размещение по ELK без принудительных рядов",
+  },
+  {
+    id: "vertical",
+    label: "Вертикальная",
+    hint: "Блоки в столбец сверху вниз, ветки столбцами правее",
   },
 ];
 

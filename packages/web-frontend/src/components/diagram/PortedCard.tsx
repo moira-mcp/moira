@@ -18,6 +18,7 @@ import { cn } from "@/lib/utils";
 import { NodeTypeTag } from "../run/nodeTypeStyle";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { TemplateText } from "./VariableText";
+import { INTERACTIVE } from "./interactive";
 
 /** One port: a React Flow handle id, what the row shows and what its tooltip explains. */
 export interface PortInfo {
@@ -30,6 +31,8 @@ export interface PortInfo {
   kind: "forward" | "return" | "external" | "default" | "error";
   /** The tooltip: the transition's condition, cause and exit, target. */
   tip?: React.ReactNode;
+  /** The card at the far end of the port's edge; clicking the port goes there. */
+  peer?: string;
 }
 
 export interface FactChip {
@@ -80,6 +83,8 @@ export interface PortedCardProps {
   /** Which port ids are lit under the current focus. */
   litIds?: ReadonlySet<string> | null;
   onHover?: (ids: readonly string[] | null) => void;
+  /** A port was clicked: go to its far end. */
+  onPortClick?: (port: PortInfo) => void;
   /** Ids of every link the card takes part in, lit together when the card is hovered. */
   allLinkIds: readonly string[];
   children?: React.ReactNode;
@@ -148,23 +153,49 @@ function Port({
   side,
   lit,
   onHover,
+  onClick,
 }: {
   port: PortInfo;
   side: "in" | "out" | "loop";
   lit: boolean;
   onHover?: (ids: readonly string[] | null) => void;
+  onClick?: (port: PortInfo) => void;
 }): React.JSX.Element {
+  const clickable = Boolean(onClick && port.peer);
   const row = (
     <div
       className={cn(
-        "relative flex min-w-0 items-center gap-1.5 rounded-full border bg-background px-2 py-0.5 font-mono text-[11px] leading-5 transition-colors",
+        "relative flex min-w-0 items-center gap-1.5 rounded-full border bg-background px-2 py-0.5 font-mono text-[11px] leading-5",
         PORT_TONE[port.kind],
+        clickable ? INTERACTIVE.clickable : INTERACTIVE.hoverOnly,
         lit && "border-primary bg-primary/10",
       )}
+      role={clickable ? "button" : undefined}
+      tabIndex={clickable ? 0 : undefined}
+      onClick={
+        clickable
+          ? (event) => {
+              event.stopPropagation();
+              onClick!(port);
+            }
+          : undefined
+      }
+      onKeyDown={
+        clickable
+          ? (event) => {
+              if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                event.stopPropagation();
+                onClick!(port);
+              }
+            }
+          : undefined
+      }
       onMouseEnter={() => onHover?.([port.id])}
       onMouseLeave={() => onHover?.(null)}
       data-port={side}
       data-transition={port.id}
+      data-peer={port.peer}
       data-lit={lit ? "true" : undefined}
     >
       {port.kind === "return" && <RotateCcw className="size-3 shrink-0" aria-hidden="true" />}
@@ -222,6 +253,7 @@ export function PortedCard({
   visited = false,
   litIds = null,
   onHover,
+  onPortClick,
   allLinkIds,
   children,
   dataAttributes,
@@ -253,7 +285,13 @@ export function PortedCard({
             )}
             style={side === "in" ? { top: "50%", left: -9 } : { top: "50%", right: -9 }}
           />
-          <Port port={port} side={side} lit={litOf(port.id)} onHover={onHover} />
+          <Port
+            port={port}
+            side={side}
+            lit={litOf(port.id)}
+            onHover={onHover}
+            onClick={onPortClick}
+          />
         </div>
       ))}
     </div>
@@ -355,7 +393,12 @@ export function PortedCard({
               {facts.map((fact) => (
                 <Tooltip key={fact.key}>
                   <TooltipTrigger asChild>
-                    <span className="inline-flex cursor-help items-center gap-1 rounded-md border bg-background px-2 py-0.5 text-[11px] leading-4 hover:border-primary">
+                    <span
+                      className={cn(
+                        "inline-flex items-center gap-1 rounded-md border bg-background px-2 py-0.5 text-[11px] leading-4",
+                        INTERACTIVE.hoverOnly,
+                      )}
+                    >
                       {fact.icon}
                       {fact.label}
                       {fact.count !== undefined && (
@@ -393,7 +436,13 @@ export function PortedCard({
                     : "justify-self-start",
               )}
             >
-              <Port port={port} side="loop" lit={litOf(port.id)} onHover={onHover} />
+              <Port
+                port={port}
+                side="loop"
+                lit={litOf(port.id)}
+                onHover={onHover}
+                onClick={onPortClick}
+              />
             </div>
           ))}
           {/* One double port for every self-loop: the edge leaves the left dot and re-enters the right one. */}

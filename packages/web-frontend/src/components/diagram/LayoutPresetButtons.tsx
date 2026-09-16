@@ -5,7 +5,7 @@
 
 import React from "react";
 import { ControlButton } from "@xyflow/react";
-import { AlignHorizontalJustifyCenter, Rows3, Shrink } from "lucide-react";
+import { AlignHorizontalJustifyCenter, ArrowDownUp, Rows3, Shrink } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { LAYOUT_PRESETS, useLayoutPreset, type LayoutPreset } from "./layoutPreset";
 import { ToolbarButton } from "./DiagramToolbar";
@@ -14,6 +14,7 @@ const ICONS: Record<LayoutPreset, React.ComponentType<{ className?: string }>> =
   default: Rows3,
   compact: Shrink,
   flow: AlignHorizontalJustifyCenter,
+  vertical: ArrowDownUp,
 };
 
 export function LayoutPresetButtons({

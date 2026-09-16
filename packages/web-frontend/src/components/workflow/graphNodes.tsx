@@ -10,8 +10,6 @@
 
 import React, { useEffect } from "react";
 import {
-  BaseEdge,
-  EdgeLabelRenderer,
   getSmoothStepPath,
   useStore,
   type Edge,
@@ -19,12 +17,13 @@ import {
   type Node,
   type NodeProps,
 } from "@xyflow/react";
-import { FileText, FunctionSquare, RotateCcw, Undo2 } from "lucide-react";
+import { FileText, FunctionSquare, Undo2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { PortedCard, type FactChip, type PortInfo } from "../diagram/PortedCard";
 import { ConditionText, ExpressionText, TemplateText } from "../diagram/VariableText";
 import { STATUS_STYLE } from "../run/status";
-import { isLit, useTransitionFocus } from "../run/focus";
+import { isFlashed, isLit, useTransitionFocus } from "../run/focus";
+import { DiagramEdge, DiagramMarkers, type DiagramEdgeKind } from "../diagram/DiagramEdge";
 import type { GraphLink, GraphStep } from "../run/graphModel";
 import type { ExecutionBlockStatus } from "../run/model";
 import { GRAPH_CARD_WIDTH, type GraphRoute } from "./graphLayout";
@@ -42,6 +41,8 @@ export type StepNodeData = Record<string, unknown> & {
   selfLoops: PortInfo[];
   /** Brings the card at the other end of an arrival into view. */
   onFocusStep?: (id: string) => void;
+  /** Travel along a link: bring the step at its far end into view and flash the edge. */
+  onGoTo?: (stepId: string, linkId: string) => void;
   /** The reader just arrived at this step from the map or the finder. */
   arrived?: boolean;
   /** The run has been through this step. */
@@ -77,6 +78,7 @@ export type GraphEdgeData = {
   route?: GraphRoute;
   /** Whether the cards' handles sit on their left and right (blocks stacked top to bottom). */
   horizontal: boolean;
+  onGoTo?: (stepId: string, linkId: string) => void;
 };
 
 /** An SVG path along `points` with the corners rounded. */
@@ -198,7 +200,7 @@ function stepFacts(graph: GraphStep): FactChip[] {
 
 export function StepNodeView({ data, selected }: NodeProps<StepNode>): React.JSX.Element {
   const focus = useTransitionFocus();
-  const { graph, current, error, inputs, outputs, selfLoops, arrived, visited } = data;
+  const { graph, current, error, inputs, outputs, selfLoops, arrived, visited, onGoTo } = data;
   const links = [...inputs, ...outputs, ...selfLoops].map((port) => port.id);
   // Hovering the card lights every connection it takes part in, and the cards at their far end.
   const near = focus.hovered !== null && links.some((id) => focus.hovered!.has(id));
@@ -230,6 +232,7 @@ export function StepNodeView({ data, selected }: NodeProps<StepNode>): React.JSX
       visited={Boolean(visited)}
       litIds={focus.hovered}
       onHover={(ids) => focus.setHovered(ids)}
+      onPortClick={onGoTo ? (port) => port.peer && onGoTo(port.peer, port.id) : undefined}
       allLinkIds={links}
       dataAttributes={{ "data-graph-node": graph.id }}
     />
@@ -279,6 +282,12 @@ export function BlockGroupView({ data }: NodeProps<BlockGroupNode>): React.JSX.E
   );
 }
 
+const LINK_KIND: Record<GraphLink["kind"], DiagramEdgeKind> = {
+  forward: "forward",
+  return: "return",
+  external: "external",
+};
+
 export function GraphEdgeView({
   id,
   data,
@@ -291,12 +300,9 @@ export function GraphEdgeView({
 }: EdgeProps<GraphEdge>): React.JSX.Element | null {
   const focus = useTransitionFocus();
   if (!data) return null;
-  const { link, route, horizontal, chipped } = data;
-  const isReturn = link.kind === "return";
+  const { link, route, horizontal, onGoTo } = data;
   const lit = isLit(focus, link.id, link.source);
   let path: string;
-  let labelX: number;
-  let labelY: number;
   if (link.source === link.target) {
     // A self-loop: out of the bottom double port's left dot, a short dip, back into its right dot.
     const dip = Math.max(sourceY, targetY) + 26;
@@ -306,16 +312,10 @@ export function GraphEdgeView({
       [targetX, dip],
       [targetX, targetY],
     ]);
-    labelX = (sourceX + targetX) / 2;
-    labelY = dip + 10;
   } else if (route) {
-    // The label sits on the first lane run, which lies in a corridor clear of the cards.
     path = roundedPath(routedPoints(route, horizontal, sourceX, sourceY, targetX, targetY));
-    const [[ax, ay], [bx, by]] = route.lane;
-    labelX = (ax + bx) / 2;
-    labelY = (ay + by) / 2;
   } else {
-    [path, labelX, labelY] = getSmoothStepPath({
+    [path] = getSmoothStepPath({
       sourceX,
       sourceY,
       targetX,
@@ -325,86 +325,21 @@ export function GraphEdgeView({
       borderRadius: 12,
     });
   }
-  // While something is hovered, everything else recedes, so one path can be followed across the
-  // whole graph instead of being read out of a bundle of equally dark lines.
-  const dim = focus.hovered !== null && !lit;
-  // Every edge is drawn at rest, arrowhead included; a routed (corridor) edge is drawn muted and
-  // without its label until it is lit, since its label would collide with its neighbours'.
-  // The transition is named by its ports (the output name on the source, the source on the
-  // target, each with a tooltip); the line itself carries no label.
-  const showLabel = false;
   return (
-    <>
-      <g
-        onMouseEnter={() => focus.setHovered([link.id])}
-        onMouseLeave={() => focus.setHovered(null)}
-        style={{ cursor: "default" }}
-      >
-        <title>{link.label}</title>
-        {/* A halo in the page colour under the line: where two edges cross, the one drawn later
-            interrupts the other, so the crossing reads as over and under instead of a junction. */}
-        <path
-          d={path}
-          fill="none"
-          stroke="var(--background)"
-          strokeWidth={lit ? 8 : 6}
-          strokeOpacity={dim ? 0 : 0.9}
-          strokeLinecap="round"
-        />
-        <BaseEdge
-          id={id}
-          path={path}
-          interactionWidth={14}
-          markerEnd={
-            lit
-              ? "url(#graph-arrow-lit)"
-              : isReturn
-                ? "url(#graph-arrow-return-muted)"
-                : "url(#graph-arrow)"
-          }
-          style={{
-            stroke: lit || isReturn ? "var(--primary)" : "var(--muted-foreground)",
-            strokeWidth: lit ? 2.5 : 1.5,
-            strokeOpacity: dim
-              ? 0.12
-              : lit
-                ? 1
-                : chipped
-                  ? 0.3
-                  : isReturn
-                    ? 0.55
-                    : link.kind === "external"
-                      ? 0.4
-                      : 0.5,
-            strokeDasharray: isReturn ? "6 5" : undefined,
-          }}
-          data-dimmed={dim ? "true" : undefined}
-          data-edge-kind={link.kind}
-          data-transition={link.id}
-          data-focused={lit ? "true" : undefined}
-        />
-      </g>
-      {showLabel && (
-        <EdgeLabelRenderer>
-          <span
-            className={cn(
-              "nodrag nopan pointer-events-auto absolute inline-flex max-w-[180px] items-center gap-1 truncate rounded-full border bg-background px-2 py-0.5 text-[11px] font-medium leading-4",
-              isReturn ? "border-primary/40 text-primary" : "border-border text-muted-foreground",
-              lit && "z-10 shadow-sm",
-            )}
-            style={{ transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)` }}
-            data-edge-label={link.kind}
-            data-transition={link.id}
-            title={link.label}
-            onMouseEnter={() => focus.setHovered([link.id])}
-            onMouseLeave={() => focus.setHovered(null)}
-          >
-            {isReturn && <RotateCcw className="size-3 shrink-0" aria-hidden="true" />}
-            {link.label}
-          </span>
-        </EdgeLabelRenderer>
-      )}
-    </>
+    <DiagramEdge
+      id={id}
+      path={path}
+      kind={link.source === link.target ? "self" : LINK_KIND[link.kind]}
+      lit={lit}
+      // While something is hovered, everything else recedes, so one path can be followed across
+      // the whole graph instead of being read out of a bundle of equally dark lines.
+      dim={focus.hovered !== null && !lit}
+      flash={isFlashed(focus, link.id)}
+      title={link.label}
+      transitionKey={link.id}
+      onHover={(over) => focus.setHovered(over ? [link.id] : null)}
+      onClick={onGoTo ? () => onGoTo(link.target, link.id) : undefined}
+    />
   );
 }
 
@@ -449,32 +384,7 @@ export function GraphMeasuredHeights({
   return null;
 }
 
-/** Arrowheads for the graph's edges, mounted once inside the viewport. */
+/** The diagrams' arrowheads, mounted once inside the viewport. */
 export function GraphDefs(): React.JSX.Element {
-  const marker = (id: string, fill: string, opacity = 1) => (
-    <marker
-      key={id}
-      id={id}
-      viewBox="0 0 10 10"
-      refX="9"
-      refY="5"
-      markerWidth="9"
-      markerHeight="9"
-      // Without this the arrowhead scales with the line's width, so a lit edge grows a head twice
-      // the size of its neighbours'.
-      markerUnits="userSpaceOnUse"
-      orient="auto-start-reverse"
-    >
-      <path d="M 0 0 L 10 5 L 0 10 z" fill={fill} fillOpacity={opacity} />
-    </marker>
-  );
-  return (
-    <svg aria-hidden="true">
-      <defs>
-        {marker("graph-arrow", "var(--muted-foreground)", 0.5)}
-        {marker("graph-arrow-lit", "var(--primary)")}
-        {marker("graph-arrow-return-muted", "var(--primary)", 0.5)}
-      </defs>
-    </svg>
-  );
+  return <DiagramMarkers />;
 }

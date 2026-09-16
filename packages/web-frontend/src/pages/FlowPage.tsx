@@ -771,6 +771,7 @@ export const FlowPage: React.FC = () => {
                 {progress && mountedViews.current.has("map") && (
                   <div className={cn("lg:h-full", mode !== "map" && "hidden")}>
                     <MapView
+                      onFocusNode={focusNode}
                       progress={progress}
                       blocks={blocks}
                       route={[]}

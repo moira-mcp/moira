@@ -21,8 +21,6 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import {
-  BaseEdge,
-  EdgeLabelRenderer,
   Background,
   type Edge,
   type EdgeProps,
@@ -30,8 +28,11 @@ import {
   type NodeProps,
   type ReactFlowInstance,
 } from "@xyflow/react";
-import { CornerDownRight, Clock, ListChecks, Loader2, Repeat, RotateCcw } from "lucide-react";
+import { Clock, ListChecks, Loader2, Repeat } from "lucide-react";
 import { PortedCard, type CardTone, type FactChip, type PortInfo } from "../diagram/PortedCard";
+import { DiagramEdge, DiagramMarkers, type DiagramEdgeKind } from "../diagram/DiagramEdge";
+import { INTERACTIVE } from "../diagram/interactive";
+import { NodeTypeTag } from "./nodeTypeStyle";
 import { roundedPath } from "../workflow/graphNodes";
 import { cn } from "@/lib/utils";
 import { useTheme } from "@/hooks/useTheme";
@@ -47,17 +48,11 @@ const CANVAS_EDGE = 16;
 /** Where the block row sits when a definition opens: this fraction of the viewport height from the top. */
 const CANVAS_ROW_ANCHOR = 0.3;
 import { PassCount, StatusChip } from "./status";
-import {
-  BLOCK_WIDTH,
-  LABEL_MAX_WIDTH,
-  layoutBlocks,
-  type BlockLayout,
-  type LaidOutEdge,
-} from "./layout";
+import { BLOCK_WIDTH, layoutBlocks, type BlockLayout, type LaidOutEdge } from "./layout";
 import { formatDuration } from "./duration";
-import { currentBlockId, stepsOf, type RunBlock, type RunViewProps } from "./model";
-import { PARALLEL_CHIP_MIN, transitionKey } from "./chips";
-import { TransitionFocusProvider, isLit, useTransitionFocus } from "./focus";
+import { currentBlockId, stepsOf, type RunBlock, type RunViewProps, type StepInfo } from "./model";
+import { transitionKey } from "./chips";
+import { TransitionFocusProvider, isFlashed, isLit, useTransitionFocus } from "./focus";
 
 type BlockNodeData = {
   block: RunBlock;
@@ -69,11 +64,23 @@ type BlockNodeData = {
   /** Who the run waits for, so a waiting card is worded for the agent or for a person. */
   waitingFor: "agent" | "user" | null;
   onSelect: (id: string | null) => void;
+  /** The blocks are stacked top to bottom (the vertical preset); the ports stay left and right. */
+  vertical: boolean;
+  /** The block's steps, for the steps tooltip. */
+  steps: StepInfo[];
+  /** Open a step on the technical graph. */
+  onFocusNode?: (nodeId: string) => void;
+  /** Travel along a transition: bring the block at its far end into view and flash the edge. */
+  onGoTo: (blockId: string, transitionKey: string) => void;
+  /** The reader just arrived at this block along a transition. */
+  arrived: boolean;
 };
 type BlockNode = Node<BlockNodeData, "block">;
 type RoutedEdge = Edge<
   {
     laid: LaidOutEdge;
+    vertical: boolean;
+    onGoTo: (blockId: string, transitionKey: string) => void;
     /** The column the edge's vertical takes beside its source and beside its target (0 = innermost). */
     outRank: number;
     inRank: number;
@@ -82,12 +89,70 @@ type RoutedEdge = Edge<
 >;
 
 /** The fact chips of a block: its steps, its passes, its time and the list it works through. */
-function blockFacts(block: RunBlock, t: TFunction): FactChip[] {
+/** The steps of a block as rows in a tooltip: type, name, id; each row opens the step on the graph. */
+function StepTipList({
+  steps,
+  currentNodeId,
+  onFocusNode,
+}: {
+  steps: StepInfo[];
+  currentNodeId: string | null;
+  onFocusNode?: (nodeId: string) => void;
+}): React.JSX.Element {
+  return (
+    <ol className="max-h-[320px] space-y-0.5 overflow-y-auto" data-step-tip-list="">
+      {steps.map((step, index) => {
+        const title = step.progressLabel ?? step.displayName ?? step.id;
+        const Row: "button" | "div" = onFocusNode ? "button" : "div";
+        return (
+          <li key={step.id}>
+            <Row
+              {...(onFocusNode
+                ? { type: "button" as const, onClick: () => onFocusNode(step.id) }
+                : {})}
+              className={cn(
+                "grid w-full grid-cols-[1.25rem_auto_minmax(0,1fr)] items-center gap-x-2 rounded-md border border-transparent px-1.5 py-1 text-left font-sans",
+                onFocusNode ? INTERACTIVE.clickable : INTERACTIVE.static,
+                step.id === currentNodeId && "bg-primary/10",
+              )}
+              data-step-row={step.id}
+            >
+              <span className="text-right text-[10px] tabular-nums text-muted-foreground">
+                {index + 1}
+              </span>
+              <NodeTypeTag type={step.type} fixed />
+              <span className="min-w-0">
+                <span className="block truncate text-xs font-medium">{title}</span>
+                {title !== step.id && (
+                  <span className="block truncate font-mono text-[10px] text-muted-foreground">
+                    {step.id}
+                  </span>
+                )}
+              </span>
+            </Row>
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
+function blockFacts(
+  block: RunBlock,
+  t: TFunction,
+  steps: StepInfo[],
+  onFocusNode?: (nodeId: string) => void,
+): FactChip[] {
   const facts: FactChip[] = [];
   facts.push({
     key: "steps",
     label: t("pages.runPage.stepCount", { count: block.nodeIds.length }),
-    tip: block.nodeIds.join("\n"),
+    tip:
+      steps.length > 0 ? (
+        <StepTipList steps={steps} currentNodeId={block.currentNodeId} onFocusNode={onFocusNode} />
+      ) : (
+        block.nodeIds.join("\n")
+      ),
   });
   if (block.iterations > 1) {
     facts.push({
@@ -149,7 +214,20 @@ const BLOCK_TONE: Record<RunBlock["status"], CardTone> = {
 function BlockNodeView({ data }: NodeProps<BlockNode>): React.JSX.Element {
   const { t } = useTranslation();
   const focus = useTransitionFocus();
-  const { block, selected, isHub, inputs, outputs, selfLoops, waitingFor, onSelect } = data;
+  const {
+    block,
+    selected,
+    isHub,
+    inputs,
+    outputs,
+    selfLoops,
+    waitingFor,
+    onSelect,
+    steps,
+    onFocusNode,
+    onGoTo,
+    arrived,
+  } = data;
   const keys = [...inputs, ...outputs, ...selfLoops].map((port) => port.id);
   const near = focus.hovered !== null && keys.some((key) => focus.hovered!.has(key));
   const litIds = focus.hovered ?? (focus.pinnedBlock === block.id ? new Set(keys) : null);
@@ -162,7 +240,9 @@ function BlockNodeView({ data }: NodeProps<BlockNode>): React.JSX.Element {
       tone={BLOCK_TONE[block.status]}
       description={block.description}
       descriptionTip={block.description}
-      facts={blockFacts(block, t)}
+      facts={blockFacts(block, t, steps, onFocusNode)}
+      arrived={arrived}
+      onPortClick={(port) => port.peer && onGoTo(port.peer, port.id)}
       inputs={inputs}
       outputs={outputs}
       selfLoops={selfLoops}
@@ -241,10 +321,77 @@ function portedPath(
   sy: number,
   tx: number,
   ty: number,
+  vertical = false,
   slots: PortSlots = { outRank: 0, inRank: 0 },
 ): { path: string; labelX: number; labelY: number } {
+  if (vertical && laid.from !== laid.to) {
+    const routed = stackedPoints(laid, sx, sy, tx, ty, slots);
+    return { path: roundedPath(routed.points), labelX: routed.labelX, labelY: routed.labelY };
+  }
   const routed = portedPoints(laid, sx, sy, tx, ty, slots);
   return { path: roundedPath(routed.points), labelX: routed.labelX, labelY: routed.labelY };
+}
+
+/**
+ * The stacked layout (blocks top to bottom, lanes in the gaps between columns) is the row layout
+ * transposed, so its laid path leaves the source's bottom edge and reaches the target's top edge.
+ * The ports stay on the sides: the edge leaves the right port, runs a stub out (one column per
+ * port rank), drops into the laid path, and at the far end comes down beside the target's left
+ * edge and enters its left port.
+ */
+function stackedPoints(
+  laid: LaidOutEdge,
+  sx: number,
+  sy: number,
+  tx: number,
+  ty: number,
+  slots: PortSlots,
+): { points: Array<[number, number]>; labelX: number; labelY: number } {
+  const logical = pathPoints(laid.path).map(([x, y]) => [y, x] as [number, number]);
+  const outX = sx + PORT_STUB + slots.outRank * PORT_COLUMN_STEP;
+  const inX = tx - PORT_STUB - slots.inRank * PORT_COLUMN_STEP;
+  // The laid path's first and last points sit on the source's bottom and the target's top edge;
+  // the points after and before them are straight below and above, in the row gaps.
+  const inner = logical.slice(1, -1);
+  if (inner.length === 0) {
+    const midY = (sy + ty) / 2;
+    const points: Array<[number, number]> = [
+      [sx, sy],
+      [outX, sy],
+      [outX, midY],
+      [inX, midY],
+      [inX, ty],
+      [tx, ty],
+    ];
+    return { points, labelX: (outX + inX) / 2, labelY: midY };
+  }
+  const first = inner[0];
+  const last = inner[inner.length - 1];
+  const points: Array<[number, number]> = [
+    [sx, sy],
+    [outX, sy],
+    [outX, first[1]],
+    ...inner.slice(1, -1),
+    [inX, last[1]],
+    [inX, ty],
+    [tx, ty],
+  ];
+  // The label sits on the longest run of the path.
+  let best = 0;
+  let bestLength = -1;
+  for (let i = 0; i + 1 < points.length; i++) {
+    const length =
+      Math.abs(points[i + 1][0] - points[i][0]) + Math.abs(points[i + 1][1] - points[i][1]);
+    if (length > bestLength) {
+      bestLength = length;
+      best = i;
+    }
+  }
+  return {
+    points,
+    labelX: (points[best][0] + points[best + 1][0]) / 2,
+    labelY: (points[best][1] + points[best + 1][1]) / 2,
+  };
 }
 
 function portedPoints(
@@ -305,6 +452,13 @@ function portedPoints(
   };
 }
 
+const EDGE_KIND: Record<LaidOutEdge["kind"], DiagramEdgeKind> = {
+  forward: "forward",
+  skip: "skip",
+  hub: "hub",
+  cycle: "return",
+};
+
 function RoutedEdgeView({
   id,
   data,
@@ -316,84 +470,30 @@ function RoutedEdgeView({
   const { t } = useTranslation();
   const focus = useTransitionFocus();
   if (!data) return null;
-  const { laid, outRank, inRank } = data;
+  const { laid, vertical, outRank, inRank, onGoTo } = data;
   const key = transitionKey(laid.from, laid.transition);
   const lit = isLit(focus, key, laid.from);
   const cycle = laid.kind === "cycle";
-  const skip = laid.kind === "skip";
-  const hub = laid.kind === "hub";
-  const forward = laid.kind === "forward";
-  const hover = {
-    onMouseEnter: () => focus.setHovered([key]),
-    onMouseLeave: () => focus.setHovered(null),
-  };
-  const ported = portedPath(laid, sourceX, sourceY, targetX, targetY, { outRank, inRank });
-  const anchor =
-    laid.from === laid.to
-      ? `translate(-50%, 0) translate(${ported.labelX}px, ${ported.labelY}px)`
-      : `translate(-50%, -100%) translate(${ported.labelX}px, ${ported.labelY - 4}px)`;
+  const ported = portedPath(laid, sourceX, sourceY, targetX, targetY, vertical, {
+    outRank,
+    inRank,
+  });
   const title = cycle
     ? `${laid.transition.label} — ${laid.transition.cycle?.cause} — ${t("pages.runPage.map.endsWhen")} ${laid.transition.cycle?.exit}`
     : laid.transition.label;
-  // Adjacent forward transitions own the gap between their blocks and keep their label there —
-  // unless several share one gap, when a chip in the source names them and the lines are
-  // labelled on demand; every other kind is muted at rest and labelled on demand.
-  const bundled = forward && (laid.parallelCount ?? 1) >= PARALLEL_CHIP_MIN;
-  // Ports name the transition on both cards; the line carries no label.
-  const showLabel = false;
-  void bundled;
   return (
-    <>
-      <g {...hover} style={{ cursor: "default" }}>
-        <title>{title}</title>
-        <BaseEdge
-          id={id}
-          path={ported.path}
-          markerEnd={
-            cycle
-              ? lit
-                ? "url(#run-arrow-cycle)"
-                : "url(#run-arrow-cycle-muted)"
-              : hub
-                ? "url(#run-arrow-hub)"
-                : "url(#run-arrow)"
-          }
-          interactionWidth={14}
-          style={{
-            stroke: cycle ? "var(--primary)" : hub ? "var(--muted-foreground)" : "var(--border)",
-            strokeWidth: forward ? 2.5 : lit ? 2 : hub ? 1.25 : 1.5,
-            strokeOpacity: forward ? 1 : lit ? 1 : hub ? 0.45 : 0.5,
-            strokeDasharray: cycle ? "6 5" : skip ? "2 4" : undefined,
-          }}
-          data-edge-kind={laid.kind}
-          data-transition={key}
-          data-focused={lit ? "true" : undefined}
-        />
-      </g>
-      {showLabel && (
-        <EdgeLabelRenderer>
-          <span
-            className={cn(
-              "nodrag nopan pointer-events-auto absolute inline-flex items-center gap-1 whitespace-nowrap rounded-full border px-2 py-0.5 text-[11px] font-medium leading-4",
-              forward && "truncate",
-              lit && "z-10 shadow-sm",
-              cycle
-                ? "border-primary/40 bg-background text-primary"
-                : "border-border bg-background text-muted-foreground",
-            )}
-            style={{ transform: anchor, maxWidth: forward ? LABEL_MAX_WIDTH : undefined }}
-            data-edge-label={laid.kind}
-            data-transition={key}
-            title={title}
-            {...hover}
-          >
-            {cycle && <RotateCcw className="size-3 shrink-0" aria-hidden="true" />}
-            {skip && <CornerDownRight className="size-3 shrink-0" aria-hidden="true" />}
-            {laid.transition.label}
-          </span>
-        </EdgeLabelRenderer>
-      )}
-    </>
+    <DiagramEdge
+      id={id}
+      path={ported.path}
+      kind={laid.from === laid.to ? "self" : EDGE_KIND[laid.kind]}
+      lit={lit}
+      dim={focus.hovered !== null && !lit}
+      flash={isFlashed(focus, key)}
+      title={title}
+      transitionKey={key}
+      onHover={(over) => focus.setHovered(over ? [key] : null)}
+      onClick={() => onGoTo(laid.to, key)}
+    />
   );
 }
 
@@ -455,7 +555,7 @@ const edgeTypes = { routed: RoutedEdgeView };
 function useBlockLayout(
   blocks: RunBlock[],
   hubIds: string[],
-  preset: "default" | "compact" | "flow",
+  preset: "default" | "compact" | "flow" | "vertical",
 ): BlockLayout | null {
   const [layout, setLayout] = useState<BlockLayout | null>(null);
   // The layout depends only on the process shape; a projection refresh or a selection change
@@ -498,6 +598,7 @@ function CanvasInner({
   workflow,
   selectedBlockId,
   onSelectBlock,
+  onFocusNode,
   toolbarLeading,
   toolbarTitle,
   toolbarTrailing,
@@ -550,6 +651,28 @@ function CanvasInner({
     placementKey as unknown as string | null,
   );
   const rfRef = useRef<ReactFlowInstance<BlockNode, RoutedEdge> | null>(null);
+  // Travelling along a transition (a port or an edge clicked): the far block comes into view,
+  // the edge flashes and the block pulses on arrival, so the jump answers "where did that land".
+  const focus = useTransitionFocus();
+  const [arrival, setArrival] = useState<{ blockId: string; token: number } | null>(null);
+  useEffect(() => {
+    if (!arrival) return;
+    const timer = setTimeout(() => setArrival(null), 1800);
+    return () => clearTimeout(timer);
+  }, [arrival]);
+  const goTo = useCallback(
+    (blockId: string, key: string) => {
+      void rfRef.current?.fitView({
+        nodes: [{ id: blockId }],
+        padding: 0.35,
+        maxZoom: 1,
+        duration: 450,
+      });
+      focus.flash([key]);
+      setArrival((previous) => ({ blockId, token: (previous?.token ?? 0) + 1 }));
+    },
+    [focus],
+  );
   const onInit = useCallback(
     (rf: ReactFlowInstance<BlockNode, RoutedEdge>) => {
       rfRef.current = rf;
@@ -602,6 +725,7 @@ function CanvasInner({
             detail: transition.label,
             kind: transition.cycle ? "return" : "forward",
             tip: `${nameOf(other.id)} → ${transition.label}${cycleTip(transition)}`,
+            peer: other.id,
           });
         }
       }
@@ -618,6 +742,7 @@ function CanvasInner({
               ? "external"
               : "forward",
           tip: `${transition.label} → ${nameOf(transition.to)}${cycleTip(transition)}`,
+          peer: transition.to,
         };
         (transition.to === block.id ? selfLoops : outputs).push(port);
       }
@@ -638,10 +763,26 @@ function CanvasInner({
           selfLoops,
           waitingFor: progress.waitingFor,
           onSelect: onSelectBlock,
+          vertical: Boolean(layout.transposed),
+          steps: stepsOf(workflow, block.nodeIds),
+          onFocusNode,
+          onGoTo: goTo,
+          arrived: arrival?.blockId === block.id,
         },
       };
     });
-  }, [layout, blocks, selectedBlockId, onSelectBlock, progress.waitingFor, t]);
+  }, [
+    layout,
+    blocks,
+    selectedBlockId,
+    onSelectBlock,
+    progress.waitingFor,
+    t,
+    workflow,
+    onFocusNode,
+    goTo,
+    arrival,
+  ]);
 
   const edges = useMemo<RoutedEdge[]>(() => {
     if (!layout) return [];
@@ -670,15 +811,17 @@ function CanvasInner({
         focusable: false,
         data: {
           laid,
+          vertical: Boolean(layout.transposed),
           outRank: ranks.out.get(laid.id) ?? 0,
           inRank: ranks.in.get(laid.id) ?? 0,
+          onGoTo: goTo,
         },
         // Cycles are drawn above forward edges so a loop is never hidden behind one; hub bundles
         // sit beneath everything so they read as background wiring.
         zIndex: laid.kind === "cycle" ? 1 : laid.kind === "hub" ? -1 : 0,
       };
     });
-  }, [layout, nodes]);
+  }, [layout, nodes, goTo]);
 
   if (!layout) {
     return (
@@ -725,54 +868,7 @@ function CanvasInner({
           onFit={fitOverview}
           showControls={false}
         >
-          <svg aria-hidden="true">
-            <defs>
-              <marker
-                id="run-arrow"
-                viewBox="0 0 10 10"
-                refX="9"
-                refY="5"
-                markerWidth="8"
-                markerHeight="8"
-                orient="auto-start-reverse"
-              >
-                <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--border)" />
-              </marker>
-              <marker
-                id="run-arrow-hub"
-                viewBox="0 0 10 10"
-                refX="9"
-                refY="5"
-                markerWidth="7"
-                markerHeight="7"
-                orient="auto-start-reverse"
-              >
-                <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--muted-foreground)" />
-              </marker>
-              <marker
-                id="run-arrow-cycle"
-                viewBox="0 0 10 10"
-                refX="9"
-                refY="5"
-                markerWidth="8"
-                markerHeight="8"
-                orient="auto-start-reverse"
-              >
-                <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--primary)" />
-              </marker>
-              <marker
-                id="run-arrow-cycle-muted"
-                viewBox="0 0 10 10"
-                refX="9"
-                refY="5"
-                markerWidth="7"
-                markerHeight="7"
-                orient="auto-start-reverse"
-              >
-                <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--primary)" fillOpacity={0.5} />
-              </marker>
-            </defs>
-          </svg>
+          <DiagramMarkers />
           <Background gap={24} size={1} />
         </DiagramViewport>
       </div>

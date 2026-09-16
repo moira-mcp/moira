@@ -384,6 +384,8 @@ export interface RunViewProps {
   /** Route cursor (visit sequence number); null means the whole run. */
   cursor: number | null;
   onSetCursor: (at: number | null) => void;
+  /** Open a step on the technical graph (the page switches views for it). */
+  onFocusNode?: (nodeId: string) => void;
 }
 
 /** What a block's visits wrote up to the cursor: the latest value per name, with its visit. */

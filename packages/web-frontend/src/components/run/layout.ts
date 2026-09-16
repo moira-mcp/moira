@@ -99,6 +99,8 @@ export interface BlockLayout {
   hubIds: string[];
   width: number;
   height: number;
+  /** The blocks were laid out horizontally and swapped: edge paths and lanes are in that space. */
+  transposed?: boolean;
 }
 
 function lineCount(text: string, charsPerLine: number, max: number): number {
@@ -416,9 +418,11 @@ export function hubPort(block: Pick<LaidOutBlock, "x" | "y">): { x: number; y: n
 export interface LayoutBlocksOptions {
   /**
    * `default`: the process rows with lanes in their gaps. `compact`: the same rows with tighter
-   * gaps. `flow`: ELK's own vertical placement, no rows forced.
+   * gaps. `flow`: ELK's own vertical placement, no rows forced. `vertical`: the default layout
+   * transposed: blocks stacked top to bottom, branches in columns to the right; the ports
+   * stay on the blocks' left and right edges.
    */
-  preset?: "default" | "compact" | "flow";
+  preset?: "default" | "compact" | "flow" | "vertical";
 }
 
 export async function layoutBlocks(
@@ -427,6 +431,7 @@ export async function layoutBlocks(
   options: LayoutBlocksOptions = {},
 ): Promise<BlockLayout> {
   const preset = options.preset ?? "default";
+  const vertical = preset === "vertical";
   const tight = preset === "compact";
   const NODE_SEP = tight ? 16 : BASE_NODE_SEP;
   const LANE_GAP = tight ? 16 : BASE_LANE_GAP;
@@ -449,6 +454,11 @@ export async function layoutBlocks(
     });
   }
   const rankSep = rankSeparation(blocks, hubIds);
+  // A vertical layout is the horizontal one transposed: the blocks are laid out with their sizes
+  // swapped and every coordinate is swapped back at the end.
+  if (vertical) {
+    for (const [id, size] of sizes) sizes.set(id, { width: size.height, height: size.width });
+  }
   const placed = await placeBlocks(
     blocks,
     sizes,
@@ -700,6 +710,16 @@ export async function layoutBlocks(
   const bottomLanes = gapLanes.get(rows.length) ?? 0;
   const width = Math.max(...laidBlocks.map((b) => b.x + b.width)) + MARGIN;
   const height = bottomOfRows + (bottomLanes > 0 ? gapSize(rows.length) : 0) + MARGIN;
+  if (vertical) {
+    return {
+      blocks: laidBlocks.map((b) => ({ ...b, x: b.y, y: b.x, width: b.height, height: b.width })),
+      edges,
+      hubIds: [...hubs],
+      width: height,
+      height: width,
+      transposed: true,
+    };
+  }
   return { blocks: laidBlocks, edges, hubIds: [...hubs], width, height };
 }
 

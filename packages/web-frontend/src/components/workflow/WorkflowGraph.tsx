@@ -48,7 +48,7 @@ import {
   type StepNode,
   type StepNodeData,
 } from "./graphNodes";
-import { TransitionFocusProvider } from "../run/focus";
+import { FocusBridge, TransitionFocusProvider, type TransitionFocusHandle } from "../run/focus";
 import { VariableProvider, type VariableDefinition } from "../diagram/VariableText";
 import { outputTip } from "./graphNodes";
 import type { PortInfo } from "../diagram/PortedCard";
@@ -280,6 +280,8 @@ export const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
   const focusStep = useCallback((id: string) => {
     void instanceRef.current?.fitView({ nodes: [{ id }], padding: 0.5, maxZoom: 1, duration: 400 });
   }, []);
+  // The focus store lives inside the provider mounted below; a bridge hands it up for `goTo`.
+  const focusRef = useRef<TransitionFocusHandle | null>(null);
   // The step (and its block) the reader just arrived at pulses for a moment, so the move from
   // the map or the finder answers "where did that land" instead of asking it.
   const [arrival, setArrival] = useState<{ nodeId: string; blockId: string | null } | null>(null);
@@ -295,6 +297,15 @@ export const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
     if (!focusRequest) return;
     announceArrival(focusRequest.nodeId);
   }, [focusRequest, announceArrival]);
+  /** Travel along a link from a port or the edge itself: the far step comes into view and pulses. */
+  const goTo = useCallback(
+    (stepId: string, linkId: string) => {
+      focusStep(stepId);
+      announceArrival(stepId);
+      focusRef.current?.flash([linkId]);
+    },
+    [focusStep, announceArrival],
+  );
   useEffect(() => {
     if (!arrival) return;
     const timer = setTimeout(() => setArrival(null), 1800);
@@ -543,6 +554,7 @@ export const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
                 label: link.label,
                 kind: "return",
                 tip: source ? outputTip(source, link.label, targetName) : link.label,
+                peer: link.target,
               },
             ]);
             continue;
@@ -557,6 +569,7 @@ export const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
                 : targetName,
               kind: outKind,
               tip: source ? outputTip(source, link.label, targetName) : link.label,
+              peer: link.target,
             },
           ]);
           inputsOf.set(link.target, [
@@ -569,6 +582,7 @@ export const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
               tip: `${nameOfStep(link.source)}${
                 crosses && sourceBlock ? ` (${blockNameOf.get(sourceBlock) ?? ""})` : ""
               } → ${link.label}`,
+              peer: link.source,
             },
           ]);
         }
@@ -585,6 +599,7 @@ export const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
             outputs: outputsOf.get(laid.id) ?? [],
             selfLoops: selfOf.get(laid.id) ?? [],
             onFocusStep: focusStep,
+            onGoTo: goTo,
           };
           return {
             id: laid.id,
@@ -619,6 +634,7 @@ export const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
             route: layout.routes[link.id],
             chipped: Boolean(layout.routes[link.id]),
             horizontal: true,
+            onGoTo: goTo,
           },
         }));
         marginRef.current = layout.margin;
@@ -652,6 +668,7 @@ export const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
     currentLayoutOptions.direction,
     measuredHeights,
     focusStep,
+    goTo,
   ]);
 
   /**
@@ -737,6 +754,7 @@ export const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
       )}
       <div className="relative min-h-0 flex-1">
         <TransitionFocusProvider pinnedBlock={null}>
+          <FocusBridge handle={focusRef} />
           <VariableProvider
             value={{
               registry: (workflow.variableRegistry ?? {}) as Record<string, VariableDefinition>,
