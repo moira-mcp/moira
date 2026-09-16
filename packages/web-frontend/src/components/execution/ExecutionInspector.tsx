@@ -482,13 +482,15 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
   /** Bring a node into view on the technical graph: the page switches to the graph view for it. */
   const focusNode = useCallback(
     (nodeId: string) => {
-      update({ [VIEW_PARAM]: "graph" });
+      // The step's block becomes the selection, so the panel's node level survives the jump.
+      const owner = nodeOwners(blocks).get(nodeId) ?? null;
+      update({ [VIEW_PARAM]: "graph", ...(owner ? { [BLOCK_PARAM]: owner } : {}) });
       setFocusRequest((previous) => ({ nodeId, token: (previous?.token ?? 0) + 1 }));
       // The panel follows the jump to its node level.
       setPanelNodeId(nodeId);
       setChosenTab("block");
     },
-    [update],
+    [update, blocks],
   );
 
   const handleCurrentNodeClick = useCallback(() => {
