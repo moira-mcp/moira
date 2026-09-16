@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { zodToJsonSchema } from "zod-to-json-schema";
 import { progressAuthoringSchema } from "../schemas/progress-authoring.js";
 
 export const listWorkflowsSchema = z.object({
@@ -873,33 +874,82 @@ export const workspaceDownloadRequestSchema = z.union([
   }),
 ]);
 
+export const WORKSPACE_ACTION_REQUEST_SCHEMAS = {
+  list: workspaceListSchema,
+  create: workspaceCreateSchema,
+  get: workspaceGetSchema,
+  start: workspaceStartSchema,
+  stop: workspaceStopSchema,
+  delete: workspaceDeleteSchema,
+  exec: workspaceExecRequestSchema,
+  stat: workspaceStatRequestSchema,
+  search: workspaceSearchRequestSchema,
+  read: workspaceReadRequestSchema,
+  write: workspaceWriteRequestSchema,
+  apply_patch: workspaceApplyPatchRequestSchema,
+  upload: workspaceUploadRequestSchema,
+  download: workspaceDownloadRequestSchema,
+} as const;
+
+export const WORKSPACE_ACTIONS = Object.keys(WORKSPACE_ACTION_REQUEST_SCHEMAS) as [
+  WorkspaceAction,
+  ...WorkspaceAction[],
+];
+
+export type WorkspaceAction = keyof typeof WORKSPACE_ACTION_REQUEST_SCHEMAS;
+
 /**
- * Published root-object projection of a workspace request union. MCP clients that
- * cannot read a root `anyOf` discover one flat object: a field is required only when
- * every form requires it, and the strict request union is applied again at dispatch.
+ * The published contract of the one `workspace` tool: `action` plus every field any action accepts,
+ * each optional because no field belongs to all fourteen. The object stays strict, so a field
+ * belonging to no action at all is still refused here; a field belonging to another action is
+ * refused at dispatch, where the action's own strict contract is applied.
  */
-function publishedWorkspaceSchema<Options extends [z.AnyZodObject, ...z.AnyZodObject[]]>(
-  request: z.ZodUnion<Options>,
-) {
-  const shape: Record<string, z.ZodTypeAny> = {};
-  const options = request.options as z.AnyZodObject[];
-  for (const option of options) {
-    for (const [key, field] of Object.entries(option.shape as Record<string, z.ZodTypeAny>)) {
-      if (shape[key]) continue;
-      const everywhere = options.every(
-        (candidate) => candidate.shape[key] && !(candidate.shape[key] as z.ZodTypeAny).isOptional(),
-      );
-      shape[key] = everywhere ? field : field.optional();
-    }
-  }
-  return z.object(shape).strict();
+/**
+ * Whether two field declarations accept exactly the same values, compared through their serialized
+ * JSON Schema — the same projection a client reads, so a difference here is a difference the caller
+ * can observe.
+ */
+function sameShape(left: z.ZodTypeAny, right: z.ZodTypeAny): boolean {
+  const serialize = (field: z.ZodTypeAny) =>
+    JSON.stringify(zodToJsonSchema(field, { $refStrategy: "none" }));
+  return serialize(left) === serialize(right);
 }
 
-export const workspaceExecSchema = publishedWorkspaceSchema(workspaceExecRequestSchema);
-export const workspaceStatSchema = publishedWorkspaceSchema(workspaceStatRequestSchema);
-export const workspaceSearchSchema = publishedWorkspaceSchema(workspaceSearchRequestSchema);
-export const workspaceReadSchema = publishedWorkspaceSchema(workspaceReadRequestSchema);
-export const workspaceWriteSchema = publishedWorkspaceSchema(workspaceWriteRequestSchema);
-export const workspaceApplyPatchSchema = publishedWorkspaceSchema(workspaceApplyPatchRequestSchema);
-export const workspaceUploadSchema = publishedWorkspaceSchema(workspaceUploadRequestSchema);
-export const workspaceDownloadSchema = publishedWorkspaceSchema(workspaceDownloadRequestSchema);
+export const workspaceSchema = (() => {
+  const declarations = new Map<string, z.ZodTypeAny[]>();
+  const forms = Object.values(WORKSPACE_ACTION_REQUEST_SCHEMAS).flatMap((request) =>
+    request instanceof z.ZodUnion
+      ? (request.options as z.AnyZodObject[])
+      : [request as z.AnyZodObject],
+  );
+  for (const form of forms) {
+    for (const [key, field] of Object.entries(form.shape as Record<string, z.ZodTypeAny>)) {
+      // A default is dropped here and applied by the action's own contract at dispatch. Left in
+      // place, the published object would fill every action's defaults into every request, and the
+      // action's strict contract would then refuse fields the caller never sent. The description
+      // is re-applied, because it was written after the default and is what the agent reads.
+      const bare =
+        field instanceof z.ZodDefault
+          ? field.description === undefined
+            ? field.removeDefault()
+            : field.removeDefault().describe(field.description)
+          : field;
+      const known = declarations.get(key) ?? [];
+      // Two actions may declare the same field name with different bounds — `search` and `download`
+      // both take `max_bytes`, with different ceilings. Publishing only the first would narrow the
+      // other action's parameter, so every distinct declaration is published and the action's own
+      // contract narrows the request at dispatch.
+      if (!known.some((candidate) => sameShape(candidate, bare))) known.push(bare);
+      declarations.set(key, known);
+    }
+  }
+  const shape: Record<string, z.ZodTypeAny> = {
+    action: z.enum(WORKSPACE_ACTIONS).describe("Workspace operation to perform"),
+  };
+  for (const [key, fields] of declarations) {
+    const published =
+      fields.length === 1 ? fields[0] : z.union(fields as [z.ZodTypeAny, z.ZodTypeAny]);
+    shape[key] = published.isOptional() ? published : published.optional();
+  }
+  return z.object(shape).strict();
+})();

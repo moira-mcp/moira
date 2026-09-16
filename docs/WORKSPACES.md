@@ -9,7 +9,7 @@ and different authorized clients may reuse the same workspace.
 GitHub authorization belongs to the authenticated website. Agents do not
 receive provider credentials, OAuth operations, SSH configuration or lifecycle
 capabilities. Agents reach workspaces only through the authenticated MCP
-`workspace_*` tools described below; the website owns the GitHub connection and
+`workspace` tool described below; the website owns the GitHub connection and
 offers the same basic workspace management (list, create, start, stop, confirmed
 delete) over the same services. Administrators own the instance-wide kill switches.
 
@@ -113,6 +113,18 @@ only when the same GitHub account, approved repository and exact provider
 resource still match. Stored resource rows from the disposable contract retain
 the explicit `legacy_disposable` policy and continue to follow exact cleanup.
 
+A provider that refuses a create, start, stop or delete is reported by what it
+refused rather than as an internal failure. A refused stored grant is
+`WORKSPACE_AUTHORIZATION_REQUIRED`; a repository the provider no longer exposes,
+or a request it rejects as malformed, conflicting with the current state or
+unprocessable (HTTP 400, 409, 422), is the non-retryable
+`WORKSPACE_RESOURCE_INVALID`; any other provider status is the retryable
+`WORKSPACE_PROVIDER_UNAVAILABLE`. Each carries the provider's own reason when it
+is safe to repeat: the refused response body is reduced to one line and capped,
+and a message containing anything credential-shaped — a token, a labelled
+secret, a JWT or any URL — is dropped whole, leaving the HTTP status as the only
+detail.
+
 Durable global and provider controls act as kill switches. A disabled control
 rejects new creation, start and operation reservations, while already required
 stop, cancellation and cleanup work remains eligible for reconciliation.
@@ -178,7 +190,7 @@ durable, idempotently retried obligation.
 
 A terminal result reports the complete size of each stream next to its bounded
 payload, so a caller knows what the answer omitted. Any range of a retained
-stream is read with `workspace_read` by naming the command's `operation_id` and
+stream is read with the `read` action by naming the command's `operation_id` and
 `stream` instead of a path. That read is a bounded control request rather than a
 new operation: it creates no operation record, is fenced by the same ownership,
 resource-generation and authorization rules as every other call against that
@@ -296,48 +308,51 @@ Outbound download uses the rate-limited
 `no-store`, `noindex`, `nosniff` and no-referrer controls and consumes the capability
 after complete or interrupted delivery. The raw capability is redacted from application
 logs, and both Nginx variants proxy this prefix to the MCP process unbuffered with
-access and error logging disabled. `workspace_download` returns the capability to the
+access and error logging disabled. The `download` action returns the capability to the
 agent as an MCP `resource_link`; its structured result carries name, MIME type, size,
 digest and expiry but not the URL.
 
 ## MCP tools
 
-The authenticated MCP catalog exposes the workspace surface as separate tools:
-`workspace_list`, `workspace_create`, `workspace_get`, `workspace_start`,
-`workspace_stop`, `workspace_delete`, `workspace_exec`, `workspace_stat`,
-`workspace_search`, `workspace_read`, `workspace_write`, `workspace_apply_patch`,
-`workspace_upload` and `workspace_download`. The public tools reference renders their
-schemas from the typed registry. Adding or changing any of them changes
-`MCP_TOOLS_REVISION`, so a client holding an older catalog receives the ordinary
-HTTP 426 reconnect contract.
+The authenticated MCP catalog exposes the whole workspace surface as one tool,
+`workspace`, whose required `action` selects the operation: `list`, `create`, `get`,
+`start`, `stop`, `delete`, `exec`, `stat`, `search`, `read`, `write`, `apply_patch`,
+`upload` and `download`. The public tools reference renders its schema from the typed
+registry. Changing it changes `MCP_TOOLS_REVISION`, so a client holding an older catalog
+receives the ordinary HTTP 426 reconnect contract.
 
-Every tool derives the user from the MCP request context and addresses a persistent
-resource by `workspace_id`; no tool accepts a user, chat, session, OAuth, provider
-token, SSH or capability field, and strict schemas reject unknown fields before any
-service call. Each execution and file tool publishes one flat root-object schema in
-which only `workspace_id` is required (and `file_name`/`mime_type` for download); the
-adapter then applies the strict request form, so exactly one stdin form, a
-resume call carrying only `workspace_id` and `operation_id`, and a complete new
-request are the only accepted shapes. `workspace_list` returns the sanitized connection readiness (with the
+Every action derives the user from the MCP request context and addresses a persistent
+resource by `workspace_id`; the tool accepts no user, chat, session, OAuth, provider
+token, SSH or capability field. The published schema is one flat root object carrying
+`action` plus the union of every action's fields, of which only `action` is required —
+the projection this repository uses wherever a client may not read a root `anyOf`. It
+stays strict, so a field no action declares is refused there; the adapter then applies
+the requested action's own strict contract, so a field belonging to a different action,
+a mixed stdin form or a partial resume call is refused as `WORKSPACE_REQUEST_INVALID`
+rather than by the published schema. A default an action declares is applied by that
+contract and is deliberately absent from the published object, which would otherwise
+inject every action's defaults into every request; the field keeps its description. A field two
+actions declare differently — `max_bytes`, which `search` bounds at 1 MiB and `download` at 4 MiB —
+is published as both forms under one key, so the projection narrows neither. The `list` action returns the sanitized connection readiness (with the
 same-origin Settings URL), approved repository targets and the user's workspace
 summaries; it is the discovery path for `repository_id` and reusable `workspace_id`.
 Deleted and rejected workspaces are finished and accept no operation, so they are
 absent from that listing and from the website's, which reads the same service method.
-`workspace_get` returns one owned summary; an unknown or foreign ID returns the
+The `get` action returns one owned summary; an unknown or foreign ID returns the
 generic `WORKSPACE_NOT_FOUND` result. Summaries omit connection and authorization
 generations, external owner/billing IDs, operation markers, provider resource names,
 claims and capabilities.
 
-`workspace_stop` returns `data_preserved: true`. `workspace_delete` requires
+The `stop` action returns `data_preserved: true`. `delete` requires
 `confirm_delete: true` and the caller's current `expected_generation`, so a stale call
 cannot remove a changed workspace, and returns `data_preserved: false`.
 
-Execution and file tools return a sanitized operation envelope (`operation_id`,
+The execution and file actions return a sanitized operation envelope (`operation_id`,
 `kind`, `state`, bounded byte counts, `exit_code`, deadline and result expiry) plus the
 action result. Failed, cancelled and timed-out commands and rejected file edits are
 returned as tool errors (`isError: true`) that keep the operation identity and any
 bounded output. A pending or `reconcile_pending` envelope is not a success: calling
-the same tool again with only `workspace_id` and `operation_id` reconciles that
+the same action again with only `workspace_id` and `operation_id` reconciles that
 operation without dispatching a second command, write, upload or download. The
 same resume call with `cancel: true` stops a command instead of reporting it.
 
@@ -386,23 +401,23 @@ validated data, never a path: the remote side builds the path from a name it has
 accepted, and a session's stored working directory is resolved by the same rule that
 refuses any escape from the repository.
 
-`workspace_exec` accepts argv as data, an optional repository-relative `cwd`,
+The `exec` action accepts argv as data, an optional repository-relative `cwd`,
 `timeout_seconds`, `background`, `session`, `session_start`, `session_end`, `env`, `script`, optional per-stream output limits and exactly one optional stdin
 form: `stdin_text` (UTF-8) or `stdin_file`, a native ChatGPT file reference. The
-registry publishes `_meta["openai/fileParams"]` for `stdin_file` and for
-`workspace_upload.file`; inside a reference only `file_id` and `download_url` are
+registry publishes `_meta["openai/fileParams"]` on the tool for both `stdin_file` and
+`file`; inside a reference only `file_id` and `download_url` are
 required, while `file_name`, `mime_type` and `size_bytes` are optional. Native input
 goes directly through the one-call native execution path and is never staged through
-the public upload tool; neither the file ID nor the temporary URL is echoed back.
+the `upload` action; neither the file ID nor the temporary URL is echoed back.
 
-`workspace_read` returns UTF-8 text with offset, total size and, for a repository
-file, SHA-256; `length` defaults to 64 KiB, and `workspace_search` defaults to 100 matches within 64 KiB of
+The `read` action returns UTF-8 text with offset, total size and, for a repository
+file, SHA-256; `length` defaults to 64 KiB, and `search` defaults to 100 matches within 64 KiB of
 result bytes, so a call that names only the workspace, path and query is complete.
 A range that is not valid UTF-8 returns `WORKSPACE_BINARY_READ_REQUIRES_DOWNLOAD`
-instead of base64. `workspace_write` replaces a file atomically from UTF-8 text under an explicit
-existence precondition with optional size/digest guards; `workspace_apply_patch` takes
+instead of base64. The `write` action replaces a file atomically from UTF-8 text under an explicit
+existence precondition with optional size/digest guards; `apply_patch` takes
 ordered byte-offset edits with UTF-8 replacement text and returns old/new versions and
-the content-free summary. `workspace_download` returns the private transfer as a
+the content-free summary. The `download` action returns the private transfer as a
 `resource_link` (see the previous section).
 
 Known connection, workspace, state, policy and provider failures become bounded tool
@@ -468,7 +483,7 @@ connector is never probed while the feature is disabled.
 
 The complete view is served to authenticated callers: the website management list,
 `GET /api/admin/system-status` (`systemHealth.workspaces`) and the agent's
-`workspace_list.instance` summary. The unauthenticated liveness surfaces
+`instance` summary the `list` action returns. The unauthenticated liveness surfaces
 `GET /api/health` and MCP `GET /health` receive only the public projection
 `{ state, provider, degraded }`, served from `snapshot()`: the last computed decision
 while it is younger than twice `WORKSPACE_RECONCILE_INTERVAL_SECONDS`, otherwise one
@@ -688,8 +703,12 @@ resource create/pending/rejection/cleanup/start/stop/delete; typed exec/file
 operation reservation/reconciliation/terminal outcomes; and administrator control
 updates. Metadata is limited to opaque
 resource relationships, provider, state/outcome, selected machine facts, byte
-counts, exit code and, for a creation rejected by the connector probe, a bounded
-`reason` naming the connector's own failure (never remote output or a credential).
+counts, exit code and, for a refusal, a bounded `reason`. A creation rejected by the connector probe
+records the connector's own failure; a creation the provider rejected, and a start, stop or delete the
+provider refused, record the redacted provider reason described under "Persistent lifecycle". A
+refused lifecycle operation is audited under the operation it refused, with the refusing HTTP status
+as its outcome, including a refusal reached through background reconciliation, where no caller is
+waiting to see it. A failure that is not the provider's answer is not audited as one.
 The connector sidecar keeps the underlying `gh`/`ssh` diagnostics in its own
 container log with the credential redacted; the application never receives them. Repository content, source, argv, cwd, stdin, stdout,
 stderr, OAuth code/state, session token and provider credentials are excluded.

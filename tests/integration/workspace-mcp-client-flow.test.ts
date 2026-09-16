@@ -378,10 +378,15 @@ async function client() {
   await server.connect(serverTransport);
   await mcp.connect(clientTransport);
   return {
-    call: (name: string, args: Record<string, unknown>, userId = USER_ID) =>
+    // One published tool: the action is the first argument, the rest of the request follows it.
+    call: (action: string, args: Record<string, unknown>, userId = USER_ID) =>
       runWithMCPContext(
         { userId, agent: "chatgpt" },
-        () => mcp.callTool({ name, arguments: args }) as Promise<CallToolResult>,
+        () =>
+          mcp.callTool({
+            name: "workspace",
+            arguments: { action, ...args },
+          }) as Promise<CallToolResult>,
       ),
     close: async () => {
       await mcp.close();
@@ -434,7 +439,7 @@ async function setup() {
 }
 
 async function createWorkspace(mcp: Awaited<ReturnType<typeof client>>) {
-  const created = await mcp.call("workspace_create", { repository_id: "301", ref: "main" });
+  const created = await mcp.call("create", { repository_id: "301", ref: "main" });
   expect(created).toEqual(expect.not.objectContaining({ isError: true }));
   expect(created.structuredContent).toMatchObject({ workspace: { state: "usable" } });
   expect(JSON.stringify(created)).not.toContain("ghu_fixture_secret");
@@ -467,13 +472,13 @@ async function expectDownloadBytes(fixture: DomainFixture, result: CallToolResul
 describe("ChatGPT-compatible workspace MCP with real domain services", () => {
   it("edits and tests actual code, transfers actual binary bytes, and reuses a workspace after restart", async () => {
     const { fixture, mcp } = await setup();
-    expect((await mcp.call("workspace_list", {})).structuredContent).toMatchObject({
+    expect((await mcp.call("list", {})).structuredContent).toMatchObject({
       repositories: [{ repository_id: "301" }],
       workspaces: [],
     });
     const workspaceId = await createWorkspace(mcp);
     const args = { workspace_id: workspaceId };
-    const written = await mcp.call("workspace_write", {
+    const written = await mcp.call("write", {
       ...args,
       path: "app.mjs",
       text: initialSource,
@@ -496,17 +501,17 @@ describe("ChatGPT-compatible workspace MCP with real domain services", () => {
       "-m",
       "fixture baseline",
     ]);
-    const stat = await mcp.call("workspace_stat", { ...args, path: "app.mjs" });
+    const stat = await mcp.call("stat", { ...args, path: "app.mjs" });
     expect(stat.structuredContent).toMatchObject({
       result: { stat: { version: { sha256: digest(Buffer.from(initialSource)) } } },
     });
     expect(
-      (await mcp.call("workspace_read", { ...args, path: "app.mjs", offset: 0, length: 1024 }))
+      (await mcp.call("read", { ...args, path: "app.mjs", offset: 0, length: 1024 }))
         .structuredContent,
     ).toMatchObject({ result: { text: initialSource } });
     expect(
       (
-        await mcp.call("workspace_search", {
+        await mcp.call("search", {
           ...args,
           path: ".",
           query: "value",
@@ -516,7 +521,7 @@ describe("ChatGPT-compatible workspace MCP with real domain services", () => {
         })
       ).structuredContent,
     ).toMatchObject({ result: { matches: [expect.objectContaining({ path: "app.mjs" })] } });
-    const patched = await mcp.call("workspace_apply_patch", {
+    const patched = await mcp.call("apply_patch", {
       ...args,
       files: [
         {
@@ -539,9 +544,9 @@ describe("ChatGPT-compatible workspace MCP with real domain services", () => {
     const run = async (argv: string[]) =>
       finish(
         mcp,
-        "workspace_exec",
+        "exec",
         workspaceId,
-        await mcp.call("workspace_exec", { ...args, argv, cwd: ".", timeout_seconds: 10 }),
+        await mcp.call("exec", { ...args, argv, cwd: ".", timeout_seconds: 10 }),
       );
     const tests = await run([
       process.execPath,
@@ -564,7 +569,7 @@ describe("ChatGPT-compatible workspace MCP with real domain services", () => {
     expect(diff.structuredContent).toMatchObject({
       result: { stdout: expect.stringContaining("+export const value = 2;"), exit_code: 0 },
     });
-    const upload = await mcp.call("workspace_upload", {
+    const upload = await mcp.call("upload", {
       ...args,
       path: "input.bin",
       file: fileReference(),
@@ -574,9 +579,9 @@ describe("ChatGPT-compatible workspace MCP with real domain services", () => {
     expect(readFileSync(join(fixture.repositoryPath, "input.bin"))).toEqual(nativeBytes);
     const nativeExec = await finish(
       mcp,
-      "workspace_exec",
+      "exec",
       workspaceId,
-      await mcp.call("workspace_exec", {
+      await mcp.call("exec", {
         ...args,
         argv: [
           process.execPath,
@@ -607,9 +612,9 @@ describe("ChatGPT-compatible workspace MCP with real domain services", () => {
     });
     const textStdin = await finish(
       mcp,
-      "workspace_exec",
+      "exec",
       workspaceId,
-      await mcp.call("workspace_exec", {
+      await mcp.call("exec", {
         ...args,
         argv: [process.execPath, "-e", "process.stdin.pipe(process.stdout)"],
         cwd: ".",
@@ -620,7 +625,7 @@ describe("ChatGPT-compatible workspace MCP with real domain services", () => {
     expect(textStdin.structuredContent).toMatchObject({
       result: { stdout: "literal stdin text\n", exit_code: 0 },
     });
-    const download = await mcp.call("workspace_download", {
+    const download = await mcp.call("download", {
       ...args,
       path: "input.bin",
       max_bytes: 1024,
@@ -639,31 +644,31 @@ describe("ChatGPT-compatible workspace MCP with real domain services", () => {
     fixture.reopen();
     const second = await client();
     cleanups.push(second.close);
-    expect((await second.call("workspace_get", args)).structuredContent).toMatchObject({
+    expect((await second.call("get", args)).structuredContent).toMatchObject({
       workspace: { workspace_id: workspaceId },
     });
-    expect((await second.call("workspace_stop", args)).structuredContent).toMatchObject({
+    expect((await second.call("stop", args)).structuredContent).toMatchObject({
       data_preserved: true,
       workspace: { state: "stopped" },
     });
     expect(readFileSync(join(fixture.repositoryPath, "input.bin"))).toEqual(nativeBytes);
-    const started = await second.call("workspace_start", args);
+    const started = await second.call("start", args);
     expect(started.structuredContent).toMatchObject({ workspace: { state: "usable" } });
     expect(
-      (await second.call("workspace_read", { ...args, path: "app.mjs", offset: 0, length: 1024 }))
+      (await second.call("read", { ...args, path: "app.mjs", offset: 0, length: 1024 }))
         .structuredContent,
     ).toMatchObject({ result: { text: "export const value = 2;\n" } });
     const generation = (started.structuredContent!.workspace as { generation: number }).generation;
     expect(
       (
-        await second.call("workspace_delete", {
+        await second.call("delete", {
           ...args,
           expected_generation: generation - 1,
           confirm_delete: true,
         })
       ).isError,
     ).toBe(true);
-    const deleted = await second.call("workspace_delete", {
+    const deleted = await second.call("delete", {
       ...args,
       expected_generation: generation,
       confirm_delete: true,
@@ -677,12 +682,12 @@ describe("ChatGPT-compatible workspace MCP with real domain services", () => {
     // lookup by its identifier still answers.
     expect(
       (
-        (await second.call("workspace_list", {})).structuredContent as {
+        (await second.call("list", {})).structuredContent as {
           workspaces: Array<{ workspace_id: string }>;
         }
       ).workspaces,
     ).toEqual([]);
-    expect((await second.call("workspace_get", args)).structuredContent).toMatchObject({
+    expect((await second.call("get", args)).structuredContent).toMatchObject({
       workspace: { state: "deleted" },
     });
   });
@@ -693,7 +698,7 @@ describe("ChatGPT-compatible workspace MCP with real domain services", () => {
     const args = { workspace_id: workspaceId };
     const markerPath = join(fixture.repositoryPath, "background-done.txt");
 
-    const started = await mcp.call("workspace_exec", {
+    const started = await mcp.call("exec", {
       ...args,
       argv: [
         process.execPath,
@@ -713,7 +718,7 @@ describe("ChatGPT-compatible workspace MCP with real domain services", () => {
     // Its output is readable while it runs, by the command's own identity.
     let progress = "";
     for (let attempt = 0; attempt < 80 && !progress.includes("progress"); attempt++) {
-      const range = await mcp.call("workspace_read", {
+      const range = await mcp.call("read", {
         ...args,
         operation_id: operationId,
         stream: "stdout",
@@ -729,9 +734,9 @@ describe("ChatGPT-compatible workspace MCP with real domain services", () => {
 
     const collected = await finish(
       mcp,
-      "workspace_exec",
+      "exec",
       workspaceId,
-      await mcp.call("workspace_exec", { ...args, operation_id: operationId }),
+      await mcp.call("exec", { ...args, operation_id: operationId }),
     );
     expect(collected.structuredContent).toMatchObject({
       result: { state: "succeeded", stdout: "progress\nfinished\n", exit_code: 0 },
@@ -740,7 +745,7 @@ describe("ChatGPT-compatible workspace MCP with real domain services", () => {
     // One dispatch, however many times it was collected.
     expect(fixture.jobs.filter((job) => job.action === "execute")).toHaveLength(1);
 
-    const running = await mcp.call("workspace_exec", {
+    const running = await mcp.call("exec", {
       ...args,
       argv: [process.execPath, "-e", "setInterval(()=>{},1000)"],
       cwd: ".",
@@ -748,7 +753,7 @@ describe("ChatGPT-compatible workspace MCP with real domain services", () => {
       background: true,
     });
     expect(operation(running).state).toBe("running");
-    const stopped = await mcp.call("workspace_exec", {
+    const stopped = await mcp.call("exec", {
       ...args,
       operation_id: operation(running).operation_id,
       cancel: true,
@@ -769,9 +774,9 @@ describe("ChatGPT-compatible workspace MCP with real domain services", () => {
 
     const opened = await finish(
       mcp,
-      "workspace_exec",
+      "exec",
       workspaceId,
-      await mcp.call("workspace_exec", {
+      await mcp.call("exec", {
         ...args,
         argv: observe,
         timeout_seconds: 10,
@@ -789,9 +794,9 @@ describe("ChatGPT-compatible workspace MCP with real domain services", () => {
     // neither. This is the difficulty the requirement describes, gone.
     const continued = await finish(
       mcp,
-      "workspace_exec",
+      "exec",
       workspaceId,
-      await mcp.call("workspace_exec", {
+      await mcp.call("exec", {
         ...args,
         argv: observe,
         timeout_seconds: 10,
@@ -803,9 +808,9 @@ describe("ChatGPT-compatible workspace MCP with real domain services", () => {
     });
     const outside = await finish(
       mcp,
-      "workspace_exec",
+      "exec",
       workspaceId,
-      await mcp.call("workspace_exec", { ...args, argv: observe, timeout_seconds: 10 }),
+      await mcp.call("exec", { ...args, argv: observe, timeout_seconds: 10 }),
     );
     expect(outside.structuredContent).toMatchObject({
       result: { stdout: "repository|none", exit_code: 0 },
@@ -820,9 +825,9 @@ describe("ChatGPT-compatible workspace MCP with real domain services", () => {
     // A script activates a toolchain; the next ordinary command inherits what it left behind.
     const activated = await finish(
       mcp,
-      "workspace_exec",
+      "exec",
       workspaceId,
-      await mcp.call("workspace_exec", {
+      await mcp.call("exec", {
         ...args,
         session: "build",
         script: "cd service\nexport BUILD_TARGET=debug\nexport TOOLCHAIN=/opt/toolchain\n",
@@ -834,9 +839,9 @@ describe("ChatGPT-compatible workspace MCP with real domain services", () => {
     });
     const afterScript = await finish(
       mcp,
-      "workspace_exec",
+      "exec",
       workspaceId,
-      await mcp.call("workspace_exec", {
+      await mcp.call("exec", {
         ...args,
         argv: [
           process.execPath,
@@ -852,13 +857,13 @@ describe("ChatGPT-compatible workspace MCP with real domain services", () => {
     });
 
     // Ending the session removes what it stored, so naming it afterwards is refused.
-    const ended = await mcp.call("workspace_exec", {
+    const ended = await mcp.call("exec", {
       ...args,
       session: "build",
       session_end: true,
     });
     expect(operation(ended).state).toBe("succeeded");
-    const afterEnd = await mcp.call("workspace_exec", {
+    const afterEnd = await mcp.call("exec", {
       ...args,
       argv: observe,
       timeout_seconds: 10,
@@ -867,7 +872,7 @@ describe("ChatGPT-compatible workspace MCP with real domain services", () => {
     expect(afterEnd.isError).toBe(true);
 
     // A session that was never opened is refused rather than silently created.
-    const unknown = await mcp.call("workspace_exec", {
+    const unknown = await mcp.call("exec", {
       ...args,
       argv: observe,
       timeout_seconds: 10,
@@ -880,11 +885,11 @@ describe("ChatGPT-compatible workspace MCP with real domain services", () => {
   it("recovers lost write and exec responses from reopened SQLite without redispatch or foreign access", async () => {
     const { fixture, mcp } = await setup();
     const workspaceId = await createWorkspace(mcp);
-    for (const kind of ["workspace_write", "workspace_exec"] as const) {
-      fixture.loseNextResponse = kind === "workspace_write" ? "file-execute" : "execute";
+    for (const kind of ["write", "exec"] as const) {
+      fixture.loseNextResponse = kind === "write" ? "file-execute" : "execute";
       const first = await mcp.call(
         kind,
-        kind === "workspace_write"
+        kind === "write"
           ? {
               workspace_id: workspaceId,
               path: "once.txt",
@@ -927,13 +932,13 @@ describe("ChatGPT-compatible workspace MCP with real domain services", () => {
         .get(operationId);
       expect(row).toEqual({
         state: "succeeded",
-        kind: kind === "workspace_write" ? "write" : "exec",
+        kind,
       });
-      const action = kind === "workspace_write" ? "file-execute" : "execute";
+      const action = kind === "write" ? "file-execute" : "execute";
       expect(fixture.jobs.filter((job) => job.action === action)).toHaveLength(1);
       expect(
         readFileSync(
-          join(fixture.repositoryPath, kind === "workspace_write" ? "once.txt" : "executions.txt"),
+          join(fixture.repositoryPath, kind === "write" ? "once.txt" : "executions.txt"),
           "utf8",
         ),
       ).toBe("once\n");
@@ -950,7 +955,7 @@ describe("ChatGPT-compatible workspace MCP with real domain services", () => {
     const { fixture, mcp } = await setup();
     const workspaceId = await createWorkspace(mcp);
     const bytes = Buffer.from("retained file bytes\n");
-    const written = await mcp.call("workspace_write", {
+    const written = await mcp.call("write", {
       workspace_id: workspaceId,
       path: "output.txt",
       text: bytes.toString("utf8"),
@@ -958,7 +963,7 @@ describe("ChatGPT-compatible workspace MCP with real domain services", () => {
     });
     expect(operation(written).state).toBe("succeeded");
     fixture.loseNextResponse = "file-execute";
-    const first = await mcp.call("workspace_download", {
+    const first = await mcp.call("download", {
       workspace_id: workspaceId,
       path: "output.txt",
       max_bytes: 1024,
@@ -971,7 +976,7 @@ describe("ChatGPT-compatible workspace MCP with real domain services", () => {
     fixture.reopen();
     const second = await client();
     cleanups.push(second.close);
-    const resumed = await second.call("workspace_download", {
+    const resumed = await second.call("download", {
       workspace_id: workspaceId,
       operation_id: operationId,
       file_name: "output.txt",

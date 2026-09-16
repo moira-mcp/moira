@@ -54,10 +54,16 @@ All tools publish a root-object input schema so MCP clients can discover the com
 public `start` schema therefore exposes `action` directly and lists the fields accepted by either
 phase. Runtime validation still enforces the selected phase exactly: `prepare` requires `workflowId`
 and `parentExecutionId`, while `execute` requires `startAttemptId`; fields belonging only to the other
-phase and unknown fields are rejected as MCP errors. The `workspace_*` execution and file tools follow
-the same pattern: one flat object per tool with only `workspace_id` required, while dispatch enforces
-the exact form (a new request, or a resume carrying only `workspace_id` and `operation_id`; exactly one
-of `stdin_text` or `stdin_file` for `workspace_exec`).
+phase and unknown fields are rejected as MCP errors. The `workspace` tool follows the same pattern at
+a larger scale: one flat object carrying `action` plus every action's fields, of which only `action`
+is required, while dispatch enforces the exact form of the action requested (a new request, or a
+resume carrying only `workspace_id` and `operation_id`; exactly one of `stdin_text` or `stdin_file`
+for `exec`). A field that belongs to no action is rejected as an MCP error, as before; a field that
+belongs to a _different_ action is rejected at dispatch as `WORKSPACE_REQUEST_INVALID`. A default an
+action declares is applied there too, so it no longer appears in the published schema. Where two
+actions accept the same field with different limits — `max_bytes` is 1 MiB for `search` and 4 MiB for
+`download` — the schema shows both forms, and the action you named decides which one your call had to
+match.
 
 `start({ action: "prepare" })` resolves and validates an authorized workflow, binds the workflow version and request options, and returns a Start attempt ID that expires after 15 minutes without creating an execution. `parentExecutionId` links a child to an existing parent; use `"none"` for a standalone execution. `skipNotificationCheck` records a policy to bypass only optional ordinary-notification preflight during execute. `skipTelegramCheck` remains a deprecated alias with the same behavior, and conflicting values are rejected.
 
@@ -129,26 +135,29 @@ curl -X POST "${uploadUrl}" -F "workflow=@your-workflow.json"
 
 ### Cloud workspaces
 
-The `workspace_*` tools give an agent a persistent, user-owned cloud development environment
-(currently a personal GitHub Codespace) without a local shell or filesystem. GitHub is connected
-only on the Moira website; no tool starts, resumes or polls an authorization. When the connection,
-installation or server configuration is missing, every tool returns a bounded error with a
-same-origin `settings_url` for the user to complete setup, and nothing is provisioned.
+The `workspace` tool gives an agent a persistent, user-owned cloud development environment
+(currently a personal GitHub Codespace) without a local shell or filesystem. One tool serves the whole
+surface: `action` selects the operation — `list`, `create`, `get`, `start`, `stop`, `delete`, `exec`,
+`stat`, `search`, `read`, `write`, `apply_patch`, `upload` or `download` — and the other fields are
+those the chosen action declares. GitHub is connected only on the Moira website; no action starts,
+resumes or polls an authorization. When the connection, installation or server configuration is
+missing, every action returns a bounded error with a same-origin `settings_url` for the user to
+complete setup, and nothing is provisioned.
 
-Every call names a `workspace_id` obtained from `workspace_list` or `workspace_create`. Ownership
+Every call but `list` and `create` names a `workspace_id` obtained from one of them. Ownership
 is checked server-side, so an unknown or foreign ID returns the generic `WORKSPACE_NOT_FOUND`
 result. A workspace is not tied to a chat or session: reuse the same `workspace_id` from any
-client. `workspace_list` offers only workspaces that can still be used; a deleted or rejected one
-is absent from it while `workspace_get` still answers for its `workspace_id`. `workspace_stop` preserves the repository data (`data_preserved: true`);
-`workspace_delete` is destructive and requires `confirm_delete: true` with the workspace's current
+client. `list` offers only workspaces that can still be used; a deleted or rejected one
+is absent from it while `get` still answers for its `workspace_id`. `stop` preserves the repository data (`data_preserved: true`);
+`delete` is destructive and requires `confirm_delete: true` with the workspace's current
 `generation`, so a stale call cannot delete a changed workspace.
 
-`workspace_exec` runs argv as data (no shell interpolation) in a repository-relative `cwd` with a
+`exec` runs argv as data (no shell interpolation) in a repository-relative `cwd` with a
 timeout (`timeout_seconds`, optional) and optional per-stream output limits, and returns bounded `stdout`, `stderr` and the exact
 `exit_code`. Those limits bound the answer, not the command: a command that prints more keeps
 running, keeps its own exit code and keeps its own `stderr`, and the result reports each stream's
 complete size and whether the payload was truncated. The whole output stays in the workspace until
-the operation is cleaned up, and any range of it is read with `workspace_read`. A command is stopped
+the operation is cleaned up, and any range of it is read with `read`. A command is stopped
 for its volume only if its retained output reaches the workspace ceiling, which is reported as that
 rather than as the command's own failure. For work that outlives one request, such as a full build or
 test suite, pass `background: true`: the call returns a running operation at once, the command keeps
@@ -173,7 +182,7 @@ succeeded or failed, while one whose end state would not fit, one that ends its 
 and one that was stopped report `session_capture_dropped` instead of leaving a session you cannot use. A session belongs to the
 workspace's current life: after the workspace stops and starts again, naming it returns
 `WORKSPACE_SESSION_UNAVAILABLE` and a new session must be opened, as it does for a session that was
-never opened. What a session stores stays in the workspace and is never returned. Stop either kind by calling the tool
+never opened. What a session stores stays in the workspace and is never returned. Stop either kind by calling the same action
 with only `workspace_id`, `operation_id` and `cancel: true`. A command stops with its workspace, so a
 long one needs a workspace whose idle lifetime outlasts it. A workspace that went to sleep does not
 have to be started first: the call that needs it starts it and then runs, within a bounded wait. If it
@@ -186,23 +195,23 @@ ChatGPT file reference; the file's bytes reach the process without base64 in the
 Failed, timed-out and cancelled commands and rejected file edits are returned as tool errors that
 keep `operation_id` and the available output. A command that finishes quickly returns its terminal
 result from the same call that started it; one that is still running returns a non-terminal
-`state`, which is not a success. Call the same tool again with only `workspace_id` and
+`state`, which is not a success. Call the same action again with only `workspace_id` and
 `operation_id` to obtain the stored outcome without running the command or mutation twice.
 
-`workspace_read` returns UTF-8 text with `offset` and `total_size`, plus `sha256` for a repository
+`read` returns UTF-8 text with `offset` and `total_size`, plus `sha256` for a repository
 file; give `path` for a file, or `operation_id` and `stream` for a command's retained `stdout` or
 `stderr`, naming the workspace that command belongs to. A read that starts at or past the end of a
 stream returns no text and the stream's current size. `length` defaults to
-64 KiB, and `workspace_search` defaults to 100 matches within 64 KiB of results, so naming only the
+64 KiB, and `search` defaults to 100 matches within 64 KiB of results, so naming only the
 workspace, path and query is a complete call. Search covers repository content and skips the
 repository's own `.git` directory, and it refuses a search rooted at or inside that directory; a
 file there is still readable by its exact path. A non-text range returns
 `WORKSPACE_BINARY_READ_REQUIRES_DOWNLOAD`. A call that matches no request form returns
-`WORKSPACE_REQUEST_INVALID` naming the missing or invalid fields. `workspace_write` replaces a file atomically
+`WORKSPACE_REQUEST_INVALID` naming the missing or invalid fields. `write` replaces a file atomically
 under an `expected` precondition (`exists`, optional `size_bytes` and `sha256`), and
-`workspace_apply_patch` applies ordered byte-offset edits per file with the same preconditions and
-returns old/new versions plus a content-free summary. `workspace_upload` writes a native file
-reference to a path; `workspace_download` returns the file as an MCP `resource_link` whose one-use
+`apply_patch` applies ordered byte-offset edits per file with the same preconditions and
+returns old/new versions plus a content-free summary. `upload` writes a native file
+reference to a path; `download` returns the file as an MCP `resource_link` whose one-use
 HTTPS link expires automatically and is never repeated in the JSON result.
 
 The agent runs as the ordinary Codespace user with that environment's repository, network and
@@ -211,7 +220,12 @@ protects the Moira server and other users; it does not sandbox the workspace fro
 owner authorized. A user may hold several workspaces at once, and a creation refused by a ceiling
 says which one refused it: your own active-workspace ceiling, the instance-wide one, or the interval
 between creations. The refusal names that ceiling's configured value and never names another user or
-their workspaces.
+their workspaces. When GitHub itself refuses a creation, start, stop or delete, the error says so
+rather than reporting an internal failure: it distinguishes a grant you must reauthorize, a request
+GitHub will refuse again however many times you repeat it, and a provider outage worth retrying, and
+it repeats GitHub's own explanation in one shortened line. That line is dropped whole, leaving only
+the HTTP status, whenever it contains anything shaped like a credential — a token, a labelled secret,
+a JWT or a URL.
 
 ### Runtime help
 

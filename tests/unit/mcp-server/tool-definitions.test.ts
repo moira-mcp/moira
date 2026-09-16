@@ -150,21 +150,9 @@ describe("MCP tool definitions", () => {
       "playbooks",
       "artifacts",
       "lock",
-      "workspace_list",
-      "workspace_create",
-      "workspace_get",
-      "workspace_start",
-      "workspace_stop",
-      "workspace_delete",
-      "workspace_exec",
-      "workspace_stat",
-      "workspace_search",
-      "workspace_read",
-      "workspace_write",
-      "workspace_apply_patch",
-      "workspace_upload",
-      "workspace_download",
+      "workspace",
     ]);
+    expect(MCP_TOOL_NAMES.filter((name) => name.startsWith("workspace_"))).toEqual([]);
   });
 
   it("publishes closed workspace schemas without chat, session, auth, or provider controls", () => {
@@ -179,41 +167,63 @@ describe("MCP tool definitions", () => {
       "ssh_key",
       "capability",
     ];
-    for (const name of MCP_TOOL_NAMES.filter((candidate) => candidate.startsWith("workspace_"))) {
-      const serializedSchema = JSON.stringify(getToolJsonSchema(definition(name)));
-      for (const field of forbidden) expect(serializedSchema).not.toContain(`"${field}"`);
-    }
+    const serializedSchema = JSON.stringify(getToolJsonSchema(definition("workspace")));
+    for (const field of forbidden) expect(serializedSchema).not.toContain(`"${field}"`);
 
+    // `delete` is refused its own incomplete form at dispatch, not by the published object, which
+    // now carries every action's fields; the published object still refuses an action it has never
+    // heard of.
     expect(
-      definition("workspace_delete").schema.safeParse({
+      definition("workspace").schema.safeParse({
+        action: "delete",
         workspace_id: "00000000-0000-4000-8000-000000000000",
         expected_generation: 2,
       }).success,
-    ).toBe(false);
-    // The published exec schema is one flat root object: every form's fields are visible,
-    // only the shared identity is required, and the strict request union decides the form.
-    const publishedExec = getToolJsonSchema(definition("workspace_exec")) as unknown as {
+    ).toBe(true);
+    expect(definition("workspace").schema.safeParse({ action: "teleport" }).success).toBe(false);
+    // The published schema is one flat root object: `action` is the only required field, every
+    // action's fields are visible, and the strict per-action contract decides the form.
+    const published = getToolJsonSchema(definition("workspace")) as unknown as {
       type: string;
       required: string[];
       properties: Record<string, unknown>;
     };
-    expect(publishedExec.type).toBe("object");
-    expect(publishedExec.required).toEqual(["workspace_id"]);
-    expect(Object.keys(publishedExec.properties).sort()).toEqual([
+    expect(published.type).toBe("object");
+    expect(published.required).toEqual(["action"]);
+    expect(Object.keys(published.properties).sort()).toEqual([
+      "action",
       "argv",
       "background",
       "cancel",
+      "confirm_delete",
       "cwd",
       "env",
+      "expected",
+      "expected_generation",
+      "file",
+      "file_name",
+      "files",
+      "length",
+      "max_bytes",
+      "max_matches",
       "max_stderr_bytes",
       "max_stdout_bytes",
+      "mime_type",
+      "mode",
+      "offset",
       "operation_id",
+      "path",
+      "query",
+      "ref",
+      "repository_id",
       "script",
       "session",
       "session_end",
       "session_start",
       "stdin_file",
       "stdin_text",
+      "stream",
+      "text",
       "timeout_seconds",
       "workspace_id",
     ]);
@@ -251,7 +261,8 @@ describe("MCP tool definitions", () => {
       }).success,
     ).toBe(false);
     expect(
-      definition("workspace_exec").schema.safeParse({
+      definition("workspace").schema.safeParse({
+        action: "exec",
         workspace_id: "00000000-0000-4000-8000-000000000000",
         chat_id: "c1",
       }).success,
@@ -270,24 +281,23 @@ describe("MCP tool definitions", () => {
     expect(download.safeParse({ ...resume, path: "new.bin" }).success).toBe(false);
     expect(download.safeParse({ ...resume, max_bytes: 0 }).success).toBe(false);
     expect(download.safeParse({ ...resume, file_name: "../result.bin" }).success).toBe(false);
-    const publishedDownload = getToolJsonSchema(
-      TOOL_DEFINITIONS.find((definition) => definition.name === "workspace_download")!,
-    ) as unknown as { required: string[] };
-    expect(publishedDownload.required.slice().sort()).toEqual([
-      "file_name",
-      "mime_type",
-      "workspace_id",
-    ]);
+    // The published object requires only `action`; `file_name` and `mime_type` are required of a
+    // download by its own contract, which is what refuses this resume without them.
+    const workspaceTool = TOOL_DEFINITIONS.find((definition) => definition.name === "workspace")!;
+    expect(
+      (getToolJsonSchema(workspaceTool) as unknown as { required: string[] }).required,
+    ).toEqual(["action"]);
+    expect(
+      download.safeParse({ workspace_id: resume.workspace_id, path: "result.bin" }).success,
+    ).toBe(false);
   });
 
   it("publishes native file metadata and optional file details at the top-level MCP boundary", async () => {
     const published = await inspectPublishedContract("native file handoff");
-    for (const [name, field] of [
-      ["workspace_exec", "stdin_file"],
-      ["workspace_upload", "file"],
-    ]) {
-      const tool = published.tools.find((candidate) => candidate.name === name)!;
-      expect(tool._meta).toEqual({ "openai/fileParams": [field] });
+    const tool = published.tools.find((candidate) => candidate.name === "workspace")!;
+    // Both native file parameters belong to the one tool, so both are declared on it.
+    expect(tool._meta).toEqual({ "openai/fileParams": ["stdin_file", "file"] });
+    for (const field of ["stdin_file", "file"]) {
       const schema = dereferenceLocalJsonSchema(tool.inputSchema) as {
         properties: Record<string, { required: string[]; properties: Record<string, unknown> }>;
       };

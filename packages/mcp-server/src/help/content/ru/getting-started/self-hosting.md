@@ -248,12 +248,11 @@ GitHub**, нажимает **Подключить GitHub**, завершает �
 docker compose --profile workspaces up -d
 ```
 
-После настройки подключения и коннектора аутентифицированный MCP-клиент использует инструменты
-`workspace_*`: `workspace_list` показывает одобренные репозитории и существующие пространства,
-`workspace_create` создаёт постоянный Codespace с личным биллингом для одобренного репозитория, а
-`workspace_exec`, `workspace_stat`, `workspace_search`, `workspace_read`, `workspace_write`,
-`workspace_apply_patch`, `workspace_upload` и `workspace_download` работают внутри него по
-`workspace_id`. `workspace_stop` сохраняет данные репозитория; `workspace_delete` удаляет Codespace
+После настройки подключения и коннектора аутентифицированный MCP-клиент использует один инструмент
+`workspace`, выбирая операцию полем `action`: `list` показывает одобренные репозитории и существующие
+пространства, `create` создаёт постоянный Codespace с личным биллингом для одобренного репозитория, а
+`exec`, `stat`, `search`, `read`, `write`, `apply_patch`, `upload` и `download` работают внутри него по
+`workspace_id`. `stop` сохраняет данные репозитория; `delete` удаляет Codespace
 и требует явного подтверждения. Разные чаты и клиенты могут использовать одно пространство; ничего
 не удаляется при завершении команды или отключении клиента.
 

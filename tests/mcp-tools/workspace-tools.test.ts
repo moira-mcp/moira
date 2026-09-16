@@ -7,21 +7,21 @@ import { dockerExecSync } from "../utils/docker-command.js";
 
 const workspaceId = "00000000-0000-4000-8000-000000000162";
 const operationId = "00000000-0000-4000-8000-000000000163";
-const names = [
-  "workspace_create",
-  "workspace_list",
-  "workspace_get",
-  "workspace_start",
-  "workspace_stop",
-  "workspace_delete",
-  "workspace_exec",
-  "workspace_stat",
-  "workspace_search",
-  "workspace_read",
-  "workspace_write",
-  "workspace_apply_patch",
-  "workspace_upload",
-  "workspace_download",
+const actions = [
+  "create",
+  "list",
+  "get",
+  "start",
+  "stop",
+  "delete",
+  "exec",
+  "stat",
+  "search",
+  "read",
+  "write",
+  "apply_patch",
+  "upload",
+  "download",
 ];
 
 // Run the baked service against its actual database and transfer directory. No
@@ -101,24 +101,20 @@ describe("Workspace MCP HTTP contract on a default-disabled installation", () =>
     await cleanup?.();
   });
 
-  test("should publish all workspace tools with actionable native-file and resume schemas", async () => {
+  test("should publish one workspace tool carrying every action and its file schemas", async () => {
     const catalog = await client.listTools();
-    const workspaceTools = catalog.tools.filter((tool) => tool.name.startsWith("workspace_"));
-    expect(workspaceTools.map((tool) => tool.name).sort()).toEqual([...names].sort());
-    for (const tool of workspaceTools) {
-      expect(tool.description?.length).toBeGreaterThan(20);
-      expect(JSON.stringify(tool.inputSchema)).not.toMatch(
-        /"(?:chat_id|session_id|access_token|refresh_token|ssh_key)"/,
-      );
-    }
-    const exec = workspaceTools.find((tool) => tool.name === "workspace_exec")!;
-    const upload = workspaceTools.find((tool) => tool.name === "workspace_upload")!;
-    for (const [tool, field] of [
-      [exec, "stdin_file"],
-      [upload, "file"],
-    ] as const) {
-      expect(tool._meta).toEqual({ "openai/fileParams": [field] });
-      const file = tool.inputSchema.properties?.[field] as Record<string, unknown>;
+    expect(catalog.tools.filter((tool) => tool.name.startsWith("workspace_"))).toEqual([]);
+    const workspace = catalog.tools.find((tool) => tool.name === "workspace")!;
+    expect(workspace.description?.length).toBeGreaterThan(20);
+    expect(JSON.stringify(workspace.inputSchema)).not.toMatch(
+      /"(?:chat_id|session_id|access_token|refresh_token|ssh_key)"/,
+    );
+    // Every action the tool serves is offered to the agent by name, or an action it can perform is
+    // one no client can discover.
+    const action = workspace.inputSchema.properties?.action as { enum?: string[] };
+    expect([...(action.enum ?? [])].sort()).toEqual([...actions].sort());
+    for (const field of ["stdin_file", "file"]) {
+      const file = workspace.inputSchema.properties?.[field] as Record<string, unknown>;
       expect(file).toMatchObject({
         type: "object",
         additionalProperties: false,
@@ -132,12 +128,14 @@ describe("Workspace MCP HTTP contract on a default-disabled installation", () =>
       });
       expect([...(file.required as string[])].sort()).toEqual(["download_url", "file_id"]);
     }
-    // Root-object catalog: every form's fields are visible at the top level, only the shared
-    // identity is required, and the exclusive stdin / resume forms are enforced at dispatch.
-    expect(exec.inputSchema).toMatchObject({
+    // Both native file parameters belong to the one tool now.
+    expect(workspace._meta).toEqual({ "openai/fileParams": ["stdin_file", "file"] });
+    // Root-object catalog: every action's fields are visible at the top level, only `action` is
+    // required, and the exact form of each action is enforced at dispatch.
+    expect(workspace.inputSchema).toMatchObject({
       type: "object",
       additionalProperties: false,
-      required: ["workspace_id"],
+      required: ["action"],
       properties: expect.objectContaining({
         argv: expect.any(Object),
         timeout_seconds: expect.any(Object),
@@ -155,29 +153,18 @@ describe("Workspace MCP HTTP contract on a default-disabled installation", () =>
         session_end: expect.objectContaining({ type: "boolean" }),
         script: expect.objectContaining({ type: "string" }),
         env: expect.objectContaining({ type: "object" }),
-      }),
-    });
-    expect(exec.inputSchema).not.toHaveProperty("anyOf");
-    const download = workspaceTools.find((tool) => tool.name === "workspace_download")!;
-    expect(download.inputSchema).toMatchObject({
-      type: "object",
-      additionalProperties: false,
-      properties: expect.objectContaining({
         path: expect.any(Object),
         max_bytes: expect.any(Object),
-        operation_id: expect.any(Object),
+        repository_id: expect.any(Object),
+        confirm_delete: expect.any(Object),
       }),
     });
-    expect([...(download.inputSchema.required as string[])].sort()).toEqual([
-      "file_name",
-      "mime_type",
-      "workspace_id",
-    ]);
+    expect(workspace.inputSchema).not.toHaveProperty("anyOf");
   });
 
   test("should list safe setup status without provisioning or exposing credentials", async () => {
     const result = CallToolResultSchema.parse(
-      await client.callTool({ name: "workspace_list", arguments: {} }),
+      await client.callTool({ name: "workspace", arguments: { action: "list" } }),
     );
     expect(result.isError).not.toBe(true);
     expect(result.structuredContent).toMatchObject({
@@ -202,9 +189,9 @@ describe("Workspace MCP HTTP contract on a default-disabled installation", () =>
     expect(JSON.parse((text as { text: string }).text)).toEqual(result.structuredContent);
   });
 
-  test("should report the same readiness decision through MCP health as through workspace_list", async () => {
+  test("should report the same readiness decision through MCP health as through the list action", async () => {
     const listed = CallToolResultSchema.parse(
-      await client.callTool({ name: "workspace_list", arguments: {} }),
+      await client.callTool({ name: "workspace", arguments: { action: "list" } }),
     );
     const instance = listed.structuredContent?.instance as { state: string; provider: string };
     const health = JSON.parse(dockerExecSync(["curl", "-s", "http://localhost:3000/health"])) as {
@@ -264,10 +251,10 @@ describe("Workspace MCP HTTP contract on a default-disabled installation", () =>
   });
 
   test.each([
-    ["workspace_create", { repository_id: "162", ref: "master" }],
-    ["workspace_exec", { workspace_id: workspaceId, argv: ["pwd"], timeout_seconds: 10 }],
+    ["create", { repository_id: "162", ref: "master" }],
+    ["exec", { workspace_id: workspaceId, argv: ["pwd"], timeout_seconds: 10 }],
     [
-      "workspace_exec",
+      "exec",
       {
         workspace_id: workspaceId,
         argv: ["cat"],
@@ -279,7 +266,7 @@ describe("Workspace MCP HTTP contract on a default-disabled installation", () =>
       },
     ],
     [
-      "workspace_upload",
+      "upload",
       {
         workspace_id: workspaceId,
         path: "input.txt",
@@ -291,7 +278,7 @@ describe("Workspace MCP HTTP contract on a default-disabled installation", () =>
       },
     ],
     [
-      "workspace_download",
+      "download",
       {
         workspace_id: workspaceId,
         operation_id: operationId,
@@ -299,8 +286,31 @@ describe("Workspace MCP HTTP contract on a default-disabled installation", () =>
         mime_type: "text/plain",
       },
     ],
-  ])("should return a website-only setup error from %s over HTTP", async (name, args) => {
-    const result = CallToolResultSchema.parse(await client.callTool({ name, arguments: args }));
+    ["get", { workspace_id: workspaceId }],
+    ["start", { workspace_id: workspaceId }],
+    ["stop", { workspace_id: workspaceId }],
+    ["delete", { workspace_id: workspaceId, expected_generation: 1, confirm_delete: true }],
+    ["stat", { workspace_id: workspaceId, path: "package.json" }],
+    ["search", { workspace_id: workspaceId, path: ".", query: "TODO" }],
+    ["read", { workspace_id: workspaceId, path: "package.json" }],
+    ["write", { workspace_id: workspaceId, path: "a.txt", text: "x", expected: { exists: false } }],
+    [
+      "apply_patch",
+      {
+        workspace_id: workspaceId,
+        files: [
+          {
+            path: "a.txt",
+            expected: { exists: true },
+            edits: [{ start: 0, end: 1, text: "y" }],
+          },
+        ],
+      },
+    ],
+  ])("should return a website-only setup error from action %s over HTTP", async (action, args) => {
+    const result = CallToolResultSchema.parse(
+      await client.callTool({ name: "workspace", arguments: { action, ...args } }),
+    );
     expect(result.isError).toBe(true);
     expect(result.structuredContent).toMatchObject({
       error: {
@@ -318,8 +328,9 @@ describe("Workspace MCP HTTP contract on a default-disabled installation", () =>
   test("should reject mixed text and native-file stdin before workspace dispatch", async () => {
     const result = CallToolResultSchema.parse(
       await client.callTool({
-        name: "workspace_exec",
+        name: "workspace",
         arguments: {
+          action: "exec",
           workspace_id: workspaceId,
           argv: ["cat"],
           timeout_seconds: 10,
@@ -342,8 +353,9 @@ describe("Workspace MCP HTTP contract on a default-disabled installation", () =>
     async (field) => {
       const result = CallToolResultSchema.parse(
         await client.callTool({
-          name: "workspace_exec",
+          name: "workspace",
           arguments: {
+            action: "exec",
             workspace_id: workspaceId,
             argv: ["pwd"],
             timeout_seconds: 10,

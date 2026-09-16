@@ -1254,7 +1254,7 @@ Authentication: Via token (no session required)
 
 Website management of the user's persistent cloud workspaces. These routes are
 mounted under `/api/integrations/github/workspaces` behind `requireAuth`, use the same
-domain services as the MCP `workspace_*` tools, and return `Cache-Control: no-store`
+domain services as the MCP `workspace` tool, and return `Cache-Control: no-store`
 and `Referrer-Policy: no-referrer`. Responses contain the sanitized workspace summary
 (opaque `workspace_id`, provider, repository, ref, machine, state, retention policy,
 desired/observed state, generation, timestamps) and never provider resource names,
@@ -1305,8 +1305,12 @@ Error mapping for every route: `WORKSPACE_GENERATION_CONFLICT`,
 `WORKSPACE_NOT_RUNNING`, `WORKSPACE_CREATE_PENDING` and
 `WORKSPACE_AUTHORIZATION_REQUIRED` → 409; `WORKSPACE_POLICY_LIMIT` and
 `WORKSPACE_OPERATION_BUSY` → 429; `WORKSPACE_PROVIDER_DISABLED` and
-`WORKSPACE_PROVIDER_UNAVAILABLE` → 503; `WORKSPACE_RESOURCE_INVALID` → 400. Messages
-are fixed safe texts; provider detail is never returned.
+`WORKSPACE_PROVIDER_UNAVAILABLE` → 503; `WORKSPACE_RESOURCE_INVALID` → 400. A message
+is the code's fixed safe text, followed by the error's bounded detail when it carries
+one. That detail may be the provider's own refusal reason, reduced to one line, capped
+and dropped whole when anything credential-shaped appears in it, under the rules
+`WORKSPACES.md` states once; no other provider output, argv, path or credential
+reaches the response.
 
 Authentication: Required
 
@@ -1345,7 +1349,7 @@ Authentication: Required (administrator)
 
 ### GET /api/workspaces/transfers/:token
 
-Deliver one private workspace file published by the MCP `workspace_download` tool. The tool
+Deliver one private workspace file published by the MCP `workspace` tool's `download` action. The tool
 returns this URL to the agent as an MCP `resource_link`; the token in the path is the only
 authorization, so the URL must not be logged or shared.
 

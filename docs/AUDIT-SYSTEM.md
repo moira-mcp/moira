@@ -236,9 +236,9 @@ Persistent resource actions:
 - `WORKSPACE_RESOURCE_CREATE_PENDING` - submitted create requires exact reconciliation
 - `WORKSPACE_RESOURCE_CREATE_REJECTED` - create or adoption failed closed
 - `WORKSPACE_RESOURCE_CLEANUP` - exact disposable resource was verified absent
-- `WORKSPACE_RESOURCE_START` - persistent resource reached running state
-- `WORKSPACE_RESOURCE_STOP` - persistent resource reached stopped state
-- `WORKSPACE_RESOURCE_DELETE` - explicit deletion reached exact provider absence
+- `WORKSPACE_RESOURCE_START` - persistent resource reached running state, or the provider refused the start
+- `WORKSPACE_RESOURCE_STOP` - persistent resource reached stopped state, or the provider refused the stop
+- `WORKSPACE_RESOURCE_DELETE` - explicit deletion reached exact provider absence, or the provider refused the deletion
 
 **Logged via:** `WorkspaceResourceService`
 
@@ -257,7 +257,10 @@ Administrator control actions:
 **Logged via:** `WorkspaceResourceService.setControl`
 
 Connection metadata is limited to provider and outcome. Resource metadata adds
-state and selected machine limits. Operation metadata contains only the opaque
+state, selected machine limits and, for a refusal, the refusing HTTP status as its
+outcome together with a bounded reason: the connector's own failure, or the
+provider's own message reduced to one line and dropped whole if anything in it
+looks like a credential. Operation metadata contains only the opaque
 workspace ID, provider, state, input/output byte counts and exit code. Actors and
 opaque resource IDs use the ordinary audit fields. OAuth code/state, web-session
 tokens, repositories or source content, argv, cwd, stdin, stdout, stderr,

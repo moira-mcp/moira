@@ -64,6 +64,10 @@ class FakeProvider implements WorkspaceProviderAdapter {
   connectorAvailable = true;
   healthAvailable = true;
   createOutcome: "accepted" | "background" | "rejected" = "accepted";
+  /** What the provider said about a refusal, as the real adapter attaches it. */
+  createRejectionDetail: string | null = null;
+  /** A refusal raised the way the real client raises one: an error carrying a status and a reason. */
+  startRefusal: { status: number; providerMessage?: string } | null = null;
   /** A real provider names each resource uniquely; tests that create twice set this. */
   resourceName = "silver-space-123";
   readonly healthCalls = jest.fn();
@@ -125,7 +129,11 @@ class FakeProvider implements WorkspaceProviderAdapter {
     if (this.loseCreateResponse) throw new Error("connection reset after submit");
     if (this.createOutcome === "rejected") {
       this.resource = null;
-      return { outcome: "rejected", reason: "provider_policy" };
+      return {
+        outcome: "rejected",
+        reason: "provider_policy",
+        ...(this.createRejectionDetail ? { detail: this.createRejectionDetail } : {}),
+      };
     }
     if (this.createOutcome === "background") return { outcome: "accepted", resource: null };
     return { outcome: "accepted", resource: this.resource };
@@ -145,6 +153,9 @@ class FakeProvider implements WorkspaceProviderAdapter {
   startStaysPending = false;
   async startExact() {
     this.startCalls();
+    if (this.startRefusal) {
+      throw Object.assign(new Error("GitHub API request failed"), this.startRefusal);
+    }
     if (this.resource && !this.startStaysPending) {
       this.resource = { ...this.resource, state: "available" };
     }
@@ -721,6 +732,141 @@ describe("durable persistent workspace lifecycle", () => {
         }),
       ]);
       expect(value.provider.deleteCalls).not.toHaveBeenCalled();
+    } finally {
+      value.sqlite.close();
+    }
+  });
+
+  test("carries the provider's own reason for a refused creation to the record and the audit", async () => {
+    const value = fixture();
+    try {
+      value.provider.createOutcome = "rejected";
+      value.provider.createRejectionDetail = "retention_period_minutes exceeds the maximum";
+      await expect(value.service.create("user-1", "301", "refs/heads/main")).rejects.toMatchObject({
+        code: "WORKSPACE_CREATE_REJECTED",
+        detail: "retention_period_minutes exceeds the maximum",
+      });
+      // The audit entry is the record that survives a container swap; a reason that lives only in a
+      // container log is gone the moment the container is recreated, which is how the production
+      // refusals became undiagnosable.
+      expect(value.audits.at(-1)).toMatchObject({
+        action: "create_rejected",
+        outcome: "provider_policy",
+        reason: "retention_period_minutes exceeds the maximum",
+      });
+    } finally {
+      value.sqlite.close();
+    }
+  });
+
+  test.each([
+    [400, "WORKSPACE_RESOURCE_INVALID", "Machine type is unavailable for this repository"],
+    [403, "WORKSPACE_AUTHORIZATION_REQUIRED", "Codespaces are disabled for this repository"],
+    [409, "WORKSPACE_RESOURCE_INVALID", "The workspace is already starting"],
+    [500, "WORKSPACE_PROVIDER_UNAVAILABLE", "We are having trouble"],
+  ])(
+    "a start refused with HTTP %i is classified as %s and keeps the provider's reason",
+    async (status, code, providerMessage) => {
+      // Before this, a refused start left the client as an unclassified error and the caller was
+      // told only that something failed internally — with neither the status nor the reason.
+      const value = fixture();
+      try {
+        const created = await value.service.create("user-1", "301", "refs/heads/main");
+        await value.service.stopWorkspace("user-1", created.resource.id);
+        value.provider.startRefusal = { status, providerMessage };
+        await expect(
+          value.service.startWorkspace("user-1", created.resource.id),
+        ).rejects.toMatchObject({ code, detail: providerMessage });
+        // The thrown error dies with the request and the connector log dies with the container, so
+        // the audit entry is the only record of a refused start that outlives the next deploy.
+        expect(value.audits.at(-1)).toMatchObject({
+          action: "start",
+          outcome: `provider_refused_${status}`,
+          reason: providerMessage,
+        });
+      } finally {
+        value.sqlite.close();
+      }
+    },
+  );
+
+  test("a refused delete is audited as a delete", async () => {
+    // The third branch of the same mapping: a delete request is the one whose record is already
+    // marked for deletion, so it must not be filed under the stop that a deletion also implies.
+    const value = fixture();
+    try {
+      const created = await value.service.create("user-1", "301", "refs/heads/main");
+      const deletable = value.service.getWorkspace("user-1", created.resource.id);
+      value.provider.deleteExact = async () => {
+        throw Object.assign(new Error("GitHub API request failed"), {
+          status: 500,
+          providerMessage: "We are having trouble",
+        });
+      };
+      await expect(
+        value.service.deleteWorkspace("user-1", created.resource.id, deletable.generation),
+      ).rejects.toMatchObject({
+        code: "WORKSPACE_PROVIDER_UNAVAILABLE",
+        detail: "We are having trouble",
+      });
+      expect(value.audits.at(-1)).toMatchObject({
+        action: "delete",
+        outcome: "provider_refused_500",
+        reason: "We are having trouble",
+      });
+    } finally {
+      value.sqlite.close();
+    }
+  });
+
+  test("a refused stop is audited as a stop, not as the start that preceded it", async () => {
+    // One funnel serves start, stop and delete, so the audited action has to come from what the
+    // record was actually doing; otherwise every refusal would be filed under the same heading.
+    const value = fixture();
+    try {
+      const created = await value.service.create("user-1", "301", "refs/heads/main");
+      value.provider.stopExact = async () => {
+        throw Object.assign(new Error("GitHub API request failed"), {
+          status: 409,
+          providerMessage: "The workspace is being deleted",
+        });
+      };
+      await expect(
+        value.service.stopWorkspace("user-1", created.resource.id),
+      ).rejects.toMatchObject({
+        code: "WORKSPACE_RESOURCE_INVALID",
+        detail: "The workspace is being deleted",
+      });
+      expect(value.audits.at(-1)).toMatchObject({
+        action: "stop",
+        outcome: "provider_refused_409",
+        reason: "The workspace is being deleted",
+      });
+    } finally {
+      value.sqlite.close();
+    }
+  });
+
+  test("a failure that is not a provider refusal stays an internal failure", async () => {
+    // The classification must be narrow: catching everything would dress a genuine internal fault
+    // as "the provider refused", which is worse than the silence it replaces.
+    const value = fixture();
+    try {
+      const created = await value.service.create("user-1", "301", "refs/heads/main");
+      await value.service.stopWorkspace("user-1", created.resource.id);
+      // No status at all: this is what a bug inside Moira looks like, not a provider refusal.
+      value.provider.startRefusal = { status: undefined as unknown as number };
+      const refusal = await value.service
+        .startWorkspace("user-1", created.resource.id)
+        .then(() => null)
+        .catch((error: unknown) => error);
+      expect(refusal).toBeInstanceOf(Error);
+      expect((refusal as { code?: string }).code).toBeUndefined();
+      // And it is not filed as the provider's answer either: an audit entry saying the provider
+      // refused would send an operator to GitHub for a fault that lives in Moira.
+      expect(value.audits.map((event) => event.outcome)).not.toContainEqual(
+        expect.stringContaining("provider_refused"),
+      );
     } finally {
       value.sqlite.close();
     }

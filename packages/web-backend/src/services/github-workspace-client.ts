@@ -25,10 +25,78 @@ export class GitHubWorkspaceClientError extends Error {
   constructor(
     message: string,
     public readonly status: number,
+    /**
+     * What the provider said about its own refusal, already redacted and bounded by
+     * {@link providerRefusalMessage}. Absent when the provider said nothing usable — a caller then
+     * sees exactly what it saw before this existed: the status alone.
+     */
+    public readonly providerMessage?: string,
   ) {
     super(message);
     this.name = "GitHubWorkspaceClientError";
   }
+}
+
+/** Longest provider message kept. Long enough for GitHub's sentences, short enough to store. */
+const PROVIDER_MESSAGE_LIMIT = 300;
+
+/**
+ * Patterns that must never survive into a stored record. A refusal body is provider text, and text
+ * that looks like a credential or a URL is dropped rather than trimmed: a partially redacted secret
+ * is still a secret, and an audit row is read long after the request is gone.
+ */
+const SECRET_SHAPED = [
+  /\bgh[pousr]_[A-Za-z0-9]{8,}/, // GitHub token prefixes
+  /\bgithub_pat_[A-Za-z0-9_]{8,}/,
+  /\b(?:bearer|token|authorization|secret|password)\b\s*[:=]?\s*\S+/i,
+  /\bey[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/, // JWT-shaped
+  /https?:\/\/\S+/i,
+];
+
+/**
+ * The provider's own reason for refusing, safe to store and to show a caller.
+ *
+ * GitHub answers a refusal with `{ message, errors: [{ message }] }`, sometimes with HTML, sometimes
+ * with nothing. Whatever arrives is reduced to one line, checked against the patterns above and
+ * capped; anything unreadable or unsafe yields `undefined`, which leaves the refusal exactly as
+ * informative as it was before — the status — rather than risking a leak for a better sentence.
+ */
+export function providerRefusalMessage(body: string): string | undefined {
+  const text = body.trim();
+  if (!text) return undefined;
+
+  let message = "";
+  try {
+    const parsed: unknown = JSON.parse(text);
+    if (parsed && typeof parsed === "object") {
+      const record = parsed as { message?: unknown; errors?: unknown };
+      const head = typeof record.message === "string" ? record.message : "";
+      const details = Array.isArray(record.errors)
+        ? record.errors
+            .map((entry) =>
+              entry &&
+              typeof entry === "object" &&
+              typeof (entry as { message?: unknown }).message === "string"
+                ? (entry as { message: string }).message
+                : "",
+            )
+            .filter((entry) => entry.length > 0)
+        : [];
+      message = [head, ...details].filter((part) => part.length > 0).join(" ");
+    }
+  } catch {
+    // Not JSON: GitHub also answers with HTML or plain text, which is still worth carrying.
+    message = text;
+  }
+  if (!message) return undefined;
+
+  const collapsed = message
+    .replace(/<[^>]*>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!collapsed) return undefined;
+  if (SECRET_SHAPED.some((pattern) => pattern.test(collapsed))) return undefined;
+  return collapsed.slice(0, PROVIDER_MESSAGE_LIMIT);
 }
 
 function decimalId(value: unknown): string {
@@ -167,9 +235,13 @@ export class HttpGitHubWorkspaceClient implements GitHubWorkspaceClient, Workspa
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
     if (!(acceptedStatuses?.includes(response.status) ?? response.ok)) {
+      // The body is where the provider says which rule was broken; reading it here means every
+      // operation carries the reason, not only the one that happens to have a rejected outcome.
+      const failureBody = await response.text().catch(() => "");
       throw new GitHubWorkspaceClientError(
         `GitHub API request failed (HTTP ${response.status})`,
         response.status,
+        providerRefusalMessage(failureBody),
       );
     }
     const body = response.status === 204 ? undefined : await response.json().catch(() => undefined);
@@ -310,7 +382,11 @@ export class HttpGitHubWorkspaceClient implements GitHubWorkspaceClient, Workspa
         error instanceof GitHubWorkspaceClientError &&
         [400, 403, 404, 409, 422, 429].includes(error.status)
       ) {
-        return { outcome: "rejected", reason: `github_status_${error.status}` };
+        return {
+          outcome: "rejected",
+          reason: `github_status_${error.status}`,
+          ...(error.providerMessage ? { detail: error.providerMessage } : {}),
+        };
       }
       throw error;
     }

@@ -46,7 +46,12 @@ export interface WorkspaceProviderResource {
 
 export type WorkspaceCreateProviderResult =
   | { outcome: "accepted"; resource: WorkspaceProviderResource | null }
-  | { outcome: "rejected"; reason: string };
+  /**
+   * `reason` is the stable machine-readable code that routing reads. `detail` is what the provider
+   * itself said about the refusal, already redacted and bounded by the adapter; it is absent when the
+   * provider said nothing usable, and nothing may infer a cause from its absence.
+   */
+  | { outcome: "rejected"; reason: string; detail?: string };
 
 export interface WorkspaceProviderAdapter {
   readonly id: string;

@@ -244,12 +244,11 @@ and the connector pair from the disabled-by-default Compose profile:
 docker compose --profile workspaces up -d
 ```
 
-With the connection and connector in place, an authenticated MCP client uses the `workspace_*`
-tools: `workspace_list` shows approved repositories and existing workspaces, `workspace_create`
-provisions a persistent personal-billed Codespace for an approved repository, and
-`workspace_exec`, `workspace_stat`, `workspace_search`, `workspace_read`, `workspace_write`,
-`workspace_apply_patch`, `workspace_upload` and `workspace_download` work inside it by
-`workspace_id`. `workspace_stop` keeps the repository data; `workspace_delete` removes the
+With the connection and connector in place, an authenticated MCP client uses the one `workspace`
+tool, choosing the operation with `action`: `list` shows approved repositories and existing
+workspaces, `create` provisions a persistent personal-billed Codespace for an approved repository,
+and `exec`, `stat`, `search`, `read`, `write`, `apply_patch`, `upload` and `download` work inside it
+by `workspace_id`. `stop` keeps the repository data; `delete` removes the
 Codespace and requires explicit confirmation. Different chats and clients may reuse the same
 workspace; nothing is deleted when a command finishes or a client disconnects.
 

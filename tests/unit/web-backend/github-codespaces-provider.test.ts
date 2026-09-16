@@ -225,11 +225,18 @@ describe("GitHub Codespaces provider edge", () => {
     expect(String(url)).not.toContain("ghu_secret");
   });
 
-  test("keeps accepted-background distinct and sanitizes definitive provider rejection", async () => {
+  test("keeps accepted-background distinct and carries a refusal reason without its secrets", async () => {
+    // The refusal's reason now travels: an operator and an agent are told what the provider
+    // objected to. What must never travel is the provider echoing a credential back, so the
+    // rejection here stages one and the one below stages an ordinary constraint sentence.
     const fetchImpl = jest
       .fn<typeof fetch>()
       .mockResolvedValueOnce(new Response(null, { status: 202 }))
-      .mockResolvedValueOnce(new Response("provider echoed secret", { status: 422 }));
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ message: "token ghu_secret is not authorized" }), {
+          status: 422,
+        }),
+      );
     const client = new HttpGitHubWorkspaceClient(config, fetchImpl);
     const input = {
       repository: {
@@ -257,6 +264,24 @@ describe("GitHub Codespaces provider edge", () => {
     await expect(client.create("ghu_secret", input)).resolves.toEqual({
       outcome: "rejected",
       reason: "github_status_422",
+    });
+
+    const constrained = jest.fn<typeof fetch>().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          message: "You do not have permission to create codespaces in this repository.",
+          errors: [{ message: "retention_period_minutes exceeds the maximum for this owner" }],
+        }),
+        { status: 400 },
+      ),
+    );
+    await expect(
+      new HttpGitHubWorkspaceClient(config, constrained).create("ghu_secret", input),
+    ).resolves.toEqual({
+      outcome: "rejected",
+      reason: "github_status_400",
+      detail:
+        "You do not have permission to create codespaces in this repository. retention_period_minutes exceeds the maximum for this owner",
     });
   });
 
