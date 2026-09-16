@@ -12,8 +12,6 @@ import React, { useEffect } from "react";
 import {
   BaseEdge,
   EdgeLabelRenderer,
-  Handle,
-  Position,
   getSmoothStepPath,
   useStore,
   type Edge,
@@ -21,13 +19,13 @@ import {
   type Node,
   type NodeProps,
 } from "@xyflow/react";
-import { RotateCcw } from "lucide-react";
+import { FileText, FunctionSquare, RotateCcw, Undo2 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { StepCard } from "../run/StepCard";
+import { PortedCard, type FactChip, type PortInfo } from "../diagram/PortedCard";
+import { ConditionText, ExpressionText, TemplateText } from "../diagram/VariableText";
 import { STATUS_STYLE } from "../run/status";
 import { isLit, useTransitionFocus } from "../run/focus";
 import type { GraphLink, GraphStep } from "../run/graphModel";
-import type { StepArrival } from "../run/model";
 import type { ExecutionBlockStatus } from "../run/model";
 import { GRAPH_CARD_WIDTH, type GraphRoute } from "./graphLayout";
 
@@ -36,12 +34,12 @@ export type StepNodeData = Record<string, unknown> & {
   current: boolean;
   error: boolean;
   horizontal: boolean;
-  /** Ids of the links leaving this card, in order; each gets its own handle along the card edge. */
-  outSlots: string[];
-  /** Ids of the links entering this card, in order; each gets its own handle. */
-  inSlots: string[];
-  /** Edges arriving here that are named in the card instead of drawn at rest. */
-  arrivals: StepArrival[];
+  /** The edges arriving at the card, one input port each, in layout order. */
+  inputs: PortInfo[];
+  /** The edges leaving the card, one output port each. */
+  outputs: PortInfo[];
+  /** The edges from the card to itself; they share the bottom double port. */
+  selfLoops: PortInfo[];
   /** Brings the card at the other end of an arrival into view. */
   onFocusStep?: (id: string) => void;
 };
@@ -131,68 +129,124 @@ export function routedPoints(
 }
 export type GraphEdge = Edge<GraphEdgeData, "graph">;
 
+/** The fact chips of a step: the directive, what it returns, its expressions, its cases. */
+function stepFacts(graph: GraphStep): FactChip[] {
+  const step = graph.step;
+  const facts: FactChip[] = [];
+  if (step.text) {
+    facts.push({
+      key: "directive",
+      icon: <FileText className="size-3" aria-hidden="true" />,
+      label: step.routing ? "message" : "directive",
+      tip: (
+        <>
+          <TemplateText text={step.text} />
+          {step.completionCondition && (
+            <>
+              {"\n\n"}
+              <b>completion</b>
+              {"\n"}
+              <TemplateText text={step.completionCondition} />
+            </>
+          )}
+        </>
+      ),
+    });
+  }
+  if (step.evidence.length > 0) {
+    facts.push({
+      key: "returns",
+      icon: <Undo2 className="size-3" aria-hidden="true" />,
+      label: "returns",
+      count: step.evidence.length,
+      tip: step.evidence
+        .map(
+          (field) =>
+            `${field.name}${field.type ? `: ${field.type}` : ""}${field.required ? " · required" : ""}${
+              field.description ? ` — ${field.description}` : ""
+            }`,
+        )
+        .join("\n"),
+    });
+  }
+  if (step.expressions.length > 0) {
+    facts.push({
+      key: "expressions",
+      icon: <FunctionSquare className="size-3" aria-hidden="true" />,
+      label: "expressions",
+      count: step.expressions.length,
+      tip: (
+        <>
+          {step.expressions.map((expression, index) => (
+            <React.Fragment key={index}>
+              {index > 0 && "\n"}
+              <ExpressionText text={expression} />
+            </React.Fragment>
+          ))}
+        </>
+      ),
+    });
+  }
+  return facts;
+}
+
 export function StepNodeView({ data, selected }: NodeProps<StepNode>): React.JSX.Element {
   const focus = useTransitionFocus();
-  const { graph, current, error, horizontal, outSlots, inSlots, arrivals, onFocusStep } = data;
-  const links = [...outSlots, ...inSlots];
+  const { graph, current, error, horizontal, inputs, outputs, selfLoops } = data;
+  const links = [...inputs, ...outputs, ...selfLoops].map((port) => port.id);
   // Hovering the card lights every connection it takes part in, and the cards at their far end.
   const near = focus.hovered !== null && links.some((id) => focus.hovered!.has(id));
+  const step = graph.step;
   return (
-    <div
-      style={{ width: GRAPH_CARD_WIDTH }}
-      onMouseEnter={() => links.length > 0 && focus.setHovered(links)}
-      onMouseLeave={() => focus.setHovered(null)}
-      className={cn(
-        "rounded-lg transition-shadow",
-        near && "ring-2 ring-primary/60",
-        selected && "ring-2 ring-ring",
-        error && "ring-2 ring-destructive",
-      )}
-      data-graph-node={graph.id}
-    >
-      {(inSlots.length > 0 ? inSlots : ["input"]).map((slot, index) => (
-        <Handle
-          key={slot}
-          type="target"
-          position={horizontal ? Position.Left : Position.Top}
-          id={slot === "input" ? "input" : `in:${slot}`}
-          className="!opacity-0"
-          style={
-            horizontal
-              ? { top: handleOffset(index, inSlots.length || 1) }
-              : { left: handleOffset(index, inSlots.length || 1) }
-          }
-        />
-      ))}
-      <ul className="list-none">
-        <StepCard
-          step={graph.step}
-          current={current}
-          connections={graph.connections}
-          arrivals={arrivals}
-          onArrival={(arrival) => onFocusStep?.(arrival.sourceId)}
-          onArrivalHover={(arrival) => focus.setHovered(arrival ? [arrival.linkId] : null)}
-          onConnectionHover={(connection) =>
-            focus.setHovered(connection ? [`${graph.id}.${connection.label}`] : null)
-          }
-        />
-      </ul>
-      {(outSlots.length > 0 ? outSlots : ["output"]).map((slot, index) => (
-        <Handle
-          key={slot}
-          type="source"
-          position={horizontal ? Position.Right : Position.Bottom}
-          id={slot === "output" ? "output" : `out:${slot}`}
-          className="!opacity-0"
-          style={
-            horizontal
-              ? { top: handleOffset(index, outSlots.length || 1) }
-              : { left: handleOffset(index, outSlots.length || 1) }
-          }
-        />
-      ))}
-    </div>
+    <PortedCard
+      type={step.type}
+      title={step.progressLabel ?? step.displayName ?? step.id}
+      subtitle={step.progressLabel || step.displayName ? step.id : null}
+      description={step.progressContent ?? step.summary ?? null}
+      descriptionTip={
+        step.progressContent ? (
+          <TemplateText text={step.progressContent} />
+        ) : step.text ? (
+          <TemplateText text={step.text} />
+        ) : null
+      }
+      facts={stepFacts(graph)}
+      inputs={inputs}
+      outputs={outputs}
+      selfLoops={selfLoops}
+      horizontal={horizontal}
+      width={GRAPH_CARD_WIDTH}
+      current={current}
+      selected={selected}
+      error={error}
+      near={near}
+      litIds={focus.hovered}
+      onHover={(ids) => focus.setHovered(ids)}
+      allLinkIds={links}
+      dataAttributes={{ "data-graph-node": graph.id }}
+    />
   );
+}
+
+/** The tooltip of an output port: the case that selects it, or the default output. */
+export function outputTip(graph: GraphStep, label: string, targetName: string): React.ReactNode {
+  const cases = graph.step.cases.filter((c) => c.output === label);
+  if (cases.length > 0) {
+    return (
+      <>
+        {cases.map((c, i) => (
+          <React.Fragment key={i}>
+            {i > 0 && "\n"}
+            <b>case</b> <ConditionText when={c.when} />
+          </React.Fragment>
+        ))}
+        {"\n→ "}
+        {targetName}
+      </>
+    );
+  }
+  if (label === "error" || label === "timeout") return `${label} — control output\n→ ${targetName}`;
+  return `${label} — taken when no case holds\n→ ${targetName}`;
 }
 
 export function BlockGroupView({ data }: NodeProps<BlockGroupNode>): React.JSX.Element {
@@ -234,7 +288,18 @@ export function GraphEdgeView({
   let path: string;
   let labelX: number;
   let labelY: number;
-  if (route) {
+  if (link.source === link.target) {
+    // A self-loop: out of the bottom double port's left dot, a short dip, back into its right dot.
+    const dip = Math.max(sourceY, targetY) + 26;
+    path = roundedPath([
+      [sourceX, sourceY],
+      [sourceX, dip],
+      [targetX, dip],
+      [targetX, targetY],
+    ]);
+    labelX = (sourceX + targetX) / 2;
+    labelY = dip + 10;
+  } else if (route) {
     // The label sits on the first lane run, which lies in a corridor clear of the cards.
     path = roundedPath(routedPoints(route, horizontal, sourceX, sourceY, targetX, targetY));
     const [[ax, ay], [bx, by]] = route.lane;

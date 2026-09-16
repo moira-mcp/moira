@@ -170,6 +170,15 @@ export interface StepInfo {
   text: string | null;
   evidence: EvidenceField[];
   routing: boolean;
+  /** The directive's completion condition, when the node has one. */
+  completionCondition: string | null;
+  /** Expressions the node evaluates before it routes. */
+  expressions: string[];
+  /** The node's routing cases, in authored order. */
+  cases: Array<{ when: unknown; output: string }>;
+  /** The authored progress label and content of the node, when given. */
+  progressLabel: string | null;
+  progressContent: string | null;
 }
 
 /** One outgoing connection of a step: inside its block (points at a sibling step) or out of it. */
@@ -306,6 +315,11 @@ export function stepsOf(
         text: null,
         evidence: [],
         routing: false,
+        completionCondition: null,
+        expressions: [],
+        cases: [],
+        progressLabel: null,
+        progressContent: null,
       };
     }
     const text = authoredText(node);
@@ -322,8 +336,24 @@ export function stepsOf(
           Record<string, Record<string, unknown>> | undefined,
       ),
       routing,
+      completionCondition: stringField(node, "completionCondition"),
+      expressions: Array.isArray((node as { expressions?: unknown }).expressions)
+        ? ((node as { expressions: unknown[] }).expressions.filter(
+            (e): e is string => typeof e === "string",
+          ) as string[])
+        : [],
+      cases: Array.isArray((node as { cases?: unknown }).cases)
+        ? ((node as { cases: Array<{ when: unknown; output: string }> }).cases ?? [])
+        : [],
+      progressLabel: stringField(node, "progressActiveLabel"),
+      progressContent: stringField(node, "progressActiveContent"),
     };
   });
+}
+
+function stringField(node: object, key: string): string | null {
+  const value = (node as Record<string, unknown>)[key];
+  return typeof value === "string" && value.trim() ? value : null;
 }
 
 /** The node the run waits for, with its expected evidence, or null when nothing waits. */

@@ -14,6 +14,7 @@ import { useTranslation } from "react-i18next";
 import { ArrowDownRight, ArrowUpRight, CornerLeftDown, RotateCcw } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { NodeTypeTag } from "./nodeTypeStyle";
+import { TemplateText } from "../diagram/VariableText";
 import type { StepArrival, StepConnection, StepInfo } from "./model";
 
 export function StepCardList({
@@ -131,7 +132,7 @@ export function StepCard({
           {beforeSummary}
           {step.summary && (
             <p className="mt-0.5 break-words text-xs leading-5 text-muted-foreground [overflow-wrap:anywhere]">
-              {step.summary}
+              <TemplateText text={step.summary} />
             </p>
           )}
           {step.evidence.length > 0 && (

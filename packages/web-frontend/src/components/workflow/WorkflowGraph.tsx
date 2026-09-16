@@ -36,7 +36,6 @@ import { useOpeningPlacement } from "../diagram/placement";
 
 import { graphModel, definitionBlocks } from "../run/graphModel";
 import { GRAPH_MARGIN, layoutGraph } from "./graphLayout";
-import type { StepArrival } from "../run/model";
 import {
   BlockGroupView,
   GraphDefs,
@@ -50,6 +49,9 @@ import {
   type StepNodeData,
 } from "./graphNodes";
 import { TransitionFocusProvider } from "../run/focus";
+import { VariableProvider, type VariableDefinition } from "../diagram/VariableText";
+import { outputTip } from "./graphNodes";
+import type { PortInfo } from "../diagram/PortedCard";
 import type { RunBlock } from "../run/model";
 import { NodeDetailSheet } from "./NodeDetailSheet";
 
@@ -150,6 +152,10 @@ export interface WorkflowGraphProps {
    * makes the same node focusable twice. It takes over the opening placement while set.
    */
   focusRequest?: { nodeId: string; token: number } | null;
+  /** Jump to a variable's definition when a reference token is clicked. */
+  onVariableSelect?: (name: string) => void;
+  /** The variable whose references are emphasised. */
+  selectedVariable?: string | null;
 }
 
 /**
@@ -190,6 +196,8 @@ export const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
   onNodeSelect,
   onInit,
   focusRequest = null,
+  onVariableSelect,
+  selectedVariable = null,
 }) => {
   // A connection chip names its other end the way the map does: the authored display name, else
   // the node id. The technical graph's `data.label` falls back to the node type ("Agent Task"),
@@ -441,39 +449,70 @@ export const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
           };
         });
         const stepById = new Map(model.steps.map((s) => [s.id, s]));
-        // One handle per connection on each side of a card: every edge leaves and arrives at its
-        // own point, so two edges between the same pair of cards never lie on top of each other.
-        const outSlots = new Map<string, string[]>();
-        const inSlots = new Map<string, string[]>();
-        for (const link of model.links) {
-          outSlots.set(link.source, [...(outSlots.get(link.source) ?? []), link.id]);
-          inSlots.set(link.target, [...(inSlots.get(link.target) ?? []), link.id]);
-        }
-        // An edge that needs a corridor is not drawn at rest: it is named by a chip in its source
-        // card (its connection) and by one in its target card (its arrival), and appears as a line
-        // while either chip or either card is hovered.
+        // One port per edge on each side of a card: an input port names where the edge comes
+        // from and its transition, an output port names the output and its target; an edge from
+        // a card to itself takes the bottom double port.
         const blockNameOf = new Map(graphBlocks.map((b) => [b.id, b.name]));
         const blockOfStep = new Map(
           graphBlocks.flatMap((b) => b.nodeIds.map((id) => [id, b.id] as const)),
         );
-        const arrivalsOf = new Map<string, StepArrival[]>();
+        const nameOfStep = (id: string) => {
+          const step = stepById.get(id)?.step;
+          return step?.progressLabel ?? step?.displayName ?? id;
+        };
+        const inputsOf = new Map<string, PortInfo[]>();
+        const outputsOf = new Map<string, PortInfo[]>();
+        const selfOf = new Map<string, PortInfo[]>();
         for (const link of model.links) {
-          if (!layout.routes[link.id]) continue;
+          const source = stepById.get(link.source);
           const sourceBlock = blockOfStep.get(link.source);
           const targetBlock = blockOfStep.get(link.target);
-          const step = stepById.get(link.source);
-          arrivalsOf.set(link.target, [
-            ...(arrivalsOf.get(link.target) ?? []),
+          const crosses = sourceBlock !== targetBlock;
+          const targetName = nameOfStep(link.target);
+          const outKind: PortInfo["kind"] =
+            link.kind === "return"
+              ? "return"
+              : link.label === "error" || link.label === "timeout"
+                ? "error"
+                : link.label === "success" || link.label === "default"
+                  ? "default"
+                  : crosses
+                    ? "external"
+                    : "forward";
+          if (link.source === link.target) {
+            selfOf.set(link.source, [
+              ...(selfOf.get(link.source) ?? []),
+              {
+                id: link.id,
+                label: link.label,
+                kind: "return",
+                tip: source ? outputTip(source, link.label, targetName) : link.label,
+              },
+            ]);
+            continue;
+          }
+          outputsOf.set(link.source, [
+            ...(outputsOf.get(link.source) ?? []),
             {
-              linkId: link.id,
-              sourceId: link.source,
-              sourceName: step?.step.displayName ?? link.source,
-              sourceBlockName:
-                sourceBlock && sourceBlock !== targetBlock
-                  ? (blockNameOf.get(sourceBlock) ?? null)
-                  : null,
+              id: link.id,
               label: link.label,
-              isReturn: link.kind === "return",
+              detail: crosses
+                ? `${blockNameOf.get(targetBlock ?? "") ?? ""} › ${targetName}`
+                : targetName,
+              kind: outKind,
+              tip: source ? outputTip(source, link.label, targetName) : link.label,
+            },
+          ]);
+          inputsOf.set(link.target, [
+            ...(inputsOf.get(link.target) ?? []),
+            {
+              id: link.id,
+              label: nameOfStep(link.source),
+              detail: link.label,
+              kind: link.kind === "return" ? "return" : crosses ? "external" : "forward",
+              tip: `${nameOfStep(link.source)}${
+                crosses && sourceBlock ? ` (${blockNameOf.get(sourceBlock) ?? ""})` : ""
+              } → ${link.label}`,
             },
           ]);
         }
@@ -487,9 +526,9 @@ export const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
             error: false,
             // Steps run across the stacking direction inside a group (see graphLayout).
             horizontal: graphBlocks.length > 0 ? !horizontal : horizontal,
-            outSlots: outSlots.get(laid.id) ?? [],
-            inSlots: inSlots.get(laid.id) ?? [],
-            arrivals: arrivalsOf.get(laid.id) ?? [],
+            inputs: inputsOf.get(laid.id) ?? [],
+            outputs: outputsOf.get(laid.id) ?? [],
+            selfLoops: selfOf.get(laid.id) ?? [],
             onFocusStep: focusStep,
           };
           return {
@@ -629,75 +668,83 @@ export const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
   return (
     <div className={`h-full relative ${className}`}>
       <TransitionFocusProvider pinnedBlock={null}>
-        <DiagramViewport
-          kind="graph"
-          controlsPosition="top-right"
-          nodes={nodes}
-          edges={edges}
-          // Disable change handlers for read-only view - major performance win
-          onNodesChange={undefined}
-          onEdgesChange={undefined}
-          onNodeClick={handleNodeClick}
-          onInit={handleInit}
-          onReady={placementReady}
-          controlButtons={
-            showControls ? (
-              <div className="contents" data-testid="graph-layout-controls">
-                <ControlButton
-                  onClick={handleFitView}
-                  title={t("components.workflowGraph.controls.fitViewTitle")}
-                  aria-label={t("components.workflowGraph.controls.fitView")}
-                  data-testid="graph-fit-view"
-                >
-                  <ZoomIn />
-                </ControlButton>
-                <ControlButton
-                  onClick={() => changeLayout({ ...currentLayoutOptions, direction: "TB" })}
-                  title={t("components.workflowGraph.controls.verticalTitle")}
-                  aria-label={t("components.workflowGraph.controls.vertical")}
-                  data-testid="graph-layout-vertical"
-                >
-                  <ArrowUpDown />
-                </ControlButton>
-                <ControlButton
-                  onClick={() => changeLayout({ ...currentLayoutOptions, direction: "LR" })}
-                  title={t("components.workflowGraph.controls.horizontalTitle")}
-                  aria-label={t("components.workflowGraph.controls.horizontal")}
-                  data-testid="graph-layout-horizontal"
-                >
-                  <ArrowLeftRight />
-                </ControlButton>
-              </div>
-            ) : undefined
-          }
-          nodeTypes={nodeTypes}
-          edgeTypes={edgeTypes}
-          connectionMode={ConnectionMode.Strict}
-          selectionMode={SelectionMode.Partial}
-          deleteKeyCode={null}
-          multiSelectionKeyCode={null}
-          colorMode={actualTheme}
-          style={{ backgroundColor }}
+        <VariableProvider
+          value={{
+            registry: (workflow.variableRegistry ?? {}) as Record<string, VariableDefinition>,
+            onSelect: onVariableSelect,
+            selected: selectedVariable,
+          }}
         >
-          <GraphDefs />
-          <GraphMeasuredHeights onMeasured={handleMeasured} />
-          <Background gap={20} size={1} color={backgroundPatternColor} />
+          <DiagramViewport
+            kind="graph"
+            controlsPosition="top-right"
+            nodes={nodes}
+            edges={edges}
+            // Disable change handlers for read-only view - major performance win
+            onNodesChange={undefined}
+            onEdgesChange={undefined}
+            onNodeClick={handleNodeClick}
+            onInit={handleInit}
+            onReady={placementReady}
+            controlButtons={
+              showControls ? (
+                <div className="contents" data-testid="graph-layout-controls">
+                  <ControlButton
+                    onClick={handleFitView}
+                    title={t("components.workflowGraph.controls.fitViewTitle")}
+                    aria-label={t("components.workflowGraph.controls.fitView")}
+                    data-testid="graph-fit-view"
+                  >
+                    <ZoomIn />
+                  </ControlButton>
+                  <ControlButton
+                    onClick={() => changeLayout({ ...currentLayoutOptions, direction: "TB" })}
+                    title={t("components.workflowGraph.controls.verticalTitle")}
+                    aria-label={t("components.workflowGraph.controls.vertical")}
+                    data-testid="graph-layout-vertical"
+                  >
+                    <ArrowUpDown />
+                  </ControlButton>
+                  <ControlButton
+                    onClick={() => changeLayout({ ...currentLayoutOptions, direction: "LR" })}
+                    title={t("components.workflowGraph.controls.horizontalTitle")}
+                    aria-label={t("components.workflowGraph.controls.horizontal")}
+                    data-testid="graph-layout-horizontal"
+                  >
+                    <ArrowLeftRight />
+                  </ControlButton>
+                </div>
+              ) : undefined
+            }
+            nodeTypes={nodeTypes}
+            edgeTypes={edgeTypes}
+            connectionMode={ConnectionMode.Strict}
+            selectionMode={SelectionMode.Partial}
+            deleteKeyCode={null}
+            multiSelectionKeyCode={null}
+            colorMode={actualTheme}
+            style={{ backgroundColor }}
+          >
+            <GraphDefs />
+            <GraphMeasuredHeights onMeasured={handleMeasured} />
+            <Background gap={20} size={1} color={backgroundPatternColor} />
 
-          {/* MiniMap with delayed render for better initial load performance */}
-          {showMinimap && showMiniMapDelayed && !mobile && (
-            <MiniMap
-              position="bottom-right"
-              nodeColor={(node) => {
-                const nodeData = node.data as { color?: string };
-                return nodeData?.color || "#3B82F6";
-              }}
-              maskColor="rgba(255, 255, 255, 0.2)"
-              nodeStrokeWidth={2}
-              zoomable={true}
-              pannable={true}
-            />
-          )}
-        </DiagramViewport>
+            {/* MiniMap with delayed render for better initial load performance */}
+            {showMinimap && showMiniMapDelayed && !mobile && (
+              <MiniMap
+                position="bottom-right"
+                nodeColor={(node) => {
+                  const nodeData = node.data as { color?: string };
+                  return nodeData?.color || "#3B82F6";
+                }}
+                maskColor="rgba(255, 255, 255, 0.2)"
+                nodeStrokeWidth={2}
+                zoomable={true}
+                pannable={true}
+              />
+            )}
+          </DiagramViewport>
+        </VariableProvider>
       </TransitionFocusProvider>
 
       {/* Legacy Node Detail Sheet — only when no external sidebar */}

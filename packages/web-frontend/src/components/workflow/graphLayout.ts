@@ -9,7 +9,7 @@
 
 import type { GraphModel } from "../run/graphModel";
 
-export const GRAPH_CARD_WIDTH = 320;
+export const GRAPH_CARD_WIDTH = 660;
 /** Least room before the first group along the card axis, where cross-block return lanes run. */
 export const GRAPH_MARGIN = 48;
 const GRAPH_GROUP_PADDING = 16;
@@ -275,12 +275,16 @@ export function estimateStepHeight(step: {
   connectionCount: number;
   /** Edges the card names instead of drawing; they take chip rows of their own. */
   arrivalCount?: number;
+  /** Ported card: the card is as tall as its longer port column, plus the self-loop band. */
+  inCount?: number;
+  outCount?: number;
+  selfCount?: number;
 }): number {
-  const summaryLines = step.summary ? Math.min(4, Math.ceil(step.summary.length / 30)) : 0;
-  const evidenceRows = step.evidence.length ? Math.ceil(step.evidence.length / 1.5) + 0.5 : 0;
-  const chips = step.connectionCount + (step.arrivalCount ?? 0);
-  const chipRows = chips ? Math.ceil(chips / 1.5) : 0;
-  return 52 + summaryLines * 20 + evidenceRows * 22 + chipRows * 26;
+  const rows = Math.max(step.inCount ?? 0, step.outCount ?? 0, 1);
+  const descriptionLines = step.summary ? Math.min(2, Math.ceil(step.summary.length / 40)) : 0;
+  const header = 64 + descriptionLines * 20 + 30;
+  const ports = rows * 34 + 24;
+  return Math.max(header, ports) + ((step.selfCount ?? 0) > 0 ? 36 : 0) + 8;
 }
 
 export async function layoutGraph(
@@ -295,8 +299,15 @@ export async function layoutGraph(
   // A card also holds a chip for every edge arriving at it that the graph names instead of
   // drawing; the estimate counts them, or the first pass lays the cards out too short.
   const arrivalCounts = new Map<string, number>();
+  const outCounts = new Map<string, number>();
+  const selfCounts = new Map<string, number>();
   for (const link of model.links) {
+    if (link.source === link.target) {
+      selfCounts.set(link.source, (selfCounts.get(link.source) ?? 0) + 1);
+      continue;
+    }
     arrivalCounts.set(link.target, (arrivalCounts.get(link.target) ?? 0) + 1);
+    outCounts.set(link.source, (outCounts.get(link.source) ?? 0) + 1);
   }
   const sizeOf = (id: string) => {
     const step = stepById.get(id)!;
@@ -309,6 +320,9 @@ export async function layoutGraph(
           evidence: step.step.evidence,
           connectionCount: step.connections.length,
           arrivalCount: arrivalCounts.get(id) ?? 0,
+          inCount: arrivalCounts.get(id) ?? 0,
+          outCount: outCounts.get(id) ?? 0,
+          selfCount: selfCounts.get(id) ?? 0,
         }),
     };
   };
