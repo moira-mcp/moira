@@ -107,8 +107,8 @@ export function migrateWorkflowGraph<T = Record<string, unknown>>(
     return { graph: input, from, to: from, changed: false };
   }
   let graph: AnyRecord = input;
-  for (let version = from; version < CURRENT_WORKFLOW_SCHEMA_VERSION; version++) {
-    graph = STEPS[version](graph);
+  for (const step of STEPS.slice(from)) {
+    graph = step(graph);
   }
   const metadata = isRecord(graph.metadata) ? graph.metadata : {};
   graph = {
