@@ -7,7 +7,10 @@
  */
 
 import axios, { AxiosInstance, AxiosResponse, AxiosError } from "axios";
-import type { ExecutionProgress } from "@mcp-moira/workflow-engine/progress-visual";
+import type {
+  ExecutionProgress,
+  WorkflowVersionStatistics,
+} from "@mcp-moira/workflow-engine/progress-visual";
 import type { ProcessProjection } from "@mcp-moira/workflow-engine/process";
 import type {
   WorkspaceConnectionView,
@@ -447,6 +450,22 @@ export class MoiraApiClient {
       }
       throw new ApiClientError(`Failed to get workflow: ${id}`, ApiErrorCode.WORKFLOW_NOT_FOUND);
     }
+  }
+
+  /**
+   * Typical block durations over the caller's completed runs of one definition version (the
+   * workflow's current version when none is given): what a pass and a whole run through each block
+   * usually take, and how many passes a run usually makes.
+   */
+  async getWorkflowStatistics(
+    id: string,
+    version?: string,
+  ): Promise<WorkflowVersionStatistics | null> {
+    const response = await this.client.get<ApiResponse<WorkflowVersionStatistics>>(
+      `/workflows/${encodeURIComponent(id)}/statistics`,
+      { params: version ? { version } : undefined },
+    );
+    return response.data.data ?? null;
   }
 
   /** The derived process view of the saved workflow; `process` is null without `progress`. */

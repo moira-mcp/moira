@@ -7,6 +7,7 @@
  */
 
 import { afterAll, beforeAll, describe, expect, test } from "@jest/globals";
+import { withoutMoment } from "../utils/progress-moment.js";
 import { randomUUID } from "node:crypto";
 import {
   callMCPTool,
@@ -225,7 +226,9 @@ describe("answering a waiting step from the run page", () => {
       headers: { Cookie: `better-auth.session_token=${cookie}` },
     });
     expect(httpAt.status).toBe(200);
-    expect(((await httpAt.json()) as { data: any }).data).toEqual(atAnswer);
+    expect(withoutMoment(((await httpAt.json()) as { data: any }).data)).toEqual(
+      withoutMoment(atAnswer),
+    );
     const badAt = await fetch(`${BASE_URL}/api/executions/${run.processId}/progress?at=-1`, {
       headers: { Cookie: `better-auth.session_token=${cookie}` },
     });

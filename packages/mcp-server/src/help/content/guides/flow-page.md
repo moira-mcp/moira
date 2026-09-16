@@ -10,47 +10,49 @@ from `progressNodeId`, transitions and loops from the labelled connections — s
 cannot drift from the graph. A workflow without a process view (`progress`) shows the technical
 node graph and its node details instead.
 
-## Modes
+## Views
 
-The tabs above the picture switch how the same definition is shown; the choice is in the URL as
+The two tabs above the picture show the same definition in two ways; the choice is in the URL as
 `view`.
 
-- **Outline** (default) — the process as a document: every block as a numbered section with its
-  description, its transitions in words (including why a loop happens and when it ends), and its
-  steps with the evidence each demands.
-- **Canvas** — the process as a map filling the whole view: blocks left to right, adjacent
-  forward transitions as arrows with their labels, loops as thin dashed lines below and transitions
-  that skip blocks above; a block that many other blocks lead into receives one thin line from each
-  of them. Every loop, skip and exit into such a block is named by a chip in its source block, and
-  so are three or more parallel transitions into the next block (one chip with their count);
-  hover the chip (or the line) to light it and read its label, and select a block to keep its lines
-  lit. Scroll or drag to pan, pinch (or hold Ctrl and scroll) to zoom.
-- **Lanes** — one card per block in process order with the loops as thin arcs under the rail and
-  transitions that skip a block as thin links above it, unlabelled at rest; each card names its
-  loops and skips in chips (several to one block fold into one chip with `×k`), and hovering a chip
-  (or a line) lights the line(s) with the label and, for a single loop, its cause and exit. The rail pans and zooms like the map. Nothing is "current": the
-  definition has no run.
-- **Split** — blocks against their implementation: pick a block on the left to see, on the right,
-  the steps that implement it in the order they run, with their connections. Chips lead to the
-  block a connection leaves for; the finder above answers "which block is this step in".
-- **Graph** — every workflow node as a step card, grouped by block in process order, with the
-  same connection chips as the split view. A line is drawn where it runs straight from card to
-  card. A loop, a link into another block and anything else that would cross the picture is named
-  instead of drawn: the source card's connection chip says where it goes, and the target card
-  gains an arrival chip saying where it comes from and from which block. Hovering either chip, or
-  either card, draws that line with its label and dims the rest; clicking an arrival chip brings
-  the card at the other end into view. The picture opens on the first block; in the zoom cluster the fit control
-  shows the whole graph and Vertical and Horizontal change the direction. The sidebar shows a selected node's definition,
-  and clicking a step in the block panel opens the graph on that node.
+- **Map** (default) — the process as a diagram with its table of contents: blocks left to right,
+  the main sequence on one row, each side branch on a row of its own above or below it, a block
+  many others lead into or that only loops reach beneath them; adjacent forward transitions as arrows with their labels, loops as thin dashed lines below and
+  transitions that skip blocks above; a block that many other blocks lead into receives one thin
+  line from each of them. Every loop, skip and exit into such a block is named by a chip in its
+  source block, and so are three or more parallel transitions into the next block (one chip with
+  their count); hover the chip (or the line) to light it and read its label, and select a block
+  to keep its lines lit. Nothing is "current": the definition has no run. The picture opens on
+  the first block; scroll or drag to pan, pinch (or hold Ctrl and scroll) to zoom; the fit
+  control shows the whole process at a readable size or, when it is wider than the view, its
+  beginning. The contents on the left list every block with, once you have completed runs of this
+  version, how long it typically takes; the finder above them answers "which block is this step
+  in" and selects that block.
+- **Graph** — every workflow node as a step card, grouped by block in process order, with its
+  connection chips. A line is drawn where it runs straight from card to card. A loop, a link into
+  another block and anything else that would cross the picture is named instead of drawn: the
+  source card's connection chip says where it goes, and the target card gains an arrival chip
+  saying where it comes from and from which block. Hovering either chip, or either card, draws
+  that line with its label and dims the rest; clicking an arrival chip brings the card at the
+  other end into view. The block selected on the map keeps its frame highlighted here. In the
+  zoom cluster the fit control shows the whole graph and Vertical and Horizontal change the
+  direction. The sidebar shows a selected node's definition and its connections as `output →
+target` with the case that selects each output; clicking a step in the block panel opens the
+  graph on that node.
+
+Switching tabs keeps the page as it is: the map keeps its selected block, the graph the position
+you left it at, and nothing reloads.
 
 ## The panel
 
-- **Block** — the selected block (the first one by default): its description, where it leads,
-  and its steps as cards of one shape (the type badge in the same place, then the name, the first
-  sentence and the fields it must return — the evidence Moira validates before a run continues);
-  the split mode shows the same cards with their connections. On the node graph, a selected step
-  that names playbooks lists them under its details with a link to each; one you cannot read is
-  marked as not available.
+- **Block** — the selected block (the first one by default): its description, how long a pass
+  and a whole run through it typically take across your completed runs of this version ("no runs
+  yet" before there are any, "typical durations unavailable" when they could not be fetched),
+  where it leads, and its steps as cards of one shape (the type badge
+  in the same place, then the name, the first sentence and the fields it must return — the
+  evidence Moira validates before a run continues). On the node graph, a selected step that
+  names playbooks lists them under its details with a link to each; one you cannot read is marked
+  as not available.
 - **Variables** — the variable registry as rows: every global the workflow declares with its
   type and default; open a row for its description and the whole declaration as JSON Schema.
   While editing, the type, default, description and schema are edited in the row.
@@ -60,10 +62,10 @@ The tabs above the picture switch how the same definition is shown; the choice i
 The owner of a workflow can turn on **Edit flow** (`edit=1` in the URL). Edit mode changes the
 definition itself and never a run:
 
-- a block's name and description, in place (Outline and Split);
+- a block's name and description, in place in the block panel;
 - a transition's label and, for a return, its loop cause and exit (the pencil next to it);
 - which block a step belongs to, and a step's directive, completion condition, message or
-  expressions (Split);
+  expressions (on the step's card in the block panel);
 - the variable registry — declarations, types, descriptions and defaults (Variables tab).
 
 The views re-derive as you type. A change that would make the process unreadable — a step in a
@@ -86,5 +88,5 @@ to get an editable one.
 ## Explaining the page
 
 **Explain this page** walks through the page in six steps — block, step, evidence, loop, editing,
-and the modes — highlighting the element that shows each. The step is in the URL as `guide`, so a
-position can be linked to. Every mode opens with a short note saying what it is for.
+and the views — highlighting the element that shows each. The step is in the URL as `guide`, so a
+position can be linked to. The map's one-line note opens into what the view is for.

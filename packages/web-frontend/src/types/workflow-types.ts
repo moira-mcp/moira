@@ -68,29 +68,29 @@ export interface StartNode extends BaseNode {
   };
 }
 
+/** One routing case: the first case whose `when` holds selects `output`, a connection key. */
+export interface RoutingCase {
+  when: StructuredCondition;
+  output: string;
+}
+
 export interface AgentDirectiveNode extends BaseNode {
   type: "agent-directive";
   directive: string;
   completionCondition: string;
   inputSchema?: Record<string, unknown>;
-  maxRetries?: number;
-  retryMessage?: string;
-  currentRetries?: number;
-  connections: {
-    success: string;
-    error?: string;
-    timeout?: string;
-    maxRetriesExceeded?: string;
-  };
+  /** Expressions evaluated after the answer is validated and before routing. */
+  expressions?: string[];
+  /** Routing on the node's own validated answer; `success` when no case holds. */
+  cases?: RoutingCase[];
+  connections: { success: string; error?: string; timeout?: string } & Record<string, string>;
 }
 
 export interface ConditionNode extends BaseNode {
   type: "condition";
-  condition: StructuredCondition;
-  connections: {
-    true: string;
-    false: string;
-  };
+  expressions?: string[];
+  cases: RoutingCase[];
+  connections: { default: string; error?: string } & Record<string, string>;
 }
 
 export interface EndNode extends BaseNode {

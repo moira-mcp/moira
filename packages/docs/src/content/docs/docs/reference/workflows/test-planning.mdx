@@ -101,20 +101,21 @@ This workflow may inspect project evidence and create its four local planning fi
 
 ## Current connection syntax
 
-Agent directives use named `success` connections, and the review gate uses `true` and `false` branches:
+Agent directives use named `success` connections, and the review gate is a condition node whose ordered `cases` select an output, with `default` taken when no case holds:
 
 ```json
 {
   "id": "review-gate",
   "type": "condition",
-  "condition": {
-    "operator": "eq",
-    "left": { "contextPath": "issues_count" },
-    "right": 0
-  },
+  "cases": [
+    {
+      "when": { "operator": "eq", "left": { "contextPath": "issues_count" }, "right": 0 },
+      "output": "clean"
+    }
+  ],
   "connections": {
-    "true": "present",
-    "false": "repair"
+    "clean": "present",
+    "default": "repair"
   }
 }
 ```

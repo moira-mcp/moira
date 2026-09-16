@@ -218,7 +218,7 @@
       "confirmDelete": "Delete workflow \"{{name}}\"?"
     },
     "workflowDetail": {
-      "backToWorkflows": "← Back to Workflows",
+      "backToWorkflows": "Back to Workflows",
       "deleteWorkflow": "Delete Workflow",
       "confirmDelete": "Delete this workflow?",
       "toggleVisibility": "Click to toggle workflow visibility",
@@ -543,20 +543,18 @@
       "title": "Run",
       "modeLabel": "View",
       "modes": {
-        "lanes": "Lanes",
-        "canvas": "Canvas",
-        "outline": "Outline",
-        "route": "Route"
+        "map": "Map",
+        "graph": "Graph"
       },
       "tabs": {
         "block": "Block",
-        "variables": "Variables",
-        "graph": "Graph"
+        "variables": "Variables"
       },
       "status": {
         "pending": "not reached",
         "active": "in progress",
         "waiting": "waiting for you",
+        "waitingAgent": "agent on the step",
         "done": "completed",
         "repeated": "repeated",
         "skipped": "skipped"
@@ -564,12 +562,11 @@
       "tabHints": {
         "block": "The selected block: what it does, where it leads, and the steps that implement it",
         "variables": "Declared variables with their values and history, each step's outputs, edits in place where the run allows them; answer the waiting step here",
-        "variablesWaiting": "A step is waiting for your answer",
+        "variablesWaiting": "You can answer the paused step here",
         "errors": "Errors the run recorded, newest first",
         "errorCount_one": "{{count}} error recorded",
         "errorCount_other": "{{count}} errors recorded",
         "steps": "Every step the run took, in order",
-        "graph": "The technical node graph with the current node focused",
         "locks": "Locks placed on this run and their history",
         "lockActive": "A lock is active on this run",
         "degradationCount_one": "{{count}} step ran without referenced text",
@@ -584,59 +581,52 @@
       "guidance": {
         "dismiss": "Dismiss"
       },
-      "lanes": {
-        "youAreHere": "You are here",
-        "phase": "Block {{index}}",
-        "rail": "Process blocks",
-        "endsWhen": "Ends when:",
-        "noContent": {
-          "pending": "The run has not reached this block yet.",
-          "active": "The agent is working in this block now.",
-          "waiting": "The run is waiting here for a person.",
-          "done": "This block completed; it reported no outcome text.",
-          "repeated": "This block completed after several passes; it reported no outcome text.",
-          "skipped": "The run bypassed this block: its routing decided the work was not needed."
+      "timing": {
+        "title": "Time",
+        "pass": "pass {{n}}",
+        "running": "in progress",
+        "total": "total",
+        "current": "current pass",
+        "typical": "typically",
+        "typicalValues": "{{pass}} per pass · {{run}} per run",
+        "noPasses": "The run has not worked in this block yet.",
+        "unit": {
+          "s": "s",
+          "min": "min",
+          "h": "h"
         }
       },
-      "canvas": {
-        "loading": "Laying out the process…"
+      "list": {
+        "title": "Checklist",
+        "progress": "{{done}} of {{total}} done",
+        "current": "in progress",
+        "countersOnly": "The binding counts the items but names none.",
+        "countersOnlyCurrent": "The binding names no items; the run is on \"{{title}}\"."
       },
-      "outline": {
-        "contents": "Contents",
-        "returnsTo": "returns to",
-        "goesTo": "goes to"
-      },
-      "route": {
+      "routeFacts": {
+        "title": "What happened here",
+        "empty": "The run has not visited this block.",
+        "visit": "#{{seq}}",
+        "goTo": "Show the run as it stood at this visit",
         "actor": {
           "user": "person",
           "agent": "agent"
         },
         "adjusted": "runtime adjustment",
-        "teleport": "teleport",
         "waited": "waited for input",
         "loopVisit": "loop",
         "cursor": "you are here",
-        "changed": "set",
-        "noBlock": "outside every block",
-        "entry": "return {{n}}",
-        "segmentSize": "{{visits}} visits, {{working}} doing work",
-        "toggleSegment": "Collapse or expand this stretch",
-        "loopMarker": "returned to {{block}}",
-        "perBlock": "Visits per block",
-        "perBlockLegend": "entries × · visits; click to jump to the first visit",
-        "stat": {
-          "visits": "visits",
-          "segments": "stretches",
-          "loops": "returns",
-          "adjustments": "adjusted"
-        },
-        "runStatus": {
-          "running": "the run continues",
-          "waiting": "the run is waiting for a person",
-          "completed": "the run completed"
-        },
-        "noRouteTitle": "No route was recorded",
-        "noRouteBody": "This execution started before Moira recorded routes, so only its current block is known. Newer runs list every step in order here."
+        "changed": "set"
+      },
+      "typical": {
+        "title": "Typically",
+        "pass": "per pass",
+        "run": "per run",
+        "passes": "passes",
+        "noRuns": "no runs yet",
+        "sample": "over {{runs}} completed runs",
+        "loading": "loading typical durations…",
+        "unavailable": "typical durations unavailable"
       },
       "blockDetail": {
         "emptyTitle": "Pick a block",
@@ -646,7 +636,16 @@
         "stepsHint": "A step is one instruction the agent receives; the fields listed are the evidence it must return. Click a step to see it on the node graph.",
         "focusStep": "Show on the node graph",
         "returns": "returns:",
-        "current": "current"
+        "current": "current",
+        "noContent": {
+          "pending": "The run has not reached this block yet.",
+          "active": "The agent is working in this block now.",
+          "waiting": "The run is waiting here for a person.",
+          "waitingAgent": "The run is waiting here for the agent to finish the step.",
+          "done": "This block completed; it reported no outcome text.",
+          "repeated": "This block completed after several passes; it reported no outcome text.",
+          "skipped": "The run bypassed this block: its routing decided the work was not needed."
+        }
       },
       "variables": {
         "guideTitle": "Values as the run goes",
@@ -707,27 +706,26 @@
           },
           "explore": {
             "title": "Explore the same run your way",
-            "body": "The tabs show the same run in different ways: Lanes as a progress rail, Canvas as a map, Outline as a document, Route to follow the run step by step. Every view starts with a note explaining what it is for."
+            "body": "The two views show the same run: the Map is the process with the run's state on it, the Graph is every node of the definition. Your selection and the graph's viewport survive a switch."
           }
         }
       },
       "modeGuide": {
-        "lanes": {
-          "title": "Lanes: how far the run got",
-          "body": "One rail, one card per block in process order. The current block is pinned as \"you are here\"; a number badge counts how many times a block was repeated; struck-through blocks were skipped. Thin arcs under the rail are the loops and thin links above it are transitions that skip a block; each card names its loops and skips in chips, and hovering a chip (or a line) lights that line and shows its label; a selected card keeps its lines lit. Scroll or drag to move along the rail, pinch (or hold Ctrl and scroll) to zoom. Click a card for its details on the right."
-        },
-        "canvas": {
-          "title": "Canvas: the process as a map",
-          "body": "Blocks are laid out left to right in process order; thin dashed lines below are loops. Every loop, skip and exit into a shared block is named by a chip in its source block; hover the chip (or the line) to light it and read its label, and select a block to keep its lines lit. The map opens on the block the run is at. Scroll or drag to pan, pinch (or hold Ctrl and scroll) to zoom, click a block to select it."
-        },
-        "outline": {
-          "title": "Outline: the process as a document",
-          "body": "Every block as a numbered section with its description, what the run produced there, its transitions in words (including why loops happen and when they end), and the steps that implement it. Use the contents list to jump; expand a section's steps to see what each demands back."
-        },
-        "route": {
-          "title": "Route: follow the run",
-          "body": "This is the route the run actually took, in the order it happened. Each card is a stretch of the run inside one block; a small count beside the block name says which visit to that block it is; a blue line under a card marks a return to an earlier block. Click any visit to put the cursor there: everything after it fades, and the other tabs show the process as it stood at that moment."
+        "map": {
+          "title": "Map: the process as a diagram",
+          "body": "Blocks are laid out left to right in process order; thin dashed lines below are loops. Every loop, skip and exit into a shared block is named by a chip in its source block; hover the chip (or the line) to light it and read its label, and select a block to keep its lines lit. A card carries the block's run state: how many times it ran, how long its passes took and, when the block works through a list, how much of that list is done. The contents on the left jump to any block and the finder there answers \"which block is this step in\". The map opens on the block the run is at."
         }
+      },
+      "map": {
+        "loading": "Laying out the process…",
+        "total": "Time spent in this block",
+        "current": "Time on the pass running now",
+        "listProgress": "Items done of the list this block works through",
+        "typical": "How long this block usually takes",
+        "endsWhen": "Ends when:",
+        "contents": "Contents",
+        "findNode": "Find a step by id or text…",
+        "noMatch": "No step matches"
       }
     },
     "settings": {
@@ -1215,10 +1213,7 @@
       "noProcess": "This workflow declares no process view (no blocks), so the page shows its node graph. Add a `progress` section with blocks to read it as a process.",
       "diagnostics": "Process diagnostics",
       "modes": {
-        "outline": "Outline",
-        "canvas": "Canvas",
-        "lanes": "Lanes",
-        "split": "Split",
+        "map": "Map",
         "graph": "Graph"
       },
       "tabs": {
@@ -1226,29 +1221,10 @@
         "variables": "Variables"
       },
       "modeGuide": {
-        "split": {
-          "title": "Split: what implements a block",
-          "body": "Pick a block on the left to see, on the right, the steps that implement it in the order they run, with their connections. Blue chips lead to other blocks; the finder above answers \"which block is this step in\"."
-        },
-        "outline": {
-          "title": "Outline: the process as a document",
-          "body": "Every block as a numbered section with its description, its transitions in words (including why loops happen and when they end), and the steps that implement it. Use the contents list to jump; expand a section's steps to see what each demands back."
-        },
-        "canvas": {
-          "title": "Canvas: the process as a map",
-          "body": "Blocks are laid out left to right in process order; thin dashed lines below are loops. Every loop, skip and exit into a shared block is named by a chip in its source block; hover the chip (or the line) to light it and read its label, and select a block to keep its lines lit. Scroll or drag to pan, pinch (or hold Ctrl and scroll) to zoom, click a block to select it."
-        },
-        "lanes": {
-          "title": "Lanes: the process in order",
-          "body": "One rail, one card per block in process order; thin arcs under the rail are the loops and thin links above it are transitions that skip a block. Each card names its loops and skips in chips: hover a chip (or a line) to light that line and read its label and what causes the loop; a selected card keeps its lines lit. Nothing is \"current\" here: this is the definition, not a run. Scroll or drag to move along the rail, pinch (or hold Ctrl and scroll) to zoom. Click a card for its details on the right."
+        "map": {
+          "title": "Map: the process as a diagram",
+          "body": "Blocks are laid out left to right in process order; thin dashed lines below are loops. Every loop, skip and exit into a shared block is named by a chip in its source block; hover the chip (or the line) to light it and read its label, and select a block to keep its lines lit. The contents on the left jump to any block and the finder there answers \"which block is this step in\"; the panel on the right holds the block's description, its steps and, in edit mode, the authoring controls."
         }
-      },
-      "split": {
-        "blocks": "Blocks",
-        "implementation": "Implementation",
-        "findNode": "Find a step by id or text…",
-        "noMatch": "No step matches",
-        "pickBlock": "Select a block to see the steps that implement it."
       },
       "registry": {
         "guideTitle": "Variables the process declares",
@@ -1271,7 +1247,7 @@
         "hintLabel": "About editing",
         "hint": "Edit mode changes the workflow definition itself — block names and descriptions, transition labels and loop explanations, which block a step belongs to, a step's directive or expressions, and the variable registry. It never touches a run. Edits live on the page until you save them; the save is refused if someone else changed the workflow in the meantime.",
         "guideTitle": "You are editing the process definition",
-        "guideBody": "Change a block's name or description in place; click the pencil next to a transition to change its label or its loop's cause and exit; in Split, move a step to another block or edit its text; in Variables, edit the registry. The views re-derive at once, rule violations appear as diagnostics, \"Export\" lists exactly which flow-file entries would change, and \"Save\" sends the definition to the server against the revision you loaded.",
+        "guideBody": "Change a block's name or description in place; click the pencil next to a transition to change its label or its loop's cause and exit; in the block panel, move a step to another block or edit its text; in Variables, edit the registry. Both views re-derive at once, rule violations appear as diagnostics, \"Export\" lists exactly which flow-file entries would change, and \"Save\" sends the definition to the server against the revision you loaded.",
         "count_one": "{{count}} edit",
         "count_other": "{{count}} edits",
         "reset": "Discard edits",
@@ -1325,7 +1301,7 @@
           },
           "explore": {
             "title": "Explore the same process your way",
-            "body": "The tabs show the same process in different ways: Outline as a document, Canvas as a map, Lanes as a rail, Split for what implements each block, Graph for every node. Every view starts with a note explaining what it is for."
+            "body": "The two views show the same workflow: the Map is the process it declares, the Graph is every node of the definition. Your selection and the graph's viewport survive a switch."
           }
         }
       }
@@ -2423,6 +2399,8 @@
         "message": "Message",
         "condition": "Condition",
         "expressions": "Expressions",
+        "cases": "Cases",
+        "whenCase": "when",
         "subgraphId": "Subgraph ID",
         "validation": "Validation",
         "inputSchema": "Input Schema",

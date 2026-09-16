@@ -92,11 +92,13 @@ const BUILTIN_NODE_DESCRIPTIONS: Record<
   end: { title: "End", description: "Completes the execution and collects the final output." },
   "agent-directive": {
     title: "Agent Task",
-    description: "Pauses for the agent, validates the submitted input against the declared schema.",
+    description:
+      "Pauses for the agent, validates the submitted input against the declared schema, then routes on the answer through its cases (or to success).",
   },
   condition: {
     title: "Condition",
-    description: "Evaluates a structured condition and routes to the true or false branch.",
+    description:
+      "Routes to the output of the first case whose condition holds, otherwise to the default output.",
   },
   subgraph: {
     title: "Subgraph",

@@ -9,6 +9,8 @@ export interface NodeExecutionResult {
   action: "continue" | "pause" | "error" | "complete";
   outputPath?: string; // Which connection to follow (for continue)
   data?: Record<string, unknown>; // Data to merge into context
+  /** Declared-global assignments made by the node's expressions; committed to the global scope. */
+  assignments?: Record<string, unknown>;
   error?: string; // Error message (for error action)
   executionTime?: number;
 }
@@ -26,12 +28,14 @@ export class NodeResultBuilder {
     nodeId: string,
     outputPath: string,
     data?: Record<string, unknown>,
+    assignments?: Record<string, unknown>,
   ): NodeExecutionResult {
     return {
       nodeId,
       action: "continue",
       outputPath,
       data,
+      ...(assignments && Object.keys(assignments).length > 0 ? { assignments } : {}),
     };
   }
 

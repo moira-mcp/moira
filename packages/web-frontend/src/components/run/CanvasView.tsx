@@ -1,5 +1,5 @@
 /**
- * Canvas — the process as a graph, filling the whole viewport.
+ * The map's diagram — the process as a graph, filling the space the map view gives it.
  *
  * Blocks are laid out in layers that follow process direction left to right. Adjacent forward
  * transitions are elbows with their label in the gap; transitions that skip ranks travel above the
@@ -9,9 +9,12 @@
  * the source names each target, and hovering the chip (or the edge) lights that edge and shows its
  * label; selecting a block lights all of its connectors. Adjacent forward transitions keep their
  * label in the gap they own. Status is carried by colour, icon and a chip, so it is readable
- * without hover. The view opens fitted to the process but never below three quarters
- * size, so a dense flow opens readable and is panned; on a run it then centres on the block the
- * run is at. Gestures come from the shared `DiagramViewport`.
+ * without hover. A card also carries the run facts of its block: how many times it ran (`×n`), the
+ * time its passes took (with the open pass's own time while it is running) and, when the block is
+ * bound to a list, how much of that list is done. The view opens fitted to the process but never
+ * below three quarters size, so a dense flow opens readable and is panned; on a run it then centres
+ * on the block the run is at. Gestures come from the shared `DiagramViewport`. `MapView` puts this
+ * diagram beside the contents sidebar; nothing else renders it.
  */
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -22,7 +25,6 @@ import {
   Handle,
   Position,
   Background,
-  MiniMap,
   type Edge,
   type EdgeProps,
   type Node,
@@ -33,6 +35,7 @@ import { CornerDownRight, Loader2, RotateCcw } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useTheme } from "@/hooks/useTheme";
 import { DiagramViewport } from "../diagram/DiagramViewport";
+import { diagramInteractionProps } from "../diagram/interaction";
 import { useOpeningPlacement } from "../diagram/placement";
 
 /** Gutter kept between the viewport edge and the first block when a definition opens. */
@@ -47,9 +50,7 @@ import {
   type BlockLayout,
   type LaidOutEdge,
 } from "./layout";
-import { GuidanceCallout } from "./Guidance";
-import { useIsMobile } from "@/hooks/use-mobile";
-import { useModeGuideKey } from "../flow/editing";
+import { formatDuration } from "./duration";
 import { currentBlockId, type RunBlock, type RunViewProps } from "./model";
 import {
   PARALLEL_CHIP_MIN,
@@ -65,16 +66,62 @@ type BlockNodeData = {
   selected: boolean;
   isHub: boolean;
   chips: TransitionChip[];
+  /** Who the run waits for, so a waiting card is worded for the agent or for a person. */
+  waitingFor: "agent" | "user" | null;
   onSelect: (id: string | null) => void;
 };
 type BlockNode = Node<BlockNodeData, "block">;
 type RoutedEdge = Edge<{ laid: LaidOutEdge }, "routed">;
 
+/**
+ * The run facts a card carries beside its step count: the time the block's passes took, the open
+ * pass's own time while the run is on it, and the bound list's progress. A block the run has not
+ * measured shows nothing here rather than a zero.
+ */
+function BlockFacts({ block }: { block: RunBlock }): React.JSX.Element | null {
+  const { t } = useTranslation();
+  const { timing, list } = block;
+  const total = timing.totalMs === null ? null : formatDuration(timing.totalMs, t);
+  const current = timing.currentMs === null ? null : formatDuration(timing.currentMs, t);
+  // An unresolved counter reads `?`, as the image and the notification footer word it.
+  const bound =
+    list && (list.done !== null || list.total !== null)
+      ? `${list.done ?? "?"}/${list.total ?? "?"}`
+      : null;
+  if (!total && !current && !bound) return null;
+  return (
+    <>
+      {total && (
+        <span title={t("pages.runPage.map.total")} data-block-total={timing.totalMs}>
+          {" · "}
+          {total}
+        </span>
+      )}
+      {current && (
+        <span
+          className="text-primary"
+          title={t("pages.runPage.map.current")}
+          data-block-current={timing.currentMs}
+        >
+          {" · "}
+          {current}
+        </span>
+      )}
+      {bound && (
+        <span title={t("pages.runPage.map.listProgress")} data-block-list={bound}>
+          {" · "}
+          {bound}
+        </span>
+      )}
+    </>
+  );
+}
+
 function BlockNodeView({ data }: NodeProps<BlockNode>): React.JSX.Element {
   const { t } = useTranslation();
-  const { block, selected, isHub, chips, onSelect } = data;
+  const { block, selected, isHub, chips, waitingFor, onSelect } = data;
   const style = STATUS_STYLE[block.status];
-  const endsWhen = t("pages.runPage.lanes.endsWhen");
+  const endsWhen = t("pages.runPage.map.endsWhen");
   return (
     <>
       <Handle type="target" position={Position.Left} className="!opacity-0" />
@@ -94,24 +141,32 @@ function BlockNodeView({ data }: NodeProps<BlockNode>): React.JSX.Element {
         )}
         data-block-id={block.id}
         data-status={block.status}
+        title={block.name}
       >
         <div className="flex items-start justify-between gap-2">
+          {/* The name is clamped like the description (`MAX_NAME_LINES` in the layout's height
+              estimate), the whole of it in the card's `title`, so a long name neither overflows
+              the card nor pushes the facts line out of it. */}
           <span
             className={cn(
-              "text-sm font-semibold leading-5",
+              "line-clamp-2 min-w-0 text-sm font-semibold leading-5",
               block.status === "skipped" && "line-through decoration-muted-foreground/60",
             )}
+            data-block-name={block.id}
           >
             <span className="mr-1.5 tabular-nums text-muted-foreground">{block.index + 1}.</span>
             {block.name}
           </span>
-          <StatusChip status={block.status} />
+          <StatusChip status={block.status} waitingFor={waitingFor} />
         </div>
         <p className="line-clamp-3 text-xs leading-[18px] text-foreground/80">
           {block.description}
         </p>
-        <div className="mt-auto flex items-end justify-between gap-2">
-          <span className="text-[11px] text-muted-foreground">
+        {/* The facts keep one line of their own; the chips wrap beneath them, each no wider
+            than the card, so a long return chip never pushes the facts into a column or draws
+            over the description. */}
+        <div className="mt-auto flex flex-col gap-1">
+          <span className="truncate whitespace-nowrap text-[11px] text-muted-foreground">
             {t("pages.runPage.stepCount", { count: block.nodeIds.length })}
             {block.iterations > 1 && (
               <>
@@ -119,9 +174,10 @@ function BlockNodeView({ data }: NodeProps<BlockNode>): React.JSX.Element {
                 <PassCount iterations={block.iterations} />
               </>
             )}
+            <BlockFacts block={block} />
           </span>
           {chips.length > 0 && (
-            <span className="flex flex-wrap justify-end gap-1" data-testid="block-chips">
+            <span className="flex flex-wrap gap-1" data-testid="block-chips">
               {chips.map((chip) => (
                 <TransitionChipView key={chip.key} chip={chip} title={chipTitle(chip, endsWhen)} />
               ))}
@@ -155,7 +211,7 @@ function RoutedEdgeView({ id, data }: EdgeProps<RoutedEdge>): React.JSX.Element 
         ? `translate(-50%, 0) translate(${laid.labelX}px, ${laid.labelY}px)`
         : `translate(-50%, -50%) translate(${laid.labelX}px, ${laid.labelY}px)`;
   const title = cycle
-    ? `${laid.transition.label} — ${laid.transition.cycle?.cause} — ${t("pages.runPage.lanes.endsWhen")} ${laid.transition.cycle?.exit}`
+    ? `${laid.transition.label} — ${laid.transition.cycle?.cause} — ${t("pages.runPage.map.endsWhen")} ${laid.transition.cycle?.exit}`
     : laid.transition.label;
   // Adjacent forward transitions own the gap between their blocks and keep their label there —
   // unless several share one gap, when a chip in the source names them and the lines are
@@ -239,8 +295,6 @@ function CanvasInner({
   selectedBlockId,
   onSelectBlock,
 }: RunViewProps): React.JSX.Element {
-  // A phone has no room for the minimap beside the blocks.
-  const mobile = useIsMobile();
   const { t } = useTranslation();
   const { actualTheme } = useTheme();
   const layout = useBlockLayout(blocks, progress.process.hubs);
@@ -248,7 +302,8 @@ function CanvasInner({
   // The viewport opens fitted to the process, clamped to a readable zoom (a definition has no
   // "current" block). On a
   // run, once that fit is in place, the block that is active or waiting is centred at a readable
-  // zoom; the fit-view control and the minimap give the overview back.
+  // zoom; the fit-view control gives the overview back and the map's contents sidebar is the
+  // navigation, so no minimap covers the blocks.
   const focusId = currentBlockId(blocks);
   const wrapperRef = useRef<HTMLDivElement>(null);
   const placeViewport = useCallback(
@@ -279,6 +334,18 @@ function CanvasInner({
     [layout, blocks],
   );
   const { onInit, onReady } = useOpeningPlacement(placeViewport, focusId);
+  // The fit-to-view control: the whole process at a readable zoom when it fits, otherwise the
+  // readable floor anchored at the first block, the same overview the definition opens with.
+  const fitOverview = useCallback(
+    (rf: ReactFlowInstance<BlockNode, RoutedEdge>) => {
+      if (!layout) return;
+      void rf.fitView(diagramInteractionProps("canvas").fitViewOptions).then(() => {
+        const width = wrapperRef.current?.clientWidth ?? 0;
+        if (layout.width * rf.getZoom() + 2 * CANVAS_EDGE > width) placeViewport(rf, null);
+      });
+    },
+    [layout, placeViewport],
+  );
 
   const nodes = useMemo<BlockNode[]>(
     () =>
@@ -297,11 +364,12 @@ function CanvasInner({
             selected: selectedBlockId === block.id,
             isHub: layout!.hubIds.includes(block.id),
             chips: canvasChipsOf(block, layout!.hubIds, blocks),
+            waitingFor: progress.waitingFor,
             onSelect: onSelectBlock,
           },
         };
       }),
-    [layout, blocks, selectedBlockId, onSelectBlock],
+    [layout, blocks, selectedBlockId, onSelectBlock, progress.waitingFor],
   );
 
   const edges = useMemo<RoutedEdge[]>(
@@ -329,15 +397,17 @@ function CanvasInner({
         data-testid="canvas-loading"
       >
         <Loader2 className="mr-2 size-4 animate-spin" aria-hidden="true" />
-        {t("pages.runPage.canvas.loading")}
+        {t("pages.runPage.map.loading")}
       </div>
     );
   }
 
+  // The box clips its own content: a block laid out beyond the fitted viewport must not reach
+  // out of the diagram and stay hit-testable over the contents sidebar beside it.
   return (
     <div
       ref={wrapperRef}
-      className="h-full w-full bg-muted/20"
+      className="h-full w-full overflow-hidden bg-muted/20"
       data-testid="canvas-view"
       data-canvas-size={`${Math.round(layout.width)}x${Math.round(layout.height)}`}
     >
@@ -350,6 +420,7 @@ function CanvasInner({
         colorMode={actualTheme}
         onInit={onInit}
         onReady={onReady}
+        onFit={fitOverview}
       >
         <svg aria-hidden="true">
           <defs>
@@ -400,31 +471,16 @@ function CanvasInner({
           </defs>
         </svg>
         <Background gap={24} size={1} />
-        {!mobile && <MiniMap pannable zoomable className="!bg-card" />}
       </DiagramViewport>
     </div>
   );
 }
 
-export function CanvasView(props: RunViewProps): React.JSX.Element {
-  const { t } = useTranslation();
-  const guideKey = useModeGuideKey();
+/** The diagram alone, with its transition focus: the map view supplies the frame around it. */
+export function CanvasDiagram(props: RunViewProps): React.JSX.Element {
   return (
-    <div className="flex h-full flex-col">
-      <div className="px-3 pt-3">
-        <GuidanceCallout
-          title={t(`${guideKey}.canvas.title`)}
-          testId="guidance-canvas"
-          className="mb-3"
-        >
-          {t(`${guideKey}.canvas.body`)}
-        </GuidanceCallout>
-      </div>
-      <div className="min-h-0 flex-1">
-        <TransitionFocusProvider pinnedBlock={props.selectedBlockId}>
-          <CanvasInner {...props} />
-        </TransitionFocusProvider>
-      </div>
-    </div>
+    <TransitionFocusProvider pinnedBlock={props.selectedBlockId}>
+      <CanvasInner {...props} />
+    </TransitionFocusProvider>
   );
 }

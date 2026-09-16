@@ -1,8 +1,12 @@
 /**
- * The run page on a real Quick Task run: the lanes rail with block statuses, the block-detail
- * panel and the technical-graph focus, a repair loop shown as a repeated block with its return
- * arc, the route cursor dimming later visits and changing the lanes, the loading state, and the
- * page kept usable on a phone when the projection fails or the workflow has no process view.
+ * The run page on a real Quick Task run, in its two views. On the map: block cards with their
+ * status, pass count, measured time and the contents sidebar beside them, a repair loop shown as
+ * a repeated block with its return chip, and the block panel carrying the block's timings, what
+ * its visits did and the steps with their evidence. On the graph: the same run as the technical
+ * node graph, which a step in the panel focuses. Plus the route cursor moving the whole page back
+ * through the run, the deep links of both views (and of the views this page used to have), the
+ * first-load state, and the page kept usable on a phone when the projection fails or the workflow
+ * has no process view.
  */
 
 import { test, expect, type Page } from "./fixtures.js";
@@ -102,121 +106,166 @@ async function openRun(page: Page) {
   };
 }
 
-test("lanes show the repair loop as a repeated block and the block panel drills into steps", async ({
+/** A block's card on the map diagram (the contents row carries the same id in the sidebar). */
+function mapCard(page: Page, blockId: string) {
+  return page.locator(`[data-testid="canvas-view"] [data-block-id="${blockId}"]`);
+}
+
+test("the map shows the repair loop as a repeated block and the block panel tells its story", async ({
   page,
 }) => {
   const run = await openRun(page);
   try {
+    // The map is the default view.
+    await expect(page.getByTestId("execution-progress")).toHaveAttribute("data-view", "map");
+    await expect(page.getByTestId("map-view")).toBeVisible();
+
     // The second review is where the run waits: the review block (review, check and repair steps)
-    // is on its second pass; the plan block completed once.
-    const review = page.getByTestId("progress-node-plan-review");
+    // is on its second pass; the plan block completed once, the execute block is not reached.
+    const review = mapCard(page, "plan-review");
     await expect(review).toHaveAttribute("aria-current", "step");
     await expect(review).toHaveAttribute("data-status", "waiting");
-    await expect(review.getByTestId("lane-iterations")).toHaveText("×2");
-    await expect(page.getByTestId("progress-node-plan")).toHaveAttribute("data-status", "done");
-    await expect(page.getByTestId("progress-node-execute")).toHaveAttribute(
+    await expect(review).toContainText("×2");
+    await expect(mapCard(page, "plan")).toHaveAttribute("data-status", "done");
+    await expect(mapCard(page, "execute")).toHaveAttribute("data-status", "pending");
+    // A card carries the block's measured time, so a reader sees where the run spent itself.
+    await expect(review.locator("[data-block-total]")).toBeVisible();
+
+    // The contents sidebar lists every block in process order with the same statuses.
+    const contents = page.getByTestId("map-contents-list");
+    await expect(contents.locator("[data-block-id]")).toHaveCount(7);
+    await expect(page.getByTestId("map-contents-plan-review")).toHaveAttribute(
       "data-status",
-      "pending",
+      "waiting",
     );
-    // The lanes rail draws the return arc of the repair loop as a thin muted line with no label
-    // at rest; the source lane's chip names the target, and hovering the chip lights the arc and
-    // shows the authored label. Selecting the lane keeps its arcs lit.
-    const rail = page.getByTestId("lanes-rail");
-    await expect(rail.locator("[data-arc]:not([data-arc='chip'])").first()).toBeVisible();
-    // (The SVG <title> tooltips carry the labels for assistive tech; the visible pill is the
-    // `data-arc-label` element, absent at rest.)
-    await expect(rail.locator("[data-arc-label]")).toHaveCount(0);
+    await expect(page.getByTestId("map-contents-plan")).toHaveAttribute("data-status", "done");
+
+    // The repair loop is drawn as a cycle edge and named by a chip in its source block; hovering
+    // the chip lights the edge and shows the authored label.
+    await expect(page.locator('[data-edge-kind="cycle"]').first()).toBeVisible();
     const chip = review.locator("[data-return-chip]").first();
     await expect(chip).toContainText(/\d/);
     await chip.hover();
-    await expect(rail.locator("[data-arc-label]")).toContainText("review found issues");
-    await expect(rail.locator('[data-arc][data-focused="true"]')).toHaveCount(1);
+    await expect(page.locator('[data-edge-kind="cycle"][data-focused="true"]')).toHaveCount(1);
+    await expect(page.locator('[data-edge-label="cycle"]')).toContainText("review found issues");
     await page.mouse.move(0, 0);
-    await expect(rail.locator("[data-arc-label]")).toHaveCount(0);
 
-    // The block panel opens on the current block with its steps and expected evidence.
+    // The block panel opens on the current block: its passes with durations, what its visits did,
+    // and the steps with the evidence each demands back.
     const detail = page.getByTestId("block-detail");
     await expect(detail).toHaveAttribute("data-block-id", "plan-review");
+    await expect(detail.getByTestId("block-timings")).toHaveAttribute("data-recorded", "true");
+    // Three passes through the review block's working steps: review, repair, review again.
+    await expect(detail.getByTestId("block-timing-pass")).toHaveCount(3);
+    await expect(detail.getByTestId("block-timing-total")).not.toHaveText("—");
+    await expect(detail.getByTestId("block-route-visit").first()).toBeVisible();
     const currentStep = detail.locator('[data-node-id][aria-current="step"]');
     await expect(currentStep).toHaveAttribute("data-node-id", "plan-review");
     await expect(currentStep.locator("[data-node-inputs]")).toContainText("issues_count");
 
-    // Selecting another block is a deep link and switches the panel to it. The rail opens
-    // centred on the current lane at full size, so the first lane is outside its viewport until
-    // the reader fits the whole rail (or pans); the fit control is the one-click way.
-    await page.getByTestId("lanes-rail").locator(".react-flow__controls-fitview").click();
-    await page.getByTestId("progress-node-scope").click();
-    await expect(page).toHaveURL(/block=scope/);
-    await expect(page.getByTestId("block-detail")).toHaveAttribute("data-block-id", "scope");
+    // Selecting another block is a deep link and switches the panel to it — from the diagram and
+    // from the contents alike.
+    // The map opens on the block the run is at, and its card is the one at hand: clicking it
+    // selects the block, which is a deep link.
+    await review.click();
+    await expect(page).toHaveURL(/block=plan-review/);
+    await expect(review).toHaveAttribute("aria-pressed", "true");
+    await expect(detail).toHaveAttribute("data-block-id", "plan-review");
+    await page.getByTestId("map-contents-execute").click();
+    await expect(page).toHaveURL(/block=execute/);
+    await expect(detail).toHaveAttribute("data-block-id", "execute");
+    // A block the run never entered says so instead of showing a zero.
+    await expect(detail.getByTestId("block-timings-empty")).toBeVisible();
+    await expect(detail.getByTestId("block-timing-total")).toHaveText("—");
 
-    // A step focuses the technical node graph in the graph tab: focusing two different steps
-    // leaves the viewport on two different transforms. The lanes rail beside the panel is a
-    // React Flow instance of its own, so the graph's viewport is read inside the panel.
-    const graphViewport = page.getByTestId("run-panel").locator(".react-flow__viewport");
+    // The finder answers "which block is this step in" and selects that block.
+    await page.getByTestId("map-node-finder").fill("fix-issues");
+    await page.locator('[data-node-match="fix-issues"]').click();
+    await expect(detail).toHaveAttribute("data-block-id", "verify");
+
+    // A step focuses the technical node graph: the page switches to the graph view and the
+    // viewport lands on a different transform for two different steps. The contents sidebar
+    // reaches any block, including one outside the diagram's current viewport.
+    await page.getByTestId("map-contents-scope").click();
+    await expect(page).toHaveURL(/block=scope/);
+    await expect(detail).toHaveAttribute("data-block-id", "scope");
+    const graphViewport = page
+      .locator('[data-testid="execution-progress"] .react-flow__viewport')
+      .last();
     const transformOf = () => graphViewport.evaluate((el) => window.getComputedStyle(el).transform);
-    await page.getByTestId("block-detail").locator('[data-node-id="get-task"] button').click();
-    await expect(page.getByRole("tab", { name: /Graph|Граф/ })).toHaveAttribute(
-      "data-state",
-      "active",
-    );
+    await detail.locator('[data-node-id="get-task"] button').click();
+    await expect(page.getByTestId("execution-progress")).toHaveAttribute("data-view", "graph");
+    await expect(page).toHaveURL(/view=graph/);
     await expect(graphViewport).toBeVisible({ timeout: 15000 });
     await expect.poll(transformOf).not.toBe("none");
     const onGetTask = await transformOf();
-    await page.getByRole("tab", { name: /Block|Блок/ }).click();
-    await page.getByTestId("block-detail").locator('[data-node-id="start"] button').click();
-    await expect(page.getByRole("tab", { name: /Graph|Граф/ })).toHaveAttribute(
-      "data-state",
-      "active",
-    );
+    await detail.locator('[data-node-id="start"] button').click();
     await expect.poll(transformOf, { timeout: 5000 }).not.toBe(onGetTask);
   } finally {
     await run.cleanup();
   }
 });
 
-test("the route cursor dims later visits and the lanes follow it; every mode is deep-linkable", async ({
+test("the route cursor moves the whole page back through the run; both views are deep-linkable", async ({
   page,
 }) => {
   const run = await openRun(page);
   try {
-    await page.goto(`${BASE_URL}/executions/${run.executionId}?view=route`);
-    const routeList = page.getByTestId("route-list");
-    await expect(routeList).toBeVisible();
-    // The repair loop stays inside the review block, so the route marks the revisited step as a
-    // loop rather than a return between blocks.
-    await expect(routeList.locator('[data-visit-seq][data-loop="true"]').first()).toBeVisible();
-    await expect(routeList.locator('[data-visit-seq="6"]')).toHaveAttribute("data-loop", "true");
+    // The block panel's route facts are the recorded route of the selected block: the repair loop
+    // stays inside the review block, so a revisit there is marked as a loop.
+    await page.goto(`${BASE_URL}/executions/${run.executionId}?block=plan-review`);
+    const facts = page.getByTestId("block-route-facts");
+    await expect(facts).toBeVisible();
+    await expect(facts.getByTestId("block-route-loop").first()).toBeVisible();
+    const visits = facts.getByTestId("block-route-visit");
+    expect(await visits.count()).toBeGreaterThan(1);
 
-    // Put the cursor on the first plan step: later visits fade and the URL carries it.
-    await routeList.locator('[data-visit-seq="2"]').click();
-    await expect(page).toHaveURL(/at=2/);
-    await expect(routeList.locator('[data-visit-seq="4"]')).toHaveAttribute("data-beyond", "true");
-    await expect(page.getByTestId("cursor-position")).toContainText("2");
+    // Clicking a visit puts the cursor there: the URL carries it and the cursor control says so.
+    const firstVisitSeq = await visits.first().getAttribute("data-seq");
+    await visits.first().locator("button").click();
+    await expect(page).toHaveURL(new RegExp(`at=${firstVisitSeq}`));
+    await expect(page.getByTestId("cursor-position")).toContainText(String(firstVisitSeq));
+    await expect(facts.locator(`[data-seq="${firstVisitSeq}"]`)).toContainText("you are here");
 
-    // Lanes at the cursor: the plan block is active, the review block not yet reached.
-    await page.getByTestId("run-modes").locator('[data-mode="lanes"]').click();
-    await expect(page).toHaveURL(/view=lanes/);
-    await expect(page.getByTestId("progress-node-plan")).toHaveAttribute("data-status", "active");
-    await expect(page.getByTestId("progress-node-plan-review")).toHaveAttribute(
-      "data-status",
-      "pending",
-    );
+    // The map follows the cursor: at the first review visit the run has not yet repeated the
+    // block, and clearing the cursor brings the waiting state back.
+    await expect(mapCard(page, "plan-review")).not.toContainText("×2");
     await page.getByTestId("cursor-clear").click();
-    await expect(page.getByTestId("progress-node-plan-review")).toHaveAttribute(
-      "data-status",
-      "waiting",
-    );
+    await expect(page).not.toHaveURL(/at=/);
+    await expect(mapCard(page, "plan-review")).toHaveAttribute("data-status", "waiting");
+    await expect(mapCard(page, "plan-review")).toContainText("×2");
 
-    // Canvas fills the viewport and draws the loop as a distinct edge; outline reads the cycle.
-    await page.goto(`${BASE_URL}/executions/${run.executionId}?view=canvas`);
-    await expect(page.getByTestId("canvas-view")).toBeVisible({ timeout: 15000 });
-    await expect(page.locator('[data-edge-kind="cycle"]').first()).toBeVisible();
-    const canvasBox = await page.getByTestId("canvas-view").boundingBox();
-    const pageBox = page.viewportSize()!;
-    expect(canvasBox!.height).toBeGreaterThan(pageBox.height * 0.5);
-    await page.goto(`${BASE_URL}/executions/${run.executionId}?view=outline`);
-    await expect(page.getByTestId("outline-document")).toBeVisible();
-    await expect(page.locator('[data-transition-kind="cycle"]').first()).toBeVisible();
+    // The graph is a page view of its own, deep-linkable, and draws one edge per output.
+    await page.goto(`${BASE_URL}/executions/${run.executionId}?view=graph`);
+    await expect(page.getByTestId("execution-progress")).toHaveAttribute("data-view", "graph");
+    await expect(page.locator("[data-graph-node]").first()).toBeVisible({ timeout: 15000 });
+    // A view is mounted when first shown: a page opened on the graph has no map in the DOM
+    // (the map then opens on the current block when the reader switches to it).
+    await expect(page.getByTestId("map-view")).toHaveCount(0);
+    // The decision after the review routes to two places, and the graph gives every output its
+    // own source handle — and so its own edge — instead of one shared exit. The expected set is
+    // read from the definition the server serves, not written down here.
+    const definition = (
+      (await (await page.request.get(`${BASE_URL}/api/workflows/moira/quick-task`)).json()) as {
+        data: { workflow: { nodes: Array<{ id: string; connections?: Record<string, string> }> } };
+      }
+    ).data.workflow;
+    const decision = definition.nodes.find((node) => node.id === "check-plan-review-clean")!;
+    const expectedHandles = Object.keys(decision.connections ?? {})
+      .map((output) => `out:check-plan-review-clean.${output}`)
+      .sort();
+    expect(expectedHandles.length).toBeGreaterThan(1);
+    const outputs = await page
+      .locator('[data-graph-node="check-plan-review-clean"] [data-handleid^="out:"]')
+      .evaluateAll((els) => els.map((el) => el.getAttribute("data-handleid")).sort());
+    expect(outputs).toEqual(expectedHandles);
+
+    // A link written for one of the views this page used to have resolves to the map.
+    for (const legacy of ["lanes", "canvas", "outline", "route", "nonsense"]) {
+      await page.goto(`${BASE_URL}/executions/${run.executionId}?view=${legacy}`);
+      await expect(page.getByTestId("execution-progress")).toHaveAttribute("data-view", "map");
+      await expect(page.getByTestId("map-view")).toBeVisible();
+    }
 
     // The walkthrough opens from the header and lives in the URL.
     await page.getByTestId("guide-open").click();
@@ -240,7 +289,7 @@ test("answering the waiting step from the page continues the run and records the
     await loginAsAdmin(page);
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto(`${BASE_URL}/executions/${run.processId}`);
-    await expect(page.getByTestId("progress-node-scope")).toHaveAttribute("data-status", "waiting");
+    await expect(mapCard(page, "scope")).toHaveAttribute("data-status", "waiting");
     await page.getByRole("tab", { name: /Variables|Переменные/ }).click();
     const form = page.getByTestId("answer-form");
     await expect(form).toHaveAttribute("data-node-id", "get-task");
@@ -254,7 +303,7 @@ test("answering the waiting step from the page continues the run and records the
     await page.getByTestId("answer-field-task_file").fill("nope");
     await page.getByTestId("answer-submit").click();
     await expect(page.getByTestId("answer-error")).toContainText(/validation/i);
-    await expect(page.getByTestId("progress-node-scope")).toHaveAttribute("data-status", "waiting");
+    await expect(mapCard(page, "scope")).toHaveAttribute("data-status", "waiting");
     await page.getByTestId("answer-field-task_file").fill(`${workspace}/task.md`);
     const answered = page.waitForResponse(
       (r) => r.url().includes("/answer") && r.request().method() === "POST" && r.status() === 200,
@@ -264,7 +313,7 @@ test("answering the waiting step from the page continues the run and records the
     // The run moved on: the scope block is done, the plan block waits, the route carries the
     // adjustment by the user. The variables rows keep every name inside the panel even with
     // long path values (a broken layout pushed the first column out of view).
-    await expect(page.getByTestId("progress-node-scope")).toHaveAttribute("data-status", "done");
+    await expect(mapCard(page, "scope")).toHaveAttribute("data-status", "done");
     const panelBox = (await page.getByTestId("run-panel").boundingBox())!;
     for (const name of ["operating_mode", "progress_scope_outcome"]) {
       const row = page.locator(`[data-variable="${name}"]`).first();
@@ -273,12 +322,12 @@ test("answering the waiting step from the page continues the run and records the
       expect(box.x + box.width).toBeLessThanOrEqual(panelBox.x + panelBox.width + 1);
       await expect(row).toContainText(name);
     }
-    await expect(page.getByTestId("progress-node-plan")).toHaveAttribute("data-status", "waiting");
+    await expect(mapCard(page, "plan")).toHaveAttribute("data-status", "waiting");
     await expect(page.getByTestId("adjustment-count")).toContainText("1");
-    await page.getByTestId("run-modes").locator('[data-mode="route"]').click();
-    const adjusted = page
-      .getByTestId("route-list")
-      .locator('[data-visit-seq][data-adjusted="true"]');
+    // The scope block's own facts name the adjustment and who made it.
+    await page.getByTestId("map-contents-scope").click();
+    await page.getByRole("tab", { name: /Block|Блок/ }).click();
+    const adjusted = page.getByTestId("block-route-facts").getByTestId("block-route-adjusted");
     await expect(adjusted).toHaveCount(1);
     await expect(adjusted).toContainText(/person|человек/i);
     // The progress_scope_outcome row's history opens under the row: the change by the answering
@@ -292,7 +341,8 @@ test("answering the waiting step from the page continues the run and records the
     await expect(changes).toBeVisible();
     await expect(changes.locator("[data-history-seq]").last()).toContainText("get-task");
     await expect(changes.locator("[data-history-seq]").last()).toContainText(/adjusted|изменено/);
-    await page.getByTestId("route-list").locator('[data-visit-seq="0"]').click();
+    await page.goto(`${BASE_URL}/executions/${run.processId}?at=0`);
+    await page.getByRole("tab", { name: /Variables|Переменные/ }).click();
     await expect(page.getByTestId("variables-cursor-note")).toBeVisible();
     await expect(page.locator('[data-variable="progress_scope_outcome"]')).toHaveAttribute(
       "data-value",
@@ -332,19 +382,20 @@ test("shows the loading state and keeps the page usable on a phone without a pro
     await page.setViewportSize({ width: 600, height: 900 });
     run.setMode("live");
     await page.reload();
-    await expect(page.getByTestId("execution-progress")).toBeVisible();
-    // Narrow width: the rail turns vertical and nothing overflows the page horizontally.
-    await expect(page.locator("[data-lanes-orientation]")).toHaveAttribute(
-      "data-lanes-orientation",
-      "vertical",
-    );
+    await expect(page.getByTestId("map-view")).toBeVisible();
+    // Narrow width: the contents stack under the diagram and nothing overflows horizontally.
+    const diagram = (await page.getByTestId("canvas-view").boundingBox())!;
+    const sidebar = (await page.getByTestId("map-contents").boundingBox())!;
+    expect(sidebar.y).toBeGreaterThanOrEqual(diagram.y + diagram.height - 1);
     const overflow = await page.evaluate(
       () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
     );
     expect(overflow).toBeLessThanOrEqual(0);
-    // On a phone the mode note folds to its title and the picture keeps at least two fifths of
-    // the viewport (the broken layout left the canvas a strip about a hundred pixels tall).
-    await expect(page.getByTestId("guidance-lanes")).toHaveAttribute("data-folded", "true");
+    // The explanation of the view costs one row: its body is closed until the reader opens it,
+    // so the picture keeps at least two fifths of the viewport (a broken layout once left the
+    // diagram a strip about a hundred pixels tall).
+    await expect(page.getByTestId("guidance-map-toggle")).toHaveAttribute("aria-expanded", "false");
+    await expect(page.getByTestId("guidance-map-body")).toHaveCount(0);
     const picture = (await page.getByTestId("execution-progress").boundingBox())!;
     expect(picture.height).toBeGreaterThanOrEqual(900 * 0.4);
 
@@ -368,8 +419,10 @@ test("shows the loading state and keeps the page usable on a phone without a pro
     await page.reload();
     await absentResponse;
     await expect(page.getByText(run.executionId.substring(0, 8), { exact: true })).toBeVisible();
+    // Without a projection the technical graph fills the page on its own.
     await expect(page.locator(".react-flow__viewport")).toBeVisible({ timeout: 15000 });
     await expect(page.getByTestId("execution-progress")).toHaveCount(0);
+    await expect(page.locator('[data-view="graph"]')).toBeVisible();
   } finally {
     run.releaseSlow();
     await run.cleanup();

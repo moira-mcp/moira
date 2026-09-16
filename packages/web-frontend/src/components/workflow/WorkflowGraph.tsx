@@ -43,6 +43,7 @@ import {
   GraphMeasuredHeights,
   GraphEdgeView,
   StepNodeView,
+  type BlockGroupData,
   type BlockGroupNode,
   type GraphEdge,
   type StepNode,
@@ -111,6 +112,8 @@ export interface WorkflowGraphProps {
   validation?: WorkflowValidationStatus;
   /** Current node ID for execution highlighting */
   currentNodeId?: string | null;
+  /** The block the page has selected on the map: its frame is highlighted on the graph. */
+  selectedBlockId?: string | null;
   /** Node IDs that have runtime errors (for error highlighting) */
   errorNodeIds?: string[];
   /**
@@ -174,6 +177,7 @@ export const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
   workflow,
   validation,
   currentNodeId,
+  selectedBlockId = null,
   errorNodeIds = EMPTY_ERROR_NODE_IDS,
   blocks,
   layoutOptions = DEFAULT_LAYOUT_OPTIONS,
@@ -187,6 +191,14 @@ export const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
   onInit,
   focusRequest = null,
 }) => {
+  // A connection chip names its other end the way the map does: the authored display name, else
+  // the node id. The technical graph's `data.label` falls back to the node type ("Agent Task"),
+  // which names nothing when three chips lead to three different agent nodes.
+  const nodeName = useCallback(
+    (nodeId: string): string =>
+      workflow.nodes.find((n) => n.id === nodeId)?.metadata?.displayName || nodeId,
+    [workflow.nodes],
+  );
   const { t } = useTranslation();
   const mobile = useIsMobile();
   const { actualTheme } = useTheme();
@@ -277,14 +289,20 @@ export const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
   // the instance a caller receives on init is the one that holds the graph.
   const [isLayouting, setIsLayouting] = useState(true);
 
-  // What changes without a relayout — the current node, the error nodes and the navigation
-  // callback — is merged into the laid-out nodes here, so a page re-render or a run advancing
-  // never lays the graph out again (and never refits it under the reader).
+  // What changes without a relayout — the current node, the selected block, the error nodes and
+  // the navigation callback — is merged into the laid-out nodes here, so a page re-render or a
+  // run advancing never lays the graph out again (and never refits it under the reader).
   const nodes = useMemo<Node[]>(() => {
     const errorNodeIdSet = new Set(errorNodeIds);
     return laidNodes.map((node) =>
       node.type === "block-group"
-        ? node
+        ? {
+            ...node,
+            data: {
+              ...node.data,
+              selected: (node.data as BlockGroupData).blockId === selectedBlockId,
+            },
+          }
         : {
             ...node,
             data: {
@@ -296,7 +314,7 @@ export const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
             selected: node.id === currentNodeId,
           },
     );
-  }, [laidNodes, currentNodeId, errorNodeIds, onWorkflowNavigate]);
+  }, [laidNodes, currentNodeId, selectedBlockId, errorNodeIds, onWorkflowNavigate]);
   const [currentLayoutOptions, setCurrentLayoutOptions] = useState(layoutOptions);
 
   // Node detail sheet state
@@ -312,39 +330,33 @@ export const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
 
   // Calculate incoming and outgoing nodes for the selected node
   const { incomingNodes, outgoingNodes } = useMemo(() => {
-    if (!selectedNodeData || edges.length === 0 || nodes.length === 0) {
+    if (!selectedNodeData || edges.length === 0) {
       return { incomingNodes: [], outgoingNodes: [] };
     }
 
     const nodeId = selectedNodeData.id;
-    const nodeMap = new Map(nodes.map((n) => [n.id, n]));
 
     // Find edges where this node is the target (incoming)
     const incoming = edges
       .filter((e) => e.target === nodeId)
       .map((e) => {
-        const sourceNode = nodeMap.get(e.source);
-        return {
-          id: e.source,
-          label: (sourceNode?.data?.label as string) || e.source,
-        };
+        return { id: e.source, label: nodeName(e.source) };
       });
 
     // Find edges where this node is the source (outgoing)
     const outgoing = edges
       .filter((e) => e.source === nodeId)
       .map((e) => {
-        const targetNode = nodeMap.get(e.target);
         const edgeData = e.data as { link?: { label: string } } | undefined;
         return {
           id: e.target,
-          label: (targetNode?.data?.label as string) || e.target,
+          label: nodeName(e.target),
           connectionType: edgeData?.link?.label ?? "default",
         };
       });
 
     return { incomingNodes: incoming, outgoingNodes: outgoing };
-  }, [selectedNodeData, edges, nodes]);
+  }, [selectedNodeData, edges, nodeName]);
 
   // Theme colors
   const backgroundColor = actualTheme === "dark" ? "#1a1a1a" : "#FAFBFC";
@@ -561,23 +573,18 @@ export const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
       if (onNodeSelect) {
         // External sidebar mode — compute connections and notify parent
         const nodeId = node.id;
-        const nodeMap = new Map(nodes.map((n) => [n.id, n]));
 
         const incoming = edges
           .filter((e) => e.target === nodeId)
-          .map((e) => {
-            const sourceNode = nodeMap.get(e.source);
-            return { id: e.source, label: (sourceNode?.data?.label as string) || e.source };
-          });
+          .map((e) => ({ id: e.source, label: nodeName(e.source) }));
 
         const outgoing = edges
           .filter((e) => e.source === nodeId)
           .map((e) => {
-            const targetNode = nodeMap.get(e.target);
             const edgeData = e.data as { link?: { label: string } } | undefined;
             return {
               id: e.target,
-              label: (targetNode?.data?.label as string) || e.target,
+              label: nodeName(e.target),
               connectionType: edgeData?.link?.label ?? "default",
             };
           });
@@ -590,7 +597,7 @@ export const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
         setDetailSheetOpen(true);
       }
     },
-    [onNodeClick, onNodeSelect, showNodeDetails, nodes, edges],
+    [onNodeClick, onNodeSelect, showNodeDetails, edges, nodeName],
   );
 
   /**

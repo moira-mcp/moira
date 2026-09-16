@@ -46,14 +46,19 @@ description: Возможность пропуска необязательны�
 {
   "type": "condition",
   "id": "check-skip",
-  "condition": {
-    "operator": "eq",
-    "left": { "contextPath": "skip" },
-    "right": "yes"
-  },
+  "cases": [
+    {
+      "when": {
+        "operator": "eq",
+        "left": { "contextPath": "skip" },
+        "right": "yes"
+      },
+      "output": "skipped"
+    }
+  ],
   "connections": {
-    "true": "next-step",
-    "false": "process-analysis"
+    "skipped": "next-step",
+    "default": "process-analysis"
   }
 }
 ```
@@ -95,14 +100,19 @@ description: Возможность пропуска необязательны�
 
 ```json
 {
-  "condition": {
-    "operator": "eq",
-    "left": { "contextPath": "want_detailed_analysis" },
-    "right": false
-  },
+  "cases": [
+    {
+      "when": {
+        "operator": "eq",
+        "left": { "contextPath": "want_detailed_analysis" },
+        "right": false
+      },
+      "output": "skipped"
+    }
+  ],
   "connections": {
-    "true": "skip-to-summary",
-    "false": "detailed-analysis"
+    "skipped": "skip-to-summary",
+    "default": "detailed-analysis"
   }
 }
 ```

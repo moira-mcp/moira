@@ -2,12 +2,15 @@
  * Run page — one execution shown as a process.
  *
  * The page keeps the inspector's contract (props injected by the user and admin wrappers, the
- * compact toolbar, context editing, errors, steps, locks) and puts the run in front: the modes
- * (lanes by default, canvas, outline, route) fill the viewport on the left, a panel on the right
- * carries the selected block's detail, the run's variables with the runtime adjustments, and the
- * inspector's tabs. Everything about the run comes from the server's projection; the page never
- * derives block statuses or the route itself. State is deep-linkable: `view`, `block`, `at`,
- * `guide`. A workflow without a process view falls back to the technical node graph.
+ * compact toolbar, context editing, errors, steps, locks) and puts the run in front: two views —
+ * the map (the process as a diagram with its contents) and the technical node graph — fill the
+ * viewport on the left, a panel on the right carries the selected block's detail, the run's
+ * variables with the runtime adjustments, and the inspector's tabs. Both views stay mounted once
+ * shown and are only hidden, so switching between them keeps the map's selection and the graph's
+ * viewport; the graph's chunk is fetched on mount, before anything asks for it. Everything about
+ * the run comes from the server's projection; the page never derives block statuses or the route
+ * itself. State is deep-linkable: `view`, `block`, `at`, `guide`. A workflow without a process
+ * view shows the technical node graph alone.
  */
 
 import React, { useState, useEffect, useCallback, useMemo, Suspense, useRef } from "react";
@@ -22,7 +25,6 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { apiClient } from "../../services/api-client";
 import type { WorkflowGraph as WorkflowGraphType } from "../../types";
-import type { ExecutionProgress } from "@mcp-moira/workflow-engine/progress-visual";
 import {
   ExecutionErrorHistory,
   isRefusalEntry,
@@ -42,7 +44,6 @@ import {
   Unlock,
   Boxes,
   Variable,
-  Workflow,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -59,23 +60,22 @@ import { Card } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 import { MODES, resolveMode, type RunViewMode } from "../run/modes";
-import { LanesView } from "../run/LanesView";
-import { CanvasView } from "../run/CanvasView";
-import { OutlineView } from "../run/OutlineView";
-import { RouteView } from "../run/RouteView";
+import { MapView } from "../run/MapView";
 import { BlockDetailPanel } from "../run/BlockDetailPanel";
 import { VariablesPanel } from "../run/VariablesPanel";
 import { RunCursor } from "../run/RunCursor";
 import { StatusLegend } from "../run/status";
 import { Walkthrough, type PanelTab } from "../run/Walkthrough";
-import { currentBlockId, runBlocks, stepsOf, waitingStep, type RunViewProps } from "../run/model";
+import { currentBlockId, runBlocks, stepsOf, waitingStep } from "../run/model";
 import { StepCard, StepCardList } from "../run/StepCard";
-import type { RunBlock } from "../run/model";
+import type { RunBlock, RunProgress } from "../run/model";
 import { clampCursor } from "../run/route";
 
-// Lazy load the technical graph for better initial page load
+// The technical graph is a large chunk: it is loaded lazily, but requested as soon as the page
+// mounts, so the first switch to the graph view has nothing to wait for.
+const importWorkflowGraph = () => import("../workflow/WorkflowGraph");
 const WorkflowGraph = React.lazy(() =>
-  import("../workflow/WorkflowGraph").then((module) => ({
+  importWorkflowGraph().then((module) => ({
     default: module.WorkflowGraph,
   })),
 );
@@ -84,13 +84,6 @@ const VIEW_PARAM = "view";
 const BLOCK_PARAM = "block";
 const AT_PARAM = "at";
 const GUIDE_PARAM = "guide";
-
-const MODE_COMPONENTS: Record<RunViewMode, React.ComponentType<RunViewProps>> = {
-  lanes: LanesView,
-  canvas: CanvasView,
-  outline: OutlineView,
-  route: RouteView,
-};
 
 // Base execution data - common fields
 export interface ExecutionData {
@@ -158,10 +151,10 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
-  /** The whole run's projection. */
-  const [progress, setProgress] = useState<ExecutionProgress | null>(null);
+  /** The whole run's projection, with the version statistics the API attaches to it. */
+  const [progress, setProgress] = useState<RunProgress | null>(null);
   /** The projection at the route cursor, when one is set. */
-  const [cursorProgress, setCursorProgress] = useState<ExecutionProgress | null>(null);
+  const [cursorProgress, setCursorProgress] = useState<RunProgress | null>(null);
   const [progressError, setProgressError] = useState(false);
   const [progressLoading, setProgressLoading] = useState(false);
   const [editableVariableNames, setEditableVariableNames] = useState<ReadonlySet<string>>(
@@ -270,13 +263,22 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
     loadExecution();
   }, [loadExecution]);
 
+  // Fetch the graph's chunk while the run is loading, so the first switch to the graph view has
+  // nothing to download and shows no skeleton.
+  useEffect(() => {
+    void importWorkflowGraph();
+  }, []);
+
   const handleRefresh = useCallback(() => {
     loadExecution(true);
   }, [loadExecution]);
 
   // --- URL state: mode, selected block, cursor, guide.
   const mode = resolveMode(searchParams.get(VIEW_PARAM));
-  const blocks = useMemo(() => (progress ? runBlocks(progress) : []), [progress]);
+  const blocks = useMemo(
+    () => (progress ? runBlocks(progress, progress.statistics) : []),
+    [progress],
+  );
   const current = useMemo(() => currentBlockId(blocks), [blocks]);
   const blockParam = searchParams.get(BLOCK_PARAM);
   const selectedBlockId = blocks.some((b) => b.id === blockParam) ? blockParam : null;
@@ -286,6 +288,9 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
     [progress, searchParams],
   );
   const guideStep = Number(searchParams.get(GUIDE_PARAM)) || 0;
+  // A view is rendered from the first time it is asked for and never unmounted again.
+  const mountedViews = useRef<Set<RunViewMode>>(new Set());
+  mountedViews.current.add(mode);
 
   const update = useCallback(
     (patch: Record<string, string | null>) => {
@@ -324,7 +329,7 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
 
   const shownProgress = cursor !== null && cursorProgress ? cursorProgress : progress;
   const shownBlocks = useMemo(
-    () => (shownProgress ? runBlocks(shownProgress) : []),
+    () => (shownProgress ? runBlocks(shownProgress, shownProgress.statistics) : []),
     [shownProgress],
   );
   const shownBlock = shownBlocks.find((b) => b.id === shownBlockId) ?? null;
@@ -413,13 +418,13 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
     // Node details are shown via NodeDetailSheet in WorkflowGraph
   }, []);
 
-  /** Bring a node into view on the technical graph (the graph panel when a process view exists). */
+  /** Bring a node into view on the technical graph: the page switches to the graph view for it. */
   const focusNode = useCallback(
     (nodeId: string) => {
-      if (progress) setChosenTab("graph");
+      update({ [VIEW_PARAM]: "graph" });
       setFocusRequest((previous) => ({ nodeId, token: (previous?.token ?? 0) + 1 }));
     },
-    [progress],
+    [update],
   );
 
   const handleCurrentNodeClick = useCallback(() => {
@@ -573,7 +578,6 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
   const journal = execution.errors ?? [];
   const errorsCount = journal.filter(isRefusalEntry).length;
   const degradationsCount = journal.length - errorsCount;
-  const ModeView = MODE_COMPONENTS[mode];
   const technicalGraph = (
     <Suspense fallback={<DiagramSkeleton />}>
       <WorkflowGraph
@@ -581,6 +585,7 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
         validation={workflow.validation}
         blocks={blocks}
         currentNodeId={execution.currentNodeId}
+        selectedBlockId={selectedBlockId}
         errorNodeIds={errorNodeIds}
         onNodeClick={handleNodeClick}
         showControls={true}
@@ -729,10 +734,12 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
         </div>
       ) : null}
 
-      {/* Main content: the run on the left, the panel on the right (stacked on a phone). */}
-      <div className="flex-1 min-h-0 flex flex-col lg:flex-row overflow-hidden">
+      {/* Main content: the run on the left, the panel on the right. On a phone the two stack into
+          one scrolling column — the view keeps a readable height instead of being squeezed into
+          what the panel leaves — and from `lg` the row fills the page and scrolls nowhere. */}
+      <div className="flex-1 min-h-0 flex flex-col lg:flex-row overflow-y-auto lg:overflow-hidden">
         <section
-          className="flex-1 min-w-0 min-h-0 flex flex-col overflow-hidden"
+          className="flex min-w-0 flex-col lg:flex-1 lg:min-h-0 lg:overflow-hidden"
           data-view={progress ? mode : "graph"}
           {...(progress ? { "data-testid": "execution-progress" } : {})}
           aria-label={t("pages.runPage.title")}
@@ -773,7 +780,10 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
                   />
                 )}
                 <div className="flex-1" />
-                <StatusLegend className="hidden xl:flex" />
+                <StatusLegend
+                  waitingFor={shownProgress?.waitingFor ?? null}
+                  className="hidden xl:flex"
+                />
                 <button
                   type="button"
                   onClick={() => update({ [GUIDE_PARAM]: "1" })}
@@ -784,24 +794,36 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
                   {t("pages.runPage.guide.open")}
                 </button>
               </div>
-              <div className="flex-1 min-h-0">
-                <ModeView
-                  progress={shownProgress}
-                  blocks={shownBlocks}
-                  route={progress.route}
-                  workflow={workflow.workflow}
-                  selectedBlockId={selectedBlockId}
-                  onSelectBlock={(id) => {
-                    update({ [BLOCK_PARAM]: id });
-                    if (id && chosenTab !== null && chosenTab !== "block") setChosenTab("block");
-                  }}
-                  cursor={cursor}
-                  onSetCursor={(at) => update({ [AT_PARAM]: at === null ? null : String(at) })}
-                />
+              {/* Both views stay mounted once they have been shown: the hidden one keeps its
+                  state (the map's selection, the graph's viewport) so a switch is instant. */}
+              <div className="lg:flex-1 lg:min-h-0">
+                {mountedViews.current.has("map") && (
+                  <div className={cn("lg:h-full", mode !== "map" && "hidden")}>
+                    <MapView
+                      progress={shownProgress}
+                      blocks={shownBlocks}
+                      route={progress.route}
+                      workflow={workflow.workflow}
+                      selectedBlockId={selectedBlockId}
+                      onSelectBlock={(id) => {
+                        update({ [BLOCK_PARAM]: id });
+                        if (id && chosenTab !== null && chosenTab !== "block")
+                          setChosenTab("block");
+                      }}
+                      cursor={cursor}
+                      onSetCursor={(at) => update({ [AT_PARAM]: at === null ? null : String(at) })}
+                    />
+                  </div>
+                )}
+                {mountedViews.current.has("graph") && (
+                  <div className={cn("h-[60vh] lg:h-full", mode !== "graph" && "hidden")}>
+                    {technicalGraph}
+                  </div>
+                )}
               </div>
             </>
           ) : (
-            <div className="flex-1 min-h-0">{technicalGraph}</div>
+            <div className="h-[60vh] lg:h-full lg:flex-1 lg:min-h-0">{technicalGraph}</div>
           )}
         </section>
 
@@ -883,16 +905,6 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
                 <ListChecks className="size-3.5" />
                 {t("pages.executionInspector.tabs.steps")}
               </TabsTrigger>
-              {progress && (
-                <TabsTrigger
-                  value="graph"
-                  className={TAB_CLASS}
-                  title={t("pages.runPage.tabHints.graph")}
-                >
-                  <Workflow className="size-3.5" />
-                  {t("pages.runPage.tabs.graph")}
-                </TabsTrigger>
-              )}
               <TabsTrigger
                 value="locks"
                 className={TAB_CLASS}
@@ -915,7 +927,13 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
                   block={shownBlock}
                   blocks={shownBlocks}
                   workflow={workflow.workflow}
+                  waitingFor={shownProgress?.waitingFor ?? null}
+                  progress={shownProgress ?? undefined}
+                  route={progress.route}
+                  statistics={shownProgress?.statistics}
+                  cursor={cursor}
                   onSelectBlock={(id) => update({ [BLOCK_PARAM]: id })}
+                  onSetCursor={(at) => update({ [AT_PARAM]: at === null ? null : String(at) })}
                   onFocusNode={focusNode}
                 />
               </TabsContent>
@@ -950,12 +968,6 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
                 onNodeClick={focusNode}
               />
             </TabsContent>
-
-            {progress && (
-              <TabsContent value="graph" className="flex-1 overflow-hidden m-0">
-                <div className="h-full min-h-[320px]">{technicalGraph}</div>
-              </TabsContent>
-            )}
 
             <TabsContent
               value="locks"

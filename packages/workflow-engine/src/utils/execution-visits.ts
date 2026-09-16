@@ -18,6 +18,10 @@ export interface EngineVisit {
   changes: Record<string, unknown>;
   /** The visit paused for input. */
   waited: boolean;
+  /** Epoch ms when the node was entered in this cycle. */
+  enteredAt: number;
+  /** Epoch ms when the node was left; absent while it waits. */
+  leftAt?: number;
 }
 
 /** Exit key recorded on the visit a teleport jumped away from. */
@@ -96,7 +100,10 @@ export function appendEngineVisits(
   };
   if (teleportTo) {
     const last = open();
-    if (last) last.exitKey = TELEPORT_EXIT_KEY;
+    if (last) {
+      last.exitKey = TELEPORT_EXIT_KEY;
+      last.leftAt = Math.max(last.enteredAt ?? 0, Date.now());
+    }
   }
   visits.forEach((visit, index) => {
     const last = index === 0 ? open() : undefined;
@@ -104,6 +111,9 @@ export function appendEngineVisits(
       last.exitKey = visit.exitKey;
       last.changes = { ...last.changes, ...visit.changes };
       if (visit.waited) last.waited = true;
+      // The wait keeps the moment its directive was presented; the resume closes it.
+      if (last.enteredAt === undefined) last.enteredAt = visit.enteredAt;
+      if (visit.leftAt !== undefined) last.leftAt = Math.max(last.enteredAt, visit.leftAt);
       // An answer that left the node was accepted; one that paused again was rejected as
       // invalid and is not an adjustment of the run.
       if (answeredBy && visit.exitKey !== null) {
@@ -114,6 +124,8 @@ export function appendEngineVisits(
           changes: { ...visit.changes },
           adjusted: true,
           actor: answeredBy,
+          enteredAt: visit.leftAt ?? visit.enteredAt,
+          leftAt: visit.leftAt ?? visit.enteredAt,
         });
       }
       return;
@@ -124,6 +136,8 @@ export function appendEngineVisits(
       exitKey: visit.exitKey,
       changes: visit.changes,
       ...(visit.waited ? { waited: true } : {}),
+      enteredAt: visit.enteredAt,
+      ...(visit.leftAt !== undefined ? { leftAt: visit.leftAt } : {}),
     });
   });
 }
@@ -139,7 +153,59 @@ export function withInFlightVisit(execution: WorkflowExecution, nodeId: string):
   return {
     ...execution,
     currentNodeId: nodeId,
-    visits: [...visits, { seq: visits.length, nodeId, exitKey: null, changes: {} }],
+    visits: [
+      ...visits,
+      { seq: visits.length, nodeId, exitKey: null, changes: {}, enteredAt: Date.now() },
+    ],
+  };
+}
+
+/**
+ * The node types a run pauses on, by who is waited for there: a `lock` gate waits for a person,
+ * every other pausing node for the agent. Continuation recovery resumes at these same types.
+ */
+export const PAUSE_ACTOR_BY_NODE_TYPE: Readonly<Record<string, "agent" | "user">> = {
+  "agent-directive": "agent",
+  teleport: "agent",
+  materialize: "agent",
+  subgraph: "agent",
+  lock: "user",
+};
+export const PAUSING_NODE_TYPES: ReadonlySet<string> = new Set(
+  Object.keys(PAUSE_ACTOR_BY_NODE_TYPE),
+);
+
+/**
+ * The execution as it stands once a notification node has sent: the notification's own open
+ * visit (`withInFlightVisit`), and — when the node's single forward connection leads straight to a
+ * node the run pauses on — that node as the one the run waits on, with a synthetic open visit that
+ * carries no timestamp (the run has not entered it yet, so its pass has no duration). A projection
+ * of this copy names the block and the actor the message's reader is about to wait for or on: a
+ * `lock` gate reads as a person, a directive, teleport, materialize or subgraph wait as the agent. A
+ * successor that pauses nowhere (a routing node, an end) leaves the copy as `withInFlightVisit`
+ * makes it. The returned copy is never persisted.
+ */
+export function withInFlightPause(
+  graph: { nodes: ReadonlyArray<{ id: string; type: string; connections?: unknown }> },
+  execution: WorkflowExecution,
+  nodeId: string,
+): WorkflowExecution {
+  const inFlight = withInFlightVisit(execution, nodeId);
+  const node = graph.nodes.find((candidate) => candidate.id === nodeId);
+  const connections = (node?.connections ?? {}) as Record<string, string | undefined>;
+  const nextId = connections.default ?? connections.success;
+  const next = nextId ? graph.nodes.find((candidate) => candidate.id === nextId) : undefined;
+  if (!next || !PAUSING_NODE_TYPES.has(next.type)) return inFlight;
+  const visits = inFlight.visits ?? [];
+  // The visit is a wait, so the projection marks the block `waiting` and words the actor.
+  return {
+    ...inFlight,
+    currentNodeId: next.id,
+    waitingForInputNodeId: next.id,
+    visits: [
+      ...visits,
+      { seq: visits.length, nodeId: next.id, exitKey: null, changes: {}, waited: true },
+    ],
   };
 }
 
@@ -149,11 +215,14 @@ export function adjustmentVisit(
   changes: Record<string, unknown>,
   actor: NonNullable<ExecutionVisit["actor"]>,
 ): Omit<ExecutionVisit, "seq"> {
+  const now = Date.now();
   return {
     nodeId: execution.currentNodeId ?? execution.waitingForInputNodeId ?? "",
     exitKey: null,
     changes,
     adjusted: true,
     actor,
+    enteredAt: now,
+    leftAt: now,
   };
 }

@@ -3,6 +3,7 @@
  */
 
 import { getDatabase, getSqliteInstance } from "../database/connection.js";
+import { upgradeStoredWorkflowDefinitions } from "./workflow-definition-upgrade.js";
 import { WorkflowRepository } from "../database/repositories/workflow-repository.js";
 import { ExecutionRepository } from "../database/repositories/execution-repository.js";
 import { SettingsRepository } from "../database/repositories/settings-repository.js";
@@ -187,6 +188,9 @@ export {
   type WorkflowVisibility,
   type CatalogEntry,
 } from "./workflow-catalog.js";
+
+export { upgradeStoredWorkflowDefinitions } from "./workflow-definition-upgrade.js";
+export type { StoredDefinitionUpgradeResult } from "./workflow-definition-upgrade.js";
 
 export {
   installCatalogEntry,
@@ -582,6 +586,9 @@ export function getWorkflowMutationService(): WorkflowMutationService {
  * to ensure newly migrated workflows also get validated.
  */
 export async function initializeWorkflowValidationCache(): Promise<void> {
+  // Stored definitions are upgraded to the current schema shape before anything validates or
+  // compares them; a row already at the current version is untouched.
+  upgradeStoredWorkflowDefinitions(getSqliteInstance());
   const mutationService = getWorkflowMutationService();
   await mutationService.initialize();
 }

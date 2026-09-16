@@ -78,7 +78,7 @@ curl http://localhost:${DOCKER_PORT}/api/health        # Backend API health
 
 - **start** - Auto-executes, merges data, continues
 - **agent-directive** - Pauses for user input, validates response
-- **condition** - Auto-executes, branches on true/false
+- **condition** - Auto-executes, takes the output of the first holding case, else `default`
 - **expression** - Auto-executes, computes values using arithmetic
 - **user-notification** - Auto-executes through the current user's configured channels
 - **telegram-notification** - Deprecated Telegram-only compatibility node

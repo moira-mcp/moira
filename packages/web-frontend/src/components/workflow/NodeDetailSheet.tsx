@@ -39,6 +39,7 @@ import { useTranslation } from "react-i18next";
 import { displayNodeType } from "../../types/node-type-catalog";
 import { NodeSchemaReadout } from "./NodeSchemaReadout";
 import { NodePlaybookReferences, collectNodeReferences } from "./NodePlaybookReferences";
+import { OutgoingConnectionChips } from "./OutgoingConnections";
 
 interface NodeDetailSheetProps {
   open: boolean;
@@ -154,7 +155,8 @@ export const NodeDetailSheet: React.FC<NodeDetailSheetProps> = ({
   const directive = data.directive as string | undefined;
   const completionCondition = data.completionCondition as string | undefined;
   const inputSchema = data.inputSchema as Record<string, unknown> | undefined;
-  const condition = data.condition as Record<string, unknown> | undefined;
+  const cases = data.cases as
+    Array<{ summary?: string; output: string; target?: string }> | undefined;
   const message = data.message as string | undefined;
   const expressions = data.expressions as string[] | undefined;
   const graphId = data.graphId as string | undefined;
@@ -272,16 +274,21 @@ export const NodeDetailSheet: React.FC<NodeDetailSheetProps> = ({
               </Section>
             )}
 
-            {/* Condition - for condition nodes */}
-            {condition && (
+            {/* Routing cases - condition and agent-directive nodes */}
+            {cases && cases.length > 0 && (
               <Section
-                title={t("components.workflowGraph.nodeDetails.condition", "Condition")}
+                title={t("components.workflowGraph.nodeDetails.cases", "Cases")}
                 collapsible
                 defaultOpen={false}
               >
-                <pre className="text-xs bg-muted p-3 rounded-md overflow-auto max-h-48">
-                  {JSON.stringify(condition, null, 2)}
-                </pre>
+                <ul className="text-xs space-y-1">
+                  {cases.map((routingCase, index) => (
+                    <li key={index} className="flex gap-2">
+                      <span className="font-mono text-muted-foreground">{routingCase.output}</span>
+                      <span>{routingCase.summary ?? ""}</span>
+                    </li>
+                  ))}
+                </ul>
               </Section>
             )}
 
@@ -383,17 +390,7 @@ export const NodeDetailSheet: React.FC<NodeDetailSheetProps> = ({
                         <ArrowRight className="w-3 h-3" />
                         <span>To</span>
                       </div>
-                      <div className="flex flex-wrap gap-1.5">
-                        {outgoingNodes.map((n) => (
-                          <Badge
-                            key={`${n.id}-${n.connectionType}`}
-                            variant="secondary"
-                            className="text-xs font-normal"
-                          >
-                            {n.label || n.id}
-                          </Badge>
-                        ))}
-                      </div>
+                      <OutgoingConnectionChips connections={outgoingNodes} cases={cases} />
                     </div>
                   )}
                 </div>

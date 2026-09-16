@@ -79,14 +79,19 @@ description: Публикация HTML контента с публичными 
 {
   "id": "check-file-access",
   "type": "condition",
-  "condition": {
-    "operator": "eq",
-    "left": { "contextPath": "can_create_files" },
-    "right": true
-  },
+  "cases": [
+    {
+      "when": {
+        "operator": "eq",
+        "left": { "contextPath": "can_create_files" },
+        "right": true
+      },
+      "output": "can-create-files"
+    }
+  ],
   "connections": {
-    "true": "generate-file-then-upload",
-    "false": "generate-and-upload-direct"
+    "can-create-files": "generate-file-then-upload",
+    "default": "generate-and-upload-direct"
   }
 }
 ```

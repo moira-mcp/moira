@@ -31,6 +31,8 @@ function blocksOf(slug: string): { blocks: RunBlock[]; graph: WorkflowGraph } {
     visits: 0,
     currentNodeId: null,
     content: { summary: null, details: [], outcome: null, next: null },
+    timing: { passes: [], totalMs: null, currentMs: null, recorded: false },
+    list: null,
   }));
   return { blocks, graph };
 }

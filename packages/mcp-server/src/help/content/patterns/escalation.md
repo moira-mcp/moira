@@ -20,8 +20,8 @@ The ask-user node offers two decisions:
 flowchart LR
     F[fix] --> V[validate]
     V --> C{count < max?}
-    C -->|true| F
-    C -->|false| A[ask-user-limit]
+    C -->|under-limit| F
+    C -->|default| A[ask-user-limit]
     A --> D{decision}
     D -->|continue| N[next phase]
     D -->|reset| R[reset counter = 0]
@@ -53,14 +53,19 @@ Route the decision: `continue` proceeds to the next phase, `reset` runs the coun
 {
   "type": "condition",
   "id": "route-limit-decision",
-  "condition": {
-    "operator": "eq",
-    "left": { "contextPath": "decision" },
-    "right": "reset"
-  },
+  "cases": [
+    {
+      "when": {
+        "operator": "eq",
+        "left": { "contextPath": "decision" },
+        "right": "reset"
+      },
+      "output": "reset"
+    }
+  ],
   "connections": {
-    "true": "reset-validation-counter",
-    "false": "next-phase"
+    "reset": "reset-validation-counter",
+    "default": "next-phase"
   }
 }
 ```
@@ -94,14 +99,19 @@ it through an ask-user node so the user keeps control over unresolved issues.
 {
   "type": "condition",
   "id": "check-retry-limit",
-  "condition": {
-    "operator": "lt",
-    "left": { "contextPath": "current_iteration" },
-    "right": 3
-  },
+  "cases": [
+    {
+      "when": {
+        "operator": "lt",
+        "left": { "contextPath": "current_iteration" },
+        "right": 3
+      },
+      "output": "under-limit"
+    }
+  ],
   "connections": {
-    "true": "fix-and-retry",
-    "false": "escalate-to-user"
+    "under-limit": "fix-and-retry",
+    "default": "escalate-to-user"
   }
 }
 ```
@@ -132,18 +142,53 @@ them make informed decisions.
 
 ### Route User Decision
 
+One condition node carries every decision the enum allows: each case names the output for one
+answer, and the answer left over (`fix`) falls through to `default`. Two answers may share an
+output, as `continue` and `skip` do here.
+
 ```json
 {
   "type": "condition",
-  "id": "check-reset",
-  "condition": {
-    "operator": "eq",
-    "left": { "contextPath": "user_decision" },
-    "right": "reset"
-  },
+  "id": "route-user-decision",
+  "cases": [
+    {
+      "when": {
+        "operator": "eq",
+        "left": { "contextPath": "user_decision" },
+        "right": "reset"
+      },
+      "output": "reset"
+    },
+    {
+      "when": {
+        "operator": "eq",
+        "left": { "contextPath": "user_decision" },
+        "right": "continue"
+      },
+      "output": "proceed"
+    },
+    {
+      "when": {
+        "operator": "eq",
+        "left": { "contextPath": "user_decision" },
+        "right": "skip"
+      },
+      "output": "proceed"
+    },
+    {
+      "when": {
+        "operator": "eq",
+        "left": { "contextPath": "user_decision" },
+        "right": "abort"
+      },
+      "output": "abort"
+    }
+  ],
   "connections": {
-    "true": "reset-counter",
-    "false": "check-continue"
+    "reset": "reset-counter",
+    "proceed": "proceed-to-next",
+    "abort": "workflow-aborted",
+    "default": "apply-user-fix"
   }
 }
 ```
@@ -154,54 +199,6 @@ them make informed decisions.
   "id": "reset-counter",
   "expressions": ["current_iteration = 0"],
   "connections": { "default": "fix-and-retry" }
-}
-```
-
-```json
-{
-  "type": "condition",
-  "id": "check-continue",
-  "condition": {
-    "operator": "eq",
-    "left": { "contextPath": "user_decision" },
-    "right": "continue"
-  },
-  "connections": {
-    "true": "proceed-to-next",
-    "false": "check-abort"
-  }
-}
-```
-
-```json
-{
-  "type": "condition",
-  "id": "check-abort",
-  "condition": {
-    "operator": "eq",
-    "left": { "contextPath": "user_decision" },
-    "right": "abort"
-  },
-  "connections": {
-    "true": "workflow-aborted",
-    "false": "check-skip"
-  }
-}
-```
-
-```json
-{
-  "type": "condition",
-  "id": "check-skip",
-  "condition": {
-    "operator": "eq",
-    "left": { "contextPath": "user_decision" },
-    "right": "skip"
-  },
-  "connections": {
-    "true": "proceed-to-next",
-    "false": "apply-user-fix"
-  }
 }
 ```
 

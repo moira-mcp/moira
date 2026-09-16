@@ -465,17 +465,18 @@ Show real-world application:
 {
   "id": "check-review",
   "type": "condition",
-  "condition": {
-    "operator": "eq",
-    "left": { "contextPath": "passed" },
-    "right": true
-  },
-  "connections": { "true": "merge-code", "false": "fix-issues" }
+  "cases": [
+    {
+      "when": { "operator": "eq", "left": { "contextPath": "passed" }, "right": true },
+      "output": "merge"
+    }
+  ],
+  "connections": { "merge": "merge-code", "default": "fix-issues" }
 }
 ```
 
-- If `passed: true` → workflow continues to merge.
-- If `passed: false` → workflow loops back to fix.
+- If `passed: true` → the case holds, and the workflow continues to merge.
+- Otherwise no case holds → `default` is taken and the workflow loops back to fix.
 ````
 
 ## Visual Components

@@ -64,14 +64,19 @@ Require `verification_evidence` to prevent agents from claiming completion witho
 {
   "type": "condition",
   "id": "check-verification",
-  "condition": {
-    "operator": "eq",
-    "left": { "contextPath": "step_verified" },
-    "right": "yes"
-  },
+  "cases": [
+    {
+      "when": {
+        "operator": "eq",
+        "left": { "contextPath": "step_verified" },
+        "right": "yes"
+      },
+      "output": "verified"
+    }
+  ],
   "connections": {
-    "true": "proceed-to-next",
-    "false": "handle-failure"
+    "verified": "proceed-to-next",
+    "default": "handle-failure"
   }
 }
 ```
@@ -171,14 +176,19 @@ On failure, either retry or escalate:
 {
   "type": "condition",
   "id": "check-retry-limit",
-  "condition": {
-    "operator": "lt",
-    "left": { "contextPath": "current_iteration" },
-    "right": 3
-  },
+  "cases": [
+    {
+      "when": {
+        "operator": "lt",
+        "left": { "contextPath": "current_iteration" },
+        "right": 3
+      },
+      "output": "under-limit"
+    }
+  ],
   "connections": {
-    "true": "fix-and-retry",
-    "false": "escalate-to-user"
+    "under-limit": "fix-and-retry",
+    "default": "escalate-to-user"
   }
 }
 ```

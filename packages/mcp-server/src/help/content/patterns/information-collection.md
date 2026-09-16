@@ -41,14 +41,19 @@ Collect information about agent environment, user preferences, or project config
 {
   "type": "condition",
   "id": "route-by-capabilities",
-  "condition": {
-    "operator": "eq",
-    "left": { "contextPath": "has_file_access" },
-    "right": true
-  },
+  "cases": [
+    {
+      "when": {
+        "operator": "eq",
+        "left": { "contextPath": "has_file_access" },
+        "right": true
+      },
+      "output": "has-file-access"
+    }
+  ],
   "connections": {
-    "true": "file-based-flow",
-    "false": "memory-based-flow"
+    "has-file-access": "file-based-flow",
+    "default": "memory-based-flow"
   }
 }
 ```

@@ -51,8 +51,8 @@ describe("getNodeOutputScope", () => {
     const node: GraphNode = {
       type: "condition",
       id: "c1",
-      condition: { operator: "exists", value: { contextPath: "x" } },
-      connections: { true: "a", false: "b" },
+      cases: [{ when: { operator: "exists", value: { contextPath: "x" } }, output: "true" }],
+      connections: { true: "a", default: "b" },
     } as unknown as GraphNode;
 
     const scope = getNodeOutputScope(node);

@@ -315,15 +315,20 @@ for the registrations.
 
 `start`, `end`, `agent-directive`, `condition`, `expression`, `user-notification`, deprecated `telegram-notification`,
 `teleport`, `subgraph`, `lock`, `materialize`, `read-note`, `write-note`, and `upsert-note`.
-Definitions and schemas: `packages/workflow-engine/src/types/graph-nodes.ts` and
+The two routing types, `condition` and `agent-directive`, carry ordered `cases` and optional
+`expressions`; a `condition` node's default output is `default` and an `agent-directive` node's is
+`success`. Definitions and schemas: `packages/workflow-engine/src/types/graph-nodes.ts` and
 `docs/WORKFLOW.md`.
 
 ## Condition System
 
-Operators: `eq`, `neq`, `gt`, `gte`, `lt`, `lte`, `contains`, `exists`, `and`,
-`or`, `not`. Binary operators take `left`/`right`; logical operators take
-`conditions`; `not` takes `condition`; `exists` takes `value`. Source:
-`packages/workflow-engine/src/types/structured-condition.ts`.
+A routing node carries `cases: [{ when, output }]`; the first case whose `when` holds selects that
+output, otherwise the node's default output is taken, and `error`/`timeout` are reserved control
+outputs no case may name. Operators inside `when`: `eq`, `neq`, `gt`, `gte`, `lt`, `lte`,
+`contains`, `exists`, `and`, `or`, `not`. Binary operators take `left`/`right`; logical operators
+take `conditions`; `not` takes `condition`; `exists` takes `value`. Source:
+`packages/workflow-engine/src/types/structured-condition.ts` and
+`packages/workflow-engine/src/services/node-routing.ts`.
 
 ## Template Processing
 
@@ -344,8 +349,11 @@ targets exist, per-node-type semantic checks. Source:
 - **StartNodeHandler** — auto-continues; merges `initialData` + input into context.
 - **AgentDirectiveHandler** — pauses for input, processes directive/completionCondition templates,
   and validates submitted input. Invalid input is logged and returns sanitized schema feedback;
-  execution remains paused at the same node until valid input is submitted.
-- **ConditionHandler** — evaluates and continues on `true`/`false`.
+  execution remains paused at the same node until valid input is submitted. On a valid answer it
+  routes like a condition node — `expressions`, then `cases` read against the merged answer — and
+  takes `success` when no case holds.
+- **ConditionHandler** — runs the node's `expressions`, then evaluates its `cases` in authored
+  order and continues on the first holding case's output, or on `default` when none holds.
 - **ExpressionNodeHandler** — sandboxed arithmetic parser (NOT JS eval); `+ - * /`,
   parentheses; division-by-zero/undefined routes to the `error` connection.
 - **TelegramNotificationHandler** — sends and continues; degrades gracefully on

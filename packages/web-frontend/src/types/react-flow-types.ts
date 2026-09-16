@@ -84,22 +84,26 @@ export interface AgentDirectiveNodeData extends MoiraNodeData {
   directive: string;
   completionCondition: string;
   inputSchema?: Record<string, unknown>;
-  maxRetries?: number;
-  retryMessage?: string;
-  connections: {
-    success: string;
-    error?: string;
-    timeout?: string;
-    maxRetriesExceeded?: string;
-  };
+  expressions: string[];
+  cases: RoutingCaseView[];
+  connections: { success: string; error?: string; timeout?: string } & Record<string, string>;
+}
+
+/** One case of a routing node as the graph shows it: readable condition and the output it selects. */
+export interface RoutingCaseView {
+  when: StructuredCondition;
+  summary: string;
+  output: string;
+  target: string;
 }
 
 export interface ConditionNodeData extends MoiraNodeData {
   nodeType: "condition";
-  condition: StructuredCondition;
+  cases: RoutingCaseView[];
+  expressions: string[];
+  /** Readable summary of the first case (the node's headline decision). */
   conditionSummary: string;
-  trueConnection: string;
-  falseConnection: string;
+  defaultConnection: string;
 }
 
 export interface TelegramNodeData extends MoiraNodeData {
@@ -254,8 +258,8 @@ export interface MoiraReactFlowEdge extends Edge {
     height?: number;
   };
   data?: {
-    connectionType:
-      "default" | "success" | "error" | "timeout" | "true" | "false" | "maxRetriesExceeded";
+    /** The connection key the edge follows: a reserved key or an authored case output. */
+    connectionType: string;
     label?: string;
     color?: string;
     style?: "solid" | "dashed" | "dotted";
@@ -613,19 +617,13 @@ export const DEFAULT_EDGE_STYLES: Record<string, EdgeStyleConfig> = {
     width: 2,
     animated: false,
   },
-  false: {
-    connectionType: "false",
-    color: "#f5222d",
+  /** An authored case output that has no style of its own is drawn like a case edge. */
+  case: {
+    connectionType: "case",
+    color: "#52c41a",
     style: "solid",
     width: 2,
     animated: false,
-  },
-  maxRetriesExceeded: {
-    connectionType: "maxRetriesExceeded",
-    color: "#cf1322",
-    style: "dashed",
-    width: 2,
-    animated: true,
   },
 };
 

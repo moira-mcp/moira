@@ -88,6 +88,8 @@ The execution card and exported progress image use the same seven-block process:
 
 Each stage shows its stable purpose, the exact current role, the latest confirmed outcome, and the next meaningful action. The node that owns a semantic result writes one bounded outcome: intake summarizes the resolved contract, planning roles replace the current plan synopsis, execution replaces the latest completed-unit outcome, review roles replace the current review disposition, and presentation or rework replaces the result disposition. Writers replace the value instead of appending history.
 
+The Execute plan steps block binds the plan's counters — `current_step` as the step in progress, counted from `0`, and `total_steps` as the total — so the run reports how far through the plan it is.
+
 Active labels and summaries describe work currently in progress without hiding the last confirmed outcome. If plan repair or mid-execution replanning creates a new plan revision, its synopsis atomically replaces obsolete current and future plan meaning while retaining only still-valid completed outcomes. These progress values are render-only: conditions, connections, the plan cursor, approvals, and authority continue to come from the primary workflow state.
 
 ## Execution and evidence

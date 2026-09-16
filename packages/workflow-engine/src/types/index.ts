@@ -77,6 +77,10 @@ export {
   isTeleportNode,
   getNextNodeId,
   validateNodeConnections,
+  isRoutingNode,
+  defaultOutputOf,
+  caseRoutableOutputs,
+  RESERVED_CONTROL_OUTPUTS,
 } from "./graph-nodes.js";
 
 // Condition helpers re-export

@@ -12,7 +12,17 @@ A workflow in Moira is a directed graph of nodes that defines a multi-step proce
 A workflow may declare an optional top-level `progress` graph for a concise user-facing view. Its
 definition may include a template-enabled title, goal, bounded generic facts, and ordered nodes.
 Nodes contain `id`, template-enabled `label`, optional structured plain-text `content` (`summary`,
-`details`, `outcome`, and `next`), and an optional static `connections.default` used for drawing.
+`details`, `outcome`, and `next`), an optional `list` binding, and an optional static
+`connections.default` used for drawing.
+
+A block that works through a list declares `list` with the variable paths it reads: `items` (the
+array), `title` (a path inside one item; a string item is its own title), `current` (the index in
+progress, counted from `indexBase` — `1` by default, `0` when declared), `done` (the finished
+count) and `total`. At least one of `items`, `current` and `total` is required, `total` defaults
+to the length of `items`, and `done` defaults to `current − indexBase`. Every path's root is a
+declared global or a node id for a node-local output; validation rejects an unknown root and a
+`title` without `items`. The binding names paths only — the engine holds no notion of what the
+list contains.
 
 The progress graph is the workflow's process view: its nodes are **blocks**, and their array order
 is the process order. When `progress` is present, every node of the primary graph — routing nodes
@@ -56,6 +66,21 @@ The same projection lists the route with loop markers and every variable with it
 values set from outside the flow appear as adjustments with their actor. Connections never route
 execution.
 
+Every visit records when it was entered and left, so each block also reports its `timing` — every
+pass with its duration, the total over all passes and how long the pass in progress has lasted —
+and, when the block binds a list, its `list`: the items with their titles, which are done, which
+one is in progress and the time spent on each. A visit recorded without timestamps has no
+duration rather than a zero one. The projection reports the version stamped on the run
+(`executionWorkflowVersion`) beside the definition it projected, and the run view adds
+`statistics`: how long a
+pass, a whole run through a block and each list position typically take across the owner's other
+completed runs of that version — the median with quartiles and range — so a run can be read
+against what is usual; one user's runs are never another's statistics. The projection also says
+who a paused run waits for (`waitingFor`): `user` at a gate a person clears (a `lock` step's
+PIN), `agent` on any other paused step, `null` when the run is not waiting.
+`GET /api/workflows/:id/statistics?version=` returns the same aggregate for any version over the
+caller's completed runs.
+
 When `progress` is present, every primary node maps to an existing block, as described above.
 Multiple primary nodes may map to one block. The currently active primary node is the focus target
 for its block; other blocks focus their first mapped primary node in workflow order. Pending and
@@ -64,18 +89,27 @@ or unit result cannot appear current during an engine-owned transition.
 
 The engine exposes one shared content-rich visual model and a bounded light/dark PNG renderer. The
 model keeps the complete task, goal, facts, completed outcomes, current activity, details and next
-action visible without hover. Text wraps without truncation and blocks pack into deterministic
-left-to-right rows when one row does not fit.
+action visible without hover. Every block is drawn in the web map's language: its status word
+(`waiting for you` only when a person must act, `agent on the step` while the agent is on it,
+`completed`, `repeated ×n`, `skipped`, `pending`) and one facts line with the time spent and, for
+a block bound to a list, `done/total` with the current item. Text wraps to the block's width, a
+token too wide for its line is ellipsised, a facts line too wide for its box loses the open pass
+and then the item's title before its `done/total` count, and every label stays inside the picture;
+at a viewport of 720 px or less the image is one column in a phone-readable type scale, wider
+images pack blocks into deterministic left-to-right rows.
 Agents request a short-lived, revision-bound, single-use download URL through `session
 progress-image-token`; the binary does not pass through MCP. The token takes optional `theme`
 (`light|dark`), `viewportWidth` (480–4096), `view` — `cards` (the default content grid) or
 `process` (the aggregated block view: blocks in process order with labelled transitions, returns
 as dashed arcs with the transition label, hub transitions written inside their source, as the run
-page's lanes show them; a loop's cause and exit are on the run page, not in the image) — and `hide` / `collapse`: block ids or authored node ids (a node names its block)
+page's map shows them; a loop's cause and exit are on the run page, not in the image) — and `hide` / `collapse`: block ids or authored node ids (a node names its block)
 left out of the image with their transitions collapsed onto the neighbours, or drawn as a
 label-only chip. Unknown ids are refused when the token is minted. A `user-notification` node may set
 `attachProgressImage: true` and use its normal message as the image caption. Such a node must belong to
-an existing block. The deprecated `telegram-notification` compatibility node supports
+an existing block. The message's footer names who the run waits for after it — `⏳ agent on the
+step: <block>` or `🙋 waiting for you: <block>` when the node leads straight to a step that pauses
+(a lock gate is a person's; a directive, teleport, materialize or subgraph wait is the agent's) — and the
+bound list's `📝 done/total: current item`; the attached image shows the same state. The deprecated `telegram-notification` compatibility node supports
 the same attachment for existing provider-specific workflows.
 
 Engine integrations with a workflow and execution use `renderExecutionProgressImage(...)`. It
@@ -84,9 +118,9 @@ version, and execution revision; rendering failures stay errors.
 
 The flow page (see the _Reading and editing a flow_ guide) shows the derived process of the
 definition itself and lets its owner edit it in place. On the run page (see the _Reading a run_
-guide) the same projection is shown as lanes, a canvas,
-an outline and the route, with a block panel that drills into each block's steps and focuses the
-technical node graph. The page and the PNG contain the same essential information. A workflow
+guide) the same projection is shown as the map — the process as a diagram with its contents —
+with a block panel that drills into each block's steps, timings and list and focuses the
+technical node graph, which is the page's other view. The page and the PNG contain the same essential information. A workflow
 without progress shows the technical node graph and the variables panel instead.
 
 Every workflow consists of:
@@ -110,11 +144,18 @@ Every workflow consists of:
 
 ### Metadata
 
-| Field         | Required | Description                    |
-| ------------- | -------- | ------------------------------ |
-| `name`        | Yes      | Human-readable workflow name   |
-| `version`     | Yes      | Semantic version string        |
-| `description` | Yes      | What the workflow accomplishes |
+| Field           | Required | Description                                             |
+| --------------- | -------- | ------------------------------------------------------- |
+| `name`          | Yes      | Human-readable workflow name                            |
+| `version`       | Yes      | Semantic version string                                 |
+| `description`   | Yes      | What the workflow accomplishes                          |
+| `schemaVersion` | No       | Integer definition-schema version; current value is `1` |
+
+`schemaVersion` describes the shape of the definition itself, next to the semver `version` that
+describes its content. A definition without it is version 0 and is upgraded automatically wherever
+it enters the system — validation, upload through the API, MCP or the CLI, the bundled catalog, and
+stored definitions read back — so you never migrate by hand. `moira-workflow <file> migrate`
+rewrites a file in place when you want the upgraded shape on disk.
 
 ### Variable Registry
 
@@ -179,7 +220,7 @@ schema come from the installation's node-type catalog.
 | `start`                 | Entry point for workflow execution                    |
 | `end`                   | Terminal node marking completion                      |
 | `agent-directive`       | Agent task with directive and completion condition    |
-| `condition`             | Branch based on structured conditions                 |
+| `condition`             | Branch to one of several outputs by ordered cases     |
 | `expression`            | Compute values using arithmetic expressions           |
 | `subgraph`              | Delegate to another workflow                          |
 | `user-notification`     | Notify through the current user's configured channels |
@@ -210,14 +251,15 @@ Nodes connect via the `connections` object that defines the flow. Each node type
 {
   "id": "check-status",
   "type": "condition",
-  "condition": {
-    "operator": "eq",
-    "left": { "contextPath": "status" },
-    "right": "success"
-  },
+  "cases": [
+    {
+      "when": { "operator": "eq", "left": { "contextPath": "status" }, "right": "success" },
+      "output": "passed"
+    }
+  ],
   "connections": {
-    "true": "success-path",
-    "false": "retry-path"
+    "passed": "success-path",
+    "default": "retry-path"
   }
 }
 ```

@@ -3,6 +3,8 @@ import sharp from "sharp";
 import {
   applyProgressVisibility,
   buildExecutionProgressVisualModel,
+  formatProgressDuration,
+  progressTextWidth,
   projectExecutionRun,
   renderExecutionProgressPng,
   renderProgressVisualSvg,
@@ -11,6 +13,7 @@ import {
   type WorkflowExecution,
 } from "@mcp-moira/workflow-engine";
 import { systemCatalogGraph } from "../../helpers/catalog-graphs.js";
+import { progressFactsCandidates } from "../../../packages/workflow-engine/src/utils/execution-progress-visual.js";
 
 /** The progress of a bundled flow's run that has not started: every block pending, the full process. */
 function bundledProgress(slug: string): ExecutionProgress {
@@ -48,6 +51,9 @@ function progress(active = 1): ExecutionProgress {
     ],
     activeNodeId: `n${active}`,
     workflowVersion: "1.0.0",
+    executionWorkflowVersion: "1.0.0",
+    projectedAt: 0,
+    waitingFor: null,
     executionRevision: 3,
     executionStatus: "running",
     diagnostics: [],
@@ -68,6 +74,8 @@ function progress(active = 1): ExecutionProgress {
       connections: { default: index === 2 ? "n0" : `n${index + 1}` },
       primaryNodeIds: [`p${index}`],
       focusNodeId: `p${index}`,
+      timing: { passes: [], totalMs: null, currentMs: null, recorded: false },
+      list: null,
       content: {
         summary:
           index === 0
@@ -350,7 +358,7 @@ describe("progress image visibility and the process view", () => {
 });
 
 describe("execution progress visual model and PNG", () => {
-  test("wraps complete whitespace text and long Unicode tokens without truncation", () => {
+  test("wraps whitespace text keeping every word and ellipsises a token wider than the line", () => {
     const sentence = "Полная задача сохраняет каждое слово и финальный результат";
     const sentenceProgress = progress();
     sentenceProgress.taskTitle = sentence;
@@ -359,18 +367,31 @@ describe("execution progress visual model and PNG", () => {
         viewportWidth: 480,
       }).taskTitleLines.join(" "),
     ).toBe(sentence);
-    const token = "ОченьДлинныйТокен🚀БезПробеловИОбрезки";
+    const token = "ОченьДлинныйТокен🚀БезПробеловИОбрезкиИПереносовВнутриСлова";
     const tokenProgress = progress();
     tokenProgress.taskTitle = token;
-    expect(
-      buildExecutionProgressVisualModel(tokenProgress, { viewportWidth: 480 }).taskTitleLines.join(
-        "",
-      ),
-    ).toBe(token);
+    const model = buildExecutionProgressVisualModel(tokenProgress, { viewportWidth: 480 });
+    expect(model.taskTitleLines).toHaveLength(1);
+    const [line] = model.taskTitleLines;
+    expect(line.endsWith("…")).toBe(true);
+    expect(token.startsWith(line.slice(0, -1))).toBe(true);
+    expect(progressTextWidth(line, model.type.header.task, "bold")).toBeLessThanOrEqual(
+      model.headerWidth,
+    );
+    // The same rule inside a block: an unbreakable title is cut, never drawn past the box.
+    const blockProgress = progress();
+    blockProgress.nodes[1] = { ...blockProgress.nodes[1], label: token };
+    const card = buildExecutionProgressVisualModel(blockProgress, { viewportWidth: 1000 }).nodes[1];
+    expect(card.labelLines).toHaveLength(1);
+    expect(card.labelLines[0].endsWith("…")).toBe(true);
+    expect(renderProgressVisualSvg(buildExecutionProgressVisualModel(blockProgress))).toContain(
+      "…",
+    );
   });
 
   test("lays out ordered nodes with card-free cross-row gutters", () => {
-    const model = buildExecutionProgressVisualModel(progress(), { viewportWidth: 600 });
+    // 760 px is the narrowest desktop grid: two card columns above the phone breakpoint.
+    const model = buildExecutionProgressVisualModel(progress(), { viewportWidth: 760 });
     expect(model.nodes.map(({ id, state, row }) => ({ id, state, row }))).toEqual([
       { id: "n0", state: "completed", row: 0 },
       { id: "n1", state: "current", row: 0 },
@@ -414,6 +435,8 @@ describe("execution progress visual model and PNG", () => {
       connections: { default: index === 4 ? "s0" : `s${index + 1}` },
       primaryNodeIds: [`p${index}`],
       focusNodeId: `p${index}`,
+      timing: { passes: [], totalMs: null, currentMs: null, recorded: false },
+      list: null,
       content: {
         summary: index === 0 ? "Tall ".repeat(30) : "Short",
         details: [],
@@ -421,7 +444,7 @@ describe("execution progress visual model and PNG", () => {
         next: null,
       },
     }));
-    const skippedModel = buildExecutionProgressVisualModel(skipped, { viewportWidth: 600 });
+    const skippedModel = buildExecutionProgressVisualModel(skipped, { viewportWidth: 760 });
     const backward = skippedModel.edges.find((edge) => edge.source === "s4")!;
     const backwardCoordinates = backward.path.match(/-?\d+(?:\.\d+)?/g)!.map(Number);
     expect(backward.direction).toBe("cross-row");
@@ -465,7 +488,7 @@ describe("execution progress visual model and PNG", () => {
     );
   });
 
-  test("renders the block status vocabulary: pass counts for repeated, marks for skipped and waiting", () => {
+  test("renders the block status vocabulary: repeat badge, skipped and pending muted, the agent on the active step", () => {
     const statuses = progress();
     statuses.nodes[0] = { ...statuses.nodes[0], status: "repeated", iterations: 3 };
     statuses.nodes[1] = {
@@ -474,25 +497,158 @@ describe("execution progress visual model and PNG", () => {
       state: "pending",
       iterations: 0,
     };
-    statuses.nodes[2] = {
-      ...statuses.nodes[2],
-      status: "waiting",
-      state: "current",
-      iterations: 1,
-    };
     const model = buildExecutionProgressVisualModel(statuses);
     const svg = renderProgressVisualSvg(model);
-    expect(svg).toContain("Repeated ×3: Stage 0");
+    expect(svg).toContain("<title>repeated ×3: Stage 0</title>");
     // The count is a badge beside the mark, not part of it; the title starts after the badge.
     const repeated = model.nodes[0];
     expect(repeated.mark).toBe("✓");
+    expect(repeated.statusLine).toBe("repeated ×3");
     expect(repeated.badge).toMatchObject({ text: "×3" });
     expect(repeated.titleX).toBeGreaterThan(repeated.badge!.x + repeated.badge!.width);
     expect(svg).toContain(">×3</text>");
     expect(svg).not.toContain("✓×3");
-    expect(svg).toContain("Skipped: Review");
-    expect(svg).toContain("Waiting: Stage 2");
-    expect(svg).toContain("◐");
+    expect(svg).toContain("<title>skipped: Review</title>");
+    expect(svg).toContain('text-decoration="line-through"');
+    expect(model.nodes[2].statusLine).toBe("pending");
+    // The active block (no wait) is the agent's step, marked ●.
+    const active = buildExecutionProgressVisualModel(progress(2));
+    expect(renderProgressVisualSvg(active)).toContain("<title>agent on the step: Stage 2</title>");
+    expect(active.nodes[2]).toMatchObject({ statusLine: "agent on the step", mark: "●" });
+  });
+
+  test.each([
+    ["agent", "agent on the step", "waiting for you"],
+    ["user", "waiting for you", "agent on the step"],
+  ] as const)(
+    "a run waiting for the %s words its waiting block '%s' and never '%s'",
+    (waitingFor, expected, absent) => {
+      const paused = progress();
+      paused.waitingFor = waitingFor;
+      paused.nodes[1] = { ...paused.nodes[1], status: "waiting", state: "current" };
+      for (const view of ["cards", "process"] as const) {
+        const model = buildExecutionProgressVisualModel(withProcess(paused), { view });
+        const svg = renderProgressVisualSvg(model);
+        expect(svg).toContain(`<title>${expected}: Review</title>`);
+        expect(svg).toContain(`>${expected}</text>`);
+        expect(svg).not.toContain(absent);
+        expect(svg).toContain("◐");
+        expect(model.nodes.map((node) => node.statusLine)).toEqual([
+          "completed",
+          expected,
+          "pending",
+        ]);
+      }
+    },
+  );
+
+  test("the facts line carries the time spent and, for a bound block only, done/total with the current item", () => {
+    const run = progress();
+    run.nodes[0] = {
+      ...run.nodes[0],
+      timing: { passes: [], totalMs: 7_505_000, currentMs: null, recorded: true },
+      list: { items: null, done: 2, total: 5, current: 2, currentTitle: "Facts line" },
+    };
+    run.nodes[1] = {
+      ...run.nodes[1],
+      timing: { passes: [], totalMs: 80_000, currentMs: 12_000, recorded: true },
+      list: null,
+    };
+    run.nodes[2] = {
+      ...run.nodes[2],
+      list: { items: null, done: 0, total: 3, current: null, currentTitle: null },
+    };
+    for (const view of ["cards", "process"] as const) {
+      const model = buildExecutionProgressVisualModel(withProcess(run), {
+        view,
+        viewportWidth: 1280,
+      });
+      expect(model.nodes.map((node) => node.factsLine)).toEqual([
+        "2 h 05 min · 2/5: Facts line",
+        "1 min 20 s · this pass 12 s",
+        "— · 0/3",
+      ]);
+    }
+    const svg = renderProgressVisualSvg(buildExecutionProgressVisualModel(withProcess(run)));
+    expect(svg).toContain(">2 h 05 min · 2/5: Facts line</text>");
+    expect(svg).toContain(">1 min 20 s · this pass 12 s</text>");
+    // A block never measured reads a dash, never a zero.
+    expect(svg).toContain(">— · 0/3</text>");
+    expect(svg).not.toContain(">0 s");
+    // A block never measured and never bound reads a dash alone.
+    expect(buildExecutionProgressVisualModel(progress()).nodes[2].factsLine).toBe("—");
+  });
+
+  test("a facts line is shortened by priority: the open pass goes first, the item's title is cut, the count survives", () => {
+    const run = progress();
+    const bound = {
+      ...run.nodes[0],
+      timing: { passes: [], totalMs: 7_500_000, currentMs: 132_000, recorded: true },
+      list: {
+        items: null,
+        done: 1,
+        total: 5,
+        current: 1,
+        currentTitle: "Readable progress images in the map's style",
+      },
+    };
+    expect(progressFactsCandidates(bound)).toEqual([
+      "2 h 05 min · this pass 2 min 12 s · 1/5: Readable progress images in the map's style",
+      "2 h 05 min · 1/5: Readable progress images in the map's style",
+      "2 h 05 min · 1/5",
+      "1/5",
+    ]);
+    // A phone-width process column is too narrow for the open pass and the whole title: the
+    // count stays, the title is what gets cut, and no ellipsis lands inside the count.
+    run.nodes[0] = bound;
+    const narrow = buildExecutionProgressVisualModel(run, { view: "process", viewportWidth: 480 });
+    const line = narrow.nodes[0].factsLine;
+    expect(line.startsWith("2 h 05 min · 1/5")).toBe(true);
+    expect(line).not.toContain("this pass");
+    expect(line).not.toMatch(/1\/…|1\/$/u);
+    // A block whose done count could not be resolved says so, as the notification footer does.
+    const unknown = { ...bound, list: { ...bound.list, done: null } };
+    expect(progressFactsCandidates(unknown)[3]).toBe("?/5");
+    expect(progressFactsCandidates(unknown)[0]).not.toContain("0/5");
+    // A total not yet written keeps the count too, as the notification footer words it.
+    const openTotal = { ...bound, list: { ...bound.list, total: null } };
+    expect(progressFactsCandidates(openTotal)[3]).toBe("1/?");
+    expect(progressFactsCandidates(openTotal)[1]).toContain("1/?: Readable");
+  });
+
+  test("a facts line wider than the card is ellipsised on one line at the card's text width", () => {
+    const run = progress();
+    run.nodes[0] = {
+      ...run.nodes[0],
+      timing: { passes: [], totalMs: 61_000, currentMs: null, recorded: true },
+      list: {
+        items: null,
+        done: 1,
+        total: 5,
+        current: 1,
+        currentTitle:
+          "Readable progress images in the map's style, with list progress and timings, no label overflow",
+      },
+    };
+    const model = buildExecutionProgressVisualModel(run, { viewportWidth: 1000 });
+    const node = model.nodes[0];
+    expect(node.factsLine.startsWith("1 min 1 s · 1/5: Readable")).toBe(true);
+    expect(node.factsLine.endsWith("…")).toBe(true);
+    expect(progressTextWidth(node.factsLine, model.type.content)).toBeLessThanOrEqual(
+      node.textRight - node.titleX,
+    );
+    expect(renderProgressVisualSvg(model)).toContain(node.factsLine);
+  });
+
+  test.each([
+    [null, "—"],
+    [0, "0 s"],
+    [12_400, "12 s"],
+    [80_000, "1 min 20 s"],
+    [180_000, "3 min"],
+    [7_505_000, "2 h 05 min"],
+  ])("formats a duration of %s ms as '%s'", (ms, expected) => {
+    expect(formatProgressDuration(ms)).toBe(expected);
   });
 
   test("escapes authored title and label data in the SVG adapter", () => {

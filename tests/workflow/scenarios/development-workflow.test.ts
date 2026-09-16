@@ -1038,7 +1038,7 @@ describe("software-development-flow", () => {
       workflow.nodes.find((node) => node.id === "route-plan-activation-mode")?.connections,
     ).toEqual({
       true: "notify-plan-approval",
-      false: "activate-reviewed-plan",
+      default: "activate-reviewed-plan",
     });
 
     const preparation = inputSchemaOf(presentingNode(workflow, "prepare-plan-unit-implementation"));
@@ -1217,54 +1217,54 @@ describe("software-development-flow", () => {
     expect(start).not.toHaveProperty("initialData");
     expect(workflow.nodes.find((node) => node.id === "route-vcs-authority")?.connections).toEqual({
       true: "finalize-feature",
-      false: "notify-workflow-complete",
+      default: "notify-workflow-complete",
     });
     expect(
       workflow.nodes.find((node) => node.id === "route-plan-unit-user-review")?.connections,
-    ).toEqual({ true: "repair-user-feedback", false: "route-checkpoint-authority" });
+    ).toEqual({ true: "repair-user-feedback", default: "route-checkpoint-authority" });
     expect(
       workflow.nodes.find((node) => node.id === "route-unit-html-report")?.connections,
     ).toEqual({
       true: "create-and-upload-step-report",
-      false: "route-unit-approval-required",
+      default: "route-unit-approval-required",
     });
     expect(
       workflow.nodes.find((node) => node.id === "route-unit-approval-required")?.connections,
-    ).toEqual({ true: "notify-unit-approval", false: "route-checkpoint-authority" });
+    ).toEqual({ true: "notify-unit-approval", default: "route-checkpoint-authority" });
     expect(
       workflow.nodes.find((node) => node.id === "route-checkpoint-authority")?.connections,
     ).toEqual({
       true: "checkpoint-plan-unit",
-      false: "route-plan-complete",
+      default: "route-plan-complete",
     });
     expect(
       workflow.nodes.find((node) => node.id === "route-expensive-repository")?.connections,
     ).toEqual({
       true: "repair-expensive",
-      false: "update-unit-documentation",
+      default: "update-unit-documentation",
     });
     expect(
       workflow.nodes.find((node) => node.id === "route-unit-documentation-replan")?.connections,
     ).toEqual({
       true: "approve-current-unit-closure",
-      false: "route-unit-documentation-product-repair",
+      default: "route-unit-documentation-product-repair",
     });
     expect(
       workflow.nodes.find((node) => node.id === "route-unit-documentation-product-repair")
         ?.connections,
     ).toEqual({
       true: "advance-evidence-iteration",
-      false: "review-unit-completeness",
+      default: "review-unit-completeness",
     });
     expect(workflow.nodes.find((node) => node.id === "route-plan-complete")?.connections).toEqual({
       true: "validate-feature-wide",
-      false: "advance-plan-unit",
+      default: "advance-plan-unit",
     });
     expect(
       workflow.nodes.find((node) => node.id === "route-feature-acceptance")?.connections,
     ).toEqual({
       true: "route-vcs-authority",
-      false: "advance-plan-revision-after-feedback",
+      default: "advance-plan-revision-after-feedback",
     });
     expect(
       (workflow.nodes.find((node) => node.id === "end") as { finalOutput?: string[] }).finalOutput,
@@ -1331,13 +1331,13 @@ describe("software-development-flow", () => {
       workflow.nodes.find((node) => node.id === "route-final-semantic-review")?.connections,
     ).toEqual({
       true: "repair-final-semantics",
-      false: "create-final-report",
+      default: "create-final-report",
     });
     expect(
       workflow.nodes.find((node) => node.id === "route-final-repair-replan")?.connections,
     ).toEqual({
       true: "advance-plan-revision-for-replan",
-      false: "validate-feature-wide",
+      default: "validate-feature-wide",
     });
     const finalReport = presentingNode(workflow, "create-final-report");
     expect(finalReport.directive).toContain("the exact numeric final review");

@@ -902,11 +902,11 @@ export async function manageWorkflow(
               )
                 changes.push("inputSchema");
               if (
-                "condition" in node1 &&
-                "condition" in node2 &&
-                JSON.stringify(node1.condition) !== JSON.stringify(node2.condition)
+                "cases" in node1 &&
+                "cases" in node2 &&
+                JSON.stringify(node1.cases) !== JSON.stringify(node2.cases)
               )
-                changes.push("condition");
+                changes.push("cases");
               if ("message" in node1 && "message" in node2 && node1.message !== node2.message)
                 changes.push("message");
               if (

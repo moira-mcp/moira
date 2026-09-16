@@ -101,20 +101,21 @@ P0/P1 должны быть связаны с критическим для ре
 
 ## Актуальный синтаксис связей
 
-Agent-directive использует именованную связь `success`, а гейт ревью — ветки `true` и `false`:
+Agent-directive использует именованную связь `success`, а гейт ревью — condition-узел, чьи упорядоченные `cases` выбирают выход; если не сработал ни один case, берётся `default`:
 
 ```json
 {
   "id": "review-gate",
   "type": "condition",
-  "condition": {
-    "operator": "eq",
-    "left": { "contextPath": "issues_count" },
-    "right": 0
-  },
+  "cases": [
+    {
+      "when": { "operator": "eq", "left": { "contextPath": "issues_count" }, "right": 0 },
+      "output": "clean"
+    }
+  ],
   "connections": {
-    "true": "present",
-    "false": "repair"
+    "clean": "present",
+    "default": "repair"
   }
 }
 ```

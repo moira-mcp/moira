@@ -6,7 +6,7 @@
  * graph and never mutates its input; invalid targets throw with a message that names them.
  */
 
-import type { WorkflowGraph } from "@mcp-moira/workflow-engine";
+import type { WorkflowGraph, ProgressListBinding } from "@mcp-moira/workflow-engine";
 import type { ConnectionLabel, GraphNode } from "@mcp-moira/workflow-engine/types";
 
 export interface CycleExplanation {
@@ -108,6 +108,41 @@ export interface BlockInput {
   outcome?: string;
   /** Optional `content.next`. */
   next?: string;
+  /** Optional list binding; `null` removes it on edit. */
+  list?: ProgressListBinding | null;
+}
+
+/** Parse a `--list` value: a JSON binding object, or `none` to remove the binding. */
+export function parseListBinding(value: string): ProgressListBinding | null {
+  if (value === "none") return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    throw new Error(
+      '--list expects a JSON object such as {"items":"tasks","current":"current_task"}',
+    );
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("--list expects a JSON object");
+  }
+  const binding = parsed as Record<string, unknown>;
+  const allowed = new Set(["items", "title", "current", "done", "total", "indexBase"]);
+  for (const key of Object.keys(binding)) {
+    if (!allowed.has(key)) throw new Error(`--list: unknown field '${key}'`);
+  }
+  for (const key of ["items", "title", "current", "done", "total"]) {
+    if (binding[key] !== undefined && (typeof binding[key] !== "string" || !binding[key])) {
+      throw new Error(`--list: '${key}' must be a non-empty variable path`);
+    }
+  }
+  if (binding.indexBase !== undefined && binding.indexBase !== 0 && binding.indexBase !== 1) {
+    throw new Error("--list: 'indexBase' must be 0 or 1");
+  }
+  if (!binding.items && !binding.current && !binding.total) {
+    throw new Error("--list needs at least one of items, current or total");
+  }
+  return binding as ProgressListBinding;
 }
 
 /**
@@ -135,6 +170,7 @@ export function addBlock(
       ...(block.outcome ? { outcome: block.outcome } : {}),
       ...(block.next ? { next: block.next } : {}),
     },
+    ...(block.list ? { list: block.list } : {}),
   };
   if (after === undefined) {
     next.progress.nodes.push(entry);
@@ -174,5 +210,9 @@ export function editBlock(
     else delete content.next;
   }
   block.content = content;
+  if (patch.list !== undefined) {
+    if (patch.list === null) delete block.list;
+    else block.list = patch.list;
+  }
   return next;
 }

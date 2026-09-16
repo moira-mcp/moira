@@ -188,11 +188,13 @@ export const TOOL_DEFINITIONS = [
     ],
     documentation: {
       en: {
-        summary: "Create, inspect, validate, and modify workflows.",
+        summary:
+          "Create, inspect, validate, and modify workflows. Express a decision as `cases` on the node that has the evidence (a directive routes on its own answer, `success` when no case holds) with single-purpose arithmetic as its `expressions`; keep a separate condition or expression node only for a shared or standalone decision. Bind a progress block to the list it works through with `list`.",
         result: "Action-specific workflow data.",
       },
       ru: {
-        summary: "Создаёт, проверяет и изменяет процессы.",
+        summary:
+          "Создаёт, проверяет и изменяет процессы. Решение выражайте через `cases` на ноде, у которой есть данные (директива маршрутизирует по своему ответу, `success` — когда ни один кейс не сработал), а простую арифметику — через её `expressions`; отдельную ноду condition или expression оставляйте только для общего или самостоятельного решения. Блок прогресса привязывайте к списку, по которому он идёт, через `list`.",
         result: "Данные процесса, зависящие от операции.",
       },
     },

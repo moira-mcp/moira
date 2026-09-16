@@ -34,6 +34,7 @@ import {
   UserRepository,
   getWorkflowMutationService,
   initializeWorkflowValidationCache,
+  upgradeStoredWorkflowDefinitions,
   readWorkflowCatalogs,
   getWorkflowsDirs,
   installCatalogEntries,
@@ -85,6 +86,15 @@ async function migrate(): Promise<void> {
   const userRepo = new UserRepository(db);
   const mutationService = getWorkflowMutationService();
   const sqlite = getSqliteInstance();
+
+  // Persisted definitions, baselines and recorded conflicts are upgraded to the current schema
+  // shape before the three-way reconciliation compares them with the (migrated) bundled entries.
+  const upgraded = upgradeStoredWorkflowDefinitions(sqlite);
+  if (upgraded.workflows + upgraded.baselines + upgraded.conflicts > 0) {
+    console.log(
+      `🔁 Upgraded stored definitions: ${upgraded.workflows} workflows, ${upgraded.baselines} baselines, ${upgraded.conflicts} conflicts`,
+    );
+  }
 
   if (!isSaas()) {
     cleanupRetiredWorkflowReconciliationBundles(

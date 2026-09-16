@@ -11,7 +11,13 @@ import * as fs from "fs";
 import * as path from "path";
 import { fileURLToPath } from "url";
 import { WorkflowGraph } from "../interfaces/core-interfaces.js";
-import { validateNodeConnections, isExtensionNode } from "../types/graph-nodes.js";
+import {
+  validateNodeConnections,
+  isExtensionNode,
+  defaultOutputOf,
+  caseRoutableOutputs,
+  RESERVED_CONTROL_OUTPUTS,
+} from "../types/graph-nodes.js";
 import type { BuiltinGraphNode } from "../types/graph-nodes.js";
 import type {
   GraphNode,
@@ -33,6 +39,7 @@ import { getActiveExtensionRegistry } from "../extensions/extension-registry-pro
 import { canonicalJson, DECLARED_SCHEMA_AJV_OPTIONS } from "../extensions/declared-schema.js";
 import { isExtensionNodeType } from "../extensions/extension-contract.js";
 import { deriveProcess } from "../utils/process-derivation.js";
+import { migrateWorkflowGraph } from "../migration/workflow-migration.js";
 import {
   classifyNodeType,
   describeNodeTypeClassification,
@@ -361,8 +368,12 @@ export class GraphValidator {
    * Validate a workflow graph object — unified format (new API)
    * Returns UnifiedValidationResult with typed issues and severity.
    */
-  async validateUnified(graph: unknown): Promise<UnifiedValidationResult> {
+  async validateUnified(input: unknown): Promise<UnifiedValidationResult> {
     const issues: UnifiedValidationIssue[] = [];
+    // A definition is judged in its current schema shape: the same pure migration every ingress
+    // and read path applies runs here too, so a pre-migration file validates as what the server
+    // would store. Malformed input passes through unchanged and is reported by the schema check.
+    const graph: unknown = migrateWorkflowGraph(input).graph;
 
     try {
       if (exceedsValidationComplexity(graph)) {
@@ -961,6 +972,8 @@ export class GraphValidator {
         break;
       case "agent-directive":
         issues.push(...this.validateAgentDirectiveNode(node));
+        issues.push(...this.validateRoutingCases(node));
+        issues.push(...this.validateExpressions(node.id, node.expressions));
         issues.push(
           ...this.validateOutputScopeDeclaration(
             node.id,
@@ -1014,14 +1027,77 @@ export class GraphValidator {
    * Validate condition node operator and required fields per operator type.
    */
   private validateConditionNode(node: ConditionNode): UnifiedValidationIssue[] {
+    return [
+      ...this.validateRoutingCases(node),
+      ...this.validateExpressions(node.id, node.expressions),
+    ];
+  }
+
+  /**
+   * Validate the routing cases of a condition or agent-directive node: every `when` is a
+   * well-formed structured condition; every `output` names one of the node's connections other
+   * than its default output; and every case-routable output (a connection key other than the
+   * default and the reserved control outputs `error`/`timeout`) is named by at least one case,
+   * otherwise it can never be taken.
+   */
+  private validateRoutingCases(node: ConditionNode | AgentDirectiveNode): UnifiedValidationIssue[] {
     const issues: UnifiedValidationIssue[] = [];
-
-    if (!node.condition || typeof node.condition !== "object") {
-      return issues; // AJV already catches missing condition
+    const cases = node.cases;
+    if (cases !== undefined && !Array.isArray(cases)) {
+      return issues; // AJV reports the shape
     }
-
-    issues.push(...this.validateConditionStructure(node.condition, node.id, "condition"));
-
+    const defaultOutput = defaultOutputOf(node);
+    const connections = (node.connections ?? {}) as Record<string, string | undefined>;
+    const named = new Set<string>();
+    for (const [index, routingCase] of (cases ?? []).entries()) {
+      if (!routingCase || typeof routingCase !== "object") continue;
+      if (routingCase.when && typeof routingCase.when === "object") {
+        issues.push(
+          ...this.validateConditionStructure(routingCase.when, node.id, `cases[${index}].when`),
+        );
+      }
+      const output = routingCase.output;
+      if (typeof output !== "string") continue;
+      named.add(output);
+      if (output === defaultOutput) {
+        issues.push({
+          type: "node",
+          severity: "warning",
+          nodeId: node.id,
+          field: `cases[${index}].output`,
+          message: `Node ${node.id}: case ${index} routes to the default output "${defaultOutput}"; a case that selects the default is redundant`,
+        });
+      } else if (RESERVED_CONTROL_OUTPUTS.includes(output)) {
+        issues.push({
+          type: "node",
+          severity: "error",
+          nodeId: node.id,
+          field: `cases[${index}].output`,
+          message: `Node ${node.id}: case ${index} names the reserved control output "${output}"; cases route only authored outcomes`,
+        });
+      } else if (!(output in connections)) {
+        issues.push({
+          type: "node",
+          severity: "error",
+          nodeId: node.id,
+          field: `cases[${index}].output`,
+          message: `Node ${node.id}: case ${index} names unknown output "${output}" (unknown-case-output); declare it in connections`,
+        });
+      }
+    }
+    // An authored output no case names can never be taken. Like an unreachable node, that is a
+    // warning rather than an error: a definition is edited one step at a time, and a connection is
+    // often added before the case that selects it.
+    for (const output of caseRoutableOutputs(node)) {
+      if (named.has(output)) continue;
+      issues.push({
+        type: "node",
+        severity: "warning",
+        nodeId: node.id,
+        field: `connections.${output}`,
+        message: `Node ${node.id}: output "${output}" is named by no case and can never be taken (unreachable-output); add a case for it or remove the connection (the default output and the control outputs ${RESERVED_CONTROL_OUTPUTS.join("/")} need no case)`,
+      });
+    }
     return issues;
   }
 
@@ -1326,10 +1402,19 @@ export class GraphValidator {
    * valid characters (alphanumeric, operators, dots, brackets, spaces).
    */
   private validateExpressionNode(node: ExpressionNode): UnifiedValidationIssue[] {
+    return this.validateExpressions(node.id, node.expressions);
+  }
+
+  /** Validate the expressions of an expression node or of a routing node carrying expressions. */
+  private validateExpressions(
+    nodeId: string,
+    expressions: string[] | undefined,
+  ): UnifiedValidationIssue[] {
     const issues: UnifiedValidationIssue[] = [];
-    if (!node.expressions || !Array.isArray(node.expressions)) {
+    if (!expressions || !Array.isArray(expressions)) {
       return issues; // AJV already catches missing/empty expressions
     }
+    const node = { id: nodeId, expressions };
 
     for (let i = 0; i < node.expressions.length; i++) {
       const expr = node.expressions[i];
@@ -1824,13 +1909,14 @@ export class GraphValidator {
         }
       }
 
-      // Check condition contextPath references against declared variables.
-      if (node.type === "condition") {
-        const conditionNode = node as ConditionNode;
-        if (conditionNode.condition) {
-          issues.push(
-            ...this.validateConditionReferences(conditionNode.condition, node.id, definedVariables),
-          );
+      // Check routing-case contextPath references against declared variables.
+      if (node.type === "condition" || node.type === "agent-directive") {
+        for (const routingCase of (node as ConditionNode | AgentDirectiveNode).cases ?? []) {
+          if (routingCase?.when && typeof routingCase.when === "object") {
+            issues.push(
+              ...this.validateConditionReferences(routingCase.when, node.id, definedVariables),
+            );
+          }
         }
       }
 
@@ -1946,12 +2032,54 @@ export class GraphValidator {
             }
           }
         }
+        if (progressNode.list) {
+          issues.push(...this.validateListBinding(progressNode, index, definedVariables));
+        }
       }
     }
 
     // §10 Fix A — warn on declared-but-never-defined registry variables.
     issues.push(...this.validateNeverDefinedVars(workflow));
 
+    return issues;
+  }
+
+  /**
+   * A block's list binding reads variables at run time: every path's root must be a declared
+   * global or a node id (a `node.field` output); `title` is relative to one item and needs
+   * `items`. An unknown root is an error — the binding could never resolve.
+   */
+  private validateListBinding(
+    progressNode: NonNullable<WorkflowGraph["progress"]>["nodes"][number],
+    index: number,
+    definedVariables: Set<string>,
+  ): UnifiedValidationIssue[] {
+    const issues: UnifiedValidationIssue[] = [];
+    const binding = progressNode.list!;
+    const nodeId = `progress.${progressNode.id}`;
+    for (const field of ["items", "current", "done", "total"] as const) {
+      const path = binding[field];
+      if (typeof path !== "string") continue;
+      const root = path.split(/[.[]/u)[0];
+      if (!definedVariables.has(root)) {
+        issues.push({
+          type: "node",
+          severity: "error",
+          nodeId,
+          field: `nodes[${index}].list.${field}`,
+          message: `Progress block '${progressNode.id}': list.${field} reads '${path}', but '${root}' is neither a declared global nor a node id`,
+        });
+      }
+    }
+    if (binding.title !== undefined && binding.items === undefined) {
+      issues.push({
+        type: "node",
+        severity: "error",
+        nodeId,
+        field: `nodes[${index}].list.title`,
+        message: `Progress block '${progressNode.id}': list.title is a path inside one item and needs list.items`,
+      });
+    }
     return issues;
   }
 

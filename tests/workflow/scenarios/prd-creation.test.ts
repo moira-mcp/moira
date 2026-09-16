@@ -163,7 +163,10 @@ describe("prd-creation", () => {
   test("validates review and repair routing", async () => {
     const validation = await new GraphValidator().validateUnified(workflow);
     expect(validation.issues.filter((issue) => issue.severity === "error")).toEqual([]);
-    expect(node(workflow, "review-gate").connections).toEqual({ true: "present", false: "repair" });
+    expect(node(workflow, "review-gate").connections).toEqual({
+      true: "present",
+      default: "repair",
+    });
     expect(node(workflow, "repair").connections).toEqual({ success: "review" });
     expect(node(workflow, "end").finalOutput).toEqual(["workspace_path", "result_summary"]);
   });

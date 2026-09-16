@@ -12,6 +12,7 @@
  */
 
 import { readdirSync, readFileSync, existsSync } from "fs";
+import { migrateWorkflowGraph } from "@mcp-moira/workflow-engine/migration";
 import path from "path";
 
 /** Stable identifiers of the two system owners. Everything else is a real user. */
@@ -53,7 +54,11 @@ export function isSystemOwner(owner: string): boolean {
  * malformed catalog fails loudly rather than silently installing under the wrong owner.
  */
 export function readCatalogEntry(filePath: string): CatalogEntry {
-  const raw = JSON.parse(readFileSync(filePath, "utf-8")) as Record<string, unknown>;
+  // A bundled definition enters the system here; it is migrated before anything digests or
+  // compares it, so an older file and a stored, migrated copy of it read as the same content.
+  const raw = migrateWorkflowGraph(
+    JSON.parse(readFileSync(filePath, "utf-8")) as Record<string, unknown>,
+  ).graph;
 
   const owner = raw.owner;
   const visibility = raw.visibility;

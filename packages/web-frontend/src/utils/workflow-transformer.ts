@@ -174,8 +174,13 @@ export class WorkflowTransformer {
         directive: node.directive,
         completionCondition: node.completionCondition,
         inputSchema: node.inputSchema,
-        maxRetries: node.maxRetries,
-        retryMessage: node.retryMessage,
+        expressions: node.expressions ?? [],
+        cases: (node.cases ?? []).map((routingCase) => ({
+          when: routingCase.when,
+          summary: this.generateConditionSummary(routingCase.when),
+          output: routingCase.output,
+          target: node.connections[routingCase.output] ?? "",
+        })),
         connections: node.connections,
         color: DEFAULT_NODE_STYLES["agent-directive"].colors.primary,
         icon: DEFAULT_NODE_STYLES["agent-directive"].icon,
@@ -183,15 +188,22 @@ export class WorkflowTransformer {
     }
 
     if (isConditionNode(node)) {
+      const cases = (node.cases ?? []).map((routingCase) => ({
+        when: routingCase.when,
+        summary: this.generateConditionSummary(routingCase.when),
+        output: routingCase.output,
+        target: node.connections[routingCase.output] ?? "",
+      }));
+      const headline = cases[0]?.summary ?? "no cases";
       return {
         ...baseData,
         nodeType: "condition",
         label: node.metadata?.displayName || "Decision",
-        description: this.generateConditionSummary(node.condition),
-        condition: node.condition,
-        conditionSummary: this.generateConditionSummary(node.condition),
-        trueConnection: node.connections.true,
-        falseConnection: node.connections.false,
+        description: headline,
+        cases,
+        expressions: node.expressions ?? [],
+        conditionSummary: headline,
+        defaultConnection: node.connections.default,
         color: DEFAULT_NODE_STYLES.condition.colors.primary,
         icon: DEFAULT_NODE_STYLES.condition.icon,
       } as ConditionNodeData;
@@ -416,7 +428,8 @@ export class WorkflowTransformer {
 
       Object.entries(node.connections).forEach(([connectionType, targetNodeId]) => {
         const edgeId = `${node.id}-${connectionType}-${targetNodeId}`;
-        const edgeStyle = DEFAULT_EDGE_STYLES[connectionType] || DEFAULT_EDGE_STYLES.default;
+        // Reserved keys have their own style; an authored case output is drawn as a case edge.
+        const edgeStyle = DEFAULT_EDGE_STYLES[connectionType] || DEFAULT_EDGE_STYLES.case;
 
         // Ensure edgeStyle is defined (TypeScript strict mode safety)
         if (!edgeStyle) {

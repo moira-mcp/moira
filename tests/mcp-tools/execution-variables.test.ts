@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "@jest/globals";
+import { withoutMoment } from "../utils/progress-moment.js";
 import {
   callMCPTool,
   callMCPToolRaw,
@@ -728,12 +729,47 @@ describe("runtime execution variables", () => {
     expect(editable).toMatchObject({ adjusted: true });
     expect(editable.history.at(-1)).toMatchObject({ nodeId: "task", adjusted: true });
 
+    // The run carries the version it started on, and both surfaces attach the typical durations
+    // of that version — with this run left out of its own sample.
+    expect(sessionProgress.executionWorkflowVersion).toBe("1.0.0");
+    expect(sessionProgress.statistics).toMatchObject({
+      workflowVersion: "1.0.0",
+      sampledRuns: 0,
+      blocks: expect.arrayContaining([expect.objectContaining({ blockId: "first" })]),
+    });
+    expect(typeof sessionProgress.projectedAt).toBe("number");
+    for (const node of sessionProgress.nodes) {
+      // The block the run waits on has a timed open pass; blocks not reached have none.
+      expect(node.timing).toMatchObject(
+        node.id === "first"
+          ? { recorded: true, passes: [expect.objectContaining({ nodeId: "task", open: true })] }
+          : { recorded: false, passes: [], totalMs: null, currentMs: null },
+      );
+      expect(node.list).toBeNull();
+    }
+
     const httpResponse = await fetch(`${getTestBaseUrl()}/api/executions/${executionId}/progress`, {
       headers: { Cookie: `better-auth.session_token=${cookie}` },
     });
     expect(httpResponse.status).toBe(200);
-    const httpBody = (await httpResponse.json()) as { data: unknown };
-    expect(httpBody.data).toEqual(sessionProgress);
+    const httpBody = (await httpResponse.json()) as { data: Record<string, unknown> };
+    // Open passes are measured to the moment of projection, so the two projections differ only
+    // there; everything recorded is identical.
+    expect(withoutMoment(httpBody.data)).toEqual(withoutMoment(sessionProgress));
+
+    const statisticsResponse = await fetch(
+      `${getTestBaseUrl()}/api/workflows/runtime-variable-test/statistics?version=1.0.0`,
+      { headers: { Cookie: `better-auth.session_token=${cookie}` } },
+    );
+    expect(statisticsResponse.status).toBe(200);
+    const statisticsBody = (await statisticsResponse.json()) as { data: Record<string, unknown> };
+    // Only completed runs are sampled, so this waiting run is in neither sample; the workflow
+    // route answers for the caller's own runs of that version.
+    expect(statisticsBody.data).toMatchObject({
+      workflowVersion: "1.0.0",
+      sampledRuns: 0,
+      versionNotRecorded: 0,
+    });
 
     const denied = await fetch(`${getTestBaseUrl()}/api/executions/${executionId}/progress`, {
       headers: { Cookie: `better-auth.session_token=${foreignCookie}` },

@@ -15,6 +15,7 @@ import {
   prepareExecutionVariablePathWrite,
   prepareExecutionVariableWrite,
   queryExecutionVariables,
+  ProgressStatisticsService,
 } from "@mcp-moira/workflow-engine";
 import { AuthenticatedRequest } from "../types/express-types.js";
 import {
@@ -146,7 +147,21 @@ router.get(
     if (!graph) throw createApiError.notFound("Workflow not found");
     const progress = projectExecutionRun(graph, execution, { at: parseCursor(req.query.at) });
     if (!progress) throw createApiError.notFound("Workflow has no progress graph");
-    res.json({ success: true, data: progress, timestamp: new Date().toISOString() });
+    // Typical durations of the version this run started on over its owner's completed runs,
+    // without the run itself.
+    const statistics = progress.executionWorkflowVersion
+      ? await new ProgressStatisticsService(repository).forVersion(
+          execution.workflowId,
+          graph,
+          progress.executionWorkflowVersion,
+          { userId: execution.userId, excludeExecutionId: execution.executionId },
+        )
+      : null;
+    res.json({
+      success: true,
+      data: { ...progress, statistics },
+      timestamp: new Date().toISOString(),
+    });
   }),
 );
 

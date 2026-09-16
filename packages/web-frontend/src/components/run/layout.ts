@@ -2,12 +2,16 @@
  * Layered layout of the block graph for the canvas mode.
  *
  * Forward transitions define the layering (ELK layered, left to right, so the drawing follows
- * process direction across a wide viewport). Edges are then routed by kind so nothing crosses a
- * block:
+ * process direction across a wide viewport). ELK owns the drawn columns (`rank`); the vertical
+ * coordinate is then replaced by rows derived from the process (`blockRows`): the main sequence on
+ * one row, each side branch on a row of its own — two branches share a row only when their column
+ * spans are disjoint — and an off-sequence hub or a loop-only block on a row of its own beneath.
+ * Edges are then routed by kind so nothing crosses a block:
  *
  * - adjacent-rank forward edges are elbows whose vertical run sits in the gap between ranks;
- * - forward edges that skip ranks travel along lanes above the graph;
- * - cycles travel along lanes below the graph, dashed, one lane per cycle;
+ * - forward edges that skip ranks travel along lanes above the graph; where the vertical to or
+ *   from the lane would pierce a block on a row between, it moves into the gap beside the column;
+ * - cycles travel along lanes below the graph, dashed, one lane per cycle, with the same detour;
  * - transitions into a hub — a block that many blocks exit into, such as "Replan" or "Stopped" —
  *   are bundled: one muted edge per source and hub, leaving the source's right edge, rising in the
  *   gap after its rank to a channel above the graph that the hub owns, and dropping in the gap
@@ -30,6 +34,8 @@ const LINE_HEIGHT = 18;
 const NAME_LINE_HEIGHT = 20;
 const CHARS_PER_LINE = 38;
 const NAME_CHARS_PER_LINE = 22;
+/** The card clamps its name to this many lines (`line-clamp-2` in `CanvasView`). */
+const MAX_NAME_LINES = 2;
 const MAX_DESCRIPTION_LINES = 3;
 const NODE_SEP = 40;
 /** The least gap between ranks; it grows to hold the widest label pill drawn at rest in a gap. */
@@ -49,6 +55,13 @@ const MARGIN = 24;
 const HUB_GAP_INSET = 24;
 /** The hub port sits this far below the hub's top on its left edge, clear of skip-lane landings. */
 const HUB_PORT_INSET = 24;
+/**
+ * How far into a gap a skip's or a return's vertical sits when it has to leave its block's column
+ * to clear a block on a row between; distinct from the hub bundles' inset so the runs never share
+ * a line.
+ */
+const SKIP_GAP_INSET = 44;
+const RETURN_GAP_INSET = 64;
 
 export interface LaidOutBlock {
   id: string;
@@ -56,7 +69,10 @@ export interface LaidOutBlock {
   y: number;
   width: number;
   height: number;
+  /** The drawn column, from ELK. */
   rank: number;
+  /** The row from `blockRows`: 0 the main sequence, negative above it, positive below. */
+  row: number;
 }
 
 export interface LaidOutEdge {
@@ -88,9 +104,17 @@ function lineCount(text: string, charsPerLine: number, max: number): number {
 }
 
 /** Height is a pure function of the block's text so layout stays deterministic. */
-/** Chips (hub exits, skips, returns) wrap inside the block; two fit one row at the block width. */
+/** Chips (hub exits, skips, returns) wrap inside the block; two fit one row at the block width
+ * when their names are short, a chip named longer than this takes a row of its own. */
 const CHIPS_PER_ROW = 2;
+const CHIP_SHARED_ROW_CHARS = 14;
 const CHIP_ROW_HEIGHT = 24;
+
+/** Rows the chips take: long-named chips one each, the short ones two per row. */
+export function chipRowCount(chipNames: readonly string[]): number {
+  const long = chipNames.filter((name) => name.length > CHIP_SHARED_ROW_CHARS).length;
+  return long + Math.ceil((chipNames.length - long) / CHIPS_PER_ROW);
+}
 /** Parallel forward transitions between one pair of blocks spread by this much per transition. */
 const PARALLEL_STEP = 26;
 
@@ -98,14 +122,14 @@ export function estimateBlockHeight(
   name: string,
   description: string,
   hasNote: boolean,
-  chipCount: number,
+  chipNames: readonly string[],
 ): number {
   return (
     BLOCK_BASE_HEIGHT +
-    lineCount(name, NAME_CHARS_PER_LINE, 3) * NAME_LINE_HEIGHT +
+    lineCount(name, NAME_CHARS_PER_LINE, MAX_NAME_LINES) * NAME_LINE_HEIGHT +
     lineCount(description, CHARS_PER_LINE, MAX_DESCRIPTION_LINES) * LINE_HEIGHT +
     (hasNote ? LINE_HEIGHT : 0) +
-    Math.ceil(chipCount / CHIPS_PER_ROW) * CHIP_ROW_HEIGHT
+    chipRowCount(chipNames) * CHIP_ROW_HEIGHT
   );
 }
 
@@ -198,6 +222,169 @@ async function placeBlocks(
   }));
 }
 
+/**
+ * The row of every block, a pure function of the blocks, their forward transitions and the drawn
+ * columns (`rankOf`); loops and self-loops shape no row. Row 0 is the main sequence — the longest
+ * forward chain from the start block, a tie between successors going to the higher process index
+ * so the row follows the process toward its end rather than into a repair. A side branch is a
+ * maximal chain of off-sequence blocks that are neither hubs nor loop-only, linked by forward
+ * transitions; its column span runs from the column of its entry to the column of its rejoin.
+ * Branches are placed in process order of their entry column, a branch entered from another
+ * branch after the one it leaves; each new row alternates below and above the sequence, and a
+ * branch joins an existing row only when its span is disjoint from every span already on it. An
+ * off-sequence hub and a loop-only block (no forward transition into it, and not the start) each
+ * take a row of their own beneath every branch row, hubs first, in process order.
+ */
+export function blockRows(
+  blocks: readonly RunBlock[],
+  hubIds: readonly string[],
+  rankOf: ReadonlyMap<string, number>,
+): Map<string, number> {
+  const ordered = [...blocks].sort((a, b) => a.index - b.index);
+  const indexOf = new Map(ordered.map((b) => [b.id, b.index]));
+  const hubs = new Set(hubIds);
+  const forward = new Map<string, string[]>();
+  const forwardIn = new Map<string, string[]>();
+  for (const block of ordered) {
+    const targets: string[] = [];
+    for (const tr of block.transitions) {
+      if (tr.cycle || tr.to === block.id || !indexOf.has(tr.to) || targets.includes(tr.to))
+        continue;
+      targets.push(tr.to);
+      forwardIn.set(tr.to, [...(forwardIn.get(tr.to) ?? []), block.id]);
+    }
+    forward.set(block.id, targets);
+  }
+  const rows = new Map<string, number>();
+  if (ordered.length === 0) return rows;
+  const start = ordered[0];
+  const loopOnly = new Set(
+    ordered.filter((b) => b !== start && (forwardIn.get(b.id) ?? []).length === 0).map((b) => b.id),
+  );
+
+  // The longest forward chain from the start, over transitions that advance the process index.
+  const later = (id: string) =>
+    (forward.get(id) ?? []).filter((to) => indexOf.get(to)! > indexOf.get(id)!);
+  const longest = new Map<string, number>();
+  for (let i = ordered.length - 1; i >= 0; i -= 1) {
+    const id = ordered[i].id;
+    longest.set(id, 1 + Math.max(0, ...later(id).map((to) => longest.get(to)!)));
+  }
+  const sequence: string[] = [];
+  for (let id: string | undefined = start.id; id;) {
+    sequence.push(id);
+    const next = later(id);
+    const best = Math.max(0, ...next.map((to) => longest.get(to)!));
+    id = next
+      .filter((to) => longest.get(to) === best)
+      .sort((a, b) => indexOf.get(b)! - indexOf.get(a)!)[0];
+  }
+  for (const id of sequence) rows.set(id, 0);
+
+  // Side branches: maximal forward-linked chains of the remaining ordinary blocks.
+  const pool = new Set(
+    ordered.map((b) => b.id).filter((id) => !rows.has(id) && !hubs.has(id) && !loopOnly.has(id)),
+  );
+  const branches: string[][] = [];
+  const taken = new Set<string>();
+  for (const id of pool) {
+    if (taken.has(id)) continue;
+    const chain = [id];
+    taken.add(id);
+    for (let tail = id; ;) {
+      const next = (forward.get(tail) ?? []).find((to) => pool.has(to) && !taken.has(to));
+      if (!next) break;
+      chain.push(next);
+      taken.add(next);
+      tail = next;
+    }
+    branches.push(chain);
+  }
+  const branchOf = new Map(branches.flatMap((chain, i) => chain.map((id) => [id, i] as const)));
+  const spans = branches.map((chain) => {
+    const own = chain.map((id) => rankOf.get(id) ?? 0);
+    const entries = chain
+      .flatMap((id) => forwardIn.get(id) ?? [])
+      .filter((from) => !chain.includes(from))
+      .map((from) => rankOf.get(from) ?? 0);
+    const exits = chain
+      .flatMap((id) => forward.get(id) ?? [])
+      .filter((to) => !chain.includes(to))
+      .map((to) => rankOf.get(to) ?? 0);
+    return { from: Math.min(...own, ...entries), to: Math.max(...own, ...exits) };
+  });
+  const entryBranches = branches.map(
+    (chain) =>
+      new Set(
+        chain
+          .flatMap((id) => forwardIn.get(id) ?? [])
+          .map((from) => branchOf.get(from))
+          .filter((i): i is number => i !== undefined && !chain.includes(branches[i][0])),
+      ),
+  );
+  const byEntry = branches
+    .map((_, i) => i)
+    .sort(
+      (a, b) =>
+        spans[a].from - spans[b].from ||
+        indexOf.get(branches[a][0])! - indexOf.get(branches[b][0])!,
+    );
+  const placed: number[] = [];
+  while (placed.length < branches.length) {
+    const next =
+      byEntry.find(
+        (i) => !placed.includes(i) && [...entryBranches[i]].every((e) => placed.includes(e)),
+      ) ?? byEntry.find((i) => !placed.includes(i))!;
+    placed.push(next);
+  }
+  const branchRows: Array<{ row: number; spans: Array<{ from: number; to: number }> }> = [];
+  let below = 0;
+  let above = 0;
+  for (const i of placed) {
+    const span = spans[i];
+    let row = branchRows.find((r) => r.spans.every((s) => s.to < span.from || span.to < s.from));
+    if (!row) {
+      const number = branchRows.length % 2 === 0 ? (below += 1) : -(above += 1);
+      row = { row: number, spans: [] };
+      branchRows.push(row);
+    }
+    row.spans.push(span);
+    for (const id of branches[i]) rows.set(id, row.row);
+  }
+  for (const id of ordered.map((b) => b.id)) {
+    if (!rows.has(id) && hubs.has(id)) rows.set(id, (below += 1));
+  }
+  for (const id of ordered.map((b) => b.id)) {
+    if (!rows.has(id)) rows.set(id, (below += 1));
+  }
+  return rows;
+}
+
+/** How far a block's self-loops dip beneath it (zero without a self-loop). */
+function selfLoopExtent(block: RunBlock): number {
+  const loops = block.transitions.filter((tr) => tr.to === block.id).length;
+  return loops === 0 ? 0 : SELF_LOOP_DEPTH + (loops - 1) * PARALLEL_STEP;
+}
+
+/** Whether the segment from (ax, ay) to (bx, by) passes through a block other than the excluded ones. */
+export function crossesBlock(
+  blocks: readonly Placed[],
+  exclude: readonly string[],
+  ax: number,
+  ay: number,
+  bx: number,
+  by: number,
+): boolean {
+  return blocks.some(
+    (b) =>
+      !exclude.includes(b.id) &&
+      Math.min(ax, bx) < b.x + b.width &&
+      Math.max(ax, bx) > b.x &&
+      Math.min(ay, by) < b.y + b.height &&
+      Math.max(ay, by) > b.y,
+  );
+}
+
 /** Where every bundled hub edge enters a hub: a point near the top of its left edge. */
 export function hubPort(block: Pick<LaidOutBlock, "x" | "y">): { x: number; y: number } {
   return { x: block.x, y: block.y + HUB_PORT_INSET };
@@ -218,27 +405,49 @@ export async function layoutBlocks(
         block.name,
         block.description,
         false,
-        canvasChipsOf(block, hubIds, blocks).length,
+        canvasChipsOf(block, hubIds, blocks).map((chip) => chip.targetName),
       ),
     });
   }
-  const placed = await placeBlocks(blocks, sizes, rankSeparation(blocks, hubIds));
+  const rankSep = rankSeparation(blocks, hubIds);
+  const placed = await placeBlocks(blocks, sizes, rankSep);
   const placedById = new Map(placed.map((p) => [p.id, p]));
   const xs = [...new Set(placed.map((p) => Math.round(p.x)))].sort((a, b) => a - b);
+  const rankOf = new Map(placed.map((p) => [p.id, xs.indexOf(Math.round(p.x))]));
+  // ELK's vertical placement is discarded: every block takes the top edge of its row. A row is as
+  // tall as its tallest block with its self-loops, plus the node gap, so a self-loop never dips
+  // into the row beneath; rows above the sequence stack upward from it, rows below downward.
+  const rowOf = blockRows(blocks, hubIds, rankOf);
+  const rowHeight = new Map<number, number>();
+  for (const block of blocks) {
+    const row = rowOf.get(block.id)!;
+    const extent = sizes.get(block.id)!.height + selfLoopExtent(block);
+    rowHeight.set(row, Math.max(rowHeight.get(row) ?? 0, extent + NODE_SEP));
+  }
+  const rowTop = new Map<number, number>();
+  const rowsAbove = [...rowHeight.keys()].filter((row) => row < 0).sort((a, b) => b - a);
+  const rowsBelow = [...rowHeight.keys()].filter((row) => row > 0).sort((a, b) => a - b);
+  rowTop.set(0, MARGIN + rowsAbove.reduce((sum, row) => sum + rowHeight.get(row)!, 0));
+  for (const row of rowsAbove) rowTop.set(row, rowTop.get(row + 1)! - rowHeight.get(row)!);
+  for (const row of rowsBelow) rowTop.set(row, rowTop.get(row - 1)! + rowHeight.get(row - 1)!);
   const laidBlocks: LaidOutBlock[] = blocks.map((block) => {
     const p = placedById.get(block.id)!;
+    const row = rowOf.get(block.id)!;
     return {
       id: block.id,
       x: p.x,
-      y: p.y,
+      y: rowTop.get(row)!,
       width: p.width,
       height: p.height,
-      rank: xs.indexOf(Math.round(p.x)),
+      rank: rankOf.get(block.id)!,
+      row,
     };
   });
   const byId = new Map(laidBlocks.map((b) => [b.id, b]));
   const top = Math.min(...laidBlocks.map((b) => b.y));
-  const bottom = Math.max(...laidBlocks.map((b) => b.y + b.height));
+  const bottom = Math.max(
+    ...blocks.map((b) => byId.get(b.id)!.y + byId.get(b.id)!.height + selfLoopExtent(b)),
+  );
 
   const edges: LaidOutEdge[] = [];
   let bottomLane = 0;
@@ -302,7 +511,10 @@ export async function layoutBlocks(
           const offset = (index - (count - 1) / 2) * PARALLEL_STEP;
           const ya = y1 + offset;
           const yb = y2 + offset;
-          const midX = x1 + (x2 - x1) / 2;
+          // The vertical run sits in the middle of the gap after the source's column — the whole
+          // gap when the target is in the next column, and still that gap when the layering put
+          // the target further right, so the run never passes through a column between.
+          const midX = x1 + rankSep / 2;
           const path =
             Math.abs(ya - yb) < 1
               ? `M ${x1} ${ya} L ${x2} ${yb}`
@@ -324,15 +536,31 @@ export async function layoutBlocks(
           topLane += 1;
           const xa = source.x + source.width * 0.7;
           const xb = target.x + target.width * 0.3;
-          const path = `M ${xa} ${source.y} L ${xa} ${laneY} L ${xb} ${laneY} L ${xb} ${target.y}`;
+          // The rise and the drop leave their block's column for the gap beside it when a block
+          // on a row between would be pierced; the turn sits in the row gap over the block.
+          const ends = [block.id, transition.to];
+          let laneFrom = xa;
+          let rise = `M ${xa} ${source.y} L ${xa} ${laneY}`;
+          if (crossesBlock(laidBlocks, ends, xa, source.y, xa, laneY)) {
+            laneFrom = source.x + source.width + SKIP_GAP_INSET;
+            const turn = source.y - NODE_SEP / 2;
+            rise = `M ${xa} ${source.y} L ${xa} ${turn} L ${laneFrom} ${turn} L ${laneFrom} ${laneY}`;
+          }
+          let laneTo = xb;
+          let drop = `L ${xb} ${laneY} L ${xb} ${target.y}`;
+          if (crossesBlock(laidBlocks, ends, xb, laneY, xb, target.y)) {
+            laneTo = target.x - SKIP_GAP_INSET;
+            const turn = target.y - NODE_SEP / 2;
+            drop = `L ${laneTo} ${laneY} L ${laneTo} ${turn} L ${xb} ${turn} L ${xb} ${target.y}`;
+          }
           edges.push({
             id,
             from: block.id,
             to: transition.to,
             transition,
             kind: "skip",
-            path,
-            labelX: (xa + xb) / 2,
+            path: `${rise} ${drop}`,
+            labelX: (laneFrom + laneTo) / 2,
             labelY: laneY,
             labelAnchor: "above",
           });
@@ -369,15 +597,32 @@ export async function layoutBlocks(
       const y1 = source.y + source.height;
       const x2 = target.x + target.width * 0.7;
       const y2 = target.y + target.height;
-      const path = `M ${x1} ${y1} L ${x1} ${laneY} L ${x2} ${laneY} L ${x2} ${y2}`;
+      // As for skips: the fall and the rise move into the gap beside their column — the fall
+      // before the source's, the rise after the target's, clear of the self-loops between — when
+      // a block on a row beneath would be pierced.
+      const ends = [block.id, transition.to];
+      let laneFrom = x1;
+      let fall = `M ${x1} ${y1} L ${x1} ${laneY}`;
+      if (crossesBlock(laidBlocks, ends, x1, y1, x1, laneY)) {
+        laneFrom = source.x - RETURN_GAP_INSET;
+        const turn = y1 + NODE_SEP / 2;
+        fall = `M ${x1} ${y1} L ${x1} ${turn} L ${laneFrom} ${turn} L ${laneFrom} ${laneY}`;
+      }
+      let laneTo = x2;
+      let rise = `L ${x2} ${laneY} L ${x2} ${y2}`;
+      if (crossesBlock(laidBlocks, ends, x2, laneY, x2, y2)) {
+        laneTo = target.x + target.width + RETURN_GAP_INSET;
+        const turn = y2 + NODE_SEP / 2;
+        rise = `L ${laneTo} ${laneY} L ${laneTo} ${turn} L ${x2} ${turn} L ${x2} ${y2}`;
+      }
       edges.push({
         id,
         from: block.id,
         to: transition.to,
         transition,
         kind: "cycle",
-        path,
-        labelX: (x1 + x2) / 2,
+        path: `${fall} ${rise}`,
+        labelX: (laneFrom + laneTo) / 2,
         labelY: laneY,
         labelAnchor: "above",
       });

@@ -79,3 +79,88 @@ describe("Workflow Management Flow carries the process block contract", () => {
     }
   });
 });
+
+describe("Workflow Management Flow prefers routing on the deciding node", () => {
+  const engine = wmf.variableRegistry!.workflow_reference_engine.default as string;
+  const design = wmf.variableRegistry!.workflow_reference_design.default as string;
+  const patterns = wmf.variableRegistry!.workflow_reference_patterns.default as string;
+  const antipatterns = wmf.variableRegistry!.workflow_reference_antipatterns.default as string;
+
+  test("the engine reference states the current routing contract and none of the retired one", () => {
+    for (const fact of [
+      "`cases: [{ when, output }]`",
+      "required `default`",
+      "routes on its own validated answer",
+      "`unreachable-output`",
+      "`metadata.schemaVersion`",
+      // Severities exactly as the validator emits them.
+      "of the reserved control outputs `error` and `timeout`, is an error",
+      "is a warning, the case being redundant",
+    ]) {
+      expect(engine).toContain(fact);
+    }
+    for (const retired of ["only `true`/`false`", "input-retry-exhaustion", "maxRetries"]) {
+      expect(engine).not.toContain(retired);
+    }
+  });
+
+  test("the design reference carries the preference as an outcome with its reason and the rule for a separate node", () => {
+    expect(design).toContain("### Decide on the node that has the evidence");
+    expect(design).toContain("Why: every extra node is a hop");
+    expect(design).toContain(
+      "Keep a separate `condition` or `expression` node when it reads better alone",
+    );
+    expect(design).toContain("The standalone nodes are\nnot deprecated");
+  });
+
+  test("the patterns and antipatterns references name routing on the answer and avoidable routing scaffolding", () => {
+    expect(patterns).toContain("### Routing on the answer");
+    expect(antipatterns).toContain("### Avoidable routing scaffolding");
+    expect(antipatterns).toContain("an `expressions` entry\non the node that has the evidence");
+  });
+
+  test("the progress reference states the list binding as an outcome with its reason", () => {
+    expect(reference).toContain("**A block that works through a list binds it.**");
+    expect(reference).toContain("`list: { items?, title?, current?, done?, total?, indexBase? }`");
+    expect(reference).toContain("edit-block <id> --list");
+    expect(reference).toContain("Nothing in the binding names a plan or a checklist");
+  });
+
+  test.each([
+    ["design-workflow-structure", "node that has its evidence"],
+    ["create-edit-plan", "avoidable routing scaffolding"],
+    ["create-workflow-json", "cases on the deciding node"],
+    ["apply-workflow-changes", "cases on the deciding node"],
+    ["review-workflow-design", "avoidable routing scaffolding"],
+    ["review-workflow-quality", "avoidable routing scaffolding"],
+  ])("%s demands the routing shape", (id, marker) => {
+    expect(directive(id)).toContain(marker);
+  });
+
+  test("the producers and gates bind a listed stage's list", () => {
+    for (const id of [
+      "design-workflow-structure",
+      "create-edit-plan",
+      "create-workflow-json",
+      "apply-workflow-changes",
+      "review-workflow-design",
+      "review-workflow-quality",
+    ]) {
+      expect(directive(id)).toMatch(
+        /bind(s|ing)? (it|the list|each listed stage's list)|without binding it/u,
+      );
+    }
+  });
+
+  test("the review-repair reference routes a repair's reach on the node that gives the answer", () => {
+    const reviewRepair = wmf.variableRegistry!.workflow_reference_review_repair.default as string;
+    expect(reviewRepair).toContain("The same node carries the case");
+    expect(reviewRepair).not.toContain("A condition placed after that node");
+  });
+
+  test("the quality gate names the references that define scaffolding instead of restating them", () => {
+    expect(directive("review-workflow-quality")).toContain(
+      "as `reference/design.md` and `reference/antipatterns.md` define it",
+    );
+  });
+});

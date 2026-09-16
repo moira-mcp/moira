@@ -1,0 +1,98 @@
+/**
+ * The list a block is bound to, as the run resolved it: how many of its items are done, the items
+ * themselves with the one in progress marked and the time the block's passes spent on each, and —
+ * when the binding names counters but no items array — the counters alone. Nothing here is
+ * inferred: the items, the counters and the current position all come from the projection.
+ */
+
+import React from "react";
+import { useTranslation } from "react-i18next";
+import { Check, CircleDashed, Loader2 } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { formatDuration } from "./duration";
+import type { RunBlock, RunList } from "./model";
+
+/** `3 / 7` with "—" for a counter the binding did not resolve. */
+function counters(list: NonNullable<RunList>): { done: string; total: string } {
+  return {
+    done: list.done === null ? "—" : String(list.done),
+    total: list.total === null ? "—" : String(list.total),
+  };
+}
+
+export function BlockListCard({
+  block,
+  className,
+}: {
+  block: RunBlock;
+  className?: string;
+}): React.JSX.Element | null {
+  const { t } = useTranslation();
+  const list = block.list ?? null;
+  if (!list) return null;
+  const { done, total } = counters(list);
+  return (
+    <section
+      className={cn("space-y-1", className)}
+      data-testid="block-list"
+      data-block-id={block.id}
+      aria-label={t("pages.runPage.list.title")}
+    >
+      <div className="flex flex-wrap items-baseline gap-x-2">
+        <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+          {t("pages.runPage.list.title")}
+        </p>
+        <p className="text-sm font-semibold tabular-nums" data-testid="block-list-progress">
+          {t("pages.runPage.list.progress", { done, total })}
+        </p>
+      </div>
+      {list.items === null ? (
+        <p className="text-sm text-muted-foreground" data-testid="block-list-counters-only">
+          {list.currentTitle
+            ? t("pages.runPage.list.countersOnlyCurrent", { title: list.currentTitle })
+            : t("pages.runPage.list.countersOnly")}
+        </p>
+      ) : (
+        <ol className="space-y-0.5 text-sm">
+          {list.items.map((item) => {
+            const Icon = item.current ? Loader2 : item.done ? Check : CircleDashed;
+            return (
+              <li
+                key={item.index}
+                className={cn(
+                  "flex items-baseline gap-2 rounded-md px-1.5 py-0.5",
+                  item.current && "bg-primary/5 font-medium",
+                  !item.current && item.done && "text-muted-foreground",
+                )}
+                data-testid="block-list-item"
+                data-index={item.index}
+                data-current={item.current ? "true" : "false"}
+                data-done={item.done ? "true" : "false"}
+              >
+                <Icon
+                  className={cn(
+                    "size-3.5 shrink-0 self-center",
+                    item.current ? "animate-spin text-primary" : "text-muted-foreground",
+                  )}
+                  aria-hidden="true"
+                />
+                <span className="min-w-0 flex-1 break-words">{item.title}</span>
+                {item.current && (
+                  <span className="text-[11px] text-primary">
+                    {t("pages.runPage.list.current")}
+                  </span>
+                )}
+                <span
+                  className="shrink-0 tabular-nums text-muted-foreground"
+                  data-testid="block-list-item-duration"
+                >
+                  {formatDuration(item.durationMs, t)}
+                </span>
+              </li>
+            );
+          })}
+        </ol>
+      )}
+    </section>
+  );
+}

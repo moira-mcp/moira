@@ -507,6 +507,7 @@ export function renderWorkflowSchema(workflow: WorkflowSchemaInput): string {
       if (progressNode.connections?.default)
         lines.push(`    EDGE [default] -> ${structuralToken(progressNode.connections.default)}`);
       if (progressNode.content) lines.push(`    CONTENT ${stableJson(progressNode.content)}`);
+      if (progressNode.list) lines.push(`    LIST ${stableJson(progressNode.list)}`);
     }
     lines.push(
       `  COVERAGE nodes=${progressNodes.length}/${progressNodes.length} edges=${progressEdges}/${progressEdges} mappings=${progressMappings}/${progressMappings}`,
@@ -538,8 +539,18 @@ export function renderWorkflowSchema(workflow: WorkflowSchemaInput): string {
       renderedNodes++;
       const preview = directivePreview(node);
       if (preview) lines.push(`    DIRECTIVE ${quotedText(preview)}`);
-      if (node.type === "condition") lines.push(`    CONDITION ${stableJson(node.condition)}`);
-      if (node.type === "expression")
+      if (node.type === "condition" || node.type === "agent-directive") {
+        (node.cases ?? []).forEach((routingCase) =>
+          lines.push(
+            `    CASE ${structuralToken(routingCase.output)} WHEN ${stableJson(routingCase.when)}`,
+          ),
+        );
+      }
+      if (
+        node.type === "expression" ||
+        node.type === "condition" ||
+        node.type === "agent-directive"
+      )
         (node.expressions ?? []).forEach((expression) =>
           lines.push(`    EXPRESSION ${quotedText(expression)}`),
         );

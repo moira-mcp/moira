@@ -63,14 +63,19 @@ Record the completed pass immediately after this response, before any gap decisi
 {
   "type": "condition",
   "id": "check-requirements-gaps",
-  "condition": {
-    "operator": "eq",
-    "left": { "contextPath": "requirements_gaps_count" },
-    "right": 0
-  },
+  "cases": [
+    {
+      "when": {
+        "operator": "eq",
+        "left": { "contextPath": "requirements_gaps_count" },
+        "right": 0
+      },
+      "output": "complete"
+    }
+  ],
   "connections": {
-    "true": "deliver",
-    "false": "fix-gaps"
+    "complete": "deliver",
+    "default": "fix-gaps"
   }
 }
 ```

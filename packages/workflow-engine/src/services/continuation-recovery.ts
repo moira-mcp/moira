@@ -1,5 +1,6 @@
 import type { IDataRepository } from "../interfaces/data-repository.js";
 import type { ExecutionContext, WorkflowExecution } from "../types/base-types.js";
+import { PAUSING_NODE_TYPES } from "../utils/execution-visits.js";
 import { diagnoseContinuation, unresolvedReferences } from "./continuation-diagnosis.js";
 import type { ContinuationDiagnosis } from "./continuation-diagnosis.js";
 import { ExecutionMutationCoordinator } from "./execution-mutation-coordinator.js";
@@ -31,13 +32,7 @@ import { ExecutionMutationCoordinator } from "./execution-mutation-coordinator.j
  * An extension node pauses only when its call fails, and a node error pauses on whatever node raised
  * it. Neither is a place an operator chooses to resume at, so neither is offered here.
  */
-const RESUMABLE_NODE_TYPES = new Set([
-  "agent-directive",
-  "teleport",
-  "materialize",
-  "lock",
-  "subgraph",
-]);
+const RESUMABLE_NODE_TYPES = PAUSING_NODE_TYPES;
 
 /**
  * The statuses a run can hold and still be something recovery may act on. The engine stores only

@@ -58,14 +58,19 @@ const LOOP_WORKFLOW = {
       {
         type: "condition",
         id: "check-loop",
-        condition: {
-          operator: "lt",
-          left: { contextPath: "iteration" },
-          right: { contextPath: "max_iterations" },
-        },
+        cases: [
+          {
+            when: {
+              operator: "lt",
+              left: { contextPath: "iteration" },
+              right: { contextPath: "max_iterations" },
+            },
+            output: "true",
+          },
+        ],
         connections: {
           true: "increment",
-          false: "end",
+          default: "end",
         },
       },
       {
