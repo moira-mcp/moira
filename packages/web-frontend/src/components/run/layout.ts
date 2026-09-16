@@ -26,7 +26,7 @@
  */
 
 import type { RunBlock, RunTransition } from "./model";
-import { PARALLEL_CHIP_MIN, hubExitsOf } from "./chips";
+import { PARALLEL_CHIP_MIN } from "./chips";
 
 export const BLOCK_WIDTH = 560;
 const BLOCK_BASE_HEIGHT = 74;
@@ -89,6 +89,8 @@ export interface LaidOutEdge {
   labelAnchor: "center" | "above" | "below";
   /** How many adjacent forward transitions share this edge's pair of blocks (forward edges). */
   parallelCount?: number;
+  /** The y of the lane a skip, hub or return edge travels along, in the gap it was given. */
+  laneY?: number;
 }
 
 export interface BlockLayout {
@@ -435,18 +437,74 @@ export async function layoutBlocks(
   // tall as its tallest block with its self-loops, plus the node gap, so a self-loop never dips
   // into the row beneath; rows above the sequence stack upward from it, rows below downward.
   const rowOf = blockRows(blocks, hubIds, rankOf);
-  const rowHeight = new Map<number, number>();
+  const rowContent = new Map<number, number>();
   for (const block of blocks) {
     const row = rowOf.get(block.id)!;
     const extent = sizes.get(block.id)!.height + selfLoopExtent(block);
-    rowHeight.set(row, Math.max(rowHeight.get(row) ?? 0, extent + NODE_SEP));
+    rowContent.set(row, Math.max(rowContent.get(row) ?? 0, extent));
   }
+  const rows = [...rowContent.keys()].sort((a, b) => a - b);
+  const rowIndex = new Map(rows.map((row, i) => [row, i]));
+
+  // Every edge that leaves the process line travels along a lane in a gap between two rows: a
+  // skip or a hub bundle in the gap just above the upper of its two blocks, a return in the gap
+  // just below the lower one. Gap g lies between rows[g - 1] and rows[g]; g = 0 is above the top
+  // row, g = rows.length below the bottom one. The lanes are counted first so every gap is given
+  // the room its lanes need, and only then are the rows placed.
+  interface Lane {
+    gap: number;
+    slot: number;
+  }
+  const laneOf = new Map<string, Lane>();
+  const gapLanes = new Map<number, number>();
+  const bundled = new Set<string>();
+  const takeLane = (id: string, gap: number) => {
+    const slot = gapLanes.get(gap) ?? 0;
+    gapLanes.set(gap, slot + 1);
+    laneOf.set(id, { gap, slot });
+  };
+  for (const block of blocks) {
+    for (const transition of block.transitions) {
+      if (!placedById.has(transition.to) || transition.to === block.id) continue;
+      const rs = rowIndex.get(rowOf.get(block.id)!)!;
+      const rt = rowIndex.get(rowOf.get(transition.to)!)!;
+      if (!transition.cycle && hubs.has(transition.to)) {
+        const bundleId = `${block.id}->${transition.to}:hub`;
+        if (bundled.has(bundleId)) continue;
+        bundled.add(bundleId);
+        takeLane(bundleId, Math.min(rs, rt));
+        continue;
+      }
+      const id = `${block.id}->${transition.to}:${transition.label}`;
+      if (!transition.cycle) {
+        if (indexOf.get(transition.to)! <= block.index + 1) continue; // an adjacent elbow
+        takeLane(id, Math.min(rs, rt));
+      } else {
+        takeLane(id, Math.max(rs, rt) + 1);
+      }
+    }
+  }
+  const gapSize = (gap: number) => {
+    const lanes = gapLanes.get(gap) ?? 0;
+    return lanes > 0 ? LANE_GAP + lanes * LANE_STEP + LANE_GAP : NODE_SEP;
+  };
   const rowTop = new Map<number, number>();
-  const rowsAbove = [...rowHeight.keys()].filter((row) => row < 0).sort((a, b) => b - a);
-  const rowsBelow = [...rowHeight.keys()].filter((row) => row > 0).sort((a, b) => a - b);
-  rowTop.set(0, MARGIN + rowsAbove.reduce((sum, row) => sum + rowHeight.get(row)!, 0));
-  for (const row of rowsAbove) rowTop.set(row, rowTop.get(row + 1)! - rowHeight.get(row)!);
-  for (const row of rowsBelow) rowTop.set(row, rowTop.get(row - 1)! + rowHeight.get(row - 1)!);
+  let cursor = MARGIN + (gapLanes.get(0) ? gapSize(0) : 0);
+  rows.forEach((row, i) => {
+    if (i > 0) cursor += gapSize(i);
+    rowTop.set(row, cursor);
+    cursor += rowContent.get(row)!;
+  });
+  const bottomOfRows = cursor;
+  /** The y of lane `slot` in gap `gap`: lanes fill the gap from its upper edge. */
+  const laneYOf = (lane: Lane) => {
+    const gapTop =
+      lane.gap === 0
+        ? MARGIN
+        : rowTop.get(rows[lane.gap - 1])! + rowContent.get(rows[lane.gap - 1])!;
+    return gapTop + LANE_GAP + lane.slot * LANE_STEP + LANE_STEP / 2;
+  };
+
   const laidBlocks: LaidOutBlock[] = blocks.map((block) => {
     const p = placedById.get(block.id)!;
     const row = rowOf.get(block.id)!;
@@ -461,25 +519,13 @@ export async function layoutBlocks(
     };
   });
   const byId = new Map(laidBlocks.map((b) => [b.id, b]));
-  const top = Math.min(...laidBlocks.map((b) => b.y));
-  const bottom = Math.max(
-    ...blocks.map((b) => byId.get(b.id)!.y + byId.get(b.id)!.height + selfLoopExtent(b)),
-  );
 
   const edges: LaidOutEdge[] = [];
-  let bottomLane = 0;
-  // Hubs take the channels nearest the graph, one per hub, in the derivation's hub order; skip
-  // edges stack above them. Only hubs that actually receive a transition get a channel.
-  const receiving = new Set(
-    blocks.flatMap((b) => hubExitsOf(b, hubIds, blocks).map((chip) => chip.transition.to)),
-  );
   // Adjacent forward transitions that join the same pair of blocks share the gap between them:
   // each takes its own horizontal line and its own label row so nothing stacks on one point.
   const parallel = parallelCounts(blocks, hubs);
   const parallelIndex = new Map<string, number>();
-  const hubLane = new Map([...hubs].filter((id) => receiving.has(id)).map((id, i) => [id, i]));
-  let topLane = hubLane.size;
-  const bundled = new Set<string>();
+  const seenBundle = new Set<string>();
 
   for (const block of blocks) {
     const source = byId.get(block.id)!;
@@ -487,39 +533,34 @@ export async function layoutBlocks(
       const target = byId.get(transition.to);
       if (!target) continue;
       const id = `${block.id}->${transition.to}:${transition.label}`;
+      const x1 = source.x + source.width;
+      const y1 = source.y + source.height / 2;
+      const x2 = target.x;
+      const y2 = target.y + target.height / 2;
 
       if (!transition.cycle && hubs.has(transition.to)) {
         const bundleId = `${block.id}->${transition.to}:hub`;
-        if (bundled.has(bundleId)) continue; // one edge per source and hub; the chips carry the labels
-        bundled.add(bundleId);
-        const laneY = top - LANE_GAP - hubLane.get(transition.to)! * LANE_STEP;
-        const x1 = source.x + source.width;
-        const y1 = source.y + HUB_PORT_INSET;
+        if (seenBundle.has(bundleId)) continue; // one edge per source and hub; the ports carry the labels
+        seenBundle.add(bundleId);
+        const laneY = laneYOf(laneOf.get(bundleId)!);
         const xa = x1 + HUB_GAP_INSET;
-        const port = hubPort(target);
-        const xb = port.x - HUB_GAP_INSET;
-        const path = `M ${x1} ${y1} L ${xa} ${y1} L ${xa} ${laneY} L ${xb} ${laneY} L ${xb} ${port.y} L ${port.x} ${port.y}`;
+        const xb = x2 - HUB_GAP_INSET;
         edges.push({
           id: bundleId,
           from: block.id,
           to: transition.to,
           transition,
           kind: "hub",
-          path,
+          path: `M ${x1} ${y1} L ${xa} ${y1} L ${xa} ${laneY} L ${xb} ${laneY} L ${xb} ${y2} L ${x2} ${y2}`,
           labelX: (xa + xb) / 2,
           labelY: laneY,
           labelAnchor: "above",
+          laneY,
         });
         continue;
       }
 
       if (!transition.cycle) {
-        const x1 = source.x + source.width;
-        const y1 = source.y + source.height / 2;
-        const x2 = target.x;
-        const y2 = target.y + target.height / 2;
-        // Adjacent in process order (the same rule the chips use): an elbow in the gap with its
-        // label; anything further is a skip lane above the graph named by a chip in the source.
         if (indexOf.get(transition.to)! <= block.index + 1) {
           const pair = `${block.id}->${transition.to}`;
           const count = parallel.get(pair) ?? 1;
@@ -528,9 +569,7 @@ export async function layoutBlocks(
           const offset = (index - (count - 1) / 2) * PARALLEL_STEP;
           const ya = y1 + offset;
           const yb = y2 + offset;
-          // The vertical run sits in the middle of the gap after the source's column — the whole
-          // gap when the target is in the next column, and still that gap when the layering put
-          // the target further right, so the run never passes through a column between.
+          // The vertical run sits in the middle of the gap after the source's column.
           const midX = x1 + rankSep / 2;
           const path =
             Math.abs(ya - yb) < 1
@@ -549,37 +588,20 @@ export async function layoutBlocks(
             parallelCount: count,
           });
         } else {
-          const laneY = top - LANE_GAP - topLane * LANE_STEP;
-          topLane += 1;
-          const xa = source.x + source.width * 0.7;
-          const xb = target.x + target.width * 0.3;
-          // The rise and the drop leave their block's column for the gap beside it when a block
-          // on a row between would be pierced; the turn sits in the row gap over the block.
-          const ends = [block.id, transition.to];
-          let laneFrom = xa;
-          let rise = `M ${xa} ${source.y} L ${xa} ${laneY}`;
-          if (crossesBlock(laidBlocks, ends, xa, source.y, xa, laneY)) {
-            laneFrom = source.x + source.width + SKIP_GAP_INSET;
-            const turn = source.y - NODE_SEP / 2;
-            rise = `M ${xa} ${source.y} L ${xa} ${turn} L ${laneFrom} ${turn} L ${laneFrom} ${laneY}`;
-          }
-          let laneTo = xb;
-          let drop = `L ${xb} ${laneY} L ${xb} ${target.y}`;
-          if (crossesBlock(laidBlocks, ends, xb, laneY, xb, target.y)) {
-            laneTo = target.x - SKIP_GAP_INSET;
-            const turn = target.y - NODE_SEP / 2;
-            drop = `L ${laneTo} ${laneY} L ${laneTo} ${turn} L ${xb} ${turn} L ${xb} ${target.y}`;
-          }
+          const laneY = laneYOf(laneOf.get(id)!);
+          const xa = x1 + SKIP_GAP_INSET;
+          const xb = x2 - SKIP_GAP_INSET;
           edges.push({
             id,
             from: block.id,
             to: transition.to,
             transition,
             kind: "skip",
-            path: `${rise} ${drop}`,
-            labelX: (laneFrom + laneTo) / 2,
+            path: `M ${x1} ${y1} L ${xa} ${y1} L ${xa} ${laneY} L ${xb} ${laneY} L ${xb} ${y2} L ${x2} ${y2}`,
+            labelX: (xa + xb) / 2,
             labelY: laneY,
             labelAnchor: "above",
+            laneY,
           });
         }
         continue;
@@ -608,48 +630,30 @@ export async function layoutBlocks(
         continue;
       }
 
-      const laneY = bottom + LANE_GAP + bottomLane * LANE_STEP;
-      bottomLane += 1;
-      const x1 = source.x + source.width * 0.3;
-      const y1 = source.y + source.height;
-      const x2 = target.x + target.width * 0.7;
-      const y2 = target.y + target.height;
-      // As for skips: the fall and the rise move into the gap beside their column — the fall
-      // before the source's, the rise after the target's, clear of the self-loops between — when
-      // a block on a row beneath would be pierced.
-      const ends = [block.id, transition.to];
-      let laneFrom = x1;
-      let fall = `M ${x1} ${y1} L ${x1} ${laneY}`;
-      if (crossesBlock(laidBlocks, ends, x1, y1, x1, laneY)) {
-        laneFrom = source.x - RETURN_GAP_INSET;
-        const turn = y1 + NODE_SEP / 2;
-        fall = `M ${x1} ${y1} L ${x1} ${turn} L ${laneFrom} ${turn} L ${laneFrom} ${laneY}`;
-      }
-      let laneTo = x2;
-      let rise = `L ${x2} ${laneY} L ${x2} ${y2}`;
-      if (crossesBlock(laidBlocks, ends, x2, laneY, x2, y2)) {
-        laneTo = target.x + target.width + RETURN_GAP_INSET;
-        const turn = y2 + NODE_SEP / 2;
-        rise = `L ${laneTo} ${laneY} L ${laneTo} ${turn} L ${x2} ${turn} L ${x2} ${y2}`;
-      }
+      // A return: out of the source's right port, down (or up) in the gap after its column to
+      // the lane in the gap beneath the lower of the two rows, back along it, and up into the
+      // target's left port from the gap before its column.
+      const laneY = laneYOf(laneOf.get(id)!);
+      const xa = x1 + RETURN_GAP_INSET;
+      const xb = x2 - RETURN_GAP_INSET;
       edges.push({
         id,
         from: block.id,
         to: transition.to,
         transition,
         kind: "cycle",
-        path: `${fall} ${rise}`,
-        labelX: (laneFrom + laneTo) / 2,
+        path: `M ${x1} ${y1} L ${xa} ${y1} L ${xa} ${laneY} L ${xb} ${laneY} L ${xb} ${y2} L ${x2} ${y2}`,
+        labelX: (xa + xb) / 2,
         labelY: laneY,
         labelAnchor: "above",
+        laneY,
       });
     }
   }
 
-  const bottomExtent = bottomLane > 0 ? LANE_GAP + bottomLane * LANE_STEP + 16 : 0;
-  const topExtent = topLane > 0 ? LANE_GAP + topLane * LANE_STEP + 16 : 0;
+  const bottomLanes = gapLanes.get(rows.length) ?? 0;
   const width = Math.max(...laidBlocks.map((b) => b.x + b.width)) + MARGIN;
-  const height = bottom + bottomExtent + topExtent + MARGIN;
+  const height = bottomOfRows + (bottomLanes > 0 ? gapSize(rows.length) : 0) + MARGIN;
   return { blocks: laidBlocks, edges, hubIds: [...hubs], width, height };
 }
 

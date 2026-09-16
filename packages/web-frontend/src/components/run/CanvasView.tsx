@@ -219,7 +219,7 @@ function portedPath(
     return { path: roundedPath(pts), labelX: midX, labelY: Math.min(sy, ty) - 4 };
   }
   const ys = points.map((p) => p[1]);
-  const laneY = laid.kind === "cycle" ? Math.max(...ys) : Math.min(...ys);
+  const laneY = laid.laneY ?? (laid.kind === "cycle" ? Math.max(...ys) : Math.min(...ys));
   const out = sx + PORT_STUB;
   const into = tx - PORT_STUB;
   return {
