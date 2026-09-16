@@ -173,7 +173,32 @@ function BlockNodeView({ data }: NodeProps<BlockNode>): React.JSX.Element {
         "data-status": block.status,
         "data-hub": isHub ? "true" : undefined,
       }}
-    />
+    >
+      {block.list && block.list.items && block.list.items.length > 0 && (
+        // The list at a glance: every item on its own line, the current one marked; the chip's
+        // tooltip keeps the durations.
+        <ol className="mt-2 space-y-0.5 text-[11px] leading-4" data-block-list-items="">
+          {block.list.items.slice(0, 5).map((item) => (
+            <li
+              key={item.index}
+              className={cn(
+                "flex items-center gap-1.5 truncate",
+                item.done && "text-muted-foreground line-through decoration-muted-foreground/50",
+                item.current && "font-medium text-primary",
+              )}
+            >
+              <span className="w-3 shrink-0 text-center">
+                {item.done ? "✓" : item.current ? "▶" : "·"}
+              </span>
+              <span className="truncate">{item.title}</span>
+            </li>
+          ))}
+          {block.list.items.length > 5 && (
+            <li className="text-muted-foreground">… {block.list.items.length - 5}</li>
+          )}
+        </ol>
+      )}
+    </PortedCard>
   );
 }
 

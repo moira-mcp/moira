@@ -16,6 +16,8 @@ import { useTranslation } from "react-i18next";
 import { ArrowRight, RotateCcw } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { GuidanceCallout } from "./Guidance";
+import { PanelSection } from "../diagram/PanelSection";
+import { formatDuration } from "./duration";
 import { StatusChip } from "./status";
 import { StepList } from "./StepList";
 import { StepCard, StepCardList } from "./StepCard";
@@ -226,9 +228,38 @@ export function BlockDetailPanel({
         )}
       </header>
 
-      {progress && <BlockTimings block={block} statistics={statistics} cursor={cursor} />}
-      {progress && <BlockListCard block={block} />}
-      {progress && <BlockWrites progress={progress} block={block} cursor={cursor} />}
+      {progress && (
+        <PanelSection
+          id="timings"
+          title={t("pages.runPage.blockDetail.time", { defaultValue: "Время" })}
+          summary={
+            block.timing.totalMs !== null
+              ? `${formatDuration(block.timing.totalMs, t)}${block.iterations > 1 ? ` · ×${block.iterations}` : ""}`
+              : undefined
+          }
+        >
+          <BlockTimings block={block} statistics={statistics} cursor={cursor} />
+        </PanelSection>
+      )}
+      {progress && block.list && (block.list.done !== null || block.list.total !== null) && (
+        <PanelSection
+          id="list"
+          title={t("pages.runPage.blockDetail.list", { defaultValue: "Список" })}
+          summary={`${block.list.done ?? "?"}/${block.list.total ?? "?"}${block.list.currentTitle ? ` · ${block.list.currentTitle}` : ""}`}
+        >
+          <BlockListCard block={block} />
+        </PanelSection>
+      )}
+      {progress && (
+        <PanelSection
+          id="writes"
+          title={t("pages.runPage.variables.wrote")}
+          defaultOpen={false}
+          summary={String(blockWrites(progress, block.id, cursor).length)}
+        >
+          <BlockWrites progress={progress} block={block} cursor={cursor} />
+        </PanelSection>
+      )}
       {definition && (
         <TypicalDurations
           blockId={block.id}
@@ -239,10 +270,11 @@ export function BlockDetailPanel({
       )}
 
       {block.transitions.length > 0 && (
-        <section aria-label={t("pages.runPage.blockDetail.transitions")}>
-          <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-            {t("pages.runPage.blockDetail.transitions")}
-          </p>
+        <PanelSection
+          id="transitions"
+          title={t("pages.runPage.blockDetail.transitions")}
+          summary={String(block.transitions.length)}
+        >
           <ul className="space-y-1.5 text-sm">
             {block.transitions.map((transition) => (
               <li
@@ -285,18 +317,28 @@ export function BlockDetailPanel({
               </li>
             ))}
           </ul>
-        </section>
+        </PanelSection>
       )}
 
       {progress && route && onSetCursor && (
-        <BlockRouteFacts block={block} route={route} cursor={cursor} onSetCursor={onSetCursor} />
+        <PanelSection
+          id="route"
+          title={t("pages.runPage.blockDetail.routeFacts", {
+            defaultValue: "Что здесь происходило",
+          })}
+          defaultOpen={false}
+          summary={String(block.visits)}
+        >
+          <BlockRouteFacts block={block} route={route} cursor={cursor} onSetCursor={onSetCursor} />
+        </PanelSection>
       )}
 
-      <section aria-label={t("pages.runPage.blockDetail.steps")}>
-        <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-          {t("pages.runPage.blockDetail.steps")} ·{" "}
-          {t("pages.runPage.stepCount", { count: steps.length })}
-        </p>
+      <PanelSection
+        id="steps"
+        title={t("pages.runPage.blockDetail.steps")}
+        summary={String(block.nodeIds.length)}
+        defaultOpen={false}
+      >
         {editing ? (
           <EditableSteps
             block={block}
@@ -312,7 +354,7 @@ export function BlockDetailPanel({
             </p>
           </>
         )}
-      </section>
+      </PanelSection>
     </div>
   );
 }
