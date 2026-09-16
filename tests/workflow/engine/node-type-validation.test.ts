@@ -307,6 +307,23 @@ describe("Node Type Validation", () => {
       expect(result.valid).toBe(true);
     });
 
+    test("a case that selects the node's own default output is a redundant-case warning", async () => {
+      const wf = validSkeleton([
+        {
+          id: "route",
+          type: "condition",
+          cases: [
+            { when: { operator: "exists", value: { contextPath: "count" } }, output: "default" },
+          ],
+          connections: { default: "end" },
+        },
+      ]);
+      const result = await validator.validateUnified(wf);
+      const redundant = result.issues.filter((i) => i.message.includes("redundant"));
+      expect(redundant.map((i) => [i.field, i.severity])).toEqual([["cases[0].output", "warning"]]);
+      expect(result.valid).toBe(true);
+    });
+
     test("a case may not name a reserved control output", async () => {
       const wf = validSkeleton([
         {

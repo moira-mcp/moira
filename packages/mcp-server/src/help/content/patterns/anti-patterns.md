@@ -305,7 +305,7 @@ that a rejection route reads but the schema leaves optional, or a failure field 
 required by a route yet not required by the schema on that branch.
 
 ```
-❌ enum ["yes", "no", "later"] with connections for true/false only
+❌ enum ["yes", "no", "later"] with a case for "yes" only and every other answer falling to default
 ✅ every allowed answer has a reachable outcome, and a route that consumes feedback
    requires that feedback on the branch that produces it
 ```
