@@ -37,7 +37,7 @@ const NAME_CHARS_PER_LINE = 22;
 /** The card clamps its name to this many lines (`line-clamp-2` in `CanvasView`). */
 const MAX_NAME_LINES = 2;
 const MAX_DESCRIPTION_LINES = 3;
-const NODE_SEP = 40;
+const BASE_NODE_SEP = 40;
 /** The least gap between ranks; it grows to hold the widest label pill drawn at rest in a gap. */
 const MIN_RANK_SEP = 150;
 /** A forward label pill is truncated beyond this width (the `max-w` of the pill in `CanvasView`). */
@@ -47,8 +47,8 @@ const LABEL_CHAR_WIDTH = 6.4;
 const LABEL_PADDING = 18;
 /** Clear space between a pill at rest and the blocks on either side of its gap. */
 const LABEL_CLEARANCE = 10;
-const LANE_GAP = 40;
-const LANE_STEP = 26;
+const BASE_LANE_GAP = 40;
+const BASE_LANE_STEP = 26;
 const SELF_LOOP_DEPTH = 36;
 const MARGIN = 24;
 /** How far into the gap between ranks a hub bundle's vertical run sits, off the label pills' centre. */
@@ -99,6 +99,8 @@ export interface BlockLayout {
   hubIds: string[];
   width: number;
   height: number;
+  /** The blocks were laid out horizontally and swapped: edge paths and lanes are in that space. */
+  transposed?: boolean;
 }
 
 function lineCount(text: string, charsPerLine: number, max: number): number {
@@ -204,6 +206,7 @@ async function placeBlocks(
   blocks: readonly RunBlock[],
   sizes: ReadonlyMap<string, { width: number; height: number }>,
   rankSep: number,
+  nodeSep: number = BASE_NODE_SEP,
 ): Promise<Placed[]> {
   const { default: ELK } = await import("elkjs/lib/elk.bundled.js");
   const elk = new ELK();
@@ -220,7 +223,7 @@ async function placeBlocks(
       "elk.algorithm": "layered",
       "elk.direction": "RIGHT",
       "elk.randomSeed": "1",
-      "elk.spacing.nodeNode": String(NODE_SEP),
+      "elk.spacing.nodeNode": String(nodeSep),
       "elk.layered.spacing.nodeNodeBetweenLayers": String(rankSep),
       "elk.layered.nodePlacement.strategy": "NETWORK_SIMPLEX",
       "elk.layered.crossingMinimization.strategy": "LAYER_SWEEP",
@@ -407,10 +410,26 @@ export function hubPort(block: Pick<LaidOutBlock, "x" | "y">): { x: number; y: n
   return { x: block.x, y: block.y + HUB_PORT_INSET };
 }
 
+export interface LayoutBlocksOptions {
+  /**
+   * `default`: the process rows with lanes in their gaps. `compact`: the same rows with tighter
+   * gaps. `flow`: ELK's own vertical placement, no rows forced. `vertical`: the default layout
+   * transposed, blocks stacked top to bottom with ports on their top and bottom edges.
+   */
+  preset?: "default" | "compact" | "flow" | "vertical";
+}
+
 export async function layoutBlocks(
   blocks: readonly RunBlock[],
   hubIds: readonly string[],
+  options: LayoutBlocksOptions = {},
 ): Promise<BlockLayout> {
+  const preset = options.preset ?? "default";
+  const vertical = preset === "vertical";
+  const tight = preset === "compact";
+  const NODE_SEP = tight ? 16 : BASE_NODE_SEP;
+  const LANE_GAP = tight ? 16 : BASE_LANE_GAP;
+  const LANE_STEP = tight ? 18 : BASE_LANE_STEP;
   const hubs = new Set(hubIds);
   const indexOf = new Map(blocks.map((b) => [b.id, b.index]));
   const sizes = new Map<string, { width: number; height: number }>();
@@ -429,14 +448,22 @@ export async function layoutBlocks(
     });
   }
   const rankSep = rankSeparation(blocks, hubIds);
-  const placed = await placeBlocks(blocks, sizes, rankSep);
+  // A vertical layout is the horizontal one transposed: the blocks are laid out with their sizes
+  // swapped and every coordinate is swapped back at the end.
+  if (vertical) {
+    for (const [id, size] of sizes) sizes.set(id, { width: size.height, height: size.width });
+  }
+  const placed = await placeBlocks(blocks, sizes, rankSep, NODE_SEP);
   const placedById = new Map(placed.map((p) => [p.id, p]));
   const xs = [...new Set(placed.map((p) => Math.round(p.x)))].sort((a, b) => a - b);
   const rankOf = new Map(placed.map((p) => [p.id, xs.indexOf(Math.round(p.x))]));
   // ELK's vertical placement is discarded: every block takes the top edge of its row. A row is as
   // tall as its tallest block with its self-loops, plus the node gap, so a self-loop never dips
   // into the row beneath; rows above the sequence stack upward from it, rows below downward.
-  const rowOf = blockRows(blocks, hubIds, rankOf);
+  const rowOf =
+    preset === "flow"
+      ? new Map(blocks.map((b) => [b.id, Math.round(placedById.get(b.id)!.y)]))
+      : blockRows(blocks, hubIds, rankOf);
   const rowContent = new Map<number, number>();
   for (const block of blocks) {
     const row = rowOf.get(block.id)!;
@@ -654,6 +681,16 @@ export async function layoutBlocks(
   const bottomLanes = gapLanes.get(rows.length) ?? 0;
   const width = Math.max(...laidBlocks.map((b) => b.x + b.width)) + MARGIN;
   const height = bottomOfRows + (bottomLanes > 0 ? gapSize(rows.length) : 0) + MARGIN;
+  if (vertical) {
+    return {
+      blocks: laidBlocks.map((b) => ({ ...b, x: b.y, y: b.x, width: b.height, height: b.width })),
+      edges,
+      hubIds: [...hubs],
+      width: height,
+      height: width,
+      transposed: true,
+    };
+  }
   return { blocks: laidBlocks, edges, hubIds: [...hubs], width, height };
 }
 

@@ -38,6 +38,8 @@ import { useTheme } from "@/hooks/useTheme";
 import { DiagramViewport } from "../diagram/DiagramViewport";
 import { diagramInteractionProps } from "../diagram/interaction";
 import { useOpeningPlacement } from "../diagram/placement";
+import { useLayoutPreset } from "../diagram/layoutPreset";
+import { LayoutPresetButtons } from "../diagram/LayoutPresetButtons";
 
 /** Gutter kept between the viewport edge and the first block when a definition opens. */
 const CANVAS_EDGE = 16;
@@ -66,9 +68,11 @@ type BlockNodeData = {
   /** Who the run waits for, so a waiting card is worded for the agent or for a person. */
   waitingFor: "agent" | "user" | null;
   onSelect: (id: string | null) => void;
+  /** Ports on the top and bottom edges (the vertical preset). */
+  vertical: boolean;
 };
 type BlockNode = Node<BlockNodeData, "block">;
-type RoutedEdge = Edge<{ laid: LaidOutEdge }, "routed">;
+type RoutedEdge = Edge<{ laid: LaidOutEdge; vertical: boolean }, "routed">;
 
 /** The fact chips of a block: its steps, its passes, its time and the list it works through. */
 function blockFacts(block: RunBlock, t: TFunction): FactChip[] {
@@ -129,7 +133,8 @@ function blockFacts(block: RunBlock, t: TFunction): FactChip[] {
 function BlockNodeView({ data }: NodeProps<BlockNode>): React.JSX.Element {
   const { t } = useTranslation();
   const focus = useTransitionFocus();
-  const { block, selected, isHub, inputs, outputs, selfLoops, waitingFor, onSelect } = data;
+  const { block, selected, isHub, inputs, outputs, selfLoops, waitingFor, onSelect, vertical } =
+    data;
   const keys = [...inputs, ...outputs, ...selfLoops].map((port) => port.id);
   const near = focus.hovered !== null && keys.some((key) => focus.hovered!.has(key));
   const litIds = focus.hovered ?? (focus.pinnedBlock === block.id ? new Set(keys) : null);
@@ -144,7 +149,7 @@ function BlockNodeView({ data }: NodeProps<BlockNode>): React.JSX.Element {
       inputs={inputs}
       outputs={outputs}
       selfLoops={selfLoops}
-      horizontal
+      horizontal={!vertical}
       width={BLOCK_WIDTH}
       current={block.status === "active" || block.status === "waiting"}
       selected={selected}
@@ -187,17 +192,38 @@ function portedPath(
   sy: number,
   tx: number,
   ty: number,
+  vertical = false,
 ): { path: string; labelX: number; labelY: number } {
+  if (vertical) {
+    // The layout is horizontal and transposed: route in its space, then swap the axes back.
+    const logical = portedPoints(laid, sy, sx, ty, tx);
+    return {
+      path: roundedPath(logical.points.map(([x, y]) => [y, x] as [number, number])),
+      labelX: logical.labelY,
+      labelY: logical.labelX,
+    };
+  }
+  const routed = portedPoints(laid, sx, sy, tx, ty);
+  return { path: roundedPath(routed.points), labelX: routed.labelX, labelY: routed.labelY };
+}
+
+function portedPoints(
+  laid: LaidOutEdge,
+  sx: number,
+  sy: number,
+  tx: number,
+  ty: number,
+): { points: Array<[number, number]>; labelX: number; labelY: number } {
   const points = pathPoints(laid.path);
   if (laid.from === laid.to) {
     const dip = Math.max(sy, ty) + SELF_LOOP_DIP;
     return {
-      path: roundedPath([
+      points: [
         [sx, sy],
         [sx, dip],
         [tx, dip],
         [tx, ty],
-      ]),
+      ],
       labelX: (sx + tx) / 2,
       labelY: dip + 10,
     };
@@ -216,21 +242,21 @@ function portedPath(
             [midX, ty],
             [tx, ty],
           ];
-    return { path: roundedPath(pts), labelX: midX, labelY: Math.min(sy, ty) - 4 };
+    return { points: pts, labelX: midX, labelY: Math.min(sy, ty) - 4 };
   }
   const ys = points.map((p) => p[1]);
   const laneY = laid.laneY ?? (laid.kind === "cycle" ? Math.max(...ys) : Math.min(...ys));
   const out = sx + PORT_STUB;
   const into = tx - PORT_STUB;
   return {
-    path: roundedPath([
+    points: [
       [sx, sy],
       [out, sy],
       [out, laneY],
       [into, laneY],
       [into, ty],
       [tx, ty],
-    ]),
+    ],
     labelX: (out + into) / 2,
     labelY: laneY,
   };
@@ -247,7 +273,7 @@ function RoutedEdgeView({
   const { t } = useTranslation();
   const focus = useTransitionFocus();
   if (!data) return null;
-  const { laid } = data;
+  const { laid, vertical } = data;
   const key = transitionKey(laid.from, laid.transition);
   const lit = isLit(focus, key, laid.from);
   const cycle = laid.kind === "cycle";
@@ -258,7 +284,7 @@ function RoutedEdgeView({
     onMouseEnter: () => focus.setHovered([key]),
     onMouseLeave: () => focus.setHovered(null),
   };
-  const ported = portedPath(laid, sourceX, sourceY, targetX, targetY);
+  const ported = portedPath(laid, sourceX, sourceY, targetX, targetY, vertical);
   const anchor =
     laid.from === laid.to
       ? `translate(-50%, 0) translate(${ported.labelX}px, ${ported.labelY}px)`
@@ -329,17 +355,21 @@ function RoutedEdgeView({
 const nodeTypes = { block: BlockNodeView };
 const edgeTypes = { routed: RoutedEdgeView };
 
-function useBlockLayout(blocks: RunBlock[], hubIds: string[]): BlockLayout | null {
+function useBlockLayout(
+  blocks: RunBlock[],
+  hubIds: string[],
+  preset: "default" | "compact" | "flow" | "vertical",
+): BlockLayout | null {
   const [layout, setLayout] = useState<BlockLayout | null>(null);
   useEffect(() => {
     let cancelled = false;
-    void layoutBlocks(blocks, hubIds).then((result) => {
+    void layoutBlocks(blocks, hubIds, { preset }).then((result) => {
       if (!cancelled) setLayout(result);
     });
     return () => {
       cancelled = true;
     };
-  }, [blocks, hubIds]);
+  }, [blocks, hubIds, preset]);
   return layout;
 }
 
@@ -351,7 +381,8 @@ function CanvasInner({
 }: RunViewProps): React.JSX.Element {
   const { t } = useTranslation();
   const { actualTheme } = useTheme();
-  const layout = useBlockLayout(blocks, progress.process.hubs);
+  const [preset] = useLayoutPreset();
+  const layout = useBlockLayout(blocks, progress.process.hubs, preset);
 
   // The viewport opens fitted to the process, clamped to a readable zoom (a definition has no
   // "current" block). On a
@@ -461,6 +492,7 @@ function CanvasInner({
           selfLoops,
           waitingFor: progress.waitingFor,
           onSelect: onSelectBlock,
+          vertical: Boolean(layout.transposed),
         },
       };
     });
@@ -477,7 +509,7 @@ function CanvasInner({
         type: "routed",
         selectable: false,
         focusable: false,
-        data: { laid },
+        data: { laid, vertical: Boolean(layout?.transposed) },
         // Cycles are drawn above forward edges so a loop is never hidden behind one; hub bundles
         // sit beneath everything so they read as background wiring.
         zIndex: laid.kind === "cycle" ? 1 : laid.kind === "hub" ? -1 : 0,
@@ -517,6 +549,7 @@ function CanvasInner({
         onInit={onInit}
         onReady={onReady}
         onFit={fitOverview}
+        controlButtons={<LayoutPresetButtons />}
       >
         <svg aria-hidden="true">
           <defs>

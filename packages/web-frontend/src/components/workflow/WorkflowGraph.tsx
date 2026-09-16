@@ -30,9 +30,11 @@ import {
   SelectionMode,
   type ReactFlowInstance as XyflowInstance,
 } from "@xyflow/react";
-import { ZoomIn, ArrowUpDown, ArrowLeftRight } from "lucide-react";
+import { ZoomIn } from "lucide-react";
 import { DiagramViewport } from "../diagram/DiagramViewport";
 import { useOpeningPlacement } from "../diagram/placement";
+import { useLayoutPreset } from "../diagram/layoutPreset";
+import { LayoutPresetButtons } from "../diagram/LayoutPresetButtons";
 
 import { graphModel, definitionBlocks } from "../run/graphModel";
 import { GRAPH_MARGIN, layoutGraph } from "./graphLayout";
@@ -325,6 +327,15 @@ export const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
     );
   }, [laidNodes, currentNodeId, selectedBlockId, errorNodeIds, onWorkflowNavigate]);
   const [currentLayoutOptions, setCurrentLayoutOptions] = useState(layoutOptions);
+  // The shared layout preset: the graph reads it as a direction — blocks stacked top to bottom
+  // (default, compact, vertical) or laid out left to right (flow).
+  const [preset] = useLayoutPreset();
+  useEffect(() => {
+    const direction = preset === "flow" ? "LR" : "TB";
+    setCurrentLayoutOptions((options) =>
+      options.direction === direction ? options : { ...options, direction },
+    );
+  }, [preset]);
 
   // Node detail sheet state
   const [detailSheetOpen, setDetailSheetOpen] = useState(false);
@@ -332,10 +343,6 @@ export const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
 
   // Performance optimization: delayed MiniMap render
   const [showMiniMapDelayed, setShowMiniMapDelayed] = useState(false);
-
-  // Throttle ref for layout changes
-  const layoutThrottleRef = useRef<NodeJS.Timeout | null>(null);
-  const LAYOUT_THROTTLE_MS = 100;
 
   // Calculate incoming and outgoing nodes for the selected node
   const { incomingNodes, outgoingNodes } = useMemo(() => {
@@ -648,17 +655,6 @@ export const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
     instanceRef.current?.fitView({ padding: 0.2, duration: 300 });
   }, []);
 
-  /**
-   * Change layout direction (throttled to prevent rapid re-layouts); the layout effect re-runs.
-   */
-  const changeLayout = useCallback((newLayoutOptions: LayoutOptions) => {
-    if (layoutThrottleRef.current) return;
-    layoutThrottleRef.current = setTimeout(() => {
-      layoutThrottleRef.current = null;
-    }, LAYOUT_THROTTLE_MS);
-    setCurrentLayoutOptions(newLayoutOptions);
-  }, []);
-
   if ((isLayouting && nodes.length === 0) || nodeTypesLoading) {
     return (
       <div className="flex items-center justify-center h-full">
@@ -702,22 +698,7 @@ export const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
                   >
                     <ZoomIn />
                   </ControlButton>
-                  <ControlButton
-                    onClick={() => changeLayout({ ...currentLayoutOptions, direction: "TB" })}
-                    title={t("components.workflowGraph.controls.verticalTitle")}
-                    aria-label={t("components.workflowGraph.controls.vertical")}
-                    data-testid="graph-layout-vertical"
-                  >
-                    <ArrowUpDown />
-                  </ControlButton>
-                  <ControlButton
-                    onClick={() => changeLayout({ ...currentLayoutOptions, direction: "LR" })}
-                    title={t("components.workflowGraph.controls.horizontalTitle")}
-                    aria-label={t("components.workflowGraph.controls.horizontal")}
-                    data-testid="graph-layout-horizontal"
-                  >
-                    <ArrowLeftRight />
-                  </ControlButton>
+                  <LayoutPresetButtons />
                 </div>
               ) : undefined
             }
