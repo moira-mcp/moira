@@ -64,11 +64,14 @@ moira-workflow ./workflow.json set-variable-schema result --file ./result-schema
 соединения правятся по ключу:
 
 ```bash
-moira-workflow ./workflow.json update route-review \
+moira-workflow ./workflow.json update review \
   --cases '[{"when":{"operator":"eq","left":{"contextPath":"verdict"},"right":"blocked"},"output":"blocked"}]'
-moira-workflow ./workflow.json update count-attempt --expressions '["attempts = attempts + 1"]'
-moira-workflow ./workflow.json update route-review --add-connection blocked fix-issues
+moira-workflow ./workflow.json update review --expressions '["attempts = attempts + 1"]'
+moira-workflow ./workflow.json update review --add-connection blocked fix-issues
 ```
+
+Все три команды адресуют одну ноду-директиву, которая произвела вердикт: её case, её счётчик и
+соединение, которое называет case.
 
 Команды только для чтения показывают результат: `schema` печатает по строке
 `CASE <output> WHEN <условие>` на каждый case и по строке `EDGE` на каждое соединение,
@@ -108,13 +111,13 @@ moira-workflow ./workflow.json update notify --progress-node-id review --attach-
 `current` и `total` отклоняются при записи.
 
 ```bash
-moira-workflow ./workflow.json set-block route-plan-approval plan
+moira-workflow ./workflow.json set-block present-plan plan
 moira-workflow ./workflow.json add-block deliver "Deliver" "Hand the result over" --after execute
 moira-workflow ./workflow.json edit-block deliver --summary "Present the result"
 moira-workflow ./workflow.json edit-block work \
   --list '{"items":"tasks","title":"action","current":"current_task","total":"total_tasks"}'
-moira-workflow ./workflow.json set-label check-plan-approved approved "plan approved"
-moira-workflow ./workflow.json set-label route-review default "review found defects" \
+moira-workflow ./workflow.json set-label present-plan approved "plan approved"
+moira-workflow ./workflow.json set-label review success "review found defects" \
   --cause "The independent review reported blocking findings." --exit "The review passes."
 moira-workflow ./workflow.json derive
 ```
@@ -369,10 +372,12 @@ workflow.
 }
 ```
 
-### Маршрутизация узла-условия
+### Маршрутизация
 
-Исходы узла-условия — это его `cases` и ключи `connections`, которые они называют. Меняйте их
-вместе, чтобы каждый case по-прежнему называл существующий ключ:
+Обе маршрутизирующие ноды — `condition` и `agent-directive` — решают через упорядоченные `cases`, и
+обе принимают `expressions`, которые выполняются перед ними. Исходы ноды — это её `cases` и ключи
+`connections`, которые они называют, поэтому меняйте их вместе, чтобы каждый case по-прежнему
+называл существующий ключ:
 
 ```typescript
 {
@@ -395,6 +400,48 @@ workflow.
   ];
 }
 ```
+
+У ноды agent-directive те же три поля правятся так же. Её выход по умолчанию — `success`, а не
+`default`, её case читают контекст, в который уже влит её собственный валидированный ответ, а
+`error`/`timeout` остаются зарезервированными под управление потоком: их не может назвать ни один
+case:
+
+```typescript
+{
+  updateNodes: [
+    {
+      nodeId: "review",
+      changes: {
+        expressions: ["review_round = review_round + 1"],
+        cases: [
+          {
+            when: { operator: "eq", left: { contextPath: "review_verdict" }, right: "blocked" },
+            output: "blocked",
+          },
+        ],
+        connections: {
+          success: "merge",
+          blocked: "fix-issues",
+        },
+      },
+    },
+  ];
+}
+```
+
+**Решай на той ноде, у которой есть свидетельство.** Когда направление прогона определяет
+собственный ответ шага, перенесите case на этот шаг, а оставшийся исход отдайте `success`; одиночный
+счётчик или производная сумма становятся записью в `expressions` уже работающей там ноды. Каждая
+лишняя нода — это переход, который читателю приходится проследить, и ещё одно место, где решение
+расходится со свидетельством. Оставьте отдельную ноду `condition` или `expression`, когда так
+читается лучше: решение общее для нескольких производителей, оно читает состояние, которого не
+произвела ни одна отдельная нода, именованная точка решения помогает читателю вида процесса или
+вычисление заслуживает собственного места в маршруте. Нода, единственная работа которой —
+маршрутизировать или считать то, что предыдущая нода уже знает, — это избыточная маршрутизирующая
+обвязка; сложить её означает удалить ноду и перенести её `cases` и `connections` на предшественника.
+
+Те же поля правятся на файле командами `update --cases` и `update --expressions`, описанными выше в
+разделе «Через CLI для workflows».
 
 ## Контроль версий
 

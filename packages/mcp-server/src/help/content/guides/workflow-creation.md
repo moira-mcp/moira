@@ -24,8 +24,8 @@ Every workflow needs:
   },
   "nodes": [
     // start node (exactly one)
-    // action nodes
-    // condition nodes (for branching)
+    // action nodes — the node that has the evidence carries the cases that route it
+    // condition nodes — for a decision several nodes share, or one that stands on its own
     // end node (at least one)
   ]
 }
@@ -35,15 +35,14 @@ Every workflow needs:
 
 ### Validation Loop
 
-Use when you need to verify results and retry on failure:
+Use when you need to verify results and retry on failure. The node that produced the result reports
+whether it holds and routes on that answer; the fix node counts the attempt on its way back:
 
 ```mermaid
 flowchart LR
-    A[action] --> B[check]
-    B -->|success| C[next]
-    B -->|failure| D[fix]
-    D --> E[increment-iteration]
-    E --> A
+    A[do-work] -->|valid| B[next-step]
+    A -->|success| C[fix-issues]
+    C -->|iteration + 1| A
 ```
 
 ```json
@@ -59,71 +58,104 @@ flowchart LR
     },
     "required": ["result_valid"]
   },
-  "connections": { "success": "check-result" }
-},
-{
-  "id": "check-result",
-  "type": "condition",
   "cases": [
     {
-      "when": { "operator": "eq", "left": { "contextPath": "result_valid" }, "right": "yes" },
+      "when": {
+        "operator": "eq",
+        "left": { "contextPath": "do-work.result_valid" },
+        "right": "yes"
+      },
       "output": "valid"
     }
   ],
   "connections": {
-    "valid": "next-step",
-    "default": "fix-issues"
+    "success": "fix-issues",
+    "valid": "next-step"
   }
 },
 {
   "id": "fix-issues",
   "type": "agent-directive",
   "directive": "Fix the issues found",
-  "connections": { "success": "increment-iteration" }
-},
-{
-  "id": "increment-iteration",
-  "type": "agent-directive",
-  "directive": "Increment iteration counter",
-  "inputSchema": {
-    "type": "object",
-    "properties": {
-      "iteration": { "type": "number" }
-    },
-    "required": ["iteration"]
-  },
+  "completionCondition": "Every issue reported by the previous attempt is fixed",
+  "expressions": ["iteration = iteration + 1"],
   "connections": { "success": "do-work" }
 }
 ```
 
+`iteration` is declared in the workflow `variableRegistry`, because an expression may only assign a
+declared global. Counting the attempt needs nothing else: a node whose whole job is `iteration + 1`
+is one more hop for the reader and one more place to forget.
+
 :::tip
-Separate responsibilities: action nodes DO work, check nodes ONLY verify, fix nodes ONLY repair.
-Use iteration counters to prevent infinite loops.
+Separate responsibilities: action nodes DO the work and report their own verdict, fix nodes ONLY
+repair. Keep the iteration counter on a node the loop already passes through, and route on it to
+prevent infinite loops.
 :::
 
 ### Branching by Action Type
 
-Use when workflow has different paths for different scenarios:
+Use when the workflow has different paths for different scenarios. The answer that selects the
+branch is the one this step just produced, so the case belongs on the step itself:
 
 ```json
 {
   "id": "get-action",
   "type": "agent-directive",
   "directive": "Ask user: create new or edit existing?",
+  "completionCondition": "The user stated create or edit",
   "inputSchema": {
+    "type": "object",
     "properties": {
       "action": { "type": "string", "enum": ["create", "edit"] }
     },
     "required": ["action"]
   },
-  "connections": { "success": "route-action" }
-},
+  "cases": [
+    {
+      "when": {
+        "operator": "eq",
+        "left": { "contextPath": "get-action.action" },
+        "right": "create"
+      },
+      "output": "create"
+    }
+  ],
+  "connections": {
+    "success": "edit-branch",
+    "create": "create-branch"
+  }
+}
+```
+
+The cases are evaluated against the context after the node's answer has been merged, so the answer
+is readable by bare name when it is a declared global (`{{action}}`) and as `<node-id>.field` when
+it is a node-local output (`get-action.action`). `success` is the fallback: a run whose answer
+matches no case takes the edit branch.
+
+**Decide on the node that has the evidence.** Every extra node is a hop the reader must follow and
+another place where the decision and the evidence can drift apart — a graph that decides where it
+knows is shorter to read and cannot route on a stale copy. The same holds for a single-purpose
+arithmetic step: a counter or a derived total is an `expressions` entry on the node that already
+runs there rather than a node of its own.
+
+Keep a separate `condition` or `expression` node when it reads better alone — when several producers
+share one decision, when the condition reads state no single node produced, when a named decision
+point helps the reader of the process view, or when the computation deserves its own place in the
+route. Written that way, the same branch is two nodes: `get-action` keeps only
+`"connections": { "success": "route-action" }`, and the decision moves to its own node.
+
+```json
 {
   "id": "route-action",
   "type": "condition",
   "cases": [
     {
-      "when": { "operator": "eq", "left": { "contextPath": "action" }, "right": "create" },
+      "when": {
+        "operator": "eq",
+        "left": { "contextPath": "get-action.action" },
+        "right": "create"
+      },
       "output": "create"
     }
   ],
@@ -134,36 +166,41 @@ Use when workflow has different paths for different scenarios:
 }
 ```
 
+A `condition` or `expression` node whose only job is to route or count what the preceding node
+already knows is avoidable routing scaffolding — fold it into that node.
+
 ### User Approval Gate
 
-Use for critical actions that need confirmation:
+Use for critical actions that need confirmation. The node that asks holds the answer, so it also
+routes on it — and a run that was not approved falls through `success` to the revision:
 
 ```json
 {
   "id": "show-plan",
   "type": "agent-directive",
   "directive": "Present plan to user and ask for approval",
+  "completionCondition": "The user answered yes or no",
   "inputSchema": {
+    "type": "object",
     "properties": {
       "approved": { "type": "string", "enum": ["yes", "no"] },
       "feedback": { "type": "string" }
     },
     "required": ["approved"]
   },
-  "connections": { "success": "check-approval" }
-},
-{
-  "id": "check-approval",
-  "type": "condition",
   "cases": [
     {
-      "when": { "operator": "eq", "left": { "contextPath": "approved" }, "right": "yes" },
+      "when": {
+        "operator": "eq",
+        "left": { "contextPath": "show-plan.approved" },
+        "right": "yes"
+      },
       "output": "approved"
     }
   ],
   "connections": {
-    "approved": "proceed",
-    "default": "revise-plan"
+    "success": "revise-plan",
+    "approved": "proceed"
   }
 }
 ```
@@ -356,14 +393,18 @@ Before saving, verify:
 3. **Node Definitions**
    - `directive` not empty
    - `completionCondition` defined
-   - `connections.success` specified
+   - `connections.success` specified — it is the output a directive takes when no case holds
    - `inputSchema` is valid JSON Schema
+   - A directive's `cases` and `expressions` obey the rules below: each case names a connection key
+     that is not `success`, `error` or `timeout`, and each expression assigns a declared global
 
-4. **Conditions**
-   - At least one case, each naming a key of `connections`
-   - `connections.default` defined
-   - Every authored output named by a case
+4. **Routing**
+   - A `condition` node has at least one case and a `connections.default`
+   - Every case names a key of `connections`, and never `error` or `timeout`
+   - Every authored output is named by a case — the default output and the control outputs
+     `error`/`timeout` need none
    - Operator is valid
+   - Each expression assigns a variable declared in `variableRegistry`
 
 ## Saving Workflows
 
@@ -434,13 +475,22 @@ Different agents have different capabilities. Design workflows to detect and ada
 
 ### Conditional Branching
 
+Capability routing is the case for a node of its own. Several steps reach the same decision — every
+branch that needs a file or a URL asks the same question — so one named `route-by-capabilities` node
+holds it once instead of repeating the same case on each node that arrives there, and the reader of
+the process view sees where the flow splits:
+
 ```json
 {
   "id": "route-by-capabilities",
   "type": "condition",
   "cases": [
     {
-      "when": { "operator": "eq", "left": { "contextPath": "has_file_access" }, "right": true },
+      "when": {
+        "operator": "eq",
+        "left": { "contextPath": "detect-capabilities.has_file_access" },
+        "right": true
+      },
       "output": "file-access"
     }
   ],
@@ -475,9 +525,8 @@ Workflows often need a planning phase, but:
 flowchart LR
     A[understand_task] --> B[decompose_into_steps]
     B --> C[present_plan]
-    C --> D{user_approval}
-    D -->|approved| E[execute_steps]
-    D -->|rejected| F[revise_plan]
+    C -->|approved| E[execute_steps]
+    C -->|success| F[revise_plan]
     F --> C
     E -->|during_execution| G[update_plan]
     G --> H[reinitialize]
@@ -487,7 +536,8 @@ flowchart LR
 
 1. **variableRegistry.plan_writing_requirements** — rules for writing plans (agent sees when creating)
 2. **decompose_into_steps** — directive with `{{plan_writing_requirements}}` for plan creation
-3. **user_approval_branch** — approved → execute, rejected → revise_plan → present_plan
+3. **user_approval_branch** — `present_plan` routes on the answer it collected: approved → execute,
+   otherwise revise_plan → present_plan
 4. **update_during_execution** — ability to adapt plan during execution
 
 ### Plan Writing Requirements
@@ -583,35 +633,56 @@ delivery.
         },
         "required": ["plan_approved"]
       },
-      "connections": { "success": "check-plan-approval" }
-    },
-    {
-      "id": "check-plan-approval",
-      "type": "condition",
       "cases": [
         {
           "when": {
             "operator": "eq",
-            "left": { "contextPath": "plan_approved" },
+            "left": { "contextPath": "present-plan.plan_approved" },
             "right": "yes"
           },
           "output": "approved"
         }
       ],
       "connections": {
-        "approved": "execute-steps",
-        "default": "revise-plan"
+        "success": "revise-plan",
+        "approved": "execute-steps"
       }
     },
     {
       "id": "revise-plan",
       "type": "agent-directive",
-      "directive": "User didn't approve plan. Feedback: {{user_feedback}}\n\nRevise plan based on feedback.\nFollow: {{plan_writing_requirements}}",
+      "directive": "User didn't approve plan. Feedback: {{present-plan.user_feedback}}\n\nRevise plan based on feedback.\nFollow: {{plan_writing_requirements}}",
       "connections": { "success": "present-plan" }
     }
   ]
 }
 ```
+
+### Showing the Plan as Progress
+
+A plan or checklist kept in variables is invisible to whoever is watching the run unless the process
+view is told where it lives. Bind the list on the block whose steps work through it: `list` names the
+paths of the array (`items`), the title inside one item (`title`), the index in progress (`current`,
+counted from `indexBase`), the finished count (`done`) and the total (`total`), and the run then
+reports done/total and the item being worked on.
+
+```json
+{
+  "id": "execute",
+  "label": "Execute",
+  "content": { "summary": "Work through the approved plan, one item at a time" },
+  "list": {
+    "items": "decompose-into-steps.steps",
+    "title": "action",
+    "current": "current_step_index",
+    "total": "total_steps"
+  }
+}
+```
+
+At least one of `items`, `current` and `total` is required; `total` defaults to the length of
+`items` and `done` to `current − indexBase`. See [Workflows](/docs/concepts/workflows/) for the
+complete field reference.
 
 ### Update Plan During Execution
 
@@ -654,12 +725,11 @@ When agent is stuck in a validation loop:
 
 ```mermaid
 flowchart TD
-    A[action] --> B[validate]
-    B -->|fail| C[increment_retry]
-    C --> D{check_retry_limit}
-    D -->|retry < max| A
-    D -->|retry >= max| E[ESCALATION]
-    E --> F[revise_plan / ask_user / skip]
+    A[action] --> B[validate, counts the attempt]
+    B -->|clean| C[next_step]
+    B -->|success: issues remain| A
+    B -->|exhausted| D[ESCALATION]
+    D --> E[revise_plan / ask_user / skip]
 ```
 
 ### When to Apply
@@ -678,32 +748,42 @@ flowchart TD
 
 ### Implementation Example
 
+The step that checks the result owns the whole decision: it counts the attempt in `expressions`, and
+its cases send a clean result forward, an exhausted budget to the escalation, and everything else
+back for another attempt through `success`.
+
 ```json
 {
-  "id": "increment-retry",
+  "id": "validate-step",
   "type": "agent-directive",
-  "directive": "Increment retry counter. Current: {{step_retry}}",
+  "directive": "ONLY CHECK the result of the step. Count any issues found. Attempt {{step_retry}}.",
+  "completionCondition": "Issue count reported",
   "inputSchema": {
     "type": "object",
     "properties": {
-      "step_retry": { "type": "number", "minimum": 1 }
+      "issues_count": { "type": "number", "minimum": 0 }
     },
-    "required": ["step_retry"]
+    "required": ["issues_count"]
   },
-  "connections": { "success": "check-retry-limit" }
-},
-{
-  "id": "check-retry-limit",
-  "type": "condition",
+  "expressions": ["step_retry = step_retry + 1"],
   "cases": [
+    {
+      "when": {
+        "operator": "eq",
+        "left": { "contextPath": "validate-step.issues_count" },
+        "right": 0
+      },
+      "output": "clean"
+    },
     {
       "when": { "operator": "gte", "left": { "contextPath": "step_retry" }, "right": 3 },
       "output": "exhausted"
     }
   ],
   "connections": {
-    "exhausted": "notify-escalation",
-    "default": "retry-action"
+    "success": "retry-action",
+    "clean": "next-step",
+    "exhausted": "notify-escalation"
   }
 },
 {
@@ -717,6 +797,7 @@ flowchart TD
   "id": "ask-escalation-decision",
   "type": "agent-directive",
   "directive": "Step failed after {{step_retry}} attempts.\n\nAsk user for decision:\n1. **revise_plan** — go back to planning and reconsider approach\n2. **ask_user** — request human help with specific problem\n3. **skip** — skip this step and continue\n\n`decision` records the user's own choice: each of the three routes elsewhere, so an assumed answer picks a route on their behalf.",
+  "completionCondition": "The user chose one of the three options",
   "inputSchema": {
     "type": "object",
     "properties": {
@@ -728,16 +809,11 @@ flowchart TD
     },
     "required": ["escalation_decision"]
   },
-  "connections": { "success": "route-escalation" }
-},
-{
-  "id": "route-escalation",
-  "type": "condition",
   "cases": [
     {
       "when": {
         "operator": "eq",
-        "left": { "contextPath": "escalation_decision" },
+        "left": { "contextPath": "ask-escalation-decision.escalation_decision" },
         "right": "revise_plan"
       },
       "output": "revise"
@@ -745,19 +821,22 @@ flowchart TD
     {
       "when": {
         "operator": "eq",
-        "left": { "contextPath": "escalation_decision" },
+        "left": { "contextPath": "ask-escalation-decision.escalation_decision" },
         "right": "skip"
       },
       "output": "skip"
     }
   ],
   "connections": {
+    "success": "handle-user-help",
     "revise": "revise-plan",
-    "skip": "mark-step-skipped",
-    "default": "handle-user-help"
+    "skip": "mark-step-skipped"
   }
 }
 ```
+
+Three outcomes need no extra node either: two cases name the branches that leave the ordinary path,
+and `success` carries the third. The enum guarantees there is no fourth.
 
 ### Combining with Planning Pattern
 
@@ -766,9 +845,9 @@ When using both Planning and Escalation patterns:
 ```mermaid
 flowchart LR
     A[plan] --> B[execute]
-    B --> C[validate]
-    C -->|fail| D[retry]
-    D -->|max_retries| E[escalate]
+    B --> C[validate, counts the attempt]
+    C -->|issues remain| B
+    C -->|exhausted| E[escalate]
     E -->|revise_plan| A
     E -->|skip| F[next_step]
     E -->|ask_user| G[wait_for_input]
@@ -787,30 +866,40 @@ Real patterns from production workflows (development-flow, 104 nodes).
 
 ### Express/Full Mode Branching
 
-Route to simplified or full flow based on task complexity:
+Route to simplified or full flow based on task complexity. The step that establishes the mode is the
+step that routes on it:
 
 ```
-[get-requirements] → [check-mode] → express=true → [express-flow]
-                                  → express=false → [full-flow]
+[get-requirements] → express → [express-flow]
+                   → success → [full-flow]
 ```
 
 ```json
 {
-  "id": "check-development-mode",
-  "type": "condition",
+  "id": "get-requirements",
+  "type": "agent-directive",
+  "directive": "Collect the requirements and decide whether this task fits the express mode.",
+  "completionCondition": "Requirements collected and a mode chosen",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "development_mode": { "type": "string", "enum": ["express", "full"] }
+    },
+    "required": ["development_mode"]
+  },
   "cases": [
     {
       "when": {
         "operator": "eq",
-        "left": { "contextPath": "development_mode" },
+        "left": { "contextPath": "get-requirements.development_mode" },
         "right": "express"
       },
       "output": "express"
     }
   ],
   "connections": {
-    "express": "express-implementation",
-    "default": "analyze-and-plan"
+    "success": "analyze-and-plan",
+    "express": "express-implementation"
   }
 }
 ```
@@ -820,8 +909,8 @@ Route to simplified or full flow based on task complexity:
 Present plan → get feedback → refine → confirm:
 
 ```
-[present-plan] → [check-approval] → approved → [continue]
-                                  → rejected → [refine] → [confirm] → [continue]
+[present-plan] → approved → [continue]
+               → success  → [refine] → [confirm] → [continue]
 ```
 
 ### Numeric Validation Pattern (Recommended)
@@ -839,6 +928,7 @@ loops.
   "id": "validate-result",
   "type": "agent-directive",
   "directive": "ONLY CHECK the result. Count any issues found.",
+  "completionCondition": "Issue count reported",
   "inputSchema": {
     "type": "object",
     "properties": {
@@ -855,20 +945,19 @@ loops.
     },
     "required": ["issues_count"]
   },
-  "connections": { "success": "route-validation" }
-},
-{
-  "id": "route-validation",
-  "type": "condition",
   "cases": [
     {
-      "when": { "operator": "eq", "left": { "contextPath": "issues_count" }, "right": 0 },
+      "when": {
+        "operator": "eq",
+        "left": { "contextPath": "validate-result.issues_count" },
+        "right": 0
+      },
       "output": "clean"
     }
   ],
   "connections": {
-    "clean": "next-step",
-    "default": "fix-issues"
+    "success": "fix-issues",
+    "clean": "next-step"
   }
 }
 ```
@@ -876,7 +965,8 @@ loops.
 **Why this works:**
 
 - Agent cannot lie about a count (number is objective)
-- Condition `issues_count == 0` is checked mechanically by engine
+- The case `issues_count == 0` is checked mechanically by the engine, on the node that produced the
+  count
 - No room for "almost ready" or "minor issues" interpretation
 
 **When to use:** ALL validation loops should use this pattern. Replace existing `is_valid: enum["yes","no"]` with `issues_count: number`.
@@ -890,6 +980,7 @@ Validate using numeric checks instead of yes/no:
   "id": "run-tests",
   "type": "agent-directive",
   "directive": "Run tests and report results",
+  "completionCondition": "Passed and failed counts reported from a real run",
   "inputSchema": {
     "type": "object",
     "properties": {
@@ -898,20 +989,19 @@ Validate using numeric checks instead of yes/no:
     },
     "required": ["tests_passed", "tests_failed"]
   },
-  "connections": { "success": "check-tests" }
-},
-{
-  "id": "check-tests",
-  "type": "condition",
   "cases": [
     {
-      "when": { "operator": "eq", "left": { "contextPath": "tests_failed" }, "right": 0 },
+      "when": {
+        "operator": "eq",
+        "left": { "contextPath": "run-tests.tests_failed" },
+        "right": 0
+      },
       "output": "all-passed"
     }
   ],
   "connections": {
-    "all-passed": "continue",
-    "default": "fix-tests"
+    "success": "fix-tests",
+    "all-passed": "continue"
   }
 }
 ```
@@ -1165,10 +1255,10 @@ State that the field records something that happened, and what happens if it did
 For critical approvals, split into separate nodes:
 
 ```
-[show-information] → [get-user-confirmation] → [route-decision]
+[show-information] → [get-user-confirmation, routes on the answer]
 ```
 
-First node only displays, second only captures response:
+First node only displays; the second captures the response and routes on it:
 
 ```json
 {
@@ -1185,11 +1275,26 @@ First node only displays, second only captures response:
   "id": "get-plan-approval",
   "directive": "The plan is displayed above. Ask whether it is approved. `approved` records the user's own answer; an assumed one commits the run to a branch they never chose.",
   "inputSchema": {
+    "type": "object",
     "properties": {
       "approved": { "type": "string", "enum": ["yes", "no"] }
-    }
+    },
+    "required": ["approved"]
   },
-  "connections": { "success": "route-approval" }
+  "cases": [
+    {
+      "when": {
+        "operator": "eq",
+        "left": { "contextPath": "get-plan-approval.approved" },
+        "right": "yes"
+      },
+      "output": "approved"
+    }
+  ],
+  "connections": {
+    "success": "revise-plan",
+    "approved": "proceed"
+  }
 }
 ```
 
@@ -1201,14 +1306,16 @@ before deploying.
 ## Best Practices
 
 1. **One node = one responsibility** — don't mix checking and fixing
-2. **Clear directives** — start with verb: Create, Check, Fix
-3. **Explicit negations** — "DO NOT fix, ONLY check"
-4. **Use inputSchema** — always define expected response structure
-5. **Numeric validation** — use counts instead of yes/no for precise checks
-6. **Iteration counters** — prevent infinite loops
-7. **User approval gates** — for critical actions
-8. **Self-documenting** — declare knowledge as variableRegistry defaults
-9. **Graceful notifications** — channel errors should not block the workflow when notification is optional
+2. **Decide where the evidence is** — the node that produced the answer carries the `cases` that
+   route on it; a standalone `condition` is for a shared or named decision
+3. **Clear directives** — start with verb: Create, Check, Fix
+4. **Explicit negations** — "DO NOT fix, ONLY check"
+5. **Use inputSchema** — always define expected response structure
+6. **Numeric validation** — use counts instead of yes/no for precise checks
+7. **Iteration counters** — prevent infinite loops
+8. **User approval gates** — for critical actions
+9. **Self-documenting** — declare knowledge as variableRegistry defaults
+10. **Graceful notifications** — channel errors should not block the workflow when notification is optional
 
 ## Related
 

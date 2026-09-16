@@ -62,7 +62,11 @@ export const manageWorkflowSchema = z.object({
         author: z.string().optional().describe("Workflow author"),
         tags: z.array(z.string()).optional().describe("Workflow tags"),
       }),
-      nodes: z.array(z.record(z.unknown())).describe("Array of workflow nodes"),
+      nodes: z
+        .array(z.record(z.unknown()))
+        .describe(
+          "Array of workflow nodes. Decisions are `cases` on the deciding node (condition or agent-directive) with a default output; a separate condition or expression node serves shared or standalone decisions.",
+        ),
       variableRegistry: z
         .record(z.unknown())
         .optional()
