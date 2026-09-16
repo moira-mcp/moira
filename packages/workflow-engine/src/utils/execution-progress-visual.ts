@@ -432,6 +432,13 @@ export function progressStatusText(
   }
 }
 
+/** `done/total` of a bound block, `?` for an unresolved counter; null when neither resolves. */
+export function progressListCount(list: ExecutionProgressNode["list"]): string | null {
+  return list && (list.done !== null || list.total !== null)
+    ? `${list.done ?? "?"}/${list.total ?? "?"}`
+    : null;
+}
+
 /**
  * The facts of a block on one line, from the fullest form to the one that must survive: the time
  * spent (`total`, plus the open pass while one runs) and, for a bound block, `done/total` with the
@@ -447,9 +454,8 @@ export function progressFactsCandidates(node: ExecutionProgressNode): string[] {
       ? `${total} · this pass ${formatProgressDuration(node.timing.currentMs)}`
       : null;
   const list = node.list;
-  if (!list || (list.done === null && list.total === null))
-    return withPass ? [withPass, total] : [total];
-  const count = `${list.done ?? "?"}/${list.total ?? "?"}`;
+  const count = progressListCount(list);
+  if (!list || count === null) return withPass ? [withPass, total] : [total];
   const titled = list.currentTitle ? `${count}: ${list.currentTitle}` : count;
   const forms = [
     withPass ? `${withPass} · ${titled}` : null,
@@ -473,10 +479,7 @@ function fitFactsLine(node: ExecutionProgressNode, width: number, font: number):
   const candidates = progressFactsCandidates(node);
   const fits = (text: string) => progressTextWidth(text, font) <= width;
   const list = node.list;
-  const count =
-    list && (list.done !== null || list.total !== null)
-      ? `${list.done ?? "?"}/${list.total ?? "?"}`
-      : null;
+  const count = progressListCount(list);
   if (fits(candidates[0])) return candidates[0];
   // The fullest form does not fit: cut the item's title on the form without the open pass, as
   // long as the count stays intact — a cut title still names the item, a dropped one does not;
