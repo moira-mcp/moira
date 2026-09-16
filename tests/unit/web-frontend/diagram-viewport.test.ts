@@ -10,7 +10,7 @@ import {
   type DiagramKind,
 } from "../../../packages/web-frontend/src/components/diagram/interaction.js";
 
-const KINDS: DiagramKind[] = ["canvas", "lanes", "graph"];
+const KINDS: DiagramKind[] = ["canvas", "graph"];
 
 describe("diagramInteractionProps", () => {
   test.each(KINDS)("%s: a plain wheel pans in both directions and never zooms", (kind) => {
@@ -36,18 +36,16 @@ describe("diagramInteractionProps", () => {
       expect(props.preventScrolling).toBe(true);
       expect(props.fitView).toBe(true);
       expect(props.fitViewOptions.padding).toBeGreaterThan(0);
-      // The opening fit never shrinks cards below legibility: lanes open at full size, the canvas
-      // at three quarters or larger; only the technical graph may shrink to its floor.
+      // The opening fit never shrinks cards below legibility: the canvas opens at three quarters
+      // or larger; only the technical graph may shrink to its floor.
       expect(props.fitViewOptions.minZoom).toBeGreaterThanOrEqual(props.minZoom);
       expect(props.fitViewOptions.maxZoom).toBeLessThanOrEqual(props.maxZoom);
-      if (kind === "lanes") expect(props.fitViewOptions.minZoom).toBe(1);
       if (kind === "canvas") expect(props.fitViewOptions.minZoom).toBeGreaterThanOrEqual(0.75);
     },
   );
 
   test.each([
     ["canvas", 0.2, 1.5],
-    ["lanes", 0.2, 1.5],
     ["graph", 0.1, 2],
   ] as const)("%s zooms between %s and %s", (kind, minZoom, maxZoom) => {
     const props = diagramInteractionProps(kind);

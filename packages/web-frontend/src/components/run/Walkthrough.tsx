@@ -14,7 +14,7 @@ import { ChevronLeft, ChevronRight, Compass, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { RunViewMode } from "./modes";
 
-export type PanelTab = "block" | "variables" | "errors" | "steps" | "graph" | "locks";
+export type PanelTab = "block" | "variables" | "errors" | "steps" | "locks";
 
 /** One anchored step of a walkthrough; `M` is the page's mode id type. */
 export interface GuideStep<M extends string = RunViewMode, P extends string = PanelTab> {
@@ -31,28 +31,22 @@ export interface GuideStep<M extends string = RunViewMode, P extends string = Pa
 }
 
 const ANY_MODE = (selector: string): Partial<Record<RunViewMode, string>> => ({
-  lanes: selector,
-  canvas: selector,
-  outline: selector,
-  route: selector,
+  map: selector,
+  graph: selector,
 });
 
 /** The run page's steps: block, step, evidence, loop, route, explore. */
 export const GUIDE_STEPS: GuideStep[] = [
   {
     id: "process",
-    targets: {
-      lanes: "[data-lane-index]",
-      canvas: "[data-block-id]",
-      outline: "section[data-block-id]",
-      route: '[data-testid="route-block-summary"]',
-    },
-    fallbackView: "lanes",
+    targets: { map: '[data-testid="map-contents-list"] [data-block-id]' },
+    fallbackView: "map",
   },
   {
     id: "agent",
+    // The block panel is beside both views, so the step points at it whichever view is open.
     targets: ANY_MODE('[data-testid="block-detail"] [data-node-id][aria-current="step"]'),
-    fallbackView: "lanes",
+    fallbackView: "map",
     needsCurrentBlock: true,
     panel: "block",
   },
@@ -61,31 +55,27 @@ export const GUIDE_STEPS: GuideStep[] = [
     targets: ANY_MODE(
       '[data-testid="block-detail"] [data-node-id][aria-current="step"] [data-node-inputs]',
     ),
-    fallbackView: "lanes",
+    fallbackView: "map",
     needsCurrentBlock: true,
     panel: "block",
   },
   {
     id: "loop",
-    targets: {
-      canvas: "[data-return-chip]",
-      lanes: "[data-return-chip]",
-      outline: '[data-transition-kind="cycle"]',
-      route: "[data-loop-marker]",
-    },
-    fallbackView: "lanes",
+    targets: { map: "[data-return-chip]" },
+    fallbackView: "map",
   },
   {
     id: "route",
-    targets: { route: '[data-testid="route-list"]' },
-    fallbackView: "route",
+    // The run's own route: the scrubber that moves the whole page back through it.
+    targets: { map: '[data-testid="run-cursor"]' },
+    fallbackView: "map",
     needsRoute: true,
     panel: "variables",
   },
   {
     id: "explore",
     targets: ANY_MODE('[data-testid="run-modes"]'),
-    fallbackView: "lanes",
+    fallbackView: "map",
   },
 ];
 

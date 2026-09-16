@@ -41,6 +41,7 @@ import { displayNodeType } from "../../types/node-type-catalog";
 import type { WorkflowGraph as WorkflowGraphType } from "../../types";
 import { NodeSchemaReadout } from "./NodeSchemaReadout";
 import { NodePlaybookReferences, collectNodeReferences } from "./NodePlaybookReferences";
+import { OutgoingConnectionChips } from "./OutgoingConnections";
 
 interface WorkflowSidebarProps {
   /** The workflow data for workflow-level info */
@@ -474,17 +475,7 @@ const NodeDetail: React.FC<{
                   <ArrowRight className="w-3 h-3" />
                   <span>{t("components.workflowSidebar.to", "To")}</span>
                 </div>
-                <div className="flex flex-wrap gap-1.5">
-                  {outgoingNodes.map((n) => (
-                    <Badge
-                      key={`${n.id}-${n.connectionType}`}
-                      variant="secondary"
-                      className="text-xs font-normal"
-                    >
-                      {n.label || n.id}
-                    </Badge>
-                  ))}
-                </div>
+                <OutgoingConnectionChips connections={outgoingNodes} cases={cases} />
               </div>
             )}
           </div>

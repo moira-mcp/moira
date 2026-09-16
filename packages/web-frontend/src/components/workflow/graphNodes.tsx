@@ -57,6 +57,8 @@ export type BlockGroupData = {
   index: number;
   name: string;
   status: ExecutionBlockStatus;
+  /** The block the page has selected: the map's selection carried onto the graph. */
+  selected?: boolean;
 };
 export type BlockGroupNode = Node<BlockGroupData, "block-group">;
 
@@ -197,9 +199,14 @@ export function BlockGroupView({ data }: NodeProps<BlockGroupNode>): React.JSX.E
   const style = STATUS_STYLE[data.status];
   return (
     <div
-      className={cn("h-full w-full rounded-2xl border-2 px-4 pt-2", style.surface)}
+      className={cn(
+        "h-full w-full rounded-2xl border-2 px-4 pt-2",
+        style.surface,
+        data.selected && "ring-2 ring-ring",
+      )}
       data-block-id={data.blockId}
       data-graph-group=""
+      data-selected={data.selected ? "true" : undefined}
     >
       <p className="text-[11px] font-semibold uppercase tracking-wide">
         <span className="mr-1.5 tabular-nums opacity-70">{data.index + 1}.</span>

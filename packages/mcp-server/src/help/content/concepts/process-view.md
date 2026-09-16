@@ -55,8 +55,8 @@ these diagnostics, and `set-block`, `add-block`, `edit-block`, `set-label` and `
 author it one change at a time.
 
 The web UI shows this derivation on the **flow page** (`/workflows/<id>`, see the _Reading and
-editing a flow_ guide): outline, canvas, lanes and a split of blocks against their steps, plus the
-technical node graph. The owner can edit the definition there — blocks, transition labels and
+editing a flow_ guide): the map — the process as a diagram with its contents and a block panel
+that drills into each block's steps — and the technical node graph. The owner can edit the definition there — blocks, transition labels and
 loops, step ownership and text, the variable registry — with the diagnostics above shown inline
 while typing and a save that is refused for an invalid definition or a stale revision.
 

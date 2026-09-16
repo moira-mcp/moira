@@ -1,8 +1,8 @@
 /**
  * Navigation never blanks the page: while a lazily loaded section's code arrives the sidebar
- * stays and the content area shows a skeleton; on the run page a refresh, a mode switch and a
+ * stays and the content area shows a skeleton; on the run page a refresh, a view switch and a
  * cursor move keep the projection mounted through the pending progress request; on the flow page
- * a save keeps the modes strip and the diagram mounted through the two refetches (detail and
+ * a save keeps the views strip and the diagram mounted through the two refetches (detail and
  * process) and shows a slim pending indicator instead of the page loader.
  */
 
@@ -104,11 +104,12 @@ test("the run page keeps its projection through a refresh, a mode switch and a c
     await expect(refresh).toHaveAttribute("data-pending", "true");
     await expect(projection).toBeAttached();
     await expect(page.getByTestId("execution-progress-loading")).toHaveCount(0);
-    // Mode and cursor are state over the data already present.
-    await page.getByTestId("run-modes").locator('[data-mode="canvas"]').click();
-    await expect(page).toHaveURL(/view=canvas/);
+    // The view and the cursor are state over the data already present.
+    await page.getByTestId("run-modes").locator('[data-mode="graph"]').click();
+    await expect(page).toHaveURL(/view=graph/);
     await expect(projection).toBeAttached();
-    await page.getByTestId("run-modes").locator('[data-mode="lanes"]').click();
+    await page.getByTestId("run-modes").locator('[data-mode="map"]').click();
+    await expect(page).toHaveURL(/view=map/);
     await expect(projection).toBeAttached();
     held.release();
     await expect(refresh).not.toHaveAttribute("data-pending", "true");
@@ -173,11 +174,12 @@ test("the flow page keeps the modes strip and the diagram through the refetches 
     await page.goto(`${BASE_URL}/workflows/${id}?edit=1`);
     await expect(page.getByTestId("flow-edit-panel")).toBeVisible();
     await expect(page.getByTestId("page-loader")).toHaveCount(0);
+    // The block panel carries the block's editors, so the block is selected first.
+    await page.getByTestId("map-contents-plan").click();
     await page.getByTestId("edit-block-label-plan").fill("Plan (renamed)");
     await expect(page.getByTestId("flow-edit-save")).toBeEnabled();
-    // Switch to the canvas in the app (a page load would discard the edit) so a diagram is mounted.
-    await page.getByTestId("flow-modes").locator('[data-mode="canvas"]').click();
-    await expect(page.locator('[data-testid="flow-view"] .react-flow')).toBeVisible();
+    // The map is the default view, so its diagram is already mounted.
+    await expect(page.locator('[data-testid="canvas-view"] .react-flow')).toBeVisible();
 
     const detail = await holdRequests(page, `**/api/workflows/${id}`);
     await page.getByTestId("flow-edit-save").click();
@@ -185,14 +187,14 @@ test("the flow page keeps the modes strip and the diagram through the refetches 
     // The save succeeded and the detail refetch is held: content stays, the page loader never mounts.
     await expect(page.getByTestId("flow-pending")).toBeVisible();
     await expect(page.getByTestId("flow-modes")).toBeAttached();
-    await expect(page.locator('[data-testid="flow-view"] .react-flow')).toBeAttached();
+    await expect(page.locator('[data-testid="canvas-view"] .react-flow')).toBeAttached();
     await expect(page.getByTestId("page-loader")).toHaveCount(0);
     detail.release();
     // The process refetch for the new revision follows; the picture stays through it as well.
     await expect(page.getByTestId("flow-pending")).toHaveCount(0);
     await expect(page.getByTestId("page-loader")).toHaveCount(0);
     await expect(
-      page.locator('[data-testid="flow-view"] [data-block-id="plan"]').first(),
+      page.locator('[data-testid="canvas-view"] [data-block-id="plan"]').first(),
     ).toContainText("Plan (renamed)");
 
     // A refetch that fails keeps the content and says so once.
@@ -201,14 +203,15 @@ test("the flow page keeps the modes strip and the diagram through the refetches 
         ? route.fulfill({ status: 500, contentType: "application/json", body: '{"error":"down"}' })
         : route.continue(),
     );
-    await page.getByTestId("flow-modes").locator('[data-mode="outline"]').click();
+    await page.getByTestId("flow-modes").locator('[data-mode="graph"]').click();
+    await page.getByTestId("flow-modes").locator('[data-mode="map"]').click();
+    await page.getByTestId("map-contents-plan").click();
     await page.getByTestId("edit-block-label-plan").fill("Plan (renamed twice)");
-    await page.getByTestId("flow-modes").locator('[data-mode="canvas"]').click();
     await page.getByTestId("flow-edit-save").click();
     await expect(page.locator('[data-sonner-toast][data-type="error"]')).toBeVisible();
     await expect(page.getByTestId("flow-modes")).toBeAttached();
     await expect(page.getByTestId("page-loader")).toHaveCount(0);
-    await expect(page.locator('[data-testid="flow-view"] .react-flow')).toBeAttached();
+    await expect(page.locator('[data-testid="canvas-view"] .react-flow')).toBeAttached();
     await expect(page.getByTestId("flow-pending")).toHaveCount(0);
   } finally {
     await page.request.delete(`${BASE_URL}/api/workflows/${id}`);

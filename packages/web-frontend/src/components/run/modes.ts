@@ -1,12 +1,14 @@
 /**
- * Mode registry of the run page. The URL parameter `view` selects a mode by id; an unknown or
- * missing value resolves to the default (lanes) rather than an error.
+ * Mode registry of the run page: two views of the same run. `map` is the process as a diagram with
+ * its contents sidebar; `graph` is the technical node graph. The URL parameter `view` selects one
+ * by id; an unknown value — including a link written for one of the views this page used to have
+ * (`lanes`, `canvas`, `outline`, `route`) — resolves to the map rather than an error.
  */
 
 import type React from "react";
-import { AlignLeft, Columns3, Footprints, GitFork } from "lucide-react";
+import { Map, Workflow } from "lucide-react";
 
-export type RunViewMode = "lanes" | "canvas" | "outline" | "route";
+export type RunViewMode = "map" | "graph";
 
 export interface ModeDefinition {
   id: RunViewMode;
@@ -14,13 +16,11 @@ export interface ModeDefinition {
 }
 
 export const MODES: readonly ModeDefinition[] = [
-  { id: "lanes", icon: Columns3 },
-  { id: "canvas", icon: GitFork },
-  { id: "outline", icon: AlignLeft },
-  { id: "route", icon: Footprints },
+  { id: "map", icon: Map },
+  { id: "graph", icon: Workflow },
 ];
 
-export const DEFAULT_MODE: RunViewMode = "lanes";
+export const DEFAULT_MODE: RunViewMode = "map";
 
 export function resolveMode(value: string | null | undefined): RunViewMode {
   return MODES.some((mode) => mode.id === value) ? (value as RunViewMode) : DEFAULT_MODE;

@@ -4,7 +4,7 @@
  * derived cycle edge is not drawn at rest but named by a connection chip in its source card and
  * an arrival chip in its target, appears dashed with its label while either chip is hovered and
  * brings the far card into view when the arrival chip is clicked, the layout controls and the
- * sidebar keep working, and the run page's Graph tab groups by the run's blocks with the current
+ * sidebar keep working, and the run page's graph view groups by the run's blocks with the current
  * node marked.
  */
 
@@ -194,7 +194,7 @@ test("the graph lays cards out from their measured heights: no two cards overlap
   await expect.poll(overlaps, { timeout: 10000 }).toEqual([]);
 });
 
-test("the run page's Graph tab groups by the run's blocks and marks the current node", async ({
+test("the run page's graph view groups by the run's blocks and marks the current node", async ({
   page,
 }) => {
   const authenticated = await createAuthenticatedMCPClient();
@@ -204,18 +204,21 @@ test("the run page's Graph tab groups by the run's blocks and marks the current 
   try {
     await loginAsAdmin(page);
     await page.setViewportSize({ width: 1440, height: 900 });
-    await page.goto(`${BASE_URL}/executions/${run.processId}`);
-    await expect(page.getByTestId("execution-progress")).toBeVisible();
-    await page.getByRole("tab", { name: /Graph|Граф/ }).click();
-    const panel = page.getByTestId("run-panel");
-    await expect(panel.locator(".react-flow")).toBeVisible({ timeout: 15000 });
-    await expect(panel.locator("[data-graph-group]").first()).toBeVisible();
+    // The graph is a view of the run page, deep-linkable like the map.
+    await page.goto(`${BASE_URL}/executions/${run.processId}?view=graph`);
+    const section = page.getByTestId("execution-progress");
+    await expect(section).toHaveAttribute("data-view", "graph");
+    // Opened on the graph, the graph is the only diagram on the page; a view mounts when first
+    // shown and then stays mounted, so a switch keeps its state.
+    await expect(section.locator(".react-flow")).toHaveCount(1);
+    await expect(section.locator(".react-flow").last()).toBeVisible({ timeout: 15000 });
+    await expect(section.locator("[data-graph-group]").first()).toBeVisible();
     // The block the run is at carries the active status surface; the current step is marked.
-    await expect(panel.locator('[data-graph-group][data-block-id="scope"]')).toHaveClass(
+    await expect(section.locator('[data-graph-group][data-block-id="scope"]')).toHaveClass(
       /ring-primary|border-primary|border-warning/,
     );
     await expect(
-      panel.locator('.react-flow__node [data-step-card][aria-current="step"]'),
+      section.locator('.react-flow__node [data-step-card][aria-current="step"]'),
     ).toHaveCount(1);
   } finally {
     await authenticated.cleanup();

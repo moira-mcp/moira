@@ -8,6 +8,7 @@ import { useTranslation } from "react-i18next";
 import { Check, CircleDashed, Hourglass, Loader2, RotateCcw, SkipForward } from "lucide-react";
 import { useEditing } from "../flow/editing";
 import { cn } from "@/lib/utils";
+import { blockStatusLabel, type WaitingFor } from "./waiting";
 import type { ExecutionBlockStatus } from "./model";
 
 interface StatusStyle {
@@ -91,9 +92,12 @@ export function StatusIcon({
 /** Compact chip: icon + status word. The pass count is secondary text on the card, not here. */
 export function StatusChip({
   status,
+  waitingFor = null,
   className,
 }: {
   status: ExecutionBlockStatus;
+  /** Who the run waits for (`progress.waitingFor`); only a person reads as "waiting for you". */
+  waitingFor?: WaitingFor;
   className?: string;
 }): React.JSX.Element | null {
   const { t } = useTranslation();
@@ -112,13 +116,20 @@ export function StatusChip({
       data-status={status}
     >
       <Icon className={cn("size-3", style.spin && "animate-spin")} aria-hidden="true" />
-      {t(`pages.runPage.status.${status}`)}
+      {blockStatusLabel(status, waitingFor, t)}
     </span>
   );
 }
 
 /** Legend: the vocabulary explained once, above every mode. */
-export function StatusLegend({ className }: { className?: string }): React.JSX.Element {
+export function StatusLegend({
+  waitingFor = null,
+  className,
+}: {
+  /** Who the run waits for, so the legend words `waiting` the way the blocks do. */
+  waitingFor?: WaitingFor;
+  className?: string;
+}): React.JSX.Element {
   const { t } = useTranslation();
   return (
     <ul
@@ -131,7 +142,7 @@ export function StatusLegend({ className }: { className?: string }): React.JSX.E
       {STATUS_ORDER.map((status) => (
         <li key={status} className="inline-flex items-center gap-1">
           <StatusIcon status={status} className="size-3" />
-          {t(`pages.runPage.status.${status}`)}
+          {blockStatusLabel(status, waitingFor, t)}
         </li>
       ))}
     </ul>

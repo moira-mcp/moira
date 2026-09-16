@@ -1,7 +1,7 @@
 /**
  * Pure helpers of the run page: the projection joined into blocks, the route grouped into
- * stretches with loop markers, per-block visit counts under a cursor, the lanes arcs, the cursor
- * clamp, and the step descriptions read from a workflow definition.
+ * stretches with loop markers, per-block visit counts under a cursor, the cursor clamp, and the
+ * step descriptions read from a workflow definition.
  */
 
 import { describe, expect, test } from "@jest/globals";
@@ -21,12 +21,6 @@ import {
   exitLabel,
   segmentsOf,
 } from "../../../packages/web-frontend/src/components/run/route.js";
-import {
-  ARC_BASE,
-  ARC_STEP,
-  arcGeometry,
-  buildArcs,
-} from "../../../packages/web-frontend/src/components/run/arcs.js";
 import type { WorkflowGraph } from "../../../packages/web-frontend/src/types/workflow-types.js";
 
 function progress(): ExecutionProgress {
@@ -70,6 +64,7 @@ function progress(): ExecutionProgress {
     workflowVersion: "1.0.0",
     executionWorkflowVersion: "1.0.0",
     projectedAt: 0,
+    waitingFor: null,
     executionRevision: 7,
     executionStatus: "running",
     diagnostics: [],
@@ -222,6 +217,103 @@ describe("run blocks from the projection", () => {
     expect(runBlocks(withSummary("Plan r3 written."))[0].content.summary).toBe("Plan r3 written.");
   });
 
+  test("carries each block's timings and bound list from the projection", () => {
+    const base = progress();
+    const timed: ExecutionProgress = {
+      ...base,
+      nodes: base.nodes.map((node) =>
+        node.id === "review"
+          ? {
+              ...node,
+              timing: {
+                passes: [
+                  {
+                    seq: 2,
+                    nodeId: "review-step",
+                    enteredAt: 1_000,
+                    leftAt: 13_000,
+                    durationMs: 12_000,
+                    open: false,
+                    itemIndex: 0,
+                  },
+                  {
+                    seq: 6,
+                    nodeId: "review-step",
+                    enteredAt: 20_000,
+                    leftAt: null,
+                    durationMs: 5_000,
+                    open: true,
+                    itemIndex: 1,
+                  },
+                ],
+                totalMs: 17_000,
+                currentMs: 5_000,
+                recorded: true,
+              },
+              list: {
+                items: [
+                  { index: 0, title: "unit one", done: true, current: false, durationMs: 12_000 },
+                  { index: 1, title: "unit two", done: false, current: true, durationMs: 5_000 },
+                ],
+                done: 1,
+                total: 2,
+                current: 1,
+                currentTitle: "unit two",
+              },
+            }
+          : node,
+      ),
+    };
+    const blocks = runBlocks(timed);
+    const review = blocks.find((b) => b.id === "review")!;
+    expect(review.timing.totalMs).toBe(17_000);
+    expect(review.timing.currentMs).toBe(5_000);
+    expect(review.timing.passes.map((pass) => pass.seq)).toEqual([2, 6]);
+    expect(review.list).toMatchObject({ done: 1, total: 2, currentTitle: "unit two" });
+    // A block the projection says nothing about keeps the empty timing and no list, never a zero.
+    const plan = blocks.find((b) => b.id === "plan")!;
+    expect(plan.timing).toEqual({ passes: [], totalMs: null, currentMs: null, recorded: false });
+    expect(plan.list).toBeNull();
+    expect(blocks.every((b) => b.stats === undefined)).toBe(true);
+  });
+
+  test("attaches the statistics entry of each block when statistics are given", () => {
+    const statistics = {
+      workflowId: "w",
+      workflowVersion: "1.0.0",
+      sampledRuns: 4,
+      versionNotRecorded: 0,
+      computedAt: 0,
+      blocks: [
+        {
+          blockId: "review",
+          pass: {
+            sampleCount: 4,
+            medianMs: 9_000,
+            p25Ms: 7_000,
+            p75Ms: 11_000,
+            minMs: 5_000,
+            maxMs: 12_000,
+          },
+          run: {
+            sampleCount: 4,
+            medianMs: 18_000,
+            p25Ms: 14_000,
+            p75Ms: 22_000,
+            minMs: 12_000,
+            maxMs: 25_000,
+          },
+          typicalPasses: 2,
+          items: [],
+        },
+      ],
+    };
+    const blocks = runBlocks(progress(), statistics);
+    expect(blocks.find((b) => b.id === "review")!.stats).toBe(statistics.blocks[0]);
+    // Only the blocks the sample covers carry statistics; the rest carry none at all.
+    expect(blocks.filter((b) => b.stats !== undefined)).toHaveLength(1);
+  });
+
   test("a block's writes are the latest value per name up to the cursor, with adjustment marks", () => {
     expect(blockWrites(progress(), "repair", null)).toEqual([
       { name: "plan", value: "v2", seq: 5, adjusted: true },
@@ -285,28 +377,6 @@ describe("route stretches and counts", () => {
     expect(changesText([])).toBe("");
     expect(changesText(["a", "b"])).toBe("a · b");
     expect(changesText(["a", "b", "c", "d", "e"])).toBe("a · b · c · +2");
-  });
-});
-
-describe("lanes arcs", () => {
-  test("cycles become arcs nested by span so they never cross", () => {
-    const blocks = runBlocks(progress());
-    blocks[3].transitions.push({
-      to: "plan",
-      label: "start over",
-      cycle: { cause: "delivery rejected", exit: "accepted" },
-      edges: ["deliver-step.error"],
-    });
-    const arcs = buildArcs(blocks);
-    // The shorter span sits on the first lane; the longer one that contains it goes one deeper.
-    expect(arcs.map((a) => [a.from, a.to, a.label, a.depth])).toEqual([
-      [2, 1, "repaired", 0],
-      [3, 0, "start over", 1],
-    ]);
-    const geometry = arcGeometry(arcs[1], (i) => i * 100 + 50);
-    const y = ARC_BASE + ARC_STEP;
-    expect(geometry).toMatchObject({ x1: 350, x2: 50, y });
-    expect(geometry.d).toBe(`M 350 2 L 350 ${y} L 50 ${y} L 50 2`);
   });
 });
 

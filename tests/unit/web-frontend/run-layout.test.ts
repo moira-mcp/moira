@@ -8,6 +8,7 @@ import { describe, expect, test } from "@jest/globals";
 import { deriveProcess } from "@mcp-moira/workflow-engine";
 import type { ExecutionProgress } from "@mcp-moira/workflow-engine/progress-visual";
 import {
+  chipRowCount,
   hubPort,
   labelPillWidth,
   layoutBlocks,
@@ -58,6 +59,7 @@ function projectionOf(slug: string): ExecutionProgress {
     workflowVersion: graph.metadata.version,
     executionWorkflowVersion: null,
     projectedAt: 0,
+    waitingFor: null,
     executionRevision: 0,
     executionStatus: "running",
     diagnostics: [],
@@ -249,5 +251,21 @@ describe("self-loops", () => {
       const ys = edges.map((e) => e.labelY).sort((a, b) => a - b);
       for (let i = 1; i < ys.length; i += 1) expect(ys[i] - ys[i - 1]).toBeGreaterThanOrEqual(24);
     }
+  });
+});
+
+describe("chip rows in a block's height", () => {
+  // Chips wrap under the facts line: two short-named chips share a row, a chip named longer
+  // than the shared budget takes a row of its own, so the estimate never leaves a long return
+  // chip without room (it used to draw over the description).
+  test.each([
+    [[], 0],
+    [["Plan", "Verify"], 1],
+    [["Plan", "Verify", "Deliver"], 2],
+    [["Prepare development standards"], 1],
+    [["Prepare development standards", "Plan"], 2],
+    [["Prepare development standards", "Independent completeness review", "Plan", "Verify"], 3],
+  ] as const)("%j takes %i row(s)", (names, rows) => {
+    expect(chipRowCount(names)).toBe(rows);
   });
 });

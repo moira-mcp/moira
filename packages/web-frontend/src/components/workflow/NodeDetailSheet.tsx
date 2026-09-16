@@ -39,6 +39,7 @@ import { useTranslation } from "react-i18next";
 import { displayNodeType } from "../../types/node-type-catalog";
 import { NodeSchemaReadout } from "./NodeSchemaReadout";
 import { NodePlaybookReferences, collectNodeReferences } from "./NodePlaybookReferences";
+import { OutgoingConnectionChips } from "./OutgoingConnections";
 
 interface NodeDetailSheetProps {
   open: boolean;
@@ -389,17 +390,7 @@ export const NodeDetailSheet: React.FC<NodeDetailSheetProps> = ({
                         <ArrowRight className="w-3 h-3" />
                         <span>To</span>
                       </div>
-                      <div className="flex flex-wrap gap-1.5">
-                        {outgoingNodes.map((n) => (
-                          <Badge
-                            key={`${n.id}-${n.connectionType}`}
-                            variant="secondary"
-                            className="text-xs font-normal"
-                          >
-                            {n.label || n.id}
-                          </Badge>
-                        ))}
-                      </div>
+                      <OutgoingConnectionChips connections={outgoingNodes} cases={cases} />
                     </div>
                   )}
                 </div>
