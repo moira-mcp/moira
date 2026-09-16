@@ -21,44 +21,23 @@ import {
 import { z } from "zod";
 import { getUserContext } from "../core/request-context.js";
 import {
-  workspaceApplyPatchRequestSchema,
-  workspaceCreateSchema,
-  workspaceDeleteSchema,
-  workspaceDownloadRequestSchema,
-  workspaceExecRequestSchema,
   workspaceGetSchema,
-  workspaceListSchema,
   workspaceNativeFileSchema,
-  workspaceReadRequestSchema,
-  workspaceSearchRequestSchema,
-  workspaceStartSchema,
-  workspaceStatRequestSchema,
-  workspaceStopSchema,
-  workspaceUploadRequestSchema,
-  workspaceWriteRequestSchema,
   workspaceExpectedSchema,
+  WORKSPACE_ACTIONS,
+  WORKSPACE_ACTION_REQUEST_SCHEMAS,
+  type WorkspaceAction,
 } from "./tool-schemas.js";
 
-export type WorkspaceToolName =
-  | "workspace_create"
-  | "workspace_list"
-  | "workspace_get"
-  | "workspace_start"
-  | "workspace_stop"
-  | "workspace_delete"
-  | "workspace_exec"
-  | "workspace_stat"
-  | "workspace_search"
-  | "workspace_read"
-  | "workspace_write"
-  | "workspace_apply_patch"
-  | "workspace_upload"
-  | "workspace_download";
-
-export function workspaceToolLogContext(
-  name: string,
-  params: unknown,
-): { inputData: { workspace_tool: string }; resourceIds: Record<string, string> } {
+/**
+ * Log context for the one workspace tool. The operation a call performs is its `action`, so that is
+ * what the record names; an absent or non-string action reads as `unknown` rather than being
+ * guessed, because the log is written before the action is validated.
+ */
+export function workspaceToolLogContext(params: unknown): {
+  inputData: { workspace_action: string };
+  resourceIds: Record<string, string>;
+} {
   const record =
     params && typeof params === "object" && !Array.isArray(params)
       ? (params as Record<string, unknown>)
@@ -68,47 +47,21 @@ export function workspaceToolLogContext(
   const operationId = workspaceGetSchema.shape.workspace_id.safeParse(record.operation_id);
   if (workspaceId.success) resourceIds.workspaceId = workspaceId.data;
   if (operationId.success) resourceIds.operationId = operationId.data;
-  return { inputData: { workspace_tool: name }, resourceIds };
+  const action = WORKSPACE_ACTION_SCHEMA.safeParse(record.action);
+  return { inputData: { workspace_action: action.success ? action.data : "unknown" }, resourceIds };
 }
 
 type WorkspaceToolParams = {
-  workspace_create: z.infer<typeof workspaceCreateSchema>;
-  workspace_list: z.infer<typeof workspaceListSchema>;
-  workspace_get: z.infer<typeof workspaceGetSchema>;
-  workspace_start: z.infer<typeof workspaceStartSchema>;
-  workspace_stop: z.infer<typeof workspaceStopSchema>;
-  workspace_delete: z.infer<typeof workspaceDeleteSchema>;
-  workspace_exec: z.infer<typeof workspaceExecRequestSchema>;
-  workspace_stat: z.infer<typeof workspaceStatRequestSchema>;
-  workspace_search: z.infer<typeof workspaceSearchRequestSchema>;
-  workspace_read: z.infer<typeof workspaceReadRequestSchema>;
-  workspace_write: z.infer<typeof workspaceWriteRequestSchema>;
-  workspace_apply_patch: z.infer<typeof workspaceApplyPatchRequestSchema>;
-  workspace_upload: z.infer<typeof workspaceUploadRequestSchema>;
-  workspace_download: z.infer<typeof workspaceDownloadRequestSchema>;
+  [Action in WorkspaceAction]: z.infer<(typeof WORKSPACE_ACTION_REQUEST_SCHEMAS)[Action]>;
 };
 
 /**
- * Strict per-tool request contracts applied after the SDK validated the flat published
- * object: exactly one stdin form, a resume call carries only its identity, and a download
- * resume still names its bounded output metadata.
+ * Strict per-action request contracts applied after the SDK validated the flat published object:
+ * exactly one stdin form, a resume call carries only its identity, and a download resume still names
+ * its bounded output metadata. The published object accepts every action's fields, so this is what
+ * refuses a field belonging to a different action than the one requested.
  */
-const WORKSPACE_REQUEST_SCHEMAS: { [Name in WorkspaceToolName]: z.ZodTypeAny } = {
-  workspace_create: workspaceCreateSchema,
-  workspace_list: workspaceListSchema,
-  workspace_get: workspaceGetSchema,
-  workspace_start: workspaceStartSchema,
-  workspace_stop: workspaceStopSchema,
-  workspace_delete: workspaceDeleteSchema,
-  workspace_exec: workspaceExecRequestSchema,
-  workspace_stat: workspaceStatRequestSchema,
-  workspace_search: workspaceSearchRequestSchema,
-  workspace_read: workspaceReadRequestSchema,
-  workspace_write: workspaceWriteRequestSchema,
-  workspace_apply_patch: workspaceApplyPatchRequestSchema,
-  workspace_upload: workspaceUploadRequestSchema,
-  workspace_download: workspaceDownloadRequestSchema,
-};
+const WORKSPACE_ACTION_SCHEMA = z.enum(WORKSPACE_ACTIONS);
 
 /**
  * Published input that matches no strict request form. The bounded detail names only schema
@@ -146,18 +99,26 @@ function describeRequestIssues(error: z.ZodError): string {
   return described.join("; ");
 }
 
-/** Narrow published workspace input to the exact request form; rejects mixed or partial forms. */
-export function parseWorkspaceToolParams<Name extends WorkspaceToolName>(
-  name: Name,
-  params: unknown,
-): WorkspaceToolParams[Name] {
-  const parsed = WORKSPACE_REQUEST_SCHEMAS[name].safeParse(params);
+/**
+ * Narrow published workspace input to the exact request form of its action; rejects an unknown
+ * action and any mixed or partial form. `action` selects the contract and is not part of it, so it
+ * is removed before the action's own schema sees the request.
+ */
+export function parseWorkspaceToolParams(params: unknown): WorkspaceCall {
+  const record =
+    params && typeof params === "object" && !Array.isArray(params)
+      ? (params as Record<string, unknown>)
+      : {};
+  const action = WORKSPACE_ACTION_SCHEMA.safeParse(record.action);
+  if (!action.success) throw new WorkspaceRequestInvalidError(describeRequestIssues(action.error));
+  const { action: _selected, ...request } = record;
+  const parsed = WORKSPACE_ACTION_REQUEST_SCHEMAS[action.data].safeParse(request);
   if (!parsed.success) throw new WorkspaceRequestInvalidError(describeRequestIssues(parsed.error));
-  return parsed.data as WorkspaceToolParams[Name];
+  return { action: action.data, request: parsed.data } as WorkspaceCall;
 }
 
-type WorkspaceNewToolParams<Name extends WorkspaceToolName> = Exclude<
-  WorkspaceToolParams[Name],
+type WorkspaceNewToolParams<Action extends WorkspaceAction> = Exclude<
+  WorkspaceToolParams[Action],
   { operation_id: string }
 >;
 
@@ -220,7 +181,7 @@ const SAFE_ERROR_MESSAGES: Record<string, string> = {
   WORKSPACE_REQUEST_INVALID: "The request does not match the tool's input schema.",
   WORKSPACE_NOT_FOUND: "Workspace was not found.",
   WORKSPACE_BINARY_READ_REQUIRES_DOWNLOAD:
-    "The requested range is not UTF-8 text; use workspace_download for binary bytes.",
+    "The requested range is not UTF-8 text; use the download action for binary bytes.",
   WORKSPACE_OPERATION_PENDING: "The workspace operation has not reached a terminal result.",
   WORKSPACE_OPERATION_FAILED: "The workspace command failed; inspect its output and exit code.",
   WORKSPACE_OPERATION_INTERRUPTED:
@@ -312,7 +273,7 @@ function projectExecResult(result: NonNullable<WorkspaceOperationResponse["resul
     // the caller is told rather than left to discover.
     session_capture_dropped: result.sessionCaptureDropped,
     // The payload above is the beginning of each stream; the complete streams stay in the
-    // workspace and are read by range with workspace_read and this operation's identifier.
+    // workspace and are read by range with the read action and this operation's identifier.
     stdout_total_bytes: result.stdoutTotalBytes,
     stderr_total_bytes: result.stderrTotalBytes,
     stdout_truncated: Buffer.byteLength(result.stdout) < result.stdoutTotalBytes,
@@ -484,10 +445,10 @@ export function setWorkspaceToolServicesLoaderForTests(
 const logger = createLogger({ component: "ManageWorkspaces" });
 
 // Unexpected failures must stay diagnosable server-side. The request context already carries
-// the tool name and opaque workspace/operation IDs; no agent input is added here.
-type WorkspaceToolFailureReporter = (name: WorkspaceToolName, error: unknown) => void;
-let reportUnexpectedFailure: WorkspaceToolFailureReporter = (name, error) => {
-  logger.error("Workspace tool failed unexpectedly", error, { workspace_tool: name });
+// the requested action and opaque workspace/operation IDs; no agent input is added here.
+type WorkspaceToolFailureReporter = (action: WorkspaceAction, error: unknown) => void;
+let reportUnexpectedFailure: WorkspaceToolFailureReporter = (action, error) => {
+  logger.error("Workspace tool failed unexpectedly", error, { workspace_action: action });
 };
 
 export function setWorkspaceToolFailureReporterForTests(
@@ -565,21 +526,27 @@ function resourceLinkResult(
   return { content: [link], structuredContent };
 }
 
-export async function executeWorkspaceTool<Name extends WorkspaceToolName>(
-  name: Name,
-  params: WorkspaceToolParams[Name],
+/** One validated call: the action requested, and the request its own contract accepted. */
+export type WorkspaceCall = {
+  [Action in WorkspaceAction]: { action: Action; request: WorkspaceToolParams[Action] };
+}[WorkspaceAction];
+
+export async function executeWorkspaceTool(
+  call: WorkspaceCall,
   userId: string,
   services: WorkspaceToolServices,
 ): Promise<CallToolResult> {
+  const { action } = call;
+  const params = call.request as WorkspaceToolParams[WorkspaceAction];
   let status: ReturnType<WorkspaceConnectionService["getStatus"]>;
   try {
     status = services.connection.getStatus(userId);
   } catch (error) {
-    reportUnexpectedFailure(name, error);
+    reportUnexpectedFailure(action, error);
     return errorResult("INTERNAL_ERROR");
   }
   try {
-    if (name === "workspace_list") {
+    if (action === "list") {
       const instance = await services.observability.readiness();
       return jsonResult({
         readiness: {
@@ -603,9 +570,9 @@ export async function executeWorkspaceTool<Name extends WorkspaceToolName>(
       });
     }
 
-    if (name === "workspace_get") {
+    if (action === "get") {
       if (!services.resource) return errorResult("WORKSPACE_NOT_CONFIGURED", status.settingsUrl);
-      const input = params as WorkspaceToolParams["workspace_get"];
+      const input = params as WorkspaceToolParams["get"];
       return jsonResult({
         workspace: projectWorkspace(services.resource.getWorkspace(userId, input.workspace_id)),
       });
@@ -617,11 +584,8 @@ export async function executeWorkspaceTool<Name extends WorkspaceToolName>(
       return errorResult("WORKSPACE_NOT_CONFIGURED", ready.settingsUrl);
     }
 
-    if (name === "workspace_read" && "stream" in params) {
-      const input = params as Extract<
-        WorkspaceToolParams["workspace_read"],
-        { stream: "stdout" | "stderr" }
-      >;
+    if (action === "read" && "stream" in params) {
+      const input = params as Extract<WorkspaceToolParams["read"], { stream: "stdout" | "stderr" }>;
       // The workspace is named in the request, so a mismatch is refused here exactly as the resume
       // path refuses one, rather than silently answering about another workspace's command.
       const owning = services.operation.get(userId, input.operation_id);
@@ -646,17 +610,17 @@ export async function executeWorkspaceTool<Name extends WorkspaceToolName>(
     }
 
     if ("operation_id" in params) {
-      const resumableKind: Partial<Record<WorkspaceToolName, WorkspaceOperationRecord["kind"]>> = {
-        workspace_exec: "exec",
-        workspace_stat: "stat",
-        workspace_search: "search",
-        workspace_read: "read",
-        workspace_write: "write",
-        workspace_apply_patch: "apply_patch",
-        workspace_upload: "upload",
-        workspace_download: "download",
+      const resumableKind: Partial<Record<WorkspaceAction, WorkspaceOperationRecord["kind"]>> = {
+        exec: "exec",
+        stat: "stat",
+        search: "search",
+        read: "read",
+        write: "write",
+        apply_patch: "apply_patch",
+        upload: "upload",
+        download: "download",
       };
-      const expectedKind = resumableKind[name];
+      const expectedKind = resumableKind[action];
       const existing = services.operation.get(userId, params.operation_id);
       if (
         !expectedKind ||
@@ -666,11 +630,8 @@ export async function executeWorkspaceTool<Name extends WorkspaceToolName>(
       ) {
         return errorResult("WORKSPACE_NOT_FOUND");
       }
-      if (name === "workspace_download") {
-        const input = params as Extract<
-          WorkspaceToolParams["workspace_download"],
-          { operation_id: string }
-        >;
+      if (action === "download") {
+        const input = params as Extract<WorkspaceToolParams["download"], { operation_id: string }>;
         const response = await services.file.reconcileDownloadReference(
           userId,
           input.operation_id,
@@ -684,11 +645,8 @@ export async function executeWorkspaceTool<Name extends WorkspaceToolName>(
           ? resourceLinkResult(operation, response.transfer)
           : operationResult(operation, null);
       }
-      if (name === "workspace_exec") {
-        const input = params as Extract<
-          WorkspaceToolParams["workspace_exec"],
-          { operation_id: string }
-        >;
+      if (action === "exec") {
+        const input = params as Extract<WorkspaceToolParams["exec"], { operation_id: string }>;
         if (input.cancel) {
           const cancelled = await services.operation.cancel(userId, input.operation_id);
           return operationResult(
@@ -709,22 +667,22 @@ export async function executeWorkspaceTool<Name extends WorkspaceToolName>(
       return fileOperationResult(response);
     }
 
-    switch (name) {
-      case "workspace_create": {
-        const input = params as WorkspaceToolParams["workspace_create"];
+    switch (action) {
+      case "create": {
+        const input = params as WorkspaceToolParams["create"];
         const created = await services.resource.create(userId, input.repository_id, input.ref);
         return jsonResult({ workspace: projectWorkspace(created.resource) });
       }
-      case "workspace_start": {
-        const input = params as WorkspaceToolParams["workspace_start"];
+      case "start": {
+        const input = params as WorkspaceToolParams["start"];
         return jsonResult({
           workspace: projectWorkspace(
             await services.resource.startWorkspace(userId, input.workspace_id),
           ),
         });
       }
-      case "workspace_stop": {
-        const input = params as WorkspaceToolParams["workspace_stop"];
+      case "stop": {
+        const input = params as WorkspaceToolParams["stop"];
         return jsonResult({
           workspace: projectWorkspace(
             await services.resource.stopWorkspace(userId, input.workspace_id),
@@ -732,8 +690,8 @@ export async function executeWorkspaceTool<Name extends WorkspaceToolName>(
           data_preserved: true,
         });
       }
-      case "workspace_delete": {
-        const input = params as WorkspaceToolParams["workspace_delete"];
+      case "delete": {
+        const input = params as WorkspaceToolParams["delete"];
         return jsonResult({
           workspace: projectWorkspace(
             await services.resource.deleteWorkspace(
@@ -745,8 +703,8 @@ export async function executeWorkspaceTool<Name extends WorkspaceToolName>(
           data_preserved: false,
         });
       }
-      case "workspace_exec": {
-        const input = params as WorkspaceNewToolParams<"workspace_exec">;
+      case "exec": {
+        const input = params as WorkspaceNewToolParams<"exec">;
         const request = {
           ...(input.argv !== undefined ? { argv: input.argv } : {}),
           ...(input.script !== undefined ? { script: input.script } : {}),
@@ -792,48 +750,45 @@ export async function executeWorkspaceTool<Name extends WorkspaceToolName>(
           response.result?.outputLimitExceeded ? "WORKSPACE_OPERATION_OUTPUT_LIMIT" : undefined,
         );
       }
-      case "workspace_stat":
-      case "workspace_search":
-      case "workspace_read":
-      case "workspace_write":
-      case "workspace_apply_patch": {
+      case "stat":
+      case "search":
+      case "read":
+      case "write":
+      case "apply_patch": {
         const request: WorkspaceFileRequest =
-          name === "workspace_stat"
+          action === "stat"
             ? {
                 action: "stat",
-                path: (params as WorkspaceNewToolParams<"workspace_stat">).path,
+                path: (params as WorkspaceNewToolParams<"stat">).path,
               }
-            : name === "workspace_search"
+            : action === "search"
               ? {
                   action: "search",
-                  path: (params as WorkspaceNewToolParams<"workspace_search">).path,
-                  query: (params as WorkspaceNewToolParams<"workspace_search">).query,
-                  mode: (params as WorkspaceNewToolParams<"workspace_search">).mode,
-                  maxMatches: (params as WorkspaceNewToolParams<"workspace_search">).max_matches,
-                  maxBytes: (params as WorkspaceNewToolParams<"workspace_search">).max_bytes,
+                  path: (params as WorkspaceNewToolParams<"search">).path,
+                  query: (params as WorkspaceNewToolParams<"search">).query,
+                  mode: (params as WorkspaceNewToolParams<"search">).mode,
+                  maxMatches: (params as WorkspaceNewToolParams<"search">).max_matches,
+                  maxBytes: (params as WorkspaceNewToolParams<"search">).max_bytes,
                 }
-              : name === "workspace_read"
+              : action === "read"
                 ? {
                     action: "read",
-                    path: (params as WorkspaceNewToolParams<"workspace_read">).path,
-                    offset: (params as WorkspaceNewToolParams<"workspace_read">).offset,
-                    length: (params as WorkspaceNewToolParams<"workspace_read">).length,
+                    path: (params as WorkspaceNewToolParams<"read">).path,
+                    offset: (params as WorkspaceNewToolParams<"read">).offset,
+                    length: (params as WorkspaceNewToolParams<"read">).length,
                   }
-                : name === "workspace_write"
+                : action === "write"
                   ? {
                       action: "write",
-                      path: (params as WorkspaceNewToolParams<"workspace_write">).path,
-                      bytes: Buffer.from(
-                        (params as WorkspaceNewToolParams<"workspace_write">).text,
-                        "utf8",
-                      ),
+                      path: (params as WorkspaceNewToolParams<"write">).path,
+                      bytes: Buffer.from((params as WorkspaceNewToolParams<"write">).text, "utf8"),
                       expected: publicExpected(
-                        (params as WorkspaceNewToolParams<"workspace_write">).expected,
+                        (params as WorkspaceNewToolParams<"write">).expected,
                       ),
                     }
                   : {
                       action: "apply_patch",
-                      files: (params as WorkspaceNewToolParams<"workspace_apply_patch">).files.map(
+                      files: (params as WorkspaceNewToolParams<"apply_patch">).files.map(
                         (file) => ({
                           path: file.path,
                           expected: publicExpected(file.expected),
@@ -849,8 +804,8 @@ export async function executeWorkspaceTool<Name extends WorkspaceToolName>(
         const response = await services.file.execute(userId, workspaceId, request);
         return fileOperationResult(response);
       }
-      case "workspace_upload": {
-        const input = params as WorkspaceNewToolParams<"workspace_upload">;
+      case "upload": {
+        const input = params as WorkspaceNewToolParams<"upload">;
         const response = await services.file.uploadReference(userId, input.workspace_id, {
           path: input.path,
           reference: publicNativeReference(input.file),
@@ -858,8 +813,8 @@ export async function executeWorkspaceTool<Name extends WorkspaceToolName>(
         });
         return fileOperationResult(response);
       }
-      case "workspace_download": {
-        const input = params as WorkspaceNewToolParams<"workspace_download">;
+      case "download": {
+        const input = params as WorkspaceNewToolParams<"download">;
         const response = await services.file.downloadReference(userId, input.workspace_id, {
           path: input.path,
           maxBytes: input.max_bytes,
@@ -871,10 +826,9 @@ export async function executeWorkspaceTool<Name extends WorkspaceToolName>(
           ? resourceLinkResult(operation, response.transfer)
           : operationResult(operation, null);
       }
-      case "workspace_list":
-      case "workspace_get":
-        throw new Error("Workspace tool was routed twice");
     }
+    // `list` and `get` answered above, before the readiness gate; the compiler knows they cannot
+    // reach this switch, which is why they are not cases of it.
   } catch (error) {
     if (error instanceof WorkspaceConnectionError || error instanceof WorkspaceResourceError) {
       recordWorkspaceRejection(error.code);
@@ -882,7 +836,7 @@ export async function executeWorkspaceTool<Name extends WorkspaceToolName>(
         // The bounded internal message names only the provider's HTTP status; operators need
         // it to tell a permission gap from an outage, while the agent sees the safe code.
         logger.warn("Workspace provider refused the request", {
-          workspace_tool: name,
+          workspace_action: action,
           code: error.code,
           detail: error.message,
         });
@@ -902,19 +856,16 @@ export async function executeWorkspaceTool<Name extends WorkspaceToolName>(
         error instanceof WorkspaceResourceError ? error.detail : undefined,
       );
     }
-    reportUnexpectedFailure(name, error);
+    reportUnexpectedFailure(action, error);
     return errorResult("INTERNAL_ERROR");
   }
 }
 
-export async function manageWorkspaceTool<Name extends WorkspaceToolName>(
-  name: Name,
-  params: unknown,
-): Promise<CallToolResult> {
+export async function manageWorkspaceTool(params: unknown): Promise<CallToolResult> {
   const { userId } = getUserContext();
-  let parsed: WorkspaceToolParams[Name];
+  let parsed: ReturnType<typeof parseWorkspaceToolParams>;
   try {
-    parsed = parseWorkspaceToolParams(name, params);
+    parsed = parseWorkspaceToolParams(params);
   } catch (error) {
     if (error instanceof WorkspaceRequestInvalidError) {
       recordWorkspaceRejection("WORKSPACE_REQUEST_INVALID");
@@ -922,5 +873,5 @@ export async function manageWorkspaceTool<Name extends WorkspaceToolName>(
     }
     throw error;
   }
-  return executeWorkspaceTool(name, parsed, userId, await workspaceToolServicesLoader());
+  return executeWorkspaceTool(parsed, userId, await workspaceToolServicesLoader());
 }

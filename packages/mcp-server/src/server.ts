@@ -439,9 +439,8 @@ async function handleAuthenticatedMcpRequest(
 
   await runWithMCPContext(userContext, async () => {
     if (toolName && toolArgs) {
-      const { inputData, resourceIds } = toolName.startsWith("workspace_")
-        ? workspaceToolLogContext(toolName, toolArgs)
-        : sanitizeInput(toolArgs);
+      const { inputData, resourceIds } =
+        toolName === "workspace" ? workspaceToolLogContext(toolArgs) : sanitizeInput(toolArgs);
       updateContext({ operation: `mcp:${toolName}`, inputData, resourceIds });
     }
     await transport.handleRequest(req, res, req.body);

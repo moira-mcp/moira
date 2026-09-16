@@ -1,4 +1,5 @@
 import { describe, expect, it, jest } from "@jest/globals";
+import { z } from "zod";
 import {
   WorkspaceResourceError,
   type WorkspaceOperationRecord,
@@ -16,6 +17,10 @@ import {
   WorkspaceRequestInvalidError,
   type WorkspaceToolServices,
 } from "../../../packages/mcp-server/src/tools/manage-workspaces.js";
+import {
+  WORKSPACE_ACTION_REQUEST_SCHEMAS,
+  workspaceSchema,
+} from "../../../packages/mcp-server/src/tools/tool-schemas.js";
 import { requestContext } from "../../../packages/mcp-server/src/core/request-context.js";
 
 const USER_ID = "user-a";
@@ -248,16 +253,18 @@ describe("workspace MCP adapter", () => {
     "omits malformed identifiers from pre-validation logging (%#)",
     (identifier) => {
       expect(
-        workspaceToolLogContext("workspace_exec", {
+        workspaceToolLogContext({
+          action: "exec",
           workspace_id: identifier,
           operation_id: identifier,
         }),
-      ).toEqual({ inputData: { workspace_tool: "workspace_exec" }, resourceIds: {} });
+      ).toEqual({ inputData: { workspace_action: "exec" }, resourceIds: {} });
     },
   );
 
   it("logs only opaque workspace/operation identity and never workspace input", () => {
-    const projected = workspaceToolLogContext("workspace_upload", {
+    const projected = workspaceToolLogContext({
+      action: "upload",
       workspace_id: WORKSPACE_ID,
       operation_id: OPERATION_ID,
       path: "private/source.ts",
@@ -272,7 +279,7 @@ describe("workspace MCP adapter", () => {
     });
 
     expect(projected).toEqual({
-      inputData: { workspace_tool: "workspace_upload" },
+      inputData: { workspace_action: "upload" },
       resourceIds: { workspaceId: WORKSPACE_ID, operationId: OPERATION_ID },
     });
     expect(JSON.stringify(projected)).not.toMatch(
@@ -285,10 +292,13 @@ describe("workspace MCP adapter", () => {
     dependencies.resource!.getWorkspace = jest.fn(() =>
       workspace({ lastOutcome: "provider-private-diagnostic" }),
     );
-    const listed = await executeWorkspaceTool("workspace_list", {}, USER_ID, dependencies);
+    const listed = await executeWorkspaceTool(
+      parseWorkspaceToolParams({ action: "list" }),
+      USER_ID,
+      dependencies,
+    );
     const fetched = await executeWorkspaceTool(
-      "workspace_get",
-      parseWorkspaceToolParams("workspace_get", { workspace_id: WORKSPACE_ID }),
+      parseWorkspaceToolParams({ action: "get", workspace_id: WORKSPACE_ID }),
       USER_ID,
       dependencies,
     );
@@ -317,20 +327,18 @@ describe("workspace MCP adapter", () => {
   it("keeps creation capability private and distinguishes stop from confirmed delete", async () => {
     const dependencies = services();
     const created = await executeWorkspaceTool(
-      "workspace_create",
-      parseWorkspaceToolParams("workspace_create", { repository_id: "42", ref: "main" }),
+      parseWorkspaceToolParams({ action: "create", repository_id: "42", ref: "main" }),
       USER_ID,
       dependencies,
     );
     const stopped = await executeWorkspaceTool(
-      "workspace_stop",
-      parseWorkspaceToolParams("workspace_stop", { workspace_id: WORKSPACE_ID }),
+      parseWorkspaceToolParams({ action: "stop", workspace_id: WORKSPACE_ID }),
       USER_ID,
       dependencies,
     );
     const deleted = await executeWorkspaceTool(
-      "workspace_delete",
-      parseWorkspaceToolParams("workspace_delete", {
+      parseWorkspaceToolParams({
+        action: "delete",
         workspace_id: WORKSPACE_ID,
         expected_generation: 4,
         confirm_delete: true,
@@ -348,8 +356,8 @@ describe("workspace MCP adapter", () => {
   it("uses exactly one inline or native stdin path without returning the native reference", async () => {
     const dependencies = services();
     await executeWorkspaceTool(
-      "workspace_exec",
-      parseWorkspaceToolParams("workspace_exec", {
+      parseWorkspaceToolParams({
+        action: "exec",
         workspace_id: WORKSPACE_ID,
         argv: ["node", "script.js"],
         cwd: ".",
@@ -360,8 +368,8 @@ describe("workspace MCP adapter", () => {
       dependencies,
     );
     const native = await executeWorkspaceTool(
-      "workspace_exec",
-      parseWorkspaceToolParams("workspace_exec", {
+      parseWorkspaceToolParams({
+        action: "exec",
         workspace_id: WORKSPACE_ID,
         argv: ["node", "script.js"],
         cwd: ".",
@@ -426,8 +434,8 @@ describe("workspace MCP adapter", () => {
     });
 
     const resumed = await executeWorkspaceTool(
-      "workspace_exec",
-      parseWorkspaceToolParams("workspace_exec", {
+      parseWorkspaceToolParams({
+        action: "exec",
         workspace_id: WORKSPACE_ID,
         operation_id: OPERATION_ID,
       }),
@@ -452,8 +460,8 @@ describe("workspace MCP adapter", () => {
     async (state, code) => {
       const base = services();
       const response = await executeWorkspaceTool(
-        "workspace_exec",
-        parseWorkspaceToolParams("workspace_exec", {
+        parseWorkspaceToolParams({
+          action: "exec",
           workspace_id: WORKSPACE_ID,
           argv: ["node", "test.js"],
           cwd: ".",
@@ -485,8 +493,8 @@ describe("workspace MCP adapter", () => {
     let current: WorkspaceOperationRecord = { ...operation("exec"), state: "running" };
     const base = services();
     const response = await executeWorkspaceTool(
-      "workspace_exec",
-      parseWorkspaceToolParams("workspace_exec", {
+      parseWorkspaceToolParams({
+        action: "exec",
         workspace_id: WORKSPACE_ID,
         operation_id: OPERATION_ID,
       }),
@@ -524,8 +532,8 @@ describe("workspace MCP adapter", () => {
   it("reports a rejected file edit as an error, retaining the durable operation", async () => {
     const base = services();
     const response = await executeWorkspaceTool(
-      "workspace_write",
-      parseWorkspaceToolParams("workspace_write", {
+      parseWorkspaceToolParams({
+        action: "write",
         workspace_id: WORKSPACE_ID,
         path: "source.txt",
         text: "new",
@@ -575,8 +583,8 @@ describe("workspace MCP adapter", () => {
       },
     });
     const resumed = await executeWorkspaceTool(
-      "workspace_download",
-      parseWorkspaceToolParams("workspace_download", {
+      parseWorkspaceToolParams({
+        action: "download",
         workspace_id: WORKSPACE_ID,
         operation_id: OPERATION_ID,
         file_name: "result.bin",
@@ -641,8 +649,8 @@ describe("workspace MCP adapter", () => {
     const base = services();
     const dependencies = services({ file: { ...base.file!, execute } });
     const read = await executeWorkspaceTool(
-      "workspace_read",
-      parseWorkspaceToolParams("workspace_read", {
+      parseWorkspaceToolParams({
+        action: "read",
         workspace_id: WORKSPACE_ID,
         path: "src/index.ts",
         offset: 0,
@@ -652,8 +660,8 @@ describe("workspace MCP adapter", () => {
       dependencies,
     );
     const patched = await executeWorkspaceTool(
-      "workspace_apply_patch",
-      parseWorkspaceToolParams("workspace_apply_patch", {
+      parseWorkspaceToolParams({
+        action: "apply_patch",
         workspace_id: WORKSPACE_ID,
         files: [
           {
@@ -667,8 +675,8 @@ describe("workspace MCP adapter", () => {
       dependencies,
     );
     const uploaded = await executeWorkspaceTool(
-      "workspace_upload",
-      parseWorkspaceToolParams("workspace_upload", {
+      parseWorkspaceToolParams({
+        action: "upload",
         workspace_id: WORKSPACE_ID,
         path: "input.txt",
         file: {
@@ -684,8 +692,8 @@ describe("workspace MCP adapter", () => {
       dependencies,
     );
     const downloaded = await executeWorkspaceTool(
-      "workspace_download",
-      parseWorkspaceToolParams("workspace_download", {
+      parseWorkspaceToolParams({
+        action: "download",
         workspace_id: WORKSPACE_ID,
         path: "result.txt",
         max_bytes: 1024,
@@ -740,10 +748,14 @@ describe("workspace MCP adapter", () => {
         },
       });
 
-      const fromStatus = await executeWorkspaceTool("workspace_list", {}, USER_ID, statusBroken);
+      const fromStatus = await executeWorkspaceTool(
+        parseWorkspaceToolParams({ action: "list" }),
+        USER_ID,
+        statusBroken,
+      );
       const fromService = await executeWorkspaceTool(
-        "workspace_write",
-        parseWorkspaceToolParams("workspace_write", {
+        parseWorkspaceToolParams({
+          action: "write",
           workspace_id: WORKSPACE_ID,
           path: "private/source.ts",
           text: "secret source",
@@ -761,8 +773,8 @@ describe("workspace MCP adapter", () => {
         expect(JSON.stringify(result)).not.toMatch(/sqlite|private\.db|projection failure/);
       }
       expect(reported).toEqual([
-        { name: "workspace_list", error: statusFailure },
-        { name: "workspace_write", error: projectionFailure },
+        { name: "list", error: statusFailure },
+        { name: "write", error: projectionFailure },
       ]);
     } finally {
       restore();
@@ -787,8 +799,8 @@ describe("workspace MCP adapter", () => {
       },
     });
     const executed = await executeWorkspaceTool(
-      "workspace_exec",
-      parseWorkspaceToolParams("workspace_exec", {
+      parseWorkspaceToolParams({
+        action: "exec",
         workspace_id: WORKSPACE_ID,
         argv: ["build"],
         cwd: ".",
@@ -811,9 +823,9 @@ describe("workspace MCP adapter", () => {
       operation: { ...base.operation!, get: jest.fn(() => operation("exec")) },
     });
     const ranged = await executeWorkspaceTool(
-      "workspace_read",
       // Parsed the way the transport parses it, so the published range default is exercised.
-      parseWorkspaceToolParams("workspace_read", {
+      parseWorkspaceToolParams({
+        action: "read",
         workspace_id: WORKSPACE_ID,
         operation_id: OPERATION_ID,
         stream: "stdout",
@@ -849,8 +861,8 @@ describe("workspace MCP adapter", () => {
       },
     });
     const mismatched = await executeWorkspaceTool(
-      "workspace_read",
-      parseWorkspaceToolParams("workspace_read", {
+      parseWorkspaceToolParams({
+        action: "read",
         workspace_id: WORKSPACE_ID,
         operation_id: OPERATION_ID,
         stream: "stdout",
@@ -882,8 +894,8 @@ describe("workspace MCP adapter", () => {
       },
     });
     const halted = await executeWorkspaceTool(
-      "workspace_exec",
-      parseWorkspaceToolParams("workspace_exec", {
+      parseWorkspaceToolParams({
+        action: "exec",
         workspace_id: WORKSPACE_ID,
         argv: ["flood"],
         cwd: ".",
@@ -901,8 +913,8 @@ describe("workspace MCP adapter", () => {
   it("passes a session through and never echoes what it stores", async () => {
     const base = services();
     const executed = await executeWorkspaceTool(
-      "workspace_exec",
-      parseWorkspaceToolParams("workspace_exec", {
+      parseWorkspaceToolParams({
+        action: "exec",
         workspace_id: WORKSPACE_ID,
         argv: ["npm", "run", "build"],
         session: "build",
@@ -928,6 +940,39 @@ describe("workspace MCP adapter", () => {
     expect(JSON.stringify(data(executed))).not.toContain("release");
   });
 
+  it("hands the caller the provider's own reason for a refused creation", async () => {
+    // The end of the path #219 is about: the provider named a constraint, the client redacted and
+    // bounded it, the service raised it as the refusal's detail, and the agent that asked for the
+    // workspace can read it here instead of being told only that creation was rejected.
+    const base = services();
+    const refusing = services({
+      resource: {
+        ...base.resource!,
+        create: jest.fn(async () => {
+          throw new WorkspaceResourceError(
+            "WORKSPACE_CREATE_REJECTED",
+            "Workspace creation was rejected",
+            "retention_period_minutes exceeds the maximum for this owner",
+          );
+        }),
+      },
+    });
+
+    const refused = await executeWorkspaceTool(
+      parseWorkspaceToolParams({ action: "create", repository_id: "42", ref: "main" }),
+      USER_ID,
+      refusing,
+    );
+
+    const error = (
+      data(refused) as { error: { code: string; message: string; retryable: boolean } }
+    ).error;
+    expect(error.code).toBe("WORKSPACE_CREATE_REJECTED");
+    expect(error.message).toContain("retention_period_minutes exceeds the maximum for this owner");
+    // A refusal the provider will repeat is not something to retry.
+    expect(error.retryable).toBe(false);
+  });
+
   it("tells a refused caller which ceiling stopped it and stays generic without a detail", async () => {
     const base = services();
     const named = services({
@@ -943,8 +988,7 @@ describe("workspace MCP adapter", () => {
       },
     });
     const refused = await executeWorkspaceTool(
-      "workspace_create",
-      parseWorkspaceToolParams("workspace_create", { repository_id: "42", ref: "main" }),
+      parseWorkspaceToolParams({ action: "create", repository_id: "42", ref: "main" }),
       USER_ID,
       named,
     );
@@ -961,8 +1005,7 @@ describe("workspace MCP adapter", () => {
       },
     });
     const generic = await executeWorkspaceTool(
-      "workspace_create",
-      parseWorkspaceToolParams("workspace_create", { repository_id: "42", ref: "main" }),
+      parseWorkspaceToolParams({ action: "create", repository_id: "42", ref: "main" }),
       USER_ID,
       unnamed,
     );
@@ -990,8 +1033,7 @@ describe("workspace MCP adapter", () => {
       },
     });
     const setup = await executeWorkspaceTool(
-      "workspace_start",
-      parseWorkspaceToolParams("workspace_start", { workspace_id: WORKSPACE_ID }),
+      parseWorkspaceToolParams({ action: "start", workspace_id: WORKSPACE_ID }),
       USER_ID,
       disconnected,
     );
@@ -1005,8 +1047,7 @@ describe("workspace MCP adapter", () => {
       },
     });
     const missing = await executeWorkspaceTool(
-      "workspace_get",
-      parseWorkspaceToolParams("workspace_get", { workspace_id: WORKSPACE_ID }),
+      parseWorkspaceToolParams({ action: "get", workspace_id: WORKSPACE_ID }),
       USER_ID,
       foreign,
     );
@@ -1029,8 +1070,8 @@ describe("workspace MCP adapter", () => {
       },
     });
     const unreadable = await executeWorkspaceTool(
-      "workspace_read",
-      parseWorkspaceToolParams("workspace_read", {
+      parseWorkspaceToolParams({
+        action: "read",
         workspace_id: WORKSPACE_ID,
         path: "asset.bin",
         offset: 0,
@@ -1064,50 +1105,63 @@ describe("workspace MCP adapter", () => {
   });
 
   it("fills published defaults so a minimal call is a complete strict request", () => {
+    // The parsed call carries the action that selected the contract beside the request it accepted.
     expect(
-      parseWorkspaceToolParams("workspace_read", { workspace_id: WORKSPACE_ID, path: "a" }),
-    ).toEqual({ workspace_id: WORKSPACE_ID, path: "a", offset: 0, length: 64 * 1024 });
+      parseWorkspaceToolParams({ action: "read", workspace_id: WORKSPACE_ID, path: "a" }),
+    ).toEqual({
+      action: "read",
+      request: { workspace_id: WORKSPACE_ID, path: "a", offset: 0, length: 64 * 1024 },
+    });
     expect(
-      parseWorkspaceToolParams("workspace_search", {
+      parseWorkspaceToolParams({
+        action: "search",
         workspace_id: WORKSPACE_ID,
         path: ".",
         query: "TODO",
       }),
     ).toEqual({
-      workspace_id: WORKSPACE_ID,
-      path: ".",
-      query: "TODO",
-      mode: "literal",
-      max_matches: 100,
-      max_bytes: 64 * 1024,
+      action: "search",
+      request: {
+        workspace_id: WORKSPACE_ID,
+        path: ".",
+        query: "TODO",
+        mode: "literal",
+        max_matches: 100,
+        max_bytes: 64 * 1024,
+      },
     });
     expect(
-      parseWorkspaceToolParams("workspace_exec", { workspace_id: WORKSPACE_ID, argv: ["ls"] }),
+      parseWorkspaceToolParams({ action: "exec", workspace_id: WORKSPACE_ID, argv: ["ls"] }),
       // A bounded command names no duration: the service applies the default its mode implies.
     ).toEqual({
-      workspace_id: WORKSPACE_ID,
-      argv: ["ls"],
-      background: false,
-      session_start: false,
-      session_end: false,
+      action: "exec",
+      request: {
+        workspace_id: WORKSPACE_ID,
+        argv: ["ls"],
+        background: false,
+        session_start: false,
+        session_end: false,
+      },
     });
     expect(
-      parseWorkspaceToolParams("workspace_download", {
+      parseWorkspaceToolParams({
+        action: "download",
         workspace_id: WORKSPACE_ID,
         path: "dist/app.zip",
         file_name: "app.zip",
         mime_type: "application/zip",
       }),
-    ).toMatchObject({ max_bytes: 4 * 1024 * 1024 });
+    ).toMatchObject({ action: "download", request: { max_bytes: 4 * 1024 * 1024 } });
   });
 
   it("names the missing or invalid fields of an incomplete request instead of a generic error", async () => {
     expect(() =>
-      parseWorkspaceToolParams("workspace_search", { workspace_id: WORKSPACE_ID, path: "." }),
+      parseWorkspaceToolParams({ action: "search", workspace_id: WORKSPACE_ID, path: "." }),
     ).toThrow(WorkspaceRequestInvalidError);
     let detail = "";
     try {
-      parseWorkspaceToolParams("workspace_write", {
+      parseWorkspaceToolParams({
+        action: "write",
         workspace_id: WORKSPACE_ID,
         path: "src/index.ts",
         text: "print('a secret value')",
@@ -1120,7 +1174,8 @@ describe("workspace MCP adapter", () => {
     const restoreLoader = setWorkspaceToolServicesLoaderForTests(async () => services());
     try {
       const result = await requestContext.run({ userId: USER_ID }, () =>
-        manageWorkspaceTool("workspace_read", {
+        manageWorkspaceTool({
+          action: "read",
           workspace_id: WORKSPACE_ID,
           path: "README.md",
           length: "all of it",
@@ -1140,5 +1195,205 @@ describe("workspace MCP adapter", () => {
     } finally {
       restoreLoader();
     }
+  });
+
+  // One published object carries every action's fields, so the only thing standing between a caller
+  // and a request shaped for a different action is this check. Each row sends one action a field
+  // that belongs to another and asserts the refusal's identity: "an error happened" is also true of
+  // an implementation that accepted the field and failed later for some other reason.
+  it.each([
+    ["list", { workspace_id: WORKSPACE_ID }],
+    ["create", { repository_id: "42", ref: "main", workspace_id: WORKSPACE_ID }],
+    ["get", { workspace_id: WORKSPACE_ID, path: "README.md" }],
+    ["start", { workspace_id: WORKSPACE_ID, argv: ["ls"] }],
+    ["stop", { workspace_id: WORKSPACE_ID, confirm_delete: true }],
+    [
+      "delete",
+      {
+        workspace_id: WORKSPACE_ID,
+        expected_generation: 3,
+        confirm_delete: true,
+        query: "TODO",
+      },
+    ],
+    ["exec", { workspace_id: WORKSPACE_ID, argv: ["ls"], path: "README.md" }],
+    ["stat", { workspace_id: WORKSPACE_ID, path: "README.md", argv: ["ls"] }],
+    ["search", { workspace_id: WORKSPACE_ID, path: ".", query: "TODO", text: "x" }],
+    ["read", { workspace_id: WORKSPACE_ID, path: "README.md", query: "TODO" }],
+    [
+      "write",
+      {
+        workspace_id: WORKSPACE_ID,
+        path: "a.txt",
+        text: "x",
+        expected: { exists: false },
+        cwd: ".",
+      },
+    ],
+    [
+      "apply_patch",
+      {
+        workspace_id: WORKSPACE_ID,
+        files: [
+          { path: "a.txt", expected: { exists: true }, edits: [{ start: 0, end: 1, text: "y" }] },
+        ],
+        text: "x",
+      },
+    ],
+    [
+      "upload",
+      {
+        workspace_id: WORKSPACE_ID,
+        path: "a.txt",
+        expected: { exists: false },
+        file: {
+          file_id: "sediment://file_00000000000000000000000000000000",
+          download_url: "https://oaiusercontent.com/example",
+        },
+        max_bytes: 1024,
+      },
+    ],
+    [
+      "download",
+      {
+        workspace_id: WORKSPACE_ID,
+        path: "a.bin",
+        file_name: "a.bin",
+        mime_type: "application/octet-stream",
+        query: "TODO",
+      },
+    ],
+  ])("refuses action %s a field that belongs to another action", (action, request) => {
+    expect(() => parseWorkspaceToolParams({ action, ...request })).toThrow(
+      WorkspaceRequestInvalidError,
+    );
+  });
+
+  // The mirror of the rows above: those prove the published object accepts too much and dispatch
+  // refuses the excess. These prove it does not accept too little — a collapse that narrowed one
+  // action's field while merging it would pass every foreign-argument row and fail here. Each
+  // payload carries that action's boundary values, so a bound lost in the projection is visible.
+  it.each([
+    ["list", {}],
+    ["create", { repository_id: "42", ref: "main" }],
+    ["get", { workspace_id: WORKSPACE_ID }],
+    ["start", { workspace_id: WORKSPACE_ID }],
+    ["stop", { workspace_id: WORKSPACE_ID }],
+    ["delete", { workspace_id: WORKSPACE_ID, expected_generation: 3, confirm_delete: true }],
+    [
+      "exec",
+      {
+        workspace_id: WORKSPACE_ID,
+        argv: ["node", "script.js"],
+        cwd: "packages",
+        env: { PATH_EXTRA: "x" },
+        session: "build",
+        session_start: true,
+        session_end: false,
+        background: true,
+        timeout_seconds: 24 * 60 * 60,
+        max_stdout_bytes: 8 * 1024 * 1024,
+        max_stderr_bytes: 8 * 1024 * 1024,
+        stdin_text: "input",
+      },
+    ],
+    ["stat", { workspace_id: WORKSPACE_ID, path: "package.json" }],
+    [
+      "search",
+      {
+        workspace_id: WORKSPACE_ID,
+        path: ".",
+        query: "TODO",
+        mode: "regex",
+        max_matches: 1000,
+        max_bytes: 1024 * 1024,
+      },
+    ],
+    ["read", { workspace_id: WORKSPACE_ID, path: "a.txt", offset: 0, length: 4 * 1024 * 1024 }],
+    [
+      "read",
+      { workspace_id: WORKSPACE_ID, operation_id: OPERATION_ID, stream: "stderr", length: 1 },
+    ],
+    [
+      "write",
+      {
+        workspace_id: WORKSPACE_ID,
+        path: "a.txt",
+        text: "x",
+        expected: { exists: true, size_bytes: 1, sha256: "a".repeat(64) },
+      },
+    ],
+    [
+      "apply_patch",
+      {
+        workspace_id: WORKSPACE_ID,
+        files: [
+          {
+            path: "a.txt",
+            expected: { exists: true },
+            edits: [{ start: 0, end: 1, text: "y" }],
+          },
+        ],
+      },
+    ],
+    [
+      "upload",
+      {
+        workspace_id: WORKSPACE_ID,
+        path: "a.txt",
+        expected: { exists: false },
+        file: {
+          file_id: "sediment://file_00000000000000000000000000000000",
+          download_url: "https://oaiusercontent.com/example",
+          file_name: "a.txt",
+          mime_type: "text/plain",
+          size_bytes: 1,
+        },
+      },
+    ],
+    [
+      // `download` and `search` both declare `max_bytes` with different ceilings; the published
+      // object must still accept a download at its own 4 MiB bound.
+      "download",
+      {
+        workspace_id: WORKSPACE_ID,
+        path: "a.bin",
+        file_name: "a.bin",
+        mime_type: "application/octet-stream",
+        max_bytes: 4 * 1024 * 1024,
+      },
+    ],
+    [
+      "download",
+      {
+        workspace_id: WORKSPACE_ID,
+        operation_id: OPERATION_ID,
+        file_name: "a.bin",
+        mime_type: "application/octet-stream",
+      },
+    ],
+  ])("publishes a payload action %s accepts", (action, request) => {
+    const payload = { action, ...request };
+    expect(workspaceSchema.safeParse(payload).success).toBe(true);
+    expect(() => parseWorkspaceToolParams(payload)).not.toThrow();
+  });
+
+  it("refuses an unknown action and a field belonging to no action at all", async () => {
+    // An action nobody serves is refused before any contract is chosen for it.
+    expect(() => parseWorkspaceToolParams({ action: "teleport" })).toThrow(
+      WorkspaceRequestInvalidError,
+    );
+    expect(() => parseWorkspaceToolParams({ workspace_id: WORKSPACE_ID })).toThrow(
+      WorkspaceRequestInvalidError,
+    );
+    // A field no action declares never reaches dispatch: the published object is still strict.
+    expect(workspaceSchema.safeParse({ action: "list", chat_id: "c1" }).success).toBe(false);
+    // Every action the tool dispatches is an action the published object offers, so none of them is
+    // unreachable through the catalog.
+    expect(
+      [...((workspaceSchema.shape.action as z.ZodEnum<[string, ...string[]]>).options as string[])]
+        .sort()
+        .join(","),
+    ).toBe(Object.keys(WORKSPACE_ACTION_REQUEST_SCHEMAS).sort().join(","));
   });
 });

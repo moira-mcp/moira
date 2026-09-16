@@ -306,9 +306,15 @@ publishes `tools/list` from the same typed projection. Every published tool sche
 which keeps the complete catalog discoverable in MCP clients that do not support a root
 `anyOf`/`oneOf`. A handler may apply a narrower action-specific schema after SDK validation; `start`
 uses a flat public object schema and then validates the exact `prepare` or `execute` branch with its
-strict discriminated request schema, and the `workspace_*` execution and file tools publish one flat
-object per tool (only the shared identity required) and apply their strict request union at dispatch
-so a mixed stdin form or a partial resume call is rejected. Validation failures at either boundary are returned as MCP
+strict discriminated request schema, and the `workspace` tool publishes one flat object carrying
+`action` plus every action's fields (only `action` required), then applies that action's own strict
+request contract at dispatch, so a mixed stdin form, a partial resume call or a field belonging to
+another action is rejected there as `WORKSPACE_REQUEST_INVALID`. A default declared by an action is
+applied by that contract and is deliberately absent from the published object, which would otherwise
+inject every action's defaults into every request. Where two actions declare the same field name with
+different bounds — `search` and `download` both take `max_bytes` — the published object carries both
+forms under that one key, so neither action's parameter is narrowed by the projection; the action's
+own contract decides which form the request had to match. Validation failures at either boundary are returned as MCP
 errors. Server bootstrap does not repeat names, schemas, actions, or descriptions. Tool descriptions
 are not stored or overridden in `globalSetting`; database-backed system prompts remain a separate MCP
 `instructions` channel.
@@ -357,18 +363,21 @@ tool name, classified as the project classifies failures at a boundary, and only
 the sanitized agent-facing message, so a suppressed message is never the only trace of a failure.
 The `reconciliation` tool answers its own failures and records them the same way.
 
-The `workspace_*` tools follow the same registry path. `manage-workspaces.ts` is a presentation
+The `workspace` tool follows the same registry path. `manage-workspaces.ts` is a presentation
 adapter over the exported `@mcp-moira/web-backend/services` composition (never the web server or
 routes): the tenant comes from the request context, results are projected field by field, known
 domain failures become bounded tool errors, and unexpected failures are logged with the tool name
-and opaque IDs only. Native file references are declared through registry `_meta["openai/fileParams"]`,
+and opaque IDs only. Both native file references are declared on that one tool through registry
+`_meta["openai/fileParams"]`,
 which participates in `MCP_TOOLS_REVISION`. The MCP process and the tools share one
 `WorkspaceTransferService` from that composition; `GET /api/workspaces/transfers/:token` delivers a
 published download once, and both nginx variants proxy `location ^~ /api/workspaces/transfers/` to
 the MCP process unbuffered with access and error logging disabled because the path carries the
-capability. Request-context logging for these tools records only the tool name and UUID-validated
-workspace/operation IDs. The shared `WorkspaceObservabilityService` computes one readiness
-decision for the website, administration, backend health, MCP health and `workspace_list`;
+capability. Request-context logging for this tool records only the requested action and UUID-validated
+workspace/operation IDs; an absent or malformed action reads as `unknown`, because the record is
+written before the action is validated. The shared `WorkspaceObservabilityService` computes one readiness
+decision for the website, administration, backend health, MCP health and the `workspace` tool's
+`list` action;
 the unauthenticated `/api/health` and MCP `/health` surfaces carry only its public projection
 (`state`, `provider`, `degraded`) from a cached snapshot with a two-second bound on the connector
 probe, and both processes refresh their workspace gauges on the reconciliation interval. See `docs/WORKSPACES.md` for the contract.

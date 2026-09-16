@@ -3,6 +3,7 @@ import type { WorkspaceGitHubConfigStatus } from "@mcp-moira/shared";
 import {
   GitHubWorkspaceClientError,
   HttpGitHubWorkspaceClient,
+  providerRefusalMessage,
 } from "../../../packages/web-backend/src/services/github-workspace-client.js";
 
 const config: Extract<WorkspaceGitHubConfigStatus, { state: "available" }> = {
@@ -178,5 +179,56 @@ describe("HttpGitHubWorkspaceClient", () => {
     expect(fetchImpl.mock.calls[1][1]?.body).toBe(
       JSON.stringify({ access_token: "ghu_disconnect-me" }),
     );
+  });
+});
+
+describe("provider refusal reasons", () => {
+  test.each([
+    [
+      "a bare message",
+      JSON.stringify({ message: "Machine type is not available" }),
+      "Machine type is not available",
+    ],
+    [
+      "a message with field errors",
+      JSON.stringify({ message: "Invalid request.", errors: [{ message: "ref not found" }] }),
+      "Invalid request. ref not found",
+    ],
+    ["an HTML body", "<html><body>  Bad   request </body></html>", "Bad request"],
+  ])("carries %s as the refusal reason", (_name, body, expected) => {
+    expect(providerRefusalMessage(body)).toBe(expected);
+  });
+
+  test.each([
+    ["an empty body", ""],
+    ["whitespace only", "   \n  "],
+    ["a token the provider echoed", JSON.stringify({ message: "ghu_0123456789abcdef is invalid" })],
+    ["a fine-grained token", JSON.stringify({ message: "github_pat_abcdefgh1234 was revoked" })],
+    ["a labelled secret", JSON.stringify({ message: "Authorization: Bearer abcdef" })],
+    ["a JWT", JSON.stringify({ message: "eyJhbGciOiJIUzI1.eyJzdWIiOiIxMjM0NT rejected" })],
+    ["a URL", JSON.stringify({ message: "See https://api.github.com/user/codespaces" })],
+  ])("drops %s rather than risking a leak", (_name, body) => {
+    // Degrading to the status alone is the safe direction: a partially redacted secret is still a
+    // secret, and an audit row outlives the request that produced it.
+    expect(providerRefusalMessage(body)).toBeUndefined();
+  });
+
+  test("bounds a long message so a record cannot be flooded", () => {
+    const long = providerRefusalMessage(JSON.stringify({ message: "x".repeat(2_000) }));
+    expect(long).toHaveLength(300);
+  });
+
+  test("a refusing request throws with the provider's reason attached", async () => {
+    const fetchImpl = jest.fn<typeof fetch>().mockResolvedValue(
+      new Response(JSON.stringify({ message: "Codespaces are disabled for this repository" }), {
+        status: 403,
+      }),
+    );
+    const client = new HttpGitHubWorkspaceClient(config, fetchImpl, () => 1_000);
+
+    await expect(client.getIdentity("ghu_secret")).rejects.toMatchObject({
+      status: 403,
+      providerMessage: "Codespaces are disabled for this repository",
+    });
   });
 });

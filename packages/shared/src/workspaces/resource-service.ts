@@ -83,33 +83,89 @@ function boundedReason(error: unknown): string {
   return message.replace(/\s+/g, " ").trim().slice(0, 200) || "unknown";
 }
 
+/**
+ * What the provider said about its own refusal, when it is carried on the error.
+ *
+ * Read structurally rather than by instance: the adapter that produces it lives in another package,
+ * and the reason has already been redacted and bounded where it was produced.
+ */
+function providerDetail(error: unknown): string | undefined {
+  const message =
+    error && typeof error === "object"
+      ? (error as { providerMessage?: unknown }).providerMessage
+      : undefined;
+  return typeof message === "string" && message.length > 0 ? message : undefined;
+}
+
+/**
+ * Statuses a provider uses to say "no, and it will still be no next time": the request itself is
+ * refused (400), it conflicts with the current state (409), or it cannot be processed as sent (422).
+ * Classifying these as an outage would mark them retryable and tell an agent to repeat a request
+ * that can never succeed, so they take the non-retryable code instead.
+ */
+const PERMANENT_REFUSAL_STATUSES = new Set([400, 409, 422]);
+
+/**
+ * The HTTP status of a provider refusal, or `null` when the error is not one: an error Moira already
+ * classified is not the provider's answer, and neither is one that carries no status at all.
+ */
+function providerRefusalStatus(error: unknown): number | null {
+  if (error instanceof WorkspaceResourceError || error instanceof WorkspaceConnectionError) {
+    return null;
+  }
+  return error &&
+    typeof error === "object" &&
+    typeof (error as { status?: unknown }).status === "number"
+    ? (error as { status: number }).status
+    : null;
+}
+
 function providerFailure(error: unknown): never {
   if (error instanceof WorkspaceResourceError || error instanceof WorkspaceConnectionError) {
     throw error;
   }
-  const status =
-    error && typeof error === "object" && typeof (error as { status?: unknown }).status === "number"
-      ? (error as { status: number }).status
-      : null;
+  const status = providerRefusalStatus(error);
+  const detail = providerDetail(error);
   if (status === 401 || status === 403) {
     throw new WorkspaceResourceError(
       "WORKSPACE_AUTHORIZATION_REQUIRED",
       `Workspace provider refused the stored grant (HTTP ${status})`,
+      detail,
     );
   }
   if (status === 404) {
     throw new WorkspaceResourceError(
       "WORKSPACE_RESOURCE_INVALID",
       "Workspace provider no longer exposes the approved repository",
+      detail,
+    );
+  }
+  if (status !== null && PERMANENT_REFUSAL_STATUSES.has(status)) {
+    throw new WorkspaceResourceError(
+      "WORKSPACE_RESOURCE_INVALID",
+      `Workspace provider refused the request (HTTP ${status})`,
+      detail,
     );
   }
   if (status !== null) {
     throw new WorkspaceResourceError(
       "WORKSPACE_PROVIDER_UNAVAILABLE",
       `Workspace provider request failed (HTTP ${status})`,
+      detail,
     );
   }
   throw error;
+}
+
+/**
+ * Which lifecycle operation a pending record is in the middle of, for the audit entry a refusal
+ * writes. The state the request persisted before provider contact is the authority; the desired
+ * state answers for a record whose pending state has already been superseded.
+ */
+function lifecycleAuditAction(record: WorkspaceResourceRecord): "start" | "stop" | "delete" {
+  if (record.state === "delete_pending" || record.desiredState === "deleted") return "delete";
+  if (record.state === "stop_pending" || record.desiredState === "stopped") return "stop";
+  return "start";
 }
 
 function smallestPermittedMachine(
@@ -518,10 +574,12 @@ export class WorkspaceResourceService {
         "create_rejected",
         this.dependencies.repository.getOwned(userId, submitted.id)!,
         result.reason,
+        result.detail,
       );
       throw new WorkspaceResourceError(
         "WORKSPACE_CREATE_REJECTED",
         "Workspace creation was rejected",
+        result.detail,
       );
     }
     if (!result.resource) {
@@ -923,6 +981,35 @@ export class WorkspaceResourceService {
   }
 
   private async applyPersistentLifecycle(record: WorkspaceResourceRecord): Promise<void> {
+    // Start, stop and delete reach the provider through this one funnel. Without this catch a
+    // provider refusal leaves as an unclassified error and the caller is told only that something
+    // went wrong internally — the state that made a refused start as undiagnosable as a refused
+    // creation. `providerFailure` rethrows an already-classified error untouched, so a genuine
+    // internal fault stays an internal fault.
+    try {
+      await this.applyPersistentLifecycleThroughProvider(record);
+    } catch (error) {
+      // The refusal is audited before it is thrown. The caller's error lives as long as the request
+      // and the connector's log lives as long as the container, so the audit entry is the only
+      // record of a refused start, stop or delete that survives the next deploy. Only an actual
+      // provider refusal is audited: an already-classified or status-less error is an internal
+      // fault, and recording it as the provider's answer would be a false entry.
+      const status = providerRefusalStatus(error);
+      if (status !== null) {
+        await this.emit(
+          lifecycleAuditAction(record),
+          record,
+          `provider_refused_${status}`,
+          providerDetail(error),
+        );
+      }
+      providerFailure(error);
+    }
+  }
+
+  private async applyPersistentLifecycleThroughProvider(
+    record: WorkspaceResourceRecord,
+  ): Promise<void> {
     const provider = this.dependencies.registry.require(record.provider);
     const credential = await this.dependencies.credentials.getCredential(
       record.userId,

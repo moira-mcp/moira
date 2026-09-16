@@ -80,34 +80,7 @@ export const TOOL_BINDINGS = {
   artifacts: async (params) => (await import("./manage-artifacts.js")).manageArtifacts(params),
   lock: async (params) => (await import("./manage-locks.js")).manageLocks(params),
 
-  workspace_list: async (params) =>
-    (await import("./manage-workspaces.js")).manageWorkspaceTool("workspace_list", params),
-  workspace_create: async (params) =>
-    (await import("./manage-workspaces.js")).manageWorkspaceTool("workspace_create", params),
-  workspace_get: async (params) =>
-    (await import("./manage-workspaces.js")).manageWorkspaceTool("workspace_get", params),
-  workspace_start: async (params) =>
-    (await import("./manage-workspaces.js")).manageWorkspaceTool("workspace_start", params),
-  workspace_stop: async (params) =>
-    (await import("./manage-workspaces.js")).manageWorkspaceTool("workspace_stop", params),
-  workspace_delete: async (params) =>
-    (await import("./manage-workspaces.js")).manageWorkspaceTool("workspace_delete", params),
-  workspace_exec: async (params) =>
-    (await import("./manage-workspaces.js")).manageWorkspaceTool("workspace_exec", params),
-  workspace_stat: async (params) =>
-    (await import("./manage-workspaces.js")).manageWorkspaceTool("workspace_stat", params),
-  workspace_search: async (params) =>
-    (await import("./manage-workspaces.js")).manageWorkspaceTool("workspace_search", params),
-  workspace_read: async (params) =>
-    (await import("./manage-workspaces.js")).manageWorkspaceTool("workspace_read", params),
-  workspace_write: async (params) =>
-    (await import("./manage-workspaces.js")).manageWorkspaceTool("workspace_write", params),
-  workspace_apply_patch: async (params) =>
-    (await import("./manage-workspaces.js")).manageWorkspaceTool("workspace_apply_patch", params),
-  workspace_upload: async (params) =>
-    (await import("./manage-workspaces.js")).manageWorkspaceTool("workspace_upload", params),
-  workspace_download: async (params) =>
-    (await import("./manage-workspaces.js")).manageWorkspaceTool("workspace_download", params),
+  workspace: async (params) => (await import("./manage-workspaces.js")).manageWorkspaceTool(params),
 } satisfies ToolBindings;
 
 export async function invokeToolDefinition(
