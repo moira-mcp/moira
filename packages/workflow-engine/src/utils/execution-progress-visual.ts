@@ -7,7 +7,12 @@ import type {
   ProgressFactTone,
 } from "./execution-progress-contract.js";
 import type { ProcessProjection, ProcessTransition } from "./process-derivation.js";
-import { progressTextWidth, wrapProgressTextToWidth } from "./execution-progress-text.js";
+import {
+  ellipsizeProgressText,
+  formatProgressDuration,
+  progressTextWidth,
+  wrapProgressTextToWidth,
+} from "./execution-progress-text.js";
 export type {
   ExecutionBlockList,
   ExecutionBlockStatus,
@@ -47,7 +52,8 @@ export type ProgressVisualLineKind = "summary" | "detail" | "outcome" | "next";
 export interface ProgressVisualLine {
   text: string;
   kind: ProgressVisualLineKind;
-  marker: boolean;
+  /** The marker drawn before the text (`• `, `✓ `, `→ `); empty on a continuation line. */
+  prefix: string;
 }
 export interface ProgressVisualFact {
   label: string;
@@ -81,7 +87,19 @@ export interface ProgressVisualNode {
   titleX: number;
   /** `×N` for a repeated block, placed beside the mark and clear of the title. */
   badge: ProgressVisualBadge | null;
+  /** The status word under the title: who is on the block, or what became of it. */
+  statusLine: string;
+  /** Time spent and, for a bound block, `done/total: current item`; one line, ellipsised. */
+  factsLine: string;
   lines: ProgressVisualLine[];
+  /** Baselines of the first title line, the status line, the facts line and the first content line. */
+  titleY: number;
+  statusY: number;
+  factsY: number;
+  contentY: number;
+  /** Content lines start at `contentX`; every text line of the block ends before `textRight`. */
+  contentX: number;
+  textRight: number;
   state: ExecutionProgressState;
   status: ExecutionBlockStatus;
   /** Completed passes; shown for repeated blocks. */
@@ -122,8 +140,14 @@ export interface ProgressVisualModel {
   facts: ProgressVisualFact[];
   theme: ProgressTheme;
   view: ProgressView;
+  /** The font sizes and line heights every text of the image is measured and drawn with. */
+  type: ProgressTypeScale;
   width: number;
   height: number;
+  /** Header text (task, title, goal) starts at `headerX`, its first baseline at `headerY`, and stays narrower than `headerWidth`. */
+  headerX: number;
+  headerY: number;
+  headerWidth: number;
   stagesTop: number;
   stagesHeight: number;
   nodes: ProgressVisualNode[];
@@ -137,19 +161,75 @@ const CARD_GAP_Y = 52;
 const PADDING_X = 40;
 const PADDING_BOTTOM = 32;
 const HEADER_TOP = 28;
-const TEXT_LINE_HEIGHT = 18;
-const LABEL_LINE_HEIGHT = 20;
-const CARD_PADDING_Y = 18;
-const CARD_FIXED_HEIGHT = 42;
+const CARD_PADDING_TOP = 12;
+const CARD_PADDING_BOTTOM = 14;
+const CONTENT_GAP = 8;
 const FACT_GAP = 12;
 const FACT_MIN_WIDTH = 180;
-const MARK_FONT = 18;
-const TITLE_FONT = 14;
-const BADGE_FONT = 11;
-const BADGE_HEIGHT = 16;
-const EDGE_LABEL_FONT = 11;
-const EDGE_LABEL_LINE = 14;
+const FACT_PADDING_X = 12;
 const LABEL_GAP = 4;
+/** A viewport this wide or narrower is a phone: one column and the larger type. */
+export const PROGRESS_PHONE_MAX_WIDTH = 720;
+
+/** Font sizes (px) and the line heights they are set on; `header` and `fact` are the top of the image. */
+export interface ProgressTypeScale {
+  /** Block title. */
+  title: number;
+  titleLine: number;
+  /** Block content, the status word and the facts line. */
+  content: number;
+  contentLine: number;
+  /** Transition labels beside connectors and in the gutters. */
+  label: number;
+  labelLine: number;
+  /** The `×n` badge and its box height. */
+  badge: number;
+  badgeHeight: number;
+  /** The state mark (✓ ◐ ● – ○). */
+  mark: number;
+  header: {
+    task: number;
+    taskLine: number;
+    title: number;
+    titleLine: number;
+    goal: number;
+    goalLine: number;
+  };
+  fact: { label: number; value: number; line: number };
+}
+
+const DESKTOP_TYPE: ProgressTypeScale = {
+  title: 14,
+  titleLine: 20,
+  content: 12,
+  contentLine: 18,
+  label: 11,
+  labelLine: 14,
+  badge: 11,
+  badgeHeight: 16,
+  mark: 18,
+  header: { task: 20, taskLine: 26, title: 13, titleLine: 18, goal: 14, goalLine: 20 },
+  fact: { label: 11, value: 13, line: 17 },
+};
+
+const PHONE_TYPE: ProgressTypeScale = {
+  title: 18,
+  titleLine: 24,
+  content: 14,
+  contentLine: 20,
+  label: 12,
+  labelLine: 16,
+  badge: 12,
+  badgeHeight: 18,
+  mark: 22,
+  header: { task: 24, taskLine: 30, title: 15, titleLine: 20, goal: 16, goalLine: 22 },
+  fact: { label: 12, value: 15, line: 19 },
+};
+
+/** The type scale for a viewport: the phone scale up to `PROGRESS_PHONE_MAX_WIDTH`, the desktop one above. */
+export function progressTypeScale(viewportWidth: number): ProgressTypeScale {
+  return viewportWidth <= PROGRESS_PHONE_MAX_WIDTH ? PHONE_TYPE : DESKTOP_TYPE;
+}
 export const PROGRESS_IMAGE_MAX_WIDTH = 4096;
 export const PROGRESS_IMAGE_MIN_WIDTH = 480;
 export const PROGRESS_VISUAL_MIN_WIDTH = 320;
@@ -288,50 +368,132 @@ export function applyProgressVisibility(
   return { nodes, transitions, collapsed, hubs };
 }
 
-export function wrapProgressText(value: string, maxCharacters: number): string[] {
-  const normalized = value.replace(/\s+/gu, " ").trim();
-  if (!normalized) return [];
-  const lines: string[] = [];
-  let current = "";
-  const flush = () => {
-    if (current) lines.push(current);
-    current = "";
-  };
-  for (const word of normalized.split(" ")) {
-    const codePoints = [...word];
-    if (codePoints.length > maxCharacters) {
-      flush();
-      for (let index = 0; index < codePoints.length; index += maxCharacters)
-        lines.push(codePoints.slice(index, index + maxCharacters).join(""));
-      continue;
-    }
-    const candidate = current ? `${current} ${word}` : word;
-    if ([...candidate].length <= maxCharacters) current = candidate;
-    else {
-      flush();
-      current = word;
-    }
-  }
-  flush();
-  return lines;
+/** The marker a content line is drawn with; the model owns it so the renderer draws what was measured. */
+function linePrefix(kind: ProgressVisualLineKind): string {
+  return kind === "detail" ? "• " : kind === "outcome" ? "✓ " : kind === "next" ? "→ " : "";
+}
+
+/** Wrap `value` as content lines of `kind`: the first carries the marker, every line fits `maxWidth`. */
+function wrapContentLines(
+  value: string,
+  kind: ProgressVisualLineKind,
+  maxWidth: number,
+  type: ProgressTypeScale,
+): ProgressVisualLine[] {
+  const prefix = linePrefix(kind);
+  const weight = kind === "summary" ? "semibold" : "regular";
+  const prefixWidth = progressTextWidth(prefix, type.content, weight);
+  return wrapProgressTextToWidth(
+    value,
+    Math.max(24, maxWidth - prefixWidth),
+    type.content,
+    weight,
+  ).map((text, index) => ({ text, kind, prefix: index === 0 ? prefix : "" }));
 }
 
 function contentLines(
   content: ExecutionProgressContent,
-  maxCharacters: number,
+  maxWidth: number,
+  type: ProgressTypeScale,
 ): ProgressVisualLine[] {
   const lines: ProgressVisualLine[] = [];
   const append = (value: string | null, kind: ProgressVisualLineKind) => {
-    if (value)
-      wrapProgressText(value, maxCharacters).forEach((text, index) =>
-        lines.push({ text, kind, marker: index === 0 }),
-      );
+    if (value) lines.push(...wrapContentLines(value, kind, maxWidth, type));
   };
   append(content.summary, "summary");
   content.details.forEach((detail) => append(detail, "detail"));
   append(content.outcome, "outcome");
   append(content.next, "next");
   return lines;
+}
+
+/**
+ * The status word of a block, as the web map words it: only a person being waited for reads
+ * `waiting for you`; the agent on the waiting or active block is `agent on the step`.
+ */
+export function progressStatusText(
+  status: ExecutionBlockStatus,
+  iterations: number,
+  waitingFor: ExecutionProgress["waitingFor"],
+): string {
+  switch (status) {
+    case "waiting":
+      return waitingFor === "user" ? "waiting for you" : "agent on the step";
+    case "active":
+      return "agent on the step";
+    case "done":
+      return "completed";
+    case "repeated":
+      return `repeated ×${iterations}`;
+    case "skipped":
+      return "skipped";
+    default:
+      return "pending";
+  }
+}
+
+/**
+ * The facts of a block on one line, from the fullest form to the one that must survive: the time
+ * spent (`total`, plus the open pass while one runs) and, for a bound block, `done/total` with the
+ * current item. Nothing measured reads `—`; an unknown done count reads `?`, as the notification
+ * footer does. `progressFactsCandidates` lists the forms in order of preference — with the open
+ * pass, without it, without the item's title, the count alone — so a narrow box drops the least
+ * important part before anything is cut; `progressFactsText` is the fullest form.
+ */
+export function progressFactsCandidates(node: ExecutionProgressNode): string[] {
+  const total = formatProgressDuration(node.timing.totalMs);
+  const withPass =
+    node.timing.currentMs !== null
+      ? `${total} · this pass ${formatProgressDuration(node.timing.currentMs)}`
+      : null;
+  const list = node.list;
+  if (!list || (list.done === null && list.total === null))
+    return withPass ? [withPass, total] : [total];
+  const count = `${list.done ?? "?"}/${list.total ?? "?"}`;
+  const titled = list.currentTitle ? `${count}: ${list.currentTitle}` : count;
+  const forms = [
+    withPass ? `${withPass} · ${titled}` : null,
+    `${total} · ${titled}`,
+    `${total} · ${count}`,
+    count,
+  ].filter((form): form is string => form !== null);
+  return [...new Set(forms)];
+}
+
+export function progressFactsText(node: ExecutionProgressNode): string {
+  return progressFactsCandidates(node)[0];
+}
+
+/**
+ * The facts line that fits the box: the fullest form that fits, else the titled form ellipsised
+ * while the ellipsis still leaves the count intact (the item's title is what gets cut), else the
+ * shorter forms, the last one ellipsised when even it does not fit.
+ */
+function fitFactsLine(node: ExecutionProgressNode, width: number, font: number): string {
+  const candidates = progressFactsCandidates(node);
+  const fits = (text: string) => progressTextWidth(text, font) <= width;
+  const list = node.list;
+  const count =
+    list && (list.done !== null || list.total !== null)
+      ? `${list.done ?? "?"}/${list.total ?? "?"}`
+      : null;
+  if (fits(candidates[0])) return candidates[0];
+  // The fullest form does not fit: cut the item's title on the form without the open pass, as
+  // long as the count stays intact — a cut title still names the item, a dropped one does not;
+  // otherwise the shorter whole forms, then the count alone, cut if even that is too wide.
+  const titled = candidates.find(
+    (candidate) =>
+      !!count &&
+      !!list?.currentTitle &&
+      !candidate.includes("this pass") &&
+      candidate.endsWith(list.currentTitle),
+  );
+  if (titled) {
+    const cut = ellipsizeProgressText(titled, width, font);
+    if (cut.includes(`${count}: `)) return cut;
+  }
+  const whole = candidates.find(fits);
+  return whole ?? ellipsizeProgressText(candidates[candidates.length - 1], width, font);
 }
 
 /** The mark for a block status; the repeat count is a badge of its own, not part of the mark. */
@@ -358,24 +520,97 @@ function blockHeader(
   label: string,
   x: number,
   width: number,
-): Pick<ProgressVisualNode, "mark" | "markX" | "titleX" | "badge" | "labelLines"> {
+  type: ProgressTypeScale,
+): Pick<ProgressVisualNode, "mark" | "markX" | "titleX" | "badge" | "labelLines" | "textRight"> {
   const mark = progressStatusMark(status);
   const markX = x + 14;
-  let titleX = Math.max(x + 38, markX + progressTextWidth(mark, MARK_FONT, "bold") + 8);
+  let titleX = Math.max(x + 38, markX + progressTextWidth(mark, type.mark, "bold") + 8);
   let badge: ProgressVisualBadge | null = null;
+  const titleY = CARD_PADDING_TOP + type.title;
   if (status === "repeated") {
     const text = `×${iterations}`;
-    const badgeWidth = progressTextWidth(text, BADGE_FONT, "semibold") + 10;
-    badge = { text, x: titleX - 2, y: 14, width: badgeWidth, height: BADGE_HEIGHT };
+    const badgeWidth = progressTextWidth(text, type.badge, "semibold") + 10;
+    badge = {
+      text,
+      x: titleX - 2,
+      y: titleY - type.badgeHeight + 4,
+      width: badgeWidth,
+      height: type.badgeHeight,
+    };
     titleX = badge.x + badgeWidth + 8;
   }
+  const textRight = x + width - 14;
   const labelLines = wrapProgressTextToWidth(
     label,
-    Math.max(40, width - (titleX - x) - 14),
-    TITLE_FONT,
+    Math.max(40, textRight - titleX),
+    type.title,
     "bold",
   );
-  return { mark, markX, titleX, badge, labelLines: labelLines.length ? labelLines : [label] };
+  return {
+    mark,
+    markX,
+    titleX,
+    badge,
+    labelLines: labelLines.length ? labelLines : [label],
+    textRight,
+  };
+}
+
+/**
+ * A block's body under its title: the status word, the facts line (ellipsised to the text
+ * width) and the content lines, with every baseline relative to the block top and the height
+ * the block needs. A collapsed block is its title alone.
+ */
+function blockBody(
+  node: ExecutionProgressNode,
+  waitingFor: ExecutionProgress["waitingFor"],
+  header: Pick<ProgressVisualNode, "titleX" | "labelLines" | "textRight">,
+  x: number,
+  collapsed: boolean,
+  lines: ProgressVisualLine[],
+  type: ProgressTypeScale,
+): Pick<
+  ProgressVisualNode,
+  "statusLine" | "factsLine" | "titleY" | "statusY" | "factsY" | "contentY" | "contentX" | "height"
+> {
+  const titleY = CARD_PADDING_TOP + type.title;
+  const titleBottom = titleY + (header.labelLines.length - 1) * type.titleLine;
+  const textWidth = Math.max(24, header.textRight - header.titleX);
+  const statusLine = ellipsizeProgressText(
+    progressStatusText(node.status, node.iterations, waitingFor),
+    textWidth,
+    type.content,
+    "semibold",
+  );
+  const factsLine = fitFactsLine(node, textWidth, type.content);
+  const statusY = titleBottom + type.contentLine + 2;
+  const factsY = statusY + type.contentLine;
+  const contentY = factsY + type.contentLine + CONTENT_GAP;
+  const lastBaseline = collapsed
+    ? titleBottom
+    : lines.length
+      ? contentY + (lines.length - 1) * type.contentLine
+      : factsY;
+  return {
+    statusLine,
+    factsLine,
+    titleY,
+    statusY,
+    factsY,
+    contentY,
+    contentX: x + 18,
+    height: lastBaseline + CARD_PADDING_BOTTOM,
+  };
+}
+
+/** Move a block whose baselines and badge are relative to its top to the absolute `y`. */
+function placeBlock(node: ProgressVisualNode, y: number): void {
+  node.y = y;
+  node.titleY += y;
+  node.statusY += y;
+  node.factsY += y;
+  node.contentY += y;
+  if (node.badge) node.badge.y += y;
 }
 
 export function buildExecutionProgressVisualModel(
@@ -387,32 +622,40 @@ export function buildExecutionProgressVisualModel(
   const visible = applyProgressVisibility(progress, normalized.hide, normalized.collapse);
   const shownNodes = visible.nodes;
   const width = normalized.viewportWidth;
+  const type = progressTypeScale(width);
+  const phone = width <= PROGRESS_PHONE_MAX_WIDTH;
   const availableWidth = width - PADDING_X * 2;
-  const columns = Math.max(
-    1,
-    Math.floor((availableWidth + CARD_GAP_X) / (CARD_MIN_WIDTH + CARD_GAP_X)),
-  );
-  const cardWidth = Math.min(
-    CARD_WIDTH,
-    Math.floor((availableWidth - CARD_GAP_X * Math.max(0, columns - 1)) / columns),
-  );
+  // A phone reads one column of full-width cards; wider viewports keep the card grid.
+  const columns = phone
+    ? 1
+    : Math.max(1, Math.floor((availableWidth + CARD_GAP_X) / (CARD_MIN_WIDTH + CARD_GAP_X)));
+  const cardWidth = phone
+    ? availableWidth
+    : Math.min(
+        CARD_WIDTH,
+        Math.floor((availableWidth - CARD_GAP_X * Math.max(0, columns - 1)) / columns),
+      );
   const actualColumns = Math.max(
     1,
     Math.floor((availableWidth + CARD_GAP_X) / (cardWidth + CARD_GAP_X)),
   );
-  const taskCharacters = Math.max(16, Math.floor(availableWidth / 13));
-  const titleCharacters = Math.max(20, Math.floor(availableWidth / 9));
-  const goalCharacters = Math.max(20, Math.floor(availableWidth / 9));
   const taskTitle = progress.taskTitle || progress.title || "Execution progress";
-  const taskTitleLines = wrapProgressText(taskTitle, taskCharacters);
+  const taskTitleLines = wrapProgressTextToWidth(
+    taskTitle,
+    availableWidth,
+    type.header.task,
+    "bold",
+  );
   const titleLines =
     progress.title && progress.title !== taskTitle
-      ? wrapProgressText(progress.title, titleCharacters)
+      ? wrapProgressTextToWidth(progress.title, availableWidth, type.header.title, "semibold")
       : [];
-  const goalLines = progress.goal ? wrapProgressText(progress.goal, goalCharacters) : [];
-  let cursorY = HEADER_TOP + taskTitleLines.length * 26;
-  if (titleLines.length) cursorY += 6 + titleLines.length * 18;
-  if (goalLines.length) cursorY += 10 + goalLines.length * 20;
+  const goalLines = progress.goal
+    ? wrapProgressTextToWidth(progress.goal, availableWidth, type.header.goal)
+    : [];
+  let cursorY = HEADER_TOP + taskTitleLines.length * type.header.taskLine;
+  if (titleLines.length) cursorY += 6 + titleLines.length * type.header.titleLine;
+  if (goalLines.length) cursorY += 10 + goalLines.length * type.header.goalLine;
 
   const factColumns = Math.max(
     1,
@@ -425,10 +668,10 @@ export function buildExecutionProgressVisualModel(
   const facts = progress.facts.map((fact, index): ProgressVisualFact => {
     const row = Math.floor(index / factColumns);
     const column = index % factColumns;
-    const maxCharacters = Math.max(12, Math.floor((factWidth - 24) / 8.2));
-    const labelLines = wrapProgressText(fact.label, maxCharacters);
-    const valueLines = wrapProgressText(fact.value, maxCharacters);
-    const height = 24 + (labelLines.length + valueLines.length) * 17;
+    const textWidth = Math.max(24, factWidth - FACT_PADDING_X * 2);
+    const labelLines = wrapProgressTextToWidth(fact.label, textWidth, type.fact.label, "semibold");
+    const valueLines = wrapProgressTextToWidth(fact.value, textWidth, type.fact.value, "semibold");
+    const height = 24 + (labelLines.length + valueLines.length) * type.fact.line;
     factRows[row] = Math.max(factRows[row] ?? 0, height);
     return {
       ...fact,
@@ -452,6 +695,7 @@ export function buildExecutionProgressVisualModel(
   if (processView) {
     return layoutProcessColumn(progress, normalized, visible, {
       width,
+      type,
       taskTitle,
       taskTitleLines,
       titleLines,
@@ -460,17 +704,17 @@ export function buildExecutionProgressVisualModel(
       nodesTop,
     });
   }
-  const maxCardCharacters = Math.max(16, Math.floor((cardWidth - 34) / 8.2));
   const nodes = shownNodes.map((node, index): ProgressVisualNode => {
     const x = PADDING_X + (index % actualColumns) * (cardWidth + CARD_GAP_X);
-    const header = blockHeader(node.status, node.iterations, node.label, x, cardWidth);
-    const { labelLines } = header;
+    const header = blockHeader(node.status, node.iterations, node.label, x, cardWidth, type);
     const collapsed = visible.collapsed.has(node.id);
-    const lines = collapsed ? [] : contentLines(node.content, maxCardCharacters);
+    const lines = collapsed ? [] : contentLines(node.content, header.textRight - (x + 18), type);
+    const body = blockBody(node, progress.waitingFor, header, x, collapsed, lines, type);
     return {
       id: node.id,
       label: node.label,
       ...header,
+      ...body,
       lines,
       state: node.state,
       status: node.status,
@@ -480,14 +724,6 @@ export function buildExecutionProgressVisualModel(
       x,
       y: 0,
       width: cardWidth,
-      height: collapsed
-        ? CARD_PADDING_Y +
-          CARD_FIXED_HEIGHT +
-          Math.max(0, labelLines.length - 1) * LABEL_LINE_HEIGHT
-        : CARD_PADDING_Y * 2 +
-          CARD_FIXED_HEIGHT +
-          labelLines.length * LABEL_LINE_HEIGHT +
-          lines.length * TEXT_LINE_HEIGHT,
       focusNodeId: node.focusNodeId,
     };
   });
@@ -500,10 +736,7 @@ export function buildExecutionProgressVisualModel(
   for (let row = 0; row < rowHeights.length; row++) {
     rowTops[row] = rowY;
     nodes.forEach((node) => {
-      if (node.row === row) {
-        node.y = rowY;
-        if (node.badge) node.badge.y += rowY;
-      }
+      if (node.row === row) placeBlock(node, rowY);
     });
     rowY += rowHeights[row] + CARD_GAP_Y;
   }
@@ -572,8 +805,12 @@ export function buildExecutionProgressVisualModel(
     facts,
     theme: normalized.theme,
     view: normalized.view,
+    type,
     width,
     height,
+    headerX: PADDING_X,
+    headerY: HEADER_TOP,
+    headerWidth: availableWidth,
     stagesTop: nodesTop,
     stagesHeight: height - nodesTop,
     nodes,
@@ -640,6 +877,7 @@ function layoutProcessColumn(
   visible: ReturnType<typeof applyProgressVisibility>,
   header: {
     width: number;
+    type: ProgressTypeScale;
     taskTitle: string;
     taskTitleLines: string[];
     titleLines: string[];
@@ -648,7 +886,9 @@ function layoutProcessColumn(
     nodesTop: number;
   },
 ): ProgressVisualModel {
-  const { width, nodesTop } = header;
+  const { width, nodesTop, type } = header;
+  const labelFont = type.label;
+  const labelLine = type.labelLine;
   const blockLabel = new Map(visible.nodes.map((node) => [node.id, node.label]));
   const index = new Map(visible.nodes.map((node, i) => [node.id, i]));
 
@@ -695,7 +935,7 @@ function layoutProcessColumn(
   // gutter holds its lanes plus a label area sized by the widest label (bounded), and the column
   // keeps its minimum width by shrinking the label areas rather than overflowing the viewport;
   // labels wrap to whatever the area leaves them.
-  const labelWidthOf = (label: string) => progressTextWidth(label, EDGE_LABEL_FONT, "semibold");
+  const labelWidthOf = (label: string) => progressTextWidth(label, labelFont, "semibold");
   const gutterArcs = arcs.filter((arc) => !arc.hub && (arc.cycle || arc.to !== arc.from + 1));
   const leftArcs = gutterArcs.filter((arc) => arc.cycle);
   const rightArcs = gutterArcs.filter((arc) => !arc.cycle);
@@ -774,41 +1014,37 @@ function layoutProcessColumn(
     const lines = wrapProgressTextToWidth(
       arc.label,
       Math.max(connectorLabelWidth, widestWordOf([arc])),
-      EDGE_LABEL_FONT,
+      labelFont,
       "semibold",
     );
     connectorLines.set(`${arc.source}>${arc.target}`, lines);
-    const needed = lines.length * EDGE_LABEL_LINE + 16;
+    const needed = lines.length * labelLine + 16;
     gapAfter.set(arc.source, Math.max(gapAfter.get(arc.source) ?? COLUMN_GAP_Y, needed));
   }
 
   let y = nodesTop;
   const nodes: ProgressVisualNode[] = visible.nodes.map((node, i): ProgressVisualNode => {
     const collapsed = visible.collapsed.has(node.id);
-    const header = blockHeader(node.status, node.iterations, node.label, columnX, columnWidth);
-    const { labelLines } = header;
-    const inlineWidth = Math.max(60, columnWidth - 36);
+    const header = blockHeader(
+      node.status,
+      node.iterations,
+      node.label,
+      columnX,
+      columnWidth,
+      type,
+    );
+    const inlineWidth = header.textRight - (columnX + 18);
     const lines: ProgressVisualLine[] = collapsed
       ? []
       : (inline.get(node.id) ?? []).flatMap((text) =>
-          wrapProgressTextToWidth(text, inlineWidth, 12).map(
-            (line, lineIndex): ProgressVisualLine => ({
-              text: line,
-              kind: "next",
-              marker: lineIndex === 0,
-            }),
-          ),
+          wrapContentLines(text, "next", inlineWidth, type),
         );
-    const height =
-      CARD_PADDING_Y +
-      CARD_FIXED_HEIGHT +
-      Math.max(0, labelLines.length - 1) * LABEL_LINE_HEIGHT +
-      lines.length * TEXT_LINE_HEIGHT;
-    if (header.badge) header.badge.y += y;
+    const body = blockBody(node, progress.waitingFor, header, columnX, collapsed, lines, type);
     const placed: ProgressVisualNode = {
       id: node.id,
       label: node.label,
       ...header,
+      ...body,
       lines,
       state: node.state,
       status: node.status,
@@ -816,12 +1052,12 @@ function layoutProcessColumn(
       collapsed,
       row: i,
       x: columnX,
-      y,
+      y: 0,
       width: columnWidth,
-      height,
       focusNodeId: node.focusNodeId,
     };
-    y += height + (gapAfter.get(node.id) ?? COLUMN_GAP_Y);
+    placeBlock(placed, y);
+    y += placed.height + (gapAfter.get(node.id) ?? COLUMN_GAP_Y);
     return placed;
   });
   const byId = new Map(nodes.map((node) => [node.id, node]));
@@ -849,7 +1085,7 @@ function layoutProcessColumn(
       const x = source.x + source.width / 2;
       const y1 = source.y + source.height;
       const y2 = target.y;
-      const boxHeight = lines.length * EDGE_LABEL_LINE;
+      const boxHeight = lines.length * labelLine;
       const top = y1 + Math.max(2, (y2 - y1 - boxHeight) / 2);
       const boxWidth = Math.max(0, ...lines.map(labelWidthOf));
       edges.push({
@@ -860,7 +1096,7 @@ function layoutProcessColumn(
         label: arc.label,
         labelLines: lines,
         labelX: x + 10,
-        labelY: top + EDGE_LABEL_FONT,
+        labelY: top + labelFont,
         labelAnchor: "start",
         labelBox: lines.length ? { x: x + 10, y: top, width: boxWidth, height: boxHeight } : null,
         cycle: false,
@@ -884,7 +1120,7 @@ function layoutProcessColumn(
     const inlined = arc.hub || (right ? rightInline : leftInline);
     const lines = inlined
       ? []
-      : wrapProgressTextToWidth(arc.label, areaWidth(area), EDGE_LABEL_FONT, "semibold");
+      : wrapProgressTextToWidth(arc.label, areaWidth(area), labelFont, "semibold");
     const edge: ProgressVisualEdge = {
       source: arc.source,
       target: arc.target,
@@ -900,7 +1136,7 @@ function layoutProcessColumn(
     };
     edges.push(edge);
     if (!lines.length) continue;
-    const boxHeight = lines.length * EDGE_LABEL_LINE + 2;
+    const boxHeight = lines.length * labelLine + 2;
     const lo = Math.min(startY, endY);
     const hi = Math.max(startY, endY) - boxHeight;
     const centred = startY - boxHeight / 2;
@@ -929,7 +1165,7 @@ function layoutProcessColumn(
         width: label.width,
         height: label.height,
       };
-      label.edge.labelY = top + EDGE_LABEL_FONT;
+      label.edge.labelY = top + labelFont;
       floor = top + label.height + LABEL_GAP;
     }
   }
@@ -952,8 +1188,12 @@ function layoutProcessColumn(
     facts: header.facts,
     theme: normalized.theme,
     view: "process",
+    type,
     width,
     height,
+    headerX: PADDING_X,
+    headerY: HEADER_TOP,
+    headerWidth: width - PADDING_X * 2,
     stagesTop: nodesTop,
     stagesHeight: height - nodesTop,
     nodes,

@@ -124,7 +124,9 @@ function ContentsRow({
 }): React.JSX.Element {
   const { t } = useTranslation();
   const bound =
-    block.list && block.list.total !== null ? `${block.list.done ?? 0}/${block.list.total}` : null;
+    block.list && (block.list.done !== null || block.list.total !== null)
+      ? `${block.list.done ?? "?"}/${block.list.total ?? "?"}`
+      : null;
   const typical = block.stats?.run.medianMs ?? null;
   return (
     <li>

@@ -28,13 +28,20 @@ function textLines(
   return `<text x="${x}" y="${y}" ${attributes}>${lines.map((line, index) => `<tspan x="${x}" dy="${index === 0 ? 0 : lineHeight}">${escapeXml(line)}</tspan>`).join("")}</text>`;
 }
 
+/**
+ * The SVG of a visual model. Every font size and line height comes from the model's type scale,
+ * so what is drawn is what the model measured; the block colours follow the web map — accent for
+ * the block the run is on, green for a completed or repeated one, muted for skipped and pending.
+ */
 export function renderProgressVisualSvg(model: ProgressVisualModel): string {
   const dark = model.theme === "dark";
+  const { type } = model;
   const palette = {
     background: dark ? "#10131a" : "#f7f8fb",
     text: dark ? "#f4f6fb" : "#172033",
     muted: dark ? "#aeb7c8" : "#596579",
     pending: dark ? "#252b38" : "#ffffff",
+    skipped: dark ? "#1a1e28" : "#eef0f4",
     completed: dark ? "#18372d" : "#e8f7ef",
     current: dark ? "#243d73" : "#e8efff",
     border: dark ? "#4d586d" : "#c8cfda",
@@ -43,35 +50,41 @@ export function renderProgressVisualSvg(model: ProgressVisualModel): string {
     warning: "#d18a00",
     critical: "#dc3e4d",
   };
-  let cursorY = 28;
+  let cursorY = model.headerY;
   const header: string[] = [];
   header.push(
     textLines(
       model.taskTitleLines,
-      40,
+      model.headerX,
       cursorY,
-      26,
-      `fill="${palette.text}" font-size="20" font-weight="700"`,
+      type.header.taskLine,
+      `fill="${palette.text}" font-size="${type.header.task}" font-weight="700"`,
     ),
   );
-  cursorY += model.taskTitleLines.length * 26;
+  cursorY += model.taskTitleLines.length * type.header.taskLine;
   if (model.titleLines.length) {
     cursorY += 6;
     header.push(
       textLines(
         model.titleLines,
-        40,
+        model.headerX,
         cursorY,
-        18,
-        `fill="${palette.muted}" font-size="13" font-weight="600"`,
+        type.header.titleLine,
+        `fill="${palette.muted}" font-size="${type.header.title}" font-weight="600"`,
       ),
     );
-    cursorY += model.titleLines.length * 18;
+    cursorY += model.titleLines.length * type.header.titleLine;
   }
   if (model.goalLines.length) {
     cursorY += 10;
     header.push(
-      textLines(model.goalLines, 40, cursorY, 20, `fill="${palette.text}" font-size="14"`),
+      textLines(
+        model.goalLines,
+        model.headerX,
+        cursorY,
+        type.header.goalLine,
+        `fill="${palette.text}" font-size="${type.header.goal}"`,
+      ),
     );
   }
   const facts = model.facts
@@ -88,16 +101,16 @@ export function renderProgressVisualSvg(model: ProgressVisualModel): string {
         fact.labelLines,
         fact.x + 12,
         fact.y + 20,
-        17,
-        `fill="${palette.muted}" font-size="11" font-weight="600"`,
+        type.fact.line,
+        `fill="${palette.muted}" font-size="${type.fact.label}" font-weight="600"`,
       );
-      const valueY = fact.y + 20 + fact.labelLines.length * 17;
+      const valueY = fact.y + 20 + fact.labelLines.length * type.fact.line;
       const value = textLines(
         fact.valueLines,
         fact.x + 12,
         valueY,
-        17,
-        `fill="${palette.text}" font-size="13" font-weight="650"`,
+        type.fact.line,
+        `fill="${palette.text}" font-size="${type.fact.value}" font-weight="650"`,
       );
       return `<g><rect x="${fact.x}" y="${fact.y}" width="${fact.width}" height="${fact.height}" rx="12" fill="${palette.pending}" stroke="${tone}" stroke-width="2"/>${label}${value}</g>`;
     })
@@ -108,75 +121,56 @@ export function renderProgressVisualSvg(model: ProgressVisualModel): string {
       const path = `<path d="${edge.path}" fill="none" stroke="${loop ? palette.accent : palette.border}" stroke-width="3" stroke-linecap="round"${loop ? ' stroke-dasharray="7 6"' : ""}/>`;
       if (!edge.labelLines.length) return path;
       const anchor = edge.labelAnchor;
-      const label = `<text x="${edge.labelX}" y="${edge.labelY}" text-anchor="${anchor}" fill="${loop ? palette.accent : palette.muted}" font-size="11" font-weight="600">${edge.labelLines.map((line, index) => `<tspan x="${edge.labelX}" dy="${index === 0 ? 0 : 14}">${escapeXml(line)}</tspan>`).join("")}</text>`;
+      const label = `<text x="${edge.labelX}" y="${edge.labelY}" text-anchor="${anchor}" fill="${loop ? palette.accent : palette.muted}" font-size="${type.label}" font-weight="600">${edge.labelLines.map((line, index) => `<tspan x="${edge.labelX}" dy="${index === 0 ? 0 : type.labelLine}">${escapeXml(line)}</tspan>`).join("")}</text>`;
       return path + label;
     })
     .join("");
   const nodes = model.nodes
     .map((node) => {
-      const fill =
-        node.state === "current"
-          ? palette.current
-          : node.state === "completed"
-            ? palette.completed
+      const finished = node.status === "done" || node.status === "repeated";
+      const onBlock = node.status === "active" || node.status === "waiting";
+      const muted = node.status === "skipped" || node.status === "pending";
+      const fill = onBlock
+        ? palette.current
+        : finished
+          ? palette.completed
+          : node.status === "skipped"
+            ? palette.skipped
             : palette.pending;
-      const stroke =
-        node.state === "current"
-          ? palette.accent
-          : node.state === "completed"
-            ? palette.success
-            : palette.border;
-      const state =
-        node.status === "repeated"
-          ? `Repeated ×${node.iterations}`
-          : node.status === "done"
-            ? "Completed"
-            : node.status === "waiting"
-              ? "Waiting"
-              : node.status === "active"
-                ? "Current"
-                : node.status === "skipped"
-                  ? "Skipped"
-                  : "Pending";
-      const labelY = node.y + 26;
-      const label = textLines(
+      const stroke = onBlock ? palette.accent : finished ? palette.success : palette.border;
+      const statusColor = onBlock ? palette.accent : finished ? palette.success : palette.muted;
+      const titleColor = muted ? palette.muted : palette.text;
+      const title = textLines(
         node.labelLines,
         node.titleX,
-        labelY,
-        20,
-        `fill="${palette.text}" font-size="14" font-weight="700"`,
+        node.titleY,
+        type.titleLine,
+        `fill="${titleColor}" font-size="${type.title}" font-weight="700"${node.status === "skipped" ? ' text-decoration="line-through"' : ""}`,
       );
       // The repeat count is a secondary badge beside the mark, never part of the title.
       const badge = node.badge
-        ? `<rect x="${node.badge.x}" y="${node.badge.y}" width="${node.badge.width}" height="${node.badge.height}" rx="8" fill="${palette.background}" stroke="${palette.border}" stroke-width="1"/><text x="${node.badge.x + 5}" y="${node.badge.y + 12}" fill="${palette.muted}" font-size="11" font-weight="600">${escapeXml(node.badge.text)}</text>`
+        ? `<rect x="${node.badge.x}" y="${node.badge.y}" width="${node.badge.width}" height="${node.badge.height}" rx="${node.badge.height / 2}" fill="${palette.background}" stroke="${palette.border}" stroke-width="1"/><text x="${node.badge.x + 5}" y="${node.badge.y + node.badge.height - 4}" fill="${palette.muted}" font-size="${type.badge}" font-weight="600">${escapeXml(node.badge.text)}</text>`
         : "";
-      let lineY = labelY + Math.max(1, node.labelLines.length) * 20 + 12;
+      const body = node.collapsed
+        ? ""
+        : `<text x="${node.titleX}" y="${node.statusY}" fill="${statusColor}" font-size="${type.content}" font-weight="600">${escapeXml(node.statusLine)}</text><text x="${node.titleX}" y="${node.factsY}" fill="${palette.muted}" font-size="${type.content}">${escapeXml(node.factsLine)}</text>`;
       const content = node.lines
-        .map((line) => {
-          const prefix = !line.marker
-            ? ""
-            : line.kind === "detail"
-              ? "• "
-              : line.kind === "outcome"
-                ? "✓ "
-                : line.kind === "next"
-                  ? "→ "
-                  : "";
+        .map((line, index) => {
           const color =
             line.kind === "next"
-              ? stroke
+              ? statusColor
               : line.kind === "outcome"
                 ? palette.success
                 : line.kind === "detail"
                   ? palette.muted
                   : palette.text;
           const weight = line.kind === "summary" ? "650" : "450";
-          const rendered = `<text x="${node.x + 18}" y="${lineY}" fill="${color}" font-size="12" font-weight="${weight}">${escapeXml(prefix + line.text)}</text>`;
-          lineY += 18;
-          return rendered;
+          const y = node.contentY + index * type.contentLine;
+          return `<text x="${node.contentX}" y="${y}" fill="${color}" font-size="${type.content}" font-weight="${weight}">${escapeXml(line.prefix + line.text)}</text>`;
         })
         .join("");
-      return `<g${node.collapsed ? ' data-collapsed="true"' : ""}><title>${escapeXml(`${state}: ${node.label}`)}</title><rect x="${node.x}" y="${node.y}" width="${node.width}" height="${node.height}" rx="${node.collapsed ? node.height / 2 : 16}" fill="${fill}" stroke="${stroke}" stroke-width="${node.state === "current" ? 4 : 2}"${node.collapsed ? ' stroke-dasharray="4 4"' : ""}/><text x="${node.markX}" y="${node.y + 27}" fill="${stroke}" font-size="18" font-weight="700">${node.mark}</text>${badge}${label}${content}</g>`;
+      const markY = node.titleY + Math.round((type.mark - type.title) / 4);
+      return `<g${node.collapsed ? ' data-collapsed="true"' : ""}><title>${escapeXml(`${node.statusLine}: ${node.label}`)}</title><rect x="${node.x}" y="${node.y}" width="${node.width}" height="${node.height}" rx="${node.collapsed ? node.height / 2 : 16}" fill="${fill}" stroke="${stroke}" stroke-width="${onBlock ? 4 : 2}"${node.collapsed ? ' stroke-dasharray="4 4"' : ""}/><text x="${node.markX}" y="${markY}" fill="${stroke}" font-size="${type.mark}" font-weight="700">${node.mark}</text>${badge}${title}${body}${content}</g>`;
     })
     .join("");
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${model.width}" height="${model.height}" viewBox="0 0 ${model.width} ${model.height}" font-family="DejaVu Sans, sans-serif"><rect width="100%" height="100%" fill="${palette.background}"/>${header.join("")}${facts}${edges}${nodes}</svg>`;

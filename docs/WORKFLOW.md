@@ -547,8 +547,15 @@ never sampled. `session progress` and
 
 A notification node that
 attaches a progress image renders it inside the cycle that reached it, before that cycle's visits
-are persisted; the handlers therefore project an unpersisted copy of the execution with an open
-visit of the notification node, so the image shows that node's block as active.
+are persisted; the handlers therefore project an unpersisted copy of the execution
+(`withInFlightPause`) with an open visit of the notification node and, when the node's single
+forward connection leads straight to a node the run pauses on — a `lock` (a person's gate) or an
+`agent-directive`, `teleport`, `materialize` or `subgraph` wait (the agent's) — that node as the one waited on,
+with a synthetic open visit that carries no timestamp. The image and the message footer read the
+same copy: the picture marks the block about to wait with the actor's wording, and the footer adds
+`⏳ agent on the step: <block>` or `🙋 waiting for you: <block>` before the bound list's
+`📝 done/total: current item` line (both handlers). A successor that pauses nowhere leaves the
+notification's block active and adds no actor line.
 
 A node that pauses the run (an `agent-directive` step or another pausing node type) may set
 template-enabled `progressActiveLabel`. The projection uses it only while that exact node is
@@ -577,10 +584,25 @@ bounded light/dark PNG behind a short-lived, revision-bound, single-use URL; `vi
 renders the aggregated block view instead (blocks in process order with the process's labelled
 transitions and dashed returns; transitions into a hub block share one bundled connector per hub
 in the right gutter, labelled inside the source block), and `hide` / `collapse` leave named blocks
-out or reduce them to a chip (see `docs/API.md`). The model measures its text with its own
-metric (`progressTextWidth`, a per-glyph-class width for the rendered face that errs wide) and places
-every label and badge as a box that overlaps nothing: a block's title starts after its state
-mark and, for a repeated block, after a small `×N` count badge; gutter labels of one side are
+out or reduce them to a chip (see `docs/API.md`). Every drawn block carries, under its
+title, a status word — `waiting for you` only for the waiting block when the projection's
+`waitingFor` is `user`, `agent on the step` for the waiting or active block otherwise,
+`completed`, `repeated ×n`, `skipped`, `pending` — and one facts line: the time spent (`total`, `·
+this pass …` while a pass is open) and, for a bound block, `done/total: current item`; an
+unmeasured value reads `—`. Colours follow the web map (current and waiting accent, completed
+green, skipped muted and struck through, pending muted). The model owns the type scale
+(`progressTypeScale`: at a viewport of 720 px or less the cards view lays out one column and both
+views use the phone scale — title 18 px, content and facts 14 px, labels 12 px; wider images keep
+the desktop scale, content never below 12 px) and every text position; the renderer draws at the
+sizes the model measured. The model measures its text with its own
+metric (`progressTextWidth`, a per-glyph-class width for the rendered face that errs wide), wraps
+every line by that width, ellipsises a token wider than its line, shortens a facts line wider
+than its box by priority (the open pass goes first, then the item's title is cut while
+`done/total` stays intact, then the title, and only then the count itself; the count is shown
+when either counter resolves and an unresolved one reads `?`, as the notification footer and
+the run page's map word it), and places every label and badge as a box that overlaps nothing and lies inside the canvas:
+a block's title starts after its state mark and, for a repeated block, after a small `×N` count
+badge; gutter labels of one side are
 stacked in vertical order beside the outermost lane, wrapped to the gutter's label area and
 never split inside a word; a connector's label sits in the gap between its two blocks, which
 widens when the label needs more lines; when a viewport cannot hold the lanes, the column and

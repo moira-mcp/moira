@@ -9,6 +9,7 @@ import { deriveProcess } from "@mcp-moira/workflow-engine";
 import type { ExecutionProgress } from "@mcp-moira/workflow-engine/progress-visual";
 import {
   chipRowCount,
+  estimateBlockHeight,
   hubPort,
   labelPillWidth,
   layoutBlocks,
@@ -267,5 +268,16 @@ describe("chip rows in a block's height", () => {
     [["Prepare development standards", "Independent completeness review", "Plan", "Verify"], 3],
   ] as const)("%j takes %i row(s)", (names, rows) => {
     expect(chipRowCount(names)).toBe(rows);
+  });
+});
+
+describe("block height estimate", () => {
+  test("a name longer than two lines costs no more height than a two-line name: the card clamps it", () => {
+    const chips: string[] = [];
+    const oneLine = estimateBlockHeight("Plan", "Write the plan.", false, chips);
+    const twoLines = estimateBlockHeight("x".repeat(44), "Write the plan.", false, chips);
+    const ninety = estimateBlockHeight("x".repeat(90), "Write the plan.", false, chips);
+    expect(twoLines).toBeGreaterThan(oneLine);
+    expect(ninety).toBe(twoLines);
   });
 });

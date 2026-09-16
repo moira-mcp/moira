@@ -160,6 +160,55 @@ export function withInFlightVisit(execution: WorkflowExecution, nodeId: string):
   };
 }
 
+/**
+ * The node types a run pauses on, by who is waited for there: a `lock` gate waits for a person,
+ * every other pausing node for the agent. Continuation recovery resumes at these same types.
+ */
+export const PAUSE_ACTOR_BY_NODE_TYPE: Readonly<Record<string, "agent" | "user">> = {
+  "agent-directive": "agent",
+  teleport: "agent",
+  materialize: "agent",
+  subgraph: "agent",
+  lock: "user",
+};
+export const PAUSING_NODE_TYPES: ReadonlySet<string> = new Set(
+  Object.keys(PAUSE_ACTOR_BY_NODE_TYPE),
+);
+
+/**
+ * The execution as it stands once a notification node has sent: the notification's own open
+ * visit (`withInFlightVisit`), and — when the node's single forward connection leads straight to a
+ * node the run pauses on — that node as the one the run waits on, with a synthetic open visit that
+ * carries no timestamp (the run has not entered it yet, so its pass has no duration). A projection
+ * of this copy names the block and the actor the message's reader is about to wait for or on: a
+ * `lock` gate reads as a person, a directive, teleport, materialize or subgraph wait as the agent. A
+ * successor that pauses nowhere (a routing node, an end) leaves the copy as `withInFlightVisit`
+ * makes it. The returned copy is never persisted.
+ */
+export function withInFlightPause(
+  graph: { nodes: ReadonlyArray<{ id: string; type: string; connections?: unknown }> },
+  execution: WorkflowExecution,
+  nodeId: string,
+): WorkflowExecution {
+  const inFlight = withInFlightVisit(execution, nodeId);
+  const node = graph.nodes.find((candidate) => candidate.id === nodeId);
+  const connections = (node?.connections ?? {}) as Record<string, string | undefined>;
+  const nextId = connections.default ?? connections.success;
+  const next = nextId ? graph.nodes.find((candidate) => candidate.id === nextId) : undefined;
+  if (!next || !PAUSING_NODE_TYPES.has(next.type)) return inFlight;
+  const visits = inFlight.visits ?? [];
+  // The visit is a wait, so the projection marks the block `waiting` and words the actor.
+  return {
+    ...inFlight,
+    currentNodeId: next.id,
+    waitingForInputNodeId: next.id,
+    visits: [
+      ...visits,
+      { seq: visits.length, nodeId: next.id, exitKey: null, changes: {}, waited: true },
+    ],
+  };
+}
+
 /** Build the adjustment visit recorded when a value is set on a paused execution from outside. */
 export function adjustmentVisit(
   execution: WorkflowExecution,

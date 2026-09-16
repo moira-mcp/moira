@@ -383,10 +383,16 @@ of being silently truncated.
 grant with `downloadUrl`, `expiresAt`, `mimeType`, `executionRevision` and the normalised
 `options`. The optional body accepts `theme: "light"|"dark"`, `viewportWidth` from 480 through
 4096, `view: "cards"|"process"`, `hide` and `collapse` (arrays of up to 100 block ids or authored
-node ids). `cards` (the default) is the content grid: every block as a card with its summary,
-details, outcome and next text, chained in display order. `process` is the aggregated block view:
-one compact block per row in process order with its status mark and, for a repeated block, a
-small `×N` badge, the process's transitions as labelled connectors, forward skips as arcs on the
+node ids). `cards` (the default) is the content grid: every block as a card with its status
+word (`waiting for you` only at a person's gate, `agent on the step`, `completed`, `repeated ×n`,
+`skipped`, `pending`), a facts line (time spent, the open pass, and for a bound block
+`done/total: current item`; `—` when unmeasured, `?` for an unresolved counter; a line too
+wide for the card drops the open pass and cuts the item's title before the count), then its
+summary, details, outcome and next
+text, chained in display order — one column at a viewport of 720 px or less, where both views use
+a phone type scale. `process` is the aggregated block view: one compact block per row in process
+order with its status mark and, for a repeated block, a small `×N` badge, the same status word and
+facts line, the process's transitions as labelled connectors, forward skips as arcs on the
 right, returns as dashed arcs on the left carrying the transition label (nested by span, labels
 stacked without overlap; the cause and exit of a loop are not drawn — the run page and `session
 progress` carry them), and transitions into hub blocks as bundled connectors in the right gutter

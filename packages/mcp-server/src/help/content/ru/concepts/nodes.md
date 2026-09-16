@@ -424,7 +424,11 @@ Expression node может завершиться с ошибкой в двух 
 | `connections.default` | Да          | Путь при полной, частичной доставке или отсутствии подходящих каналов |
 | `connections.error`   | Нет         | Путь при полном провале попыток; иначе используется `default`         |
 
-`attachment` и включённый `attachProgressImage` взаимоисключающие. Имя вложения должно
+Каждое сообщение несёт футер с коротким id запуска, названием workflow и, когда нода ведёт прямо
+на шаг, на котором запуск останавливается, тем, кого там ждут — `⏳ agent on the step: <block>`
+или `🙋 waiting for you: <block>` (гейт `lock`), — а для привязанного списка ещё
+`📝 done/total: current item`. `attachment` и включённый `attachProgressImage` взаимоисключающие.
+Имя вложения должно
 соответствовать безопасному переносимому allowlist, а MIME — форме `type/subtype`. До provider
 delivery сервис применяет общие per-user/provider rate limits, ограничения concurrency пользователя
 и provider, deadlines, пределы текста и байтов. Настроенный канал Telegram поддерживает текст,

@@ -5,9 +5,14 @@ import {
   diffVariables,
   snapshotVariables,
   TELEPORT_EXIT_KEY,
+  buildExecutionProgressVisualModel,
+  projectExecutionRun,
+  renderProgressVisualSvg,
+  withInFlightPause,
   withInFlightVisit,
   type EngineVisit,
   type WorkflowExecution,
+  type WorkflowGraph,
 } from "@mcp-moira/workflow-engine";
 
 function execution(visits?: WorkflowExecution["visits"]): WorkflowExecution {
@@ -319,5 +324,118 @@ describe("adjustment visit", () => {
       enteredAt: expect.any(Number),
       leftAt: expect.any(Number),
     });
+  });
+});
+
+describe("the execution as a notification sees it", () => {
+  const base = (): WorkflowExecution =>
+    ({
+      executionId: "e",
+      workflowId: "w",
+      userId: "u",
+      status: "running",
+      currentNodeId: "notify",
+      waitingForInputNodeId: null,
+      globalContext: { variables: {}, nodeStates: {} },
+      visits: [{ seq: 0, nodeId: "start", exitKey: "default", changes: {}, enteredAt: 1 }],
+    }) as unknown as WorkflowExecution;
+  const graphTo = (successor: { id: string; type: string; connections?: unknown }) => ({
+    nodes: [
+      { id: "start", type: "start", connections: { default: "notify" } },
+      { id: "notify", type: "user-notification", connections: { default: successor.id } },
+      successor,
+    ],
+  });
+
+  test.each([
+    ["a directive", { id: "next", type: "agent-directive", connections: { success: "end" } }],
+    ["a lock gate", { id: "gate", type: "lock", connections: { unlocked: "end" } }],
+    ["a teleport", { id: "jump", type: "teleport", connections: { default: "end" } }],
+    ["a subgraph", { id: "sub", type: "subgraph", connections: { success: "end" } }],
+  ])("a notification followed by %s is projected as waiting on that node", (_case, successor) => {
+    const copy = withInFlightPause(graphTo(successor), base(), "notify");
+    expect(copy.currentNodeId).toBe(successor.id);
+    expect(copy.waitingForInputNodeId).toBe(successor.id);
+    const visits = copy.visits!;
+    expect(visits.map((v) => v.nodeId)).toEqual(["start", "notify", successor.id]);
+    // The run has not entered the successor: its open visit carries no timestamp, so its pass
+    // has no duration rather than a zero one.
+    expect(visits[2].enteredAt).toBeUndefined();
+    expect(visits[2].waited).toBe(true);
+    expect(visits[1].enteredAt).toBeDefined();
+    expect(visits.map((v) => v.seq)).toEqual([0, 1, 2]);
+  });
+
+  test("a successor the run does not pause on leaves the copy at the notification", () => {
+    const copy = withInFlightPause(graphTo({ id: "end", type: "end" }), base(), "notify");
+    // Both copies stamp the notification's visit with their own clock; compare everything else.
+    const stamped = (e: WorkflowExecution) => ({
+      ...e,
+      visits: e.visits?.map(({ enteredAt: _at, ...rest }) => rest),
+    });
+    expect(stamped(copy)).toEqual(stamped(withInFlightVisit(base(), "notify")));
+    expect(copy.waitingForInputNodeId).toBeNull();
+  });
+
+  test("a lock gate after the notification is drawn as waiting for the reader, a directive as the agent's step", () => {
+    const graph = {
+      metadata: { name: "Gate", version: "1.0.0", description: "x" },
+      variableRegistry: {},
+      progress: { nodes: [{ id: "wrap", label: "Wrap" }] },
+      nodes: [
+        { id: "start", type: "start", progressNodeId: "wrap", connections: { default: "notify" } },
+        {
+          id: "notify",
+          type: "user-notification",
+          progressNodeId: "wrap",
+          message: "x",
+          connections: { default: "gate" },
+        },
+        {
+          id: "gate",
+          type: "lock",
+          progressNodeId: "wrap",
+          reason: "r",
+          connections: { unlocked: "end" },
+        },
+        { id: "end", type: "end", progressNodeId: "wrap" },
+      ],
+    } as unknown as WorkflowGraph;
+    const projected = projectExecutionRun(graph, withInFlightPause(graph, base(), "notify"))!;
+    expect(projected.waitingFor).toBe("user");
+    expect(projected.nodes[0].status).toBe("waiting");
+    const model = buildExecutionProgressVisualModel(projected, { viewportWidth: 720 });
+    expect(model.nodes[0].statusLine).toBe("waiting for you");
+    const svg = renderProgressVisualSvg(model);
+    expect(svg).toContain("waiting for you");
+    expect(svg).not.toContain("agent on the step");
+
+    const agentGraph = {
+      ...graph,
+      nodes: graph.nodes.map((n) =>
+        n.id === "gate"
+          ? {
+              id: "gate",
+              type: "agent-directive",
+              progressNodeId: "wrap",
+              directive: "d",
+              completionCondition: "c",
+              connections: { success: "end" },
+            }
+          : n,
+      ),
+    } as unknown as WorkflowGraph;
+    const agentModel = buildExecutionProgressVisualModel(
+      projectExecutionRun(agentGraph, withInFlightPause(agentGraph, base(), "notify"))!,
+      { viewportWidth: 720 },
+    );
+    expect(agentModel.nodes[0].statusLine).toBe("agent on the step");
+  });
+
+  test("never mutates the persisted execution", () => {
+    const persisted = base();
+    const snapshot = JSON.stringify(persisted);
+    withInFlightPause(graphTo({ id: "gate", type: "lock" }), persisted, "notify");
+    expect(JSON.stringify(persisted)).toBe(snapshot);
   });
 });

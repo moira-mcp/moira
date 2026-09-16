@@ -30,6 +30,8 @@ const LINE_HEIGHT = 18;
 const NAME_LINE_HEIGHT = 20;
 const CHARS_PER_LINE = 38;
 const NAME_CHARS_PER_LINE = 22;
+/** The card clamps its name to this many lines (`line-clamp-2` in `CanvasView`). */
+const MAX_NAME_LINES = 2;
 const MAX_DESCRIPTION_LINES = 3;
 const NODE_SEP = 40;
 /** The least gap between ranks; it grows to hold the widest label pill drawn at rest in a gap. */
@@ -110,7 +112,7 @@ export function estimateBlockHeight(
 ): number {
   return (
     BLOCK_BASE_HEIGHT +
-    lineCount(name, NAME_CHARS_PER_LINE, 3) * NAME_LINE_HEIGHT +
+    lineCount(name, NAME_CHARS_PER_LINE, MAX_NAME_LINES) * NAME_LINE_HEIGHT +
     lineCount(description, CHARS_PER_LINE, MAX_DESCRIPTION_LINES) * LINE_HEIGHT +
     (hasNote ? LINE_HEIGHT : 0) +
     chipRowCount(chipNames) * CHIP_ROW_HEIGHT

@@ -2,14 +2,16 @@
  * Bound lists and pass timings of the run projection: a block reads the list it is bound to from
  * the run's variables (items, counters, or both), passes are timed from the route's timestamps,
  * an open pass is measured to the projection moment, runs without timestamps report null, and
- * the notification line names done/total and the current item.
+ * the notification lines name who a paused run waits for and done/total with the current item.
  */
 
 import { describe, expect, test } from "@jest/globals";
 import {
   boundListLine,
   nearestBoundList,
+  progressFooterLines,
   projectExecutionRun,
+  waitingActorLine,
   type ExecutionVisit,
   type WorkflowExecution,
   type WorkflowGraph,
@@ -434,5 +436,86 @@ describe("notification line", () => {
     // A run that reached no bound block has no line.
     const unbound = execution([{ seq: 0, nodeId: "end", exitKey: null, changes: {} }], {});
     expect(boundListLine(projectExecutionRun(graph(), unbound))).toBeNull();
+  });
+});
+
+describe("waiting actor line", () => {
+  /** The list fixture with a lock gate before its end: a pause a person clears. */
+  function gatedGraph(): WorkflowGraph {
+    const definition = graph();
+    const unit = definition.nodes.find((node) => node.id === "unit")!;
+    if (unit.type !== "agent-directive") throw new Error("fixture: unit is a directive");
+    unit.connections = { success: "gate" };
+    definition.nodes.splice(definition.nodes.length - 1, 0, {
+      id: "gate",
+      type: "lock",
+      progressNodeId: "wrap",
+      reason: "PIN before the wrap-up",
+      connections: { unlocked: "end" },
+    });
+    return definition;
+  }
+
+  test("a run paused on an agent step says the agent is on it, never that it waits for the reader", () => {
+    const run = execution(
+      [
+        { seq: 0, nodeId: "start", exitKey: "default", changes: {} },
+        { seq: 1, nodeId: "task", exitKey: null, changes: {}, waited: true },
+      ],
+      { tasks, total_tasks: 3, current_task: 1 },
+    );
+    const line = waitingActorLine(projectExecutionRun(graph(), run))!;
+    expect(line).toBe("⏳ agent on the step: Work");
+    expect(line).not.toContain("waiting for you");
+    expect(line).not.toContain("ждёт вас");
+  });
+
+  test("a run paused at a lock node waits for the reader, in the block the gate belongs to", () => {
+    const run = execution(
+      [
+        { seq: 0, nodeId: "start", exitKey: "default", changes: {} },
+        { seq: 1, nodeId: "task", exitKey: "success", changes: {}, waited: true },
+        { seq: 2, nodeId: "unit", exitKey: "success", changes: {}, waited: true },
+        { seq: 3, nodeId: "gate", exitKey: null, changes: {}, waited: true },
+      ],
+      { tasks, total_tasks: 3, current_task: 4, current_step: 3, total_steps: 3 },
+    );
+    expect(waitingActorLine(projectExecutionRun(gatedGraph(), run))).toBe(
+      "🙋 waiting for you: Wrap",
+    );
+  });
+
+  test("a run that is not paused has no actor line", () => {
+    const finished = execution(
+      [
+        { seq: 0, nodeId: "start", exitKey: "default", changes: {} },
+        { seq: 1, nodeId: "end", exitKey: null, changes: {} },
+      ],
+      {},
+      "completed",
+    );
+    expect(waitingActorLine(projectExecutionRun(graph(), finished))).toBeNull();
+    expect(waitingActorLine(null)).toBeNull();
+  });
+
+  test("the footer lines put the actor before the list, and omit whichever does not apply", () => {
+    const onChecklist = execution(
+      [
+        { seq: 0, nodeId: "start", exitKey: "default", changes: { tasks, total_tasks: 3 } },
+        { seq: 1, nodeId: "task", exitKey: "success", changes: { current_task: 2 }, waited: true },
+        { seq: 2, nodeId: "task", exitKey: null, changes: {}, waited: true },
+      ],
+      { tasks, total_tasks: 3, current_task: 2 },
+    );
+    expect(progressFooterLines(projectExecutionRun(graph(), onChecklist))).toEqual([
+      "⏳ agent on the step: Work",
+      "📝 1/3: Wire the CLI",
+    ]);
+    // No block binds a list: the actor alone, no count.
+    const unbound = graph();
+    for (const block of unbound.progress!.nodes) delete block.list;
+    expect(progressFooterLines(projectExecutionRun(unbound, onChecklist))).toEqual([
+      "⏳ agent on the step: Work",
+    ]);
   });
 });

@@ -89,8 +89,14 @@ or unit result cannot appear current during an engine-owned transition.
 
 The engine exposes one shared content-rich visual model and a bounded light/dark PNG renderer. The
 model keeps the complete task, goal, facts, completed outcomes, current activity, details and next
-action visible without hover. Text wraps without truncation and blocks pack into deterministic
-left-to-right rows when one row does not fit.
+action visible without hover. Every block is drawn in the web map's language: its status word
+(`waiting for you` only when a person must act, `agent on the step` while the agent is on it,
+`completed`, `repeated ×n`, `skipped`, `pending`) and one facts line with the time spent and, for
+a block bound to a list, `done/total` with the current item. Text wraps to the block's width, a
+token too wide for its line is ellipsised, a facts line too wide for its box loses the open pass
+and then the item's title before its `done/total` count, and every label stays inside the picture;
+at a viewport of 720 px or less the image is one column in a phone-readable type scale, wider
+images pack blocks into deterministic left-to-right rows.
 Agents request a short-lived, revision-bound, single-use download URL through `session
 progress-image-token`; the binary does not pass through MCP. The token takes optional `theme`
 (`light|dark`), `viewportWidth` (480–4096), `view` — `cards` (the default content grid) or
@@ -100,7 +106,10 @@ page's map shows them; a loop's cause and exit are on the run page, not in the i
 left out of the image with their transitions collapsed onto the neighbours, or drawn as a
 label-only chip. Unknown ids are refused when the token is minted. A `user-notification` node may set
 `attachProgressImage: true` and use its normal message as the image caption. Such a node must belong to
-an existing block. The deprecated `telegram-notification` compatibility node supports
+an existing block. The message's footer names who the run waits for after it — `⏳ agent on the
+step: <block>` or `🙋 waiting for you: <block>` when the node leads straight to a step that pauses
+(a lock gate is a person's; a directive, teleport, materialize or subgraph wait is the agent's) — and the
+bound list's `📝 done/total: current item`; the attached image shows the same state. The deprecated `telegram-notification` compatibility node supports
 the same attachment for existing provider-specific workflows.
 
 Engine integrations with a workflow and execution use `renderExecutionProgressImage(...)`. It
