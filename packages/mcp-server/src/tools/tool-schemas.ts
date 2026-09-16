@@ -71,7 +71,7 @@ export const manageWorkflowSchema = z.object({
         .record(z.unknown())
         .optional()
         .describe(
-          "Declared global variables (JSON-Schema-shaped: name -> {type, description, default?}). Required for any variable referenced by bare name in directives/conditions/templates.",
+          "Declared global variables (JSON-Schema-shaped: name -> {type, description, default?}). Required for any variable referenced by bare name in directives, routing cases, expressions, progress list bindings and templates.",
         ),
       runtimePolicy: z
         .object({
