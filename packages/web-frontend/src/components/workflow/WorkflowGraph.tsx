@@ -160,6 +160,8 @@ export interface WorkflowGraphProps {
   selectedVariable?: string | null;
   /** The step the page has selected (the map's step, the finder's pick): ringed on the graph. */
   selectedNodeId?: string | null;
+  /** Steps a run has been through: drawn as visited. */
+  visitedNodeIds?: readonly string[];
 }
 
 /**
@@ -203,6 +205,7 @@ export const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
   onVariableSelect,
   selectedVariable = null,
   selectedNodeId = null,
+  visitedNodeIds = EMPTY_ERROR_NODE_IDS,
 }) => {
   // A connection chip names its other end the way the map does: the authored display name, else
   // the node id. The technical graph's `data.label` falls back to the node type ("Agent Task"),
@@ -328,6 +331,7 @@ export const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
   // run advancing never lays the graph out again (and never refits it under the reader).
   const nodes = useMemo<Node[]>(() => {
     const errorNodeIdSet = new Set(errorNodeIds);
+    const visitedSet = new Set(visitedNodeIds);
     return laidNodes.map((node) =>
       node.type === "block-group"
         ? {
@@ -346,6 +350,7 @@ export const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
               current: node.id === currentNodeId,
               error: errorNodeIdSet.has(node.id),
               arrived: arrival?.nodeId === node.id,
+              visited: visitedSet.has(node.id) && node.id !== currentNodeId,
             },
             selected:
               node.id === currentNodeId || node.id === selectedNodeId || node.id === finderStep,
@@ -359,6 +364,7 @@ export const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
     finderStep,
     arrival,
     errorNodeIds,
+    visitedNodeIds,
     onWorkflowNavigate,
   ]);
   const [currentLayoutOptions, setCurrentLayoutOptions] = useState(layoutOptions);

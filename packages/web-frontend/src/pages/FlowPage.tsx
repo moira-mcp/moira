@@ -796,13 +796,27 @@ export const FlowPage: React.FC = () => {
             {process && (
               <aside
                 className={cn(
-                  "flex flex-col bg-card overflow-hidden border-t lg:border-t-0 lg:border-l",
+                  "relative flex flex-col bg-card overflow-hidden border-t lg:border-t-0 lg:border-l",
                   "max-h-[38vh] lg:max-h-none shrink-0",
-                  panelCollapsed ? "lg:w-10" : "lg:w-[380px] xl:w-[440px]",
+                  panelCollapsed ? "h-10 lg:h-auto lg:w-10" : "lg:w-[380px] xl:w-[440px]",
                 )}
                 data-testid="flow-panel"
                 data-collapsed={panelCollapsed ? "true" : undefined}
               >
+                {!panelCollapsed && (
+                  <button
+                    type="button"
+                    onClick={togglePanel}
+                    title={t("pages.flowPage.panel.collapse", { defaultValue: "Свернуть панель" })}
+                    aria-label={t("pages.flowPage.panel.collapse", {
+                      defaultValue: "Свернуть панель",
+                    })}
+                    className="absolute right-1 top-1 z-10 inline-flex h-8 w-8 items-center justify-center rounded-md border bg-card/90 text-muted-foreground shadow-sm hover:bg-accent hover:text-foreground"
+                    data-testid="flow-panel-collapse"
+                  >
+                    <PanelRightClose className="size-4" aria-hidden="true" />
+                  </button>
+                )}
                 {panelCollapsed && (
                   <button
                     type="button"
@@ -811,33 +825,19 @@ export const FlowPage: React.FC = () => {
                     aria-label={t("pages.flowPage.panel.expand", {
                       defaultValue: "Развернуть панель",
                     })}
-                    className="hidden h-10 w-full items-center justify-center text-muted-foreground hover:bg-accent hover:text-foreground lg:flex"
+                    className="flex h-10 w-full items-center justify-center text-muted-foreground hover:bg-accent hover:text-foreground"
                     data-testid="flow-panel-expand"
                   >
                     <PanelRightOpen className="size-4" aria-hidden="true" />
                   </button>
                 )}
-                <div className={cn("flex min-h-0 flex-1 flex-col", panelCollapsed && "lg:hidden")}>
+                <div className={cn("flex min-h-0 flex-1 flex-col", panelCollapsed && "hidden")}>
                   <Tabs
                     value={chosenTab}
                     onValueChange={(value) => setChosenTab(value as FlowPanelTab)}
                     className="flex flex-col h-full"
                   >
-                    <TabsList className="w-full justify-start rounded-none border-b bg-muted/30 px-2 h-10">
-                      <button
-                        type="button"
-                        onClick={togglePanel}
-                        title={t("pages.flowPage.panel.collapse", {
-                          defaultValue: "Свернуть панель",
-                        })}
-                        aria-label={t("pages.flowPage.panel.collapse", {
-                          defaultValue: "Свернуть панель",
-                        })}
-                        className="order-last ml-auto hidden h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground lg:inline-flex"
-                        data-testid="flow-panel-collapse"
-                      >
-                        <PanelRightClose className="size-4" aria-hidden="true" />
-                      </button>
+                    <TabsList className="w-full justify-start rounded-none border-b bg-muted/30 pl-2 pr-10 h-10">
                       <TabsTrigger value="block" className="gap-1.5 text-xs">
                         <Boxes className="h-3.5 w-3.5" />
                         {t("pages.flowPage.tabs.block")}

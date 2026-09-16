@@ -440,15 +440,37 @@ function useBlockLayout(
   preset: "default" | "compact" | "flow" | "vertical",
 ): BlockLayout | null {
   const [layout, setLayout] = useState<BlockLayout | null>(null);
+  // The layout depends only on the process shape; a projection refresh or a selection change
+  // gives new block objects with the same shape and must not lay out again (nor blank the map).
+  const signature = useMemo(
+    () =>
+      JSON.stringify([
+        preset,
+        hubIds,
+        blocks.map((b) => [
+          b.id,
+          b.index,
+          b.name,
+          b.description,
+          b.transitions.map((t) => [t.to, t.label, Boolean(t.cycle)]),
+        ]),
+      ]),
+    [blocks, hubIds, preset],
+  );
+  const laidRef = useRef<string | null>(null);
   useEffect(() => {
+    if (laidRef.current === signature) return;
     let cancelled = false;
     void layoutBlocks(blocks, hubIds, { preset }).then((result) => {
-      if (!cancelled) setLayout(result);
+      if (cancelled) return;
+      laidRef.current = signature;
+      setLayout(result);
     });
     return () => {
       cancelled = true;
     };
-  }, [blocks, hubIds, preset]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the signature stands for the inputs
+  }, [signature]);
   return layout;
 }
 
@@ -501,7 +523,14 @@ function CanvasInner({
     },
     [layout, blocks],
   );
-  const { onInit: placementInit, onReady } = useOpeningPlacement(placeViewport, focusId);
+  // The opening placement (centre on the current block) runs once per laid-out process, not on
+  // every projection refresh: re-placing on each render is what made the map jump to the active
+  // block whenever another one was selected.
+  const placementKey = layout ? `${focusId ?? "first"}:${layout.width}x${layout.height}` : null;
+  const { onInit: placementInit, onReady } = useOpeningPlacement(
+    placeViewport,
+    placementKey as unknown as string | null,
+  );
   const rfRef = useRef<ReactFlowInstance<BlockNode, RoutedEdge> | null>(null);
   const onInit = useCallback(
     (rf: ReactFlowInstance<BlockNode, RoutedEdge>) => {

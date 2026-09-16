@@ -70,6 +70,8 @@ export interface PortedCardProps {
   near?: boolean;
   /** The reader just arrived here from another view: a short pulse marks the card. */
   arrived?: boolean;
+  /** A run has been through this card (and is not on it now). */
+  visited?: boolean;
   /** Which port ids are lit under the current focus. */
   litIds?: ReadonlySet<string> | null;
   onHover?: (ids: readonly string[] | null) => void;
@@ -168,6 +170,7 @@ export function PortedCard({
   error = false,
   near = false,
   arrived = false,
+  visited = false,
   litIds = null,
   onHover,
   allLinkIds,
@@ -233,11 +236,15 @@ export function PortedCard({
       className={cn(
         "relative flex flex-col rounded-xl border bg-card text-sm shadow-sm transition-shadow",
         onClick && "cursor-pointer",
-        current && "border-primary/50",
+        current &&
+          "border-primary ring-2 ring-primary/40 animate-[pulse_2.4s_ease-in-out_infinite]",
+        visited && !current && "border-emerald-500/40 bg-emerald-500/5",
         (near || selected) && "ring-2 ring-primary/60",
         arrived && "animate-pulse ring-4 ring-primary/80",
         error && "ring-2 ring-destructive",
       )}
+      data-visited={visited ? "true" : undefined}
+      data-current={current ? "true" : undefined}
       {...dataAttributes}
     >
       <div

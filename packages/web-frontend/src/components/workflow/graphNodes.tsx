@@ -44,6 +44,8 @@ export type StepNodeData = Record<string, unknown> & {
   onFocusStep?: (id: string) => void;
   /** The reader just arrived at this step from the map or the finder. */
   arrived?: boolean;
+  /** The run has been through this step. */
+  visited?: boolean;
 };
 
 /** Where the `index`-th of `count` handles sits along a card's edge, as a CSS percentage. */
@@ -196,7 +198,7 @@ function stepFacts(graph: GraphStep): FactChip[] {
 
 export function StepNodeView({ data, selected }: NodeProps<StepNode>): React.JSX.Element {
   const focus = useTransitionFocus();
-  const { graph, current, error, horizontal, inputs, outputs, selfLoops, arrived } = data;
+  const { graph, current, error, horizontal, inputs, outputs, selfLoops, arrived, visited } = data;
   const links = [...inputs, ...outputs, ...selfLoops].map((port) => port.id);
   // Hovering the card lights every connection it takes part in, and the cards at their far end.
   const near = focus.hovered !== null && links.some((id) => focus.hovered!.has(id));
@@ -225,6 +227,7 @@ export function StepNodeView({ data, selected }: NodeProps<StepNode>): React.JSX
       error={error}
       near={near}
       arrived={Boolean(arrived)}
+      visited={Boolean(visited)}
       litIds={focus.hovered}
       onHover={(ids) => focus.setHovered(ids)}
       allLinkIds={links}
@@ -430,6 +433,10 @@ export function GraphMeasuredHeights({
   });
   useEffect(() => {
     if (!signature) return;
+    // A hidden document (another window in front, a background tab) measures cards at wrong or
+    // zero sizes; laying out from those wrecks the graph when the reader comes back.
+    if (document.visibilityState !== "visible") return;
+    if (signature.split("\u0001").some((part) => Number(part.split("\u0000")[1]) < 24)) return;
     onMeasured(
       new Map(
         signature.split("\u0001").map((part) => {

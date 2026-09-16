@@ -505,7 +505,8 @@ export async function layoutBlocks(
       if (!placedById.has(transition.to) || transition.to === block.id) continue;
       const rs = rowIndex.get(rowOf.get(block.id)!)!;
       const rt = rowIndex.get(rowOf.get(transition.to)!)!;
-      if (!transition.cycle && hubs.has(transition.to)) {
+      const adjacent = indexOf.get(transition.to)! <= block.index + 1;
+      if (!transition.cycle && hubs.has(transition.to) && !adjacent) {
         const bundleId = `${block.id}->${transition.to}:hub`;
         if (bundled.has(bundleId)) continue;
         bundled.add(bundleId);
@@ -578,7 +579,10 @@ export async function layoutBlocks(
       const x2 = target.x;
       const y2 = target.y + target.height / 2;
 
-      if (!transition.cycle && hubs.has(transition.to)) {
+      // The step right before a hub reaches it like any neighbour, with an elbow in the gap;
+      // only sources further back join the hub's bundle lane.
+      const adjacentToHub = indexOf.get(transition.to)! <= block.index + 1;
+      if (!transition.cycle && hubs.has(transition.to) && !adjacentToHub) {
         const bundleId = `${block.id}->${transition.to}:hub`;
         if (seenBundle.has(bundleId)) continue; // one edge per source and hub; the ports carry the labels
         seenBundle.add(bundleId);

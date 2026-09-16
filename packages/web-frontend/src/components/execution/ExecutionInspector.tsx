@@ -869,26 +869,38 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
         {/* Right panel */}
         <aside
           className={cn(
-            "flex flex-col bg-card overflow-hidden border-t lg:border-t-0 lg:border-l",
+            "relative flex flex-col bg-card overflow-hidden border-t lg:border-t-0 lg:border-l",
             "max-h-[38vh] lg:max-h-none shrink-0",
-            panelCollapsed ? "lg:w-10" : "lg:w-[400px] xl:w-[460px]",
+            panelCollapsed ? "h-10 lg:h-auto lg:w-10" : "lg:w-[400px] xl:w-[460px]",
           )}
           data-testid="run-panel"
           data-collapsed={panelCollapsed ? "true" : undefined}
         >
+          {!panelCollapsed && (
+            <button
+              type="button"
+              onClick={togglePanel}
+              title={t("pages.runPage.panel.collapse", { defaultValue: "Свернуть панель" })}
+              aria-label={t("pages.runPage.panel.collapse", { defaultValue: "Свернуть панель" })}
+              className="absolute right-1 top-1 z-10 inline-flex h-8 w-8 items-center justify-center rounded-md border bg-card/90 text-muted-foreground shadow-sm hover:bg-accent hover:text-foreground"
+              data-testid="run-panel-collapse"
+            >
+              <PanelRightClose className="size-4" aria-hidden="true" />
+            </button>
+          )}
           {panelCollapsed && (
             <button
               type="button"
               onClick={togglePanel}
               title={t("pages.runPage.panel.expand", { defaultValue: "Развернуть панель" })}
               aria-label={t("pages.runPage.panel.expand", { defaultValue: "Развернуть панель" })}
-              className="hidden h-10 w-full items-center justify-center text-muted-foreground hover:bg-accent hover:text-foreground lg:flex"
+              className="flex h-10 w-full items-center justify-center text-muted-foreground hover:bg-accent hover:text-foreground"
               data-testid="run-panel-expand"
             >
               <PanelRightOpen className="size-4" aria-hidden="true" />
             </button>
           )}
-          <div className={cn("flex min-h-0 flex-1 flex-col", panelCollapsed && "lg:hidden")}>
+          <div className={cn("flex min-h-0 flex-1 flex-col", panelCollapsed && "hidden")}>
             <Tabs
               value={activeTab}
               onValueChange={(value) => setChosenTab(value as PanelTab)}
@@ -900,21 +912,9 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
                 the important override), so the second row never paints over the content. */}
               <TabsList
                 variant="line"
-                className="!h-auto w-full flex-wrap justify-start gap-x-0 gap-y-1 rounded-none border-b bg-card px-2 py-1"
+                className="!h-auto w-full flex-wrap justify-start gap-x-0 gap-y-1 rounded-none border-b bg-card py-1 pl-2 pr-10"
                 data-testid="run-panel-tabs"
               >
-                <button
-                  type="button"
-                  onClick={togglePanel}
-                  title={t("pages.runPage.panel.collapse", { defaultValue: "Свернуть панель" })}
-                  aria-label={t("pages.runPage.panel.collapse", {
-                    defaultValue: "Свернуть панель",
-                  })}
-                  className="order-last ml-auto hidden h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground lg:inline-flex"
-                  data-testid="run-panel-collapse"
-                >
-                  <PanelRightClose className="size-4" aria-hidden="true" />
-                </button>
                 {progress && (
                   <TabsTrigger
                     value="block"
