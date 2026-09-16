@@ -120,7 +120,15 @@ function StepTipList({
           <li key={step.id}>
             <Row
               {...(onFocusNode
-                ? { type: "button" as const, onClick: () => onFocusNode(step.id) }
+                ? {
+                    type: "button" as const,
+                    // The tooltip lives in a portal, but React bubbles the click to the card,
+                    // which would toggle the block's selection under the jump.
+                    onClick: (event: React.MouseEvent) => {
+                      event.stopPropagation();
+                      onFocusNode(step.id);
+                    },
+                  }
                 : {})}
               className={cn(
                 "grid w-full grid-cols-[1.25rem_auto_minmax(0,1fr)] items-center gap-x-2 rounded-md border border-transparent px-1.5 py-1 text-left font-sans",
