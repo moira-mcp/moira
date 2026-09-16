@@ -100,7 +100,7 @@ function Port({
       className={cn(
         "relative flex min-w-0 items-center gap-1.5 rounded-full border bg-background px-2 py-0.5 font-mono text-[11px] leading-5 transition-colors",
         PORT_TONE[port.kind],
-        lit && "bg-primary/10 border-primary",
+        lit && "border-primary bg-primary/10",
       )}
       onMouseEnter={() => onHover?.([port.id])}
       onMouseLeave={() => onHover?.(null)}
@@ -209,8 +209,7 @@ export function PortedCard({
       className={cn(
         "relative flex flex-col rounded-xl border bg-card text-sm shadow-sm transition-shadow",
         current && "border-primary/50",
-        near && "ring-2 ring-primary/60",
-        selected && "ring-2 ring-ring",
+        (near || selected) && "ring-2 ring-primary/60",
         error && "ring-2 ring-destructive",
       )}
       {...dataAttributes}

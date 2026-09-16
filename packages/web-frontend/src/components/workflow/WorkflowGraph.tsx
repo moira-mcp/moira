@@ -96,6 +96,7 @@ const edgeTypes = { graph: GraphEdgeView };
 
 // Empty array constant to avoid creating new array on each render
 const EMPTY_ERROR_NODE_IDS: string[] = [];
+const noopEdgeClick = (): void => {};
 /** A grouped graph opens at least this readable, on its first block. */
 const GRAPH_OPENING_ZOOM = 0.7;
 const GRAPH_OPENING_EDGE = 16;
@@ -440,7 +441,8 @@ export const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
             id: `block:${group.id}`,
             type: "block-group",
             position: { x: group.x, y: group.y },
-            style: { width: group.width, height: group.height },
+            // The frame is not interactive and must not sit between the pointer and the edges.
+            style: { width: group.width, height: group.height, pointerEvents: "none" },
             draggable: false,
             selectable: false,
             focusable: false,
@@ -684,6 +686,9 @@ export const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
             onNodesChange={undefined}
             onEdgesChange={undefined}
             onNodeClick={handleNodeClick}
+            // Without a click handler React Flow marks an unselectable edge `inactive` and takes
+            // its pointer events away, so it could never be hovered; the handler does nothing.
+            onEdgeClick={noopEdgeClick}
             onInit={handleInit}
             onReady={placementReady}
             controlButtons={

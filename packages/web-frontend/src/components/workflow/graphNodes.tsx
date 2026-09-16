@@ -254,7 +254,7 @@ export function BlockGroupView({ data }: NodeProps<BlockGroupNode>): React.JSX.E
   return (
     <div
       className={cn(
-        "h-full w-full rounded-2xl border-2 px-4 pt-2",
+        "pointer-events-none h-full w-full rounded-2xl border-2 px-4 pt-2",
         style.surface,
         data.selected && "ring-2 ring-ring",
       )}
@@ -319,14 +319,9 @@ export function GraphEdgeView({
   // While something is hovered, everything else recedes, so one path can be followed across the
   // whole graph instead of being read out of a bundle of equally dark lines.
   const dim = focus.hovered !== null && !lit;
-  // A chipped edge exists in the graph but is drawn only while it is lit.
-  const hidden = chipped && !lit;
-  // A label is drawn at rest only where its line runs straight from card to card. A routed edge
-  // runs through a corridor other lines cross, so its label would be cut by them and stack on its
-  // neighbours' labels; its target is already named by the connection chip inside its source
-  // card, and the label itself appears when the edge or either of its cards is hovered.
+  // Every edge is drawn at rest, arrowhead included; a routed (corridor) edge is drawn muted and
+  // without its label until it is lit, since its label would collide with its neighbours'.
   const showLabel = (link.kind === "forward" && !route && !chipped) || (lit && !dim);
-  if (hidden) return null;
   return (
     <>
       <g
@@ -363,11 +358,13 @@ export function GraphEdgeView({
               ? 0.12
               : lit
                 ? 1
-                : isReturn
-                  ? 0.55
-                  : link.kind === "external"
-                    ? 0.4
-                    : 0.5,
+                : chipped
+                  ? 0.3
+                  : isReturn
+                    ? 0.55
+                    : link.kind === "external"
+                      ? 0.4
+                      : 0.5,
             strokeDasharray: isReturn ? "6 5" : undefined,
           }}
           data-dimmed={dim ? "true" : undefined}
@@ -380,7 +377,7 @@ export function GraphEdgeView({
         <EdgeLabelRenderer>
           <span
             className={cn(
-              "nodrag nopan absolute inline-flex max-w-[180px] items-center gap-1 truncate rounded-full border bg-background px-2 py-0.5 text-[11px] font-medium leading-4",
+              "nodrag nopan pointer-events-auto absolute inline-flex max-w-[180px] items-center gap-1 truncate rounded-full border bg-background px-2 py-0.5 text-[11px] font-medium leading-4",
               isReturn ? "border-primary/40 text-primary" : "border-border text-muted-foreground",
               lit && "z-10 shadow-sm",
             )}
@@ -388,6 +385,8 @@ export function GraphEdgeView({
             data-edge-label={link.kind}
             data-transition={link.id}
             title={link.label}
+            onMouseEnter={() => focus.setHovered([link.id])}
+            onMouseLeave={() => focus.setHovered(null)}
           >
             {isReturn && <RotateCcw className="size-3 shrink-0" aria-hidden="true" />}
             {link.label}
