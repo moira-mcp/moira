@@ -53,9 +53,15 @@ function rootOf(name: string): string {
 export function VariableRef({
   name,
   className,
+  braces = false,
+  compact = false,
 }: {
   name: string;
   className?: string;
+  /** Show the reference as authored, `{{name}}`, rather than the bare name. */
+  braces?: boolean;
+  /** Inside a title: no pill, the surrounding font, colour and a dotted underline only. */
+  compact?: boolean;
 }): React.JSX.Element {
   const { registry, onSelect, selected } = useVariables();
   const root = rootOf(name);
@@ -72,17 +78,23 @@ export function VariableRef({
         onSelect(root);
       }}
       className={cn(
-        "rounded px-1 font-mono text-[0.95em] leading-none",
+        compact
+          ? "underline decoration-dotted underline-offset-2"
+          : "rounded px-1 font-mono text-[0.95em] leading-none",
         known
-          ? "bg-primary/10 text-primary hover:bg-primary/20"
-          : "bg-muted text-muted-foreground line-through decoration-destructive/60",
+          ? compact
+            ? "text-primary hover:decoration-solid"
+            : "bg-primary/10 text-primary hover:bg-primary/20"
+          : compact
+            ? "text-muted-foreground line-through decoration-destructive/60"
+            : "bg-muted text-muted-foreground line-through decoration-destructive/60",
         selected === root && "ring-1 ring-primary",
         onSelect && "cursor-pointer",
         className,
       )}
       data-variable={root}
     >
-      {name}
+      {braces ? `{{${name}}}` : name}
     </span>
   );
   return (
@@ -115,14 +127,23 @@ export function VariableRef({
   );
 }
 
-/** A directive or message: `{{…}}` references become tokens, the rest stays text. */
-export function TemplateText({ text }: { text: string }): React.JSX.Element {
+/**
+ * A directive or message: `{{…}}` references become tokens that keep their braces, the rest
+ * stays text; `compact` is for titles, where a pill would break the line.
+ */
+export function TemplateText({
+  text,
+  compact = false,
+}: {
+  text: string;
+  compact?: boolean;
+}): React.JSX.Element {
   const parts: React.ReactNode[] = [];
   let last = 0;
   for (const match of text.matchAll(TEMPLATE)) {
     const index = match.index ?? 0;
     if (index > last) parts.push(text.slice(last, index));
-    parts.push(<VariableRef key={`${index}`} name={match[1]} />);
+    parts.push(<VariableRef key={`${index}`} name={match[1]} braces compact={compact} />);
     last = index + match[0].length;
   }
   if (last < text.length) parts.push(text.slice(last));

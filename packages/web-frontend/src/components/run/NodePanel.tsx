@@ -99,7 +99,7 @@ export function NodePanel({
           <NodeTypeTag type={step.type} />
           <div className="min-w-0 flex-1">
             <h3 className="text-sm font-semibold leading-tight">
-              <TemplateText text={step.progressLabel ?? step.displayName ?? step.id} />
+              <TemplateText text={step.progressLabel ?? step.displayName ?? step.id} compact />
             </h3>
             {step.progressContent && (
               <p className="mt-1 text-xs leading-5 text-muted-foreground">

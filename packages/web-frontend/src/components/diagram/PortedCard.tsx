@@ -323,7 +323,7 @@ export function PortedCard({
         )}
         <span className="min-w-0 flex-1">
           <span className="line-clamp-2 text-[16px] font-bold leading-[1.2] tracking-tight">
-            <TemplateText text={title} />
+            <TemplateText text={title} compact />
           </span>
           {subtitle && (
             <span className="block truncate font-mono text-[11px] font-normal text-muted-foreground">
