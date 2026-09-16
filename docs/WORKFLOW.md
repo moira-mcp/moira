@@ -528,8 +528,10 @@ the cursor: `{ items: [{ index, title, done, current, durationMs }] | null, done
 currentTitle }`, `null` when the block binds nothing or the binding did not resolve. A pass counts
 toward the item its `current` path pointed at when the pass began, which is how an item gets a
 duration. The projection reports `executionWorkflowVersion` (the version stamped on the run,
-`null` without one) beside `workflowVersion` (the definition it projected), and `projectedAt`, the
-epoch ms it was made at.
+`null` without one) beside `workflowVersion` (the definition it projected), `projectedAt`, the
+epoch ms it was made at, and `waitingFor` — who the run waits for while it pauses: `user` when the
+paused node is a `lock` (a gate a person clears with the PIN), `agent` on any other paused node (a
+directive, teleport or materialize wait), `null` when the run is not waiting.
 
 `computeVersionStatistics` and the caching `ProgressStatisticsService` aggregate those timings
 across the runs of one definition version: per block, a `DurationSample`
@@ -594,10 +596,12 @@ definition exists; otherwise it returns `{ buffer, mimeType: "image/png", width,
 workflowVersion, executionRevision }`. Projection/render failures propagate. The lower-level
 projection and PNG adapter remain available when their narrower contracts are required.
 
-The run page (`/executions/:id`) renders the same projection in its outline, canvas and lanes
-modes, with the task, goal, facts, block outcomes, the active block and its next action visible
-immediately, and answers the waiting step from the page; the technical node graph stays on its
-Graph tab (see `docs/WEB-UI.md`). Workflows without `progress` show the technical view only.
+The run page (`/executions/:id`) renders the same projection in its map view — the layered
+diagram with a contents sidebar and a block panel carrying the block's timings, bound list and
+route facts — with the task, goal, facts, block outcomes, the active block and its next action
+visible immediately, and answers the waiting step from the page; the technical node graph is the
+page's graph view (see `docs/WEB-UI.md`). Workflows without `progress` show the technical view
+only.
 
 The bundled flows (Quick Task, Todo List, Robust Task, Software Development Flow, Workflow
 Management Flow and User Onboarding) are annotated under this contract: every node belongs to a

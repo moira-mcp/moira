@@ -7,10 +7,13 @@
  */
 
 import React, { useCallback, useMemo } from "react";
+import { useTranslation } from "react-i18next";
 import {
+  ControlButton,
   Controls,
   ReactFlow,
   ReactFlowProvider,
+  useReactFlow,
   type Edge,
   type Node,
   type PanelPosition,
@@ -18,6 +21,7 @@ import {
   type ReactFlowProps,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
+import { Maximize } from "lucide-react";
 import { diagramInteractionProps, type DiagramKind } from "./interaction";
 
 export { diagramInteractionProps, type DiagramKind } from "./interaction";
@@ -39,7 +43,34 @@ export type DiagramViewportProps<N extends Node = Node, E extends Edge = Edge> =
   /** Extra buttons for the zoom/fit cluster (React Flow `ControlButton`s), so a diagram's own
    * controls sit with the standard ones instead of floating over its content. */
   controlButtons?: React.ReactNode;
+  /**
+   * Replaces the fit-to-view control's action. The stock control fits and centres the whole
+   * diagram, which at the readable zoom floor can leave nothing but the middle of a wide process
+   * on screen; a diagram that knows its own overview placement takes over from here.
+   */
+  onFit?: (instance: ReactFlowInstance<N, E>) => void;
 };
+
+/** The fit-to-view button whose action the diagram owns; keeps the stock control's class. */
+function FitButton<N extends Node, E extends Edge>({
+  onFit,
+}: {
+  onFit: (instance: ReactFlowInstance<N, E>) => void;
+}): React.JSX.Element {
+  const { t } = useTranslation();
+  const instance = useReactFlow<N, E>();
+  const label = t("components.workflowGraph.controls.fitViewTitle");
+  return (
+    <ControlButton
+      className="react-flow__controls-fitview"
+      onClick={() => onFit(instance)}
+      title={label}
+      aria-label={label}
+    >
+      <Maximize />
+    </ControlButton>
+  );
+}
 
 /**
  * React Flow routes pointer events to a node only when it is selectable, draggable, or the
@@ -53,6 +84,7 @@ export function DiagramViewport<N extends Node = Node, E extends Edge = Edge>({
   controlsPosition = "top-right",
   onReady,
   controlButtons,
+  onFit,
   children,
   ...rest
 }: DiagramViewportProps<N, E>): React.JSX.Element {
@@ -80,7 +112,13 @@ export function DiagramViewport<N extends Node = Node, E extends Edge = Edge>({
         proOptions={{ hideAttribution: true }}
         {...flowProps}
       >
-        <Controls position={controlsPosition} showInteractive={false}>
+        <Controls
+          position={controlsPosition}
+          showInteractive={false}
+          showFitView={!onFit}
+          fitViewOptions={policy.fitViewOptions}
+        >
+          {onFit && <FitButton<N, E> onFit={onFit} />}
           {controlButtons}
         </Controls>
         {children}

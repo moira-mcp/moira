@@ -8,14 +8,32 @@
 
 import type { WorkflowGraph, WorkflowNode } from "../../types/workflow-types";
 import type {
+  BlockDurationStatistics,
+  ExecutionBlockList,
   ExecutionBlockStatus,
+  ExecutionBlockTiming,
   ExecutionProgress,
   ExecutionProgressContent,
   ExecutionProgressNode,
   ExecutionRouteEntry,
+  WorkflowVersionStatistics,
 } from "@mcp-moira/workflow-engine/progress-visual";
 
 export type { ExecutionBlockStatus, ExecutionProgress };
+export type { BlockDurationStatistics, WorkflowVersionStatistics };
+
+/** A block's passes with their durations, as the projection carries them. */
+export type RunTiming = ExecutionBlockTiming;
+/** The list a block is bound to, as the projection carries it; null when it binds none. */
+export type RunList = ExecutionBlockList | null;
+
+/**
+ * The projection as the pages receive it: `GET /api/executions/:id/progress` attaches the typical
+ * durations of the version the run started on, which the engine's own projection does not carry.
+ */
+export interface RunProgress extends ExecutionProgress {
+  statistics?: WorkflowVersionStatistics | null;
+}
 
 export interface RunTransition {
   to: string;
@@ -38,24 +56,40 @@ export interface RunBlock {
   visits: number;
   currentNodeId: string | null;
   content: ExecutionProgressContent;
+  /** The block's passes with their durations, live pass included. */
+  timing: RunTiming;
+  /** The list the block is bound to, with its done/total; null when it binds none. */
+  list: RunList;
+  /** Typical durations of this block over earlier runs; absent when no statistics were given. */
+  stats?: BlockDurationStatistics;
 }
 
 const PENDING: Pick<
   ExecutionProgressNode,
-  "status" | "iterations" | "visits" | "currentNodeId" | "content"
+  "status" | "iterations" | "visits" | "currentNodeId" | "content" | "timing" | "list"
 > = {
   status: "pending",
   iterations: 0,
   visits: 0,
   currentNodeId: null,
   content: { summary: null, details: [], outcome: null, next: null },
+  timing: { passes: [], totalMs: null, currentMs: null, recorded: false },
+  list: null,
 };
 
-/** The process blocks in order, each joined with the run's projection of it. */
-export function runBlocks(progress: ExecutionProgress): RunBlock[] {
+/**
+ * The process blocks in order, each joined with the run's projection of it and, when statistics
+ * are given, with the typical durations recorded for it.
+ */
+export function runBlocks(
+  progress: ExecutionProgress,
+  statistics?: WorkflowVersionStatistics | null,
+): RunBlock[] {
   const byId = new Map(progress.nodes.map((node) => [node.id, node]));
+  const statsById = new Map((statistics?.blocks ?? []).map((entry) => [entry.blockId, entry]));
   return progress.process.blocks.map((block, index) => {
     const run = byId.get(block.id) ?? PENDING;
+    const stats = statsById.get(block.id);
     return {
       id: block.id,
       index,
@@ -71,6 +105,9 @@ export function runBlocks(progress: ExecutionProgress): RunBlock[] {
         block.description,
         byId.get(block.id)?.label ?? block.label,
       ]),
+      timing: run.timing,
+      list: run.list,
+      ...(stats ? { stats } : {}),
     };
   });
 }

@@ -445,6 +445,16 @@ export function projectExecutionRun(
   if (!finished && execution.currentNodeId && !currentPrimaryNode?.progressNodeId) {
     diagnostics.push(`Current primary node '${execution.currentNodeId}' has no progressNodeId`);
   }
+  // Who is waited for: a person at a lock's PIN gate, the agent on any other paused step.
+  const waitingNodeId =
+    !finished && execution.waitingForInputNodeId === execution.currentNodeId
+      ? (execution.waitingForInputNodeId ?? null)
+      : null;
+  const waitingFor: ExecutionProgress["waitingFor"] = waitingNodeId
+    ? nodeTypes.get(waitingNodeId) === "lock"
+      ? "user"
+      : "agent"
+    : null;
 
   // Statuses: from the route, or — without one — only the block the run is on.
   let statuses: Map<string, { status: ExecutionBlockStatus; iterations: number; visits: number }>;
@@ -635,5 +645,6 @@ export function projectExecutionRun(
     cursor,
     source: "trace",
     projectedAt: now,
+    waitingFor,
   };
 }

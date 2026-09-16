@@ -349,6 +349,9 @@ version, execution revision, execution status and diagnostics, plus:
   (`null` for a run recorded without the stamp), beside `workflowVersion` — the version of the
   definition the projection used;
 - `projectedAt`: epoch ms the projection was made at, the moment open passes are measured to;
+- `waitingFor`: who the run waits for while it pauses — `"user"` when the paused node is a `lock`
+  (a gate a person clears with the PIN), `"agent"` on any other paused node (a directive,
+  teleport or materialize wait), `null` when the run is not waiting;
 - `statistics`: the typical durations of `executionWorkflowVersion` over the run owner's completed
   runs, the run itself excluded — the same object `GET /api/workflows/:id/statistics` returns for
   that owner — or `null` when the run carries no version stamp;

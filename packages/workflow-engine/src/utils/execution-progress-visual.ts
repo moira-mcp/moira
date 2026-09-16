@@ -9,7 +9,11 @@ import type {
 import type { ProcessProjection, ProcessTransition } from "./process-derivation.js";
 import { progressTextWidth, wrapProgressTextToWidth } from "./execution-progress-text.js";
 export type {
+  ExecutionBlockList,
   ExecutionBlockStatus,
+  ExecutionBlockTiming,
+  ExecutionListItem,
+  ExecutionPassTiming,
   ExecutionProgress,
   ExecutionProgressContent,
   ExecutionProgressNode,
@@ -18,6 +22,12 @@ export type {
   ExecutionVariableChange,
   ExecutionVariableState,
 } from "./execution-progress-contract.js";
+/** The typical durations a run is compared with; the run page and the flow page both read them. */
+export type {
+  BlockDurationStatistics,
+  DurationSample,
+  WorkflowVersionStatistics,
+} from "./execution-statistics.js";
 
 export type ProgressTheme = "light" | "dark";
 /** `cards`: every block as a content card (the default). `process`: the aggregated block view —

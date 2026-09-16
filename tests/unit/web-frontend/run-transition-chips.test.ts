@@ -1,10 +1,9 @@
 /**
- * The chip model shared by the lanes rail, the canvas and the phone stepper: for every block of
- * the annotated bundled flows, its returns, its skips and its hub exits fold into one chip per
- * kind and target with the target's name and number; the connector keys the chips carry are
- * exactly the keys of the lanes rail's arcs and links and of the canvas's cycle, skip and bundled
- * hub edges, each connector claimed by one chip; and a lit chip's title carries the label(s)
- * plus, for a single return, its cause and exit.
+ * The chip model of the map's diagram: for every block of the annotated bundled flows, its
+ * returns, its skips and its hub exits fold into one chip per kind and target with the target's
+ * name and number; the connector keys the chips carry are exactly the keys of the laid-out cycle,
+ * skip and bundled hub edges, each connector claimed by one chip; and a lit chip's title carries
+ * the label(s) plus, for a single return, its cause and exit.
  */
 
 import { describe, expect, test } from "@jest/globals";
@@ -13,13 +12,11 @@ import {
   canvasChipsOf,
   chipTitle,
   hubExitsOf,
-  laneChipsOf,
   returnsOf,
   skipsOf,
   transitionKey,
   PARALLEL_CHIP_MIN,
 } from "../../../packages/web-frontend/src/components/run/chips.js";
-import { buildArcs, buildLinks } from "../../../packages/web-frontend/src/components/run/arcs.js";
 import { layoutBlocks } from "../../../packages/web-frontend/src/components/run/layout.js";
 import type { RunBlock } from "../../../packages/web-frontend/src/components/run/model.js";
 import { catalogGraph } from "../../helpers/catalog-graphs.js";
@@ -51,6 +48,8 @@ function blocksOf(slug: string): RunBlock[] {
     visits: 0,
     currentNodeId: null,
     content: { summary: null, details: [], outcome: null, next: null },
+    timing: { passes: [], totalMs: null, currentMs: null, recorded: false },
+    list: null,
   }));
 }
 
@@ -97,25 +96,6 @@ describe("transition chips", () => {
     },
   );
 
-  test.each(FLOWS)(
-    "%s: every lane chip has exactly one arc or link with its key and vice versa",
-    (slug) => {
-      const blocks = blocksOf(slug);
-      const idOf = (index: number) => blocks[index].id;
-      const chipKeys = blocks.flatMap((b) => laneChipsOf(b, blocks).flatMap((c) => c.keys));
-      const connectorKeys = [
-        ...buildArcs(blocks).map((a) =>
-          transitionKey(idOf(a.from), { to: idOf(a.to), label: a.label }),
-        ),
-        ...buildLinks(blocks).map((l) =>
-          transitionKey(idOf(l.from), { to: idOf(l.to), label: l.label }),
-        ),
-      ];
-      expect(new Set(chipKeys).size).toBe(chipKeys.length);
-      expect([...chipKeys].sort()).toEqual([...connectorKeys].sort());
-    },
-  );
-
   test("three or more adjacent forward transitions into one block fold into one forward chip", () => {
     const blocks = blocksOf("workflow-management-flow");
     const requirements = blocks.find((b) => b.name === "Requirements")!;
@@ -125,14 +105,11 @@ describe("transition chips", () => {
     expect(chips[0].transition.to).toBe(design.id);
     expect(chips[0].labels.length).toBeGreaterThanOrEqual(PARALLEL_CHIP_MIN);
     expect(chips[0].keys).toHaveLength(chips[0].labels.length);
-    // A pair with fewer parallel transitions gets no forward chip, and lanes never show one.
+    // A pair with fewer parallel transitions gets no forward chip at all.
     const quick = blocksOf("quick-task");
     expect(
       quick.flatMap((b) => canvasChipsOf(b, [], quick)).some((c) => c.kind === "forward"),
     ).toBe(false);
-    expect(blocks.flatMap((b) => laneChipsOf(b, blocks)).some((c) => c.kind === "forward")).toBe(
-      false,
-    );
   });
 
   test("a source with several transitions into one hub gets one chip carrying every label", () => {

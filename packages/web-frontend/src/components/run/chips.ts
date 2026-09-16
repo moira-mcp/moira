@@ -1,6 +1,6 @@
 /**
- * The chip model shared by the lanes rail, the canvas, the phone stepper and their edges: for
- * one source block, the transitions that the diagrams draw as connectors away from the rail —
+ * The chip model of the map's diagram and its edges: for one source block, the transitions the
+ * diagram draws as connectors away from the process line —
  * returns (cycles), forward transitions that skip a block and exits into a hub — each with the
  * name of its target and the keys that identify the same transitions on their connectors, so
  * hovering a chip lights its connectors and hovering a connector lights it alone. Transitions of
@@ -136,9 +136,8 @@ export function parallelForwardsOf(
 }
 
 /**
- * Every chip of a block as the canvas shows them: hub exits first, then skips that do not enter a
- * hub, then bundled parallel forwards, then returns. Lanes show the same set without the hub kind
- * folded out (a hub is a lane) and without the forward bundle (the rail is the connection).
+ * Every chip of a block as the map shows them: hub exits first, then skips that do not enter a
+ * hub, then bundled parallel forwards, then returns.
  */
 export function canvasChipsOf(
   block: RunBlock,
@@ -152,10 +151,6 @@ export function canvasChipsOf(
     ...parallelForwardsOf(block, hubIds, blocks),
     ...returnsOf(block, blocks),
   ];
-}
-
-export function laneChipsOf(block: RunBlock, blocks: readonly RunBlock[]): TransitionChip[] {
-  return [...returnsOf(block, blocks), ...skipsOf(block, blocks)];
 }
 
 /** What a lit chip says: every label, and for a single return its cause and what ends the loop. */

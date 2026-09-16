@@ -170,4 +170,10 @@ export interface ExecutionProgress {
   source: "trace";
   /** Epoch ms the projection was made at; open passes are measured to it. */
   projectedAt: number;
+  /**
+   * Who the run waits for while it pauses: `user` at a gate a person clears (a lock's PIN),
+   * `agent` on a step the agent must complete (a directive, teleport or materialize wait),
+   * `null` when the run is not waiting.
+   */
+  waitingFor: "agent" | "user" | null;
 }

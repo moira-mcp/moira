@@ -88,9 +88,17 @@ function lineCount(text: string, charsPerLine: number, max: number): number {
 }
 
 /** Height is a pure function of the block's text so layout stays deterministic. */
-/** Chips (hub exits, skips, returns) wrap inside the block; two fit one row at the block width. */
+/** Chips (hub exits, skips, returns) wrap inside the block; two fit one row at the block width
+ * when their names are short, a chip named longer than this takes a row of its own. */
 const CHIPS_PER_ROW = 2;
+const CHIP_SHARED_ROW_CHARS = 14;
 const CHIP_ROW_HEIGHT = 24;
+
+/** Rows the chips take: long-named chips one each, the short ones two per row. */
+export function chipRowCount(chipNames: readonly string[]): number {
+  const long = chipNames.filter((name) => name.length > CHIP_SHARED_ROW_CHARS).length;
+  return long + Math.ceil((chipNames.length - long) / CHIPS_PER_ROW);
+}
 /** Parallel forward transitions between one pair of blocks spread by this much per transition. */
 const PARALLEL_STEP = 26;
 
@@ -98,14 +106,14 @@ export function estimateBlockHeight(
   name: string,
   description: string,
   hasNote: boolean,
-  chipCount: number,
+  chipNames: readonly string[],
 ): number {
   return (
     BLOCK_BASE_HEIGHT +
     lineCount(name, NAME_CHARS_PER_LINE, 3) * NAME_LINE_HEIGHT +
     lineCount(description, CHARS_PER_LINE, MAX_DESCRIPTION_LINES) * LINE_HEIGHT +
     (hasNote ? LINE_HEIGHT : 0) +
-    Math.ceil(chipCount / CHIPS_PER_ROW) * CHIP_ROW_HEIGHT
+    chipRowCount(chipNames) * CHIP_ROW_HEIGHT
   );
 }
 
@@ -218,7 +226,7 @@ export async function layoutBlocks(
         block.name,
         block.description,
         false,
-        canvasChipsOf(block, hubIds, blocks).length,
+        canvasChipsOf(block, hubIds, blocks).map((chip) => chip.targetName),
       ),
     });
   }

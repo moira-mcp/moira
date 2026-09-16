@@ -75,7 +75,9 @@ duration rather than a zero one. The projection reports the version stamped on t
 `statistics`: how long a
 pass, a whole run through a block and each list position typically take across the owner's other
 completed runs of that version — the median with quartiles and range — so a run can be read
-against what is usual; one user's runs are never another's statistics.
+against what is usual; one user's runs are never another's statistics. The projection also says
+who a paused run waits for (`waitingFor`): `user` at a gate a person clears (a `lock` step's
+PIN), `agent` on any other paused step, `null` when the run is not waiting.
 `GET /api/workflows/:id/statistics?version=` returns the same aggregate for any version over the
 caller's completed runs.
 
@@ -94,7 +96,7 @@ progress-image-token`; the binary does not pass through MCP. The token takes opt
 (`light|dark`), `viewportWidth` (480–4096), `view` — `cards` (the default content grid) or
 `process` (the aggregated block view: blocks in process order with labelled transitions, returns
 as dashed arcs with the transition label, hub transitions written inside their source, as the run
-page's lanes show them; a loop's cause and exit are on the run page, not in the image) — and `hide` / `collapse`: block ids or authored node ids (a node names its block)
+page's map shows them; a loop's cause and exit are on the run page, not in the image) — and `hide` / `collapse`: block ids or authored node ids (a node names its block)
 left out of the image with their transitions collapsed onto the neighbours, or drawn as a
 label-only chip. Unknown ids are refused when the token is minted. A `user-notification` node may set
 `attachProgressImage: true` and use its normal message as the image caption. Such a node must belong to
@@ -107,9 +109,9 @@ version, and execution revision; rendering failures stay errors.
 
 The flow page (see the _Reading and editing a flow_ guide) shows the derived process of the
 definition itself and lets its owner edit it in place. On the run page (see the _Reading a run_
-guide) the same projection is shown as lanes, a canvas,
-an outline and the route, with a block panel that drills into each block's steps and focuses the
-technical node graph. The page and the PNG contain the same essential information. A workflow
+guide) the same projection is shown as the map — the process as a diagram with its contents —
+with a block panel that drills into each block's steps, timings and list and focuses the
+technical node graph, which is the page's other view. The page and the PNG contain the same essential information. A workflow
 without progress shows the technical node graph and the variables panel instead.
 
 Every workflow consists of:

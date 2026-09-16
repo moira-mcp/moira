@@ -3,10 +3,12 @@
  * /workflows/:handle/:slug.
  *
  * The definition's derived process (from the server for the saved definition, re-derived in the
- * browser while there are unsaved edits) is shown through the run page's modes with no run in
- * them — outline by default, canvas, lanes — plus the split mode (blocks against their steps) and
- * the technical node graph with its controls and node details. The right panel carries the
- * selected block's detail and the variable registry. Owners can turn on edit mode: block names and
+ * browser while there are unsaved edits) is shown through the run page's two views with no run in
+ * them: the map (the process as a diagram with its contents sidebar) and the technical node graph
+ * with its controls and node details. Both stay mounted once shown. The right panel carries the
+ * selected block's detail — its narrative, the steps that implement it, and how long the block
+ * typically takes over the viewer's completed runs of this version — and the variable registry.
+ * Owners can turn on edit mode: block names and
  * descriptions, transition labels and loop explanations, which block a step belongs to, a step's
  * directive, message or expressions, and the registry are edited in place; the views re-derive at
  * once, the derivation's diagnostics appear inline, the export lists the flow-file entries that
@@ -62,17 +64,15 @@ import { useWorkflowApp } from "../hooks/useWorkflowData";
 import { useResource } from "../hooks/useResource";
 import { useSession } from "../auth/better-auth-client";
 import { apiClient, ApiClientError } from "../services/api-client";
+import type { WorkflowVersionStatistics } from "@mcp-moira/workflow-engine/progress-visual";
 import { VisibilityToggle } from "../components/access/VisibilityToggle";
 import { ROUTES } from "../constants/routes";
 import type { WorkflowGraph } from "../types/workflow-types";
-import { LanesView } from "../components/run/LanesView";
-import { CanvasView } from "../components/run/CanvasView";
-import { OutlineView } from "../components/run/OutlineView";
+import { MapView } from "../components/run/MapView";
 import { BlockDetailPanel } from "../components/run/BlockDetailPanel";
-import { GuidanceCallout, GuidanceHint } from "../components/run/Guidance";
+import { GuidanceHint } from "../components/run/Guidance";
 import { Walkthrough, type GuideStep } from "../components/run/Walkthrough";
-import { runBlocks, type RunViewProps } from "../components/run/model";
-import { SplitView } from "../components/flow/SplitView";
+import { runBlocks } from "../components/run/model";
 import { RegistryPanel } from "../components/flow/RegistryPanel";
 import { FLOW_MODES, resolveFlowMode, type FlowViewMode } from "../components/flow/modes";
 import { definitionProgress } from "../components/flow/model";
@@ -85,8 +85,10 @@ import {
   useFlowEdits,
 } from "../components/flow/editing";
 
+// Lazy chunk, requested on mount so the first switch to the graph view downloads nothing.
+const importWorkflowGraph = () => import("../components/workflow/WorkflowGraph");
 const TechnicalGraph = React.lazy(() =>
-  import("../components/workflow/WorkflowGraph").then((module) => ({
+  importWorkflowGraph().then((module) => ({
     default: module.WorkflowGraph,
   })),
 );
@@ -98,18 +100,8 @@ const EDIT_PARAM = "edit";
 
 type FlowPanelTab = "block" | "variables";
 
-const MODE_COMPONENTS: Record<Exclude<FlowViewMode, "graph">, React.ComponentType<RunViewProps>> = {
-  outline: OutlineView,
-  canvas: CanvasView,
-  lanes: LanesView,
-  split: SplitView,
-};
-
 const EVERY_MODE = (selector: string): Partial<Record<FlowViewMode, string>> => ({
-  outline: selector,
-  canvas: selector,
-  lanes: selector,
-  split: selector,
+  map: selector,
   graph: selector,
 });
 
@@ -118,41 +110,34 @@ export function flowGuideSteps(isOwner: boolean): GuideStep<FlowViewMode, FlowPa
   return [
     {
       id: "process",
-      targets: {
-        outline: "section[data-block-id]",
-        canvas: "[data-block-id]",
-        lanes: "[data-lane-index]",
-        split: '[data-testid="split-blocks"] [data-block-id]',
-      },
-      fallbackView: "outline",
+      targets: { map: '[data-testid="map-contents-list"] [data-block-id]' },
+      fallbackView: "map",
     },
     {
       id: "agent",
-      targets: { split: '[data-testid="split-nodes"] [data-node-id]' },
-      fallbackView: "split",
+      targets: EVERY_MODE('[data-testid="block-detail"] [data-node-id]'),
+      fallbackView: "map",
+      panel: "block",
     },
     {
       id: "evidence",
-      targets: { split: '[data-testid="split-nodes"] [data-node-inputs]' },
-      fallbackView: "split",
+      targets: EVERY_MODE('[data-testid="block-detail"] [data-node-inputs]'),
+      fallbackView: "map",
+      panel: "block",
     },
     {
       id: "loop",
-      targets: {
-        outline: '[data-transition-kind="cycle"]',
-        canvas: "[data-return-chip]",
-        lanes: "[data-return-chip]",
-      },
-      fallbackView: "outline",
+      targets: { map: "[data-return-chip]" },
+      fallbackView: "map",
     },
     {
       id: "edit",
       targets: EVERY_MODE(
         isOwner ? '[data-testid="flow-edit-toggle"]' : '[data-testid="flow-header"]',
       ),
-      fallbackView: "outline",
+      fallbackView: "map",
     },
-    { id: "explore", targets: EVERY_MODE('[data-testid="flow-modes"]'), fallbackView: "outline" },
+    { id: "explore", targets: EVERY_MODE('[data-testid="flow-modes"]'), fallbackView: "map" },
   ];
 }
 
@@ -199,6 +184,11 @@ export const FlowPage: React.FC = () => {
   useEffect(() => {
     if (workflowIdentifier) selectWorkflow(workflowIdentifier);
   }, [workflowIdentifier, selectWorkflow]);
+
+  // Fetch the graph's chunk right away, so the first switch to the graph view shows no skeleton.
+  useEffect(() => {
+    void importWorkflowGraph();
+  }, []);
 
   const detail = workflowDetail.workflow;
   const fileInfo = detail?.fileInfo;
@@ -276,10 +266,25 @@ export const FlowPage: React.FC = () => {
     () => (edited && process ? definitionProgress(edited, process) : null),
     [edited, process],
   );
-  const blocks = useMemo(() => (progress ? runBlocks(progress) : []), [progress]);
+  // Typical durations of the saved version, over the viewer's own completed runs. They are held
+  // per workflow and version; a workflow nobody has finished yet simply has an empty sample.
+  const version = savedWorkflow?.metadata.version;
+  const statisticsResource = useResource<WorkflowVersionStatistics | null>(
+    workflowId && version ? `${workflowId}@${version}` : null,
+    () =>
+      workflowId ? apiClient.getWorkflowStatistics(workflowId, version) : Promise.resolve(null),
+  );
+  const statistics = statisticsResource.data ?? null;
+  const blocks = useMemo(
+    () => (progress ? runBlocks(progress, statistics) : []),
+    [progress, statistics],
+  );
 
   const requestedMode = resolveFlowMode(searchParams.get(VIEW_PARAM));
   const mode: FlowViewMode = process ? requestedMode : "graph";
+  // A view is rendered from the first time it is asked for and never unmounted again.
+  const mountedViews = useRef<Set<FlowViewMode>>(new Set());
+  mountedViews.current.add(mode);
   const blockParam = searchParams.get(BLOCK_PARAM);
   const selectedBlockId = blocks.some((b) => b.id === blockParam) ? blockParam : null;
   const shownBlock = blocks.find((b) => b.id === (selectedBlockId ?? blocks[0]?.id)) ?? null;
@@ -453,11 +458,12 @@ export const FlowPage: React.FC = () => {
             workflow={edited}
             validation={detail?.validation}
             blocks={blocks}
+            selectedBlockId={selectedBlockId}
             onWorkflowNavigate={handleNavigate}
             onNodeSelect={handleNodeSelect}
             showNodeDetails={false}
             showControls={true}
-            showMinimap={true}
+            showMinimap={false}
             focusRequest={focusRequest}
           />
         </Suspense>
@@ -472,8 +478,6 @@ export const FlowPage: React.FC = () => {
       />
     </div>
   );
-
-  const ModeView = mode === "graph" ? null : MODE_COMPONENTS[mode];
 
   return (
     <EditingProvider
@@ -603,9 +607,9 @@ export const FlowPage: React.FC = () => {
             <p className="text-muted-foreground">{t("pages.workflowDetail.selectWorkflow")}</p>
           </div>
         ) : (
-          <div className="flex-1 min-h-0 flex flex-col lg:flex-row overflow-hidden">
+          <div className="flex-1 min-h-0 flex flex-col lg:flex-row overflow-y-auto lg:overflow-hidden">
             <section
-              className="flex-1 min-w-0 min-h-0 flex flex-col overflow-hidden"
+              className="flex min-w-0 flex-col lg:flex-1 lg:min-h-0 lg:overflow-hidden"
               aria-label={t("pages.flowPage.title")}
               data-testid="flow-view"
             >
@@ -662,16 +666,9 @@ export const FlowPage: React.FC = () => {
 
               {editing && process && (
                 <div
-                  className="space-y-2 border-b border-warning/50 bg-warning/5 px-3 py-2"
+                  className="space-y-1 border-b border-warning/50 bg-warning/5 px-3 py-1.5"
                   data-testid="flow-edit-panel"
                 >
-                  <GuidanceCallout
-                    title={t("pages.flowPage.edit.guideTitle")}
-                    testId="guidance-edit"
-                    className="border-warning/40 bg-transparent"
-                  >
-                    {t("pages.flowPage.edit.guideBody")}
-                  </GuidanceCallout>
                   <div className="flex flex-wrap items-center gap-2 text-sm">
                     <span data-testid="flow-edit-count">
                       {t("pages.flowPage.edit.count", { count: editCount })}
@@ -756,32 +753,43 @@ export const FlowPage: React.FC = () => {
                 </ul>
               )}
 
-              <div className="flex-1 min-h-0">
-                {ModeView && progress ? (
-                  <ModeView
-                    progress={progress}
-                    blocks={blocks}
-                    route={[]}
-                    workflow={edited}
-                    selectedBlockId={selectedBlockId}
-                    onSelectBlock={(blockId) => {
-                      update({ [BLOCK_PARAM]: blockId });
-                      if (blockId) setChosenTab("block");
-                    }}
-                    cursor={null}
-                    onSetCursor={() => {}}
-                  />
-                ) : (
-                  technicalGraph
+              {/* Both views stay mounted once shown and are only hidden, so the map keeps its
+                  selection and the graph its viewport across a switch. */}
+              <div className="lg:flex-1 lg:min-h-0">
+                {progress && mountedViews.current.has("map") && (
+                  <div className={cn("lg:h-full", mode !== "map" && "hidden")}>
+                    <MapView
+                      progress={progress}
+                      blocks={blocks}
+                      route={[]}
+                      workflow={edited}
+                      selectedBlockId={selectedBlockId}
+                      onSelectBlock={(blockId) => {
+                        update({ [BLOCK_PARAM]: blockId });
+                        if (blockId) setChosenTab("block");
+                      }}
+                      cursor={null}
+                      onSetCursor={() => {}}
+                    />
+                  </div>
+                )}
+                {(!progress || mountedViews.current.has("graph")) && (
+                  <div
+                    className={cn("h-[60vh] lg:h-full", progress && mode !== "graph" && "hidden")}
+                  >
+                    {technicalGraph}
+                  </div>
                 )}
               </div>
             </section>
 
-            {process && mode !== "graph" && (
+            {process && (
               <aside
                 className={cn(
                   "flex flex-col bg-card overflow-hidden border-t lg:border-t-0 lg:border-l",
                   "max-h-[38vh] lg:max-h-none lg:w-[380px] xl:w-[440px] shrink-0",
+                  // The graph brings its own node sidebar; the block panel steps aside for it.
+                  mode === "graph" && "hidden",
                 )}
                 data-testid="flow-panel"
               >
@@ -805,6 +813,9 @@ export const FlowPage: React.FC = () => {
                       block={shownBlock}
                       blocks={blocks}
                       workflow={edited}
+                      statistics={statistics}
+                      statisticsPending={statisticsResource.pending}
+                      statisticsError={statisticsResource.error}
                       onSelectBlock={(blockId) => update({ [BLOCK_PARAM]: blockId })}
                       onFocusNode={focusNode}
                     />
