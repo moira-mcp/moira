@@ -48,6 +48,7 @@ function Divider(): React.JSX.Element {
 
 export function DiagramToolbar({
   leading,
+  title,
   finder,
   onZoomIn,
   onZoomOut,
@@ -56,6 +57,8 @@ export function DiagramToolbar({
   testId = "diagram-toolbar",
 }: {
   leading?: React.ReactNode;
+  /** What is being looked at (the flow's or run's name), one truncated line. */
+  title?: React.ReactNode;
   finder?: React.ReactNode;
   onZoomIn: () => void;
   onZoomOut: () => void;
@@ -70,8 +73,13 @@ export function DiagramToolbar({
       role="toolbar"
     >
       {leading}
-      {finder && <div className="mx-1 min-w-0 flex-1 basis-[240px] max-w-[360px]">{finder}</div>}
-      <div className="ml-auto flex items-center gap-0.5">
+      {title && <div className="mx-1 min-w-0 flex-1">{title}</div>}
+      {finder && (
+        <div className={cn("mx-1 min-w-0 basis-[220px] max-w-[320px]", !title && "flex-1")}>
+          {finder}
+        </div>
+      )}
+      <div className="ml-auto flex shrink-0 items-center gap-0.5">
         <LayoutPresetButtons variant="toolbar" />
         <Divider />
         <ToolbarButton

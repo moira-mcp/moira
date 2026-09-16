@@ -63,6 +63,8 @@ import { MODES, resolveMode, type RunViewMode } from "../run/modes";
 import { MapView } from "../run/MapView";
 import { BlockDetailPanel } from "../run/BlockDetailPanel";
 import { NodePanel } from "../run/NodePanel";
+import { useStoredFlag } from "../diagram/useStoredFlag";
+import { PanelRightClose, PanelRightOpen } from "lucide-react";
 import { RouteSummary } from "../run/RouteSummary";
 import { nodeOwners } from "../run/model";
 import { VariablesPanel } from "../run/VariablesPanel";
@@ -420,6 +422,7 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
   // A step clicked on the graph opens as the second level of the block panel: its block becomes
   // the selected block, the panel shows the step with a breadcrumb back to the block.
   const [panelNodeId, setPanelNodeId] = useState<string | null>(null);
+  const [panelCollapsed, togglePanel] = useStoredFlag("moira.run.panelCollapsed");
   const handleNodeClick = useCallback(
     (_event: React.MouseEvent, node: { id: string }) => {
       const owner = nodeOwners(blocks).get(node.id) ?? null;
@@ -867,253 +870,284 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
         <aside
           className={cn(
             "flex flex-col bg-card overflow-hidden border-t lg:border-t-0 lg:border-l",
-            "max-h-[38vh] lg:max-h-none lg:w-[400px] xl:w-[460px] shrink-0",
+            "max-h-[38vh] lg:max-h-none shrink-0",
+            panelCollapsed ? "lg:w-10" : "lg:w-[400px] xl:w-[460px]",
           )}
           data-testid="run-panel"
+          data-collapsed={panelCollapsed ? "true" : undefined}
         >
-          <Tabs
-            value={activeTab}
-            onValueChange={(value) => setChosenTab(value as PanelTab)}
-            className="flex flex-col h-full"
-          >
-            {/* The panel strip: underline tabs that wrap on a narrow panel instead of scrolling;
+          {panelCollapsed && (
+            <button
+              type="button"
+              onClick={togglePanel}
+              title={t("pages.runPage.panel.expand", { defaultValue: "Развернуть панель" })}
+              aria-label={t("pages.runPage.panel.expand", { defaultValue: "Развернуть панель" })}
+              className="hidden h-10 w-full items-center justify-center text-muted-foreground hover:bg-accent hover:text-foreground lg:flex"
+              data-testid="run-panel-expand"
+            >
+              <PanelRightOpen className="size-4" aria-hidden="true" />
+            </button>
+          )}
+          <div className={cn("flex min-h-0 flex-1 flex-col", panelCollapsed && "lg:hidden")}>
+            <Tabs
+              value={activeTab}
+              onValueChange={(value) => setChosenTab(value as PanelTab)}
+              className="flex flex-col h-full"
+            >
+              {/* The panel strip: underline tabs that wrap on a narrow panel instead of scrolling;
                 each tab says what it holds, and counters and warnings are one badge. The list's
                 height must follow the wrapped rows (the tabs variant fixes it at one row, hence
                 the important override), so the second row never paints over the content. */}
-            <TabsList
-              variant="line"
-              className="!h-auto w-full flex-wrap justify-start gap-x-0 gap-y-1 rounded-none border-b bg-card px-2 py-1"
-              data-testid="run-panel-tabs"
-            >
-              {progress && (
-                <TabsTrigger
-                  value="block"
-                  className={TAB_CLASS}
-                  title={t("pages.runPage.tabHints.block")}
+              <TabsList
+                variant="line"
+                className="!h-auto w-full flex-wrap justify-start gap-x-0 gap-y-1 rounded-none border-b bg-card px-2 py-1"
+                data-testid="run-panel-tabs"
+              >
+                <button
+                  type="button"
+                  onClick={togglePanel}
+                  title={t("pages.runPage.panel.collapse", { defaultValue: "Свернуть панель" })}
+                  aria-label={t("pages.runPage.panel.collapse", {
+                    defaultValue: "Свернуть панель",
+                  })}
+                  className="order-last ml-auto hidden h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground lg:inline-flex"
+                  data-testid="run-panel-collapse"
                 >
-                  <Boxes className="size-3.5" />
-                  {t("pages.runPage.tabs.block")}
-                </TabsTrigger>
-              )}
-              <TabsTrigger
-                value="variables"
-                className={TAB_CLASS}
-                title={t("pages.runPage.tabHints.variables")}
-              >
-                <Variable className="size-3.5" />
-                {t("pages.runPage.tabs.variables")}
-                <TabBadge
-                  warning={Boolean(answerable && waiting)}
-                  tone="warning"
-                  label={t("pages.runPage.tabHints.variablesWaiting")}
-                  testId="variables-waiting-badge"
-                />
-              </TabsTrigger>
-              <TabsTrigger
-                value="errors"
-                className={TAB_CLASS}
-                title={t("pages.runPage.tabHints.errors")}
-              >
-                <AlertTriangle className="size-3.5" />
-                {t("pages.executionInspector.tabs.errors")}
-                <TabBadge
-                  count={errorsCount}
-                  tone="danger"
-                  label={t("pages.runPage.tabHints.errorCount", { count: errorsCount })}
-                  testId="errors-count-badge"
-                />
-                {degradationsCount > 0 && (
-                  <TabBadge
-                    count={degradationsCount}
-                    tone="warning"
-                    label={t("pages.runPage.tabHints.degradationCount", {
-                      count: degradationsCount,
-                    })}
-                    testId="degradations-count-badge"
-                  />
+                  <PanelRightClose className="size-4" aria-hidden="true" />
+                </button>
+                {progress && (
+                  <TabsTrigger
+                    value="block"
+                    className={TAB_CLASS}
+                    title={t("pages.runPage.tabHints.block")}
+                  >
+                    <Boxes className="size-3.5" />
+                    {t("pages.runPage.tabs.block")}
+                  </TabsTrigger>
                 )}
-              </TabsTrigger>
-              <TabsTrigger
-                value="steps"
-                className={TAB_CLASS}
-                title={t("pages.runPage.tabHints.steps")}
-              >
-                <ListChecks className="size-3.5" />
-                {t("pages.executionInspector.tabs.steps")}
-              </TabsTrigger>
-              <TabsTrigger
-                value="locks"
-                className={TAB_CLASS}
-                title={t("pages.runPage.tabHints.locks")}
-              >
-                <Lock className="size-3.5" />
-                {t("pages.executionInspector.tabs.locks")}
-                <TabBadge
-                  warning={locks.some((l) => l.status === "active")}
-                  tone="warning"
-                  label={t("pages.runPage.tabHints.lockActive")}
-                  testId="locks-active-badge"
-                />
-              </TabsTrigger>
-            </TabsList>
+                <TabsTrigger
+                  value="variables"
+                  className={TAB_CLASS}
+                  title={t("pages.runPage.tabHints.variables")}
+                >
+                  <Variable className="size-3.5" />
+                  {t("pages.runPage.tabs.variables")}
+                  <TabBadge
+                    warning={Boolean(answerable && waiting)}
+                    tone="warning"
+                    label={t("pages.runPage.tabHints.variablesWaiting")}
+                    testId="variables-waiting-badge"
+                  />
+                </TabsTrigger>
+                <TabsTrigger
+                  value="errors"
+                  className={TAB_CLASS}
+                  title={t("pages.runPage.tabHints.errors")}
+                >
+                  <AlertTriangle className="size-3.5" />
+                  {t("pages.executionInspector.tabs.errors")}
+                  <TabBadge
+                    count={errorsCount}
+                    tone="danger"
+                    label={t("pages.runPage.tabHints.errorCount", { count: errorsCount })}
+                    testId="errors-count-badge"
+                  />
+                  {degradationsCount > 0 && (
+                    <TabBadge
+                      count={degradationsCount}
+                      tone="warning"
+                      label={t("pages.runPage.tabHints.degradationCount", {
+                        count: degradationsCount,
+                      })}
+                      testId="degradations-count-badge"
+                    />
+                  )}
+                </TabsTrigger>
+                <TabsTrigger
+                  value="steps"
+                  className={TAB_CLASS}
+                  title={t("pages.runPage.tabHints.steps")}
+                >
+                  <ListChecks className="size-3.5" />
+                  {t("pages.executionInspector.tabs.steps")}
+                </TabsTrigger>
+                <TabsTrigger
+                  value="locks"
+                  className={TAB_CLASS}
+                  title={t("pages.runPage.tabHints.locks")}
+                >
+                  <Lock className="size-3.5" />
+                  {t("pages.executionInspector.tabs.locks")}
+                  <TabBadge
+                    warning={locks.some((l) => l.status === "active")}
+                    tone="warning"
+                    label={t("pages.runPage.tabHints.lockActive")}
+                    testId="locks-active-badge"
+                  />
+                </TabsTrigger>
+              </TabsList>
 
-            {progress && (
-              <TabsContent value="block" className="scrollbar-thin flex-1 overflow-auto m-0">
-                <RouteSummary
-                  route={progress.route}
+              {progress && (
+                <TabsContent value="block" className="scrollbar-thin flex-1 overflow-auto m-0">
+                  <RouteSummary
+                    route={progress.route}
+                    workflow={workflow.workflow}
+                    blocks={shownBlocks}
+                  />
+                  {panelNodeId && workflow.workflow ? (
+                    <NodePanel
+                      workflow={workflow.workflow}
+                      blocks={shownBlocks}
+                      nodeId={panelNodeId}
+                      onBack={() => setPanelNodeId(null)}
+                      onFocusNode={focusNode}
+                      onSelectVariable={() => setChosenTab("variables")}
+                    />
+                  ) : (
+                    <BlockDetailPanel
+                      block={shownBlock}
+                      blocks={shownBlocks}
+                      workflow={workflow.workflow}
+                      waitingFor={shownProgress?.waitingFor ?? null}
+                      progress={shownProgress ?? undefined}
+                      route={progress.route}
+                      statistics={shownProgress?.statistics}
+                      cursor={cursor}
+                      onSelectBlock={(id) => update({ [BLOCK_PARAM]: id })}
+                      onSetCursor={(at) => update({ [AT_PARAM]: at === null ? null : String(at) })}
+                      onFocusNode={focusNode}
+                    />
+                  )}
+                </TabsContent>
+              )}
+
+              <TabsContent value="variables" className="scrollbar-thin flex-1 overflow-auto m-0">
+                <VariablesPanel
+                  progress={shownProgress}
+                  cursor={cursor}
+                  context={execution?.context?.variables}
+                  workflow={workflow?.workflow}
+                  waiting={waiting}
+                  waitingBlockName={waitingBlockName}
+                  canAdjust={answerable}
+                  editableVariableNames={editableVariableNames}
+                  onAnswer={handleAnswer}
+                  onSavePath={canEdit ? handleSavePath : undefined}
+                  onFullscreen={() => setVariablesFullscreen(true)}
+                />
+              </TabsContent>
+
+              <TabsContent value="errors" className="scrollbar-thin flex-1 overflow-auto m-0 p-4">
+                <ExecutionErrorHistory errors={execution.errors ?? []} />
+              </TabsContent>
+
+              <TabsContent value="steps" className="scrollbar-thin flex-1 overflow-auto m-0 p-4">
+                <StepProgression
                   workflow={workflow.workflow}
                   blocks={shownBlocks}
+                  currentNodeId={shownCurrentNodeId}
+                  visitedNodeIds={visitedNodeIds}
+                  onNodeClick={focusNode}
                 />
-                {panelNodeId && workflow.workflow ? (
-                  <NodePanel
-                    workflow={workflow.workflow}
-                    blocks={shownBlocks}
-                    nodeId={panelNodeId}
-                    onBack={() => setPanelNodeId(null)}
-                    onFocusNode={focusNode}
-                    onSelectVariable={() => setChosenTab("variables")}
-                  />
-                ) : (
-                  <BlockDetailPanel
-                    block={shownBlock}
-                    blocks={shownBlocks}
-                    workflow={workflow.workflow}
-                    waitingFor={shownProgress?.waitingFor ?? null}
-                    progress={shownProgress ?? undefined}
-                    route={progress.route}
-                    statistics={shownProgress?.statistics}
-                    cursor={cursor}
-                    onSelectBlock={(id) => update({ [BLOCK_PARAM]: id })}
-                    onSetCursor={(at) => update({ [AT_PARAM]: at === null ? null : String(at) })}
-                    onFocusNode={focusNode}
-                  />
-                )}
               </TabsContent>
-            )}
 
-            <TabsContent value="variables" className="scrollbar-thin flex-1 overflow-auto m-0">
-              <VariablesPanel
-                progress={shownProgress}
-                cursor={cursor}
-                context={execution?.context?.variables}
-                workflow={workflow?.workflow}
-                waiting={waiting}
-                waitingBlockName={waitingBlockName}
-                canAdjust={answerable}
-                editableVariableNames={editableVariableNames}
-                onAnswer={handleAnswer}
-                onSavePath={canEdit ? handleSavePath : undefined}
-                onFullscreen={() => setVariablesFullscreen(true)}
-              />
-            </TabsContent>
-
-            <TabsContent value="errors" className="scrollbar-thin flex-1 overflow-auto m-0 p-4">
-              <ExecutionErrorHistory errors={execution.errors ?? []} />
-            </TabsContent>
-
-            <TabsContent value="steps" className="scrollbar-thin flex-1 overflow-auto m-0 p-4">
-              <StepProgression
-                workflow={workflow.workflow}
-                blocks={shownBlocks}
-                currentNodeId={shownCurrentNodeId}
-                visitedNodeIds={visitedNodeIds}
-                onNodeClick={focusNode}
-              />
-            </TabsContent>
-
-            <TabsContent
-              value="locks"
-              className="scrollbar-thin flex-1 overflow-auto m-0 p-4"
-              data-testid="locks-panel"
-              data-pending={lockHistory.pending ? "true" : undefined}
-            >
-              {lockHistory.error && (
-                <div
-                  className="mb-3 text-xs text-destructive"
-                  role="alert"
-                  data-testid="locks-error"
-                >
-                  {lockHistory.error}
-                </div>
-              )}
-              {locksLoading ? (
-                <div className="flex items-center justify-center py-8" data-testid="locks-loading">
-                  <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-                </div>
-              ) : locks.length === 0 ? (
-                <div className="text-center py-8 text-muted-foreground text-sm">
-                  {t("pages.executionInspector.locks.noHistory")}
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  {locks.map((lock) => (
-                    <Card key={lock.id} className="p-3">
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="flex items-center gap-2 min-w-0">
-                          {lock.status === "active" ? (
-                            <Lock className="h-4 w-4 text-yellow-500 flex-shrink-0" />
-                          ) : (
-                            <Unlock className="h-4 w-4 text-muted-foreground flex-shrink-0" />
-                          )}
-                          <div className="min-w-0">
-                            <div className="text-sm font-medium truncate">{lock.reason}</div>
-                            <div className="text-xs text-muted-foreground">
-                              {t("pages.executionInspector.locks.node")}{" "}
-                              <code className="text-[10px]">{lock.nodeId}</code>
+              <TabsContent
+                value="locks"
+                className="scrollbar-thin flex-1 overflow-auto m-0 p-4"
+                data-testid="locks-panel"
+                data-pending={lockHistory.pending ? "true" : undefined}
+              >
+                {lockHistory.error && (
+                  <div
+                    className="mb-3 text-xs text-destructive"
+                    role="alert"
+                    data-testid="locks-error"
+                  >
+                    {lockHistory.error}
+                  </div>
+                )}
+                {locksLoading ? (
+                  <div
+                    className="flex items-center justify-center py-8"
+                    data-testid="locks-loading"
+                  >
+                    <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+                  </div>
+                ) : locks.length === 0 ? (
+                  <div className="text-center py-8 text-muted-foreground text-sm">
+                    {t("pages.executionInspector.locks.noHistory")}
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {locks.map((lock) => (
+                      <Card key={lock.id} className="p-3">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex items-center gap-2 min-w-0">
+                            {lock.status === "active" ? (
+                              <Lock className="h-4 w-4 text-yellow-500 flex-shrink-0" />
+                            ) : (
+                              <Unlock className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                            )}
+                            <div className="min-w-0">
+                              <div className="text-sm font-medium truncate">{lock.reason}</div>
+                              <div className="text-xs text-muted-foreground">
+                                {t("pages.executionInspector.locks.node")}{" "}
+                                <code className="text-[10px]">{lock.nodeId}</code>
+                              </div>
                             </div>
                           </div>
-                        </div>
-                        <div className="flex items-center gap-2 flex-shrink-0">
-                          <Badge
-                            variant={lock.status === "active" ? "default" : "secondary"}
-                            className={
-                              lock.status === "active"
-                                ? "bg-yellow-500/20 text-yellow-600 border-yellow-500/30"
-                                : ""
-                            }
-                          >
-                            {lock.status}
-                          </Badge>
-                          {lock.status === "active" && (
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() =>
-                                showOwnerInfo
-                                  ? handleAdminUnlock(lock.id)
-                                  : handleOwnerUnlock(lock.id)
+                          <div className="flex items-center gap-2 flex-shrink-0">
+                            <Badge
+                              variant={lock.status === "active" ? "default" : "secondary"}
+                              className={
+                                lock.status === "active"
+                                  ? "bg-yellow-500/20 text-yellow-600 border-yellow-500/30"
+                                  : ""
                               }
-                              disabled={unlocking === lock.id}
-                              className="h-7 text-xs"
                             >
-                              {unlocking === lock.id ? (
-                                <Loader2 className="h-3 w-3 mr-1 animate-spin" />
-                              ) : (
-                                <Unlock className="h-3 w-3 mr-1" />
-                              )}
-                              {t("pages.executionInspector.locks.unlock")}
-                            </Button>
+                              {lock.status}
+                            </Badge>
+                            {lock.status === "active" && (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() =>
+                                  showOwnerInfo
+                                    ? handleAdminUnlock(lock.id)
+                                    : handleOwnerUnlock(lock.id)
+                                }
+                                disabled={unlocking === lock.id}
+                                className="h-7 text-xs"
+                              >
+                                {unlocking === lock.id ? (
+                                  <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                                ) : (
+                                  <Unlock className="h-3 w-3 mr-1" />
+                                )}
+                                {t("pages.executionInspector.locks.unlock")}
+                              </Button>
+                            )}
+                          </div>
+                        </div>
+                        <div className="mt-2 flex gap-4 text-[10px] text-muted-foreground">
+                          <span>
+                            {t("pages.executionInspector.locks.created")}{" "}
+                            {new Date(lock.createdAt).toLocaleString()}
+                          </span>
+                          {lock.unlockedAt && (
+                            <span>
+                              {t("pages.executionInspector.locks.unlocked")}{" "}
+                              {new Date(lock.unlockedAt).toLocaleString()}
+                            </span>
                           )}
                         </div>
-                      </div>
-                      <div className="mt-2 flex gap-4 text-[10px] text-muted-foreground">
-                        <span>
-                          {t("pages.executionInspector.locks.created")}{" "}
-                          {new Date(lock.createdAt).toLocaleString()}
-                        </span>
-                        {lock.unlockedAt && (
-                          <span>
-                            {t("pages.executionInspector.locks.unlocked")}{" "}
-                            {new Date(lock.unlockedAt).toLocaleString()}
-                          </span>
-                        )}
-                      </div>
-                    </Card>
-                  ))}
-                </div>
-              )}
-            </TabsContent>
-          </Tabs>
+                      </Card>
+                    ))}
+                  </div>
+                )}
+              </TabsContent>
+            </Tabs>
+          </div>
         </aside>
       </div>
 

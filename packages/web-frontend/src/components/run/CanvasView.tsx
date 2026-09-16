@@ -424,6 +424,13 @@ function portRanks(
   return { out, in: inn };
 }
 
+/** What the map view puts into the diagram's toolbar around the shared controls. */
+export interface CanvasToolbarSlots {
+  toolbarLeading?: React.ReactNode;
+  toolbarTitle?: React.ReactNode;
+  toolbarTrailing?: React.ReactNode;
+}
+
 const nodeTypes = { block: BlockNodeView };
 const edgeTypes = { routed: RoutedEdgeView };
 
@@ -452,7 +459,9 @@ function CanvasInner({
   selectedBlockId,
   onSelectBlock,
   toolbarLeading,
-}: RunViewProps & { toolbarLeading?: React.ReactNode }): React.JSX.Element {
+  toolbarTitle,
+  toolbarTrailing,
+}: RunViewProps & CanvasToolbarSlots): React.JSX.Element {
   const { t } = useTranslation();
   const { actualTheme } = useTheme();
   const [preset] = useLayoutPreset();
@@ -645,6 +654,8 @@ function CanvasInner({
     <div className="flex h-full w-full flex-col overflow-hidden">
       <DiagramToolbar
         leading={toolbarLeading}
+        title={toolbarTitle}
+        trailing={toolbarTrailing}
         finder={<NodeFinder blocks={blocks} steps={allSteps} onPick={onSelectBlock} />}
         onZoomIn={() => void rfRef.current?.zoomIn({ duration: 200 })}
         onZoomOut={() => void rfRef.current?.zoomOut({ duration: 200 })}
@@ -725,9 +736,7 @@ function CanvasInner({
 }
 
 /** The diagram alone, with its transition focus: the map view supplies the frame around it. */
-export function CanvasDiagram(
-  props: RunViewProps & { toolbarLeading?: React.ReactNode },
-): React.JSX.Element {
+export function CanvasDiagram(props: RunViewProps & CanvasToolbarSlots): React.JSX.Element {
   return (
     <TransitionFocusProvider pinnedBlock={props.selectedBlockId}>
       <CanvasInner {...props} />

@@ -70,6 +70,8 @@ import type { WorkflowGraph } from "../types/workflow-types";
 import { MapView } from "../components/run/MapView";
 import { BlockDetailPanel } from "../components/run/BlockDetailPanel";
 import { NodePanel } from "../components/run/NodePanel";
+import { useStoredFlag } from "../components/diagram/useStoredFlag";
+import { PanelRightClose, PanelRightOpen } from "lucide-react";
 import { GuidanceHint } from "../components/run/Guidance";
 import { Walkthrough, type GuideStep } from "../components/run/Walkthrough";
 import { runBlocks } from "../components/run/model";
@@ -171,6 +173,7 @@ export const FlowPage: React.FC = () => {
   const [selectedNode, setSelectedNode] = useState<Node | null>(null);
   const [focusRequest, setFocusRequest] = useState<{ nodeId: string; token: number } | null>(null);
   const [chosenTab, setChosenTab] = useState<FlowPanelTab>("block");
+  const [panelCollapsed, togglePanel] = useStoredFlag("moira.flow.panelCollapsed");
   const [edits, setEdits] = useFlowEdits();
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -794,58 +797,90 @@ export const FlowPage: React.FC = () => {
               <aside
                 className={cn(
                   "flex flex-col bg-card overflow-hidden border-t lg:border-t-0 lg:border-l",
-                  "max-h-[38vh] lg:max-h-none lg:w-[380px] xl:w-[440px] shrink-0",
+                  "max-h-[38vh] lg:max-h-none shrink-0",
+                  panelCollapsed ? "lg:w-10" : "lg:w-[380px] xl:w-[440px]",
                 )}
                 data-testid="flow-panel"
+                data-collapsed={panelCollapsed ? "true" : undefined}
               >
-                <Tabs
-                  value={chosenTab}
-                  onValueChange={(value) => setChosenTab(value as FlowPanelTab)}
-                  className="flex flex-col h-full"
-                >
-                  <TabsList className="w-full justify-start rounded-none border-b bg-muted/30 px-2 h-10">
-                    <TabsTrigger value="block" className="gap-1.5 text-xs">
-                      <Boxes className="h-3.5 w-3.5" />
-                      {t("pages.flowPage.tabs.block")}
-                    </TabsTrigger>
-                    <TabsTrigger value="variables" className="gap-1.5 text-xs">
-                      <Variable className="h-3.5 w-3.5" />
-                      {t("pages.flowPage.tabs.variables")}
-                    </TabsTrigger>
-                  </TabsList>
-                  <TabsContent value="block" className="scrollbar-thin flex-1 overflow-auto m-0">
-                    {selectedNode ? (
-                      <NodePanel
-                        workflow={edited}
-                        blocks={blocks}
-                        nodeId={selectedNode.id}
-                        onBack={handleClearSelection}
-                        onFocusNode={focusNode}
-                        onSelectVariable={() => setChosenTab("variables")}
-                      />
-                    ) : (
-                      <BlockDetailPanel
-                        block={shownBlock}
-                        blocks={blocks}
-                        workflow={edited}
-                        statistics={statistics}
-                        statisticsPending={statisticsResource.pending}
-                        statisticsError={statisticsResource.error}
-                        onSelectBlock={(blockId) => {
-                          handleClearSelection();
-                          update({ [BLOCK_PARAM]: blockId });
-                        }}
-                        onFocusNode={focusNode}
-                      />
-                    )}
-                  </TabsContent>
-                  <TabsContent
-                    value="variables"
-                    className="scrollbar-thin flex-1 overflow-auto m-0"
+                {panelCollapsed && (
+                  <button
+                    type="button"
+                    onClick={togglePanel}
+                    title={t("pages.flowPage.panel.expand", { defaultValue: "Развернуть панель" })}
+                    aria-label={t("pages.flowPage.panel.expand", {
+                      defaultValue: "Развернуть панель",
+                    })}
+                    className="hidden h-10 w-full items-center justify-center text-muted-foreground hover:bg-accent hover:text-foreground lg:flex"
+                    data-testid="flow-panel-expand"
                   >
-                    <RegistryPanel registry={edited.variableRegistry} />
-                  </TabsContent>
-                </Tabs>
+                    <PanelRightOpen className="size-4" aria-hidden="true" />
+                  </button>
+                )}
+                <div className={cn("flex min-h-0 flex-1 flex-col", panelCollapsed && "lg:hidden")}>
+                  <Tabs
+                    value={chosenTab}
+                    onValueChange={(value) => setChosenTab(value as FlowPanelTab)}
+                    className="flex flex-col h-full"
+                  >
+                    <TabsList className="w-full justify-start rounded-none border-b bg-muted/30 px-2 h-10">
+                      <button
+                        type="button"
+                        onClick={togglePanel}
+                        title={t("pages.flowPage.panel.collapse", {
+                          defaultValue: "Свернуть панель",
+                        })}
+                        aria-label={t("pages.flowPage.panel.collapse", {
+                          defaultValue: "Свернуть панель",
+                        })}
+                        className="order-last ml-auto hidden h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground lg:inline-flex"
+                        data-testid="flow-panel-collapse"
+                      >
+                        <PanelRightClose className="size-4" aria-hidden="true" />
+                      </button>
+                      <TabsTrigger value="block" className="gap-1.5 text-xs">
+                        <Boxes className="h-3.5 w-3.5" />
+                        {t("pages.flowPage.tabs.block")}
+                      </TabsTrigger>
+                      <TabsTrigger value="variables" className="gap-1.5 text-xs">
+                        <Variable className="h-3.5 w-3.5" />
+                        {t("pages.flowPage.tabs.variables")}
+                      </TabsTrigger>
+                    </TabsList>
+                    <TabsContent value="block" className="scrollbar-thin flex-1 overflow-auto m-0">
+                      {selectedNode ? (
+                        <NodePanel
+                          workflow={edited}
+                          blocks={blocks}
+                          nodeId={selectedNode.id}
+                          onBack={handleClearSelection}
+                          onFocusNode={focusNode}
+                          onSelectVariable={() => setChosenTab("variables")}
+                        />
+                      ) : (
+                        <BlockDetailPanel
+                          block={shownBlock}
+                          blocks={blocks}
+                          workflow={edited}
+                          statistics={statistics}
+                          statisticsPending={statisticsResource.pending}
+                          statisticsError={statisticsResource.error}
+                          onSelectBlock={(blockId) => {
+                            handleClearSelection();
+                            update({ [BLOCK_PARAM]: blockId });
+                          }}
+                          onFocusNode={focusNode}
+                        />
+                      )}
+                    </TabsContent>
+                    <TabsContent
+                      value="variables"
+                      className="scrollbar-thin flex-1 overflow-auto m-0"
+                    >
+                      <RegistryPanel registry={edited.variableRegistry} />
+                    </TabsContent>
+                  </Tabs>
+                </div>
               </aside>
             )}
           </div>

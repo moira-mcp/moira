@@ -20,7 +20,7 @@
 
 import React, { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { ChevronDown, Compass, PanelLeftClose, PanelLeftOpen } from "lucide-react";
+import { Compass, PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useModeGuideKey } from "../flow/editing";
 import { PassCount, StatusIcon } from "./status";
@@ -105,8 +105,11 @@ const FACT_TONE: Record<string, string> = {
 function HeaderFacts({
   progress,
   className,
+  compact = false,
 }: {
   className?: string;
+  /** One line: title and description truncated, for the toolbar. */
+  compact?: boolean;
   progress: RunViewProps["progress"];
 }): React.JSX.Element | null {
   const { taskTitle, goal, facts } = progress;
@@ -117,7 +120,9 @@ function HeaderFacts({
   return (
     <div
       className={cn(
-        "flex flex-wrap items-baseline gap-x-2 gap-y-1 border-b bg-card px-3 py-1.5",
+        compact
+          ? "flex min-w-0 items-baseline gap-x-2 overflow-hidden whitespace-nowrap"
+          : "flex flex-wrap items-baseline gap-x-2 gap-y-1 border-b bg-card px-3 py-1.5",
         className,
       )}
       data-testid="run-header-facts"
@@ -134,7 +139,7 @@ function HeaderFacts({
       )}
       {goal && (
         <span
-          className="min-w-0 basis-full truncate text-xs text-muted-foreground"
+          className={cn("min-w-0 truncate text-xs text-muted-foreground", !compact && "basis-full")}
           title={goal}
           data-fact="goal"
         >
@@ -170,48 +175,31 @@ function HeaderFacts({
  */
 function MapGuide({ guideKey }: { guideKey: string }): React.JSX.Element {
   const { t } = useTranslation();
-  const storageKey = `moira.map.guide:${guideKey}`;
-  const [open, setOpen] = useState(() => {
-    try {
-      return window.localStorage.getItem(storageKey) === "open";
-    } catch {
-      return false;
-    }
-  });
-  const toggle = (): void => {
-    setOpen((was) => {
-      const next = !was;
-      try {
-        window.localStorage.setItem(storageKey, next ? "open" : "closed");
-      } catch {
-        // A browser that blocks site data keeps the choice for this view only.
-      }
-      return next;
-    });
-  };
+  const [open, setOpen] = useState(false);
   return (
-    <div className="border-b bg-primary/5 px-3 py-1" data-testid="guidance-map">
+    <div className="relative" data-testid="guidance-map">
       <button
         type="button"
-        onClick={toggle}
+        onClick={() => setOpen((was) => !was)}
         aria-expanded={open}
-        className="flex w-full items-center gap-1.5 text-left text-xs font-medium text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        title={t(`${guideKey}.map.title`)}
+        aria-label={t(`${guideKey}.map.title`)}
+        className={cn(
+          "inline-flex h-8 w-8 items-center justify-center rounded-md border border-transparent text-muted-foreground hover:border-border hover:bg-accent hover:text-foreground",
+          open && "border-primary/50 bg-primary/10 text-primary",
+        )}
         data-testid="guidance-map-toggle"
       >
-        <Compass className="size-3.5 shrink-0" aria-hidden="true" />
-        <span className="min-w-0 truncate">{t(`${guideKey}.map.title`)}</span>
-        <ChevronDown
-          className={cn("ml-auto size-3.5 shrink-0 transition-transform", open && "rotate-180")}
-          aria-hidden="true"
-        />
+        <Compass className="size-4" aria-hidden="true" />
       </button>
       {open && (
-        <p
-          className="pb-1 pt-1 text-xs leading-5 text-foreground/80"
+        <div
+          className="absolute right-0 top-full z-20 mt-1 w-[360px] rounded-lg border bg-popover p-3 text-xs leading-5 text-popover-foreground shadow-md"
           data-testid="guidance-map-body"
         >
+          <p className="mb-1 font-medium text-primary">{t(`${guideKey}.map.title`)}</p>
           {t(`${guideKey}.map.body`)}
-        </p>
+        </div>
       )}
     </div>
   );
@@ -258,11 +246,11 @@ export function MapView({
       data-testid="map-view"
     >
       <div className="order-1 flex h-[55vh] flex-col overflow-hidden lg:order-2 lg:h-full lg:min-h-0 lg:flex-1">
-        <HeaderFacts progress={props.progress} />
-        <MapGuide guideKey={guideKey} />
         <div className="min-h-0 flex-1 overflow-hidden">
           <CanvasDiagram
             {...props}
+            toolbarTitle={<HeaderFacts progress={props.progress} compact />}
+            toolbarTrailing={<MapGuide guideKey={guideKey} />}
             toolbarLeading={
               <button
                 type="button"
