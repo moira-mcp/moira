@@ -180,14 +180,15 @@ export function resolveBlockList(
 }
 
 /**
- * The bound-list item index a pass was working on: the `current` path as of the visit's start.
- * Reads the variable's history (the last write at or before the visit); falls back to the value
- * of the variables object when the run never wrote it.
+ * The bound-list item index a pass was working on: the `current` path as of the visit's start —
+ * the last write before the visit, or the registry default when nothing had written it yet. A
+ * pass before any write and without a default is attributed to no item (never to the value the
+ * cursor holds now).
  */
 export function itemIndexResolver(
   binding: ProgressListBinding | undefined,
   states: readonly ExecutionVariableState[],
-  variables: Record<string, unknown>,
+  defaults: Record<string, unknown>,
 ): (visit: ExecutionVisit) => number | null {
   if (!binding?.current) return () => null;
   const path = binding.current;
@@ -201,18 +202,17 @@ export function itemIndexResolver(
     let rootValue: unknown;
     if (direct) {
       const before = direct.history.filter((change) => change.seq < visit.seq);
-      rootValue = before.length ? before[before.length - 1].value : variables[root];
+      rootValue = before.length ? before[before.length - 1].value : defaults[root];
     } else {
-      rootValue = variables[root];
       const nodeScope: Record<string, unknown> = {};
       for (const state of states) {
         if (!state.name.startsWith(`${root}.`)) continue;
         const before = state.history.filter((change) => change.seq < visit.seq);
-        nodeScope[state.name.slice(root.length + 1)] = before.length
-          ? before[before.length - 1].value
-          : state.current;
+        if (before.length) {
+          nodeScope[state.name.slice(root.length + 1)] = before[before.length - 1].value;
+        }
       }
-      if (Object.keys(nodeScope).length) rootValue = nodeScope;
+      rootValue = Object.keys(nodeScope).length ? nodeScope : undefined;
     }
     const value = rest ? readPath({ [root]: rootValue }, path) : rootValue;
     const index = asCount(value);

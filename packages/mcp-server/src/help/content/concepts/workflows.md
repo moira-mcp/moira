@@ -73,9 +73,11 @@ one is in progress and the time spent on each. A visit recorded without timestam
 duration rather than a zero one. The projection reports the version stamped on the run
 (`executionWorkflowVersion`) beside the definition it projected, and the run view adds
 `statistics`: how long a
-pass, a whole run through a block and each list position typically take across the other runs of
-that version — the median with quartiles and range — so a run can be read against what is usual.
-`GET /api/workflows/:id/statistics?version=` returns the same aggregate for any version.
+pass, a whole run through a block and each list position typically take across the owner's other
+completed runs of that version — the median with quartiles and range — so a run can be read
+against what is usual; one user's runs are never another's statistics.
+`GET /api/workflows/:id/statistics?version=` returns the same aggregate for any version over the
+caller's completed runs.
 
 When `progress` is present, every primary node maps to an existing block, as described above.
 Multiple primary nodes may map to one block. The currently active primary node is the focus target

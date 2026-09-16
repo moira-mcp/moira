@@ -535,10 +535,11 @@ epoch ms it was made at.
 across the runs of one definition version: per block, a `DurationSample`
 (`{ sampleCount, medianMs, p25Ms, p75Ms, minMs, maxMs }`) for a single pass and for a run's whole
 time in the block, the median pass count of a run, and the same sample per bound-list position.
-The sample is every execution stamped with that version, projected onto the current process and
-joined by block id; run totals and the pass count use completed runs only, the asking run is
-excluded so its own timing does not move the value it is compared with, and an execution without a
-version stamp is counted as `versionNotRecorded` and never sampled. `session progress` and
+The sample is one user's completed runs stamped with that version (one user's runs are never
+another's statistics, and a run still stepping is not sampled), projected onto the current process
+and joined by block id; the asking run is excluded so its own timing does not move the value it is
+compared with, and a completed run without a version stamp is counted as `versionNotRecorded` and
+never sampled. `session progress` and
 `GET /api/executions/:id/progress` return this aggregate as `statistics`;
 `GET /api/workflows/:id/statistics?version=` returns it for any version (`docs/API.md`).
 

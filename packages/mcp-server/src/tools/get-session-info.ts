@@ -858,7 +858,7 @@ export async function getSessionInfo(
               execution.workflowId,
               graph,
               progress.executionWorkflowVersion,
-              { excludeExecutionId: execution.executionId },
+              { userId: execution.userId, excludeExecutionId: execution.executionId },
             )
           : null;
         return { success: true, data: { ...progress, statistics } };

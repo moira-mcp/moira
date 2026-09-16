@@ -47,9 +47,10 @@ export type {
 const ROUTING_NODE_TYPES: ReadonlySet<string> = new Set(["start", "condition", "expression"]);
 
 /**
- * Which visits count as passes of which block: a visit of a working step, or of any node in a
- * block made of routing nodes alone; adjustments are never passes. The same rule the status
- * projection counts iterations with.
+ * Which visits count as passes of which block for timings: a visit of a working step, or of any
+ * node in a block made of routing and end nodes alone; adjustments are never passes. The status
+ * projection's iteration count differs in one point — it counts an end node's visit as work — so a
+ * completed run's end adds no zero-length pass here.
  */
 export function passSelector(
   process: ProcessProjection,
@@ -506,7 +507,7 @@ export function projectExecutionRun(
   const itemResolvers = new Map(
     [...bindings].map(([blockId, binding]) => [
       blockId,
-      itemIndexResolver(binding, variableStates, variablesAtCursor),
+      itemIndexResolver(binding, variableStates, registryDefaults),
     ]),
   );
   const timings = blockTimings(

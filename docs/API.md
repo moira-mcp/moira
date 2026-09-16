@@ -349,9 +349,9 @@ version, execution revision, execution status and diagnostics, plus:
   (`null` for a run recorded without the stamp), beside `workflowVersion` — the version of the
   definition the projection used;
 - `projectedAt`: epoch ms the projection was made at, the moment open passes are measured to;
-- `statistics`: the typical durations of `executionWorkflowVersion`, the run itself excluded —
-  the same object `GET /api/workflows/:id/statistics` returns — or `null` when the run carries no
-  version stamp;
+- `statistics`: the typical durations of `executionWorkflowVersion` over the run owner's completed
+  runs, the run itself excluded — the same object `GET /api/workflows/:id/statistics` returns for
+  that owner — or `null` when the run carries no version stamp;
 - `routeRecorded`, `cursor` and `source: "trace"`.
 
 Statuses are projected from the route the engine recorded, never inferred from block order: a
@@ -450,11 +450,13 @@ list position with its `index`, `title` and the same sample fields. A duration s
 `sampleCount`, `medianMs`, `p25Ms`, `p75Ms`, `minMs` and `maxMs`. `pass` samples single measured
 passes, `run` sums a run's measured passes through the block, and `run` together with
 `typicalPasses` (the median number of passes)
-counts completed runs only. The sample is every execution stamped with that version, projected
-onto the current process and joined by block id; an execution without a version stamp is counted
-in `versionNotRecorded` and never sampled. `items` holds one entry per bound-list position a pass
-was attributed to, and is empty for a block with no such pass. The aggregate is cached and
-recomputed when the count or the latest update of that version's runs changes.
+counts each run once. The sample is the caller's own **completed** runs stamped with that version
+(a public workflow is run by many users; one user's runs — their list item titles among them —
+are never another's statistics; a run still stepping is not sampled), projected onto the current
+process and joined by block id; a completed run without a version stamp is counted in
+`versionNotRecorded` and never sampled. `items` holds one entry per bound-list position a pass
+was attributed to, and is empty for a block with no such pass. The aggregate is cached per user
+and version and recomputed when the count or the latest completion of those runs changes.
 
 Authentication: Required
 

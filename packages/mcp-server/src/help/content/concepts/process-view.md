@@ -80,8 +80,9 @@ timestamps existed has no duration; it reads as unknown rather than as zero. The
 items with their titles, which are done, which one is in progress, and the time the block's passes
 spent on each. Beside them the run view carries **statistics** for the version the run started
 on: how long a pass, a whole run through a block, and each list position typically take across the
-other runs of that version (median with quartiles and range), so the run in front of you can be
-read against what is usual. Runs recorded without a version stamp are counted apart and never
+owner's other completed runs of that version (median with quartiles and range), so the run in front
+of you can be read against what is usual; one user's runs are never another's statistics. Runs
+recorded without a version stamp are counted apart and never
 sampled.
 
 An unvisited block is never shown as done. The route itself is available as an ordered list

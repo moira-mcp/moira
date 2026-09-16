@@ -369,22 +369,33 @@ export class InMemoryRepository implements IDataRepository {
   async listExecutionsByWorkflowVersion(
     workflowId: string,
     workflowVersion: string,
+    userId: string,
   ): Promise<WorkflowExecution[]> {
     return Array.from(this.executions.values())
-      .filter((e) => e.workflowId === workflowId && e.workflowVersion === workflowVersion)
+      .filter(
+        (e) =>
+          e.workflowId === workflowId &&
+          e.userId === userId &&
+          e.status === "completed" &&
+          e.workflowVersion === workflowVersion,
+      )
       .map((e) => ({ ...e }));
   }
 
   async summarizeExecutionsByWorkflowVersion(
     workflowId: string,
     workflowVersion: string,
-  ): Promise<{ count: number; lastUpdatedAt: number | null; unstamped: number }> {
-    const all = Array.from(this.executions.values()).filter((e) => e.workflowId === workflowId);
-    const stamped = all.filter((e) => e.workflowVersion === workflowVersion);
+    userId: string,
+  ): Promise<{ count: number; lastCompletedAt: number | null; unstamped: number }> {
+    const completed = Array.from(this.executions.values()).filter(
+      (e) => e.workflowId === workflowId && e.userId === userId && e.status === "completed",
+    );
+    const stamped = completed.filter((e) => e.workflowVersion === workflowVersion);
+    const completedAt = (e: WorkflowExecution) => e.completedAt ?? e.updatedAt;
     return {
       count: stamped.length,
-      lastUpdatedAt: stamped.length ? Math.max(...stamped.map((e) => e.updatedAt)) : null,
-      unstamped: all.filter((e) => !e.workflowVersion).length,
+      lastCompletedAt: stamped.length ? Math.max(...stamped.map(completedAt)) : null,
+      unstamped: completed.filter((e) => !e.workflowVersion).length,
     };
   }
 

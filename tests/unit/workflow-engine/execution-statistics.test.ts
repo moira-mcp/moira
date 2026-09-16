@@ -151,6 +151,15 @@ describe("computeVersionStatistics", () => {
     expect(withoutA.blocks[0].run.medianMs).toBe(3_000);
   });
 
+  test("a run still running is not sampled, whatever it has recorded so far", () => {
+    const running = run("live", "3.0.0", 1_000, [200, 400]);
+    running.status = "running";
+    running.completedAt = undefined;
+    const stats = computeVersionStatistics(graph(), "3.0.0", [running], { now: T });
+    expect(stats.sampledRuns).toBe(0);
+    expect(stats.blocks[0].pass.sampleCount).toBe(0);
+  });
+
   test("runs without timestamps contribute no samples", () => {
     const bare = run("bare", "3.0.0", 1_000, [200, 400]);
     bare.visits = bare.visits!.map(({ enteredAt: _e, leftAt: _l, ...visit }) => visit);
@@ -172,21 +181,58 @@ describe("ProgressStatisticsService", () => {
     const service = new ProgressStatisticsService(repository);
     // 300 distinct asking runs: only the newest 256 keys survive.
     for (let index = 0; index < 300; index += 1) {
-      await service.forVersion("wf", definition, "3.0.0", { excludeExecutionId: `ask-${index}` });
+      await service.forVersion("wf", definition, "3.0.0", {
+        userId: "user",
+        excludeExecutionId: `ask-${index}`,
+      });
     }
     expect(ProgressStatisticsService.cacheSize()).toBe(256);
     const kept = await service.forVersion("wf", definition, "3.0.0", {
+      userId: "user",
       excludeExecutionId: "ask-299",
     });
     // The newest key was cached (same object back); the oldest was evicted (recomputed object).
     expect(
-      await service.forVersion("wf", definition, "3.0.0", { excludeExecutionId: "ask-299" }),
+      await service.forVersion("wf", definition, "3.0.0", {
+        userId: "user",
+        excludeExecutionId: "ask-299",
+      }),
     ).toBe(kept);
     const first = await service.forVersion("wf", definition, "3.0.0", {
+      userId: "user",
       excludeExecutionId: "ask-0",
     });
     expect(first).not.toBe(kept);
     expect(ProgressStatisticsService.cacheSize()).toBe(256);
+  });
+
+  test("samples one user's completed runs only: another user's runs and a running run stay out and do not touch the cache", async () => {
+    ProgressStatisticsService.resetCache();
+    const repository = new InMemoryRepository();
+    const definition = graph();
+    await repository.saveWorkflow(definition, "user", "public");
+    await repository.saveExecution(run("mine", "3.0.0", 1_000, [200, 400], T));
+    const theirs = run("theirs", "3.0.0", 9_000, [9_000, 9_000], T);
+    theirs.userId = "someone-else";
+    await repository.saveExecution(theirs);
+    const service = new ProgressStatisticsService(repository);
+    const mine = await service.forVersion("wf", definition, "3.0.0", { userId: "user", now: T });
+    expect(mine.sampledRuns).toBe(1);
+    expect(mine.blocks[0].run.medianMs).toBe(1_000);
+    const others = await service.forVersion("wf", definition, "3.0.0", {
+      userId: "someone-else",
+      now: T,
+    });
+    expect(others.sampledRuns).toBe(1);
+    expect(others.blocks[0].run.medianMs).toBe(9_000);
+    // A run of mine that is still stepping neither enters the sample nor invalidates the cache.
+    const live = run("live", "3.0.0", 5, [5, 5], T + 50);
+    live.status = "running";
+    live.completedAt = undefined;
+    await repository.saveExecution(live);
+    expect(await service.forVersion("wf", definition, "3.0.0", { userId: "user", now: T })).toBe(
+      mine,
+    );
   });
 
   test("serves the aggregate through the repository and refreshes it when a run of the version changes", async () => {
@@ -197,14 +243,19 @@ describe("ProgressStatisticsService", () => {
     await repository.saveExecution(run("a", "3.0.0", 1_000, [200, 400], T));
     await repository.saveExecution(run("z", null, 5, [5, 5], T));
     const service = new ProgressStatisticsService(repository);
-    const first = await service.forVersion("wf", definition, "3.0.0", { now: T });
+    const first = await service.forVersion("wf", definition, "3.0.0", { userId: "user", now: T });
     expect(first).toMatchObject({ sampledRuns: 1, versionNotRecorded: 1 });
     expect(first.blocks[0].run.medianMs).toBe(1_000);
     // Unchanged state: the cached aggregate is returned as is.
-    expect(await service.forVersion("wf", definition, "3.0.0", { now: T + 1 })).toBe(first);
+    expect(
+      await service.forVersion("wf", definition, "3.0.0", { userId: "user", now: T + 1 }),
+    ).toBe(first);
     // A new run of the version changes the summary: the aggregate is recomputed.
     await repository.saveExecution(run("b", "3.0.0", 3_000, [600, 800], T + 10));
-    const second = await service.forVersion("wf", definition, "3.0.0", { now: T + 20 });
+    const second = await service.forVersion("wf", definition, "3.0.0", {
+      userId: "user",
+      now: T + 20,
+    });
     expect(second).not.toBe(first);
     expect(second.sampledRuns).toBe(2);
     expect(second.blocks[0].run.medianMs).toBe(2_000);

@@ -1,11 +1,14 @@
 /**
- * Per-version duration statistics: what a block typically takes, over the runs that started on
- * one definition version. The sample is every execution stamped with that version and projected
- * onto the current process (block ids are the join key); executions without a stamp are counted
- * apart and never sampled, and the run asking about itself is left out so its own timing does
- * not move the typical value it is compared with. A measured pass is a closed pass with
- * timestamps; a run's block total is the sum of its measured passes. Per-item typical durations
- * come from passes attributed to a bound list item, by item position. Pure.
+ * Per-version duration statistics: what a block typically takes, over the completed runs that
+ * started on one definition version. The sample is every completed execution stamped with that
+ * version and projected onto the current process (block ids are the join key); a running
+ * execution is not sampled (its passes are still being written), executions without a stamp are
+ * counted as not recorded (from the executions given here; a caller with a separate summary may
+ * overwrite that count) and never sampled, and the run asking about itself is left out so its own
+ * timing does not move the typical value it is compared with. A measured pass is a closed pass
+ * with timestamps; a run's block total is the sum of its measured passes. Per-item typical
+ * durations come from passes attributed to a bound list item, by item position. Pure; the caller
+ * scopes the executions it passes (the service passes one user's runs).
  */
 
 import type { WorkflowGraph } from "../interfaces/core-interfaces.js";
@@ -37,9 +40,9 @@ export interface BlockDurationStatistics {
 export interface WorkflowVersionStatistics {
   workflowId: string;
   workflowVersion: string;
-  /** Executions in the sample (stamped with the version, the asking run excluded). */
+  /** Completed executions in the sample (stamped with the version, the asking run excluded). */
   sampledRuns: number;
-  /** Executions of this workflow that carry no version stamp and are therefore not sampled. */
+  /** Completed executions of this workflow that carry no version stamp and are not sampled. */
   versionNotRecorded: number;
   blocks: BlockDurationStatistics[];
   computedAt: number;
@@ -103,6 +106,7 @@ export function computeVersionStatistics(
       continue;
     }
     if (execution.workflowVersion !== workflowVersion) continue;
+    if (execution.status !== "completed") continue;
     const projection = projectExecutionRun(workflow, execution, { now });
     if (!projection) continue;
     sampledRuns += 1;
@@ -110,10 +114,8 @@ export function computeVersionStatistics(
       const closed = node.timing.passes.filter((pass) => !pass.open && pass.durationMs !== null);
       if (closed.length === 0) continue;
       passSamples.get(node.id)?.push(...closed.map((pass) => pass.durationMs!));
-      if (execution.status === "completed") {
-        runSamples.get(node.id)?.push(closed.reduce((sum, pass) => sum + pass.durationMs!, 0));
-        passCounts.get(node.id)?.push(closed.length);
-      }
+      runSamples.get(node.id)?.push(closed.reduce((sum, pass) => sum + pass.durationMs!, 0));
+      passCounts.get(node.id)?.push(closed.length);
       const items = itemSamples.get(node.id);
       if (!items) continue;
       const perItem = new Map<number, number>();

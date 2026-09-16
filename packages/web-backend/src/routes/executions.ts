@@ -147,13 +147,14 @@ router.get(
     if (!graph) throw createApiError.notFound("Workflow not found");
     const progress = projectExecutionRun(graph, execution, { at: parseCursor(req.query.at) });
     if (!progress) throw createApiError.notFound("Workflow has no progress graph");
-    // Typical durations of the version this run started on, without the run itself.
+    // Typical durations of the version this run started on over its owner's completed runs,
+    // without the run itself.
     const statistics = progress.executionWorkflowVersion
       ? await new ProgressStatisticsService(repository).forVersion(
           execution.workflowId,
           graph,
           progress.executionWorkflowVersion,
-          { excludeExecutionId: execution.executionId },
+          { userId: execution.userId, excludeExecutionId: execution.executionId },
         )
       : null;
     res.json({
