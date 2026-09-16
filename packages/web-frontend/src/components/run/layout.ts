@@ -473,9 +473,9 @@ export async function layoutBlocks(
   const rows = [...rowContent.keys()].sort((a, b) => a - b);
   const rowIndex = new Map(rows.map((row, i) => [row, i]));
 
-  // Every edge that leaves the process line travels along a lane in a gap between two rows: a
-  // skip or a hub bundle in the gap just above the upper of its two blocks, a return in the gap
-  // just below the lower one. Gap g lies between rows[g - 1] and rows[g]; g = 0 is above the top
+  // Every edge that leaves the process line travels along a lane in a gap between two rows: when
+  // its blocks share a row, a skip or hub bundle takes the gap above that row and a return the gap
+  // beneath it; when they sit on two rows, every kind takes the gap between those rows. Gap g lies between rows[g - 1] and rows[g]; g = 0 is above the top
   // row, g = rows.length below the bottom one. The lanes are counted first so every gap is given
   // the room its lanes need, and only then are the rows placed.
   interface Lane {
@@ -499,15 +499,18 @@ export async function layoutBlocks(
         const bundleId = `${block.id}->${transition.to}:hub`;
         if (bundled.has(bundleId)) continue;
         bundled.add(bundleId);
-        takeLane(bundleId, Math.min(rs, rt));
+        takeLane(bundleId, rs === rt ? rs : Math.min(rs, rt) + 1);
         continue;
       }
       const id = `${block.id}->${transition.to}:${transition.label}`;
       if (!transition.cycle) {
         if (indexOf.get(transition.to)! <= block.index + 1) continue; // an adjacent elbow
-        takeLane(id, Math.min(rs, rt));
+        // Blocks on two rows: the lane runs in the gap between them (just under the upper one),
+        // so neither vertical crosses a row. Blocks on one row: the gap above it.
+        takeLane(id, rs === rt ? rs : Math.min(rs, rt) + 1);
       } else {
-        takeLane(id, Math.max(rs, rt) + 1);
+        // A return on one row: the gap beneath it; on two rows: the gap between them.
+        takeLane(id, rs === rt ? rs + 1 : Math.min(rs, rt) + 1);
       }
     }
   }

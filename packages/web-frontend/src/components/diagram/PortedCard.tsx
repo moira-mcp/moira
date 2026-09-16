@@ -207,7 +207,15 @@ export function PortedCard({
               litOf(port.id) ? "!border-primary" : "!border-muted-foreground",
               port.kind === "return" && "!border-amber-500",
             )}
-            style={horizontal ? { top: "50%" } : { left: "50%" }}
+            style={
+              horizontal
+                ? side === "in"
+                  ? { top: "50%", left: -9 }
+                  : { top: "50%", right: -9 }
+                : side === "in"
+                  ? { left: "50%", top: -9 }
+                  : { left: "50%", bottom: -9 }
+            }
           />
           <Port port={port} side={side} lit={litOf(port.id)} onHover={onHover} />
         </div>
@@ -322,7 +330,7 @@ export function PortedCard({
                   "!size-2.5 !border-2 !bg-card !border-amber-500",
                   index > 0 && "!opacity-0",
                 )}
-                style={{ left: "calc(50% - 9px)" }}
+                style={{ left: "calc(50% - 9px)", bottom: -11 }}
               />
               <Handle
                 type="target"
@@ -332,7 +340,7 @@ export function PortedCard({
                   "!size-2.5 !border-2 !bg-card !border-amber-500",
                   index > 0 && "!opacity-0",
                 )}
-                style={{ left: "calc(50% + 9px)" }}
+                style={{ left: "calc(50% + 9px)", bottom: -11 }}
               />
             </React.Fragment>
           ))}
