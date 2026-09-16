@@ -105,7 +105,9 @@ const FACT_TONE: Record<string, string> = {
  */
 function HeaderFacts({
   progress,
+  className,
 }: {
+  className?: string;
   progress: RunViewProps["progress"];
 }): React.JSX.Element | null {
   const { taskTitle, goal, facts } = progress;
@@ -115,7 +117,10 @@ function HeaderFacts({
   if (!taskTitle && !title && !goal && facts.length === 0) return null;
   return (
     <div
-      className="flex flex-wrap items-baseline gap-x-2 gap-y-1 border-b bg-card px-3 py-1.5"
+      className={cn(
+        "flex flex-wrap items-baseline gap-x-2 gap-y-1 border-b bg-card px-3 py-1.5",
+        className,
+      )}
       data-testid="run-header-facts"
     >
       {taskTitle && (
@@ -261,23 +266,25 @@ export function MapView({
       className="flex flex-col lg:h-full lg:min-h-0 lg:flex-row lg:overflow-hidden"
       data-testid="map-view"
     >
-      <div className="relative order-1 flex h-[55vh] flex-col overflow-hidden lg:order-2 lg:h-full lg:min-h-0 lg:flex-1">
-        <button
-          type="button"
-          onClick={toggleSidebar}
-          aria-expanded={!collapsed}
-          aria-label={t("pages.runPage.map.contents")}
-          title={t("pages.runPage.map.contents")}
-          data-testid="map-sidebar-toggle"
-          className="absolute left-2 top-2 z-20 hidden rounded-md border bg-background/90 p-1.5 text-muted-foreground shadow-sm hover:text-foreground lg:inline-flex"
-        >
-          {collapsed ? (
-            <PanelLeftOpen className="size-4" aria-hidden="true" />
-          ) : (
-            <PanelLeftClose className="size-4" aria-hidden="true" />
-          )}
-        </button>
-        <HeaderFacts progress={props.progress} />
+      <div className="order-1 flex h-[55vh] flex-col overflow-hidden lg:order-2 lg:h-full lg:min-h-0 lg:flex-1">
+        <div className="flex items-stretch border-b bg-card">
+          <button
+            type="button"
+            onClick={toggleSidebar}
+            aria-expanded={!collapsed}
+            aria-label={t("pages.runPage.map.contents")}
+            title={t("pages.runPage.map.contents")}
+            data-testid="map-sidebar-toggle"
+            className="hidden shrink-0 items-center justify-center border-r px-2.5 text-muted-foreground hover:bg-accent hover:text-foreground lg:inline-flex"
+          >
+            {collapsed ? (
+              <PanelLeftOpen className="size-4" aria-hidden="true" />
+            ) : (
+              <PanelLeftClose className="size-4" aria-hidden="true" />
+            )}
+          </button>
+          <HeaderFacts progress={props.progress} className="min-w-0 flex-1 border-b-0" />
+        </div>
         <MapGuide guideKey={guideKey} />
         <div className="min-h-0 flex-1 overflow-hidden">
           <CanvasDiagram {...props} />

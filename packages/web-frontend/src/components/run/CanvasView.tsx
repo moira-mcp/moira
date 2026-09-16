@@ -296,7 +296,9 @@ function RoutedEdgeView({
   // unless several share one gap, when a chip in the source names them and the lines are
   // labelled on demand; every other kind is muted at rest and labelled on demand.
   const bundled = forward && (laid.parallelCount ?? 1) >= PARALLEL_CHIP_MIN;
-  const showLabel = (forward && !bundled) || lit;
+  // Ports name the transition on both cards; the line carries no label.
+  const showLabel = false;
+  void bundled;
   return (
     <>
       <g {...hover} style={{ cursor: "default" }}>

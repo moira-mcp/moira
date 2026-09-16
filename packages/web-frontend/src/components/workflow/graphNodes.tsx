@@ -327,7 +327,9 @@ export function GraphEdgeView({
   const dim = focus.hovered !== null && !lit;
   // Every edge is drawn at rest, arrowhead included; a routed (corridor) edge is drawn muted and
   // without its label until it is lit, since its label would collide with its neighbours'.
-  const showLabel = (link.kind === "forward" && !route && !chipped) || (lit && !dim);
+  // The transition is named by its ports (the output name on the source, the source on the
+  // target, each with a tooltip); the line itself carries no label.
+  const showLabel = false;
   return (
     <>
       <g

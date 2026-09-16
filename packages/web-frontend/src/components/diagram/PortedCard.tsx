@@ -182,7 +182,7 @@ export function PortedCard({
   const column = (ports: PortInfo[], side: "in" | "out") => (
     <div
       className={cn(
-        "flex min-w-0 flex-col justify-evenly gap-1.5 px-2 py-2",
+        "flex min-w-0 flex-col justify-center gap-1.5 px-2 py-2",
         side === "in" ? "border-r border-dashed" : "border-l border-dashed",
         !horizontal && "flex-row flex-wrap border-0",
       )}
@@ -241,14 +241,21 @@ export function PortedCard({
       {...dataAttributes}
     >
       <div
-        className={cn(
-          "grid min-h-0 flex-1",
-          horizontal
-            ? "grid-cols-[minmax(150px,1fr)_minmax(0,1.6fr)_minmax(150px,1fr)]"
-            : "grid-cols-1",
-        )}
+        className="grid min-h-0 flex-1"
+        style={{
+          // A column of ports exists only where the card has ports on that side.
+          gridTemplateColumns: horizontal
+            ? [
+                inputs.length > 0 ? "minmax(190px,1fr)" : null,
+                "minmax(0,1.35fr)",
+                outputs.length > 0 ? "minmax(190px,1fr)" : null,
+              ]
+                .filter(Boolean)
+                .join(" ")
+            : "1fr",
+        }}
       >
-        {column(inputs, "in")}
+        {inputs.length > 0 && column(inputs, "in")}
         <div className="min-w-0 px-3 py-2.5">
           <div className="flex items-center gap-2">
             {badge ?? (type ? <NodeTypeTag type={type} /> : null)}
@@ -309,15 +316,29 @@ export function PortedCard({
           )}
           {children}
         </div>
-        {column(outputs, "out")}
+        {outputs.length > 0 && column(outputs, "out")}
       </div>
       {selfLoops.length > 0 && (
         <div
-          className="relative flex flex-wrap items-center justify-center gap-1.5 rounded-b-xl border-t border-dashed bg-muted/40 px-3 pb-2.5 pt-2"
+          className="relative grid grid-cols-2 items-center gap-x-2 gap-y-1.5 rounded-b-xl border-t border-dashed bg-muted/40 px-3 pb-2.5 pt-2"
           data-ports="loop"
         >
-          {selfLoops.map((port) => (
-            <Port key={port.id} port={port} side="loop" lit={litOf(port.id)} onHover={onHover} />
+          {/* Two columns meeting at the double port: the left column hugs the centre from the
+              left, the right one from the right; a lone loop sits in the middle. */}
+          {selfLoops.map((port, index) => (
+            <div
+              key={port.id}
+              className={cn(
+                "min-w-0",
+                selfLoops.length === 1
+                  ? "col-span-2 justify-self-center"
+                  : index % 2 === 0
+                    ? "justify-self-end"
+                    : "justify-self-start",
+              )}
+            >
+              <Port port={port} side="loop" lit={litOf(port.id)} onHover={onHover} />
+            </div>
           ))}
           {/* One double port for every self-loop: the edge leaves the left dot and re-enters the right one. */}
           {selfLoops.map((port, index) => (
@@ -330,7 +351,7 @@ export function PortedCard({
                   "!size-2.5 !border-2 !bg-card !border-amber-500",
                   index > 0 && "!opacity-0",
                 )}
-                style={{ left: "calc(50% - 9px)", bottom: -11 }}
+                style={{ left: "calc(50% - 9px)", bottom: -1 }}
               />
               <Handle
                 type="target"
@@ -340,7 +361,7 @@ export function PortedCard({
                   "!size-2.5 !border-2 !bg-card !border-amber-500",
                   index > 0 && "!opacity-0",
                 )}
-                style={{ left: "calc(50% + 9px)", bottom: -11 }}
+                style={{ left: "calc(50% + 9px)", bottom: -1 }}
               />
             </React.Fragment>
           ))}
