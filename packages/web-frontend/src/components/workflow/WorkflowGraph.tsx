@@ -31,7 +31,6 @@ import {
 } from "@xyflow/react";
 import { DiagramViewport } from "../diagram/DiagramViewport";
 import { useOpeningPlacement } from "../diagram/placement";
-import { useLayoutPreset } from "../diagram/layoutPreset";
 import { DiagramToolbar } from "../diagram/DiagramToolbar";
 import { NodeFinder } from "../run/NodeFinder";
 
@@ -375,16 +374,6 @@ export const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
     onWorkflowNavigate,
   ]);
   const [currentLayoutOptions, setCurrentLayoutOptions] = useState(layoutOptions);
-  // The shared layout preset: the graph reads it as a direction — blocks stacked top to bottom
-  // (default, compact, vertical) or laid out left to right (flow).
-  const [preset] = useLayoutPreset();
-  useEffect(() => {
-    const direction = preset === "flow" ? "LR" : "TB";
-    setCurrentLayoutOptions((options) =>
-      options.direction === direction ? options : { ...options, direction },
-    );
-  }, [preset]);
-
   // Node detail sheet state
   const [detailSheetOpen, setDetailSheetOpen] = useState(false);
   const [selectedNodeData, setSelectedNodeData] = useState<Node | null>(null);
@@ -466,6 +455,16 @@ export const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
   // The process the graph is grouped by: the caller's blocks (a run's, with status) or the
   // definition's own derivation.
   const graphBlocks = useMemo(() => blocks ?? definitionBlocks(workflow), [blocks, workflow]);
+  // Cards always carry their ports on the left and right: a grouped graph stacks its blocks top
+  // to bottom (steps run left to right inside), a flat graph runs left to right. The shared
+  // preset changes nothing here yet.
+  useEffect(() => {
+    const direction = graphBlocks.length > 0 ? "TB" : "LR";
+    setCurrentLayoutOptions((options) =>
+      options.direction === direction ? options : { ...options, direction },
+    );
+  }, [graphBlocks]);
+
   const model = useMemo(() => graphModel(workflow, graphBlocks), [workflow, graphBlocks]);
 
   /**
@@ -581,8 +580,7 @@ export const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
             graph,
             current: false,
             error: false,
-            // Steps run across the stacking direction inside a group (see graphLayout).
-            horizontal: graphBlocks.length > 0 ? !horizontal : horizontal,
+            horizontal: true,
             inputs: inputsOf.get(laid.id) ?? [],
             outputs: outputsOf.get(laid.id) ?? [],
             selfLoops: selfOf.get(laid.id) ?? [],
@@ -620,7 +618,7 @@ export const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
             link,
             route: layout.routes[link.id],
             chipped: Boolean(layout.routes[link.id]),
-            horizontal: graphBlocks.length > 0 ? !horizontal : horizontal,
+            horizontal: true,
           },
         }));
         marginRef.current = layout.margin;

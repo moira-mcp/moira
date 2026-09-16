@@ -69,14 +69,11 @@ type BlockNodeData = {
   /** Who the run waits for, so a waiting card is worded for the agent or for a person. */
   waitingFor: "agent" | "user" | null;
   onSelect: (id: string | null) => void;
-  /** Ports on the top and bottom edges (the vertical preset). */
-  vertical: boolean;
 };
 type BlockNode = Node<BlockNodeData, "block">;
 type RoutedEdge = Edge<
   {
     laid: LaidOutEdge;
-    vertical: boolean;
     /** The column the edge's vertical takes beside its source and beside its target (0 = innermost). */
     outRank: number;
     inRank: number;
@@ -152,8 +149,7 @@ const BLOCK_TONE: Record<RunBlock["status"], CardTone> = {
 function BlockNodeView({ data }: NodeProps<BlockNode>): React.JSX.Element {
   const { t } = useTranslation();
   const focus = useTransitionFocus();
-  const { block, selected, isHub, inputs, outputs, selfLoops, waitingFor, onSelect, vertical } =
-    data;
+  const { block, selected, isHub, inputs, outputs, selfLoops, waitingFor, onSelect } = data;
   const keys = [...inputs, ...outputs, ...selfLoops].map((port) => port.id);
   const near = focus.hovered !== null && keys.some((key) => focus.hovered!.has(key));
   const litIds = focus.hovered ?? (focus.pinnedBlock === block.id ? new Set(keys) : null);
@@ -170,7 +166,6 @@ function BlockNodeView({ data }: NodeProps<BlockNode>): React.JSX.Element {
       inputs={inputs}
       outputs={outputs}
       selfLoops={selfLoops}
-      horizontal={!vertical}
       width={BLOCK_WIDTH}
       current={block.status === "active" || block.status === "waiting"}
       selected={selected}
@@ -246,18 +241,8 @@ function portedPath(
   sy: number,
   tx: number,
   ty: number,
-  vertical = false,
   slots: PortSlots = { outRank: 0, inRank: 0 },
 ): { path: string; labelX: number; labelY: number } {
-  if (vertical) {
-    // The layout is horizontal and transposed: route in its space, then swap the axes back.
-    const logical = portedPoints(laid, sy, sx, ty, tx, slots);
-    return {
-      path: roundedPath(logical.points.map(([x, y]) => [y, x] as [number, number])),
-      labelX: logical.labelY,
-      labelY: logical.labelX,
-    };
-  }
   const routed = portedPoints(laid, sx, sy, tx, ty, slots);
   return { path: roundedPath(routed.points), labelX: routed.labelX, labelY: routed.labelY };
 }
@@ -331,7 +316,7 @@ function RoutedEdgeView({
   const { t } = useTranslation();
   const focus = useTransitionFocus();
   if (!data) return null;
-  const { laid, vertical, outRank, inRank } = data;
+  const { laid, outRank, inRank } = data;
   const key = transitionKey(laid.from, laid.transition);
   const lit = isLit(focus, key, laid.from);
   const cycle = laid.kind === "cycle";
@@ -342,10 +327,7 @@ function RoutedEdgeView({
     onMouseEnter: () => focus.setHovered([key]),
     onMouseLeave: () => focus.setHovered(null),
   };
-  const ported = portedPath(laid, sourceX, sourceY, targetX, targetY, vertical, {
-    outRank,
-    inRank,
-  });
+  const ported = portedPath(laid, sourceX, sourceY, targetX, targetY, { outRank, inRank });
   const anchor =
     laid.from === laid.to
       ? `translate(-50%, 0) translate(${ported.labelX}px, ${ported.labelY}px)`
@@ -473,7 +455,7 @@ const edgeTypes = { routed: RoutedEdgeView };
 function useBlockLayout(
   blocks: RunBlock[],
   hubIds: string[],
-  preset: "default" | "compact" | "flow" | "vertical",
+  preset: "default" | "compact" | "flow",
 ): BlockLayout | null {
   const [layout, setLayout] = useState<BlockLayout | null>(null);
   // The layout depends only on the process shape; a projection refresh or a selection change
@@ -656,7 +638,6 @@ function CanvasInner({
           selfLoops,
           waitingFor: progress.waitingFor,
           onSelect: onSelectBlock,
-          vertical: Boolean(layout.transposed),
         },
       };
     });
@@ -689,7 +670,6 @@ function CanvasInner({
         focusable: false,
         data: {
           laid,
-          vertical: Boolean(layout.transposed),
           outRank: ranks.out.get(laid.id) ?? 0,
           inRank: ranks.in.get(laid.id) ?? 0,
         },

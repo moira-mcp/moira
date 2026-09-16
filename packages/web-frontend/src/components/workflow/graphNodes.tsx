@@ -198,7 +198,7 @@ function stepFacts(graph: GraphStep): FactChip[] {
 
 export function StepNodeView({ data, selected }: NodeProps<StepNode>): React.JSX.Element {
   const focus = useTransitionFocus();
-  const { graph, current, error, horizontal, inputs, outputs, selfLoops, arrived, visited } = data;
+  const { graph, current, error, inputs, outputs, selfLoops, arrived, visited } = data;
   const links = [...inputs, ...outputs, ...selfLoops].map((port) => port.id);
   // Hovering the card lights every connection it takes part in, and the cards at their far end.
   const near = focus.hovered !== null && links.some((id) => focus.hovered!.has(id));
@@ -220,7 +220,6 @@ export function StepNodeView({ data, selected }: NodeProps<StepNode>): React.JSX
       inputs={inputs}
       outputs={outputs}
       selfLoops={selfLoops}
-      horizontal={horizontal}
       width={GRAPH_CARD_WIDTH}
       tone={error ? "error" : current ? "active" : visited ? "done" : "neutral"}
       current={current}

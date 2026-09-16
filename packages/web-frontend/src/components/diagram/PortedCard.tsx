@@ -67,8 +67,6 @@ export interface PortedCardProps {
   outputs: PortInfo[];
   /** Transitions from the card to itself; all share the bottom double port. */
   selfLoops: PortInfo[];
-  /** Ports on the left and right (true) or on the top and bottom (false). */
-  horizontal: boolean;
   width: number;
   current?: boolean;
   selected?: boolean;
@@ -213,7 +211,6 @@ export function PortedCard({
   inputs,
   outputs,
   selfLoops,
-  horizontal,
   width,
   tone = "neutral",
   index,
@@ -230,18 +227,16 @@ export function PortedCard({
   dataAttributes,
 }: PortedCardProps): React.JSX.Element {
   const rows = Math.max(inputs.length, outputs.length, 1);
-  const minHeight = horizontal
-    ? PORTED_TITLE_BAND +
-      Math.max(PORTED_HEADER, rows * PORT_ROW + 24) +
-      (selfLoops.length ? SELF_LOOP_BAND : 0)
-    : undefined;
+  const minHeight =
+    PORTED_TITLE_BAND +
+    Math.max(PORTED_HEADER, rows * PORT_ROW + 24) +
+    (selfLoops.length ? SELF_LOOP_BAND : 0);
   const litOf = (id: string) => litIds?.has(id) ?? false;
   const column = (ports: PortInfo[], side: "in" | "out") => (
     <div
       className={cn(
         "flex min-w-0 flex-col justify-center gap-1.5 px-2 py-2",
         side === "in" ? "border-r border-dashed" : "border-l border-dashed",
-        !horizontal && "flex-row flex-wrap border-0",
       )}
       data-ports={side}
     >
@@ -249,30 +244,14 @@ export function PortedCard({
         <div key={port.id} className="relative min-w-0">
           <Handle
             type={side === "in" ? "target" : "source"}
-            position={
-              horizontal
-                ? side === "in"
-                  ? Position.Left
-                  : Position.Right
-                : side === "in"
-                  ? Position.Top
-                  : Position.Bottom
-            }
+            position={side === "in" ? Position.Left : Position.Right}
             id={`${side}:${port.id}`}
             className={cn(
               "!size-2.5 !border-2 !bg-card",
               litOf(port.id) ? "!border-primary" : "!border-muted-foreground",
               port.kind === "return" && "!border-amber-500",
             )}
-            style={
-              horizontal
-                ? side === "in"
-                  ? { top: "50%", left: -9 }
-                  : { top: "50%", right: -9 }
-                : side === "in"
-                  ? { left: "50%", top: -9 }
-                  : { left: "50%", bottom: -9 }
-            }
+            style={side === "in" ? { top: "50%", left: -9 } : { top: "50%", right: -9 }}
           />
           <Port port={port} side={side} lit={litOf(port.id)} onHover={onHover} />
         </div>
@@ -343,15 +322,13 @@ export function PortedCard({
         className="grid min-h-0 flex-1"
         style={{
           // A column of ports exists only where the card has ports on that side.
-          gridTemplateColumns: horizontal
-            ? [
-                inputs.length > 0 ? "minmax(190px,1fr)" : null,
-                "minmax(0,1.35fr)",
-                outputs.length > 0 ? "minmax(190px,1fr)" : null,
-              ]
-                .filter(Boolean)
-                .join(" ")
-            : "1fr",
+          gridTemplateColumns: [
+            inputs.length > 0 ? "minmax(190px,1fr)" : null,
+            "minmax(0,1.35fr)",
+            outputs.length > 0 ? "minmax(190px,1fr)" : null,
+          ]
+            .filter(Boolean)
+            .join(" "),
         }}
       >
         {inputs.length > 0 && column(inputs, "in")}
