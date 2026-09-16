@@ -162,6 +162,10 @@ export interface WorkflowGraphProps {
   selectedNodeId?: string | null;
   /** Steps a run has been through: drawn as visited. */
   visitedNodeIds?: readonly string[];
+  /** What the page puts into the toolbar around the shared controls. */
+  toolbarLeading?: React.ReactNode;
+  toolbarTitle?: React.ReactNode;
+  toolbarTrailing?: React.ReactNode;
 }
 
 /**
@@ -206,6 +210,9 @@ export const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
   selectedVariable = null,
   selectedNodeId = null,
   visitedNodeIds = EMPTY_ERROR_NODE_IDS,
+  toolbarLeading,
+  toolbarTitle,
+  toolbarTrailing,
 }) => {
   // A connection chip names its other end the way the map does: the authored display name, else
   // the node id. The technical graph's `data.label` falls back to the node type ("Agent Task"),
@@ -708,6 +715,9 @@ export const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
     <div className={`h-full relative flex flex-col ${className}`}>
       {showControls && (
         <DiagramToolbar
+          leading={toolbarLeading}
+          title={toolbarTitle}
+          trailing={toolbarTrailing}
           finder={
             <NodeFinder
               blocks={graphBlocks}

@@ -209,10 +209,16 @@ const SIDEBAR_KEY = "moira.map.sidebarCollapsed";
 
 export function MapView({
   sidebar,
+  toolbarExtra,
+  toolbarTrailing,
   ...props
 }: RunViewProps & {
   /** Extra content the page puts above the contents list. */
   sidebar?: React.ReactNode;
+  /** The page's own controls (view tabs, route cursor), placed after the sidebar toggle. */
+  toolbarExtra?: React.ReactNode;
+  /** The page's trailing controls (legend, guide), placed after the diagram's. */
+  toolbarTrailing?: React.ReactNode;
 }): React.JSX.Element {
   const { t } = useTranslation();
   const guideKey = useModeGuideKey();
@@ -249,24 +255,33 @@ export function MapView({
         <div className="min-h-0 flex-1 overflow-hidden">
           <CanvasDiagram
             {...props}
-            toolbarTitle={<HeaderFacts progress={props.progress} compact />}
-            toolbarTrailing={<MapGuide guideKey={guideKey} />}
+            // On a run the page's own toolbar names the run; the map's title would only crowd the row.
+            toolbarTitle={toolbarExtra ? null : <HeaderFacts progress={props.progress} compact />}
+            toolbarTrailing={
+              <>
+                <MapGuide guideKey={guideKey} />
+                {toolbarTrailing}
+              </>
+            }
             toolbarLeading={
-              <button
-                type="button"
-                onClick={toggleSidebar}
-                aria-expanded={!collapsed}
-                aria-label={t("pages.runPage.map.contents")}
-                title={t("pages.runPage.map.contents")}
-                data-testid="map-sidebar-toggle"
-                className="hidden h-8 w-8 items-center justify-center rounded-md border border-transparent text-muted-foreground hover:border-border hover:bg-accent hover:text-foreground lg:inline-flex"
-              >
-                {collapsed ? (
-                  <PanelLeftOpen className="size-4" aria-hidden="true" />
-                ) : (
-                  <PanelLeftClose className="size-4" aria-hidden="true" />
-                )}
-              </button>
+              <>
+                <button
+                  type="button"
+                  onClick={toggleSidebar}
+                  aria-expanded={!collapsed}
+                  aria-label={t("pages.runPage.map.contents")}
+                  title={t("pages.runPage.map.contents")}
+                  data-testid="map-sidebar-toggle"
+                  className="hidden h-8 w-8 items-center justify-center rounded-md border border-transparent text-muted-foreground hover:border-border hover:bg-accent hover:text-foreground lg:inline-flex"
+                >
+                  {collapsed ? (
+                    <PanelLeftOpen className="size-4" aria-hidden="true" />
+                  ) : (
+                    <PanelLeftClose className="size-4" aria-hidden="true" />
+                  )}
+                </button>
+                {toolbarExtra}
+              </>
             }
           />
         </div>

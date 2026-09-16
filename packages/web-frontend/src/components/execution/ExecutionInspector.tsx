@@ -64,6 +64,7 @@ import { MapView } from "../run/MapView";
 import { BlockDetailPanel } from "../run/BlockDetailPanel";
 import { NodePanel } from "../run/NodePanel";
 import { useStoredFlag } from "../diagram/useStoredFlag";
+import type { HighlightRequest } from "../diagram/useHighlightTarget";
 import { PanelRightClose, PanelRightOpen } from "lucide-react";
 import { RouteSummary } from "../run/RouteSummary";
 import { nodeOwners } from "../run/model";
@@ -353,6 +354,7 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
     () => new Set((shownProgress?.route ?? []).map((visit) => visit.nodeId)),
     [shownProgress],
   );
+  const visitedNodeList = useMemo(() => [...visitedNodeIds], [visitedNodeIds]);
 
   // Lock history for both admin and user views, kept while a refetch is pending.
   const lockHistory = useResource<LockRecord[]>(
@@ -428,6 +430,13 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
   // the selected block, the panel shows the step with a breadcrumb back to the block.
   const [panelNodeId, setPanelNodeId] = useState<string | null>(null);
   const [panelCollapsed, togglePanel] = useStoredFlag("moira.run.panelCollapsed");
+  // A variable reference token was clicked: open the variables tab and mark the variable there.
+  const [variableHighlight, setVariableHighlight] = useState<HighlightRequest | null>(null);
+  const goToVariable = useCallback((name: string) => {
+    setChosenTab("variables");
+    setVariableHighlight((previous) => ({ name, token: (previous?.token ?? 0) + 1 }));
+  }, []);
+  const [legendOpen, setLegendOpen] = useState(false);
   const handleNodeClick = useCallback(
     (_event: React.MouseEvent, node: { id: string }) => {
       const owner = nodeOwners(blocks).get(node.id) ?? null;
@@ -615,6 +624,78 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
   const journal = execution.errors ?? [];
   const errorsCount = journal.filter(isRefusalEntry).length;
   const degradationsCount = journal.length - errorsCount;
+  // The run's own controls live in the diagram toolbar with the map's and the graph's, so the
+  // page has one row above the diagram: view tabs and route cursor first, legend and guide last.
+  const runControls = progress ? (
+    <>
+      <Tabs value={mode} onValueChange={(value) => update({ [VIEW_PARAM]: value })}>
+        <TabsList aria-label={t("pages.runPage.modeLabel")} className="h-8" data-testid="run-modes">
+          {MODES.map((definition) => {
+            const Icon = definition.icon;
+            return (
+              <TabsTrigger
+                key={definition.id}
+                value={definition.id}
+                data-mode={definition.id}
+                className="gap-1 text-xs"
+              >
+                <Icon className="h-3.5 w-3.5" aria-hidden="true" />
+                {t(`pages.runPage.modes.${definition.id}`)}
+              </TabsTrigger>
+            );
+          })}
+        </TabsList>
+      </Tabs>
+      {progress.routeRecorded && (
+        <div className="hidden shrink-0 lg:block">
+          <RunCursor
+            route={progress.route}
+            cursor={cursor}
+            onSetCursor={(at) => update({ [AT_PARAM]: at === null ? null : String(at) })}
+          />
+        </div>
+      )}
+    </>
+  ) : null;
+  const runTrailing = progress ? (
+    <>
+      <div className="relative">
+        <button
+          type="button"
+          onClick={() => setLegendOpen((was) => !was)}
+          aria-expanded={legendOpen}
+          title={t("pages.runPage.legend.title", { defaultValue: "Легенда статусов" })}
+          aria-label={t("pages.runPage.legend.title", { defaultValue: "Легенда статусов" })}
+          className={cn(
+            "inline-flex h-8 w-8 items-center justify-center rounded-md border border-transparent text-muted-foreground hover:border-border hover:bg-accent hover:text-foreground",
+            legendOpen && "border-primary/50 bg-primary/10 text-primary",
+          )}
+          data-testid="legend-open"
+        >
+          <ListChecks className="size-4" aria-hidden="true" />
+        </button>
+        {legendOpen && (
+          <div className="absolute right-0 top-full z-20 mt-1 rounded-lg border bg-popover p-3 shadow-md">
+            <StatusLegend
+              waitingFor={shownProgress?.waitingFor ?? null}
+              className="flex-col items-start gap-1"
+            />
+          </div>
+        )}
+      </div>
+      <button
+        type="button"
+        onClick={() => update({ [GUIDE_PARAM]: "1" })}
+        title={t("pages.runPage.guide.open")}
+        aria-label={t("pages.runPage.guide.open")}
+        className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-transparent text-primary hover:border-border hover:bg-primary/10"
+        data-testid="guide-open"
+      >
+        <Compass className="size-4" aria-hidden="true" />
+      </button>
+    </>
+  ) : null;
+
   const technicalGraph = (
     <Suspense fallback={<DiagramSkeleton />}>
       <WorkflowGraph
@@ -630,6 +711,11 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
         showNodeDetails={false}
         focusRequest={focusRequest}
         selectedNodeId={focusRequest?.nodeId ?? null}
+        visitedNodeIds={visitedNodeList}
+        onVariableSelect={goToVariable}
+        selectedVariable={variableHighlight?.name ?? null}
+        toolbarLeading={runControls}
+        toolbarTrailing={runTrailing}
       />
     </Suspense>
   );
@@ -784,60 +870,14 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
         >
           {progress && shownProgress ? (
             <>
-              <div
-                className="border-b bg-card px-3 py-1.5 flex flex-wrap items-center gap-2"
-                data-testid="run-header"
-              >
-                <Tabs value={mode} onValueChange={(value) => update({ [VIEW_PARAM]: value })}>
-                  <TabsList
-                    aria-label={t("pages.runPage.modeLabel")}
-                    className="h-8"
-                    data-testid="run-modes"
-                  >
-                    {MODES.map((definition) => {
-                      const Icon = definition.icon;
-                      return (
-                        <TabsTrigger
-                          key={definition.id}
-                          value={definition.id}
-                          data-mode={definition.id}
-                          className="gap-1 text-xs"
-                        >
-                          <Icon className="h-3.5 w-3.5" aria-hidden="true" />
-                          {t(`pages.runPage.modes.${definition.id}`)}
-                        </TabsTrigger>
-                      );
-                    })}
-                  </TabsList>
-                </Tabs>
-                {progress.routeRecorded && (
-                  <RunCursor
-                    route={progress.route}
-                    cursor={cursor}
-                    onSetCursor={(at) => update({ [AT_PARAM]: at === null ? null : String(at) })}
-                  />
-                )}
-                <div className="flex-1" />
-                <StatusLegend
-                  waitingFor={shownProgress?.waitingFor ?? null}
-                  className="hidden xl:flex"
-                />
-                <button
-                  type="button"
-                  onClick={() => update({ [GUIDE_PARAM]: "1" })}
-                  className="inline-flex items-center gap-1.5 rounded-lg border bg-primary/5 px-2.5 py-1 text-xs font-medium text-primary hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                  data-testid="guide-open"
-                >
-                  <Compass className="size-3.5" aria-hidden="true" />
-                  {t("pages.runPage.guide.open")}
-                </button>
-              </div>
               {/* Both views stay mounted once they have been shown: the hidden one keeps its
                   state (the map's selection, the graph's viewport) so a switch is instant. */}
               <div className="lg:flex-1 lg:min-h-0">
                 {mountedViews.current.has("map") && (
                   <div className={cn("lg:h-full", mode !== "map" && "hidden")}>
                     <MapView
+                      toolbarExtra={runControls}
+                      toolbarTrailing={runTrailing}
                       progress={shownProgress}
                       blocks={shownBlocks}
                       route={progress.route}
@@ -1007,7 +1047,7 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
                       nodeId={panelNodeId}
                       onBack={() => setPanelNodeId(null)}
                       onFocusNode={focusNode}
-                      onSelectVariable={() => setChosenTab("variables")}
+                      onSelectVariable={goToVariable}
                     />
                   ) : (
                     <BlockDetailPanel
@@ -1040,6 +1080,7 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
                   onAnswer={handleAnswer}
                   onSavePath={canEdit ? handleSavePath : undefined}
                   onFullscreen={() => setVariablesFullscreen(true)}
+                  highlight={variableHighlight}
                 />
               </TabsContent>
 

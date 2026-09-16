@@ -71,6 +71,7 @@ import { MapView } from "../components/run/MapView";
 import { BlockDetailPanel } from "../components/run/BlockDetailPanel";
 import { NodePanel } from "../components/run/NodePanel";
 import { useStoredFlag } from "../components/diagram/useStoredFlag";
+import type { HighlightRequest } from "../components/diagram/useHighlightTarget";
 import { PanelRightClose, PanelRightOpen } from "lucide-react";
 import { GuidanceHint } from "../components/run/Guidance";
 import { Walkthrough, type GuideStep } from "../components/run/Walkthrough";
@@ -174,6 +175,11 @@ export const FlowPage: React.FC = () => {
   const [focusRequest, setFocusRequest] = useState<{ nodeId: string; token: number } | null>(null);
   const [chosenTab, setChosenTab] = useState<FlowPanelTab>("block");
   const [panelCollapsed, togglePanel] = useStoredFlag("moira.flow.panelCollapsed");
+  const [variableHighlight, setVariableHighlight] = useState<HighlightRequest | null>(null);
+  const goToVariable = useCallback((name: string) => {
+    setChosenTab("variables");
+    setVariableHighlight((previous) => ({ name, token: (previous?.token ?? 0) + 1 }));
+  }, []);
   const [edits, setEdits] = useFlowEdits();
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -477,6 +483,8 @@ export const FlowPage: React.FC = () => {
             showMinimap={false}
             focusRequest={focusRequest}
             selectedNodeId={focusRequest?.nodeId ?? null}
+            onVariableSelect={goToVariable}
+            selectedVariable={variableHighlight?.name ?? null}
           />
         </Suspense>
       </div>
@@ -855,7 +863,7 @@ export const FlowPage: React.FC = () => {
                           nodeId={selectedNode.id}
                           onBack={handleClearSelection}
                           onFocusNode={focusNode}
-                          onSelectVariable={() => setChosenTab("variables")}
+                          onSelectVariable={goToVariable}
                         />
                       ) : (
                         <BlockDetailPanel
@@ -877,7 +885,10 @@ export const FlowPage: React.FC = () => {
                       value="variables"
                       className="scrollbar-thin flex-1 overflow-auto m-0"
                     >
-                      <RegistryPanel registry={edited.variableRegistry} />
+                      <RegistryPanel
+                        registry={edited.variableRegistry}
+                        highlight={variableHighlight}
+                      />
                     </TabsContent>
                   </Tabs>
                 </div>

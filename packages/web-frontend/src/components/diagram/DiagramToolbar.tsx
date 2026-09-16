@@ -68,14 +68,14 @@ export function DiagramToolbar({
 }): React.JSX.Element {
   return (
     <div
-      className="flex shrink-0 items-center gap-1 border-b bg-card px-2 py-1"
+      className="flex shrink-0 items-center gap-1 overflow-hidden border-b bg-card px-2 py-1"
       data-testid={testId}
       role="toolbar"
     >
-      {leading}
-      {title && <div className="mx-1 min-w-0 flex-1">{title}</div>}
+      {leading && <div className="flex shrink-0 items-center gap-2">{leading}</div>}
+      {title && <div className="mx-1 hidden min-w-0 flex-1 xl:block">{title}</div>}
       {finder && (
-        <div className={cn("mx-1 min-w-0 basis-[220px] max-w-[320px]", !title && "flex-1")}>
+        <div className={cn("mx-1 min-w-[140px] basis-[160px] max-w-[320px]", !title && "flex-1")}>
           {finder}
         </div>
       )}

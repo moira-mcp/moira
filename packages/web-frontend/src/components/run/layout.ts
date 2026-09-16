@@ -207,6 +207,8 @@ async function placeBlocks(
   sizes: ReadonlyMap<string, { width: number; height: number }>,
   rankSep: number,
   nodeSep: number = BASE_NODE_SEP,
+  /** `tree`: branches fan out from their fork (Brandes-Köpf, balanced); default: network simplex. */
+  placement: "rows" | "tree" = "rows",
 ): Promise<Placed[]> {
   const { default: ELK } = await import("elkjs/lib/elk.bundled.js");
   const elk = new ELK();
@@ -225,7 +227,10 @@ async function placeBlocks(
       "elk.randomSeed": "1",
       "elk.spacing.nodeNode": String(nodeSep),
       "elk.layered.spacing.nodeNodeBetweenLayers": String(rankSep),
-      "elk.layered.nodePlacement.strategy": "NETWORK_SIMPLEX",
+      "elk.layered.nodePlacement.strategy":
+        placement === "tree" ? "BRANDES_KOEPF" : "NETWORK_SIMPLEX",
+      "elk.layered.nodePlacement.bk.fixedAlignment": "BALANCED",
+      "elk.layered.nodePlacement.bk.edgeStraightening": "IMPROVE_STRAIGHTNESS",
       "elk.layered.crossingMinimization.strategy": "LAYER_SWEEP",
       "elk.layered.considerModelOrder.strategy": "NODES_AND_EDGES",
       "elk.padding": `[top=${MARGIN},left=${MARGIN},bottom=${MARGIN},right=${MARGIN}]`,
@@ -453,7 +458,13 @@ export async function layoutBlocks(
   if (vertical) {
     for (const [id, size] of sizes) sizes.set(id, { width: size.height, height: size.width });
   }
-  const placed = await placeBlocks(blocks, sizes, rankSep, NODE_SEP);
+  const placed = await placeBlocks(
+    blocks,
+    sizes,
+    rankSep,
+    NODE_SEP,
+    preset === "flow" ? "tree" : "rows",
+  );
   const placedById = new Map(placed.map((p) => [p.id, p]));
   const xs = [...new Set(placed.map((p) => Math.round(p.x)))].sort((a, b) => a - b);
   const rankOf = new Map(placed.map((p) => [p.id, xs.indexOf(Math.round(p.x))]));

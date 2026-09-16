@@ -38,6 +38,20 @@ export const progressAuthoringSchema = z
               .object({ default: z.string().min(1).optional() })
               .strict()
               .optional(),
+            /**
+             * The list the block works through, bound to existing variables: the array of items,
+             * the item field shown as its title, and the counters that say how far the block is.
+             */
+            list: z
+              .object({
+                items: z.string().min(1).optional(),
+                title: z.string().min(1).optional(),
+                current: z.string().min(1).optional(),
+                total: z.string().min(1).optional(),
+                indexBase: z.union([z.literal(0), z.literal(1)]).optional(),
+              })
+              .strict()
+              .optional(),
           })
           .strict(),
       )
