@@ -62,6 +62,9 @@ import { cn } from "@/lib/utils";
 import { MODES, resolveMode, type RunViewMode } from "../run/modes";
 import { MapView } from "../run/MapView";
 import { BlockDetailPanel } from "../run/BlockDetailPanel";
+import { NodePanel } from "../run/NodePanel";
+import { RouteSummary } from "../run/RouteSummary";
+import { nodeOwners } from "../run/model";
 import { VariablesPanel } from "../run/VariablesPanel";
 import { RunCursor } from "../run/RunCursor";
 import { StatusLegend } from "../run/status";
@@ -414,9 +417,24 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
     }
   }, [executionId, lockReason, loadExecution, loadLocks, activeTab]);
 
-  const handleNodeClick = useCallback((_event: React.MouseEvent, _node: { id: string }) => {
-    // Node details are shown via NodeDetailSheet in WorkflowGraph
-  }, []);
+  // A step clicked on the graph opens as the second level of the block panel: its block becomes
+  // the selected block, the panel shows the step with a breadcrumb back to the block.
+  const [panelNodeId, setPanelNodeId] = useState<string | null>(null);
+  const handleNodeClick = useCallback(
+    (_event: React.MouseEvent, node: { id: string }) => {
+      const owner = nodeOwners(blocks).get(node.id) ?? null;
+      if (owner) update({ [BLOCK_PARAM]: owner });
+      setPanelNodeId(node.id);
+      setChosenTab("block");
+    },
+    [blocks, update],
+  );
+  // Selecting a block that does not own the shown step (contents, map) leaves the step level.
+  useEffect(() => {
+    setPanelNodeId((current) =>
+      current && nodeOwners(blocks).get(current) !== selectedBlockId ? null : current,
+    );
+  }, [selectedBlockId, blocks]);
 
   // Opening the graph with a block selected brings that block's first step into view, even when
   // the selection was made while the graph was hidden (a hidden viewport cannot be fitted).
@@ -600,7 +618,7 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
         onNodeClick={handleNodeClick}
         showControls={true}
         showMinimap={false}
-        showNodeDetails={true}
+        showNodeDetails={false}
         focusRequest={focusRequest}
         selectedNodeId={focusRequest?.nodeId ?? null}
       />
@@ -941,19 +959,35 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
 
             {progress && (
               <TabsContent value="block" className="scrollbar-thin flex-1 overflow-auto m-0">
-                <BlockDetailPanel
-                  block={shownBlock}
-                  blocks={shownBlocks}
-                  workflow={workflow.workflow}
-                  waitingFor={shownProgress?.waitingFor ?? null}
-                  progress={shownProgress ?? undefined}
+                <RouteSummary
                   route={progress.route}
-                  statistics={shownProgress?.statistics}
-                  cursor={cursor}
-                  onSelectBlock={(id) => update({ [BLOCK_PARAM]: id })}
-                  onSetCursor={(at) => update({ [AT_PARAM]: at === null ? null : String(at) })}
-                  onFocusNode={focusNode}
+                  workflow={workflow.workflow}
+                  blocks={shownBlocks}
                 />
+                {panelNodeId && workflow.workflow ? (
+                  <NodePanel
+                    workflow={workflow.workflow}
+                    blocks={shownBlocks}
+                    nodeId={panelNodeId}
+                    onBack={() => setPanelNodeId(null)}
+                    onFocusNode={focusNode}
+                    onSelectVariable={() => setChosenTab("variables")}
+                  />
+                ) : (
+                  <BlockDetailPanel
+                    block={shownBlock}
+                    blocks={shownBlocks}
+                    workflow={workflow.workflow}
+                    waitingFor={shownProgress?.waitingFor ?? null}
+                    progress={shownProgress ?? undefined}
+                    route={progress.route}
+                    statistics={shownProgress?.statistics}
+                    cursor={cursor}
+                    onSelectBlock={(id) => update({ [BLOCK_PARAM]: id })}
+                    onSetCursor={(at) => update({ [AT_PARAM]: at === null ? null : String(at) })}
+                    onFocusNode={focusNode}
+                  />
+                )}
               </TabsContent>
             )}
 

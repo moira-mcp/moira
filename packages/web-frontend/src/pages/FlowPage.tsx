@@ -53,7 +53,6 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { WorkflowSidebar } from "../components/workflow/WorkflowSidebar";
 import WorkflowBreadcrumbComponent from "../components/workflow/WorkflowBreadcrumb";
 import { ShareDialog } from "../components/workflow/ShareDialog";
 import { ConfirmDialog } from "../components/confirm-dialog";
@@ -70,6 +69,7 @@ import { ROUTES } from "../constants/routes";
 import type { WorkflowGraph } from "../types/workflow-types";
 import { MapView } from "../components/run/MapView";
 import { BlockDetailPanel } from "../components/run/BlockDetailPanel";
+import { NodePanel } from "../components/run/NodePanel";
 import { GuidanceHint } from "../components/run/Guidance";
 import { Walkthrough, type GuideStep } from "../components/run/Walkthrough";
 import { runBlocks } from "../components/run/model";
@@ -169,10 +169,6 @@ export const FlowPage: React.FC = () => {
   const [shareDialogOpen, setShareDialogOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [selectedNode, setSelectedNode] = useState<Node | null>(null);
-  const [nodeConnections, setNodeConnections] = useState<{
-    incoming: Array<{ id: string; label: string }>;
-    outgoing: Array<{ id: string; label: string; connectionType: string }>;
-  }>({ incoming: [], outgoing: [] });
   const [focusRequest, setFocusRequest] = useState<{ nodeId: string; token: number } | null>(null);
   const [chosenTab, setChosenTab] = useState<FlowPanelTab>("block");
   const [edits, setEdits] = useFlowEdits();
@@ -386,19 +382,22 @@ export const FlowPage: React.FC = () => {
   const handleNodeSelect = useCallback(
     (
       node: Node | null,
-      connections: {
+      _connections: {
         incoming: Array<{ id: string; label: string }>;
         outgoing: Array<{ id: string; label: string; connectionType: string }>;
       },
     ) => {
       setSelectedNode(node);
-      setNodeConnections(connections);
+      if (node) {
+        const owner = blocks.find((b) => b.nodeIds.includes(node.id));
+        if (owner) update({ [BLOCK_PARAM]: owner.id });
+        setChosenTab("block");
+      }
     },
-    [],
+    [blocks, update],
   );
   const handleClearSelection = useCallback(() => {
     setSelectedNode(null);
-    setNodeConnections({ incoming: [], outgoing: [] });
   }, []);
   const onPanel = useCallback((tab: FlowPanelTab) => setChosenTab(tab), []);
 
@@ -478,14 +477,6 @@ export const FlowPage: React.FC = () => {
           />
         </Suspense>
       </div>
-      <WorkflowSidebar
-        workflow={edited}
-        selectedNode={selectedNode}
-        incomingNodes={nodeConnections.incoming}
-        outgoingNodes={nodeConnections.outgoing}
-        onClearSelection={handleClearSelection}
-        className="w-[340px] lg:w-[400px] shrink-0 hidden md:flex"
-      />
     </div>
   );
 
@@ -804,8 +795,6 @@ export const FlowPage: React.FC = () => {
                 className={cn(
                   "flex flex-col bg-card overflow-hidden border-t lg:border-t-0 lg:border-l",
                   "max-h-[38vh] lg:max-h-none lg:w-[380px] xl:w-[440px] shrink-0",
-                  // The graph brings its own node sidebar; the block panel steps aside for it.
-                  mode === "graph" && "hidden",
                 )}
                 data-testid="flow-panel"
               >
@@ -825,16 +814,30 @@ export const FlowPage: React.FC = () => {
                     </TabsTrigger>
                   </TabsList>
                   <TabsContent value="block" className="scrollbar-thin flex-1 overflow-auto m-0">
-                    <BlockDetailPanel
-                      block={shownBlock}
-                      blocks={blocks}
-                      workflow={edited}
-                      statistics={statistics}
-                      statisticsPending={statisticsResource.pending}
-                      statisticsError={statisticsResource.error}
-                      onSelectBlock={(blockId) => update({ [BLOCK_PARAM]: blockId })}
-                      onFocusNode={focusNode}
-                    />
+                    {selectedNode ? (
+                      <NodePanel
+                        workflow={edited}
+                        blocks={blocks}
+                        nodeId={selectedNode.id}
+                        onBack={handleClearSelection}
+                        onFocusNode={focusNode}
+                        onSelectVariable={() => setChosenTab("variables")}
+                      />
+                    ) : (
+                      <BlockDetailPanel
+                        block={shownBlock}
+                        blocks={blocks}
+                        workflow={edited}
+                        statistics={statistics}
+                        statisticsPending={statisticsResource.pending}
+                        statisticsError={statisticsResource.error}
+                        onSelectBlock={(blockId) => {
+                          handleClearSelection();
+                          update({ [BLOCK_PARAM]: blockId });
+                        }}
+                        onFocusNode={focusNode}
+                      />
+                    )}
                   </TabsContent>
                   <TabsContent
                     value="variables"
