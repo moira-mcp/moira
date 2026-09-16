@@ -22,6 +22,7 @@ import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import {
   Background,
+  MiniMap,
   type Edge,
   type EdgeProps,
   type Node,
@@ -41,6 +42,7 @@ import { DiagramViewport } from "../diagram/DiagramViewport";
 import { diagramInteractionProps } from "../diagram/interaction";
 import { useOpeningPlacement } from "../diagram/placement";
 import { useLayoutPreset } from "../diagram/layoutPreset";
+import { useStoredFlag } from "../diagram/useStoredFlag";
 import { DiagramToolbar } from "../diagram/DiagramToolbar";
 import { NodeFinder } from "./NodeFinder";
 
@@ -51,7 +53,14 @@ const CANVAS_ROW_ANCHOR = 0.3;
 import { PassCount, StatusChip } from "./status";
 import { BLOCK_WIDTH, layoutBlocks, type BlockLayout, type LaidOutEdge } from "./layout";
 import { formatDuration } from "./duration";
-import { currentBlockId, stepsOf, type RunBlock, type RunViewProps, type StepInfo } from "./model";
+import {
+  currentBlockId,
+  orderNodeIds,
+  stepsOf,
+  type RunBlock,
+  type RunViewProps,
+  type StepInfo,
+} from "./model";
 import { transitionKey } from "./chips";
 import { TransitionFocusProvider, isFlashed, isLit, useTransitionFocus } from "./focus";
 
@@ -560,8 +569,9 @@ function portRanks(
 
 /** What the map view puts into the diagram's toolbar around the shared controls. */
 export interface CanvasToolbarSlots {
+  /** The page's view-mode switch, first in the toolbar. */
+  toolbarModes?: React.ReactNode;
   toolbarLeading?: React.ReactNode;
-  toolbarTitle?: React.ReactNode;
   toolbarTrailing?: React.ReactNode;
 }
 
@@ -616,10 +626,11 @@ function CanvasInner({
   onSelectBlock,
   onFocusNode,
   onSelectListItem,
+  toolbarModes,
   toolbarLeading,
-  toolbarTitle,
   toolbarTrailing,
 }: RunViewProps & CanvasToolbarSlots): React.JSX.Element {
+  const [minimapOn, toggleMinimap] = useStoredFlag("moira.diagram.minimap", true);
   const { t } = useTranslation();
   const { actualTheme } = useTheme();
   const [preset] = useLayoutPreset();
@@ -633,8 +644,12 @@ function CanvasInner({
   const focusId = currentBlockId(blocks);
   const wrapperRef = useRef<HTMLDivElement>(null);
   const placeViewport = useCallback(
-    (rf: ReactFlowInstance<BlockNode, RoutedEdge>, blockId: string | null) => {
+    (rf: ReactFlowInstance<BlockNode, RoutedEdge>, key: string | null) => {
       if (!layout) return;
+      // `preset|block|WxH`: the block to centre, or "first" for the definition's opening view.
+      const parts = (key ?? "").split("|");
+      const blockId = parts[1] && parts[1] !== "first" ? parts[1] : null;
+      const animated = parts[3] === "move";
       if (!blockId) {
         // A definition: keep the fitted zoom but start at the first block with the block row in
         // the upper third, so a process wider than the viewport is read from its beginning; the
@@ -653,8 +668,8 @@ function CanvasInner({
       const laid = layout.blocks.find((b) => b.id === blockId);
       if (!laid) return;
       void rf.setCenter(laid.x + laid.width / 2, laid.y + laid.height / 2 + 40, {
-        zoom: 0.85,
-        duration: 0,
+        zoom: animated ? Math.min(rf.getZoom(), 0.85) : 0.85,
+        duration: animated ? 450 : 0,
       });
     },
     [layout, blocks],
@@ -662,7 +677,15 @@ function CanvasInner({
   // The opening placement (centre on the current block) runs once per laid-out process, not on
   // every projection refresh: re-placing on each render is what made the map jump to the active
   // block whenever another one was selected.
-  const placementKey = layout ? `${focusId ?? "first"}:${layout.width}x${layout.height}` : null;
+  // The placement follows the laid-out process and the reader's preset: a new preset re-lays
+  // the map, and the camera moves (animated) to the selected block, else the current one.
+  const placedOnce = useRef(false);
+  const placementKey = layout
+    ? `${preset}|${selectedBlockId ?? focusId ?? "first"}|${layout.width}x${layout.height}|${placedOnce.current ? "move" : "open"}`
+    : null;
+  useEffect(() => {
+    if (layout) placedOnce.current = true;
+  }, [layout]);
   const { onInit: placementInit, onReady } = useOpeningPlacement(
     placeViewport,
     placementKey as unknown as string | null,
@@ -677,6 +700,15 @@ function CanvasInner({
     const timer = setTimeout(() => setArrival(null), 1800);
     return () => clearTimeout(timer);
   }, [arrival]);
+  // A block picked elsewhere (the contents, a panel link): the camera moves through the
+  // placement key; the block pulses so the move reads as an arrival.
+  const lastSelected = useRef<string | null>(selectedBlockId);
+  useEffect(() => {
+    if (selectedBlockId === lastSelected.current) return;
+    lastSelected.current = selectedBlockId;
+    if (selectedBlockId)
+      setArrival((previous) => ({ blockId: selectedBlockId, token: (previous?.token ?? 0) + 1 }));
+  }, [selectedBlockId]);
   const goTo = useCallback(
     (blockId: string, key: string) => {
       void rfRef.current?.fitView({
@@ -781,7 +813,7 @@ function CanvasInner({
           waitingFor: progress.waitingFor,
           onSelect: onSelectBlock,
           vertical: Boolean(layout.transposed),
-          steps: stepsOf(workflow, block.nodeIds),
+          steps: stepsOf(workflow, orderNodeIds(workflow, block.nodeIds)),
           onFocusNode,
           onGoTo: goTo,
           arrived: arrival?.blockId === block.id,
@@ -860,13 +892,22 @@ function CanvasInner({
   return (
     <div className="flex h-full w-full flex-col overflow-hidden">
       <DiagramToolbar
+        modes={toolbarModes}
         leading={toolbarLeading}
-        title={toolbarTitle}
         trailing={toolbarTrailing}
-        finder={<NodeFinder blocks={blocks} steps={allSteps} onPick={onSelectBlock} />}
+        finder={(close) => (
+          <NodeFinder
+            blocks={blocks}
+            steps={allSteps}
+            onPick={onSelectBlock}
+            autoFocus
+            onClose={close}
+          />
+        )}
         onZoomIn={() => void rfRef.current?.zoomIn({ duration: 200 })}
         onZoomOut={() => void rfRef.current?.zoomOut({ duration: 200 })}
         onFit={() => rfRef.current && fitOverview(rfRef.current)}
+        minimap={{ on: minimapOn, toggle: toggleMinimap }}
         testId="map-toolbar"
       />
       <div
@@ -888,6 +929,24 @@ function CanvasInner({
           showControls={false}
         >
           <DiagramMarkers />
+          {minimapOn && (
+            <MiniMap
+              position="bottom-right"
+              pannable
+              zoomable
+              nodeColor={(node) => {
+                const status = (node.data as { block?: RunBlock }).block?.status;
+                return status === "active" || status === "waiting"
+                  ? "var(--primary)"
+                  : status === "done" || status === "repeated"
+                    ? "var(--success)"
+                    : "var(--muted-foreground)";
+              }}
+              maskColor="color-mix(in oklch, var(--background) 60%, transparent)"
+              className="!bg-card !border !border-border !rounded-lg"
+              data-testid="map-minimap"
+            />
+          )}
           <Background gap={24} size={1} />
         </DiagramViewport>
       </div>

@@ -44,7 +44,7 @@ export function TypicalDurations({
       {error ? (
         <p
           className="text-sm text-muted-foreground"
-          title={error}
+          data-hint={error}
           data-testid="typical-durations-error"
         >
           {t("pages.runPage.typical.unavailable")}

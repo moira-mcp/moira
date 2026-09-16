@@ -304,7 +304,7 @@ export function DiagnosticBadge({
       role="alert"
       data-testid="inline-diagnostic"
       data-diagnostic={own.map((d) => d.code).join(",")}
-      title={own.map((d) => d.message).join("\n")}
+      data-hint={own.map((d) => d.message).join("\n")}
     >
       <AlertTriangle className="mt-0.5 size-3 shrink-0" aria-hidden="true" />
       <span className="min-w-0">

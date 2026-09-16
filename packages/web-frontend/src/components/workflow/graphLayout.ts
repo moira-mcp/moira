@@ -25,9 +25,24 @@ export const APPROACH_COLUMNS = 4;
 /** Distance between two return lanes in the margin, which holds one lane per return. */
 const MARGIN_LANE_STEP = 8;
 const GRAPH_GROUP_HEADER = 36;
-const NODE_GAP = 20;
-const LAYER_GAP = 76;
-const GROUP_GAP = 56;
+const BASE_NODE_GAP = 20;
+const BASE_LAYER_GAP = 76;
+const BASE_GROUP_GAP = 56;
+/** The gaps a preset scales: `compact` tightens them, `flow` gives the groups more air. */
+export interface GraphSpacing {
+  node: number;
+  layer: number;
+  group: number;
+}
+export function graphSpacing(preset: "default" | "compact" | "flow" | "vertical"): GraphSpacing {
+  const scale = preset === "compact" ? 0.55 : preset === "flow" ? 1.35 : 1;
+  return {
+    node: Math.round(BASE_NODE_GAP * scale),
+    layer: Math.round(BASE_LAYER_GAP * scale),
+    group: Math.round(BASE_GROUP_GAP * scale),
+  };
+}
+const NODE_GAP = BASE_NODE_GAP;
 /** Distance between two edge lanes sharing a corridor. */
 const LANE_STEP = 12;
 /**
@@ -206,7 +221,7 @@ export function routeLinks(
   /** The b coordinate of lane `index` of `total`, centred in the gap after group `id`. */
   const gapLane = (id: string, from: number, index: number, total: number): number => {
     const next = groups[groupIndex.get(id)! + 1];
-    const to = next ? box(next).b0 : from + GROUP_GAP;
+    const to = next ? box(next).b0 : from + BASE_GROUP_GAP;
     const span = (total - 1) * LANE_STEP;
     return from + Math.max(LANE_CLEARANCE, (to - from - span) / 2) + index * LANE_STEP;
   };
@@ -292,7 +307,9 @@ export async function layoutGraph(
   direction: "DOWN" | "RIGHT",
   /** Card heights the browser measured, overriding the estimates (a second pass). */
   measuredHeights?: ReadonlyMap<string, number>,
+  spacing: GraphSpacing = graphSpacing("default"),
 ): Promise<GraphLayout> {
+  const GROUP_GAP = spacing.group;
   const { default: ELK } = await import("elkjs/lib/elk.bundled.js");
   const elk = new ELK();
   const stepById = new Map(model.steps.map((s) => [s.id, s]));
@@ -333,8 +350,8 @@ export async function layoutGraph(
     "elk.algorithm": "layered",
     "elk.direction": innerDirection,
     "elk.randomSeed": "1",
-    "elk.spacing.nodeNode": String(NODE_GAP),
-    "elk.layered.spacing.nodeNodeBetweenLayers": String(LAYER_GAP),
+    "elk.spacing.nodeNode": String(spacing.node),
+    "elk.layered.spacing.nodeNodeBetweenLayers": String(spacing.layer),
     "elk.layered.nodePlacement.strategy": "NETWORK_SIMPLEX",
     "elk.layered.considerModelOrder.strategy": "NODES_AND_EDGES",
     "elk.layered.cycleBreaking.strategy": "MODEL_ORDER",

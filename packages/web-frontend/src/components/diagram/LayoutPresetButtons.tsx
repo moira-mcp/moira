@@ -58,7 +58,7 @@ export function LayoutPresetButtons({
           <ControlButton
             key={entry.id}
             onClick={() => setPreset(entry.id)}
-            title={`${entry.label} — ${entry.hint}`}
+            data-hint={`${entry.label} — ${entry.hint}`}
             aria-label={entry.label}
             aria-pressed={active}
             data-layout-preset={entry.id}

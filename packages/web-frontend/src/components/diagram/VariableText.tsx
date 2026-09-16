@@ -7,7 +7,7 @@
 
 import React, { createContext, useContext } from "react";
 import { cn } from "@/lib/utils";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { Hint } from "./Hint";
 
 export interface VariableDefinition {
   type?: string;
@@ -98,10 +98,9 @@ export function VariableRef({
     </span>
   );
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>{token}</TooltipTrigger>
-      <TooltipContent side="top">
-        <div className="max-w-[360px] whitespace-pre-wrap text-left font-mono text-[11px] leading-[1.5] [text-wrap:initial]">
+    <Hint
+      content={
+        <>
           {definition ? (
             <>
               <b>{root}</b>
@@ -121,9 +120,12 @@ export function VariableRef({
               {"\nне объявлена в variableRegistry"}
             </>
           )}
-        </div>
-      </TooltipContent>
-    </Tooltip>
+        </>
+      }
+      mono
+    >
+      {token}
+    </Hint>
   );
 }
 

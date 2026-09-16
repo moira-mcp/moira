@@ -377,7 +377,7 @@ export function VariablesPanel({
             size="sm"
             className="h-8 w-8 shrink-0 p-0"
             onClick={onFullscreen}
-            title={t("pages.runPage.variables.fullscreen")}
+            data-hint={t("pages.runPage.variables.fullscreen")}
             aria-label={t("pages.runPage.variables.fullscreen")}
             data-testid="context-fullscreen-button"
           >
@@ -434,7 +434,7 @@ export function VariablesPanel({
                           onClick={() => setOpenHistory(openHistory === row.name ? null : row.name)}
                           data-testid={`variable-history-${row.name}`}
                           aria-expanded={openHistory === row.name}
-                          title={t("pages.runPage.variables.changes")}
+                          data-hint={t("pages.runPage.variables.changes")}
                         >
                           <History className="size-3" aria-hidden="true" />
                           {row.history.length}

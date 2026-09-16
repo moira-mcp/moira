@@ -123,7 +123,7 @@ export function VariableRow({
   const nameEl = (
     <span
       className="min-w-0 truncate font-mono text-xs font-medium text-foreground"
-      title={typeof name === "string" ? name : undefined}
+      data-hint={typeof name === "string" ? name : undefined}
     >
       {name}
     </span>
@@ -394,7 +394,7 @@ function LeafEditor({
           "min-w-0 flex-1 truncate rounded bg-muted px-1.5 py-0.5 font-mono text-xs",
           text ? "text-foreground" : "text-muted-foreground",
         )}
-        title={text}
+        data-hint={text}
       >
         {text || t("pages.executionInspector.context.emptyValue")}
       </code>
@@ -423,7 +423,7 @@ function LeafEditor({
             variant="ghost"
             className="absolute right-0.5 top-1/2 h-6 w-6 -translate-y-1/2 p-0 text-muted-foreground"
             onClick={() => setModalOpen(true)}
-            title={t("pages.executionInspector.context.editLong")}
+            data-hint={t("pages.executionInspector.context.editLong")}
             data-testid={`context-var-expand-${pathId}`}
           >
             <Maximize2 className="h-3 w-3" />
@@ -435,7 +435,7 @@ function LeafEditor({
         className="h-7 w-7 shrink-0 p-0"
         onClick={() => void doSave(draft)}
         disabled={saving || !dirty}
-        title={t("pages.executionInspector.context.save")}
+        data-hint={t("pages.executionInspector.context.save")}
         data-testid={`context-var-save-${pathId}`}
       >
         {saving ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3" />}
@@ -446,7 +446,7 @@ function LeafEditor({
         className="h-7 w-7 shrink-0 p-0"
         onClick={() => setDraft(toEditString(value))}
         disabled={saving || !dirty}
-        title={t("common.cancel")}
+        data-hint={t("common.cancel")}
         data-testid={`context-var-cancel-${pathId}`}
       >
         <X className="h-3 w-3" />

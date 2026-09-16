@@ -16,7 +16,7 @@ import { Handle, Position } from "@xyflow/react";
 import { RotateCcw } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { NodeTypeTag } from "../run/nodeTypeStyle";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { Hint } from "./Hint";
 import { TemplateText } from "./VariableText";
 import { INTERACTIVE } from "./interactive";
 import { IndexBadge } from "./IndexBadge";
@@ -207,12 +207,14 @@ function Port({
   );
   if (!port.tip) return row;
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>{row}</TooltipTrigger>
-      <TooltipContent side={side === "in" ? "left" : side === "out" ? "right" : "bottom"}>
-        <TipBody>{port.tip}</TipBody>
-      </TooltipContent>
-    </Tooltip>
+    <Hint
+      content={port.tip}
+      mono
+      width="lg"
+      side={side === "in" ? "left" : side === "out" ? "right" : "bottom"}
+    >
+      {row}
+    </Hint>
   );
 }
 
@@ -359,16 +361,11 @@ export function PortedCard({
         <div className="min-w-0 px-3 py-2.5">
           {description &&
             (descriptionTip ? (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <p className="line-clamp-2 cursor-help text-xs leading-5 text-muted-foreground">
-                    <TemplateText text={description} />
-                  </p>
-                </TooltipTrigger>
-                <TooltipContent side="top">
-                  <TipBody>{descriptionTip}</TipBody>
-                </TooltipContent>
-              </Tooltip>
+              <Hint content={descriptionTip} mono width="lg">
+                <p className="line-clamp-2 cursor-help text-xs leading-5 text-muted-foreground">
+                  <TemplateText text={description} />
+                </p>
+              </Hint>
             ) : (
               <p className="line-clamp-2 text-xs leading-5 text-muted-foreground">
                 <TemplateText text={description} />
@@ -377,25 +374,26 @@ export function PortedCard({
           {facts.length > 0 && (
             <div className="mt-2 flex flex-wrap gap-1.5" data-step-facts="">
               {facts.map((fact) => (
-                <Tooltip key={fact.key}>
-                  <TooltipTrigger asChild>
-                    <span
-                      className={cn(
-                        "inline-flex items-center gap-1 rounded-md border bg-background px-2 py-0.5 text-[11px] leading-4",
-                        INTERACTIVE.hoverOnly,
-                      )}
-                    >
-                      {fact.icon}
-                      {fact.label}
-                      {fact.count !== undefined && (
-                        <b className="font-semibold text-primary">{fact.count}</b>
-                      )}
-                    </span>
-                  </TooltipTrigger>
-                  <TooltipContent side="top">
-                    <TipBody>{fact.tip}</TipBody>
-                  </TooltipContent>
-                </Tooltip>
+                <Hint
+                  key={fact.key}
+                  content={fact.tip}
+                  mono={typeof fact.tip === "string"}
+                  flush={typeof fact.tip !== "string"}
+                  width="lg"
+                >
+                  <span
+                    className={cn(
+                      "inline-flex items-center gap-1 rounded-md border bg-background px-2 py-0.5 text-[11px] leading-4",
+                      INTERACTIVE.hoverOnly,
+                    )}
+                  >
+                    {fact.icon}
+                    {fact.label}
+                    {fact.count !== undefined && (
+                      <b className="font-semibold text-primary">{fact.count}</b>
+                    )}
+                  </span>
+                </Hint>
               ))}
             </div>
           )}

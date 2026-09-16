@@ -61,6 +61,14 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 import { MODES, resolveMode } from "../run/modes";
 import { MapView } from "../run/MapView";
+import { ContentsLayout } from "../run/ContentsSidebar";
+import { PageHeader } from "../diagram/PageHeader";
+
+/** The contents fold button, handed from the graph's layout into the graph's toolbar. */
+const GraphContentsToggle = React.createContext<React.ReactNode>(null);
+function GraphContentsToggleSlot(): React.JSX.Element {
+  return <>{React.useContext(GraphContentsToggle)}</>;
+}
 import { BlockDetailPanel } from "../run/BlockDetailPanel";
 import { NodePanel } from "../run/NodePanel";
 import { useStoredFlag } from "../diagram/useStoredFlag";
@@ -476,6 +484,9 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
     (nodeId: string) => {
       update({ [VIEW_PARAM]: "graph" });
       setFocusRequest((previous) => ({ nodeId, token: (previous?.token ?? 0) + 1 }));
+      // The panel follows the jump to its node level.
+      setPanelNodeId(nodeId);
+      setChosenTab("block");
     },
     [update],
   );
@@ -634,37 +645,36 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
   const degradationsCount = journal.length - errorsCount;
   // The run's own controls live in the diagram toolbar with the map's and the graph's, so the
   // page has one row above the diagram: view tabs and route cursor first, legend and guide last.
-  const runControls = progress ? (
-    <>
-      <Tabs value={mode} onValueChange={(value) => update({ [VIEW_PARAM]: value })}>
-        <TabsList aria-label={t("pages.runPage.modeLabel")} className="h-8" data-testid="run-modes">
-          {MODES.map((definition) => {
-            const Icon = definition.icon;
-            return (
-              <TabsTrigger
-                key={definition.id}
-                value={definition.id}
-                data-mode={definition.id}
-                className="gap-1 text-xs"
-              >
-                <Icon className="h-3.5 w-3.5" aria-hidden="true" />
-                {t(`pages.runPage.modes.${definition.id}`)}
-              </TabsTrigger>
-            );
-          })}
-        </TabsList>
-      </Tabs>
-      {progress.routeRecorded && (
-        <div className="hidden shrink-0 lg:block">
-          <RunCursor
-            route={progress.route}
-            cursor={cursor}
-            onSetCursor={(at) => update({ [AT_PARAM]: at === null ? null : String(at) })}
-          />
-        </div>
-      )}
-    </>
+  const runModes = progress ? (
+    <Tabs value={mode} onValueChange={(value) => update({ [VIEW_PARAM]: value })}>
+      <TabsList aria-label={t("pages.runPage.modeLabel")} className="h-8" data-testid="run-modes">
+        {MODES.map((definition) => {
+          const Icon = definition.icon;
+          return (
+            <TabsTrigger
+              key={definition.id}
+              value={definition.id}
+              data-mode={definition.id}
+              className="gap-1 text-xs"
+            >
+              <Icon className="h-3.5 w-3.5" aria-hidden="true" />
+              {t(`pages.runPage.modes.${definition.id}`)}
+            </TabsTrigger>
+          );
+        })}
+      </TabsList>
+    </Tabs>
   ) : null;
+  const runControls =
+    progress && progress.routeRecorded ? (
+      <div className="hidden shrink-0 lg:block">
+        <RunCursor
+          route={progress.route}
+          cursor={cursor}
+          onSetCursor={(at) => update({ [AT_PARAM]: at === null ? null : String(at) })}
+        />
+      </div>
+    ) : null;
   const runTrailing = progress ? (
     <>
       <div className="relative">
@@ -672,7 +682,7 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
           type="button"
           onClick={() => setLegendOpen((was) => !was)}
           aria-expanded={legendOpen}
-          title={t("pages.runPage.legend.title", { defaultValue: "Легенда статусов" })}
+          data-hint={t("pages.runPage.legend.title", { defaultValue: "Легенда статусов" })}
           aria-label={t("pages.runPage.legend.title", { defaultValue: "Легенда статусов" })}
           className={cn(
             "inline-flex h-8 w-8 items-center justify-center rounded-md border border-transparent text-muted-foreground hover:border-border hover:bg-accent hover:text-foreground",
@@ -694,7 +704,7 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
       <button
         type="button"
         onClick={() => update({ [GUIDE_PARAM]: "1" })}
-        title={t("pages.runPage.guide.open")}
+        data-hint={t("pages.runPage.guide.open")}
         aria-label={t("pages.runPage.guide.open")}
         className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-transparent text-primary hover:border-border hover:bg-primary/10"
         data-testid="guide-open"
@@ -704,6 +714,7 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
     </>
   ) : null;
 
+  const graphContentsToggle = <GraphContentsToggleSlot />;
   const technicalGraph = (
     <Suspense fallback={<DiagramSkeleton />}>
       <WorkflowGraph
@@ -715,14 +726,20 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
         errorNodeIds={errorNodeIds}
         onNodeClick={handleNodeClick}
         showControls={true}
-        showMinimap={false}
+        showMinimap
         showNodeDetails={false}
         focusRequest={focusRequest}
         selectedNodeId={focusRequest?.nodeId ?? null}
         visitedNodeIds={visitedNodeList}
         onVariableSelect={goToVariable}
         selectedVariable={variableHighlight?.name ?? null}
-        toolbarLeading={runControls}
+        toolbarModes={runModes}
+        toolbarLeading={
+          <>
+            {graphContentsToggle}
+            {runControls}
+          </>
+        }
         toolbarTrailing={runTrailing}
       />
     </Suspense>
@@ -730,8 +747,11 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
 
   return (
     <div className="h-full flex flex-col" data-testid="run-page">
-      {/* Compact Toolbar - 1 line */}
-      <div className="border-b bg-card px-4 py-2 flex items-center gap-3">
+      {/* The header: what is being looked at, and the page's own actions. */}
+      <PageHeader
+        description={progress?.goal ?? progress?.taskTitle ?? undefined}
+        testId="run-header"
+      >
         <Tooltip>
           <TooltipTrigger asChild>
             <Button variant="ghost" size="sm" onClick={() => navigate(backRoute)}>
@@ -850,7 +870,7 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
 
           {errorsCount > 0 && <ErrorCountBadge count={errorsCount} />}
         </div>
-      </div>
+      </PageHeader>
 
       {!progress && progressLoading ? (
         <div
@@ -885,6 +905,7 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
                 {mode === "map" && (
                   <div className="lg:h-full">
                     <MapView
+                      toolbarModes={runModes}
                       onFocusNode={focusNode}
                       onSelectListItem={selectListItem}
                       toolbarExtra={runControls}
@@ -911,7 +932,23 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
                     />
                   </div>
                 )}
-                {mode === "graph" && <div className="h-[60vh] lg:h-full">{technicalGraph}</div>}
+                {mode === "graph" && (
+                  <ContentsLayout
+                    blocks={shownBlocks}
+                    selectedBlockId={selectedBlockId}
+                    onSelect={(id) => {
+                      update({ [BLOCK_PARAM]: id });
+                      if (chosenTab !== null && chosenTab !== "block") setChosenTab("block");
+                    }}
+                    testId="graph-view"
+                  >
+                    {(toggle) => (
+                      <GraphContentsToggle.Provider value={toggle}>
+                        <div className="h-[60vh] lg:h-full">{technicalGraph}</div>
+                      </GraphContentsToggle.Provider>
+                    )}
+                  </ContentsLayout>
+                )}
               </div>
             </>
           ) : (
@@ -933,7 +970,7 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
             <button
               type="button"
               onClick={togglePanel}
-              title={t("pages.runPage.panel.collapse", { defaultValue: "Свернуть панель" })}
+              data-hint={t("pages.runPage.panel.collapse", { defaultValue: "Свернуть панель" })}
               aria-label={t("pages.runPage.panel.collapse", { defaultValue: "Свернуть панель" })}
               className="absolute right-1 top-1 z-10 inline-flex h-8 w-8 items-center justify-center rounded-md border bg-card/90 text-muted-foreground shadow-sm hover:bg-accent hover:text-foreground"
               data-testid="run-panel-collapse"
@@ -945,7 +982,7 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
             <button
               type="button"
               onClick={togglePanel}
-              title={t("pages.runPage.panel.expand", { defaultValue: "Развернуть панель" })}
+              data-hint={t("pages.runPage.panel.expand", { defaultValue: "Развернуть панель" })}
               aria-label={t("pages.runPage.panel.expand", { defaultValue: "Развернуть панель" })}
               className="flex h-10 w-full items-center justify-center text-muted-foreground hover:bg-accent hover:text-foreground"
               data-testid="run-panel-expand"
@@ -972,7 +1009,7 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
                   <TabsTrigger
                     value="block"
                     className={TAB_CLASS}
-                    title={t("pages.runPage.tabHints.block")}
+                    data-hint={t("pages.runPage.tabHints.block")}
                   >
                     <Boxes className="size-3.5" />
                     {t("pages.runPage.tabs.block")}
@@ -981,7 +1018,7 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
                 <TabsTrigger
                   value="variables"
                   className={TAB_CLASS}
-                  title={t("pages.runPage.tabHints.variables")}
+                  data-hint={t("pages.runPage.tabHints.variables")}
                 >
                   <Variable className="size-3.5" />
                   {t("pages.runPage.tabs.variables")}
@@ -995,7 +1032,7 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
                 <TabsTrigger
                   value="errors"
                   className={TAB_CLASS}
-                  title={t("pages.runPage.tabHints.errors")}
+                  data-hint={t("pages.runPage.tabHints.errors")}
                 >
                   <AlertTriangle className="size-3.5" />
                   {t("pages.executionInspector.tabs.errors")}
@@ -1019,7 +1056,7 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
                 <TabsTrigger
                   value="steps"
                   className={TAB_CLASS}
-                  title={t("pages.runPage.tabHints.steps")}
+                  data-hint={t("pages.runPage.tabHints.steps")}
                 >
                   <ListChecks className="size-3.5" />
                   {t("pages.executionInspector.tabs.steps")}
@@ -1027,7 +1064,7 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
                 <TabsTrigger
                   value="locks"
                   className={TAB_CLASS}
-                  title={t("pages.runPage.tabHints.locks")}
+                  data-hint={t("pages.runPage.tabHints.locks")}
                 >
                   <Lock className="size-3.5" />
                   {t("pages.executionInspector.tabs.locks")}
@@ -1391,7 +1428,7 @@ const StepProgression: React.FC<StepProgressionProps> = ({
                 <span
                   className="inline-flex items-center gap-1 text-[11px] font-medium text-success"
                   data-step-done=""
-                  title={t("pages.runPage.status.done")}
+                  data-hint={t("pages.runPage.status.done")}
                 >
                   <Check className="size-3.5" aria-hidden="true" />
                   {t("pages.runPage.status.done")}

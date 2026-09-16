@@ -106,7 +106,7 @@ export function StepCard({
           onSelect &&
             "rounded-lg hover:bg-accent/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
         )}
-        title={selectTitle}
+        data-hint={selectTitle}
       >
         {position !== undefined && (
           <span className="pt-0.5 text-right text-[11px] leading-5 tabular-nums text-muted-foreground">
@@ -148,7 +148,7 @@ export function StepCard({
                     "rounded border bg-background px-1 font-mono leading-4",
                     field.required && "border-foreground/40",
                   )}
-                  title={field.description ?? undefined}
+                  data-hint={field.description ?? undefined}
                 >
                   {field.name}
                   {field.type && <span className="text-muted-foreground">: {field.type}</span>}
@@ -163,7 +163,7 @@ export function StepCard({
                   key={arrival.linkId}
                   type="button"
                   data-arrival={arrival.linkId}
-                  title={`${arrival.sourceName} · ${arrival.label}`}
+                  data-hint={`${arrival.sourceName} · ${arrival.label}`}
                   onClick={(event) => {
                     event.stopPropagation();
                     onArrival?.(arrival);

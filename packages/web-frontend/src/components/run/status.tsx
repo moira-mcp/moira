@@ -165,7 +165,7 @@ export function PassCount({
     <span
       className={cn("text-[11px] tabular-nums text-muted-foreground", className)}
       data-testid={testId}
-      title={t("pages.runPage.ran", { count: iterations })}
+      data-hint={t("pages.runPage.ran", { count: iterations })}
     >
       ×{iterations}
     </span>

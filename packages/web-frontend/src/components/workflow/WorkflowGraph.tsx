@@ -33,9 +33,11 @@ import { DiagramViewport } from "../diagram/DiagramViewport";
 import { useOpeningPlacement } from "../diagram/placement";
 import { DiagramToolbar } from "../diagram/DiagramToolbar";
 import { NodeFinder } from "../run/NodeFinder";
+import { useStoredFlag } from "../diagram/useStoredFlag";
+import { useLayoutPreset } from "../diagram/layoutPreset";
 
 import { graphModel, definitionBlocks } from "../run/graphModel";
-import { GRAPH_MARGIN, layoutGraph } from "./graphLayout";
+import { graphSpacing, GRAPH_MARGIN, layoutGraph } from "./graphLayout";
 import {
   BlockGroupView,
   GraphDefs,
@@ -162,8 +164,8 @@ export interface WorkflowGraphProps {
   /** Steps a run has been through: drawn as visited. */
   visitedNodeIds?: readonly string[];
   /** What the page puts into the toolbar around the shared controls. */
+  toolbarModes?: React.ReactNode;
   toolbarLeading?: React.ReactNode;
-  toolbarTitle?: React.ReactNode;
   toolbarTrailing?: React.ReactNode;
 }
 
@@ -209,10 +211,11 @@ export const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
   selectedVariable = null,
   selectedNodeId = null,
   visitedNodeIds = EMPTY_ERROR_NODE_IDS,
+  toolbarModes,
   toolbarLeading,
-  toolbarTitle,
   toolbarTrailing,
 }) => {
+  const [minimapOn, toggleMinimap] = useStoredFlag("moira.diagram.minimap", true);
   // A connection chip names its other end the way the map does: the authored display name, else
   // the node id. The technical graph's `data.label` falls back to the node type ("Agent Task"),
   // which names nothing when three chips lead to three different agent nodes.
@@ -257,7 +260,15 @@ export const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
     window.requestAnimationFrame(() => {
       if (key.startsWith("node:")) {
         const nodeId = key.slice(key.indexOf(":", 5) + 1);
-        void instance.fitView({ nodes: [{ id: nodeId }], padding: 0.5, maxZoom: 1, duration: 0 });
+        // The node itself, not its block: a tight fit at readable zoom, animated after the
+        // first placement so the reader sees where the jump landed.
+        void instance.fitView({
+          nodes: [{ id: nodeId }],
+          padding: 0.25,
+          maxZoom: 1,
+          minZoom: 0.6,
+          duration: 350,
+        });
         return;
       }
       const first = groupsRef.current[0];
@@ -278,13 +289,21 @@ export const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
   >(placeViewport, placementKey);
   /** Brings a step into view: what an arrival chip does when the reader clicks the far end. */
   const focusStep = useCallback((id: string) => {
-    void instanceRef.current?.fitView({ nodes: [{ id }], padding: 0.5, maxZoom: 1, duration: 400 });
+    void instanceRef.current?.fitView({
+      nodes: [{ id }],
+      padding: 0.25,
+      maxZoom: 1,
+      minZoom: 0.6,
+      duration: 400,
+    });
   }, []);
   // The focus store lives inside the provider mounted below; a bridge hands it up for `goTo`.
   const focusRef = useRef<TransitionFocusHandle | null>(null);
   // The step (and its block) the reader just arrived at pulses for a moment, so the move from
   // the map or the finder answers "where did that land" instead of asking it.
-  const [arrival, setArrival] = useState<{ nodeId: string; blockId: string | null } | null>(null);
+  const [arrival, setArrival] = useState<{ nodeId: string | null; blockId: string | null } | null>(
+    null,
+  );
   const blockOfNode = useMemo(
     () => new Map((blocks ?? []).flatMap((b) => b.nodeIds.map((id) => [id, b.id] as const))),
     [blocks],
@@ -297,6 +316,22 @@ export const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
     if (!focusRequest) return;
     announceArrival(focusRequest.nodeId);
   }, [focusRequest, announceArrival]);
+  // The contents picked a block: the camera moves to its group and the group pulses. Skipped on
+  // the first render (the opening placement owns it) and when a step focus arrives with it.
+  const lastBlock = useRef<string | null>(selectedBlockId);
+  useEffect(() => {
+    if (selectedBlockId === lastBlock.current) return;
+    lastBlock.current = selectedBlockId;
+    if (!selectedBlockId || !instanceRef.current) return;
+    if (!instanceRef.current.getNode(`block:${selectedBlockId}`)) return;
+    void instanceRef.current.fitView({
+      nodes: [{ id: `block:${selectedBlockId}` }],
+      padding: 0.15,
+      maxZoom: 0.9,
+      duration: 450,
+    });
+    setArrival({ nodeId: null, blockId: selectedBlockId });
+  }, [selectedBlockId]);
   /** Travel along a link from a port or the edge itself: the far step comes into view and pulses. */
   const goTo = useCallback(
     (stepId: string, linkId: string) => {
@@ -356,7 +391,10 @@ export const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
             data: {
               ...node.data,
               selected: (node.data as BlockGroupData).blockId === selectedBlockId,
-              arrived: arrival?.blockId === (node.data as BlockGroupData).blockId,
+              // The group pulses only when the jump was to the block itself (the contents).
+              arrived:
+                arrival?.nodeId === null &&
+                arrival?.blockId === (node.data as BlockGroupData).blockId,
             },
           }
         : {
@@ -468,7 +506,9 @@ export const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
   const graphBlocks = useMemo(() => blocks ?? definitionBlocks(workflow), [blocks, workflow]);
   // Cards always carry their ports on the left and right: a grouped graph stacks its blocks top
   // to bottom (steps run left to right inside), a flat graph runs left to right. The shared
-  // preset changes nothing here yet.
+  // preset scales the gaps (compact, airy) and re-lays the graph; the camera then returns to the
+  // focused step through the placement key.
+  const [preset] = useLayoutPreset();
   useEffect(() => {
     const direction = graphBlocks.length > 0 ? "TB" : "LR";
     setCurrentLayoutOptions((options) =>
@@ -493,7 +533,12 @@ export const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
     const horizontal =
       currentLayoutOptions.direction === "LR" || currentLayoutOptions.direction === "RL";
     setIsLayouting(true);
-    void layoutGraph(model, horizontal ? "RIGHT" : "DOWN", measuredHeights ?? undefined)
+    void layoutGraph(
+      model,
+      horizontal ? "RIGHT" : "DOWN",
+      measuredHeights ?? undefined,
+      graphSpacing(preset),
+    )
       .then((layout) => {
         if (cancelled) return;
         laidHeightsRef.current = new Map(layout.steps.map((step) => [step.id, step.height]));
@@ -669,6 +714,7 @@ export const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
     measuredHeights,
     focusStep,
     goTo,
+    preset,
   ]);
 
   /**
@@ -730,10 +776,10 @@ export const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
     <div className={`h-full relative flex flex-col ${className}`}>
       {showControls && (
         <DiagramToolbar
+          modes={toolbarModes}
           leading={toolbarLeading}
-          title={toolbarTitle}
           trailing={toolbarTrailing}
-          finder={
+          finder={(close) => (
             <NodeFinder
               blocks={graphBlocks}
               steps={model.steps.map((s) => s.step)}
@@ -744,11 +790,14 @@ export const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
                 announceArrival(stepId);
               }}
               testId="graph-node-finder"
+              autoFocus
+              onClose={close}
             />
-          }
+          )}
           onZoomIn={() => void instanceRef.current?.zoomIn({ duration: 200 })}
           onZoomOut={() => void instanceRef.current?.zoomOut({ duration: 200 })}
           onFit={handleFitView}
+          minimap={{ on: minimapOn, toggle: toggleMinimap }}
           testId="graph-toolbar"
         />
       )}
@@ -791,14 +840,15 @@ export const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
               <Background gap={20} size={1} color={backgroundPatternColor} />
 
               {/* MiniMap with delayed render for better initial load performance */}
-              {showMinimap && showMiniMapDelayed && !mobile && (
+              {showMinimap && minimapOn && showMiniMapDelayed && !mobile && (
                 <MiniMap
                   position="bottom-right"
                   nodeColor={(node) => {
                     const nodeData = node.data as { color?: string };
                     return nodeData?.color || "#3B82F6";
                   }}
-                  maskColor="rgba(255, 255, 255, 0.2)"
+                  maskColor="color-mix(in oklch, var(--background) 60%, transparent)"
+                  className="!bg-card !border !border-border !rounded-lg"
                   nodeStrokeWidth={2}
                   zoomable={true}
                   pannable={true}

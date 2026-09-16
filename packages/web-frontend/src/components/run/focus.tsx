@@ -134,7 +134,7 @@ export function TransitionChipView({
         lit && (chip.kind === "return" ? "bg-primary/10" : "bg-accent"),
         className,
       )}
-      title={title}
+      data-hint={title}
       onMouseEnter={() => focus.setHovered(chip.keys)}
       onMouseLeave={() => focus.setHovered(null)}
       data-transition={chip.key}

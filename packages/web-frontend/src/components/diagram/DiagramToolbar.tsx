@@ -1,11 +1,13 @@
 /**
- * One toolbar for a process diagram, the same on the map and on the graph: what the surface puts
- * first (the map's sidebar toggle), the step finder, the layout presets and the zoom and fit
- * actions — instead of React Flow's floating control cluster plus controls scattered around.
+ * One toolbar for a process diagram, the same on the map and on the graph, and the only place
+ * the page keeps its functions: the view modes (map / graph), what the surface puts first (the
+ * map's sidebar toggle, the run's route cursor), the step finder folded into a button, the
+ * layout presets, the zoom and fit actions, the minimap switch, and the page's trailing controls
+ * (legend, guide, edit). Text about the page lives in `PageHeader`, never here.
  */
 
-import React from "react";
-import { Maximize, ZoomIn, ZoomOut } from "lucide-react";
+import React, { useState } from "react";
+import { Map as MapIcon, Maximize, Search, X, ZoomIn, ZoomOut } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { LayoutPresetButtons } from "./LayoutPresetButtons";
 
@@ -16,6 +18,7 @@ export function ToolbarButton({
   active = false,
   children,
   dataAttributes,
+  className,
 }: {
   onClick: () => void;
   title: string;
@@ -23,17 +26,19 @@ export function ToolbarButton({
   active?: boolean;
   children: React.ReactNode;
   dataAttributes?: Record<string, string | undefined>;
+  className?: string;
 }): React.JSX.Element {
   return (
     <button
       type="button"
       onClick={onClick}
-      title={title}
+      data-hint={title}
       aria-label={label}
       aria-pressed={active || undefined}
       className={cn(
         "inline-flex h-8 w-8 items-center justify-center rounded-md border border-transparent text-muted-foreground transition hover:border-border hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
         active && "border-primary/50 bg-primary/10 text-primary",
+        className,
       )}
       {...dataAttributes}
     >
@@ -42,46 +47,67 @@ export function ToolbarButton({
   );
 }
 
-function Divider(): React.JSX.Element {
-  return <span className="mx-1 h-5 w-px bg-border" aria-hidden="true" />;
+export function ToolbarDivider(): React.JSX.Element {
+  return <span className="mx-1 h-5 w-px shrink-0 bg-border" aria-hidden="true" />;
 }
 
 export function DiagramToolbar({
+  modes,
   leading,
-  title,
   finder,
+  finderLabel = "Найти шаг",
   onZoomIn,
   onZoomOut,
   onFit,
+  minimap,
   trailing,
   testId = "diagram-toolbar",
 }: {
+  /** The page's view-mode switch (map / graph), first in the row. */
+  modes?: React.ReactNode;
   leading?: React.ReactNode;
-  /** What is being looked at (the flow's or run's name), one truncated line. */
-  title?: React.ReactNode;
-  finder?: React.ReactNode;
+  /** The step finder; shown when the search button is pressed. Receives `onClose` via context-free prop. */
+  finder?: (close: () => void) => React.ReactNode;
+  finderLabel?: string;
   onZoomIn: () => void;
   onZoomOut: () => void;
   onFit: () => void;
+  /** The minimap switch, when the diagram has one. */
+  minimap?: { on: boolean; toggle: () => void };
   trailing?: React.ReactNode;
   testId?: string;
 }): React.JSX.Element {
+  const [finderOpen, setFinderOpen] = useState(false);
   return (
     <div
       className="flex shrink-0 items-center gap-1 overflow-hidden border-b bg-card px-2 py-1"
       data-testid={testId}
       role="toolbar"
     >
-      {leading && <div className="flex shrink-0 items-center gap-2">{leading}</div>}
-      {title && <div className="mx-1 hidden min-w-0 flex-1 xl:block">{title}</div>}
+      {modes && <div className="flex shrink-0 items-center">{modes}</div>}
+      {modes && (leading || finder) && <ToolbarDivider />}
+      {leading && <div className="flex min-w-0 shrink-0 items-center gap-2">{leading}</div>}
       {finder && (
-        <div className={cn("mx-1 min-w-[140px] basis-[160px] max-w-[320px]", !title && "flex-1")}>
-          {finder}
+        <div className={cn("flex min-w-0 items-center gap-1", finderOpen && "flex-1")}>
+          <ToolbarButton
+            onClick={() => setFinderOpen((open) => !open)}
+            title={finderLabel}
+            label={finderLabel}
+            active={finderOpen}
+            dataAttributes={{ "data-testid": "toolbar-finder" }}
+          >
+            {finderOpen ? <X className="size-4" /> : <Search className="size-4" />}
+          </ToolbarButton>
+          {finderOpen && (
+            <div className="min-w-[160px] max-w-[360px] flex-1" data-testid="toolbar-finder-field">
+              {finder(() => setFinderOpen(false))}
+            </div>
+          )}
         </div>
       )}
       <div className="ml-auto flex shrink-0 items-center gap-0.5">
         <LayoutPresetButtons variant="toolbar" />
-        <Divider />
+        <ToolbarDivider />
         <ToolbarButton
           onClick={onZoomOut}
           title="Отдалить"
@@ -106,7 +132,23 @@ export function DiagramToolbar({
         >
           <Maximize className="size-4" />
         </ToolbarButton>
-        {trailing}
+        {minimap && (
+          <ToolbarButton
+            onClick={minimap.toggle}
+            title="Навигатор в углу схемы"
+            label="Навигатор"
+            active={minimap.on}
+            dataAttributes={{ "data-testid": "toolbar-minimap" }}
+          >
+            <MapIcon className="size-4" />
+          </ToolbarButton>
+        )}
+        {trailing && (
+          <>
+            <ToolbarDivider />
+            {trailing}
+          </>
+        )}
       </div>
     </div>
   );

@@ -136,7 +136,7 @@ function Entry({ name, entry }: { name: string; entry: RegistryVariable }): Reac
   ) : (
     <span className="flex min-w-0 flex-1 items-center gap-1.5">
       {type}
-      <code className="min-w-0 truncate font-mono text-xs" title={formatDefault(entry.default)}>
+      <code className="min-w-0 truncate font-mono text-xs" data-hint={formatDefault(entry.default)}>
         {entry.default === undefined ? (
           <span className="text-muted-foreground">{t("pages.flowPage.registry.noDefault")}</span>
         ) : (

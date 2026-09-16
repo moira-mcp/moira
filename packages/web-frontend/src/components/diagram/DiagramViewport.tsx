@@ -66,7 +66,7 @@ function FitButton<N extends Node, E extends Edge>({
     <ControlButton
       className="react-flow__controls-fitview"
       onClick={() => onFit(instance)}
-      title={label}
+      data-hint={label}
       aria-label={label}
     >
       <Maximize />

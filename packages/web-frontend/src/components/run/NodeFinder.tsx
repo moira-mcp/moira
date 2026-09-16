@@ -17,6 +17,8 @@ export function NodeFinder({
   onPick,
   onPickStep,
   testId = "map-node-finder",
+  autoFocus = false,
+  onClose,
 }: {
   blocks: RunBlock[];
   steps: StepInfo[];
@@ -24,6 +26,9 @@ export function NodeFinder({
   /** Also called with the step itself: the graph brings that step into view. */
   onPickStep?: (stepId: string, blockId: string | null) => void;
   testId?: string;
+  autoFocus?: boolean;
+  /** Escape, or a pick: the toolbar folds the finder away. */
+  onClose?: () => void;
 }): React.JSX.Element {
   const { t } = useTranslation();
   const [query, setQuery] = useState("");
@@ -49,8 +54,15 @@ export function NodeFinder({
         onChange={(e) => setQuery(e.target.value)}
         placeholder={t("pages.runPage.map.findNode")}
         aria-label={t("pages.runPage.map.findNode")}
-        className="h-9 pl-8 text-sm"
+        className="h-8 pl-8 text-sm"
         data-testid={testId}
+        autoFocus={autoFocus}
+        onKeyDown={(e) => {
+          if (e.key === "Escape") {
+            setQuery("");
+            onClose?.();
+          }
+        }}
       />
       {query.trim() && (
         <ul
@@ -71,6 +83,7 @@ export function NodeFinder({
                   if (owner) onPick(owner.id);
                   onPickStep?.(step.id, owner?.id ?? null);
                   setQuery("");
+                  onClose?.();
                 }}
                 data-node-match={step.id}
               >

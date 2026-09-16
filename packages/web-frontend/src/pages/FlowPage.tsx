@@ -23,7 +23,6 @@ import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import {
   AlertTriangle,
-  ArrowLeft,
   Boxes,
   Compass,
   Copy,
@@ -57,6 +56,14 @@ import WorkflowBreadcrumbComponent from "../components/workflow/WorkflowBreadcru
 import { ShareDialog } from "../components/workflow/ShareDialog";
 import { ConfirmDialog } from "../components/confirm-dialog";
 import { PageLoader } from "../components/page-loader";
+import { PageHeader } from "../components/diagram/PageHeader";
+import { ContentsLayout } from "../components/run/ContentsSidebar";
+
+/** The contents fold button, handed from the graph's layout into the graph's toolbar. */
+const GraphContentsToggle = React.createContext<React.ReactNode>(null);
+function GraphContentsToggleSlot(): React.JSX.Element {
+  return <>{React.useContext(GraphContentsToggle)}</>;
+}
 import { DiagramSkeleton } from "../components/route-skeleton";
 import { InlineError } from "../components/inline-error";
 import { useWorkflowApp } from "../hooks/useWorkflowData";
@@ -465,6 +472,41 @@ export const FlowPage: React.FC = () => {
     </>
   );
 
+  const flowModes = process ? (
+    <Tabs value={mode} onValueChange={(value) => update({ [VIEW_PARAM]: value })}>
+      <TabsList aria-label={t("pages.runPage.modeLabel")} className="h-8" data-testid="flow-modes">
+        {FLOW_MODES.map((definition) => {
+          const Icon = definition.icon;
+          return (
+            <TabsTrigger
+              key={definition.id}
+              value={definition.id}
+              data-mode={definition.id}
+              className="gap-1 text-xs"
+            >
+              <Icon className="h-3.5 w-3.5" aria-hidden="true" />
+              {t(`pages.flowPage.modes.${definition.id}`)}
+            </TabsTrigger>
+          );
+        })}
+      </TabsList>
+    </Tabs>
+  ) : null;
+  const flowTrailing = (
+    <>
+      {refetching && <PendingIndicator />}
+      <button
+        type="button"
+        onClick={() => update({ [GUIDE_PARAM]: "1" })}
+        data-hint={t("pages.flowPage.guide.open")}
+        aria-label={t("pages.flowPage.guide.open")}
+        className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-transparent text-primary hover:border-border hover:bg-primary/10"
+        data-testid="guide-open"
+      >
+        <Compass className="size-4" aria-hidden="true" />
+      </button>
+    </>
+  );
   const technicalGraph = savedWorkflow && edited && (
     <div className="flex h-full min-h-0">
       <div className="flex-1 min-w-0">
@@ -478,7 +520,10 @@ export const FlowPage: React.FC = () => {
             onNodeSelect={handleNodeSelect}
             showNodeDetails={false}
             showControls={true}
-            showMinimap={false}
+            toolbarModes={flowModes}
+            toolbarLeading={<GraphContentsToggleSlot />}
+            toolbarTrailing={flowTrailing}
+            showMinimap
             focusRequest={focusRequest}
             selectedNodeId={focusRequest?.nodeId ?? null}
             onVariableSelect={goToVariable}
@@ -498,102 +543,108 @@ export const FlowPage: React.FC = () => {
       onChange={onEditsChange}
     >
       <div className="h-full flex flex-col" data-testid="flow-page" data-view={mode}>
-        {/* Toolbar */}
-        <div className="border-b border-border p-2 flex justify-between items-center gap-2">
-          <div className="flex min-w-0 items-center gap-2">
-            <Button variant="ghost" size="sm" onClick={handleBack} className="gap-1.5 shrink-0">
-              <ArrowLeft className="w-4 h-4" />
-              <span className="hidden sm:inline">{t("pages.workflowDetail.backToWorkflows")}</span>
-            </Button>
-            {savedWorkflow && (
-              <span className="truncate text-sm font-medium" data-testid="flow-title">
-                {savedWorkflow.metadata.name}
-                <span className="ml-1.5 text-xs text-muted-foreground">
-                  v{savedWorkflow.metadata.version}
-                </span>
-              </span>
-            )}
-          </div>
-
-          <div className="hidden md:flex items-center gap-2">
-            {isOwner && process && (
-              <>
-                <button
-                  type="button"
-                  onClick={() => update({ [EDIT_PARAM]: editing ? null : "1" })}
-                  aria-pressed={editing}
-                  className={cn(
-                    "inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                    editing
-                      ? "border-warning bg-warning/15 text-warning-foreground"
-                      : "text-muted-foreground hover:text-foreground",
-                  )}
-                  data-testid="flow-edit-toggle"
-                >
-                  <PencilLine className="size-3.5" aria-hidden="true" />
-                  {t(editing ? "pages.flowPage.edit.on" : "pages.flowPage.edit.off")}
-                </button>
-                <GuidanceHint label={t("pages.flowPage.edit.hintLabel")}>
-                  {t("pages.flowPage.edit.hint")}
-                </GuidanceHint>
-              </>
-            )}
-            {ownerActions}
-          </div>
-
-          <div className="md:hidden">
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  aria-label={t("common.actions", { defaultValue: "Actions" })}
-                >
-                  <MoreHorizontal className="h-4 w-4" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
+        <PageHeader
+          back={{
+            label: t("pages.workflowDetail.backToWorkflows"),
+            onClick: handleBack,
+            testId: "flow-back",
+          }}
+          title={
+            savedWorkflow ? (
+              <span data-testid="flow-title">{savedWorkflow.metadata.name}</span>
+            ) : null
+          }
+          meta={savedWorkflow ? `v${savedWorkflow.metadata.version}` : undefined}
+          description={savedWorkflow?.metadata.description}
+          actions={
+            <>
+              <div className="hidden md:flex items-center gap-2">
                 {isOwner && process && (
-                  <DropdownMenuItem onClick={() => update({ [EDIT_PARAM]: editing ? null : "1" })}>
-                    <PencilLine className="mr-2 h-4 w-4" />
-                    {t(editing ? "pages.flowPage.edit.on" : "pages.flowPage.edit.off")}
-                  </DropdownMenuItem>
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => update({ [EDIT_PARAM]: editing ? null : "1" })}
+                      aria-pressed={editing}
+                      className={cn(
+                        "inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                        editing
+                          ? "border-warning bg-warning/15 text-warning-foreground"
+                          : "text-muted-foreground hover:text-foreground",
+                      )}
+                      data-testid="flow-edit-toggle"
+                    >
+                      <PencilLine className="size-3.5" aria-hidden="true" />
+                      {t(editing ? "pages.flowPage.edit.on" : "pages.flowPage.edit.off")}
+                    </button>
+                    <GuidanceHint label={t("pages.flowPage.edit.hintLabel")}>
+                      {t("pages.flowPage.edit.hint")}
+                    </GuidanceHint>
+                  </>
                 )}
-                {fileInfo?.visibility === "public" && session?.user && (
-                  <DropdownMenuItem onClick={handleCopyWorkflow} disabled={copying}>
-                    <Copy className="mr-2 h-4 w-4" />
-                    {t("pages.workflowDetail.useAsTemplate")}
-                  </DropdownMenuItem>
-                )}
-                {isOwner && fileInfo && (
-                  <DropdownMenuItem onClick={handleToggleVisibility} disabled={visibilityUpdating}>
-                    {fileInfo.visibility === "public" ? (
-                      <Globe className="mr-2 h-4 w-4" />
-                    ) : (
-                      <Lock className="mr-2 h-4 w-4" />
+                {ownerActions}
+              </div>
+
+              <div className="md:hidden">
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      aria-label={t("common.actions", { defaultValue: "Actions" })}
+                    >
+                      <MoreHorizontal className="h-4 w-4" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    {isOwner && process && (
+                      <DropdownMenuItem
+                        onClick={() => update({ [EDIT_PARAM]: editing ? null : "1" })}
+                      >
+                        <PencilLine className="mr-2 h-4 w-4" />
+                        {t(editing ? "pages.flowPage.edit.on" : "pages.flowPage.edit.off")}
+                      </DropdownMenuItem>
                     )}
-                    {t("pages.workflowDetail.toggleVisibility")}
-                  </DropdownMenuItem>
-                )}
-                {isOwner && workflowIdentifier && (
-                  <DropdownMenuItem onClick={() => setShareDialogOpen(true)}>
-                    <Share2 className="mr-2 h-4 w-4" />
-                    {t("pages.workflowDetail.share")}
-                  </DropdownMenuItem>
-                )}
-                {isOwner && (
-                  <DropdownMenuItem
-                    onClick={() => setDeleteDialogOpen(true)}
-                    className="text-destructive focus:text-destructive"
-                  >
-                    <Trash2 className="mr-2 h-4 w-4" />
-                    {t("pages.workflowDetail.deleteWorkflow")}
-                  </DropdownMenuItem>
-                )}
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </div>
-        </div>
+                    {fileInfo?.visibility === "public" && session?.user && (
+                      <DropdownMenuItem onClick={handleCopyWorkflow} disabled={copying}>
+                        <Copy className="mr-2 h-4 w-4" />
+                        {t("pages.workflowDetail.useAsTemplate")}
+                      </DropdownMenuItem>
+                    )}
+                    {isOwner && fileInfo && (
+                      <DropdownMenuItem
+                        onClick={handleToggleVisibility}
+                        disabled={visibilityUpdating}
+                      >
+                        {fileInfo.visibility === "public" ? (
+                          <Globe className="mr-2 h-4 w-4" />
+                        ) : (
+                          <Lock className="mr-2 h-4 w-4" />
+                        )}
+                        {t("pages.workflowDetail.toggleVisibility")}
+                      </DropdownMenuItem>
+                    )}
+                    {isOwner && workflowIdentifier && (
+                      <DropdownMenuItem onClick={() => setShareDialogOpen(true)}>
+                        <Share2 className="mr-2 h-4 w-4" />
+                        {t("pages.workflowDetail.share")}
+                      </DropdownMenuItem>
+                    )}
+                    {isOwner && (
+                      <DropdownMenuItem
+                        onClick={() => setDeleteDialogOpen(true)}
+                        className="text-destructive focus:text-destructive"
+                      >
+                        <Trash2 className="mr-2 h-4 w-4" />
+                        {t("pages.workflowDetail.deleteWorkflow")}
+                      </DropdownMenuItem>
+                    )}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
+            </>
+          }
+          testId="flow-header"
+        />
 
         {breadcrumbs.length > 0 && (
           <WorkflowBreadcrumbComponent
@@ -623,47 +674,6 @@ export const FlowPage: React.FC = () => {
               aria-label={t("pages.flowPage.title")}
               data-testid="flow-view"
             >
-              {process && (
-                <div
-                  className="border-b bg-card px-3 py-1.5 flex flex-wrap items-center gap-2"
-                  data-testid="flow-header"
-                >
-                  <Tabs value={mode} onValueChange={(value) => update({ [VIEW_PARAM]: value })}>
-                    <TabsList
-                      aria-label={t("pages.runPage.modeLabel")}
-                      className="h-8"
-                      data-testid="flow-modes"
-                    >
-                      {FLOW_MODES.map((definition) => {
-                        const Icon = definition.icon;
-                        return (
-                          <TabsTrigger
-                            key={definition.id}
-                            value={definition.id}
-                            data-mode={definition.id}
-                            className="gap-1 text-xs"
-                          >
-                            <Icon className="h-3.5 w-3.5" aria-hidden="true" />
-                            {t(`pages.flowPage.modes.${definition.id}`)}
-                          </TabsTrigger>
-                        );
-                      })}
-                    </TabsList>
-                  </Tabs>
-                  <div className="flex-1" />
-                  {refetching && <PendingIndicator />}
-                  <button
-                    type="button"
-                    onClick={() => update({ [GUIDE_PARAM]: "1" })}
-                    className="inline-flex items-center gap-1.5 rounded-lg border bg-primary/5 px-2.5 py-1 text-xs font-medium text-primary hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                    data-testid="guide-open"
-                  >
-                    <Compass className="size-3.5" aria-hidden="true" />
-                    {t("pages.flowPage.guide.open")}
-                  </button>
-                </div>
-              )}
-
               {!process && (
                 <div
                   className="border-b bg-muted/20 px-4 py-2 text-xs text-muted-foreground flex flex-wrap items-center gap-2"
@@ -769,6 +779,8 @@ export const FlowPage: React.FC = () => {
                 {progress && mode === "map" && (
                   <div className="lg:h-full">
                     <MapView
+                      toolbarModes={flowModes}
+                      toolbarTrailing={flowTrailing}
                       onFocusNode={focusNode}
                       progress={progress}
                       blocks={blocks}
@@ -790,9 +802,24 @@ export const FlowPage: React.FC = () => {
                     />
                   </div>
                 )}
-                {(!progress || mode === "graph") && (
-                  <div className="h-[60vh] lg:h-full">{technicalGraph}</div>
+                {progress && mode === "graph" && (
+                  <ContentsLayout
+                    blocks={blocks}
+                    selectedBlockId={selectedBlockId}
+                    onSelect={(id) => {
+                      update({ [BLOCK_PARAM]: id });
+                      setChosenTab("block");
+                    }}
+                    testId="graph-view"
+                  >
+                    {(toggle) => (
+                      <GraphContentsToggle.Provider value={toggle}>
+                        <div className="h-[60vh] lg:h-full">{technicalGraph}</div>
+                      </GraphContentsToggle.Provider>
+                    )}
+                  </ContentsLayout>
                 )}
+                {!progress && <div className="h-[60vh] lg:h-full">{technicalGraph}</div>}
               </div>
             </section>
 
@@ -810,7 +837,9 @@ export const FlowPage: React.FC = () => {
                   <button
                     type="button"
                     onClick={togglePanel}
-                    title={t("pages.flowPage.panel.collapse", { defaultValue: "Свернуть панель" })}
+                    data-hint={t("pages.flowPage.panel.collapse", {
+                      defaultValue: "Свернуть панель",
+                    })}
                     aria-label={t("pages.flowPage.panel.collapse", {
                       defaultValue: "Свернуть панель",
                     })}
@@ -824,7 +853,9 @@ export const FlowPage: React.FC = () => {
                   <button
                     type="button"
                     onClick={togglePanel}
-                    title={t("pages.flowPage.panel.expand", { defaultValue: "Развернуть панель" })}
+                    data-hint={t("pages.flowPage.panel.expand", {
+                      defaultValue: "Развернуть панель",
+                    })}
                     aria-label={t("pages.flowPage.panel.expand", {
                       defaultValue: "Развернуть панель",
                     })}

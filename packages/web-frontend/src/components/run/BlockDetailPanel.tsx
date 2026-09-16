@@ -48,6 +48,7 @@ import {
   blockWrites,
   formatValue,
   stepConnections,
+  orderNodeIds,
   stepsOf,
   type ExecutionProgress,
   type RunBlock,
@@ -86,7 +87,7 @@ function BlockWrites({
               "inline-flex max-w-full items-center gap-1 rounded-md border bg-background px-1.5 font-mono leading-5",
               w.adjusted && "border-warning bg-warning/10",
             )}
-            title={`${w.name} = ${formatValue(w.value)} (#${w.seq})`}
+            data-hint={`${w.name} = ${formatValue(w.value)} (#${w.seq})`}
             data-block-write={w.name}
           >
             <span className="shrink-0 text-muted-foreground">{w.name}</span>
@@ -182,7 +183,10 @@ export function BlockDetailPanel({
 }): React.JSX.Element {
   const { t } = useTranslation();
   const { definition, enabled: editing } = useEditing();
-  const steps = useMemo(() => (block ? stepsOf(workflow, block.nodeIds) : []), [workflow, block]);
+  const steps = useMemo(
+    () => (block ? stepsOf(workflow, orderNodeIds(workflow, block.nodeIds)) : []),
+    [workflow, block],
+  );
   if (!block) {
     return (
       <div className="p-3">

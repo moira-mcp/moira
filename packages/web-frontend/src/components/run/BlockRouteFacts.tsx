@@ -65,7 +65,7 @@ export function BlockRouteFacts({
                   type="button"
                   className="tabular-nums text-muted-foreground underline-offset-2 hover:underline"
                   onClick={() => onSetCursor(visit.seq)}
-                  title={t("pages.runPage.routeFacts.goTo")}
+                  data-hint={t("pages.runPage.routeFacts.goTo")}
                 >
                   {t("pages.runPage.routeFacts.visit", { seq: visit.seq })}
                 </button>

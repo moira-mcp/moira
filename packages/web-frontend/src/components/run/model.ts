@@ -299,6 +299,39 @@ function authoredText(node: WorkflowNode): string | null {
 }
 
 /** Describe the steps of a block from the workflow definition, in the block's node order. */
+/**
+ * A block's node ids in the order the process runs them: from the block's entry nodes (the ones
+ * no other node of the block leads to, or the first when every node has a predecessor), along
+ * the connections in authored order, depth first; what the walk never reaches keeps its
+ * definition order at the end.
+ */
+export function orderNodeIds(
+  workflow: WorkflowGraph | undefined,
+  nodeIds: readonly string[],
+): string[] {
+  const inBlock = new Set(nodeIds);
+  const nodes = new Map((workflow?.nodes ?? []).map((node) => [node.id, node]));
+  const targetsOf = (id: string): string[] => {
+    const connections = (nodes.get(id) as { connections?: Record<string, string> } | undefined)
+      ?.connections;
+    return Object.values(connections ?? {}).filter((to) => inBlock.has(to));
+  };
+  const hasPredecessor = new Set<string>();
+  for (const id of nodeIds) for (const to of targetsOf(id)) if (to !== id) hasPredecessor.add(to);
+  const entries = nodeIds.filter((id) => !hasPredecessor.has(id));
+  const order: string[] = [];
+  const seen = new Set<string>();
+  const walk = (id: string) => {
+    if (seen.has(id)) return;
+    seen.add(id);
+    order.push(id);
+    for (const to of targetsOf(id)) walk(to);
+  };
+  for (const id of entries.length > 0 ? entries : nodeIds.slice(0, 1)) walk(id);
+  for (const id of nodeIds) walk(id);
+  return order;
+}
+
 export function stepsOf(
   workflow: WorkflowGraph | undefined,
   nodeIds: readonly string[],
