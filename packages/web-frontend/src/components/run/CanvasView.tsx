@@ -83,7 +83,11 @@ function BlockFacts({ block }: { block: RunBlock }): React.JSX.Element | null {
   const { timing, list } = block;
   const total = timing.totalMs === null ? null : formatDuration(timing.totalMs, t);
   const current = timing.currentMs === null ? null : formatDuration(timing.currentMs, t);
-  const bound = list && list.total !== null ? `${list.done ?? 0}/${list.total}` : null;
+  // An unresolved counter reads `?`, as the image and the notification footer word it.
+  const bound =
+    list && (list.done !== null || list.total !== null)
+      ? `${list.done ?? "?"}/${list.total ?? "?"}`
+      : null;
   if (!total && !current && !bound) return null;
   return (
     <>
@@ -137,13 +141,18 @@ function BlockNodeView({ data }: NodeProps<BlockNode>): React.JSX.Element {
         )}
         data-block-id={block.id}
         data-status={block.status}
+        title={block.name}
       >
         <div className="flex items-start justify-between gap-2">
+          {/* The name is clamped like the description (`MAX_NAME_LINES` in the layout's height
+              estimate), the whole of it in the card's `title`, so a long name neither overflows
+              the card nor pushes the facts line out of it. */}
           <span
             className={cn(
-              "text-sm font-semibold leading-5",
+              "line-clamp-2 min-w-0 text-sm font-semibold leading-5",
               block.status === "skipped" && "line-through decoration-muted-foreground/60",
             )}
+            data-block-name={block.id}
           >
             <span className="mr-1.5 tabular-nums text-muted-foreground">{block.index + 1}.</span>
             {block.name}

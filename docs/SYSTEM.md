@@ -1158,7 +1158,7 @@ interface ValidationError {
 - **Auto-execution** - sends message and continues
 - **Template processing** - processes message templates
 - **Inline keyboard support** - passes `replyMarkup` (InlineKeyboardMarkup) to Telegram API as `reply_markup`
-- **System footer** - appends process ID, resolved workflow name, and branding to each notification
+- **System footer** - appends process ID, resolved workflow name, and branding to each notification; when the workflow has a process view, also the progress lines of the run projected as of the node (`withInFlightPause`): `⏳ agent on the step: <block>` or `🙋 waiting for you: <block>` when the node's successor pauses the run, then `📝 done/total: current item` for the bound list nearest the run
 - **Workflow name resolution** - resolves workflowId UUID to human-readable name via repository with fallback
 - **Graceful degradation** - continues workflow on send failures
 - **Actionable error messages** - pushes classified error guidance to messageQueue (invalid token, chat not found, rate limit, etc.)
@@ -1168,9 +1168,12 @@ interface ValidationError {
 
 - **Auto-execution** - renders the portable message and invokes the shared user communication service
 - **System footer** - appends the short process ID, the resolved workflow name, and branding; when
-  a block of the workflow declares a `list` binding, also one `📝 done/total: current item` line
-  for the bound list nearest the run (the active block's, else the most recently passed bound
-  block), resolved from the projection of the execution with an open visit of this node
+  the workflow has a process view, also the progress lines of the run projected as of the node
+  (`withInFlightPause`, the same copy the attached image renders): `⏳ agent on the step: <block>` or
+  `🙋 waiting for you: <block>` when the node's single forward connection leads to a node the run
+  pauses on (`lock` → a person; `agent-directive`, `teleport`, `materialize`, `subgraph` → the agent), then one
+  `📝 done/total: current item` line for the bound list nearest the run (the active block's, else
+  the most recently passed bound block's); no count for an unbound run
 - **Channel selection** - fans out only to enabled configured adapters for the execution user
 - **Results** - stores sanitized full, partial, no-channel, or total-failure outcomes under the node ID
 - **Routing** - total attempted failure uses `connections.error` when present; other outcomes continue through `default`

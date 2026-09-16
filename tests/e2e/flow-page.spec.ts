@@ -2,7 +2,8 @@
  * The flow page on Quick Task, in its two views: the map (the derived process as a diagram with
  * its contents sidebar and the block panel beside it) and the technical graph with its node
  * sidebar. Covers reading a bundled flow, a non-owner without edit mode, and an owner's edit
- * session on a private copy — a renamed block, a relabelled return, a moved routing node reported
+ * session on a private copy — a block renamed to ninety characters (the map card clamps it, facts
+ * still inside the card), a relabelled return, a moved routing node reported
  * as a diagnostic before any save, an edited directive and registry default, the export diff, a
  * save that persists and advances the revision, a save refused on a stale revision (409) and on an
  * invalid definition (400) with the edits kept, and the page usable on a phone.
@@ -159,6 +160,10 @@ test("reads a bundled flow as a process on the map and as nodes on the graph, an
   await expect(page.locator('[data-guide-target="evidence"]')).toBeVisible();
 });
 
+/** A ninety-character block name: the map card must clamp it rather than grow or overflow. */
+const LONG_BLOCK_NAME =
+  "Draft the plan (edited) with every unit, its acceptance evidence and the gate it ends with";
+
 async function openEditing(page: Page, id: string): Promise<void> {
   await page.goto(`${BASE_URL}/workflows/${id}?edit=1`);
   await expect(page.getByTestId("flow-edit-panel")).toBeVisible();
@@ -178,8 +183,42 @@ test("an owner edits the definition in place; the save persists and advances the
     // Rename a block in its own panel. Switching blocks happens in the app: a page load would
     // discard the in-memory edits.
     await openBlock(page, "plan");
-    await page.getByTestId("edit-block-label-plan").fill("Draft the plan (edited)");
+    await page.getByTestId("edit-block-label-plan").fill(LONG_BLOCK_NAME);
     await expect(page.getByTestId("flow-edit-count")).toContainText("1");
+    // The map's card clamps the ninety-character name: its name box and its facts line both lie
+    // inside the card, the name takes at most two lines and the facts keep one — a name that
+    // wrapped freely would push the facts out of the card's bottom edge.
+    await expect(
+      page.locator('[data-testid="canvas-view"] [data-block-id="plan"] [data-block-name]'),
+    ).toContainText(LONG_BLOCK_NAME.slice(0, 20));
+    const geometry = await page
+      .locator('[data-testid="canvas-view"] [data-block-id="plan"]')
+      .evaluate((card) => {
+        const box = card.getBoundingClientRect();
+        const name = card.querySelector("[data-block-name]")!.getBoundingClientRect();
+        const facts = card.querySelector(".mt-auto > span")!.getBoundingClientRect();
+        const inside = (r: DOMRect) =>
+          r.left >= box.left - 1 &&
+          r.right <= box.right + 1 &&
+          r.top >= box.top - 1 &&
+          r.bottom <= box.bottom + 1;
+        return {
+          title: card.getAttribute("title"),
+          nameInside: inside(name),
+          nameLines: Math.round(name.height / 20),
+          factsInside: inside(facts),
+          factsLines: Math.round(facts.height / 16),
+          factsBelowName: facts.top >= name.bottom - 1,
+        };
+      });
+    expect(geometry).toEqual({
+      title: LONG_BLOCK_NAME,
+      nameInside: true,
+      nameLines: 2,
+      factsInside: true,
+      factsLines: 1,
+      factsBelowName: true,
+    });
 
     // Relabel the repair return, which belongs to the review block that it re-enters.
     await openBlock(page, "plan-review");
@@ -238,7 +277,7 @@ test("an owner edits the definition in place; the save persists and advances the
     await expect(page.getByTestId("flow-edit-count")).toContainText("0");
     const saved = await detailOf(page, id);
     expect(saved.fileInfo.revision).toBe(1);
-    expect(saved.workflow.progress.nodes[1].label).toBe("Draft the plan (edited)");
+    expect(saved.workflow.progress.nodes[1].label).toBe(LONG_BLOCK_NAME);
     expect(saved.workflow.nodes.find((n: any) => n.id === "create-plan").directive).toBe(
       "Write the plan (edited).",
     );
@@ -252,7 +291,7 @@ test("an owner edits the definition in place; the save persists and advances the
       saved.workflow.nodes.find((n: any) => n.id === "close-completed-step").expressions,
     ).toEqual(["current_step = current_step + 2"]);
     await page.goto(`${BASE_URL}/workflows/${id}?block=plan`);
-    await expect(page.getByTestId("block-detail")).toContainText("Draft the plan (edited)");
+    await expect(page.getByTestId("block-detail")).toContainText(LONG_BLOCK_NAME);
     await expect(page.getByTestId("block-detail")).toContainText("Write the plan (edited).");
   } finally {
     await page.request.delete(`${BASE_URL}/api/workflows/${id}`);

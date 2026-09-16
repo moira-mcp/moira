@@ -5,7 +5,9 @@
  * contents list every block of the process in order with its position, its pass count and the
  * progress of the list it is bound to; the diagram's cards carry the same run facts — how many
  * passes, the time spent in the block, the time on the pass running now and the bound list's
- * done/total — and a block the run has not measured shows no timing at all rather than a zero.
+ * done/total — and a block the run has not measured shows no timing at all rather than a zero. A
+ * card's name is clamped to two lines with the whole name in the card's `title`, like its
+ * description, so a long name cannot push the facts line out of the card.
  *
  * The layout the E2E pass found broken is checked here too, as far as jsdom can: the view's
  * explanation costs one collapsed row (its body is not even in the document until it is opened,
@@ -278,6 +280,18 @@ describe("the map view", () => {
     expect(document.querySelectorAll("[data-contents-typical]")).toHaveLength(1);
   });
 
+  test("an unresolved list counter reads ? on the contents and the card, never 0", async () => {
+    const base = projectionOf("robust-task");
+    const bound = base.nodes.findIndex((node) => node.list !== null);
+    const nodes = base.nodes.map((node, index) =>
+      index === bound ? { ...node, list: { ...node.list!, done: null } } : node,
+    );
+    await renderMap({ nodes });
+    const row = screen.getByTestId(`map-contents-${nodes[bound].id}`);
+    expect(within(row).getByTitle(/items done/i).textContent).toBe("?/3");
+    expect(document.body.textContent).not.toContain("0/3");
+  });
+
   test("words the cards' durations in the interface language", async () => {
     await i18n.changeLanguage("ru");
     try {
@@ -382,5 +396,28 @@ describe("the map view", () => {
     expect(within(pending).queryByTitle(/time spent in this block/i)).toBeNull();
     expect(within(pending).queryByTitle(/pass running now/i)).toBeNull();
     expect(pending.textContent).not.toContain("0 s");
+  });
+
+  test("a card clamps a long block name to two lines and keeps the whole name in its title", async () => {
+    const base = projectionOf("robust-task");
+    const longName =
+      "Reconcile the plan with the review findings and the user's late scope change".padEnd(
+        90,
+        "!",
+      );
+    expect(longName).toHaveLength(90);
+    const nodes = base.nodes.map((node, index) =>
+      index === 0 ? { ...node, label: longName } : node,
+    );
+    await renderMap({ nodes });
+    const card = screen
+      .getByTestId("diagram-nodes")
+      .querySelector<HTMLElement>(`[data-block-id="${nodes[0].id}"]`)!;
+    expect(card.getAttribute("title")).toBe(longName);
+    const name = card.querySelector<HTMLElement>("[data-block-name]")!;
+    expect(name.textContent).toContain(longName);
+    // jsdom lays nothing out: the clamp is the class the stylesheet turns into two lines, the
+    // same rule the description uses; the geometry is checked in the browser by the E2E pass.
+    expect(name.className).toContain("line-clamp-2");
   });
 });

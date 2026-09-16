@@ -421,7 +421,10 @@ choose a provider, recipient, or credential:
 | `connections.default` | Yes      | Full, partial, or no-eligible-channel continuation          |
 | `connections.error`   | No       | Total attempted failure; otherwise it also uses `default`   |
 
-`attachment` and an enabled `attachProgressImage` are mutually exclusive. Attachment filenames
+Every message carries a footer with the run's short id, the workflow's name and, when the node
+leads straight to a step the run pauses on, who is waited for there — `⏳ agent on the step:
+<block>` or `🙋 waiting for you: <block>` (a lock gate) — plus `📝 done/total: current item` for a
+bound list. `attachment` and an enabled `attachProgressImage` are mutually exclusive. Attachment filenames
 use the safe portable allowlist and MIME types must have a valid `type/subtype` form. The service
 applies shared per-user/provider rate limits, per-user and provider concurrency, deadlines, text
 and byte limits before provider delivery. A configured Telegram channel supports text, PNG/JPEG

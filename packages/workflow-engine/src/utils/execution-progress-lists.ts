@@ -245,3 +245,25 @@ export function boundListLine(progress: ExecutionProgress | null): string | null
   const count = `${list.done ?? "?"}/${list.total ?? "?"}`;
   return list.currentTitle ? `📝 ${count}: ${list.currentTitle}` : `📝 ${count}`;
 }
+
+/**
+ * Who the paused run waits for, with the block it waits in, for notification text: `🙋 waiting
+ * for you: <block>` at a gate a person clears, `⏳ agent on the step: <block>` on a step the agent
+ * must complete. Null while the run is not paused.
+ */
+export function waitingActorLine(progress: ExecutionProgress | null): string | null {
+  if (!progress || progress.waitingFor === null) return null;
+  const actor = progress.waitingFor === "user" ? "🙋 waiting for you" : "⏳ agent on the step";
+  const block = progress.nodes.find((node) => node.id === progress.activeNodeId);
+  return block ? `${actor}: ${block.label}` : actor;
+}
+
+/**
+ * The progress lines of a notification footer, in order: the waiting actor (while the run is
+ * paused), then the bound list nearest the run. Empty when neither applies.
+ */
+export function progressFooterLines(progress: ExecutionProgress | null): string[] {
+  return [waitingActorLine(progress), boundListLine(progress)].filter(
+    (line): line is string => line !== null,
+  );
+}
