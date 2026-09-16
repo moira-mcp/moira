@@ -540,7 +540,17 @@ live URL so a duplicate change pushes no history entry.
   summary that equals the block's description or its name (an untemplated `content.summary`, or
   one that renders to the label) is dropped so the views show it once, under the title.
 - `CanvasDiagram` (`CanvasView.tsx`) — React Flow over an ELK layered layout (`layout.ts`, `elkjs`
-  loaded on first use):
+  loaded on first use) whose columns come from ELK and whose rows are derived (`blockRows`, a
+  pure function of the blocks, the hubs and the drawn columns): the main sequence — the longest
+  forward chain from the start block, ties toward the higher process index — on one row; each
+  side branch (a maximal chain of off-sequence blocks linked by forward transitions) on a row of
+  its own, placed in order of its entry column, sharing a row with an earlier branch only when
+  their column spans are disjoint, new rows alternating below and above; an off-sequence hub and
+  a block reached only by loops each on a row beneath every branch row; every block of a row takes
+  the row's top edge and ELK's vertical placement is discarded. A skip's or return's vertical moves
+  into the gap beside its column when it would pass through a block on an intermediate row
+  (`crossesBlock`, `SKIP_GAP_INSET` / `RETURN_GAP_INSET`), and adjacent forward elbows turn in the
+  gap after the source's column. The rest of the diagram:
   forward edges between blocks adjacent in process order as elbows with label pills (several
   transitions between one pair take their own line and label row, `PARALLEL_STEP`; from
   `PARALLEL_CHIP_MIN` transitions the pills give way to one "forward" chip in the source block,

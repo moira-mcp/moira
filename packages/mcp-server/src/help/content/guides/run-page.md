@@ -16,7 +16,9 @@ The two tabs above the picture show the same run in two ways; the choice is in t
 - **Map** (default) — the process as a diagram with its table of contents. A compact band above
   the diagram names the run: its task, the title it rendered for itself when that differs, its
   goal and the projection's facts as chips. The diagram draws the blocks left to right in process
-  order, adjacent forward transitions as arrows with their labels, loops as thin dashed lines
+  order: the main sequence of the process on one row, each side branch on a row of its own
+  above or below it, and a block many others lead into or that is reached only by loops beneath
+  them; adjacent forward transitions as arrows with their labels, loops as thin dashed lines
   below and transitions that skip blocks above; a block that many other blocks lead into (a
   replan or stop block) receives one thin line from each of them. Every loop, skip and exit into
   such a block is named by a chip in its source block, and so are three or more parallel

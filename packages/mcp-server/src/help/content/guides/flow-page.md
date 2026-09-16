@@ -16,7 +16,8 @@ The two tabs above the picture show the same definition in two ways; the choice 
 `view`.
 
 - **Map** (default) — the process as a diagram with its table of contents: blocks left to right,
-  adjacent forward transitions as arrows with their labels, loops as thin dashed lines below and
+  the main sequence on one row, each side branch on a row of its own above or below it, a block
+  many others lead into or that only loops reach beneath them; adjacent forward transitions as arrows with their labels, loops as thin dashed lines below and
   transitions that skip blocks above; a block that many other blocks lead into receives one thin
   line from each of them. Every loop, skip and exit into such a block is named by a chip in its
   source block, and so are three or more parallel transitions into the next block (one chip with
