@@ -2,7 +2,9 @@ import { describe, expect, test } from "@jest/globals";
 import {
   GraphValidator,
   deriveProcess,
+  projectExecutionRun,
   type ProcessDiagnosticCode,
+  type WorkflowExecution,
   type WorkflowGraph,
 } from "@mcp-moira/workflow-engine";
 import { systemCatalogGraph } from "../../helpers/catalog-graphs.js";
@@ -73,6 +75,35 @@ function synthetic(): WorkflowGraph {
       { id: "end", type: "end", progressNodeId: "check" },
     ],
   } as WorkflowGraph;
+}
+
+/** The synthetic process with a three-case condition: fast and slow paths beside the return. */
+function threeWay(): WorkflowGraph {
+  const workflow = synthetic();
+  workflow.progress!.nodes.push(
+    { id: "fast", label: "Fast", content: { summary: "Fast path" } },
+    { id: "slow", label: "Slow", content: { summary: "Slow path" } },
+  );
+  workflow.nodes.push(
+    { id: "fast-end", type: "end", progressNodeId: "fast" },
+    { id: "slow-end", type: "end", progressNodeId: "slow" },
+  );
+  const verify = workflow.nodes[2] as Extract<
+    WorkflowGraph["nodes"][number],
+    { type: "condition" }
+  >;
+  verify.cases = [
+    { when: { operator: "eq", left: { contextPath: "do.size" }, right: "small" }, output: "fast" },
+    { when: { operator: "eq", left: { contextPath: "do.size" }, right: "large" }, output: "slow" },
+    { when: { operator: "eq", left: { contextPath: "do.ok" }, right: true }, output: "true" },
+  ];
+  verify.connections = { fast: "fast-end", slow: "slow-end", true: "end", default: "do" };
+  verify.connectionLabels = {
+    ...verify.connectionLabels,
+    fast: "small change",
+    slow: "large change",
+  };
+  return workflow;
 }
 
 describe("process derivation from the authored graph", () => {
@@ -216,6 +247,64 @@ describe("process derivation from the authored graph", () => {
     const workflow = synthetic();
     mutate(workflow);
     expect(codes(workflow)).toEqual(expected);
+  });
+
+  test("a three-case condition derives one labelled transition per output, not only true and default", () => {
+    const projection = deriveProcess(threeWay())!;
+    expect(projection.diagnostics).toEqual([]);
+    expect(projection.blocks[1].transitions).toEqual([
+      { to: "fast", label: "small change", edges: ["verify.fast"] },
+      { to: "slow", label: "large change", edges: ["verify.slow"] },
+      {
+        to: "work",
+        label: "check failed",
+        cycle: { cause: "The check found a problem", exit: "The check passes" },
+        edges: ["verify.default"],
+      },
+    ]);
+  });
+
+  test("a run that leaves a three-case condition through its third output projects that branch as taken", () => {
+    const run: WorkflowExecution = {
+      executionId: "execution",
+      workflowId: "workflow",
+      userId: "user",
+      currentNodeId: null,
+      waitingForInputNodeId: null,
+      globalContext: {
+        variables: {},
+        nodeStates: {},
+        executionId: "execution",
+        workflowId: "workflow",
+        userId: "user",
+      },
+      status: "completed",
+      revision: 1,
+      createdAt: 1,
+      updatedAt: 1,
+      visits: [
+        { seq: 0, nodeId: "start", exitKey: "default", changes: {} },
+        { seq: 1, nodeId: "do", exitKey: "success", changes: { "do.size": "large" }, waited: true },
+        { seq: 2, nodeId: "verify", exitKey: "slow", changes: {} },
+        { seq: 3, nodeId: "slow-end", exitKey: null, changes: {} },
+      ],
+    };
+    const projected = projectExecutionRun(threeWay(), run)!;
+    expect(projected.route.map((entry) => [entry.nodeId, entry.blockId, entry.exitKey])).toEqual([
+      ["start", "work", "default"],
+      ["do", "work", "success"],
+      ["verify", "check", "slow"],
+      ["slow-end", "slow", null],
+    ]);
+    // "check" was entered by its condition only: a block without a working visit is skipped by
+    // the existing status rule, while the branch the third output selected is done and the
+    // branch it did not select is skipped.
+    expect(projected.nodes.map((node) => [node.id, node.status])).toEqual([
+      ["work", "done"],
+      ["check", "skipped"],
+      ["fast", "skipped"],
+      ["slow", "done"],
+    ]);
   });
 
   test("a transition to an earlier block is a return even when the node walk finished that block first", () => {

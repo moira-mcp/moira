@@ -59,6 +59,30 @@ moira-workflow ./workflow.json set-tags research,verification
 moira-workflow ./workflow.json set-variable-schema result --file ./result-schema.json
 ```
 
+Маршрутизация правится той же командой `update`. `--cases` заменяет упорядоченные case узла
+`condition` или `agent-directive`, `--expressions` — выражения, которые он вычисляет перед ними, а
+соединения правятся по ключу:
+
+```bash
+moira-workflow ./workflow.json update route-review \
+  --cases '[{"when":{"operator":"eq","left":{"contextPath":"verdict"},"right":"blocked"},"output":"blocked"}]'
+moira-workflow ./workflow.json update count-attempt --expressions '["attempts = attempts + 1"]'
+moira-workflow ./workflow.json update route-review --add-connection blocked fix-issues
+```
+
+Команды только для чтения показывают результат: `schema` печатает по строке
+`CASE <output> WHEN <условие>` на каждый case и по строке `EDGE` на каждое соединение,
+`structure --detailed` выводит каждый case как `Case: <output> when …`, а `diff` называет `cases`
+среди изменённых полей узла, — поэтому изменение маршрутизации можно проверить, не читая сырой JSON.
+
+Чтобы привести файл к текущей схеме definition, выполните `migrate`. Команда перезаписывает файл на
+месте, предварительно создавая резервную копию, как и любая запись, и сообщает
+«Already at schema version 1; nothing to migrate», когда делать нечего:
+
+```bash
+moira-workflow ./workflow.json migrate
+```
+
 Вид процесса использует тот же файловый authoring surface. Задайте полный список блоков из JSON
 командой `set-progress` (или наращивайте его через `add-block` / `edit-block`), затем назначьте
 каждой ноде её блок командой `set-block` — включая маршрутизирующие ноды: вывод процесса отклоняет
@@ -83,8 +107,8 @@ moira-workflow ./workflow.json update notify --progress-node-id review --attach-
 moira-workflow ./workflow.json set-block route-plan-approval plan
 moira-workflow ./workflow.json add-block deliver "Deliver" "Hand the result over" --after execute
 moira-workflow ./workflow.json edit-block deliver --summary "Present the result"
-moira-workflow ./workflow.json set-label check-plan-approved true "plan approved"
-moira-workflow ./workflow.json set-label route-review false "review found defects" \
+moira-workflow ./workflow.json set-label check-plan-approved approved "plan approved"
+moira-workflow ./workflow.json set-label route-review default "review found defects" \
   --cause "The independent review reported blocking findings." --exit "The review passes."
 moira-workflow ./workflow.json derive
 ```
@@ -339,7 +363,10 @@ workflow.
 }
 ```
 
-### Соединения узла-условия
+### Маршрутизация узла-условия
+
+Исходы узла-условия — это его `cases` и ключи `connections`, которые они называют. Меняйте их
+вместе, чтобы каждый case по-прежнему называл существующий ключ:
 
 ```typescript
 {
@@ -347,9 +374,15 @@ workflow.
     {
       nodeId: "condition-node",
       changes: {
+        cases: [
+          {
+            when: { operator: "eq", left: { contextPath: "status" }, right: "success" },
+            output: "passed",
+          },
+        ],
         connections: {
-          true: "when-true-node",
-          false: "when-false-node",
+          passed: "success-node",
+          default: "retry-node",
         },
       },
     },

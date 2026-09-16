@@ -65,14 +65,15 @@ flowchart LR
 {
   "id": "check-result",
   "type": "condition",
-  "condition": {
-    "operator": "eq",
-    "left": { "contextPath": "result_valid" },
-    "right": "yes"
-  },
+  "cases": [
+    {
+      "when": { "operator": "eq", "left": { "contextPath": "result_valid" }, "right": "yes" },
+      "output": "valid"
+    }
+  ],
   "connections": {
-    "true": "next-step",
-    "false": "fix-issues"
+    "valid": "next-step",
+    "default": "fix-issues"
   }
 },
 {
@@ -121,14 +122,15 @@ flowchart LR
 {
   "id": "route-action",
   "type": "condition",
-  "condition": {
-    "operator": "eq",
-    "left": { "contextPath": "action" },
-    "right": "create"
-  },
+  "cases": [
+    {
+      "when": { "operator": "eq", "left": { "contextPath": "action" }, "right": "create" },
+      "output": "create"
+    }
+  ],
   "connections": {
-    "true": "create-branch",
-    "false": "edit-branch"
+    "create": "create-branch",
+    "default": "edit-branch"
   }
 }
 ```
@@ -154,14 +156,15 @@ flowchart LR
 {
   "id": "check-approval",
   "type": "condition",
-  "condition": {
-    "operator": "eq",
-    "left": { "contextPath": "approved" },
-    "right": "yes"
-  },
+  "cases": [
+    {
+      "when": { "operator": "eq", "left": { "contextPath": "approved" }, "right": "yes" },
+      "output": "approved"
+    }
+  ],
   "connections": {
-    "true": "proceed",
-    "false": "revise-plan"
+    "approved": "proceed",
+    "default": "revise-plan"
   }
 }
 ```
@@ -253,37 +256,52 @@ flowchart LR
 
 ## Операторы условий
 
-| Оператор  | Описание              | Пример                |
-| --------- | --------------------- | --------------------- |
-| `eq`      | Равно                 | `"right": "value"`    |
-| `neq`     | Не равно              | `"right": "value"`    |
-| `lt`      | Меньше                | `"right": 10`         |
-| `gt`      | Больше                | `"right": 0`          |
-| `lte`     | Меньше или равно      | `"right": 100`        |
-| `gte`     | Больше или равно      | `"right": 1`          |
-| `and`     | Логическое И          | `"conditions": [...]` |
-| `or`      | Логическое ИЛИ        | `"conditions": [...]` |
-| `exists`  | Переменная существует | —                     |
-| `isEmpty` | Массив/строка пусты   | —                     |
+Каждый case узла condition связывает один из таких объектов условия с ключом соединения, который он
+выбирает.
+
+| Оператор   | Описание                      | Пример                         |
+| ---------- | ----------------------------- | ------------------------------ |
+| `eq`       | Равно                         | `"right": "value"`             |
+| `neq`      | Не равно                      | `"right": "value"`             |
+| `lt`       | Меньше                        | `"right": 10`                  |
+| `gt`       | Больше                        | `"right": 0`                   |
+| `lte`      | Меньше или равно              | `"right": 100`                 |
+| `gte`      | Больше или равно              | `"right": 1`                   |
+| `contains` | Вхождение в строку или массив | `"right": "urgent"`            |
+| `and`      | Логическое И                  | `"conditions": [...]`          |
+| `or`       | Логическое ИЛИ                | `"conditions": [...]`          |
+| `not`      | Отрицание                     | `"condition": {...}`           |
+| `exists`   | Переменная существует         | `"value": { "contextPath": …}` |
 
 ### Пример сложного условия
 
 ```json
 {
-  "condition": {
-    "operator": "and",
-    "conditions": [
-      {
-        "operator": "eq",
-        "left": { "contextPath": "status" },
-        "right": "ready"
+  "id": "check-ready",
+  "type": "condition",
+  "cases": [
+    {
+      "when": {
+        "operator": "and",
+        "conditions": [
+          {
+            "operator": "eq",
+            "left": { "contextPath": "status" },
+            "right": "ready"
+          },
+          {
+            "operator": "gt",
+            "left": { "contextPath": "count" },
+            "right": 0
+          }
+        ]
       },
-      {
-        "operator": "gt",
-        "left": { "contextPath": "count" },
-        "right": 0
-      }
-    ]
+      "output": "ready"
+    }
+  ],
+  "connections": {
+    "ready": "process-items",
+    "default": "wait"
   }
 }
 ```
@@ -343,7 +361,9 @@ flowchart LR
    - `inputSchema` — валидный JSON Schema
 
 4. **Условия**
-   - `true` и `false` connections определены
+   - Есть хотя бы один case, и каждый называет ключ из `connections`
+   - `connections.default` определён
+   - Каждый авторский выход назван каким-нибудь case
    - Оператор валиден
 
 ## Сохранение Workflows
@@ -419,14 +439,15 @@ const { uploadUrl } = await mcp__moira__token({ action: "upload" });
 {
   "id": "route-by-capabilities",
   "type": "condition",
-  "condition": {
-    "operator": "eq",
-    "left": { "contextPath": "has_file_access" },
-    "right": true
-  },
+  "cases": [
+    {
+      "when": { "operator": "eq", "left": { "contextPath": "has_file_access" }, "right": true },
+      "output": "file-access"
+    }
+  ],
   "connections": {
-    "true": "file-based-flow",
-    "false": "mcp-only-flow"
+    "file-access": "file-based-flow",
+    "default": "mcp-only-flow"
   }
 }
 ```
@@ -568,14 +589,19 @@ Self-Review](/ru/docs/patterns/self-review/) проверяет каждое т�
     {
       "id": "check-plan-approval",
       "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": { "contextPath": "plan_approved" },
-        "right": "да"
-      },
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": { "contextPath": "plan_approved" },
+            "right": "да"
+          },
+          "output": "approved"
+        }
+      ],
       "connections": {
-        "true": "execute-steps",
-        "false": "revise-plan"
+        "approved": "execute-steps",
+        "default": "revise-plan"
       }
     },
     {
@@ -670,14 +696,15 @@ flowchart TD
 {
   "id": "check-retry-limit",
   "type": "condition",
-  "condition": {
-    "operator": "gte",
-    "left": { "contextPath": "step_retry" },
-    "right": 3
-  },
+  "cases": [
+    {
+      "when": { "operator": "gte", "left": { "contextPath": "step_retry" }, "right": 3 },
+      "output": "exhausted"
+    }
+  ],
   "connections": {
-    "true": "notify-escalation",
-    "false": "retry-action"
+    "exhausted": "notify-escalation",
+    "default": "retry-action"
   }
 },
 {
@@ -707,27 +734,28 @@ flowchart TD
 {
   "id": "route-escalation",
   "type": "condition",
-  "condition": {
-    "operator": "eq",
-    "left": { "contextPath": "escalation_decision" },
-    "right": "revise_plan"
-  },
+  "cases": [
+    {
+      "when": {
+        "operator": "eq",
+        "left": { "contextPath": "escalation_decision" },
+        "right": "revise_plan"
+      },
+      "output": "revise"
+    },
+    {
+      "when": {
+        "operator": "eq",
+        "left": { "contextPath": "escalation_decision" },
+        "right": "skip"
+      },
+      "output": "skip"
+    }
+  ],
   "connections": {
-    "true": "revise-plan",
-    "false": "route-escalation-skip"
-  }
-},
-{
-  "id": "route-escalation-skip",
-  "type": "condition",
-  "condition": {
-    "operator": "eq",
-    "left": { "contextPath": "escalation_decision" },
-    "right": "skip"
-  },
-  "connections": {
-    "true": "mark-step-skipped",
-    "false": "handle-user-help"
+    "revise": "revise-plan",
+    "skip": "mark-step-skipped",
+    "default": "handle-user-help"
   }
 }
 ```
@@ -771,14 +799,19 @@ flowchart LR
 {
   "id": "check-development-mode",
   "type": "condition",
-  "condition": {
-    "operator": "eq",
-    "left": { "contextPath": "development_mode" },
-    "right": "express"
-  },
+  "cases": [
+    {
+      "when": {
+        "operator": "eq",
+        "left": { "contextPath": "development_mode" },
+        "right": "express"
+      },
+      "output": "express"
+    }
+  ],
   "connections": {
-    "true": "express-implementation",
-    "false": "analyze-and-plan"
+    "express": "express-implementation",
+    "default": "analyze-and-plan"
   }
 }
 ```
@@ -827,14 +860,15 @@ flowchart LR
 {
   "id": "route-validation",
   "type": "condition",
-  "condition": {
-    "operator": "eq",
-    "left": { "contextPath": "issues_count" },
-    "right": 0
-  },
+  "cases": [
+    {
+      "when": { "operator": "eq", "left": { "contextPath": "issues_count" }, "right": 0 },
+      "output": "clean"
+    }
+  ],
   "connections": {
-    "true": "next-step",
-    "false": "fix-issues"
+    "clean": "next-step",
+    "default": "fix-issues"
   }
 }
 ```
@@ -869,14 +903,15 @@ flowchart LR
 {
   "id": "check-tests",
   "type": "condition",
-  "condition": {
-    "operator": "eq",
-    "left": { "contextPath": "tests_failed" },
-    "right": 0
-  },
+  "cases": [
+    {
+      "when": { "operator": "eq", "left": { "contextPath": "tests_failed" }, "right": 0 },
+      "output": "all-passed"
+    }
+  ],
   "connections": {
-    "true": "continue",
-    "false": "fix-tests"
+    "all-passed": "continue",
+    "default": "fix-tests"
   }
 }
 ```

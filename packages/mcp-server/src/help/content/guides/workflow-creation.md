@@ -64,14 +64,15 @@ flowchart LR
 {
   "id": "check-result",
   "type": "condition",
-  "condition": {
-    "operator": "eq",
-    "left": { "contextPath": "result_valid" },
-    "right": "yes"
-  },
+  "cases": [
+    {
+      "when": { "operator": "eq", "left": { "contextPath": "result_valid" }, "right": "yes" },
+      "output": "valid"
+    }
+  ],
   "connections": {
-    "true": "next-step",
-    "false": "fix-issues"
+    "valid": "next-step",
+    "default": "fix-issues"
   }
 },
 {
@@ -120,14 +121,15 @@ Use when workflow has different paths for different scenarios:
 {
   "id": "route-action",
   "type": "condition",
-  "condition": {
-    "operator": "eq",
-    "left": { "contextPath": "action" },
-    "right": "create"
-  },
+  "cases": [
+    {
+      "when": { "operator": "eq", "left": { "contextPath": "action" }, "right": "create" },
+      "output": "create"
+    }
+  ],
   "connections": {
-    "true": "create-branch",
-    "false": "edit-branch"
+    "create": "create-branch",
+    "default": "edit-branch"
   }
 }
 ```
@@ -153,14 +155,15 @@ Use for critical actions that need confirmation:
 {
   "id": "check-approval",
   "type": "condition",
-  "condition": {
-    "operator": "eq",
-    "left": { "contextPath": "approved" },
-    "right": "yes"
-  },
+  "cases": [
+    {
+      "when": { "operator": "eq", "left": { "contextPath": "approved" }, "right": "yes" },
+      "output": "approved"
+    }
+  ],
   "connections": {
-    "true": "proceed",
-    "false": "revise-plan"
+    "approved": "proceed",
+    "default": "revise-plan"
   }
 }
 ```
@@ -252,37 +255,52 @@ Use for critical actions that need confirmation:
 
 ## Condition Operators
 
-| Operator  | Description        | Example               |
-| --------- | ------------------ | --------------------- |
-| `eq`      | Equal              | `"right": "value"`    |
-| `neq`     | Not equal          | `"right": "value"`    |
-| `lt`      | Less than          | `"right": 10`         |
-| `gt`      | Greater than       | `"right": 0`          |
-| `lte`     | Less or equal      | `"right": 100`        |
-| `gte`     | Greater or equal   | `"right": 1`          |
-| `and`     | Logical AND        | `"conditions": [...]` |
-| `or`      | Logical OR         | `"conditions": [...]` |
-| `exists`  | Variable exists    | —                     |
-| `isEmpty` | Array/string empty | —                     |
+A condition node's `cases` each pair one of these condition objects with the connection key it
+selects.
+
+| Operator   | Description         | Example                        |
+| ---------- | ------------------- | ------------------------------ |
+| `eq`       | Equal               | `"right": "value"`             |
+| `neq`      | Not equal           | `"right": "value"`             |
+| `lt`       | Less than           | `"right": 10`                  |
+| `gt`       | Greater than        | `"right": 0`                   |
+| `lte`      | Less or equal       | `"right": 100`                 |
+| `gte`      | Greater or equal    | `"right": 1`                   |
+| `contains` | String/array member | `"right": "urgent"`            |
+| `and`      | Logical AND         | `"conditions": [...]`          |
+| `or`       | Logical OR          | `"conditions": [...]`          |
+| `not`      | Negation            | `"condition": {...}`           |
+| `exists`   | Variable exists     | `"value": { "contextPath": …}` |
 
 ### Complex Condition Example
 
 ```json
 {
-  "condition": {
-    "operator": "and",
-    "conditions": [
-      {
-        "operator": "eq",
-        "left": { "contextPath": "status" },
-        "right": "ready"
+  "id": "check-ready",
+  "type": "condition",
+  "cases": [
+    {
+      "when": {
+        "operator": "and",
+        "conditions": [
+          {
+            "operator": "eq",
+            "left": { "contextPath": "status" },
+            "right": "ready"
+          },
+          {
+            "operator": "gt",
+            "left": { "contextPath": "count" },
+            "right": 0
+          }
+        ]
       },
-      {
-        "operator": "gt",
-        "left": { "contextPath": "count" },
-        "right": 0
-      }
-    ]
+      "output": "ready"
+    }
+  ],
+  "connections": {
+    "ready": "process-items",
+    "default": "wait"
   }
 }
 ```
@@ -342,7 +360,9 @@ Before saving, verify:
    - `inputSchema` is valid JSON Schema
 
 4. **Conditions**
-   - `true` and `false` connections defined
+   - At least one case, each naming a key of `connections`
+   - `connections.default` defined
+   - Every authored output named by a case
    - Operator is valid
 
 ## Saving Workflows
@@ -418,14 +438,15 @@ Different agents have different capabilities. Design workflows to detect and ada
 {
   "id": "route-by-capabilities",
   "type": "condition",
-  "condition": {
-    "operator": "eq",
-    "left": { "contextPath": "has_file_access" },
-    "right": true
-  },
+  "cases": [
+    {
+      "when": { "operator": "eq", "left": { "contextPath": "has_file_access" }, "right": true },
+      "output": "file-access"
+    }
+  ],
   "connections": {
-    "true": "file-based-flow",
-    "false": "mcp-only-flow"
+    "file-access": "file-based-flow",
+    "default": "mcp-only-flow"
   }
 }
 ```
@@ -567,14 +588,19 @@ delivery.
     {
       "id": "check-plan-approval",
       "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": { "contextPath": "plan_approved" },
-        "right": "yes"
-      },
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": { "contextPath": "plan_approved" },
+            "right": "yes"
+          },
+          "output": "approved"
+        }
+      ],
       "connections": {
-        "true": "execute-steps",
-        "false": "revise-plan"
+        "approved": "execute-steps",
+        "default": "revise-plan"
       }
     },
     {
@@ -669,14 +695,15 @@ flowchart TD
 {
   "id": "check-retry-limit",
   "type": "condition",
-  "condition": {
-    "operator": "gte",
-    "left": { "contextPath": "step_retry" },
-    "right": 3
-  },
+  "cases": [
+    {
+      "when": { "operator": "gte", "left": { "contextPath": "step_retry" }, "right": 3 },
+      "output": "exhausted"
+    }
+  ],
   "connections": {
-    "true": "notify-escalation",
-    "false": "retry-action"
+    "exhausted": "notify-escalation",
+    "default": "retry-action"
   }
 },
 {
@@ -706,27 +733,28 @@ flowchart TD
 {
   "id": "route-escalation",
   "type": "condition",
-  "condition": {
-    "operator": "eq",
-    "left": { "contextPath": "escalation_decision" },
-    "right": "revise_plan"
-  },
+  "cases": [
+    {
+      "when": {
+        "operator": "eq",
+        "left": { "contextPath": "escalation_decision" },
+        "right": "revise_plan"
+      },
+      "output": "revise"
+    },
+    {
+      "when": {
+        "operator": "eq",
+        "left": { "contextPath": "escalation_decision" },
+        "right": "skip"
+      },
+      "output": "skip"
+    }
+  ],
   "connections": {
-    "true": "revise-plan",
-    "false": "route-escalation-skip"
-  }
-},
-{
-  "id": "route-escalation-skip",
-  "type": "condition",
-  "condition": {
-    "operator": "eq",
-    "left": { "contextPath": "escalation_decision" },
-    "right": "skip"
-  },
-  "connections": {
-    "true": "mark-step-skipped",
-    "false": "handle-user-help"
+    "revise": "revise-plan",
+    "skip": "mark-step-skipped",
+    "default": "handle-user-help"
   }
 }
 ```
@@ -770,14 +798,19 @@ Route to simplified or full flow based on task complexity:
 {
   "id": "check-development-mode",
   "type": "condition",
-  "condition": {
-    "operator": "eq",
-    "left": { "contextPath": "development_mode" },
-    "right": "express"
-  },
+  "cases": [
+    {
+      "when": {
+        "operator": "eq",
+        "left": { "contextPath": "development_mode" },
+        "right": "express"
+      },
+      "output": "express"
+    }
+  ],
   "connections": {
-    "true": "express-implementation",
-    "false": "analyze-and-plan"
+    "express": "express-implementation",
+    "default": "analyze-and-plan"
   }
 }
 ```
@@ -827,14 +860,15 @@ loops.
 {
   "id": "route-validation",
   "type": "condition",
-  "condition": {
-    "operator": "eq",
-    "left": { "contextPath": "issues_count" },
-    "right": 0
-  },
+  "cases": [
+    {
+      "when": { "operator": "eq", "left": { "contextPath": "issues_count" }, "right": 0 },
+      "output": "clean"
+    }
+  ],
   "connections": {
-    "true": "next-step",
-    "false": "fix-issues"
+    "clean": "next-step",
+    "default": "fix-issues"
   }
 }
 ```
@@ -869,14 +903,15 @@ Validate using numeric checks instead of yes/no:
 {
   "id": "check-tests",
   "type": "condition",
-  "condition": {
-    "operator": "eq",
-    "left": { "contextPath": "tests_failed" },
-    "right": 0
-  },
+  "cases": [
+    {
+      "when": { "operator": "eq", "left": { "contextPath": "tests_failed" }, "right": 0 },
+      "output": "all-passed"
+    }
+  ],
   "connections": {
-    "true": "continue",
-    "false": "fix-tests"
+    "all-passed": "continue",
+    "default": "fix-tests"
   }
 }
 ```

@@ -103,7 +103,7 @@ Common node types are shown below. This table is representative, not exhaustive;
 | `start`             | Entry point for workflow execution                     |
 | `end`               | Terminal node marking completion                       |
 | `agent-directive`   | Task for agent with directive and completion condition |
-| `condition`         | Branch execution based on structured conditions        |
+| `condition`         | Branch execution to one of several outputs by cases    |
 | `expression`        | Compute values using arithmetic expressions            |
 | `subgraph`          | Delegate to another workflow                           |
 | `user-notification` | Notify through the current user's configured channels  |

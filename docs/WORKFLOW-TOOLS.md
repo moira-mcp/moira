@@ -34,8 +34,11 @@ Prints the full JSON of a specific node.
 # Update the directive
 moira-workflow ./workflows/production/flows/<flow>.json update analyze-and-plan --directive "new text"
 
-# Update a condition
-moira-workflow ./workflows/production/flows/<flow>.json update check-plan-approval --condition "plan_approved == true"
+# Update the routing cases of a condition or agent-directive node
+moira-workflow ./workflows/production/flows/<flow>.json update check-plan-approval --cases '[{"when":{"operator":"eq","left":{"contextPath":"plan_approved"},"right":true},"output":"approved"}]'
+
+# Update the expressions a condition or agent-directive node runs before its cases
+moira-workflow ./workflows/production/flows/<flow>.json update check-plan-approval --expressions '["attempts = attempts + 1"]'
 
 # Update a message (for notifications)
 moira-workflow ./workflows/production/flows/<flow>.json update notify-plan-ready --message "Plan is ready!"
@@ -60,6 +63,13 @@ moira-workflow ./workflows/production/flows/<flow>.json update analyze-and-plan 
 ```
 
 **Note:** A double-dash `--` is required before `--remove-connection` due to npm argument parsing.
+
+`--cases` takes a JSON array of `{ "when": <structured condition>, "output": "<connection key>" }`
+objects and replaces the node's cases; `--expressions` takes a JSON array of expression strings and
+replaces the node's expressions. Both apply to `condition` and `agent-directive` nodes. Each
+`output` must name a key of the node's `connections` other than its default output (`default` on a
+condition node, `success` on an agent-directive node) and other than the reserved control outputs
+`error` and `timeout` — run `validate` after the edit to see the routing diagnostics.
 
 ### clone - Clone a node
 
@@ -156,13 +166,15 @@ Basic structure:
 With `--graph`:
 
 - The same deterministic plain-text schema as `schema`, appended after the basic structure
-- Every node and labelled connection, including condition branches and dangling targets
+- Every node and labelled connection, including the routing cases of condition and agent-directive
+  nodes (`CASE <output> WHEN <condition>`) and dangling targets
 - Basic blocks, cycles, reachability classes, declared data flow, and a coverage footer
 
 With `--detailed`:
 
 - Directives of agent-directive nodes (first 150 characters)
-- Conditions of condition nodes (first 80 characters)
+- One `Case: <output> when <condition>` line per routing case of a condition or agent-directive
+  node (the condition truncated to 80 characters), and the node's expressions
 - Messages of notification nodes (first line)
 - Input schema properties
 
@@ -200,7 +212,8 @@ moira-workflow ./workflows/production/flows/<flow>.json schema
 ```
 
 Prints one deterministic plain-text control-flow schema derived only from the workflow JSON. It
-expands real node IDs, canonically ordered labelled connections, conditions, declared local/global
+expands real node IDs, canonically ordered labelled connections, routing cases (`CASE <output> WHEN
+<condition>`) and node expressions, declared local/global
 outputs, final outputs, subgraph mappings, automatic-node output variables, context references,
 basic blocks, cyclic regions, and the complete progress definition with its ordered blocks, any
 legacy display edges still stored on them, and node-to-block mappings. It distinguishes normal
@@ -224,18 +237,31 @@ the authored edges behind every transition, hub blocks, and every block-contract
 a single line saying it has no block view. The output is deterministic and the command does not
 write the source file.
 
+### migrate - Upgrade the definition to the current schema version
+
+```bash
+moira-workflow ./workflows/production/flows/<flow>.json migrate
+```
+
+Rewrites the file in place at the current `metadata.schemaVersion`, applying exactly the migration
+the server applies wherever a definition enters it, so a migrated file is what the server would
+see. A backup is created first, as for every write. Running it on a file that is already current
+changes nothing and prints `Already at schema version 1; nothing to migrate`. Authors do not need
+this command to make an old file work — the server migrates on the way in — only to read and edit
+the current shape locally.
+
 ### set-label, clear-label, set-block, add-block, edit-block - Author the block contract
 
 ```bash
 # Label a boundary edge (the edge leaves the node's block)
-moira-workflow <flow>.json set-label check-plan-approved true "plan approved"
+moira-workflow <flow>.json set-label check-plan-approved approved "plan approved"
 
 # Explain a return: a label plus the cause of the loop and the condition that ends it
-moira-workflow <flow>.json set-label route-review-verdict false "review found defects" \
+moira-workflow <flow>.json set-label route-review-verdict default "review found defects" \
   --cause "The independent review reported blocking findings." \
   --exit "The review passes."
 
-moira-workflow <flow>.json clear-label check-plan-approved true
+moira-workflow <flow>.json clear-label check-plan-approved approved
 
 # Own a node by a block (sets progressNodeId; the block must exist)
 moira-workflow <flow>.json set-block route-plan-approval plan
@@ -343,7 +369,7 @@ Shows:
 - Metadata changes (name, version, description)
 - Added nodes
 - Removed nodes
-- Changed nodes (with details of what changed)
+- Changed nodes (with details of what changed, routing `cases` among them)
 - systemReminder changes
 
 ### create - Create a new workflow

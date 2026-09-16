@@ -62,20 +62,25 @@ flowchart LR
 {
   "id": "route-test-adequacy-reach",
   "type": "condition",
-  "condition": {
-    "operator": "eq",
-    "left": { "contextPath": "repair-test-adequacy.repair_reach" },
-    "right": "contained"
-  },
+  "cases": [
+    {
+      "when": {
+        "operator": "eq",
+        "left": { "contextPath": "repair-test-adequacy.repair_reach" },
+        "right": "contained"
+      },
+      "output": "contained"
+    }
+  ],
   "connections": {
-    "true": "review-test-adequacy",
-    "false": "advance-evidence-iteration"
+    "contained": "review-test-adequacy",
+    "default": "advance-evidence-iteration"
   }
 }
 ```
 
-Пишите условие так, чтобы полная цепочка была веткой любого ответа, кроме `contained`. Тогда
-консервативное направление совпадает с направлением по умолчанию.
+Пишите единственный case так, чтобы он называл `contained`; полную цепочку тогда берёт `default`,
+то есть любой ответ, кроме `contained`. Консервативное направление — это output по умолчанию.
 
 Ветка `spreading` попадает в цепочку не напрямую: сначала она проходит через expression-ноду,
 открывающую следующий круг, а цепочка идёт уже после неё.

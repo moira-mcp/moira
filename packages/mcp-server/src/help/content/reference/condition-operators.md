@@ -3,17 +3,34 @@ title: Condition Operators
 description: Reference for all condition operators in workflow nodes
 ---
 
+A structured condition is the object that decides whether a routing case holds. It appears as the
+`when` of a case on a `condition` or `agent-directive` node:
+
+```json
+{
+  "id": "check-status",
+  "type": "condition",
+  "cases": [
+    {
+      "when": { "operator": "eq", "left": { "contextPath": "status" }, "right": "ready" },
+      "output": "ready"
+    }
+  ],
+  "connections": { "ready": "next-step", "default": "wait" }
+}
+```
+
+Every example below shows the condition object itself — what you place in a case's `when`.
+
 ## Comparison Operators
 
 ### Equal (`eq`)
 
 ```json
 {
-  "condition": {
-    "operator": "eq",
-    "left": { "contextPath": "status" },
-    "right": "ready"
-  }
+  "operator": "eq",
+  "left": { "contextPath": "status" },
+  "right": "ready"
 }
 ```
 
@@ -23,11 +40,9 @@ Works with strings, numbers, booleans.
 
 ```json
 {
-  "condition": {
-    "operator": "neq",
-    "left": { "contextPath": "error_count" },
-    "right": 0
-  }
+  "operator": "neq",
+  "left": { "contextPath": "error_count" },
+  "right": 0
 }
 ```
 
@@ -35,11 +50,9 @@ Works with strings, numbers, booleans.
 
 ```json
 {
-  "condition": {
-    "operator": "gt",
-    "left": { "contextPath": "score" },
-    "right": 80
-  }
+  "operator": "gt",
+  "left": { "contextPath": "score" },
+  "right": 80
 }
 ```
 
@@ -47,11 +60,9 @@ Works with strings, numbers, booleans.
 
 ```json
 {
-  "condition": {
-    "operator": "gte",
-    "left": { "contextPath": "items_count" },
-    "right": 1
-  }
+  "operator": "gte",
+  "left": { "contextPath": "items_count" },
+  "right": 1
 }
 ```
 
@@ -59,11 +70,9 @@ Works with strings, numbers, booleans.
 
 ```json
 {
-  "condition": {
-    "operator": "lt",
-    "left": { "contextPath": "retry_count" },
-    "right": 3
-  }
+  "operator": "lt",
+  "left": { "contextPath": "retry_count" },
+  "right": 3
 }
 ```
 
@@ -71,11 +80,9 @@ Works with strings, numbers, booleans.
 
 ```json
 {
-  "condition": {
-    "operator": "lte",
-    "left": { "contextPath": "error_rate" },
-    "right": 0.05
-  }
+  "operator": "lte",
+  "left": { "contextPath": "error_rate" },
+  "right": 0.05
 }
 ```
 
@@ -85,11 +92,9 @@ Works with strings, numbers, booleans.
 
 ```json
 {
-  "condition": {
-    "operator": "contains",
-    "left": { "contextPath": "message" },
-    "right": "error"
-  }
+  "operator": "contains",
+  "left": { "contextPath": "message" },
+  "right": "error"
 }
 ```
 
@@ -97,11 +102,9 @@ Also works with arrays:
 
 ```json
 {
-  "condition": {
-    "operator": "contains",
-    "left": { "contextPath": "tags" },
-    "right": "urgent"
-  }
+  "operator": "contains",
+  "left": { "contextPath": "tags" },
+  "right": "urgent"
 }
 ```
 
@@ -111,31 +114,12 @@ Also works with arrays:
 
 ```json
 {
-  "condition": {
-    "operator": "exists",
-    "operand": { "contextPath": "optional_field" }
-  }
+  "operator": "exists",
+  "value": { "contextPath": "optional_field" }
 }
 ```
 
 Returns true if variable exists and is not null/undefined.
-
-### Is Empty (`isEmpty`)
-
-```json
-{
-  "condition": {
-    "operator": "isEmpty",
-    "operand": { "contextPath": "items" }
-  }
-}
-```
-
-Returns true for:
-
-- Empty string `""`
-- Empty array `[]`
-- Null/undefined
 
 ## Logical Operators
 
@@ -145,21 +129,19 @@ All conditions must be true:
 
 ```json
 {
-  "condition": {
-    "operator": "and",
-    "conditions": [
-      {
-        "operator": "eq",
-        "left": { "contextPath": "status" },
-        "right": "complete"
-      },
-      {
-        "operator": "gt",
-        "left": { "contextPath": "score" },
-        "right": 80
-      }
-    ]
-  }
+  "operator": "and",
+  "conditions": [
+    {
+      "operator": "eq",
+      "left": { "contextPath": "status" },
+      "right": "complete"
+    },
+    {
+      "operator": "gt",
+      "left": { "contextPath": "score" },
+      "right": 80
+    }
+  ]
 }
 ```
 
@@ -169,21 +151,19 @@ At least one condition must be true:
 
 ```json
 {
-  "condition": {
-    "operator": "or",
-    "conditions": [
-      {
-        "operator": "eq",
-        "left": { "contextPath": "priority" },
-        "right": "high"
-      },
-      {
-        "operator": "eq",
-        "left": { "contextPath": "priority" },
-        "right": "critical"
-      }
-    ]
-  }
+  "operator": "or",
+  "conditions": [
+    {
+      "operator": "eq",
+      "left": { "contextPath": "priority" },
+      "right": "high"
+    },
+    {
+      "operator": "eq",
+      "left": { "contextPath": "priority" },
+      "right": "critical"
+    }
+  ]
 }
 ```
 
@@ -193,13 +173,11 @@ Negates a condition:
 
 ```json
 {
+  "operator": "not",
   "condition": {
-    "operator": "not",
-    "condition": {
-      "operator": "eq",
-      "left": { "contextPath": "status" },
-      "right": "blocked"
-    }
+    "operator": "eq",
+    "left": { "contextPath": "status" },
+    "right": "blocked"
   }
 }
 ```
@@ -269,11 +247,9 @@ comparison.
 
 ```json
 {
-  "condition": {
-    "operator": "eq",
-    "left": { "contextPath": "has_tests" },
-    "right": "yes"
-  }
+  "operator": "eq",
+  "left": { "contextPath": "has_tests" },
+  "right": "yes"
 }
 ```
 
@@ -281,33 +257,34 @@ comparison.
 
 ```json
 {
-  "condition": {
-    "operator": "lt",
-    "left": { "contextPath": "current_iteration" },
-    "right": 5
-  }
+  "operator": "lt",
+  "left": { "contextPath": "current_iteration" },
+  "right": 5
 }
 ```
 
-### Check Non-Empty Result
+### Route Three Outcomes
+
+One case per authored output; the first case that holds wins, and `default` covers the rest:
 
 ```json
 {
-  "condition": {
-    "operator": "and",
-    "conditions": [
-      {
-        "operator": "exists",
-        "operand": { "contextPath": "result" }
-      },
-      {
-        "operator": "not",
-        "condition": {
-          "operator": "isEmpty",
-          "operand": { "contextPath": "result" }
-        }
-      }
-    ]
+  "id": "route-verdict",
+  "type": "condition",
+  "cases": [
+    {
+      "when": { "operator": "eq", "left": { "contextPath": "verdict" }, "right": "blocked" },
+      "output": "blocked"
+    },
+    {
+      "when": { "operator": "eq", "left": { "contextPath": "verdict" }, "right": "minor" },
+      "output": "minor"
+    }
+  ],
+  "connections": {
+    "blocked": "escalate",
+    "minor": "fix-issues",
+    "default": "proceed"
   }
 }
 ```

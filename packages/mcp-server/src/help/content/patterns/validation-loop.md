@@ -43,14 +43,19 @@ Ensure quality by verifying results and retrying if they don't meet criteria. Pr
 {
   "type": "condition",
   "id": "check-quality",
-  "condition": {
-    "operator": "eq",
-    "left": { "contextPath": "quality_check_passed" },
-    "right": "yes"
-  },
+  "cases": [
+    {
+      "when": {
+        "operator": "eq",
+        "left": { "contextPath": "quality_check_passed" },
+        "right": "yes"
+      },
+      "output": "passed"
+    }
+  ],
   "connections": {
-    "true": "next-step",
-    "false": "fix-issues"
+    "passed": "next-step",
+    "default": "fix-issues"
   }
 }
 ```
@@ -92,14 +97,19 @@ Add check before retry:
 {
   "type": "condition",
   "id": "check-max-iterations",
-  "condition": {
-    "operator": "lt",
-    "left": { "contextPath": "current_iteration" },
-    "right": 5
-  },
+  "cases": [
+    {
+      "when": {
+        "operator": "lt",
+        "left": { "contextPath": "current_iteration" },
+        "right": 5
+      },
+      "output": "under-limit"
+    }
+  ],
   "connections": {
-    "true": "do-work",
-    "false": "escalate-to-user"
+    "under-limit": "do-work",
+    "default": "escalate-to-user"
   }
 }
 ```
@@ -182,11 +192,12 @@ findings, an exit status, a coverage gap:
 
 ```json
 {
-  "condition": {
+  "when": {
     "operator": "eq",
     "left": { "contextPath": "issues_count" },
     "right": 0
-  }
+  },
+  "output": "clean"
 }
 ```
 

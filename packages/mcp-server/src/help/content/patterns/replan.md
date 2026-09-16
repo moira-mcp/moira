@@ -62,14 +62,19 @@ to the same revision owner instead of retrying the step:
 {
   "type": "condition",
   "id": "route-plan-change",
-  "condition": {
-    "operator": "eq",
-    "left": { "contextPath": "step_scope" },
-    "right": "plan"
-  },
+  "cases": [
+    {
+      "when": {
+        "operator": "eq",
+        "left": { "contextPath": "step_scope" },
+        "right": "plan"
+      },
+      "output": "plan"
+    }
+  ],
   "connections": {
-    "true": "revise-plan",
-    "false": "execute-step"
+    "plan": "revise-plan",
+    "default": "execute-step"
   }
 }
 ```
@@ -104,14 +109,19 @@ Gaps route to the revision owner, which extends the plan; zero gaps route to del
 {
   "type": "condition",
   "id": "check-requirements-gaps",
-  "condition": {
-    "operator": "eq",
-    "left": { "contextPath": "requirements_gaps_count" },
-    "right": 0
-  },
+  "cases": [
+    {
+      "when": {
+        "operator": "eq",
+        "left": { "contextPath": "requirements_gaps_count" },
+        "right": 0
+      },
+      "output": "complete"
+    }
+  ],
   "connections": {
-    "true": "deliver",
-    "false": "revise-plan"
+    "complete": "deliver",
+    "default": "revise-plan"
   }
 }
 ```

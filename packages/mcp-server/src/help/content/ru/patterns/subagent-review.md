@@ -159,14 +159,19 @@ DO NOT pass:
 {
   "type": "condition",
   "id": "check-review-result",
-  "condition": {
-    "operator": "eq",
-    "left": { "contextPath": "issues_found" },
-    "right": "no"
-  },
+  "cases": [
+    {
+      "when": {
+        "operator": "eq",
+        "left": { "contextPath": "issues_found" },
+        "right": "no"
+      },
+      "output": "clean"
+    }
+  ],
   "connections": {
-    "true": "next-step",
-    "false": "fix-issues"
+    "clean": "next-step",
+    "default": "fix-issues"
   }
 }
 ```
@@ -242,11 +247,12 @@ DO NOT pass:
 
 ```json
 {
-  "condition": {
+  "when": {
     "operator": "eq",
     "left": { "contextPath": "issues_count" },
     "right": 0
-  }
+  },
+  "output": "clean"
 }
 ```
 

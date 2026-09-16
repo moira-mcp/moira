@@ -37,6 +37,8 @@ Graph structure is analyzed for correctness:
   error with a stable code (`unowned-node`, `unknown-block`, `empty-block`, `empty-description`,
   `unlabeled-edge`, `unexplained-cycle`, `outcome-duplicate`, `outcome-unowned`,
   `unconnected-block`)
+- **Routing cases** - Each case of a `condition` or `agent-directive` node is checked as described
+  under _Routing Diagnostics_ below
 - **Extension node types** - Types found in the live extension registry or a published registry
   snapshot validate their declared configuration schema. A live registry that does not contain a
   type reports an error; a type absent from a snapshot, or validation without usable registry data,
@@ -50,6 +52,50 @@ Agent responses are validated against `inputSchema`:
 - Type checking for response fields
 - Required field validation
 - Pattern and format validation
+
+## Schema Version and Migration
+
+`metadata.schemaVersion` is an integer that describes the shape of the definition itself, beside the
+semver `metadata.version` that describes its content. The current value is `1`; a definition without
+the field is version 0.
+
+Every definition is upgraded to the current version before it is checked, so validation never sees
+an older shape. The upgrade runs wherever a definition enters the system — validation, upload
+through the API, MCP or the CLI, the bundled catalog, and stored definitions read back — and once at
+startup for stored definitions, reconciliation baselines and recorded conflicts. It is pure and
+idempotent: a definition already at the current version comes back unchanged.
+
+Authors never have to migrate by hand. To rewrite a file on disk into the current shape, run:
+
+```bash
+moira-workflow <file> migrate
+```
+
+Like every write, it creates a backup first. Run a second time it reports
+«Already at schema version 1; nothing to migrate».
+
+## Routing Diagnostics
+
+A `condition` or `agent-directive` node routes through ordered `cases`, each naming a key of the
+node's `connections`. The validator checks them as follows. The identifier in parentheses is the
+code that appears in the message.
+
+| Severity | Condition                                                                         |
+| -------- | --------------------------------------------------------------------------------- |
+| error    | A case names an output that is not a key of `connections` (`unknown-case-output`) |
+| error    | A case names a reserved control output (`error` or `timeout`)                     |
+| error    | A `condition` node has no `cases`, or no `connections.default`                    |
+| warning  | A case selects the node's own default output, which makes the case redundant      |
+| warning  | An authored output no case names can never be taken (`unreachable-output`)        |
+
+`unreachable-output` is a warning rather than an error because a definition is edited one step at a
+time and a connection is often added before the case that selects it; the definition stays valid.
+The default output (`default` on a condition node, `success` on an agent-directive node) and the
+control outputs `error` and `timeout` need no case of their own.
+
+Each case's `when` gets the same operator and structure checks as any structured condition, and the
+declared-variable check below applies to the paths it reads. `expressions` on a routing node get the
+same syntax and registry checks as a standalone `expression` node.
 
 ## Validation Results
 
@@ -217,7 +263,7 @@ Error:
 
 ## Declared-But-No-Default Variable Warning
 
-The validator emits a `warning` (severity `warning`, not an error — the workflow is still valid) when a `variableRegistry` variable is referenced in a `directive`, `completionCondition`, `message`, or `condition`, but the variable has no `default` and is never written by any upstream node's `globalInputs` (and is not present in the start node's `initialData`).
+The validator emits a `warning` (severity `warning`, not an error — the workflow is still valid) when a `variableRegistry` variable is referenced in a `directive`, `completionCondition`, `message`, or a routing case's `when`, but the variable has no `default` and is never written by any upstream node's `globalInputs` (and is not present in the start node's `initialData`).
 
 At runtime, such a reference renders the literal placeholder `[[UNDEFINED_VARIABLE]]` instead of a value.
 

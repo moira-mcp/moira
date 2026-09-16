@@ -248,17 +248,21 @@ type and its current contract, including automatic note operations and file mate
 {
   "type": "condition",
   "id": "check",
-  "condition": {
-    "operator": "gte",
-    "left": { "contextPath": "score" },
-    "right": 8
-  },
+  "cases": [
+    {
+      "when": { "operator": "gte", "left": { "contextPath": "score" }, "right": 8 },
+      "output": "passed"
+    }
+  ],
   "connections": {
-    "true": "success-path",
-    "false": "failure-path"
+    "passed": "success-path",
+    "default": "failure-path"
   }
 }
 ```
+
+`cases` are evaluated in authored order; the first case whose `when` holds selects its `output`,
+and `default` is taken when none holds.
 
 ### User Notification Node
 
