@@ -93,6 +93,9 @@ describe("Workflow Management Flow prefers routing on the deciding node", () => 
       "routes on its own validated answer",
       "`unreachable-output`",
       "`metadata.schemaVersion`",
+      // Severities exactly as the validator emits them.
+      "of the reserved control outputs `error` and `timeout`, is an error",
+      "is a warning, the case being redundant",
     ]) {
       expect(engine).toContain(fact);
     }

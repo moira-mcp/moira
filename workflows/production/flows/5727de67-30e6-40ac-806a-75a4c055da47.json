@@ -2,7 +2,7 @@
   "id": "5727de67-30e6-40ac-806a-75a4c055da47",
   "metadata": {
     "name": "Workflow Management Flow",
-    "version": "6.10.0",
+    "version": "6.10.1",
     "description": "Creates or edits one complete Moira workflow through reconciled sources, independently reviewed semantic design, official mutation, quality review, and authority-bound delivery. It materializes nine canonical thematic authoring references and requires each substantive consumer to read its exact applicable files while keeping local node contracts concise. It preserves the process block contract (every node owned by a described block, every boundary edge and return labelled, one readable order), cause-aware repair/replan, publication authority, repository identity, and the complete create/edit route model; it does not execute the downstream task.",
     "author": "mcp-moira-team",
     "tags": [
