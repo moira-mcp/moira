@@ -485,10 +485,20 @@ export async function layoutBlocks(
   const laneOf = new Map<string, Lane>();
   const gapLanes = new Map<number, number>();
   const bundled = new Set<string>();
-  const takeLane = (id: string, gap: number) => {
+  // Bundles into one hub share one lane per gap: every source's line joins the hub's channel
+  // instead of taking a lane of its own, so a hub with many sources costs one lane, not many.
+  const hubLane = new Map<string, Lane>();
+  const takeLane = (id: string, gap: number, hubId?: string) => {
+    const shared = hubId ? hubLane.get(`${gap}:${hubId}`) : undefined;
+    if (shared) {
+      laneOf.set(id, shared);
+      return;
+    }
     const slot = gapLanes.get(gap) ?? 0;
     gapLanes.set(gap, slot + 1);
-    laneOf.set(id, { gap, slot });
+    const lane = { gap, slot };
+    laneOf.set(id, lane);
+    if (hubId) hubLane.set(`${gap}:${hubId}`, lane);
   };
   for (const block of blocks) {
     for (const transition of block.transitions) {
@@ -499,7 +509,7 @@ export async function layoutBlocks(
         const bundleId = `${block.id}->${transition.to}:hub`;
         if (bundled.has(bundleId)) continue;
         bundled.add(bundleId);
-        takeLane(bundleId, rs === rt ? rs : Math.min(rs, rt) + 1);
+        takeLane(bundleId, rs === rt ? rs : Math.min(rs, rt) + 1, transition.to);
         continue;
       }
       const id = `${block.id}->${transition.to}:${transition.label}`;
