@@ -126,6 +126,45 @@ describe("workflow-tool process block authoring", () => {
     expect(read(file).nodes[1]).not.toHaveProperty("connectionLabels");
   });
 
+  test("binds a block to a list, rejects a malformed binding, and removes it with none", () => {
+    run([
+      file,
+      "edit-block",
+      "work",
+      "--list",
+      '{"current":"progress_work_outcome","total":"progress_work_outcome"}',
+      "--no-version-bump",
+    ]);
+    expect(read(file).progress.nodes[0].list).toEqual({
+      current: "progress_work_outcome",
+      total: "progress_work_outcome",
+    });
+    expect(() =>
+      run([file, "edit-block", "work", "--list", '{"title":"name"}', "--no-version-bump"]),
+    ).toThrow(/at least one of items, current or total/u);
+    expect(read(file).progress.nodes[0].list).toBeDefined();
+    run([
+      file,
+      "add-block",
+      "deliver",
+      "Deliver",
+      "Hand over",
+      "--list",
+      '{"items":"progress_work_outcome","indexBase":0}',
+      "--no-version-bump",
+    ]);
+    expect(read(file).progress.nodes[2].list).toEqual({
+      items: "progress_work_outcome",
+      indexBase: 0,
+    });
+    // The deterministic schema names the binding on its block.
+    expect(run([file, "schema"])).toMatch(
+      /PROGRESS_NODE deliver[^\n]*\n(?:[^\n]*\n)*? {4}LIST \{"indexBase":0,"items":"progress_work_outcome"\}/u,
+    );
+    run([file, "edit-block", "work", "--list", "none", "--no-version-bump"]);
+    expect(read(file).progress.nodes[0].list).toBeUndefined();
+  });
+
   test("adds a block after another and edits its description and outcome", () => {
     run([
       file,

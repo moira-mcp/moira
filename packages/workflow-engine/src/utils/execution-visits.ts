@@ -18,6 +18,10 @@ export interface EngineVisit {
   changes: Record<string, unknown>;
   /** The visit paused for input. */
   waited: boolean;
+  /** Epoch ms when the node was entered in this cycle. */
+  enteredAt: number;
+  /** Epoch ms when the node was left; absent while it waits. */
+  leftAt?: number;
 }
 
 /** Exit key recorded on the visit a teleport jumped away from. */
@@ -96,7 +100,10 @@ export function appendEngineVisits(
   };
   if (teleportTo) {
     const last = open();
-    if (last) last.exitKey = TELEPORT_EXIT_KEY;
+    if (last) {
+      last.exitKey = TELEPORT_EXIT_KEY;
+      last.leftAt = Math.max(last.enteredAt ?? 0, Date.now());
+    }
   }
   visits.forEach((visit, index) => {
     const last = index === 0 ? open() : undefined;
@@ -104,6 +111,9 @@ export function appendEngineVisits(
       last.exitKey = visit.exitKey;
       last.changes = { ...last.changes, ...visit.changes };
       if (visit.waited) last.waited = true;
+      // The wait keeps the moment its directive was presented; the resume closes it.
+      if (last.enteredAt === undefined) last.enteredAt = visit.enteredAt;
+      if (visit.leftAt !== undefined) last.leftAt = Math.max(last.enteredAt, visit.leftAt);
       // An answer that left the node was accepted; one that paused again was rejected as
       // invalid and is not an adjustment of the run.
       if (answeredBy && visit.exitKey !== null) {
@@ -114,6 +124,8 @@ export function appendEngineVisits(
           changes: { ...visit.changes },
           adjusted: true,
           actor: answeredBy,
+          enteredAt: visit.leftAt ?? visit.enteredAt,
+          leftAt: visit.leftAt ?? visit.enteredAt,
         });
       }
       return;
@@ -124,6 +136,8 @@ export function appendEngineVisits(
       exitKey: visit.exitKey,
       changes: visit.changes,
       ...(visit.waited ? { waited: true } : {}),
+      enteredAt: visit.enteredAt,
+      ...(visit.leftAt !== undefined ? { leftAt: visit.leftAt } : {}),
     });
   });
 }
@@ -139,7 +153,10 @@ export function withInFlightVisit(execution: WorkflowExecution, nodeId: string):
   return {
     ...execution,
     currentNodeId: nodeId,
-    visits: [...visits, { seq: visits.length, nodeId, exitKey: null, changes: {} }],
+    visits: [
+      ...visits,
+      { seq: visits.length, nodeId, exitKey: null, changes: {}, enteredAt: Date.now() },
+    ],
   };
 }
 
@@ -149,11 +166,14 @@ export function adjustmentVisit(
   changes: Record<string, unknown>,
   actor: NonNullable<ExecutionVisit["actor"]>,
 ): Omit<ExecutionVisit, "seq"> {
+  const now = Date.now();
   return {
     nodeId: execution.currentNodeId ?? execution.waitingForInputNodeId ?? "",
     exitKey: null,
     changes,
     adjusted: true,
     actor,
+    enteredAt: now,
+    leftAt: now,
   };
 }

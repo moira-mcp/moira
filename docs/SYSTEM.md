@@ -1167,6 +1167,10 @@ interface ValidationError {
 ### UserNotificationHandler
 
 - **Auto-execution** - renders the portable message and invokes the shared user communication service
+- **System footer** - appends the short process ID, the resolved workflow name, and branding; when
+  a block of the workflow declares a `list` binding, also one `📝 done/total: current item` line
+  for the bound list nearest the run (the active block's, else the most recently passed bound
+  block), resolved from the projection of the execution with an open visit of this node
 - **Channel selection** - fans out only to enabled configured adapters for the execution user
 - **Results** - stores sanitized full, partial, no-channel, or total-failure outcomes under the node ID
 - **Routing** - total attempted failure uses `connections.error` when present; other outcomes continue through `default`

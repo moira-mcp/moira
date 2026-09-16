@@ -12,7 +12,17 @@ A workflow in Moira is a directed graph of nodes that defines a multi-step proce
 A workflow may declare an optional top-level `progress` graph for a concise user-facing view. Its
 definition may include a template-enabled title, goal, bounded generic facts, and ordered nodes.
 Nodes contain `id`, template-enabled `label`, optional structured plain-text `content` (`summary`,
-`details`, `outcome`, and `next`), and an optional static `connections.default` used for drawing.
+`details`, `outcome`, and `next`), an optional `list` binding, and an optional static
+`connections.default` used for drawing.
+
+A block that works through a list declares `list` with the variable paths it reads: `items` (the
+array), `title` (a path inside one item; a string item is its own title), `current` (the index in
+progress, counted from `indexBase` — `1` by default, `0` when declared), `done` (the finished
+count) and `total`. At least one of `items`, `current` and `total` is required, `total` defaults
+to the length of `items`, and `done` defaults to `current − indexBase`. Every path's root is a
+declared global or a node id for a node-local output; validation rejects an unknown root and a
+`title` without `items`. The binding names paths only — the engine holds no notion of what the
+list contains.
 
 The progress graph is the workflow's process view: its nodes are **blocks**, and their array order
 is the process order. When `progress` is present, every node of the primary graph — routing nodes
@@ -55,6 +65,17 @@ before routes were recorded reports only its current block as active with `route
 The same projection lists the route with loop markers and every variable with its history;
 values set from outside the flow appear as adjustments with their actor. Connections never route
 execution.
+
+Every visit records when it was entered and left, so each block also reports its `timing` — every
+pass with its duration, the total over all passes and how long the pass in progress has lasted —
+and, when the block binds a list, its `list`: the items with their titles, which are done, which
+one is in progress and the time spent on each. A visit recorded without timestamps has no
+duration rather than a zero one. The projection reports the version stamped on the run
+(`executionWorkflowVersion`) beside the definition it projected, and the run view adds
+`statistics`: how long a
+pass, a whole run through a block and each list position typically take across the other runs of
+that version — the median with quartiles and range — so a run can be read against what is usual.
+`GET /api/workflows/:id/statistics?version=` returns the same aggregate for any version.
 
 When `progress` is present, every primary node maps to an existing block, as described above.
 Multiple primary nodes may map to one block. The currently active primary node is the focus target

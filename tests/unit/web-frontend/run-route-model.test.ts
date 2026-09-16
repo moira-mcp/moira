@@ -52,6 +52,8 @@ function progress(): ExecutionProgress {
     primaryNodeIds: [],
     focusNodeId: null,
     content: { summary: null, details: [], outcome: null, next: null },
+    timing: { passes: [], totalMs: null, currentMs: null, recorded: false },
+    list: null,
   });
   return {
     taskTitle: "Task",
@@ -66,6 +68,8 @@ function progress(): ExecutionProgress {
       node("deliver", "Deliver", "pending", 0),
     ],
     workflowVersion: "1.0.0",
+    executionWorkflowVersion: "1.0.0",
+    projectedAt: 0,
     executionRevision: 7,
     executionStatus: "running",
     diagnostics: [],

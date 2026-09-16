@@ -159,7 +159,9 @@ type SessionInfoData =
   | { name: string; value: unknown; revision: number; contextRevision: string }
   | import("@mcp-moira/workflow-engine").ContinuationDiagnosis
   | import("@mcp-moira/workflow-engine").ContinuationRecoveryResult
-  | import("@mcp-moira/workflow-engine").ExecutionProgress
+  | (import("@mcp-moira/workflow-engine").ExecutionProgress & {
+      statistics?: import("@mcp-moira/workflow-engine").WorkflowVersionStatistics | null;
+    })
   | import("@mcp-moira/workflow-engine").ProgressImageGrant
   | import("./deliver-materialize.js").MaterializeDeliveryData
   | string;
@@ -850,7 +852,16 @@ export async function getSessionInfo(
         if (!graph) return { success: false, error: "Workflow not found" };
         const progress = projectExecutionRun(graph, execution, { at: params.at });
         if (!progress) return { success: false, error: "Workflow has no progress graph" };
-        return { success: true, data: progress };
+        const { ProgressStatisticsService } = await import("@mcp-moira/workflow-engine");
+        const statistics = progress.executionWorkflowVersion
+          ? await new ProgressStatisticsService(repository).forVersion(
+              execution.workflowId,
+              graph,
+              progress.executionWorkflowVersion,
+              { excludeExecutionId: execution.executionId },
+            )
+          : null;
+        return { success: true, data: { ...progress, statistics } };
       }
 
       case "materialize": {

@@ -2032,12 +2032,54 @@ export class GraphValidator {
             }
           }
         }
+        if (progressNode.list) {
+          issues.push(...this.validateListBinding(progressNode, index, definedVariables));
+        }
       }
     }
 
     // §10 Fix A — warn on declared-but-never-defined registry variables.
     issues.push(...this.validateNeverDefinedVars(workflow));
 
+    return issues;
+  }
+
+  /**
+   * A block's list binding reads variables at run time: every path's root must be a declared
+   * global or a node id (a `node.field` output); `title` is relative to one item and needs
+   * `items`. An unknown root is an error — the binding could never resolve.
+   */
+  private validateListBinding(
+    progressNode: NonNullable<WorkflowGraph["progress"]>["nodes"][number],
+    index: number,
+    definedVariables: Set<string>,
+  ): UnifiedValidationIssue[] {
+    const issues: UnifiedValidationIssue[] = [];
+    const binding = progressNode.list!;
+    const nodeId = `progress.${progressNode.id}`;
+    for (const field of ["items", "current", "done", "total"] as const) {
+      const path = binding[field];
+      if (typeof path !== "string") continue;
+      const root = path.split(/[.[]/u)[0];
+      if (!definedVariables.has(root)) {
+        issues.push({
+          type: "node",
+          severity: "error",
+          nodeId,
+          field: `nodes[${index}].list.${field}`,
+          message: `Progress block '${progressNode.id}': list.${field} reads '${path}', but '${root}' is neither a declared global nor a node id`,
+        });
+      }
+    }
+    if (binding.title !== undefined && binding.items === undefined) {
+      issues.push({
+        type: "node",
+        severity: "error",
+        nodeId,
+        field: `nodes[${index}].list.title`,
+        message: `Progress block '${progressNode.id}': list.title is a path inside one item and needs list.items`,
+      });
+    }
     return issues;
   }
 

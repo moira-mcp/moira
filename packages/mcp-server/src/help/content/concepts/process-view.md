@@ -14,6 +14,12 @@ produced.
 - **Block.** One stage of the process as a person would name it — "Draft the plan",
   "Independent plan review", "Execute plan steps". A workflow's `progress.nodes` array lists its
   blocks in process order; each has a label and a one-sentence description (`content.summary`).
+- **List binding.** A block that works through a list may declare `list`: the variable paths of
+  the items array (`items`), the title inside one item (`title`), the index in progress
+  (`current`, counted from `indexBase`, `1` by default), the finished count (`done`) and the total
+  (`total`). At least one of `items`, `current` and `total` is required; `total` defaults to the
+  items' length and `done` to `current − indexBase`. The run then reports how far through that
+  list it is, and which item each pass was spent on.
 - **Step.** One authored node of the workflow graph: a directive the agent executes, a condition
   or expression that routes, a start or an end. Every step belongs to exactly one block through
   its `progressNodeId`, routing steps included, so nothing the run does falls outside the
@@ -65,6 +71,18 @@ A run is projected onto the process from its recorded route, never guessed from 
 - **skipped** — a block the run bypassed, or entered without doing its work (only its routing
   steps ran);
 - **pending** — not reached yet.
+
+Each block also carries its **timing** and, when it binds one, its **list**. Every visit records
+when it was entered and left — a waiting step from the moment its directive is presented to the
+moment the answer moves the run on — so a block reports each pass with its duration, the total
+over all passes, and how long the pass in progress has lasted so far. A visit recorded before
+timestamps existed has no duration; it reads as unknown rather than as zero. The list reports the
+items with their titles, which are done, which one is in progress, and the time the block's passes
+spent on each. Beside them the run view carries **statistics** for the version the run started
+on: how long a pass, a whole run through a block, and each list position typically take across the
+other runs of that version (median with quartiles and range), so the run in front of you can be
+read against what is usual. Runs recorded without a version stamp are counted apart and never
+sampled.
 
 An unvisited block is never shown as done. The route itself is available as an ordered list
 with loop markers, every variable carries its value history, and a value set from outside the

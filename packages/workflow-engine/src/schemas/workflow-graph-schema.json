@@ -224,6 +224,9 @@
               "content": {
                 "$ref": "#/$defs/progressContent"
               },
+              "list": {
+                "$ref": "#/$defs/progressListBinding"
+              },
               "connections": {
                 "type": "object",
                 "additionalProperties": false,
@@ -325,6 +328,20 @@
         }
       },
       "minProperties": 1
+    },
+    "progressListBinding": {
+      "type": "object",
+      "description": "Binds the block to the list the run works through: variable paths of the items array, the index in progress, the finished count and the total; `title` is a path inside one item. At least one of items, current or total is required.",
+      "additionalProperties": false,
+      "properties": {
+        "items": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "title": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "current": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "done": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "total": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "indexBase": { "type": "integer", "enum": [0, 1] }
+      },
+      "anyOf": [{ "required": ["items"] }, { "required": ["current"] }, { "required": ["total"] }]
     },
     "progressFact": {
       "type": "object",

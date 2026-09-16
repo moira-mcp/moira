@@ -251,12 +251,15 @@ export class GraphExecutionEngine implements IGraphExecutionEngine {
       // Track visited node
       visitedNodes.push(currentNodeId);
       const variablesBefore = snapshotVariables(updatedContext.variables);
+      const enteredAt = Date.now();
       const recordVisit = (exitKey: string | null, waited: boolean): void => {
         visits.push({
           nodeId: currentNode.id,
           exitKey,
           changes: diffVariables(variablesBefore, updatedContext.variables, nodeIds),
           waited,
+          enteredAt,
+          leftAt: exitKey === null ? undefined : Math.max(enteredAt, Date.now()),
         });
       };
 

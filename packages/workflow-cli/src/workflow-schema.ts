@@ -507,6 +507,7 @@ export function renderWorkflowSchema(workflow: WorkflowSchemaInput): string {
       if (progressNode.connections?.default)
         lines.push(`    EDGE [default] -> ${structuralToken(progressNode.connections.default)}`);
       if (progressNode.content) lines.push(`    CONTENT ${stableJson(progressNode.content)}`);
+      if (progressNode.list) lines.push(`    LIST ${stableJson(progressNode.list)}`);
     }
     lines.push(
       `  COVERAGE nodes=${progressNodes.length}/${progressNodes.length} edges=${progressEdges}/${progressEdges} mappings=${progressMappings}/${progressMappings}`,

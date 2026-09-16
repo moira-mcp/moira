@@ -37,6 +37,11 @@ Graph structure is analyzed for correctness:
   error with a stable code (`unowned-node`, `unknown-block`, `empty-block`, `empty-description`,
   `unlabeled-edge`, `unexplained-cycle`, `outcome-duplicate`, `outcome-unowned`,
   `unconnected-block`)
+- **Block list bindings** - A block's `list` binding names at least one of `items`, `current` and
+  `total`, and only the fields `items`, `title`, `current`, `done`, `total` and `indexBase` (`0`
+  or `1`). Each of `items`, `current`, `done` and `total` is a variable path whose root is a
+  declared global or a node id — an unknown root is an error naming the block, the field and the
+  path — and `title` is a path inside one item, so it is an error without `items`
 - **Routing cases** - Each case of a `condition` or `agent-directive` node is checked as described
   under _Routing Diagnostics_ below
 - **Extension node types** - Types found in the live extension registry or a published registry

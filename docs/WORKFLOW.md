@@ -443,7 +443,8 @@ Node task-1: unclosed template bracket '{{' at position 15
 `WorkflowGraph.progress` is the workflow's process view. It can declare a template-enabled
 `title`, `goal`, bounded generic `facts`, and ordered nodes — the **blocks** of the process, in
 process order. Each block has `id`, `label`, structured `content` with a mandatory `summary`
-(the block description) and optional `details`, `outcome`, `next`, and an optional display-only
+(the block description) and optional `details`, `outcome`, `next`, an optional `list` binding
+(below), and an optional display-only
 default connection that the derivation ignores. A primary node's `progressNodeId` names the block
 it belongs to and activates that block while the node is current. Block statuses come from the
 execution's recorded route (below) and labels are rendered through the existing template
@@ -470,12 +471,32 @@ unaffected. Multiple primary nodes may map to one block. The active primary node
 block's focus target, while every other block deterministically focuses its first mapped primary
 node in workflow order.
 
+**List binding.** A block may declare `list`, the variable paths of the list its steps work
+through: `{ items?, title?, current?, done?, total?, indexBase? }`. `items`, `current`, `done` and
+`total` are variable paths in `PathResolver` syntax (`plan.units[0].name`) whose root is a
+declared global or a node id for a node-local output (`node-id.field`); `title` is a path resolved
+inside one item, and a string item is its own title. At least one of `items`, `current` and
+`total` is required. `indexBase` says whether `current` counts from `1` (the default) or `0`;
+`total` defaults to the length of `items` and `done` defaults to `current − indexBase`, clamped to
+`0..total`. Validation rejects a path whose root is neither a declared global nor a node id, and
+`title` without `items`. At run time a binding that resolves to nothing yields `list: null` and a
+projection diagnostic, while a `title` naming nothing on any item keeps the list with empty titles
+and adds a diagnostic. The binding names paths only: the engine knows nothing about what the list
+holds.
+
 **Route log and run projection.** Every execution records its route: the engine appends one
-visit per node it runs — `{ seq, nodeId, exitKey, changes, waited?, adjusted?, actor? }` — where
+visit per node it runs — `{ seq, nodeId, exitKey, changes, waited?, adjusted?, actor?, enteredAt?,
+leftAt? }` — where
 `exitKey` is the connection taken (`null` while the node waits or at completion, `"teleport"`
 when a jump left it), `changes` holds the globals and node-local outputs (`nodeId.field`) the
-visit changed, and `waited` marks a pause for input. A resumed wait continues its open visit
-instead of opening another. The log is the `visits` column of the execution row, part of the
+visit changed, and `waited` marks a pause for input. `enteredAt` and `leftAt` are epoch ms: a
+visit is entered when the node is reached — for a waiting node, when its directive is presented —
+and left when the run leaves through `exitKey`, so a waiting step measures presentation to
+transition; both are absent on visits recorded without timestamps and `leftAt` is absent while the
+visit is open. A resumed wait continues its open visit
+instead of opening another. The execution also stores `workflowVersion`, the `metadata.version` of
+the definition it started on (absent for a run recorded without the stamp). The log is the
+`visits` column of the execution row, part of the
 revisioned state written by every step. Setting a variable from outside the flow (`session
 set-variable`, the HTTP variable routes) appends a visit flagged `adjusted` with its `actor`
 (`agent` or `user` and the user id) in the same guarded write as the value.
@@ -487,14 +508,41 @@ user right after the wait it closed; a rejected answer records nothing.
 node, and gives variables the values written up to it; the cursor is echoed as `cursor`): the block
 of the engine's last visit is `active`, or `waiting` when that visit is open on the node the
 execution waits for; a visited block is `done`, or `repeated` with the pass count of its working
-steps (start, condition and expression nodes are not passes unless the block consists of routing
-nodes alone); a block whose working step never ran, and an unvisited block before the furthest
+steps (start, condition and expression nodes route without doing a block's work and are not passes
+unless the block consists of routing nodes alone; an adjustment visit is never a pass; the timings
+below also leave an end node's visit out unless the block has no working step); a block whose
+working step never ran, and an unvisited block before the furthest
 visited block in process order, are `skipped`; the rest are `pending`. A finished run has no
 active block unless it stopped on an open wait, which stays its frontier. Nothing unvisited is
 ever reported done. An execution with an empty log (created before routes were recorded) reports
 only the block it is on as active or waiting, everything else pending, and `routeRecorded: false`;
 nothing is inferred from block order. The projection also carries the route with block ids and
-loop markers, and every variable with its current value and history. A notification node that
+loop markers, and every variable with its current value and history.
+
+Each block additionally carries `timing` — `{ passes: [{ seq, nodeId, enteredAt, leftAt,
+durationMs, open, itemIndex }], totalMs, currentMs, recorded }`, where a pass is a visit of one of
+the block's working steps, a closed pass lasts `leftAt − enteredAt`, the open pass (the visit the
+run is on) is measured to the projection's `projectedAt`, and a visit without timestamps lasts
+`null` rather than `0` — and `list`, the block's binding resolved against the run's variables at
+the cursor: `{ items: [{ index, title, done, current, durationMs }] | null, done, total, current,
+currentTitle }`, `null` when the block binds nothing or the binding did not resolve. A pass counts
+toward the item its `current` path pointed at when the pass began, which is how an item gets a
+duration. The projection reports `executionWorkflowVersion` (the version stamped on the run,
+`null` without one) beside `workflowVersion` (the definition it projected), and `projectedAt`, the
+epoch ms it was made at.
+
+`computeVersionStatistics` and the caching `ProgressStatisticsService` aggregate those timings
+across the runs of one definition version: per block, a `DurationSample`
+(`{ sampleCount, medianMs, p25Ms, p75Ms, minMs, maxMs }`) for a single pass and for a run's whole
+time in the block, the median pass count of a run, and the same sample per bound-list position.
+The sample is every execution stamped with that version, projected onto the current process and
+joined by block id; run totals and the pass count use completed runs only, the asking run is
+excluded so its own timing does not move the value it is compared with, and an execution without a
+version stamp is counted as `versionNotRecorded` and never sampled. `session progress` and
+`GET /api/executions/:id/progress` return this aggregate as `statistics`;
+`GET /api/workflows/:id/statistics?version=` returns it for any version (`docs/API.md`).
+
+A notification node that
 attaches a progress image renders it inside the cycle that reached it, before that cycle's visits
 are persisted; the handlers therefore project an unpersisted copy of the execution with an open
 visit of the notification node, so the image shows that node's block as active.
@@ -762,6 +810,14 @@ results are stored under the node ID with sanitized channel statuses. A configur
 does not support the requested attachment is reported as `unsupported` and skipped; it does not by
 itself make delivery fail. Total attempted failure uses `connections.error` when it exists and
 otherwise continues through `default`.
+
+Every message carries a footer with the short process id, the resolved workflow name and the
+Moira attribution. When the workflow has a block with a `list` binding, the footer also carries
+one line `📝 done/total: current item` for the bound list nearest the run — the active block's
+when it binds one, otherwise the bound block the route passed most recently — taken from the same
+projection the progress attachment uses (the execution copy with an open visit of the notification
+node). A workflow whose blocks bind no list, and a binding that resolves to neither a finished
+count nor a total, add no line.
 
 `telegram-notification` is deprecated but remains executable for existing Telegram-specific
 workflows. Its explicit `chatId`, `parseMode`, and `replyMarkup` keep their original meanings and

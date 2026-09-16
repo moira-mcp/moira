@@ -39,6 +39,55 @@ export interface ExecutionRouteEntry {
   actor?: { role: ExecutionVisitActorRole; userId: string };
   /** The visit re-entered a block the route had already left. */
   loop?: boolean;
+  /** Epoch ms the node was entered; absent for visits recorded before timestamps. */
+  enteredAt?: number;
+  /** Epoch ms the node was left; absent while open or when not recorded. */
+  leftAt?: number;
+}
+
+/** One pass through a block's working step, with the time it took. */
+export interface ExecutionPassTiming {
+  seq: number;
+  nodeId: string;
+  enteredAt: number | null;
+  leftAt: number | null;
+  /** Closed pass: left − entered; open pass: now − entered; null when not recorded. */
+  durationMs: number | null;
+  /** The run is still on this pass. */
+  open: boolean;
+  /** Index (from 0) of the bound list item the pass was working on, when the block binds a list. */
+  itemIndex: number | null;
+}
+
+/** A block's timings derived from the route; `recorded` is false for runs without timestamps. */
+export interface ExecutionBlockTiming {
+  passes: ExecutionPassTiming[];
+  /** Sum of every measured pass (open pass included); null when nothing was measured. */
+  totalMs: number | null;
+  /** Duration of the open pass so far; null when the block is not open. */
+  currentMs: number | null;
+  recorded: boolean;
+}
+
+export interface ExecutionListItem {
+  /** Position in the list, from 0. */
+  index: number;
+  title: string;
+  done: boolean;
+  current: boolean;
+  /** Time the block's passes spent on this item; null when none was measured. */
+  durationMs: number | null;
+}
+
+/** The list a block is bound to, resolved from the run's variables at the cursor. */
+export interface ExecutionBlockList {
+  /** Null when the binding names no items array (counters only). */
+  items: ExecutionListItem[] | null;
+  done: number | null;
+  total: number | null;
+  /** Index (from 0) of the item in progress; null when none. */
+  current: number | null;
+  currentTitle: string | null;
 }
 
 export interface ExecutionVariableChange {
@@ -87,6 +136,9 @@ export interface ExecutionProgressNode {
   primaryNodeIds: string[];
   focusNodeId: string | null;
   content: ExecutionProgressContent;
+  timing: ExecutionBlockTiming;
+  /** The bound list; null when the block binds none or the binding did not resolve. */
+  list: ExecutionBlockList | null;
 }
 
 export interface ExecutionProgress {
@@ -96,7 +148,10 @@ export interface ExecutionProgress {
   facts: ExecutionProgressFact[];
   activeNodeId: string | null;
   nodes: ExecutionProgressNode[];
+  /** `metadata.version` of the definition the projection used (the current one). */
   workflowVersion: string;
+  /** Version stamped on the execution when it started; null for runs recorded before the stamp. */
+  executionWorkflowVersion: string | null;
   executionRevision: number;
   executionStatus: string;
   diagnostics: string[];
@@ -113,4 +168,6 @@ export interface ExecutionProgress {
    */
   cursor: number | null;
   source: "trace";
+  /** Epoch ms the projection was made at; open passes are measured to it. */
+  projectedAt: number;
 }

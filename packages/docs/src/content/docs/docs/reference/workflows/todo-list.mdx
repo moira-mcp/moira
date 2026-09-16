@@ -47,6 +47,8 @@ The execution card and exported image share three blocks: Checklist → Prepare 
 
 The current role remains explicit. Ordinary work is labelled `Task N/M` and shows the complete current action; the full expected result stays in the agent directive because it may be longer than the bounded progress field. A checklist jump is labelled `Revise checklist` and uses no task projection that might be unavailable on that route. Both roles belong to the final Work block, so normal completion and a revision that removes the whole unfinished tail both finish the progress presentation without adding a synthetic result step.
 
+The Work block binds the checklist itself: `tasks` as the items, each item's `action` as its title, `current_task` as the index in progress and `total_tasks` as the total. The run therefore reports how many tasks are done, which one is in progress and the time its passes spent on each.
+
 Checklist and Work outcomes are bounded render-only values. Revision replaces the checklist synopsis and atomically keeps only a completed-task outcome that remains true for the preserved prefix, or `Pending`. Progress does not participate in conditions, cursor arithmetic, task data, completion evidence, terminal output, or authority.
 
 ## Revising the checklist mid-run

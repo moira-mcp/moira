@@ -81,6 +81,9 @@ export * from "./utils/registry-value-validator.js";
 export * from "./utils/execution-variable-policy.js";
 export * from "./utils/execution-run-projection.js";
 export * from "./utils/execution-visits.js";
+export * from "./utils/execution-progress-lists.js";
+export * from "./utils/execution-statistics.js";
+export { ProgressStatisticsService } from "./services/progress-statistics-service.js";
 export * from "./utils/process-derivation.js";
 export {
   applyProgressVisibility,
