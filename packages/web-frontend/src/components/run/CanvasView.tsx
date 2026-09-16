@@ -32,6 +32,7 @@ import { Clock, ListChecks, Loader2, Repeat } from "lucide-react";
 import { PortedCard, type CardTone, type FactChip, type PortInfo } from "../diagram/PortedCard";
 import { DiagramEdge, DiagramMarkers, type DiagramEdgeKind } from "../diagram/DiagramEdge";
 import { INTERACTIVE } from "../diagram/interactive";
+import { ListMarker } from "../diagram/ListMarker";
 import { NodeTypeTag } from "./nodeTypeStyle";
 import { roundedPath } from "../workflow/graphNodes";
 import { cn } from "@/lib/utils";
@@ -74,6 +75,8 @@ type BlockNodeData = {
   onGoTo: (blockId: string, transitionKey: string) => void;
   /** The reader just arrived at this block along a transition. */
   arrived: boolean;
+  /** A list item on the card was clicked: open the block's list in the panel at that item. */
+  onSelectListItem?: (blockId: string, index: number) => void;
 };
 type BlockNode = Node<BlockNodeData, "block">;
 type RoutedEdge = Edge<
@@ -202,7 +205,7 @@ function blockFacts(
   return facts;
 }
 
-const BLOCK_TONE: Record<RunBlock["status"], CardTone> = {
+export const BLOCK_TONE: Record<RunBlock["status"], CardTone> = {
   pending: "neutral",
   active: "active",
   waiting: "waiting",
@@ -227,6 +230,7 @@ function BlockNodeView({ data }: NodeProps<BlockNode>): React.JSX.Element {
     onFocusNode,
     onGoTo,
     arrived,
+    onSelectListItem,
   } = data;
   const keys = [...inputs, ...outputs, ...selfLoops].map((port) => port.id);
   const near = focus.hovered !== null && keys.some((key) => focus.hovered!.has(key));
@@ -273,10 +277,22 @@ function BlockNodeView({ data }: NodeProps<BlockNode>): React.JSX.Element {
                 item.current && "font-medium text-primary",
               )}
             >
-              <span className={cn("w-3 shrink-0 text-center", item.current && "marker-pulse")}>
-                {item.done ? "✓" : item.current ? "▶" : "·"}
-              </span>
-              <span className="truncate">{item.title}</span>
+              <ListMarker done={item.done} current={item.current} variant="glyph" />
+              {onSelectListItem ? (
+                <button
+                  type="button"
+                  className={cn("truncate text-left", INTERACTIVE.clickable, "hover:underline")}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onSelectListItem(block.id, item.index);
+                  }}
+                  data-list-item={item.index}
+                >
+                  {item.title}
+                </button>
+              ) : (
+                <span className="truncate">{item.title}</span>
+              )}
             </li>
           ))}
           {block.list.items.length > 5 && (
@@ -599,6 +615,7 @@ function CanvasInner({
   selectedBlockId,
   onSelectBlock,
   onFocusNode,
+  onSelectListItem,
   toolbarLeading,
   toolbarTitle,
   toolbarTrailing,
@@ -768,6 +785,7 @@ function CanvasInner({
           onFocusNode,
           onGoTo: goTo,
           arrived: arrival?.blockId === block.id,
+          onSelectListItem,
         },
       };
     });
@@ -782,6 +800,7 @@ function CanvasInner({
     onFocusNode,
     goTo,
     arrival,
+    onSelectListItem,
   ]);
 
   const edges = useMemo<RoutedEdge[]>(() => {

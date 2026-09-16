@@ -59,7 +59,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { Card } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
-import { MODES, resolveMode, type RunViewMode } from "../run/modes";
+import { MODES, resolveMode } from "../run/modes";
 import { MapView } from "../run/MapView";
 import { BlockDetailPanel } from "../run/BlockDetailPanel";
 import { NodePanel } from "../run/NodePanel";
@@ -300,8 +300,6 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
   );
   const guideStep = Number(searchParams.get(GUIDE_PARAM)) || 0;
   // A view is rendered from the first time it is asked for and never unmounted again.
-  const mountedViews = useRef<Set<RunViewMode>>(new Set());
-  mountedViews.current.add(mode);
 
   const update = useCallback(
     (patch: Record<string, string | null>) => {
@@ -432,6 +430,16 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
   const [panelCollapsed, togglePanel] = useStoredFlag("moira.run.panelCollapsed");
   // A variable reference token was clicked: open the variables tab and mark the variable there.
   const [variableHighlight, setVariableHighlight] = useState<HighlightRequest | null>(null);
+  // A list item clicked on a block card: the block panel opens its list section at that item.
+  const [listHighlight, setListHighlight] = useState<HighlightRequest | null>(null);
+  const selectListItem = useCallback(
+    (blockId: string, index: number) => {
+      update({ [BLOCK_PARAM]: blockId });
+      setChosenTab("block");
+      setListHighlight((previous) => ({ name: String(index), token: (previous?.token ?? 0) + 1 }));
+    },
+    [update],
+  );
   const goToVariable = useCallback((name: string) => {
     setChosenTab("variables");
     setVariableHighlight((previous) => ({ name, token: (previous?.token ?? 0) + 1 }));
@@ -870,13 +878,15 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
         >
           {progress && shownProgress ? (
             <>
-              {/* Both views stay mounted once they have been shown: the hidden one keeps its
-                  state (the map's selection, the graph's viewport) so a switch is instant. */}
+              {/* Only the shown view is mounted: the selection lives in the URL and the graph
+                  re-centres on its focus request, so nothing is lost, and one diagram means one
+                  toolbar and one set of markers in the document. */}
               <div className="lg:flex-1 lg:min-h-0">
-                {mountedViews.current.has("map") && (
-                  <div className={cn("lg:h-full", mode !== "map" && "hidden")}>
+                {mode === "map" && (
+                  <div className="lg:h-full">
                     <MapView
                       onFocusNode={focusNode}
+                      onSelectListItem={selectListItem}
                       toolbarExtra={runControls}
                       toolbarTrailing={runTrailing}
                       progress={shownProgress}
@@ -901,11 +911,7 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
                     />
                   </div>
                 )}
-                {mountedViews.current.has("graph") && (
-                  <div className={cn("h-[60vh] lg:h-full", mode !== "graph" && "hidden")}>
-                    {technicalGraph}
-                  </div>
-                )}
+                {mode === "graph" && <div className="h-[60vh] lg:h-full">{technicalGraph}</div>}
               </div>
             </>
           ) : (
@@ -1063,6 +1069,7 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
                       onSelectBlock={(id) => update({ [BLOCK_PARAM]: id })}
                       onSetCursor={(at) => update({ [AT_PARAM]: at === null ? null : String(at) })}
                       onFocusNode={focusNode}
+                      listHighlight={listHighlight}
                     />
                   )}
                 </TabsContent>

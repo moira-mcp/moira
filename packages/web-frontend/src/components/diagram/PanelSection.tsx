@@ -5,7 +5,7 @@
  * body, gap.
  */
 
-import React from "react";
+import React, { useEffect, useRef } from "react";
 import { ChevronDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useStoredFlag } from "./useStoredFlag";
@@ -18,6 +18,7 @@ export function PanelSection({
   children,
   className,
   testId,
+  openToken,
 }: {
   /** Storage key suffix; the fold state is kept per id. */
   id: string;
@@ -28,8 +29,16 @@ export function PanelSection({
   children: React.ReactNode;
   className?: string;
   testId?: string;
+  /** A new value unfolds the section (a "go to" landed inside it). */
+  openToken?: number;
 }): React.JSX.Element {
   const [folded, toggle] = useStoredFlag(`moira.panel.folded:${id}`, !defaultOpen);
+  const lastToken = useRef(openToken);
+  useEffect(() => {
+    if (openToken === undefined || openToken === lastToken.current) return;
+    lastToken.current = openToken;
+    if (folded) toggle();
+  }, [openToken, folded, toggle]);
   return (
     <section
       className={cn("rounded-lg border bg-card", className)}

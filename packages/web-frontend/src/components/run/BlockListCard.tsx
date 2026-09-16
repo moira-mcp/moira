@@ -7,7 +7,9 @@
 
 import React from "react";
 import { useTranslation } from "react-i18next";
-import { Check, CircleDashed, Loader2 } from "lucide-react";
+import { useRef } from "react";
+import { ListMarker } from "../diagram/ListMarker";
+import { useHighlightTarget, type HighlightRequest } from "../diagram/useHighlightTarget";
 import { cn } from "@/lib/utils";
 import { formatDuration } from "./duration";
 import type { RunBlock, RunList } from "./model";
@@ -23,16 +25,22 @@ function counters(list: NonNullable<RunList>): { done: string; total: string } {
 export function BlockListCard({
   block,
   className,
+  highlight = null,
 }: {
   block: RunBlock;
   className?: string;
+  /** The item (by index) to scroll to and mark. */
+  highlight?: HighlightRequest | null;
 }): React.JSX.Element | null {
   const { t } = useTranslation();
   const list = block.list ?? null;
+  const ref = useRef<HTMLElement>(null);
+  useHighlightTarget(ref, highlight, (name) => `[data-index="${name}"]`);
   if (!list) return null;
   const { done, total } = counters(list);
   return (
     <section
+      ref={ref}
       className={cn("space-y-1", className)}
       data-testid="block-list"
       data-block-id={block.id}
@@ -55,7 +63,6 @@ export function BlockListCard({
       ) : (
         <ol className="space-y-0.5 text-sm">
           {list.items.map((item) => {
-            const Icon = item.current ? Loader2 : item.done ? Check : CircleDashed;
             return (
               <li
                 key={item.index}
@@ -69,13 +76,7 @@ export function BlockListCard({
                 data-current={item.current ? "true" : "false"}
                 data-done={item.done ? "true" : "false"}
               >
-                <Icon
-                  className={cn(
-                    "size-3.5 shrink-0 self-center",
-                    item.current ? "animate-spin text-primary" : "text-muted-foreground",
-                  )}
-                  aria-hidden="true"
-                />
+                <ListMarker done={item.done} current={item.current} className="self-center" />
                 <span className="min-w-0 flex-1 break-words">{item.title}</span>
                 {item.current && (
                   <span className="text-[11px] text-primary">

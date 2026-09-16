@@ -24,7 +24,8 @@ import { Compass, PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useModeGuideKey } from "../flow/editing";
 import { PassCount, StatusIcon } from "./status";
-import { CanvasDiagram } from "./CanvasView";
+import { CanvasDiagram, BLOCK_TONE } from "./CanvasView";
+import { IndexBadge } from "../diagram/IndexBadge";
 import { formatDuration } from "./duration";
 import { type RunBlock, type RunViewProps } from "./model";
 
@@ -63,7 +64,7 @@ function ContentsRow({
         )}
       >
         <StatusIcon status={block.status} className="size-3.5" />
-        <span className="tabular-nums text-muted-foreground">{block.index + 1}.</span>
+        <IndexBadge index={block.index + 1} tone={BLOCK_TONE[block.status]} size="sm" />
         <span className="min-w-0 flex-1 truncate">{block.name}</span>
         <PassCount iterations={block.iterations} />
         {bound && (

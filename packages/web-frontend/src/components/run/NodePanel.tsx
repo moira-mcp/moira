@@ -11,6 +11,7 @@ import { useTranslation } from "react-i18next";
 import { ArrowLeft, ChevronRight, Crosshair } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { NodeTypeTag } from "./nodeTypeStyle";
+import { PanelSection } from "../diagram/PanelSection";
 import {
   ConditionText,
   ExpressionText,
@@ -20,25 +21,6 @@ import {
 import type { VariableDefinition } from "../diagram/VariableText";
 import type { WorkflowGraph } from "../../types/workflow-types";
 import { blockById, nodeOwners, stepsOf, type RunBlock } from "./model";
-
-function Section({
-  title,
-  children,
-  testId,
-}: {
-  title: string;
-  children: React.ReactNode;
-  testId?: string;
-}): React.JSX.Element {
-  return (
-    <section className="space-y-1" data-testid={testId}>
-      <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-        {title}
-      </p>
-      {children}
-    </section>
-  );
-}
 
 export function NodePanel({
   workflow,
@@ -76,7 +58,7 @@ export function NodePanel({
         onSelect: onSelectVariable,
       }}
     >
-      <div className="space-y-4 p-4" data-testid="node-panel" data-node-id={nodeId}>
+      <div className="space-y-3 p-3" data-testid="node-panel" data-node-id={nodeId}>
         <nav
           className="flex flex-wrap items-center gap-1 text-xs text-muted-foreground"
           aria-label="breadcrumb"
@@ -122,21 +104,29 @@ export function NodePanel({
         </div>
 
         {step.text && (
-          <Section title={step.routing ? "message" : "directive"} testId="node-panel-directive">
+          <PanelSection
+            id={step.routing ? "message" : "directive"}
+            title={step.routing ? "message" : "directive"}
+            testId="node-panel-directive"
+          >
             <p className="whitespace-pre-wrap break-words text-xs leading-5 [overflow-wrap:anywhere]">
               <TemplateText text={step.text} />
             </p>
-          </Section>
+          </PanelSection>
         )}
         {step.completionCondition && (
-          <Section title="completion">
+          <PanelSection id="completion" title="completion">
             <p className="whitespace-pre-wrap text-xs leading-5 text-muted-foreground">
               <TemplateText text={step.completionCondition} />
             </p>
-          </Section>
+          </PanelSection>
         )}
         {step.evidence.length > 0 && (
-          <Section title={t("pages.runPage.blockDetail.returns")} testId="node-panel-returns">
+          <PanelSection
+            id={t("pages.runPage.blockDetail.returns")}
+            title={t("pages.runPage.blockDetail.returns")}
+            testId="node-panel-returns"
+          >
             <ul className="space-y-1 text-xs">
               {step.evidence.map((field) => (
                 <li key={field.name} className="flex flex-wrap items-baseline gap-x-2">
@@ -153,10 +143,10 @@ export function NodePanel({
                 </li>
               ))}
             </ul>
-          </Section>
+          </PanelSection>
         )}
         {step.expressions.length > 0 && (
-          <Section title="expressions" testId="node-panel-expressions">
+          <PanelSection id="expressions" title="expressions" testId="node-panel-expressions">
             <ul className="space-y-0.5 font-mono text-[11px]">
               {step.expressions.map((expression, index) => (
                 <li key={index}>
@@ -164,10 +154,10 @@ export function NodePanel({
                 </li>
               ))}
             </ul>
-          </Section>
+          </PanelSection>
         )}
         {step.cases.length > 0 && (
-          <Section title="cases" testId="node-panel-cases">
+          <PanelSection id="cases" title="cases" testId="node-panel-cases">
             <ol className="space-y-1 text-[11px]">
               {step.cases.map((c, index) => (
                 <li key={index} className="flex flex-wrap items-center gap-1 font-mono">
@@ -182,10 +172,10 @@ export function NodePanel({
                 </li>
               ))}
             </ol>
-          </Section>
+          </PanelSection>
         )}
         {node?.connections && Object.keys(node.connections).length > 0 && (
-          <Section title="connections" testId="node-panel-connections">
+          <PanelSection id="connections" title="connections" testId="node-panel-connections">
             <ul className="space-y-0.5 text-[11px]">
               {Object.entries(node.connections).map(([key, target]) => (
                 <li key={key} className="flex items-center gap-1 font-mono">
@@ -201,7 +191,7 @@ export function NodePanel({
                 </li>
               ))}
             </ul>
-          </Section>
+          </PanelSection>
         )}
       </div>
     </VariableProvider>

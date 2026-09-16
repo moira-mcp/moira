@@ -22,7 +22,7 @@ export const LAYOUT_PRESETS: ReadonlyArray<{ id: LayoutPreset; label: string; hi
   {
     id: "flow",
     label: "По потоку",
-    hint: "Вертикальное размещение по ELK без принудительных рядов",
+    hint: "Ветки по обе стороны линии: сторона по заполненности, вложенные развилки дальше от линии",
   },
   {
     id: "vertical",

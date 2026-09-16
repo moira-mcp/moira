@@ -19,6 +19,7 @@ import { NodeTypeTag } from "../run/nodeTypeStyle";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { TemplateText } from "./VariableText";
 import { INTERACTIVE } from "./interactive";
+import { IndexBadge } from "./IndexBadge";
 
 /** One port: a React Flow handle id, what the row shows and what its tooltip explains. */
 export interface PortInfo {
@@ -103,40 +104,35 @@ export const SELF_LOOP_BAND = 36;
  * Tone styles: the accent bar and ground gradient of the frame, the rule under the title, the
  * index badge. `--card-accent` feeds the glow keyframes.
  */
-const TONE_STYLE: Record<CardTone, { frame: string; rule: string; badge: string; band: string }> = {
+const TONE_STYLE: Record<CardTone, { frame: string; rule: string; band: string }> = {
   neutral: {
     band: "bg-muted/40",
     frame: "before:bg-border [--card-accent:var(--primary)]",
     rule: "border-border",
-    badge: "bg-muted text-muted-foreground",
   },
   active: {
     band: "bg-primary/15",
     frame:
       "border-primary before:bg-primary bg-gradient-to-br from-primary/12 via-card to-card [--card-accent:var(--primary)]",
     rule: "border-primary/60",
-    badge: "bg-primary text-primary-foreground",
   },
   waiting: {
     band: "bg-warning/20",
     frame:
       "border-warning before:bg-warning bg-gradient-to-br from-warning/15 via-card to-card [--card-accent:var(--warning)]",
     rule: "border-warning/70",
-    badge: "bg-warning text-warning-foreground",
   },
   done: {
     band: "bg-success/12",
     frame:
       "border-success/50 before:bg-success bg-gradient-to-br from-success/10 via-card to-card [--card-accent:var(--success)]",
     rule: "border-success/50",
-    badge: "bg-success text-success-foreground",
   },
   error: {
     band: "bg-destructive/15",
     frame:
       "border-destructive/60 before:bg-destructive bg-gradient-to-br from-destructive/10 via-card to-card [--card-accent:var(--destructive)]",
     rule: "border-destructive/60",
-    badge: "bg-destructive text-white",
   },
 };
 
@@ -327,17 +323,7 @@ export function PortedCard({
         )}
         data-step-title=""
       >
-        {index !== undefined && (
-          <span
-            className={cn(
-              "inline-flex h-6 min-w-6 shrink-0 items-center justify-center rounded-md px-1.5 text-[12px] font-bold tabular-nums",
-              TONE_STYLE[tone].badge,
-            )}
-            data-step-index=""
-          >
-            {index}
-          </span>
-        )}
+        {index !== undefined && <IndexBadge index={index} tone={tone} />}
         <span className="min-w-0 flex-1">
           <span className="line-clamp-2 text-[16px] font-bold leading-[1.2] tracking-tight">
             <TemplateText text={title} compact />

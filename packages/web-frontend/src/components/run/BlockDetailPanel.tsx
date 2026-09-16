@@ -17,6 +17,9 @@ import { ArrowRight, RotateCcw } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { GuidanceCallout } from "./Guidance";
 import { PanelSection } from "../diagram/PanelSection";
+import { IndexBadge } from "../diagram/IndexBadge";
+import { BLOCK_TONE } from "./CanvasView";
+import type { HighlightRequest } from "../diagram/useHighlightTarget";
 import { formatDuration } from "./duration";
 import { StatusChip } from "./status";
 import { StepList } from "./StepList";
@@ -152,6 +155,7 @@ export function BlockDetailPanel({
   onSelectBlock,
   onSetCursor,
   onFocusNode,
+  listHighlight = null,
 }: {
   block: RunBlock | null;
   blocks: RunBlock[];
@@ -173,6 +177,8 @@ export function BlockDetailPanel({
   /** Move the route cursor to a visit of this block; absent where there is no cursor. */
   onSetCursor?: (at: number | null) => void;
   onFocusNode: (nodeId: string) => void;
+  /** A list item to open the list section at and mark (from a click on the card). */
+  listHighlight?: HighlightRequest | null;
 }): React.JSX.Element {
   const { t } = useTranslation();
   const { definition, enabled: editing } = useEditing();
@@ -195,9 +201,11 @@ export function BlockDetailPanel({
     <div className="space-y-3 p-3" data-testid="block-detail" data-block-id={block.id}>
       <header className="space-y-1">
         <div className="flex flex-wrap items-center gap-2">
-          <h3 className="min-w-0 flex-1 text-base font-semibold leading-6">
-            <span className="mr-2 tabular-nums text-muted-foreground">{block.index + 1}.</span>
-            {editing ? <BlockNameEditor block={block} /> : block.name}
+          <h3 className="flex min-w-0 flex-1 items-center gap-2 text-base font-semibold leading-6">
+            <IndexBadge index={block.index + 1} tone={BLOCK_TONE[block.status]} />
+            <span className="min-w-0">
+              {editing ? <BlockNameEditor block={block} /> : block.name}
+            </span>
           </h3>
           <StatusChip status={block.status} waitingFor={waitingFor} />
         </div>
@@ -246,8 +254,9 @@ export function BlockDetailPanel({
           id="list"
           title={t("pages.runPage.blockDetail.list", { defaultValue: "Список" })}
           summary={`${block.list.done ?? "?"}/${block.list.total ?? "?"}${block.list.currentTitle ? ` · ${block.list.currentTitle}` : ""}`}
+          openToken={listHighlight?.token}
         >
-          <BlockListCard block={block} />
+          <BlockListCard block={block} highlight={listHighlight} />
         </PanelSection>
       )}
       {progress && (

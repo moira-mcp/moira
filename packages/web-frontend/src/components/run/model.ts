@@ -386,6 +386,8 @@ export interface RunViewProps {
   onSetCursor: (at: number | null) => void;
   /** Open a step on the technical graph (the page switches views for it). */
   onFocusNode?: (nodeId: string) => void;
+  /** A list item on a block card was clicked: select the block and show that item in its panel. */
+  onSelectListItem?: (blockId: string, index: number) => void;
 }
 
 /** What a block's visits wrote up to the cursor: the latest value per name, with its visit. */

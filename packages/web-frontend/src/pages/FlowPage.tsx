@@ -288,8 +288,6 @@ export const FlowPage: React.FC = () => {
   const requestedMode = resolveFlowMode(searchParams.get(VIEW_PARAM));
   const mode: FlowViewMode = process ? requestedMode : "graph";
   // A view is rendered from the first time it is asked for and never unmounted again.
-  const mountedViews = useRef<Set<FlowViewMode>>(new Set());
-  mountedViews.current.add(mode);
   const blockParam = searchParams.get(BLOCK_PARAM);
   const selectedBlockId = blocks.some((b) => b.id === blockParam) ? blockParam : null;
   // Opening the graph with a block selected brings that block's first step into view, even when
@@ -768,8 +766,8 @@ export const FlowPage: React.FC = () => {
               {/* Both views stay mounted once shown and are only hidden, so the map keeps its
                   selection and the graph its viewport across a switch. */}
               <div className="lg:flex-1 lg:min-h-0">
-                {progress && mountedViews.current.has("map") && (
-                  <div className={cn("lg:h-full", mode !== "map" && "hidden")}>
+                {progress && mode === "map" && (
+                  <div className="lg:h-full">
                     <MapView
                       onFocusNode={focusNode}
                       progress={progress}
@@ -792,12 +790,8 @@ export const FlowPage: React.FC = () => {
                     />
                   </div>
                 )}
-                {(!progress || mountedViews.current.has("graph")) && (
-                  <div
-                    className={cn("h-[60vh] lg:h-full", progress && mode !== "graph" && "hidden")}
-                  >
-                    {technicalGraph}
-                  </div>
+                {(!progress || mode === "graph") && (
+                  <div className="h-[60vh] lg:h-full">{technicalGraph}</div>
                 )}
               </div>
             </section>

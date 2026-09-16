@@ -196,18 +196,19 @@ export function VariableGroup({
       data-testid={`variables-group-${id}`}
       data-open={open ? "true" : "false"}
     >
+      {/* The same header as `PanelSection`: title left, the count as the summary, chevron right. */}
       <CollapsibleTrigger
-        className="group flex w-full items-center gap-1.5 px-2 py-1.5 text-left"
+        className="group flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-accent/50"
         data-testid={`variables-group-toggle-${id}`}
       >
+        <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+          {title}
+        </span>
+        <span className="ml-auto text-xs tabular-nums text-foreground/80">{count}</span>
         <ChevronDown
           className="size-3.5 shrink-0 text-muted-foreground transition-transform group-data-[state=closed]:-rotate-90"
           aria-hidden="true"
         />
-        <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-          {title}
-        </span>
-        <span className="text-[11px] tabular-nums text-muted-foreground/70">{count}</span>
       </CollapsibleTrigger>
       <CollapsibleContent className="divide-y border-t">{children}</CollapsibleContent>
     </Collapsible>

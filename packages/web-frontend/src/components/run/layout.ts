@@ -207,8 +207,6 @@ async function placeBlocks(
   sizes: ReadonlyMap<string, { width: number; height: number }>,
   rankSep: number,
   nodeSep: number = BASE_NODE_SEP,
-  /** `tree`: branches fan out from their fork (Brandes-Köpf, balanced); default: network simplex. */
-  placement: "rows" | "tree" = "rows",
 ): Promise<Placed[]> {
   const { default: ELK } = await import("elkjs/lib/elk.bundled.js");
   const elk = new ELK();
@@ -227,10 +225,14 @@ async function placeBlocks(
       "elk.randomSeed": "1",
       "elk.spacing.nodeNode": String(nodeSep),
       "elk.layered.spacing.nodeNodeBetweenLayers": String(rankSep),
-      "elk.layered.nodePlacement.strategy":
-        placement === "tree" ? "BRANDES_KOEPF" : "NETWORK_SIMPLEX",
-      "elk.layered.nodePlacement.bk.fixedAlignment": "BALANCED",
-      "elk.layered.nodePlacement.bk.edgeStraightening": "IMPROVE_STRAIGHTNESS",
+      // Network simplex places every node as close to its neighbours as the layering allows, so a
+      // fork's branches hug the line and a nested fork moves out only as far as its depth needs;
+      // the post-compaction pulls stragglers back in. (Brandes-Köpf, the alternative, aligns
+      // nodes on straight lines and spreads branches over the whole height.)
+      "elk.layered.nodePlacement.strategy": "NETWORK_SIMPLEX",
+      "elk.layered.nodePlacement.networkSimplex.nodeFlexibility": "NODE_SIZE",
+      "elk.layered.compaction.postCompaction.strategy": "EDGE_LENGTH",
+      "elk.layered.compaction.postCompaction.constraints": "SEQUENCE",
       "elk.layered.crossingMinimization.strategy": "LAYER_SWEEP",
       "elk.layered.considerModelOrder.strategy": "NODES_AND_EDGES",
       "elk.padding": `[top=${MARGIN},left=${MARGIN},bottom=${MARGIN},right=${MARGIN}]`,
@@ -264,6 +266,13 @@ export function blockRows(
   blocks: readonly RunBlock[],
   hubIds: readonly string[],
   rankOf: ReadonlyMap<string, number>,
+  /**
+   * `alternate` (the default preset): each new row alternates below and above the sequence.
+   * `balanced` (the flow preset): a branch entered from another branch goes one row further out
+   * on that branch's side, and any other new row goes to the side carrying less span length, so
+   * the drawing fills evenly above and below the line instead of by turn.
+   */
+  sides: "alternate" | "balanced" = "alternate",
 ): Map<string, number> {
   const ordered = [...blocks].sort((a, b) => a.index - b.index);
   const indexOf = new Map(ordered.map((b) => [b.id, b.index]));
@@ -365,22 +374,54 @@ export function blockRows(
   const branchRows: Array<{ row: number; spans: Array<{ from: number; to: number }> }> = [];
   let below = 0;
   let above = 0;
+  /** Span length already placed on one side: what "fuller" means when a side is chosen. */
+  const load = (sign: 1 | -1) =>
+    branchRows
+      .filter((r) => Math.sign(r.row) === sign)
+      .reduce((sum, r) => sum + r.spans.reduce((n, sp) => n + (sp.to - sp.from + 1), 0), 0);
+  const newRow = (preferred?: 1 | -1) => {
+    let sign: 1 | -1;
+    if (sides === "alternate") sign = branchRows.length % 2 === 0 ? 1 : -1;
+    else sign = preferred ?? (load(1) <= load(-1) ? 1 : -1);
+    const number = sign === 1 ? (below += 1) : -(above += 1);
+    const row = { row: number, spans: [] as Array<{ from: number; to: number }> };
+    branchRows.push(row);
+    return row;
+  };
   for (const i of placed) {
     const span = spans[i];
-    let row = branchRows.find((r) => r.spans.every((s) => s.to < span.from || span.to < s.from));
-    if (!row) {
-      const number = branchRows.length % 2 === 0 ? (below += 1) : -(above += 1);
-      row = { row: number, spans: [] };
-      branchRows.push(row);
-    }
+    // The side of the branch this one is entered from (undefined when entered from the line).
+    const parentRow = [...entryBranches[i]]
+      .map((e) => rows.get(branches[e][0]) ?? 0)
+      .find((r) => r !== 0);
+    const parentSide = parentRow === undefined ? undefined : parentRow > 0 ? 1 : -1;
+    let row = branchRows.find(
+      (r) =>
+        (sides === "alternate" || parentSide === undefined || Math.sign(r.row) === parentSide) &&
+        (sides === "alternate" ||
+          parentRow === undefined ||
+          Math.abs(r.row) > Math.abs(parentRow)) &&
+        r.spans.every((s) => s.to < span.from || span.to < s.from),
+    );
+    if (!row) row = newRow(sides === "balanced" ? parentSide : undefined);
     row.spans.push(span);
     for (const id of branches[i]) rows.set(id, row.row);
   }
+  // Off-sequence hubs and loop-only blocks: a row of their own each. Alternating: all beneath
+  // every branch row; balanced: on the emptier side, so a long process does not pile them below.
   for (const id of ordered.map((b) => b.id)) {
-    if (!rows.has(id) && hubs.has(id)) rows.set(id, (below += 1));
+    if (rows.has(id) || !hubs.has(id)) continue;
+    if (sides === "balanced") {
+      const sign: 1 | -1 = below <= above ? 1 : -1;
+      rows.set(id, sign === 1 ? (below += 1) : -(above += 1));
+    } else rows.set(id, (below += 1));
   }
   for (const id of ordered.map((b) => b.id)) {
-    if (!rows.has(id)) rows.set(id, (below += 1));
+    if (rows.has(id)) continue;
+    if (sides === "balanced") {
+      const sign: 1 | -1 = below <= above ? 1 : -1;
+      rows.set(id, sign === 1 ? (below += 1) : -(above += 1));
+    } else rows.set(id, (below += 1));
   }
   return rows;
 }
@@ -418,7 +459,8 @@ export function hubPort(block: Pick<LaidOutBlock, "x" | "y">): { x: number; y: n
 export interface LayoutBlocksOptions {
   /**
    * `default`: the process rows with lanes in their gaps. `compact`: the same rows with tighter
-   * gaps. `flow`: ELK's own vertical placement, no rows forced. `vertical`: the default layout
+   * gaps. `flow`: the same rows, but branches placed on whichever side is emptier and nested
+   * forks stepping outward on their parent's side. `vertical`: the default layout
    * transposed: blocks stacked top to bottom, branches in columns to the right; the ports
    * stay on the blocks' left and right edges.
    */
@@ -459,23 +501,14 @@ export async function layoutBlocks(
   if (vertical) {
     for (const [id, size] of sizes) sizes.set(id, { width: size.height, height: size.width });
   }
-  const placed = await placeBlocks(
-    blocks,
-    sizes,
-    rankSep,
-    NODE_SEP,
-    preset === "flow" ? "tree" : "rows",
-  );
+  const placed = await placeBlocks(blocks, sizes, rankSep, NODE_SEP);
   const placedById = new Map(placed.map((p) => [p.id, p]));
   const xs = [...new Set(placed.map((p) => Math.round(p.x)))].sort((a, b) => a - b);
   const rankOf = new Map(placed.map((p) => [p.id, xs.indexOf(Math.round(p.x))]));
   // ELK's vertical placement is discarded: every block takes the top edge of its row. A row is as
   // tall as its tallest block with its self-loops, plus the node gap, so a self-loop never dips
   // into the row beneath; rows above the sequence stack upward from it, rows below downward.
-  const rowOf =
-    preset === "flow"
-      ? new Map(blocks.map((b) => [b.id, Math.round(placedById.get(b.id)!.y)]))
-      : blockRows(blocks, hubIds, rankOf);
+  const rowOf = blockRows(blocks, hubIds, rankOf, preset === "flow" ? "balanced" : "alternate");
   const rowContent = new Map<number, number>();
   for (const block of blocks) {
     const row = rowOf.get(block.id)!;
