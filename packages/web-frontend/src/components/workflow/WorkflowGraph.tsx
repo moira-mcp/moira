@@ -23,6 +23,7 @@ import React, { useState, useCallback, useEffect, useMemo, useRef } from "react"
 import {
   Background,
   MiniMap,
+  Panel,
   Node,
   Edge,
   ConnectionMode,
@@ -35,6 +36,7 @@ import { DiagramViewport } from "../diagram/DiagramViewport";
 import { useOpeningPlacement } from "../diagram/placement";
 import { useLayoutPreset } from "../diagram/layoutPreset";
 import { LayoutPresetButtons } from "../diagram/LayoutPresetButtons";
+import { NodeFinder } from "../run/NodeFinder";
 
 import { graphModel, definitionBlocks } from "../run/graphModel";
 import { GRAPH_MARGIN, layoutGraph } from "./graphLayout";
@@ -159,6 +161,8 @@ export interface WorkflowGraphProps {
   onVariableSelect?: (name: string) => void;
   /** The variable whose references are emphasised. */
   selectedVariable?: string | null;
+  /** The step the page has selected (the map's step, the finder's pick): ringed on the graph. */
+  selectedNodeId?: string | null;
 }
 
 /**
@@ -201,6 +205,7 @@ export const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
   focusRequest = null,
   onVariableSelect,
   selectedVariable = null,
+  selectedNodeId = null,
 }) => {
   // A connection chip names its other end the way the map does: the authored display name, else
   // the node id. The technical graph's `data.label` falls back to the node type ("Agent Task"),
@@ -269,6 +274,27 @@ export const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
   const focusStep = useCallback((id: string) => {
     void instanceRef.current?.fitView({ nodes: [{ id }], padding: 0.5, maxZoom: 1, duration: 400 });
   }, []);
+  // The step (and its block) the reader just arrived at pulses for a moment, so the move from
+  // the map or the finder answers "where did that land" instead of asking it.
+  const [arrival, setArrival] = useState<{ nodeId: string; blockId: string | null } | null>(null);
+  const blockOfNode = useMemo(
+    () => new Map((blocks ?? []).flatMap((b) => b.nodeIds.map((id) => [id, b.id] as const))),
+    [blocks],
+  );
+  const announceArrival = useCallback(
+    (nodeId: string) => setArrival({ nodeId, blockId: blockOfNode.get(nodeId) ?? null }),
+    [blockOfNode],
+  );
+  useEffect(() => {
+    if (!focusRequest) return;
+    announceArrival(focusRequest.nodeId);
+  }, [focusRequest, announceArrival]);
+  useEffect(() => {
+    if (!arrival) return;
+    const timer = setTimeout(() => setArrival(null), 1800);
+    return () => clearTimeout(timer);
+  }, [arrival]);
+  const [finderStep, setFinderStep] = useState<string | null>(null);
   const handleMeasured = useCallback((heights: Map<string, number>) => {
     // Cards taller or shorter than laid out: lay out again with what the browser measured.
     let differs = false;
@@ -312,6 +338,7 @@ export const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
             data: {
               ...node.data,
               selected: (node.data as BlockGroupData).blockId === selectedBlockId,
+              arrived: arrival?.blockId === (node.data as BlockGroupData).blockId,
             },
           }
         : {
@@ -321,11 +348,22 @@ export const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
               onWorkflowNavigate,
               current: node.id === currentNodeId,
               error: errorNodeIdSet.has(node.id),
+              arrived: arrival?.nodeId === node.id,
             },
-            selected: node.id === currentNodeId,
+            selected:
+              node.id === currentNodeId || node.id === selectedNodeId || node.id === finderStep,
           },
     );
-  }, [laidNodes, currentNodeId, selectedBlockId, errorNodeIds, onWorkflowNavigate]);
+  }, [
+    laidNodes,
+    currentNodeId,
+    selectedBlockId,
+    selectedNodeId,
+    finderStep,
+    arrival,
+    errorNodeIds,
+    onWorkflowNavigate,
+  ]);
   const [currentLayoutOptions, setCurrentLayoutOptions] = useState(layoutOptions);
   // The shared layout preset: the graph reads it as a direction — blocks stacked top to bottom
   // (default, compact, vertical) or laid out left to right (flow).
@@ -713,6 +751,19 @@ export const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
           >
             <GraphDefs />
             <GraphMeasuredHeights onMeasured={handleMeasured} />
+            <Panel position="top-left" className="w-[280px]">
+              <NodeFinder
+                blocks={graphBlocks}
+                steps={model.steps.map((s) => s.step)}
+                onPick={() => {}}
+                onPickStep={(stepId) => {
+                  setFinderStep(stepId);
+                  focusStep(stepId);
+                  announceArrival(stepId);
+                }}
+                testId="graph-node-finder"
+              />
+            </Panel>
             <Background gap={20} size={1} color={backgroundPatternColor} />
 
             {/* MiniMap with delayed render for better initial load performance */}

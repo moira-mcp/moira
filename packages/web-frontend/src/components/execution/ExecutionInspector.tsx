@@ -418,6 +418,16 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
     // Node details are shown via NodeDetailSheet in WorkflowGraph
   }, []);
 
+  // Opening the graph with a block selected brings that block's first step into view, even when
+  // the selection was made while the graph was hidden (a hidden viewport cannot be fitted).
+  useEffect(() => {
+    if (mode !== "graph" || !selectedBlockId) return;
+    const first = blocks.find((b) => b.id === selectedBlockId)?.nodeIds[0];
+    if (!first) return;
+    setFocusRequest((previous) => ({ nodeId: first, token: (previous?.token ?? 0) + 1 }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only the tab change re-focuses
+  }, [mode]);
+
   /** Bring a node into view on the technical graph: the page switches to the graph view for it. */
   const focusNode = useCallback(
     (nodeId: string) => {
@@ -592,6 +602,7 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
         showMinimap={false}
         showNodeDetails={true}
         focusRequest={focusRequest}
+        selectedNodeId={focusRequest?.nodeId ?? null}
       />
     </Suspense>
   );
@@ -809,6 +820,13 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
                         update({ [BLOCK_PARAM]: id });
                         if (id && chosenTab !== null && chosenTab !== "block")
                           setChosenTab("block");
+                        // The graph opens on the block's first step when the reader goes there.
+                        const first = blocks.find((b) => b.id === id)?.nodeIds[0];
+                        if (first)
+                          setFocusRequest((previous) => ({
+                            nodeId: first,
+                            token: (previous?.token ?? 0) + 1,
+                          }));
                       }}
                       cursor={cursor}
                       onSetCursor={(at) => update({ [AT_PARAM]: at === null ? null : String(at) })}

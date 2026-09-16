@@ -68,6 +68,8 @@ export interface PortedCardProps {
   error?: boolean;
   /** Something connected to this card is hovered: the card lights with its edges. */
   near?: boolean;
+  /** The reader just arrived here from another view: a short pulse marks the card. */
+  arrived?: boolean;
   /** Which port ids are lit under the current focus. */
   litIds?: ReadonlySet<string> | null;
   onHover?: (ids: readonly string[] | null) => void;
@@ -165,6 +167,7 @@ export function PortedCard({
   selected = false,
   error = false,
   near = false,
+  arrived = false,
   litIds = null,
   onHover,
   allLinkIds,
@@ -224,6 +227,7 @@ export function PortedCard({
         onClick && "cursor-pointer",
         current && "border-primary/50",
         (near || selected) && "ring-2 ring-primary/60",
+        arrived && "animate-pulse ring-4 ring-primary/80",
         error && "ring-2 ring-destructive",
       )}
       {...dataAttributes}

@@ -20,97 +20,14 @@
 
 import React, { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { ChevronDown, CornerDownLeft, Compass, Search } from "lucide-react";
+import { ChevronDown, Compass, PanelLeftClose, PanelLeftOpen } from "lucide-react";
+import { NodeFinder } from "./NodeFinder";
 import { cn } from "@/lib/utils";
-import { Input } from "@/components/ui/input";
 import { useModeGuideKey } from "../flow/editing";
-import { NodeTypeTag } from "./nodeTypeStyle";
 import { PassCount, StatusIcon } from "./status";
 import { CanvasDiagram } from "./CanvasView";
 import { formatDuration } from "./duration";
-import {
-  blockById,
-  nodeOwners,
-  stepsOf,
-  type RunBlock,
-  type RunViewProps,
-  type StepInfo,
-} from "./model";
-
-/** Search over every step of the process: picking a match selects the block that owns it. */
-function NodeFinder({
-  blocks,
-  steps,
-  onPick,
-}: {
-  blocks: RunBlock[];
-  steps: StepInfo[];
-  onPick: (blockId: string) => void;
-}): React.JSX.Element {
-  const { t } = useTranslation();
-  const [query, setQuery] = useState("");
-  const owners = useMemo(() => nodeOwners(blocks), [blocks]);
-  const byId = blockById(blocks);
-  const matches = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return [];
-    return steps
-      .filter((n) => n.id.toLowerCase().includes(q) || n.summary.toLowerCase().includes(q))
-      .slice(0, 8)
-      .map((n) => ({ step: n, owner: byId.get(owners.get(n.id) ?? "") }));
-  }, [steps, query, owners, byId]);
-
-  return (
-    <div className="relative">
-      <Search
-        className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
-        aria-hidden="true"
-      />
-      <Input
-        value={query}
-        onChange={(e) => setQuery(e.target.value)}
-        placeholder={t("pages.runPage.map.findNode")}
-        aria-label={t("pages.runPage.map.findNode")}
-        className="h-9 pl-8 text-sm"
-        data-testid="map-node-finder"
-      />
-      {query.trim() && (
-        <ul
-          className="absolute z-10 mt-1 w-full overflow-hidden rounded-lg border bg-popover text-popover-foreground shadow-md"
-          role="listbox"
-        >
-          {matches.length === 0 && (
-            <li className="px-3 py-2 text-xs text-muted-foreground">
-              {t("pages.runPage.map.noMatch")}
-            </li>
-          )}
-          {matches.map(({ step, owner }) => (
-            <li key={step.id} role="option" aria-selected={false}>
-              <button
-                type="button"
-                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-accent"
-                onClick={() => {
-                  if (owner) onPick(owner.id);
-                  setQuery("");
-                }}
-                data-node-match={step.id}
-              >
-                <NodeTypeTag type={step.type} />
-                <span className="truncate font-mono">{step.id}</span>
-                {owner && (
-                  <span className="ml-auto shrink-0 text-muted-foreground">
-                    <CornerDownLeft className="mr-1 inline size-3" aria-hidden="true" />
-                    {owner.name}
-                  </span>
-                )}
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
-  );
-}
+import { stepsOf, type RunBlock, type RunViewProps } from "./model";
 
 /** One row of the contents: status, position, name, and the block's counts on the right. */
 function ContentsRow({
@@ -296,6 +213,8 @@ function MapGuide({ guideKey }: { guideKey: string }): React.JSX.Element {
   );
 }
 
+const SIDEBAR_KEY = "moira.map.sidebarCollapsed";
+
 export function MapView({
   sidebar,
   ...props
@@ -306,6 +225,25 @@ export function MapView({
   const { t } = useTranslation();
   const guideKey = useModeGuideKey();
   const { blocks, workflow, selectedBlockId, onSelectBlock } = props;
+  // The contents sidebar folds away to give the diagram the whole width; the choice is kept per
+  // browser so a reader who folded it finds it folded on the next run.
+  const [collapsed, setCollapsed] = useState<boolean>(() => {
+    try {
+      return window.localStorage.getItem(SIDEBAR_KEY) === "1";
+    } catch {
+      return false;
+    }
+  });
+  const toggleSidebar = (): void => {
+    setCollapsed((value) => {
+      try {
+        window.localStorage.setItem(SIDEBAR_KEY, value ? "0" : "1");
+      } catch {
+        // storage unavailable: the choice lives for this page only
+      }
+      return !value;
+    });
+  };
   const allSteps = useMemo(
     () =>
       stepsOf(
@@ -323,7 +261,22 @@ export function MapView({
       className="flex flex-col lg:h-full lg:min-h-0 lg:flex-row lg:overflow-hidden"
       data-testid="map-view"
     >
-      <div className="order-1 flex h-[55vh] flex-col overflow-hidden lg:order-2 lg:h-full lg:min-h-0 lg:flex-1">
+      <div className="relative order-1 flex h-[55vh] flex-col overflow-hidden lg:order-2 lg:h-full lg:min-h-0 lg:flex-1">
+        <button
+          type="button"
+          onClick={toggleSidebar}
+          aria-expanded={!collapsed}
+          aria-label={t("pages.runPage.map.contents")}
+          title={t("pages.runPage.map.contents")}
+          data-testid="map-sidebar-toggle"
+          className="absolute left-2 top-2 z-20 hidden rounded-md border bg-background/90 p-1.5 text-muted-foreground shadow-sm hover:text-foreground lg:inline-flex"
+        >
+          {collapsed ? (
+            <PanelLeftOpen className="size-4" aria-hidden="true" />
+          ) : (
+            <PanelLeftClose className="size-4" aria-hidden="true" />
+          )}
+        </button>
         <HeaderFacts progress={props.progress} />
         <MapGuide guideKey={guideKey} />
         <div className="min-h-0 flex-1 overflow-hidden">
@@ -332,9 +285,13 @@ export function MapView({
       </div>
 
       <aside
-        className="scrollbar-thin order-2 shrink-0 space-y-3 border-t p-3 lg:order-1 lg:w-[260px] lg:overflow-auto lg:border-r lg:border-t-0 xl:w-[300px]"
+        className={cn(
+          "scrollbar-thin order-2 shrink-0 space-y-3 border-t p-3 lg:order-1 lg:w-[260px] lg:overflow-auto lg:border-r lg:border-t-0 xl:w-[300px]",
+          collapsed && "lg:hidden",
+        )}
         aria-label={t("pages.runPage.map.contents")}
         data-testid="map-contents"
+        data-collapsed={collapsed ? "true" : undefined}
       >
         {sidebar}
         <NodeFinder blocks={blocks} steps={allSteps} onPick={onSelectBlock} />

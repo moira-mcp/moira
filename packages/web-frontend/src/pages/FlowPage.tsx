@@ -287,6 +287,15 @@ export const FlowPage: React.FC = () => {
   mountedViews.current.add(mode);
   const blockParam = searchParams.get(BLOCK_PARAM);
   const selectedBlockId = blocks.some((b) => b.id === blockParam) ? blockParam : null;
+  // Opening the graph with a block selected brings that block's first step into view, even when
+  // the selection was made while the graph was hidden (a hidden viewport cannot be fitted).
+  useEffect(() => {
+    if (mode !== "graph" || !selectedBlockId) return;
+    const first = blocks.find((b) => b.id === selectedBlockId)?.nodeIds[0];
+    if (!first) return;
+    setFocusRequest((previous) => ({ nodeId: first, token: (previous?.token ?? 0) + 1 }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only the tab change re-focuses
+  }, [mode]);
   const shownBlock = blocks.find((b) => b.id === (selectedBlockId ?? blocks[0]?.id)) ?? null;
 
   const guideSteps = useMemo(() => flowGuideSteps(isOwner), [isOwner]);
@@ -465,6 +474,7 @@ export const FlowPage: React.FC = () => {
             showControls={true}
             showMinimap={false}
             focusRequest={focusRequest}
+            selectedNodeId={focusRequest?.nodeId ?? null}
           />
         </Suspense>
       </div>
@@ -767,6 +777,12 @@ export const FlowPage: React.FC = () => {
                       onSelectBlock={(blockId) => {
                         update({ [BLOCK_PARAM]: blockId });
                         if (blockId) setChosenTab("block");
+                        const first = blocks.find((b) => b.id === blockId)?.nodeIds[0];
+                        if (first)
+                          setFocusRequest((previous) => ({
+                            nodeId: first,
+                            token: (previous?.token ?? 0) + 1,
+                          }));
                       }}
                       cursor={null}
                       onSetCursor={() => {}}

@@ -42,6 +42,8 @@ export type StepNodeData = Record<string, unknown> & {
   selfLoops: PortInfo[];
   /** Brings the card at the other end of an arrival into view. */
   onFocusStep?: (id: string) => void;
+  /** The reader just arrived at this step from the map or the finder. */
+  arrived?: boolean;
 };
 
 /** Where the `index`-th of `count` handles sits along a card's edge, as a CSS percentage. */
@@ -57,6 +59,8 @@ export type BlockGroupData = {
   status: ExecutionBlockStatus;
   /** The block the page has selected: the map's selection carried onto the graph. */
   selected?: boolean;
+  /** The reader just arrived in this block from the map. */
+  arrived?: boolean;
 };
 export type BlockGroupNode = Node<BlockGroupData, "block-group">;
 
@@ -192,7 +196,7 @@ function stepFacts(graph: GraphStep): FactChip[] {
 
 export function StepNodeView({ data, selected }: NodeProps<StepNode>): React.JSX.Element {
   const focus = useTransitionFocus();
-  const { graph, current, error, horizontal, inputs, outputs, selfLoops } = data;
+  const { graph, current, error, horizontal, inputs, outputs, selfLoops, arrived } = data;
   const links = [...inputs, ...outputs, ...selfLoops].map((port) => port.id);
   // Hovering the card lights every connection it takes part in, and the cards at their far end.
   const near = focus.hovered !== null && links.some((id) => focus.hovered!.has(id));
@@ -220,6 +224,7 @@ export function StepNodeView({ data, selected }: NodeProps<StepNode>): React.JSX
       selected={selected}
       error={error}
       near={near}
+      arrived={Boolean(arrived)}
       litIds={focus.hovered}
       onHover={(ids) => focus.setHovered(ids)}
       allLinkIds={links}
@@ -257,6 +262,7 @@ export function BlockGroupView({ data }: NodeProps<BlockGroupNode>): React.JSX.E
         "pointer-events-none h-full w-full rounded-2xl border-2 px-4 pt-2",
         style.surface,
         data.selected && "ring-2 ring-ring",
+        data.arrived && "animate-pulse ring-4 ring-primary/70",
       )}
       data-block-id={data.blockId}
       data-graph-group=""
