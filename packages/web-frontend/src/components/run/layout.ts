@@ -26,9 +26,9 @@
  */
 
 import type { RunBlock, RunTransition } from "./model";
-import { PARALLEL_CHIP_MIN, canvasChipsOf, hubExitsOf } from "./chips";
+import { PARALLEL_CHIP_MIN, hubExitsOf } from "./chips";
 
-export const BLOCK_WIDTH = 256;
+export const BLOCK_WIDTH = 560;
 const BLOCK_BASE_HEIGHT = 74;
 const LINE_HEIGHT = 18;
 const NAME_LINE_HEIGHT = 20;
@@ -131,6 +131,21 @@ export function estimateBlockHeight(
     (hasNote ? LINE_HEIGHT : 0) +
     chipRowCount(chipNames) * CHIP_ROW_HEIGHT
   );
+}
+
+/**
+ * A ported block card is as tall as its longer port column (one row per transition in or out,
+ * the transitions to itself on a band beneath) or its header, whichever is more.
+ */
+export function estimatePortedBlockHeight(
+  inCount: number,
+  outCount: number,
+  selfCount: number,
+  description: string,
+): number {
+  const rows = Math.max(inCount, outCount, 1);
+  const header = 76 + lineCount(description, 44, 2) * LINE_HEIGHT + 30;
+  return Math.max(header, rows * 34 + 24) + (selfCount > 0 ? 36 : 0) + 8;
 }
 
 interface Placed {
@@ -399,14 +414,16 @@ export async function layoutBlocks(
   const sizes = new Map<string, { width: number; height: number }>();
   for (const block of blocks) {
     // Every connector away from the rail (hub exit, skip, return) is a chip inside the block.
+    const inCount = blocks.reduce(
+      (n, other) =>
+        other.id === block.id ? n : n + other.transitions.filter((t) => t.to === block.id).length,
+      0,
+    );
+    const outCount = block.transitions.filter((t) => t.to !== block.id).length;
+    const selfCount = block.transitions.filter((t) => t.to === block.id).length;
     sizes.set(block.id, {
       width: BLOCK_WIDTH,
-      height: estimateBlockHeight(
-        block.name,
-        block.description,
-        false,
-        canvasChipsOf(block, hubIds, blocks).map((chip) => chip.targetName),
-      ),
+      height: estimatePortedBlockHeight(inCount, outCount, selfCount, block.description),
     });
   }
   const rankSep = rankSeparation(blocks, hubIds);

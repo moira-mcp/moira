@@ -41,7 +41,14 @@ export interface FactChip {
 }
 
 export interface PortedCardProps {
-  type: string;
+  /** The node type, drawn as the type badge; a block passes `badge` instead. */
+  type?: string;
+  /** Replaces the type badge (a block's status chip). */
+  badge?: React.ReactNode;
+  /** Shown at the right of the title row (a block's pass count). */
+  titleExtra?: React.ReactNode;
+  /** Makes the card clickable (a block selects itself on the map). */
+  onClick?: () => void;
   title: string;
   /** Shown small beside the title (the node id when the title is the authored label). */
   subtitle?: string | null;
@@ -141,6 +148,9 @@ export function TipBody({ children }: { children: React.ReactNode }): React.JSX.
 
 export function PortedCard({
   type,
+  badge,
+  titleExtra,
+  onClick,
   title,
   subtitle,
   description,
@@ -206,8 +216,12 @@ export function PortedCard({
       style={{ width, minHeight }}
       onMouseEnter={() => allLinkIds.length > 0 && onHover?.(allLinkIds)}
       onMouseLeave={() => onHover?.(null)}
+      onClick={onClick}
+      role={onClick ? "button" : undefined}
+      tabIndex={onClick ? 0 : undefined}
       className={cn(
         "relative flex flex-col rounded-xl border bg-card text-sm shadow-sm transition-shadow",
+        onClick && "cursor-pointer",
         current && "border-primary/50",
         (near || selected) && "ring-2 ring-primary/60",
         error && "ring-2 ring-destructive",
@@ -225,7 +239,8 @@ export function PortedCard({
         {column(inputs, "in")}
         <div className="min-w-0 px-3 py-2.5">
           <div className="flex items-center gap-2">
-            <NodeTypeTag type={type} />
+            {badge ?? (type ? <NodeTypeTag type={type} /> : null)}
+            {titleExtra && <span className="ml-auto">{titleExtra}</span>}
             {current && (
               <span className="rounded-full bg-primary px-2 py-0.5 text-[10px] font-semibold leading-4 text-primary-foreground">
                 •

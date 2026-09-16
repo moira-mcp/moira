@@ -19,11 +19,10 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import {
   BaseEdge,
   EdgeLabelRenderer,
-  Handle,
-  Position,
   Background,
   type Edge,
   type EdgeProps,
@@ -31,7 +30,9 @@ import {
   type NodeProps,
   type ReactFlowInstance,
 } from "@xyflow/react";
-import { CornerDownRight, Loader2, RotateCcw } from "lucide-react";
+import { CornerDownRight, Clock, ListChecks, Loader2, Repeat, RotateCcw } from "lucide-react";
+import { PortedCard, type FactChip, type PortInfo } from "../diagram/PortedCard";
+import { roundedPath } from "../workflow/graphNodes";
 import { cn } from "@/lib/utils";
 import { useTheme } from "@/hooks/useTheme";
 import { DiagramViewport } from "../diagram/DiagramViewport";
@@ -42,7 +43,7 @@ import { useOpeningPlacement } from "../diagram/placement";
 const CANVAS_EDGE = 16;
 /** Where the block row sits when a definition opens: this fraction of the viewport height from the top. */
 const CANVAS_ROW_ANCHOR = 0.3;
-import { PassCount, StatusChip, STATUS_STYLE } from "./status";
+import { PassCount, StatusChip } from "./status";
 import {
   BLOCK_WIDTH,
   LABEL_MAX_WIDTH,
@@ -52,20 +53,16 @@ import {
 } from "./layout";
 import { formatDuration } from "./duration";
 import { currentBlockId, type RunBlock, type RunViewProps } from "./model";
-import {
-  PARALLEL_CHIP_MIN,
-  canvasChipsOf,
-  chipTitle,
-  transitionKey,
-  type TransitionChip,
-} from "./chips";
-import { TransitionChipView, TransitionFocusProvider, isLit, useTransitionFocus } from "./focus";
+import { PARALLEL_CHIP_MIN, transitionKey } from "./chips";
+import { TransitionFocusProvider, isLit, useTransitionFocus } from "./focus";
 
 type BlockNodeData = {
   block: RunBlock;
   selected: boolean;
   isHub: boolean;
-  chips: TransitionChip[];
+  inputs: PortInfo[];
+  outputs: PortInfo[];
+  selfLoops: PortInfo[];
   /** Who the run waits for, so a waiting card is worded for the agent or for a person. */
   waitingFor: "agent" | "user" | null;
   onSelect: (id: string | null) => void;
@@ -73,123 +70,180 @@ type BlockNodeData = {
 type BlockNode = Node<BlockNodeData, "block">;
 type RoutedEdge = Edge<{ laid: LaidOutEdge }, "routed">;
 
-/**
- * The run facts a card carries beside its step count: the time the block's passes took, the open
- * pass's own time while the run is on it, and the bound list's progress. A block the run has not
- * measured shows nothing here rather than a zero.
- */
-function BlockFacts({ block }: { block: RunBlock }): React.JSX.Element | null {
-  const { t } = useTranslation();
+/** The fact chips of a block: its steps, its passes, its time and the list it works through. */
+function blockFacts(block: RunBlock, t: TFunction): FactChip[] {
+  const facts: FactChip[] = [];
+  facts.push({
+    key: "steps",
+    label: t("pages.runPage.stepCount", { count: block.nodeIds.length }),
+    tip: block.nodeIds.join("\n"),
+  });
+  if (block.iterations > 1) {
+    facts.push({
+      key: "passes",
+      icon: <Repeat className="size-3" aria-hidden="true" />,
+      label: "×",
+      count: block.iterations,
+      tip: block.timing.passes
+        .map(
+          (pass, index) =>
+            `${index + 1}: ${pass.durationMs === null ? "—" : formatDuration(pass.durationMs, t)}${pass.open ? " · " + t("pages.runPage.map.current") : ""}`,
+        )
+        .join("\n"),
+    });
+  }
   const { timing, list } = block;
-  const total = timing.totalMs === null ? null : formatDuration(timing.totalMs, t);
-  const current = timing.currentMs === null ? null : formatDuration(timing.currentMs, t);
-  // An unresolved counter reads `?`, as the image and the notification footer word it.
-  const bound =
-    list && (list.done !== null || list.total !== null)
-      ? `${list.done ?? "?"}/${list.total ?? "?"}`
-      : null;
-  if (!total && !current && !bound) return null;
-  return (
-    <>
-      {total && (
-        <span title={t("pages.runPage.map.total")} data-block-total={timing.totalMs}>
-          {" · "}
-          {total}
-        </span>
-      )}
-      {current && (
-        <span
-          className="text-primary"
-          title={t("pages.runPage.map.current")}
-          data-block-current={timing.currentMs}
-        >
-          {" · "}
-          {current}
-        </span>
-      )}
-      {bound && (
-        <span title={t("pages.runPage.map.listProgress")} data-block-list={bound}>
-          {" · "}
-          {bound}
-        </span>
-      )}
-    </>
-  );
+  if (timing.totalMs !== null || timing.currentMs !== null) {
+    facts.push({
+      key: "timing",
+      icon: <Clock className="size-3" aria-hidden="true" />,
+      label:
+        timing.currentMs !== null
+          ? formatDuration(timing.currentMs, t)
+          : formatDuration(timing.totalMs ?? 0, t),
+      tip: `${t("pages.runPage.map.total")}: ${timing.totalMs === null ? "—" : formatDuration(timing.totalMs, t)}${
+        timing.currentMs !== null
+          ? `\n${t("pages.runPage.map.current")}: ${formatDuration(timing.currentMs, t)}`
+          : ""
+      }`,
+    });
+  }
+  if (list && (list.done !== null || list.total !== null)) {
+    facts.push({
+      key: "list",
+      icon: <ListChecks className="size-3" aria-hidden="true" />,
+      label: `${list.done ?? "?"}/${list.total ?? "?"}`,
+      tip: list.items
+        ? list.items
+            .map(
+              (item) =>
+                `${item.done ? "✓" : item.current ? "▶" : "·"} ${item.title}${item.durationMs !== null ? ` — ${formatDuration(item.durationMs, t)}` : ""}`,
+            )
+            .join("\n")
+        : (list.currentTitle ?? t("pages.runPage.map.listProgress")),
+    });
+  }
+  return facts;
 }
 
 function BlockNodeView({ data }: NodeProps<BlockNode>): React.JSX.Element {
   const { t } = useTranslation();
-  const { block, selected, isHub, chips, waitingFor, onSelect } = data;
-  const style = STATUS_STYLE[block.status];
-  const endsWhen = t("pages.runPage.map.endsWhen");
+  const focus = useTransitionFocus();
+  const { block, selected, isHub, inputs, outputs, selfLoops, waitingFor, onSelect } = data;
+  const keys = [...inputs, ...outputs, ...selfLoops].map((port) => port.id);
+  const near = focus.hovered !== null && keys.some((key) => focus.hovered!.has(key));
+  const litIds = focus.hovered ?? (focus.pinnedBlock === block.id ? new Set(keys) : null);
   return (
-    <>
-      <Handle type="target" position={Position.Left} className="!opacity-0" />
-      <Handle type="source" position={Position.Right} className="!opacity-0" />
-      <button
-        type="button"
-        onClick={() => onSelect(selected ? null : block.id)}
-        aria-pressed={selected}
-        aria-current={block.status === "active" || block.status === "waiting" ? "step" : undefined}
-        style={{ width: BLOCK_WIDTH }}
-        className={cn(
-          "flex h-full flex-col gap-1.5 rounded-xl border-2 px-3.5 py-3 text-left transition",
-          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-          style.surface,
-          isHub && "border-dashed",
-          selected && "ring-2 ring-ring",
-        )}
-        data-block-id={block.id}
-        data-status={block.status}
-        title={block.name}
-      >
-        <div className="flex items-start justify-between gap-2">
-          {/* The name is clamped like the description (`MAX_NAME_LINES` in the layout's height
-              estimate), the whole of it in the card's `title`, so a long name neither overflows
-              the card nor pushes the facts line out of it. */}
-          <span
-            className={cn(
-              "line-clamp-2 min-w-0 text-sm font-semibold leading-5",
-              block.status === "skipped" && "line-through decoration-muted-foreground/60",
-            )}
-            data-block-name={block.id}
-          >
-            <span className="mr-1.5 tabular-nums text-muted-foreground">{block.index + 1}.</span>
-            {block.name}
-          </span>
-          <StatusChip status={block.status} waitingFor={waitingFor} />
-        </div>
-        <p className="line-clamp-3 text-xs leading-[18px] text-foreground/80">
-          {block.description}
-        </p>
-        {/* The facts keep one line of their own; the chips wrap beneath them, each no wider
-            than the card, so a long return chip never pushes the facts into a column or draws
-            over the description. */}
-        <div className="mt-auto flex flex-col gap-1">
-          <span className="truncate whitespace-nowrap text-[11px] text-muted-foreground">
-            {t("pages.runPage.stepCount", { count: block.nodeIds.length })}
-            {block.iterations > 1 && (
-              <>
-                {" · "}
-                <PassCount iterations={block.iterations} />
-              </>
-            )}
-            <BlockFacts block={block} />
-          </span>
-          {chips.length > 0 && (
-            <span className="flex flex-wrap gap-1" data-testid="block-chips">
-              {chips.map((chip) => (
-                <TransitionChipView key={chip.key} chip={chip} title={chipTitle(chip, endsWhen)} />
-              ))}
-            </span>
-          )}
-        </div>
-      </button>
-    </>
+    <PortedCard
+      badge={<StatusChip status={block.status} waitingFor={waitingFor} />}
+      titleExtra={block.iterations > 1 ? <PassCount iterations={block.iterations} /> : undefined}
+      title={`${block.index + 1}. ${block.name}`}
+      description={block.description}
+      descriptionTip={block.description}
+      facts={blockFacts(block, t)}
+      inputs={inputs}
+      outputs={outputs}
+      selfLoops={selfLoops}
+      horizontal
+      width={BLOCK_WIDTH}
+      current={block.status === "active" || block.status === "waiting"}
+      selected={selected}
+      near={near}
+      litIds={litIds}
+      onHover={(ids) => focus.setHovered(ids)}
+      allLinkIds={keys}
+      onClick={() => onSelect(selected ? null : block.id)}
+      dataAttributes={{
+        "data-block-id": block.id,
+        "data-status": block.status,
+        "data-hub": isHub ? "true" : undefined,
+      }}
+    />
   );
 }
 
-function RoutedEdgeView({ id, data }: EdgeProps<RoutedEdge>): React.JSX.Element | null {
+/** The points of a laid path (`M x y L x y …`), so a lane can be read back from it. */
+function pathPoints(path: string): Array<[number, number]> {
+  const points: Array<[number, number]> = [];
+  for (const match of path.matchAll(/[ML]\s*(-?[\d.]+)\s+(-?[\d.]+)/g)) {
+    points.push([Number(match[1]), Number(match[2])]);
+  }
+  return points;
+}
+
+/** How far an edge runs out of its port before it turns. */
+const PORT_STUB = 20;
+const SELF_LOOP_DIP = 26;
+
+/**
+ * The edge from its source port to its target port: a forward elbow keeps its vertical in the
+ * gap the layout chose; a skip, a hub bundle or a return keeps the lane the layout gave it and
+ * reaches it from the ports through short stubs; a transition back to the block itself dips
+ * under its bottom double port.
+ */
+function portedPath(
+  laid: LaidOutEdge,
+  sx: number,
+  sy: number,
+  tx: number,
+  ty: number,
+): { path: string; labelX: number; labelY: number } {
+  const points = pathPoints(laid.path);
+  if (laid.from === laid.to) {
+    const dip = Math.max(sy, ty) + SELF_LOOP_DIP;
+    return {
+      path: roundedPath([
+        [sx, sy],
+        [sx, dip],
+        [tx, dip],
+        [tx, ty],
+      ]),
+      labelX: (sx + tx) / 2,
+      labelY: dip + 10,
+    };
+  }
+  if (laid.kind === "forward") {
+    const midX = points.length >= 3 ? points[1][0] : (sx + tx) / 2;
+    const pts: Array<[number, number]> =
+      Math.abs(sy - ty) < 1
+        ? [
+            [sx, sy],
+            [tx, ty],
+          ]
+        : [
+            [sx, sy],
+            [midX, sy],
+            [midX, ty],
+            [tx, ty],
+          ];
+    return { path: roundedPath(pts), labelX: midX, labelY: Math.min(sy, ty) - 4 };
+  }
+  const ys = points.map((p) => p[1]);
+  const laneY = laid.kind === "cycle" ? Math.max(...ys) : Math.min(...ys);
+  const out = sx + PORT_STUB;
+  const into = tx - PORT_STUB;
+  return {
+    path: roundedPath([
+      [sx, sy],
+      [out, sy],
+      [out, laneY],
+      [into, laneY],
+      [into, ty],
+      [tx, ty],
+    ]),
+    labelX: (out + into) / 2,
+    labelY: laneY,
+  };
+}
+
+function RoutedEdgeView({
+  id,
+  data,
+  sourceX,
+  sourceY,
+  targetX,
+  targetY,
+}: EdgeProps<RoutedEdge>): React.JSX.Element | null {
   const { t } = useTranslation();
   const focus = useTransitionFocus();
   if (!data) return null;
@@ -204,12 +258,11 @@ function RoutedEdgeView({ id, data }: EdgeProps<RoutedEdge>): React.JSX.Element 
     onMouseEnter: () => focus.setHovered([key]),
     onMouseLeave: () => focus.setHovered(null),
   };
+  const ported = portedPath(laid, sourceX, sourceY, targetX, targetY);
   const anchor =
-    laid.labelAnchor === "above"
-      ? `translate(-50%, -100%) translate(${laid.labelX}px, ${laid.labelY - 4}px)`
-      : laid.labelAnchor === "below"
-        ? `translate(-50%, 0) translate(${laid.labelX}px, ${laid.labelY}px)`
-        : `translate(-50%, -50%) translate(${laid.labelX}px, ${laid.labelY}px)`;
+    laid.from === laid.to
+      ? `translate(-50%, 0) translate(${ported.labelX}px, ${ported.labelY}px)`
+      : `translate(-50%, -100%) translate(${ported.labelX}px, ${ported.labelY - 4}px)`;
   const title = cycle
     ? `${laid.transition.label} — ${laid.transition.cycle?.cause} — ${t("pages.runPage.map.endsWhen")} ${laid.transition.cycle?.exit}`
     : laid.transition.label;
@@ -224,7 +277,7 @@ function RoutedEdgeView({ id, data }: EdgeProps<RoutedEdge>): React.JSX.Element 
         <title>{title}</title>
         <BaseEdge
           id={id}
-          path={laid.path}
+          path={ported.path}
           markerEnd={
             cycle
               ? lit
@@ -250,7 +303,7 @@ function RoutedEdgeView({ id, data }: EdgeProps<RoutedEdge>): React.JSX.Element 
         <EdgeLabelRenderer>
           <span
             className={cn(
-              "nodrag nopan absolute inline-flex items-center gap-1 whitespace-nowrap rounded-full border px-2 py-0.5 text-[11px] font-medium leading-4",
+              "nodrag nopan pointer-events-auto absolute inline-flex items-center gap-1 whitespace-nowrap rounded-full border px-2 py-0.5 text-[11px] font-medium leading-4",
               forward && "truncate",
               lit && "z-10 shadow-sm",
               cycle
@@ -261,6 +314,7 @@ function RoutedEdgeView({ id, data }: EdgeProps<RoutedEdge>): React.JSX.Element 
             data-edge-label={laid.kind}
             data-transition={key}
             title={title}
+            {...hover}
           >
             {cycle && <RotateCcw className="size-3 shrink-0" aria-hidden="true" />}
             {skip && <CornerDownRight className="size-3 shrink-0" aria-hidden="true" />}
@@ -347,30 +401,70 @@ function CanvasInner({
     [layout, placeViewport],
   );
 
-  const nodes = useMemo<BlockNode[]>(
-    () =>
-      (layout?.blocks ?? []).map((laid) => {
-        const block = blocks.find((b) => b.id === laid.id)!;
-        return {
-          id: laid.id,
-          type: "block",
-          position: { x: laid.x, y: laid.y },
-          width: laid.width,
-          height: laid.height,
-          draggable: false,
-          selectable: false,
-          data: {
-            block,
-            selected: selectedBlockId === block.id,
-            isHub: layout!.hubIds.includes(block.id),
-            chips: canvasChipsOf(block, layout!.hubIds, blocks),
-            waitingFor: progress.waitingFor,
-            onSelect: onSelectBlock,
-          },
+  const nodes = useMemo<BlockNode[]>(() => {
+    if (!layout) return [];
+    const byId = new Map(blocks.map((b) => [b.id, b]));
+    const nameOf = (id: string) => {
+      const b = byId.get(id);
+      return b ? `${b.index + 1}. ${b.name}` : id;
+    };
+    const cycleTip = (transition: RunBlock["transitions"][number]) =>
+      transition.cycle
+        ? `\n${transition.cycle.cause}\n${t("pages.runPage.map.endsWhen")} ${transition.cycle.exit}`
+        : "";
+    return layout.blocks.map((laid) => {
+      const block = byId.get(laid.id)!;
+      const inputs: PortInfo[] = [];
+      for (const other of blocks) {
+        if (other.id === block.id) continue;
+        for (const transition of other.transitions) {
+          if (transition.to !== block.id) continue;
+          inputs.push({
+            id: transitionKey(other.id, transition),
+            label: nameOf(other.id),
+            detail: transition.label,
+            kind: transition.cycle ? "return" : "forward",
+            tip: `${nameOf(other.id)} → ${transition.label}${cycleTip(transition)}`,
+          });
+        }
+      }
+      const outputs: PortInfo[] = [];
+      const selfLoops: PortInfo[] = [];
+      for (const transition of block.transitions) {
+        const port: PortInfo = {
+          id: transitionKey(block.id, transition),
+          label: transition.label,
+          detail: transition.to === block.id ? null : nameOf(transition.to),
+          kind: transition.cycle
+            ? "return"
+            : layout.hubIds.includes(transition.to)
+              ? "external"
+              : "forward",
+          tip: `${transition.label} → ${nameOf(transition.to)}${cycleTip(transition)}`,
         };
-      }),
-    [layout, blocks, selectedBlockId, onSelectBlock, progress.waitingFor],
-  );
+        (transition.to === block.id ? selfLoops : outputs).push(port);
+      }
+      return {
+        id: laid.id,
+        type: "block",
+        position: { x: laid.x, y: laid.y },
+        width: laid.width,
+        height: laid.height,
+        draggable: false,
+        selectable: false,
+        data: {
+          block,
+          selected: selectedBlockId === block.id,
+          isHub: layout.hubIds.includes(block.id),
+          inputs,
+          outputs,
+          selfLoops,
+          waitingFor: progress.waitingFor,
+          onSelect: onSelectBlock,
+        },
+      };
+    });
+  }, [layout, blocks, selectedBlockId, onSelectBlock, progress.waitingFor, t]);
 
   const edges = useMemo<RoutedEdge[]>(
     () =>
@@ -378,6 +472,8 @@ function CanvasInner({
         id: laid.id,
         source: laid.from,
         target: laid.to,
+        sourceHandle: `out:${transitionKey(laid.from, laid.transition)}`,
+        targetHandle: `in:${transitionKey(laid.from, laid.transition)}`,
         type: "routed",
         selectable: false,
         focusable: false,
