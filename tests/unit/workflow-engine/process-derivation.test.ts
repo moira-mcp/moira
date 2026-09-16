@@ -59,10 +59,12 @@ function synthetic(): WorkflowGraph {
         id: "verify",
         type: "condition",
         progressNodeId: "check",
-        condition: { operator: "eq", left: { contextPath: "do.ok" }, right: true },
-        connections: { true: "end", false: "do" },
+        cases: [
+          { when: { operator: "eq", left: { contextPath: "do.ok" }, right: true }, output: "true" },
+        ],
+        connections: { true: "end", default: "do" },
         connectionLabels: {
-          false: {
+          default: {
             label: "check failed",
             cycle: { cause: "The check found a problem", exit: "The check passes" },
           },
@@ -148,7 +150,7 @@ describe("process derivation from the authored graph", () => {
         to: "work",
         label: "check failed",
         cycle: { cause: "The check found a problem", exit: "The check passes" },
-        edges: ["verify.false"],
+        edges: ["verify.default"],
       },
     ]);
   });
@@ -184,7 +186,7 @@ describe("process derivation from the authored graph", () => {
       "a return without a cycle explanation",
       (w) => {
         (w.nodes[2] as { connectionLabels: Record<string, unknown> }).connectionLabels = {
-          false: "check failed",
+          default: "check failed",
         };
       },
       ["unexplained-cycle"],
@@ -231,7 +233,7 @@ describe("process derivation from the authored graph", () => {
       // A node whose only connection is a self-retry: the derivation must report it as
       // unconnected, and an agent-directive node cannot declare that shape in the type.
     } as unknown as WorkflowGraph["nodes"][number]);
-    (workflow.nodes[2] as { connections: Record<string, string> }).connections.false = "redo";
+    (workflow.nodes[2] as { connections: Record<string, string> }).connections.default = "redo";
     const projection = deriveProcess(workflow)!;
     expect(projection.diagnostics).toEqual([]);
     expect(projection.blocks[1].transitions[0].cycle).toBeDefined();

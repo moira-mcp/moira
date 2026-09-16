@@ -88,11 +88,11 @@ function generateHintForBranch(
 
   switch (nodeType) {
     case "condition":
-      suggestedScenarioName = `${nodeId} evaluates to ${branch}`;
-      if (branch === "true") {
-        mockInputHint = `Set condition variables to make ${nodeId} evaluate true`;
+      suggestedScenarioName = `${nodeId} takes output ${branch}`;
+      if (branch === "default") {
+        mockInputHint = `Set condition variables so that no case of ${nodeId} holds`;
       } else {
-        mockInputHint = `Set condition variables to make ${nodeId} evaluate false`;
+        mockInputHint = `Set condition variables so that the case of ${nodeId} routing to ${branch} holds`;
       }
       break;
 
@@ -103,9 +103,9 @@ function generateHintForBranch(
       } else if (branch === "error") {
         suggestedScenarioName = `${nodeId} fails with error`;
         mockInputHint = `Configure scenario to trigger error path from ${nodeId}`;
-      } else if (branch === "maxRetriesExceeded") {
-        suggestedScenarioName = `${nodeId} exceeds max retries`;
-        mockInputHint = `Provide invalid input to ${nodeId} multiple times`;
+      } else {
+        suggestedScenarioName = `${nodeId} answers so that case "${branch}" holds`;
+        mockInputHint = `Provide an answer to ${nodeId} that selects output ${branch}`;
       }
       break;
 

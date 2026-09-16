@@ -46,8 +46,13 @@ const testWorkflow: WorkflowGraph = {
     {
       id: "check-condition",
       type: "condition",
-      condition: { operator: "eq", left: { contextPath: "result" }, right: "success" },
-      connections: { true: "step-2", false: "error-handler" },
+      cases: [
+        {
+          when: { operator: "eq", left: { contextPath: "result" }, right: "success" },
+          output: "true",
+        },
+      ],
+      connections: { true: "step-2", default: "error-handler" },
     },
     {
       id: "step-2",
@@ -278,7 +283,7 @@ describe("Manage Workflow Actions Integration Tests", () => {
       });
     });
 
-    test("returns condition node with condition object", async () => {
+    test("returns condition node with its routing cases", async () => {
       const result = await runWithMCPContext({ userId: TEST_USER_ID }, async () => {
         return manageWorkflow({
           action: "get-node",
@@ -289,8 +294,9 @@ describe("Manage Workflow Actions Integration Tests", () => {
 
       expect(result.success).toBe(true);
       expect(result.data.node.type).toBe("condition");
-      expect(result.data.node.condition).toBeDefined();
-      expect(result.data.node.condition.operator).toBe("eq");
+      expect(result.data.node.cases).toHaveLength(1);
+      expect(result.data.node.cases[0].when.operator).toBe("eq");
+      expect(result.data.node.cases[0].output).toBe("true");
     });
 
     test("returns error for non-existent node", async () => {

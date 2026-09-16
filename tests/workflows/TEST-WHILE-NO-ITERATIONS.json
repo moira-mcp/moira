@@ -3,7 +3,8 @@
   "metadata": {
     "name": "TEST-WHILE-NO-ITERATIONS",
     "version": "1.0.0",
-    "description": "While loop with condition false from start"
+    "description": "While loop with condition false from start",
+    "schemaVersion": 1
   },
   "nodes": [
     {
@@ -36,16 +37,21 @@
     {
       "type": "condition",
       "id": "check-loop",
-      "condition": {
-        "operator": "lt",
-        "left": {
-          "contextPath": "counter"
-        },
-        "right": 3
-      },
+      "cases": [
+        {
+          "when": {
+            "operator": "lt",
+            "left": {
+              "contextPath": "counter"
+            },
+            "right": 3
+          },
+          "output": "true"
+        }
+      ],
       "connections": {
         "true": "increment",
-        "false": "end"
+        "default": "end"
       }
     },
     {

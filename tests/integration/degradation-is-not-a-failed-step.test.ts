@@ -50,8 +50,10 @@ function loopingGraph(): WorkflowGraph {
       {
         type: "condition",
         id: "check",
-        condition: { operator: "eq", left: { contextPath: "done" }, right: true },
-        connections: { true: "end", false: "task" },
+        cases: [
+          { when: { operator: "eq", left: { contextPath: "done" }, right: true }, output: "true" },
+        ],
+        connections: { true: "end", default: "task" },
       },
       { type: "end", id: "end" },
     ],

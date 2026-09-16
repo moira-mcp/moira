@@ -60,6 +60,7 @@ import {
   type DirectiveMessage,
 } from "@mcp-moira/workflow-engine";
 import { randomUUID } from "crypto";
+import { migrateWorkflowGraph } from "@mcp-moira/workflow-engine/migration";
 
 /**
  * User ID used by scenario runner for workflow execution.
@@ -190,6 +191,9 @@ export async function runScenario(
   }
 
   // Save workflow
+  // Definitions reach the engine in their current schema shape, as they do through every server
+  // ingress; an inline or file-read fixture in an older shape is migrated the same way here.
+  workflow = migrateWorkflowGraph(workflow).graph;
   await repository.saveWorkflow(workflow, TEST_USER_ID);
 
   // Find start node

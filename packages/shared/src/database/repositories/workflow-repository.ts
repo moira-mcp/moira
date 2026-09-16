@@ -15,6 +15,15 @@ import { workflow, user, accessGrant, principalGroupMember } from "../schema.js"
 import { RESOURCE_TYPES } from "../../authorization/authorization-policy.js";
 import { AuthorizationService } from "../../authorization/authorization-service.js";
 import type { WorkflowGraph } from "@mcp-moira/workflow-engine";
+import { migrateWorkflowGraph } from "@mcp-moira/workflow-engine/migration";
+
+/**
+ * A stored definition, read in its current schema shape. Persisted rows are upgraded once at
+ * startup; this keeps a row written by an older process readable until that upgrade runs.
+ */
+export function parseStoredGraph(json: string): WorkflowGraph {
+  return migrateWorkflowGraph(JSON.parse(json) as WorkflowGraph).graph;
+}
 import { createLogger } from "../../logging/logger.js";
 import type * as schema from "../schema.js";
 import { randomUUID } from "node:crypto";
@@ -446,7 +455,7 @@ export class WorkflowRepository {
     });
 
     return rows.map((row) => {
-      const graph = JSON.parse(row.graph) as WorkflowGraph;
+      const graph = parseStoredGraph(row.graph);
       // Determine access type: owner if user owns it, public otherwise
       const accessType: "owner" | "shared" | "public" = row.userId === userId ? "owner" : "public";
       return {
@@ -580,7 +589,7 @@ export class WorkflowRepository {
     this.logger.info("listWithFilters() DB query returned", { rowCount: rows.length, total });
 
     const workflows = rows.map((row) => {
-      const graph = JSON.parse(row.graph) as WorkflowGraph;
+      const graph = parseStoredGraph(row.graph);
       // Determine access type: owner > shared > public
       let accessType: "owner" | "shared" | "public";
       if (row.userId === userId) {
@@ -656,7 +665,7 @@ export class WorkflowRepository {
 
     // Owner, public, an explicit grant or an operator — one decision, taken centrally.
     if (await this.mayView(userId, row)) {
-      return JSON.parse(row.graph) as WorkflowGraph;
+      return parseStoredGraph(row.graph);
     }
 
     // User has no access to this workflow
@@ -740,7 +749,7 @@ export class WorkflowRepository {
       accessType = "shared";
     }
 
-    const graph = JSON.parse(row.graph) as WorkflowGraph;
+    const graph = parseStoredGraph(row.graph);
     return {
       id: row.id,
       slug: row.slug,
@@ -807,7 +816,7 @@ export class WorkflowRepository {
     // Extract workflow name from graph JSON
     let workflowName: string | null = null;
     try {
-      const graphData = JSON.parse(row.graph) as WorkflowGraph;
+      const graphData = parseStoredGraph(row.graph);
       workflowName = graphData.metadata?.name || null;
     } catch {
       // Ignore JSON parse errors - name will be null
@@ -846,7 +855,9 @@ export class WorkflowRepository {
    * Save workflow with automatic UUID and slug generation
    */
   async save(options: SaveWorkflowOptions): Promise<{ id: string; slug: string }> {
-    const { graph, userId, slug: providedSlug, visibility = "private", adminBypass } = options;
+    const { userId, slug: providedSlug, visibility = "private", adminBypass } = options;
+    // Every write stores the current schema shape.
+    const graph = migrateWorkflowGraph(options.graph).graph;
     const now = new Date();
 
     // Size validation: max 5MB for workflow JSON
@@ -1048,7 +1059,7 @@ export class WorkflowRepository {
       .orderBy(workflow.deletedAt);
 
     return rows.map((row) => {
-      const graph = JSON.parse(row.graph) as WorkflowGraph;
+      const graph = parseStoredGraph(row.graph);
       return {
         id: row.id,
         slug: row.slug,
@@ -1344,7 +1355,7 @@ export class WorkflowRepository {
 
     return rows.map((row) => ({
       id: row.id,
-      graph: JSON.parse(row.graph) as WorkflowGraph,
+      graph: parseStoredGraph(row.graph),
     }));
   }
 

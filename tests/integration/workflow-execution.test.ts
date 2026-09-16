@@ -96,10 +96,15 @@ describe("Workflow Execution Integration", () => {
         {
           type: "condition",
           id: "check-score",
-          condition: ConditionBuilder.greaterThan(ConditionBuilder.contextPath("score"), 70),
+          cases: [
+            {
+              when: ConditionBuilder.greaterThan(ConditionBuilder.contextPath("score"), 70),
+              output: "true",
+            },
+          ],
           connections: {
             true: "congratulate",
-            false: "encourage",
+            default: "encourage",
           },
         },
         {

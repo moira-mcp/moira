@@ -185,8 +185,10 @@ describe("workflow schema renderer", () => {
       {
         id: "decide",
         type: "condition",
-        condition: { operator: "eq", left: { contextPath: "mode" }, right: "yes" },
-        connections: { true: "work", false: "merge" },
+        cases: [
+          { when: { operator: "eq", left: { contextPath: "mode" }, right: "yes" }, output: "true" },
+        ],
+        connections: { true: "work", default: "merge" },
       },
       {
         id: "work",
@@ -210,8 +212,10 @@ describe("workflow schema renderer", () => {
       {
         id: "loop",
         type: "condition",
-        condition: { operator: "lt", left: { contextPath: "attempt" }, right: 2 },
-        connections: { true: "merge", false: "end" },
+        cases: [
+          { when: { operator: "lt", left: { contextPath: "attempt" }, right: 2 }, output: "true" },
+        ],
+        connections: { true: "merge", default: "end" },
       },
       { id: "end", type: "end" },
       {
@@ -234,7 +238,7 @@ describe("workflow schema renderer", () => {
     expect(first).toContain("TELEPORT_ENTRIES resume");
     expect(first).toContain("TELEPORT_ONLY resume");
     expect(first).toContain(
-      'CONDITION {"left":{"contextPath":"mode"},"operator":"eq","right":"yes"}',
+      'CASE true WHEN {"left":{"contextPath":"mode"},"operator":"eq","right":"yes"}',
     );
     expect(first).toContain(
       'OUTPUT local outcome required {"enum":["ok","retry"],"type":"string"}',
@@ -276,8 +280,10 @@ describe("workflow schema renderer", () => {
       {
         id: "orphan-a",
         type: "condition",
-        condition: { operator: "exists", value: { contextPath: "missing" } },
-        connections: { true: "orphan-b", false: "missing-target" },
+        cases: [
+          { when: { operator: "exists", value: { contextPath: "missing" } }, output: "true" },
+        ],
+        connections: { true: "orphan-b", default: "missing-target" },
       },
       {
         id: "orphan-b",
@@ -295,7 +301,7 @@ describe("workflow schema renderer", () => {
     expect(output).toContain("TELEPORT_ONLY resume, teleport-end");
     expect(output).toContain("DISCONNECTED orphan-root, orphan-leaf, orphan-a, orphan-b");
     expect(output).toContain("DANGLING E004");
-    expect(output).toContain("EDGE E004 [false] -> missing-target [DANGLING]");
+    expect(output).toContain("EDGE E004 [default] -> missing-target [DANGLING]");
     expect(output).toContain("CYCLE orphan-a");
     expect(output).toContain("COVERAGE nodes=8/8 edges=6/6");
   });
@@ -389,8 +395,8 @@ describe("workflow schema renderer", () => {
       {
         id: "route",
         type: "condition",
-        condition: { operator: "exists", value: { contextPath: "mode" } },
-        connections: { true: "child", false: "end" },
+        cases: [{ when: { operator: "exists", value: { contextPath: "mode" } }, output: "true" }],
+        connections: { true: "child", default: "end" },
       },
       {
         id: "child",
@@ -407,8 +413,8 @@ describe("workflow schema renderer", () => {
       {
         id: "route",
         type: "condition",
-        condition: { value: { contextPath: "mode" }, operator: "exists" },
-        connections: { false: "end", true: "child" },
+        cases: [{ when: { value: { contextPath: "mode" }, operator: "exists" }, output: "true" }],
+        connections: { default: "end", true: "child" },
       },
       {
         id: "child",

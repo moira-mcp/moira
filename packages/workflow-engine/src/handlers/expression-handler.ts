@@ -20,16 +20,10 @@ import { IDataRepository } from "../interfaces/data-repository.js";
 import { IGraphExecutionEngine } from "../interfaces/graph-execution-engine.js";
 import { AgentMessageQueue } from "../services/agent-message-queue.js";
 import { createLogger, InternalError, ValidationError } from "@mcp-moira/shared";
-import { SafeExpressionInterpreter } from "../expression/index.js";
-import { validateDeclaredRegistryValues } from "../utils/registry-value-validator.js";
+import { runNodeExpressions } from "../services/node-routing.js";
 
 export class ExpressionHandler implements INodeHandler {
   private logger = createLogger({ component: "ExpressionHandler" });
-  private interpreter: SafeExpressionInterpreter;
-
-  constructor() {
-    this.interpreter = new SafeExpressionInterpreter();
-  }
 
   getNodeType(): string {
     return "expression";
@@ -59,70 +53,27 @@ export class ExpressionHandler implements INodeHandler {
       expressionCount: expressionNode.expressions.length,
     });
 
-    // Collect all assignments from all expressions
-    const allAssignments: Record<string, unknown> = {};
-
-    // Execute each expression in order
-    // Use a merged context that includes previous assignments
-    const mergedContext = { ...context.variables };
-
-    for (let i = 0; i < expressionNode.expressions.length; i++) {
-      const expression = expressionNode.expressions[i];
-
-      this.logger.debug("Evaluating expression", {
-        nodeId: expressionNode.id,
-        expressionIndex: i,
-      });
-
-      const result = this.interpreter.evaluate(expression, mergedContext);
-
-      if (result.error) {
-        // Check if error connection exists - use it for graceful handling
-        if (expressionNode.connections.error) {
-          return NodeResultBuilder.continue(expressionNode.id, "error", {
-            expressionFailed: true,
-            failedIndex: i,
-          });
-        }
-
-        // No error connection - throw to boundary
-        throw new ValidationError(`Expression evaluation failed at index ${i}: ${result.error}`, {
-          nodeId: expressionNode.id,
-          expressionIndex: i,
+    // The same runner serves expressions carried by routing nodes; a failure here takes the
+    // node's error output when it has one and fails the node otherwise, publishing nothing.
+    const run = runNodeExpressions(
+      expressionNode.expressions,
+      context.variables,
+      variableRegistry,
+      `expression node '${expressionNode.id}'`,
+    );
+    if (run.failure) {
+      if (expressionNode.connections.error) {
+        return NodeResultBuilder.continue(expressionNode.id, "error", {
+          expressionFailed: true,
+          failedIndex: run.failure.index,
         });
       }
-
-      let normalizedAssignments: Record<string, unknown>;
-      try {
-        normalizedAssignments = validateDeclaredRegistryValues(
-          result.assignments,
-          variableRegistry,
-          `expression node '${expressionNode.id}' index ${i}`,
-          true,
-        );
-      } catch (error) {
-        if (expressionNode.connections.error) {
-          return NodeResultBuilder.continue(expressionNode.id, "error", {
-            expressionFailed: true,
-            failedIndex: i,
-          });
-        }
-        throw new ValidationError(
-          `Expression assignment failed at index ${i}: ${error instanceof Error ? error.message : String(error)}`,
-          { nodeId: expressionNode.id, expressionIndex: i },
-        );
-      }
-
-      // Merge only validated assignments into the temporary context. The engine
-      // commits the accumulated map after the complete node succeeds.
-      Object.assign(allAssignments, normalizedAssignments);
-      Object.assign(mergedContext, normalizedAssignments);
-      this.logger.debug("Expression evaluated", {
-        nodeId: expressionNode.id,
-        expressionIndex: i,
-        assignmentNames: Object.keys(result.assignments),
-      });
+      throw new ValidationError(
+        `Expression evaluation failed at index ${run.failure.index}: ${run.failure.message}`,
+        { nodeId: expressionNode.id, expressionIndex: run.failure.index },
+      );
     }
+    const allAssignments = run.assignments;
 
     const executionTime = timer.elapsed();
 

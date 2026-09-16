@@ -547,6 +547,13 @@ export class GraphExecutionEngine implements IGraphExecutionEngine {
         }
       }
 
+      // Expressions on a routing node (condition, agent-directive) assign declared globals by
+      // bare name, exactly like a standalone expression node; the handler reports them apart
+      // from the node's own data so the scope rules above do not reject them as undeclared.
+      if (nodeResult.assignments && Object.keys(nodeResult.assignments).length > 0) {
+        Object.assign(updatedContext.variables, nodeResult.assignments);
+      }
+
       // Handle node action
       const actionResult = await this.handleNodeAction(
         updatedContext,

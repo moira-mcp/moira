@@ -52,6 +52,15 @@ export type { ConvertResult } from "./templates/registry-converter.js";
 // Expression engine
 export * from "./expression/index.js";
 
+// Workflow definition migration
+export * from "./migration/index.js";
+export {
+  evaluateStructuredCondition,
+  runNodeExpressions,
+  selectOutput,
+  routeNode,
+} from "./services/node-routing.js";
+
 // Storage implementation
 export * from "./storage/index.js";
 

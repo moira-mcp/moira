@@ -4,7 +4,8 @@
     "metadata": {
       "name": "Subgraph Parent Test",
       "version": "1.0.0",
-      "description": "Parent workflow for testing subgraph execution"
+      "description": "Parent workflow for testing subgraph execution",
+      "schemaVersion": 1
     },
     "nodes": [
       {
@@ -73,7 +74,8 @@
     "metadata": {
       "name": "Subgraph Child Test",
       "version": "1.0.0",
-      "description": "Child workflow for testing subgraph execution"
+      "description": "Child workflow for testing subgraph execution",
+      "schemaVersion": 1
     },
     "nodes": [
       {
@@ -127,7 +129,8 @@
     "metadata": {
       "name": "Recursive Subgraph Test",
       "version": "1.0.0",
-      "description": "Self-referencing workflow for testing recursion limits"
+      "description": "Self-referencing workflow for testing recursion limits",
+      "schemaVersion": 1
     },
     "nodes": [
       {
@@ -148,16 +151,21 @@
       {
         "type": "condition",
         "id": "check",
-        "condition": {
-          "operator": "lt",
-          "left": {
-            "contextPath": "counter"
-          },
-          "right": 3
-        },
+        "cases": [
+          {
+            "when": {
+              "operator": "lt",
+              "left": {
+                "contextPath": "counter"
+              },
+              "right": 3
+            },
+            "output": "true"
+          }
+        ],
         "connections": {
           "true": "recurse",
-          "false": "end"
+          "default": "end"
         }
       },
       {
@@ -210,7 +218,8 @@
     "metadata": {
       "name": "Deep Nesting Test",
       "version": "1.0.0",
-      "description": "Multi-level nesting test workflow"
+      "description": "Multi-level nesting test workflow",
+      "schemaVersion": 1
     },
     "nodes": [
       {
@@ -263,7 +272,8 @@
     "metadata": {
       "name": "Middle Level Subgraph",
       "version": "1.0.0",
-      "description": "Middle level in deep nesting test"
+      "description": "Middle level in deep nesting test",
+      "schemaVersion": 1
     },
     "nodes": [
       {
@@ -276,16 +286,21 @@
       {
         "type": "condition",
         "id": "condition",
-        "condition": {
-          "operator": "lt",
-          "left": {
-            "contextPath": "level"
-          },
-          "right": 3
-        },
+        "cases": [
+          {
+            "when": {
+              "operator": "lt",
+              "left": {
+                "contextPath": "level"
+              },
+              "right": 3
+            },
+            "output": "true"
+          }
+        ],
         "connections": {
           "true": "subgraph",
-          "false": "end"
+          "default": "end"
         }
       },
       {
@@ -319,7 +334,8 @@
     "metadata": {
       "name": "Leaf Level Subgraph",
       "version": "1.0.0",
-      "description": "Deepest level in nesting test"
+      "description": "Deepest level in nesting test",
+      "schemaVersion": 1
     },
     "nodes": [
       {

@@ -238,7 +238,12 @@ describe("mergeOldSchemas", () => {
 describe("inferGateEnums", () => {
   function flowWithConditions(conditions: unknown[]) {
     return {
-      nodes: conditions.map((condition, i) => ({ id: `c${i}`, type: "condition", condition })),
+      nodes: conditions.map((condition, i) => ({
+        id: `c${i}`,
+        type: "condition",
+        cases: [{ when: condition, output: "true" }],
+        connections: { true: "end", default: "end" },
+      })),
     } as Record<string, unknown>;
   }
 

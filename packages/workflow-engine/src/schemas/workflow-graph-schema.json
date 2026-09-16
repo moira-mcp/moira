@@ -41,6 +41,11 @@
             "minLength": 1
           },
           "description": "Workflow tags"
+        },
+        "schemaVersion": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Workflow definition schema version stamped by the migration; absent means the pre-routing shape (0)."
         }
       }
     },
@@ -165,7 +170,9 @@
             "properties": {
               "allowedNodeIds": {
                 "type": "array",
-                "items": { "type": "string" },
+                "items": {
+                  "type": "string"
+                },
                 "uniqueItems": true
               }
             }
@@ -178,12 +185,22 @@
       "required": ["nodes"],
       "additionalProperties": false,
       "properties": {
-        "title": { "type": "string", "minLength": 1, "maxLength": 200 },
-        "goal": { "type": "string", "minLength": 1, "maxLength": 1000 },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "goal": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000
+        },
         "facts": {
           "type": "array",
           "maxItems": 8,
-          "items": { "$ref": "#/$defs/progressFact" }
+          "items": {
+            "$ref": "#/$defs/progressFact"
+          }
         },
         "nodes": {
           "type": "array",
@@ -195,14 +212,26 @@
             "required": ["id", "label"],
             "additionalProperties": false,
             "properties": {
-              "id": { "type": "string", "minLength": 1 },
-              "label": { "type": "string", "minLength": 1, "maxLength": 200 },
-              "content": { "$ref": "#/$defs/progressContent" },
+              "id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "label": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "content": {
+                "$ref": "#/$defs/progressContent"
+              },
               "connections": {
                 "type": "object",
                 "additionalProperties": false,
                 "properties": {
-                  "default": { "type": "string", "minLength": 1 }
+                  "default": {
+                    "type": "string",
+                    "minLength": 1
+                  }
                 }
               }
             }
@@ -218,20 +247,36 @@
       "description": "Human labels for this node's connections, keyed like `connections`. Required by the aggregated process view for every edge that crosses a progress-block boundary or returns to an earlier node; a `cycle` entry explains a return.",
       "additionalProperties": {
         "oneOf": [
-          { "type": "string", "minLength": 1, "maxLength": 120 },
+          {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
           {
             "type": "object",
             "required": ["label"],
             "additionalProperties": false,
             "properties": {
-              "label": { "type": "string", "minLength": 1, "maxLength": 120 },
+              "label": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 120
+              },
               "cycle": {
                 "type": "object",
                 "required": ["cause", "exit"],
                 "additionalProperties": false,
                 "properties": {
-                  "cause": { "type": "string", "minLength": 1, "maxLength": 300 },
-                  "exit": { "type": "string", "minLength": 1, "maxLength": 300 }
+                  "cause": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 300
+                  },
+                  "exit": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 300
+                  }
                 }
               }
             }
@@ -254,14 +299,30 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "summary": { "type": "string", "minLength": 1, "maxLength": 1000 },
+        "summary": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000
+        },
         "details": {
           "type": "array",
           "maxItems": 12,
-          "items": { "type": "string", "minLength": 1, "maxLength": 500 }
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          }
         },
-        "outcome": { "type": "string", "minLength": 1, "maxLength": 1000 },
-        "next": { "type": "string", "minLength": 1, "maxLength": 500 }
+        "outcome": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000
+        },
+        "next": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        }
       },
       "minProperties": 1
     },
@@ -270,8 +331,16 @@
       "required": ["label", "value"],
       "additionalProperties": false,
       "properties": {
-        "label": { "type": "string", "minLength": 1, "maxLength": 100 },
-        "value": { "type": "string", "minLength": 1, "maxLength": 500 },
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "value": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        },
         "tone": {
           "type": "string",
           "enum": ["neutral", "positive", "warning", "critical"]
@@ -279,7 +348,11 @@
       }
     },
     "progressActiveContent": {
-      "allOf": [{ "$ref": "#/$defs/progressContent" }],
+      "allOf": [
+        {
+          "$ref": "#/$defs/progressContent"
+        }
+      ],
       "description": "Template-enabled presentation merged into the node's block while this exact node is current"
     },
     "startNode": {
@@ -293,8 +366,12 @@
           "type": "string",
           "minLength": 1
         },
-        "progressNodeId": { "$ref": "#/$defs/progressNodeId" },
-        "connectionLabels": { "$ref": "#/$defs/connectionLabels" },
+        "progressNodeId": {
+          "$ref": "#/$defs/progressNodeId"
+        },
+        "connectionLabels": {
+          "$ref": "#/$defs/connectionLabels"
+        },
         "initialData": {
           "type": "object",
           "properties": {
@@ -342,7 +419,9 @@
           "type": "string",
           "minLength": 1
         },
-        "progressNodeId": { "$ref": "#/$defs/progressNodeId" },
+        "progressNodeId": {
+          "$ref": "#/$defs/progressNodeId"
+        },
         "finalOutput": {
           "type": "array",
           "items": {
@@ -363,10 +442,18 @@
           "type": "string",
           "minLength": 1
         },
-        "progressNodeId": { "$ref": "#/$defs/progressNodeId" },
-        "connectionLabels": { "$ref": "#/$defs/connectionLabels" },
-        "progressActiveLabel": { "$ref": "#/$defs/progressActiveLabel" },
-        "progressActiveContent": { "$ref": "#/$defs/progressActiveContent" },
+        "progressNodeId": {
+          "$ref": "#/$defs/progressNodeId"
+        },
+        "connectionLabels": {
+          "$ref": "#/$defs/connectionLabels"
+        },
+        "progressActiveLabel": {
+          "$ref": "#/$defs/progressActiveLabel"
+        },
+        "progressActiveContent": {
+          "$ref": "#/$defs/progressActiveContent"
+        },
         "directive": {
           "type": "string",
           "minLength": 1
@@ -377,14 +464,6 @@
         },
         "inputSchema": {
           "type": "object"
-        },
-        "maxRetries": {
-          "type": "number",
-          "minimum": 0,
-          "maximum": 10
-        },
-        "retryMessage": {
-          "type": "string"
         },
         "connections": {
           "type": "object",
@@ -401,18 +480,29 @@
             "timeout": {
               "type": "string",
               "minLength": 1
-            },
-            "maxRetriesExceeded": {
-              "type": "string",
-              "minLength": 1
             }
-          }
+          },
+          "additionalProperties": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "Named outputs: `success` (default), optional `error`/`timeout` control outputs, and any output named by `cases`."
+        },
+        "expressions": {
+          "$ref": "#/$defs/nodeExpressions"
+        },
+        "cases": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/routingCase"
+          },
+          "description": "Routing on the node's own validated answer; `success` is taken when no case holds."
         }
       }
     },
     "conditionNode": {
       "type": "object",
-      "required": ["type", "id", "condition", "connections"],
+      "required": ["type", "id", "cases", "connections"],
       "properties": {
         "type": {
           "const": "condition"
@@ -421,25 +511,43 @@
           "type": "string",
           "minLength": 1
         },
-        "progressNodeId": { "$ref": "#/$defs/progressNodeId" },
-        "connectionLabels": { "$ref": "#/$defs/connectionLabels" },
-        "condition": {
-          "type": "object"
+        "progressNodeId": {
+          "$ref": "#/$defs/progressNodeId"
+        },
+        "connectionLabels": {
+          "$ref": "#/$defs/connectionLabels"
+        },
+        "expressions": {
+          "$ref": "#/$defs/nodeExpressions"
+        },
+        "cases": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/routingCase"
+          },
+          "description": "Ordered cases; the first whose condition holds selects its output, otherwise `default`."
         },
         "connections": {
           "type": "object",
-          "required": ["true", "false"],
+          "required": ["default"],
           "properties": {
-            "true": {
+            "default": {
               "type": "string",
-              "minLength": 1
+              "minLength": 1,
+              "description": "Next node when no case holds"
             },
-            "false": {
+            "error": {
               "type": "string",
-              "minLength": 1
+              "minLength": 1,
+              "description": "Next node when an expression on this node fails"
             }
           },
-          "additionalProperties": false
+          "additionalProperties": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "Named outputs: `default`, optional `error`, and every output named by `cases`."
         }
       }
     },
@@ -454,10 +562,18 @@
           "type": "string",
           "minLength": 1
         },
-        "progressNodeId": { "$ref": "#/$defs/progressNodeId" },
-        "connectionLabels": { "$ref": "#/$defs/connectionLabels" },
-        "progressActiveLabel": { "$ref": "#/$defs/progressActiveLabel" },
-        "progressActiveContent": { "$ref": "#/$defs/progressActiveContent" },
+        "progressNodeId": {
+          "$ref": "#/$defs/progressNodeId"
+        },
+        "connectionLabels": {
+          "$ref": "#/$defs/connectionLabels"
+        },
+        "progressActiveLabel": {
+          "$ref": "#/$defs/progressActiveLabel"
+        },
+        "progressActiveContent": {
+          "$ref": "#/$defs/progressActiveContent"
+        },
         "graphId": {
           "type": "string",
           "minLength": 1,
@@ -508,27 +624,50 @@
       "required": ["type", "id", "message", "connections"],
       "additionalProperties": false,
       "properties": {
-        "type": { "const": "user-notification" },
-        "id": { "type": "string", "minLength": 1 },
-        "progressNodeId": { "$ref": "#/$defs/progressNodeId" },
-        "connectionLabels": { "$ref": "#/$defs/connectionLabels" },
-        "message": { "type": "string", "minLength": 1, "maxLength": 4096 },
-        "format": { "enum": ["plain", "markdown", "html"] },
-        "silent": { "type": "boolean" },
-        "attachProgressImage": { "type": "boolean" },
+        "type": {
+          "const": "user-notification"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "progressNodeId": {
+          "$ref": "#/$defs/progressNodeId"
+        },
+        "connectionLabels": {
+          "$ref": "#/$defs/connectionLabels"
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "format": {
+          "enum": ["plain", "markdown", "html"]
+        },
+        "silent": {
+          "type": "boolean"
+        },
+        "attachProgressImage": {
+          "type": "boolean"
+        },
         "attachment": {
           "type": "object",
           "additionalProperties": false,
           "required": ["kind", "data", "encoding", "filename", "mimeType"],
           "properties": {
-            "kind": { "enum": ["image", "document"] },
+            "kind": {
+              "enum": ["image", "document"]
+            },
             "data": {
               "type": "string",
               "minLength": 4,
               "maxLength": 27962028,
               "pattern": "^(?:[A-Za-z0-9+/]*={0,2}|\\{\\{[^{}]+\\}\\})$"
             },
-            "encoding": { "const": "base64" },
+            "encoding": {
+              "const": "base64"
+            },
             "filename": {
               "type": "string",
               "minLength": 1,
@@ -548,15 +687,27 @@
           "required": ["default"],
           "additionalProperties": false,
           "properties": {
-            "default": { "type": "string", "minLength": 1 },
-            "error": { "type": "string", "minLength": 1 }
+            "default": {
+              "type": "string",
+              "minLength": 1
+            },
+            "error": {
+              "type": "string",
+              "minLength": 1
+            }
           }
         },
-        "metadata": { "type": "object" }
+        "metadata": {
+          "type": "object"
+        }
       },
       "not": {
         "required": ["attachProgressImage", "attachment"],
-        "properties": { "attachProgressImage": { "const": true } }
+        "properties": {
+          "attachProgressImage": {
+            "const": true
+          }
+        }
       }
     },
     "telegramNotificationNode": {
@@ -571,8 +722,12 @@
           "type": "string",
           "minLength": 1
         },
-        "progressNodeId": { "$ref": "#/$defs/progressNodeId" },
-        "connectionLabels": { "$ref": "#/$defs/connectionLabels" },
+        "progressNodeId": {
+          "$ref": "#/$defs/progressNodeId"
+        },
+        "connectionLabels": {
+          "$ref": "#/$defs/connectionLabels"
+        },
         "message": {
           "type": "string",
           "minLength": 1,
@@ -660,11 +815,19 @@
       "allOf": [
         {
           "if": {
-            "properties": { "attachProgressImage": { "const": true } },
+            "properties": {
+              "attachProgressImage": {
+                "const": true
+              }
+            },
             "required": ["attachProgressImage"]
           },
           "then": {
-            "properties": { "message": { "maxLength": 1024 } }
+            "properties": {
+              "message": {
+                "maxLength": 1024
+              }
+            }
           }
         }
       ]
@@ -680,8 +843,12 @@
           "type": "string",
           "minLength": 1
         },
-        "progressNodeId": { "$ref": "#/$defs/progressNodeId" },
-        "connectionLabels": { "$ref": "#/$defs/connectionLabels" },
+        "progressNodeId": {
+          "$ref": "#/$defs/progressNodeId"
+        },
+        "connectionLabels": {
+          "$ref": "#/$defs/connectionLabels"
+        },
         "expressions": {
           "type": "array",
           "minItems": 1,
@@ -724,8 +891,12 @@
           "type": "string",
           "minLength": 1
         },
-        "progressNodeId": { "$ref": "#/$defs/progressNodeId" },
-        "connectionLabels": { "$ref": "#/$defs/connectionLabels" },
+        "progressNodeId": {
+          "$ref": "#/$defs/progressNodeId"
+        },
+        "connectionLabels": {
+          "$ref": "#/$defs/connectionLabels"
+        },
         "outputVariable": {
           "type": "string",
           "minLength": 1,
@@ -786,8 +957,12 @@
           "type": "string",
           "minLength": 1
         },
-        "progressNodeId": { "$ref": "#/$defs/progressNodeId" },
-        "connectionLabels": { "$ref": "#/$defs/connectionLabels" },
+        "progressNodeId": {
+          "$ref": "#/$defs/progressNodeId"
+        },
+        "connectionLabels": {
+          "$ref": "#/$defs/connectionLabels"
+        },
         "key": {
           "type": "string",
           "description": "Note key (supports template expressions). Required in single mode."
@@ -841,8 +1016,12 @@
           "type": "string",
           "minLength": 1
         },
-        "progressNodeId": { "$ref": "#/$defs/progressNodeId" },
-        "connectionLabels": { "$ref": "#/$defs/connectionLabels" },
+        "progressNodeId": {
+          "$ref": "#/$defs/progressNodeId"
+        },
+        "connectionLabels": {
+          "$ref": "#/$defs/connectionLabels"
+        },
         "search": {
           "type": "object",
           "properties": {
@@ -911,10 +1090,18 @@
           "type": "string",
           "minLength": 1
         },
-        "progressNodeId": { "$ref": "#/$defs/progressNodeId" },
-        "connectionLabels": { "$ref": "#/$defs/connectionLabels" },
-        "progressActiveLabel": { "$ref": "#/$defs/progressActiveLabel" },
-        "progressActiveContent": { "$ref": "#/$defs/progressActiveContent" },
+        "progressNodeId": {
+          "$ref": "#/$defs/progressNodeId"
+        },
+        "connectionLabels": {
+          "$ref": "#/$defs/connectionLabels"
+        },
+        "progressActiveLabel": {
+          "$ref": "#/$defs/progressActiveLabel"
+        },
+        "progressActiveContent": {
+          "$ref": "#/$defs/progressActiveContent"
+        },
         "directive": {
           "type": "string",
           "minLength": 1
@@ -964,10 +1151,18 @@
           "type": "string",
           "minLength": 1
         },
-        "progressNodeId": { "$ref": "#/$defs/progressNodeId" },
-        "connectionLabels": { "$ref": "#/$defs/connectionLabels" },
-        "progressActiveLabel": { "$ref": "#/$defs/progressActiveLabel" },
-        "progressActiveContent": { "$ref": "#/$defs/progressActiveContent" },
+        "progressNodeId": {
+          "$ref": "#/$defs/progressNodeId"
+        },
+        "connectionLabels": {
+          "$ref": "#/$defs/connectionLabels"
+        },
+        "progressActiveLabel": {
+          "$ref": "#/$defs/progressActiveLabel"
+        },
+        "progressActiveContent": {
+          "$ref": "#/$defs/progressActiveContent"
+        },
         "reason": {
           "type": "string",
           "minLength": 1,
@@ -995,13 +1190,29 @@
       "type": "object",
       "required": ["type", "id", "basePath", "files", "connections"],
       "properties": {
-        "type": { "const": "materialize" },
-        "id": { "type": "string", "minLength": 1 },
-        "progressNodeId": { "$ref": "#/$defs/progressNodeId" },
-        "connectionLabels": { "$ref": "#/$defs/connectionLabels" },
-        "progressActiveLabel": { "$ref": "#/$defs/progressActiveLabel" },
-        "progressActiveContent": { "$ref": "#/$defs/progressActiveContent" },
-        "basePath": { "type": "string", "minLength": 1 },
+        "type": {
+          "const": "materialize"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "progressNodeId": {
+          "$ref": "#/$defs/progressNodeId"
+        },
+        "connectionLabels": {
+          "$ref": "#/$defs/connectionLabels"
+        },
+        "progressActiveLabel": {
+          "$ref": "#/$defs/progressActiveLabel"
+        },
+        "progressActiveContent": {
+          "$ref": "#/$defs/progressActiveContent"
+        },
+        "basePath": {
+          "type": "string",
+          "minLength": 1
+        },
         "files": {
           "type": "array",
           "minItems": 1,
@@ -1010,18 +1221,30 @@
             "type": "object",
             "required": ["path"],
             "properties": {
-              "path": { "type": "string", "minLength": 1 },
-              "from": { "type": "string", "minLength": 1 },
-              "content": { "const": "" }
+              "path": {
+                "type": "string",
+                "minLength": 1
+              },
+              "from": {
+                "type": "string",
+                "minLength": 1
+              },
+              "content": {
+                "const": ""
+              }
             },
             "oneOf": [
               {
                 "required": ["from"],
-                "not": { "required": ["content"] }
+                "not": {
+                  "required": ["content"]
+                }
               },
               {
                 "required": ["content"],
-                "not": { "required": ["from"] }
+                "not": {
+                  "required": ["from"]
+                }
               }
             ],
             "additionalProperties": false
@@ -1031,12 +1254,20 @@
           "type": "object",
           "required": ["success"],
           "properties": {
-            "success": { "type": "string", "minLength": 1 },
-            "error": { "type": "string", "minLength": 1 }
+            "success": {
+              "type": "string",
+              "minLength": 1
+            },
+            "error": {
+              "type": "string",
+              "minLength": 1
+            }
           },
           "additionalProperties": false
         },
-        "metadata": { "type": "object" }
+        "metadata": {
+          "type": "object"
+        }
       },
       "additionalProperties": false
     },
@@ -1045,27 +1276,82 @@
       "description": "Custom node contributed by an installed extension. The namespaced type keeps this branch disjoint from every built-in branch, whose types never contain a dot, so built-in node bodies stay fully validated.",
       "required": ["type", "id", "connections"],
       "properties": {
-        "type": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*\\.[a-z0-9][a-z0-9-]*$" },
-        "id": { "type": "string", "minLength": 1 },
-        "progressNodeId": { "$ref": "#/$defs/progressNodeId" },
-        "connectionLabels": { "$ref": "#/$defs/connectionLabels" },
-        "progressActiveLabel": { "$ref": "#/$defs/progressActiveLabel" },
-        "progressActiveContent": { "$ref": "#/$defs/progressActiveContent" },
-        "config": { "type": "object" },
-        "input": { "type": "object" },
-        "timeout": { "type": "number", "minimum": 1000, "maximum": 600000 },
+        "type": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]*\\.[a-z0-9][a-z0-9-]*$"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "progressNodeId": {
+          "$ref": "#/$defs/progressNodeId"
+        },
+        "connectionLabels": {
+          "$ref": "#/$defs/connectionLabels"
+        },
+        "progressActiveLabel": {
+          "$ref": "#/$defs/progressActiveLabel"
+        },
+        "progressActiveContent": {
+          "$ref": "#/$defs/progressActiveContent"
+        },
+        "config": {
+          "type": "object"
+        },
+        "input": {
+          "type": "object"
+        },
+        "timeout": {
+          "type": "number",
+          "minimum": 1000,
+          "maximum": 600000
+        },
         "connections": {
           "type": "object",
           "required": ["success"],
           "properties": {
-            "success": { "type": "string", "minLength": 1 },
-            "error": { "type": "string", "minLength": 1 }
+            "success": {
+              "type": "string",
+              "minLength": 1
+            },
+            "error": {
+              "type": "string",
+              "minLength": 1
+            }
           },
           "additionalProperties": false
         },
-        "metadata": { "type": "object" }
+        "metadata": {
+          "type": "object"
+        }
       },
       "additionalProperties": false
+    },
+    "routingCase": {
+      "type": "object",
+      "required": ["when", "output"],
+      "additionalProperties": false,
+      "properties": {
+        "when": {
+          "type": "object",
+          "description": "Structured condition; the first case whose condition holds selects its output."
+        },
+        "output": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Connection key taken when this case holds."
+        }
+      }
+    },
+    "nodeExpressions": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "description": "Expressions evaluated on this node before routing (e.g. 'counter = counter + 1'); a failure routes to connections.error when present."
     }
   }
 }

@@ -56,6 +56,8 @@ export interface WorkflowGraph {
     description: string;
     author?: string;
     tags?: string[];
+    /** Definition schema version stamped by the migration; absent means the pre-routing shape (0). */
+    schemaVersion?: number;
   };
   nodes: GraphNode[];
   // No startNodeId/endNodeIds - engine finds by node types automatically

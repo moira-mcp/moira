@@ -48,11 +48,11 @@ describe("user-onboarding", () => {
     expect(validation.issues.filter((issue) => issue.severity === "error")).toEqual([]);
     expect(node(workflow, "selection-valid").connections).toEqual({
       true: "route-intent",
-      false: "welcome",
+      default: "welcome",
     });
     expect(node(workflow, "check-start-now").connections).toEqual({
       true: "start-chosen-workflow",
-      false: "end",
+      default: "end",
     });
   });
 

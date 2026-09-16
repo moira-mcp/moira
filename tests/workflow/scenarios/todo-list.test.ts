@@ -384,7 +384,7 @@ describe("todo-list minimal sequential checklist", () => {
 
     const primaryState = JSON.stringify(
       workflow.nodes.map((candidate) => ({
-        condition: candidate.type === "condition" ? candidate.condition : undefined,
+        cases: candidate.type === "condition" ? candidate.cases : undefined,
         expressions: candidate.type === "expression" ? candidate.expressions : undefined,
         connections: candidate.connections,
       })),
