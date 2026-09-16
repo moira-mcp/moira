@@ -83,7 +83,9 @@ export function blockTimings(
 export function variablesObject(
   states: readonly ExecutionVariableState[],
 ): Record<string, unknown> {
-  const object: Record<string, unknown> = {};
+  // Null-prototype containers: a variable or node named like an Object.prototype member can
+  // neither reach the prototype nor collide with an inherited property.
+  const object: Record<string, unknown> = Object.create(null);
   for (const state of states) {
     if (state.kind === "variable") {
       object[state.name] = state.current;
@@ -92,8 +94,13 @@ export function variablesObject(
     const dot = state.name.indexOf(".");
     const node = state.name.slice(0, dot);
     const field = state.name.slice(dot + 1);
-    const scope = (object[node] ??= {}) as Record<string, unknown>;
-    if (typeof scope === "object" && scope !== null) scope[field] = state.current;
+    const existing = object[node];
+    const scope =
+      typeof existing === "object" && existing !== null
+        ? (existing as Record<string, unknown>)
+        : (Object.create(null) as Record<string, unknown>);
+    object[node] = scope;
+    scope[field] = state.current;
   }
   return object;
 }

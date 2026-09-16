@@ -11,7 +11,9 @@ import {
   nearestBoundList,
   progressFooterLines,
   projectExecutionRun,
+  variablesObject,
   waitingActorLine,
+  type ExecutionVariableState,
   type ExecutionVisit,
   type WorkflowExecution,
   type WorkflowGraph,
@@ -517,5 +519,37 @@ describe("waiting actor line", () => {
     expect(progressFooterLines(projectExecutionRun(unbound, onChecklist))).toEqual([
       "⏳ agent on the step: Work",
     ]);
+  });
+});
+
+describe("variables object", () => {
+  function state(
+    name: string,
+    kind: "variable" | "output",
+    current: unknown,
+  ): ExecutionVariableState {
+    return { name, kind, current, history: [], adjusted: false };
+  }
+
+  test("nests node outputs under the node id and keeps globals flat", () => {
+    const object = variablesObject([
+      state("tasks", "variable", ["a"]),
+      state("plan.path", "output", "plans/1"),
+      state("plan.count", "output", 2),
+    ]);
+    expect(object).toEqual({ tasks: ["a"], plan: { path: "plans/1", count: 2 } });
+  });
+
+  test("a node or variable named like a prototype member cannot reach Object.prototype", () => {
+    const before = Object.keys(Object.prototype).length;
+    const object = variablesObject([
+      state("__proto__.polluted", "output", true),
+      state("constructor.polluted", "output", true),
+      state("__proto__", "variable", "flat"),
+    ]);
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+    expect(Object.keys(Object.prototype).length).toBe(before);
+    expect(object.constructor).toEqual({ polluted: true });
+    expect(Object.getPrototypeOf(object)).toBeNull();
   });
 });
