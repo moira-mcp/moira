@@ -179,3 +179,52 @@
   background-color: oklch(0.65 0.22 264 / 0.4);
   color: oklch(0.985 0 0);
 }
+
+/*
+ * Diagram cards: the card under the run's cursor breathes with its accent colour, a waiting card
+ * breathes slower in the warning tone, the marker of the list item in progress pulses.
+ */
+@keyframes card-breathe {
+  0%,
+  100% {
+    box-shadow:
+      0 0 0 0 color-mix(in oklch, var(--card-accent) 45%, transparent),
+      0 10px 30px -12px color-mix(in oklch, var(--card-accent) 60%, transparent);
+  }
+  50% {
+    box-shadow:
+      0 0 0 6px color-mix(in oklch, var(--card-accent) 0%, transparent),
+      0 14px 36px -10px color-mix(in oklch, var(--card-accent) 75%, transparent);
+  }
+}
+@keyframes card-arrive {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in oklch, var(--card-accent) 70%, transparent);
+  }
+  100% {
+    box-shadow: 0 0 0 18px color-mix(in oklch, var(--card-accent) 0%, transparent);
+  }
+}
+@keyframes marker-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.45;
+    transform: scale(0.85);
+  }
+}
+@utility card-breathe {
+  animation: card-breathe 2.6s ease-in-out infinite;
+}
+@utility card-breathe-slow {
+  animation: card-breathe 4s ease-in-out infinite;
+}
+@utility card-arrive {
+  animation: card-arrive 0.9s ease-out 2;
+}
+@utility marker-pulse {
+  animation: marker-pulse 1.2s ease-in-out infinite;
+}

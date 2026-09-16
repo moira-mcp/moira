@@ -31,7 +31,7 @@ import {
   type ReactFlowInstance,
 } from "@xyflow/react";
 import { CornerDownRight, Clock, ListChecks, Loader2, Repeat, RotateCcw } from "lucide-react";
-import { PortedCard, type FactChip, type PortInfo } from "../diagram/PortedCard";
+import { PortedCard, type CardTone, type FactChip, type PortInfo } from "../diagram/PortedCard";
 import { roundedPath } from "../workflow/graphNodes";
 import { cn } from "@/lib/utils";
 import { useTheme } from "@/hooks/useTheme";
@@ -140,6 +140,15 @@ function blockFacts(block: RunBlock, t: TFunction): FactChip[] {
   return facts;
 }
 
+const BLOCK_TONE: Record<RunBlock["status"], CardTone> = {
+  pending: "neutral",
+  active: "active",
+  waiting: "waiting",
+  done: "done",
+  repeated: "done",
+  skipped: "neutral",
+};
+
 function BlockNodeView({ data }: NodeProps<BlockNode>): React.JSX.Element {
   const { t } = useTranslation();
   const focus = useTransitionFocus();
@@ -152,7 +161,9 @@ function BlockNodeView({ data }: NodeProps<BlockNode>): React.JSX.Element {
     <PortedCard
       badge={<StatusChip status={block.status} waitingFor={waitingFor} />}
       titleExtra={block.iterations > 1 ? <PassCount iterations={block.iterations} /> : undefined}
-      title={`${block.index + 1}. ${block.name}`}
+      title={block.name}
+      index={block.index + 1}
+      tone={BLOCK_TONE[block.status]}
       description={block.description}
       descriptionTip={block.description}
       facts={blockFacts(block, t)}
@@ -187,7 +198,7 @@ function BlockNodeView({ data }: NodeProps<BlockNode>): React.JSX.Element {
                 item.current && "font-medium text-primary",
               )}
             >
-              <span className="w-3 shrink-0 text-center">
+              <span className={cn("w-3 shrink-0 text-center", item.current && "marker-pulse")}>
                 {item.done ? "✓" : item.current ? "▶" : "·"}
               </span>
               <span className="truncate">{item.title}</span>

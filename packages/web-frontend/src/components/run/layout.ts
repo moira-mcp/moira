@@ -148,7 +148,7 @@ export function estimatePortedBlockHeight(
   description: string,
 ): number {
   const rows = Math.max(inCount, outCount, 1);
-  const header = 76 + lineCount(description, 44, 2) * LINE_HEIGHT + 30;
+  const header = 96 + lineCount(description, 44, 2) * LINE_HEIGHT + 30;
   return Math.max(header, rows * 34 + 24) + (selfCount > 0 ? 36 : 0) + 8;
 }
 

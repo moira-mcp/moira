@@ -282,7 +282,7 @@ export function estimateStepHeight(step: {
 }): number {
   const rows = Math.max(step.inCount ?? 0, step.outCount ?? 0, 1);
   const descriptionLines = step.summary ? Math.min(2, Math.ceil(step.summary.length / 40)) : 0;
-  const header = 64 + descriptionLines * 20 + 30;
+  const header = 84 + descriptionLines * 20 + 30;
   const ports = rows * 34 + 24;
   return Math.max(header, ports) + ((step.selfCount ?? 0) > 0 ? 36 : 0) + 8;
 }

@@ -40,9 +40,16 @@ export interface FactChip {
   tip: React.ReactNode;
 }
 
+/** The card's colour: what the run is doing with it, or nothing. */
+export type CardTone = "neutral" | "active" | "waiting" | "done" | "error";
+
 export interface PortedCardProps {
   /** The node type, drawn as the type badge; a block passes `badge` instead. */
   type?: string;
+  /** Tints the accent bar, the ground and the glow; derived from the run status on the map. */
+  tone?: CardTone;
+  /** The ordinal drawn as a badge before the title (a block's number on the map). */
+  index?: number;
   /** Replaces the type badge (a block's status chip). */
   badge?: React.ReactNode;
   /** Shown at the right of the title row (a block's pass count). */
@@ -84,8 +91,44 @@ export interface PortedCardProps {
 /** Height of one port row plus its gap; the card's minimum height follows the longer column. */
 export const PORT_ROW = 34;
 /** Room the header (badge, title, description, facts) needs before the port columns matter. */
-export const PORTED_HEADER = 120;
+export const PORTED_HEADER = 140;
 export const SELF_LOOP_BAND = 36;
+
+/**
+ * Tone styles: the accent bar and ground gradient of the frame, the rule under the title, the
+ * index badge. `--card-accent` feeds the glow keyframes.
+ */
+const TONE_STYLE: Record<CardTone, { frame: string; rule: string; badge: string }> = {
+  neutral: {
+    frame: "before:bg-border [--card-accent:var(--primary)]",
+    rule: "border-border",
+    badge: "bg-muted text-muted-foreground",
+  },
+  active: {
+    frame:
+      "border-primary before:bg-primary bg-gradient-to-br from-primary/12 via-card to-card [--card-accent:var(--primary)]",
+    rule: "border-primary/60",
+    badge: "bg-primary text-primary-foreground",
+  },
+  waiting: {
+    frame:
+      "border-warning before:bg-warning bg-gradient-to-br from-warning/15 via-card to-card [--card-accent:var(--warning)]",
+    rule: "border-warning/70",
+    badge: "bg-warning text-warning-foreground",
+  },
+  done: {
+    frame:
+      "border-success/50 before:bg-success bg-gradient-to-br from-success/10 via-card to-card [--card-accent:var(--success)]",
+    rule: "border-success/50",
+    badge: "bg-success text-success-foreground",
+  },
+  error: {
+    frame:
+      "border-destructive/60 before:bg-destructive bg-gradient-to-br from-destructive/10 via-card to-card [--card-accent:var(--destructive)]",
+    rule: "border-destructive/60",
+    badge: "bg-destructive text-white",
+  },
+};
 
 const PORT_TONE: Record<PortInfo["kind"], string> = {
   forward: "border-border text-foreground",
@@ -165,6 +208,8 @@ export function PortedCard({
   selfLoops,
   horizontal,
   width,
+  tone = "neutral",
+  index,
   current = false,
   selected = false,
   error = false,
@@ -234,17 +279,18 @@ export function PortedCard({
       role={onClick ? "button" : undefined}
       tabIndex={onClick ? 0 : undefined}
       className={cn(
-        "relative flex flex-col rounded-xl border bg-card text-sm shadow-sm transition-shadow",
-        onClick && "cursor-pointer",
-        current &&
-          "border-primary ring-2 ring-primary/40 animate-[pulse_2.4s_ease-in-out_infinite]",
-        visited && !current && "border-emerald-500/40 bg-emerald-500/5",
+        "group/card relative flex flex-col rounded-xl border bg-card text-sm shadow-sm transition-[box-shadow,transform,border-color] duration-200 before:pointer-events-none before:absolute before:inset-y-0 before:left-0 before:w-1 before:rounded-l-xl before:content-['']",
+        onClick && "cursor-pointer hover:-translate-y-0.5 hover:shadow-lg",
+        TONE_STYLE[tone].frame,
+        current && "card-breathe",
+        tone === "waiting" && !current && "card-breathe-slow",
         (near || selected) && "ring-2 ring-primary/60",
-        arrived && "animate-pulse ring-4 ring-primary/80",
+        arrived && "card-arrive",
         error && "ring-2 ring-destructive",
       )}
       data-visited={visited ? "true" : undefined}
       data-current={current ? "true" : undefined}
+      data-tone={tone}
       {...dataAttributes}
     >
       <div
@@ -274,15 +320,30 @@ export function PortedCard({
             )}
           </div>
           <div
-            className="mt-1.5 truncate text-[14px] font-semibold leading-tight"
+            className={cn("mt-1.5 flex items-start gap-2 border-b-2 pb-1.5", TONE_STYLE[tone].rule)}
             data-step-title=""
           >
-            <TemplateText text={title} />
-            {subtitle && (
-              <span className="ml-1.5 font-mono text-[11px] font-normal text-muted-foreground">
-                {subtitle}
+            {index !== undefined && (
+              <span
+                className={cn(
+                  "mt-0.5 inline-flex h-5 min-w-5 shrink-0 items-center justify-center rounded-md px-1 text-[11px] font-bold tabular-nums",
+                  TONE_STYLE[tone].badge,
+                )}
+                data-step-index=""
+              >
+                {index}
               </span>
             )}
+            <span className="min-w-0">
+              <span className="line-clamp-2 text-[16px] font-bold leading-[1.2] tracking-tight">
+                <TemplateText text={title} />
+              </span>
+              {subtitle && (
+                <span className="block truncate font-mono text-[11px] font-normal text-muted-foreground">
+                  {subtitle}
+                </span>
+              )}
+            </span>
           </div>
           {description &&
             (descriptionTip ? (

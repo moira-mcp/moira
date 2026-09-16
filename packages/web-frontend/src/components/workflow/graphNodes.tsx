@@ -222,6 +222,7 @@ export function StepNodeView({ data, selected }: NodeProps<StepNode>): React.JSX
       selfLoops={selfLoops}
       horizontal={horizontal}
       width={GRAPH_CARD_WIDTH}
+      tone={error ? "error" : current ? "active" : visited ? "done" : "neutral"}
       current={current}
       selected={selected}
       error={error}
