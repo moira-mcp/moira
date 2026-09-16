@@ -138,10 +138,26 @@ describe("Workflow Management Flow prefers routing on the deciding node", () => 
     for (const id of [
       "design-workflow-structure",
       "create-edit-plan",
+      "create-workflow-json",
+      "apply-workflow-changes",
       "review-workflow-design",
       "review-workflow-quality",
     ]) {
-      expect(directive(id)).toMatch(/bind(s|ing)? (it|the list)|without binding it/u);
+      expect(directive(id)).toMatch(
+        /bind(s|ing)? (it|the list|each listed stage's list)|without binding it/u,
+      );
     }
+  });
+
+  test("the review-repair reference routes a repair's reach on the node that gives the answer", () => {
+    const reviewRepair = wmf.variableRegistry!.workflow_reference_review_repair.default as string;
+    expect(reviewRepair).toContain("The same node carries the case");
+    expect(reviewRepair).not.toContain("A condition placed after that node");
+  });
+
+  test("the quality gate names the references that define scaffolding instead of restating them", () => {
+    expect(directive("review-workflow-quality")).toContain(
+      "as `reference/design.md` and `reference/antipatterns.md` define it",
+    );
   });
 });
