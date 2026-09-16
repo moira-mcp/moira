@@ -90,39 +90,46 @@ export interface PortedCardProps {
 
 /** Height of one port row plus its gap; the card's minimum height follows the longer column. */
 export const PORT_ROW = 34;
-/** Room the header (badge, title, description, facts) needs before the port columns matter. */
-export const PORTED_HEADER = 140;
+/** The full-width title band above the port columns and the centre. */
+export const PORTED_TITLE_BAND = 48;
+/** Room the centre (description, facts) needs before the port columns matter. */
+export const PORTED_HEADER = 96;
 export const SELF_LOOP_BAND = 36;
 
 /**
  * Tone styles: the accent bar and ground gradient of the frame, the rule under the title, the
  * index badge. `--card-accent` feeds the glow keyframes.
  */
-const TONE_STYLE: Record<CardTone, { frame: string; rule: string; badge: string }> = {
+const TONE_STYLE: Record<CardTone, { frame: string; rule: string; badge: string; band: string }> = {
   neutral: {
+    band: "bg-muted/40",
     frame: "before:bg-border [--card-accent:var(--primary)]",
     rule: "border-border",
     badge: "bg-muted text-muted-foreground",
   },
   active: {
+    band: "bg-primary/15",
     frame:
       "border-primary before:bg-primary bg-gradient-to-br from-primary/12 via-card to-card [--card-accent:var(--primary)]",
     rule: "border-primary/60",
     badge: "bg-primary text-primary-foreground",
   },
   waiting: {
+    band: "bg-warning/20",
     frame:
       "border-warning before:bg-warning bg-gradient-to-br from-warning/15 via-card to-card [--card-accent:var(--warning)]",
     rule: "border-warning/70",
     badge: "bg-warning text-warning-foreground",
   },
   done: {
+    band: "bg-success/12",
     frame:
       "border-success/50 before:bg-success bg-gradient-to-br from-success/10 via-card to-card [--card-accent:var(--success)]",
     rule: "border-success/50",
     badge: "bg-success text-success-foreground",
   },
   error: {
+    band: "bg-destructive/15",
     frame:
       "border-destructive/60 before:bg-destructive bg-gradient-to-br from-destructive/10 via-card to-card [--card-accent:var(--destructive)]",
     rule: "border-destructive/60",
@@ -224,7 +231,9 @@ export function PortedCard({
 }: PortedCardProps): React.JSX.Element {
   const rows = Math.max(inputs.length, outputs.length, 1);
   const minHeight = horizontal
-    ? Math.max(PORTED_HEADER, rows * PORT_ROW + 24) + (selfLoops.length ? SELF_LOOP_BAND : 0)
+    ? PORTED_TITLE_BAND +
+      Math.max(PORTED_HEADER, rows * PORT_ROW + 24) +
+      (selfLoops.length ? SELF_LOOP_BAND : 0)
     : undefined;
   const litOf = (id: string) => litIds?.has(id) ?? false;
   const column = (ports: PortInfo[], side: "in" | "out") => (
@@ -294,6 +303,43 @@ export function PortedCard({
       {...dataAttributes}
     >
       <div
+        className={cn(
+          "flex items-center gap-2 rounded-t-xl border-b-2 px-3 py-2",
+          TONE_STYLE[tone].rule,
+          TONE_STYLE[tone].band,
+        )}
+        data-step-title=""
+      >
+        {index !== undefined && (
+          <span
+            className={cn(
+              "inline-flex h-6 min-w-6 shrink-0 items-center justify-center rounded-md px-1.5 text-[12px] font-bold tabular-nums",
+              TONE_STYLE[tone].badge,
+            )}
+            data-step-index=""
+          >
+            {index}
+          </span>
+        )}
+        <span className="min-w-0 flex-1">
+          <span className="line-clamp-2 text-[16px] font-bold leading-[1.2] tracking-tight">
+            <TemplateText text={title} />
+          </span>
+          {subtitle && (
+            <span className="block truncate font-mono text-[11px] font-normal text-muted-foreground">
+              {subtitle}
+            </span>
+          )}
+        </span>
+        <span className="flex shrink-0 items-center gap-1.5">
+          {titleExtra}
+          {badge ?? (type ? <NodeTypeTag type={type} /> : null)}
+          {current && (
+            <span className="size-2 rounded-full bg-primary marker-pulse" aria-hidden="true" />
+          )}
+        </span>
+      </div>
+      <div
         className="grid min-h-0 flex-1"
         style={{
           // A column of ports exists only where the card has ports on that side.
@@ -310,46 +356,11 @@ export function PortedCard({
       >
         {inputs.length > 0 && column(inputs, "in")}
         <div className="min-w-0 px-3 py-2.5">
-          <div className="flex items-center gap-2">
-            {badge ?? (type ? <NodeTypeTag type={type} /> : null)}
-            {titleExtra && <span className="ml-auto">{titleExtra}</span>}
-            {current && (
-              <span className="rounded-full bg-primary px-2 py-0.5 text-[10px] font-semibold leading-4 text-primary-foreground">
-                •
-              </span>
-            )}
-          </div>
-          <div
-            className={cn("mt-1.5 flex items-start gap-2 border-b-2 pb-1.5", TONE_STYLE[tone].rule)}
-            data-step-title=""
-          >
-            {index !== undefined && (
-              <span
-                className={cn(
-                  "mt-0.5 inline-flex h-5 min-w-5 shrink-0 items-center justify-center rounded-md px-1 text-[11px] font-bold tabular-nums",
-                  TONE_STYLE[tone].badge,
-                )}
-                data-step-index=""
-              >
-                {index}
-              </span>
-            )}
-            <span className="min-w-0">
-              <span className="line-clamp-2 text-[16px] font-bold leading-[1.2] tracking-tight">
-                <TemplateText text={title} />
-              </span>
-              {subtitle && (
-                <span className="block truncate font-mono text-[11px] font-normal text-muted-foreground">
-                  {subtitle}
-                </span>
-              )}
-            </span>
-          </div>
           {description &&
             (descriptionTip ? (
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <p className="mt-1 line-clamp-2 cursor-help text-xs leading-5 text-muted-foreground">
+                  <p className="line-clamp-2 cursor-help text-xs leading-5 text-muted-foreground">
                     <TemplateText text={description} />
                   </p>
                 </TooltipTrigger>
@@ -358,7 +369,7 @@ export function PortedCard({
                 </TooltipContent>
               </Tooltip>
             ) : (
-              <p className="mt-1 line-clamp-2 text-xs leading-5 text-muted-foreground">
+              <p className="line-clamp-2 text-xs leading-5 text-muted-foreground">
                 <TemplateText text={description} />
               </p>
             ))}

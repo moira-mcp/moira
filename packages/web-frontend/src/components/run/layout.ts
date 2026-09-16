@@ -148,8 +148,8 @@ export function estimatePortedBlockHeight(
   description: string,
 ): number {
   const rows = Math.max(inCount, outCount, 1);
-  const header = 96 + lineCount(description, 44, 2) * LINE_HEIGHT + 30;
-  return Math.max(header, rows * 34 + 24) + (selfCount > 0 ? 36 : 0) + 8;
+  const centre = 24 + lineCount(description, 44, 2) * LINE_HEIGHT + 30;
+  return 48 + Math.max(centre, rows * 34 + 24) + (selfCount > 0 ? 36 : 0) + 8;
 }
 
 interface Placed {
