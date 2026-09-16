@@ -58,6 +58,30 @@ moira-workflow ./workflow.json set-tags research,verification
 moira-workflow ./workflow.json set-variable-schema result --file ./result-schema.json
 ```
 
+Routing is edited through the same `update` command. `--cases` replaces the ordered cases of a
+`condition` or `agent-directive` node, `--expressions` replaces the expressions it evaluates before
+them, and connections are edited by key:
+
+```bash
+moira-workflow ./workflow.json update route-review \
+  --cases '[{"when":{"operator":"eq","left":{"contextPath":"verdict"},"right":"blocked"},"output":"blocked"}]'
+moira-workflow ./workflow.json update count-attempt --expressions '["attempts = attempts + 1"]'
+moira-workflow ./workflow.json update route-review --add-connection blocked fix-issues
+```
+
+The read-only commands show the result: `schema` prints one `CASE <output> WHEN <condition>` line
+per case plus an `EDGE` line per connection, `structure --detailed` lists each case as
+`Case: <output> when …`, and `diff` names `cases` among a node's changed fields — so a routing
+change is reviewable without reading the raw JSON.
+
+To bring a file up to the current definition schema, run `migrate`. It rewrites the file in place,
+creating a backup first like every write, and reports «Already at schema version 1; nothing to
+migrate» when there is nothing to do:
+
+```bash
+moira-workflow ./workflow.json migrate
+```
+
 The process view uses the same file-backed authoring surface. Set the complete block list from
 JSON with `set-progress` (or grow it with `add-block` / `edit-block`), then give every node its
 block with `set-block` — routing nodes included, since the derivation refuses an unowned node. Progress attachment is available on
@@ -81,8 +105,8 @@ the version while iterating.
 moira-workflow ./workflow.json set-block route-plan-approval plan
 moira-workflow ./workflow.json add-block deliver "Deliver" "Hand the result over" --after execute
 moira-workflow ./workflow.json edit-block deliver --summary "Present the result"
-moira-workflow ./workflow.json set-label check-plan-approved true "plan approved"
-moira-workflow ./workflow.json set-label route-review false "review found defects" \
+moira-workflow ./workflow.json set-label check-plan-approved approved "plan approved"
+moira-workflow ./workflow.json set-label route-review default "review found defects" \
   --cause "The independent review reported blocking findings." --exit "The review passes."
 moira-workflow ./workflow.json derive
 ```
@@ -331,7 +355,10 @@ declared previous identity exists, rather than guessing or creating a duplicate.
 }
 ```
 
-### Condition Node Connections
+### Condition Node Routing
+
+A condition node's outcomes are its `cases` and the `connections` keys they name. Change them
+together, so every case still names an existing key:
 
 ```typescript
 {
@@ -339,9 +366,15 @@ declared previous identity exists, rather than guessing or creating a duplicate.
     {
       nodeId: "condition-node",
       changes: {
+        cases: [
+          {
+            when: { operator: "eq", left: { contextPath: "status" }, right: "success" },
+            output: "passed",
+          },
+        ],
         connections: {
-          true: "when-true-node",
-          false: "when-false-node",
+          passed: "success-node",
+          default: "retry-node",
         },
       },
     },

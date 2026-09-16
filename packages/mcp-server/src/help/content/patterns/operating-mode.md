@@ -43,14 +43,19 @@ its rejection loop:
 {
   "id": "route-operating-mode-plan-approval",
   "type": "condition",
-  "condition": {
-    "operator": "eq",
-    "left": { "contextPath": "operating_mode" },
-    "right": "autonomous"
-  },
+  "cases": [
+    {
+      "when": {
+        "operator": "eq",
+        "left": { "contextPath": "operating_mode" },
+        "right": "autonomous"
+      },
+      "output": "autonomous"
+    }
+  ],
   "connections": {
-    "true": "check-steps-remaining",
-    "false": "present-plan"
+    "autonomous": "check-steps-remaining",
+    "default": "present-plan"
   }
 }
 ```

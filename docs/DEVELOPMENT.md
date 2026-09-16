@@ -365,14 +365,16 @@ NodeResultBuilder.error(nodeId, errorMessage); // Fail execution
 - **Template processing** - processes templates in directive/completionCondition
 - **Validation** - validates input against inputSchema; a rejected submission is logged and pauses
   again at the same node with sanitized feedback that does not echo the rejected payload
-- **Legacy fields** - `maxRetries`, `retryMessage`, and `connections.maxRetriesExceeded` remain
-  accepted in stored definitions but do not control runtime behavior
+- **Routing** - after validation, the node's `expressions` run and its `cases` are evaluated
+  against the context with the answer merged; the first holding case selects its output, otherwise
+  `success`
 
 ### ConditionHandler
 
-- **Auto-execution** - immediately evaluates and continues
-- **Operators** - 10 supported: eq, neq, gt, gte, lt, lte, contains, exists, and, or, not
-- **Output paths** - 'true' or 'false' based on evaluation
+- **Auto-execution** - immediately routes and continues
+- **Operators** - eq, neq, gt, gte, lt, lte, contains, exists, and, or, not
+- **Output paths** - `expressions` first, then `cases` in authored order; the first case whose
+  condition holds selects its output, otherwise `default`
 - **Context access** - resolves {{contextPath}} references
 
 ### TelegramNotificationHandler
@@ -743,5 +745,4 @@ initialize before ordinary requests proceed.
 - The engine returns the same node with schema-derived corrective feedback and no rejected-payload
   echo.
 - A workflow that needs a bounded business retry policy must model it explicitly with ordinary
-  expression, condition, and decision nodes after valid submissions; legacy per-node retry fields
-  are non-operative.
+  expression, condition, and decision nodes after valid submissions.

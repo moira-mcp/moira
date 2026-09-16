@@ -40,56 +40,63 @@ Route workflow execution to different paths based on user choice, collected data
 {
   "type": "condition",
   "id": "route-action",
-  "condition": {
-    "operator": "eq",
-    "left": { "contextPath": "action" },
-    "right": "create"
-  },
+  "cases": [
+    {
+      "when": {
+        "operator": "eq",
+        "left": { "contextPath": "action" },
+        "right": "create"
+      },
+      "output": "create"
+    }
+  ],
   "connections": {
-    "true": "create-workflow",
-    "false": "edit-workflow"
+    "create": "create-workflow",
+    "default": "edit-workflow"
   }
 }
 ```
+
+A binary decision is one case plus `default`: the case names the branch it selects, and
+`default` carries every other value.
 
 ## Multi-Way Branching
 
-For more than 2 options, chain conditions:
+For more than 2 options, list several cases on one condition node. Cases are evaluated in
+authored order; the first whose `when` holds selects its output, and `default` catches the rest:
 
 ```json
 {
-  "id": "check-create",
+  "id": "route-action",
   "type": "condition",
-  "condition": {
-    "operator": "eq",
-    "left": { "contextPath": "action" },
-    "right": "create"
-  },
+  "cases": [
+    {
+      "when": {
+        "operator": "eq",
+        "left": { "contextPath": "action" },
+        "right": "create"
+      },
+      "output": "create"
+    },
+    {
+      "when": {
+        "operator": "eq",
+        "left": { "contextPath": "action" },
+        "right": "edit"
+      },
+      "output": "edit"
+    }
+  ],
   "connections": {
-    "true": "create-branch",
-    "false": "check-edit"
-  }
-}
-```
-
-```json
-{
-  "id": "check-edit",
-  "type": "condition",
-  "condition": {
-    "operator": "eq",
-    "left": { "contextPath": "action" },
-    "right": "edit"
-  },
-  "connections": {
-    "true": "edit-branch",
-    "false": "delete-branch"
+    "create": "create-branch",
+    "edit": "edit-branch",
+    "default": "delete-branch"
   }
 }
 ```
 
 :::tip
-For multi-way branches, order conditions from most to least common for efficiency.
+For multi-way branches, order cases from most to least common for efficiency.
 :::
 
 ## Branching by Boolean Flag
@@ -98,14 +105,19 @@ For multi-way branches, order conditions from most to least common for efficienc
 {
   "type": "condition",
   "id": "check-has-tests",
-  "condition": {
-    "operator": "eq",
-    "left": { "contextPath": "has_tests" },
-    "right": "yes"
-  },
+  "cases": [
+    {
+      "when": {
+        "operator": "eq",
+        "left": { "contextPath": "has_tests" },
+        "right": "yes"
+      },
+      "output": "has-tests"
+    }
+  ],
   "connections": {
-    "true": "run-tests",
-    "false": "skip-tests"
+    "has-tests": "run-tests",
+    "default": "skip-tests"
   }
 }
 ```
@@ -116,25 +128,30 @@ For multi-way branches, order conditions from most to least common for efficienc
 {
   "type": "condition",
   "id": "check-error-count",
-  "condition": {
-    "operator": "gt",
-    "left": { "contextPath": "error_count" },
-    "right": 0
-  },
+  "cases": [
+    {
+      "when": {
+        "operator": "gt",
+        "left": { "contextPath": "error_count" },
+        "right": 0
+      },
+      "output": "has-errors"
+    }
+  ],
   "connections": {
-    "true": "fix-errors",
-    "false": "proceed"
+    "has-errors": "fix-errors",
+    "default": "proceed"
   }
 }
 ```
 
 ## Complex Conditions
 
-Combine multiple checks:
+Combine multiple checks inside a single case:
 
 ```json
 {
-  "condition": {
+  "when": {
     "operator": "and",
     "conditions": [
       {
@@ -148,7 +165,8 @@ Combine multiple checks:
         "right": 0
       }
     ]
-  }
+  },
+  "output": "ready"
 }
 ```
 

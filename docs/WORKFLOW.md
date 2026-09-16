@@ -433,7 +433,7 @@ Node task-1: unclosed template bracket '{{' at position 15
 **Check:**
 
 - Templates only processed in `directive`, `completionCondition`, `message` fields
-- NOT processed in `inputSchema` or `condition`
+- NOT processed in `inputSchema` or `cases`
 - Variable must exist in context
 
 ## Workflow Structure
@@ -571,6 +571,17 @@ prints each one.
 }
 ```
 
+### Definition Schema Version
+
+Beside the semver `metadata.version`, which authors bump when they change a workflow,
+`metadata.schemaVersion` is an integer stamped by the engine that says which definition shape the
+file uses; the current value is 1, and a definition without the field is version 0. A pure,
+idempotent migration upgrades a definition wherever one enters the system — validation, upload
+through the API, MCP or the CLI, the bundled catalog, stored rows on read — and stored
+definitions, reconciliation baselines and recorded conflicts are upgraded once at startup, so no
+one has to migrate by hand. `moira-workflow <file> migrate` applies the same migration to a file
+in place when you want to read and edit the current shape.
+
 ### Node Requirements
 
 **All Nodes:**
@@ -612,26 +623,91 @@ prints each one.
 ```
 
 Invalid input is logged and the workflow pauses again at the same node with schema-derived
-feedback. The rejected payload is not echoed. Legacy `maxRetries`, `retryMessage`, and
-`connections.maxRetriesExceeded` fields may still parse in stored definitions, but the runtime
-does not use them. Model a bounded business retry policy explicitly in the graph after a valid
-submission.
+feedback. The rejected payload is not echoed. Model a bounded business retry policy explicitly in
+the graph after a valid submission.
+
+An agent-directive node may also carry `cases` and route on its own validated answer:
+
+```json
+{
+  "type": "agent-directive",
+  "id": "review-plan",
+  "directive": "Review the plan",
+  "completionCondition": "Verdict recorded",
+  "inputSchema": {
+    "type": "object",
+    "properties": { "review_outcome": { "type": "string" } },
+    "required": ["review_outcome"]
+  },
+  "cases": [
+    {
+      "when": {
+        "operator": "eq",
+        "left": { "contextPath": "review_outcome" },
+        "right": "rejected"
+      },
+      "output": "rework"
+    }
+  ],
+  "connections": { "success": "next-node", "rework": "fix-plan" }
+}
+```
+
+The cases are evaluated against the context after the answer has been merged, so an answer field
+is readable by bare name (`review_outcome`) and under the node's own id
+(`review-plan.review_outcome`). When no case holds the node takes `success`, its default output.
+The control outputs `error` and `timeout` are reserved and are never named by a case.
 
 ### Condition Node
 
 ```json
 {
   "type": "condition",
-  "id": "check-id",
-  "condition": {
-    "operator": "gte",
-    "left": { "contextPath": "score" },
-    "right": 8
-  },
+  "id": "triage",
+  "cases": [
+    {
+      "when": { "operator": "gte", "left": { "contextPath": "score" }, "right": 8 },
+      "output": "high"
+    },
+    {
+      "when": { "operator": "gte", "left": { "contextPath": "score" }, "right": 5 },
+      "output": "medium"
+    }
+  ],
   "connections": {
-    "true": "success-node",
-    "false": "failure-node"
+    "high": "ship-node",
+    "medium": "revise-node",
+    "default": "reject-node"
   }
+}
+```
+
+`cases` are evaluated in authored order; the first case whose `when` holds selects its `output`,
+which names a key of `connections`. When no case holds the node takes `default`, which is
+required. A two-way decision is one case plus `default`. The optional `error` output is taken when
+an expression on the node fails.
+
+### Expressions on Routing Nodes
+
+Both `condition` and `agent-directive` nodes accept `expressions` — an array of strings evaluated
+by the same sandboxed arithmetic interpreter as the standalone expression node, with the same
+registry validation (an assignment must name a declared global and satisfy its schema). They run
+before the cases, so a case reads what they assigned; on an agent-directive node they run after
+the answer has been validated. Assignments are published only when the node succeeds. A failing
+expression takes `connections.error` when the node declares one, and otherwise fails the node.
+
+```json
+{
+  "type": "condition",
+  "id": "count-and-branch",
+  "expressions": ["attempts = attempts + 1"],
+  "cases": [
+    {
+      "when": { "operator": "gte", "left": { "contextPath": "attempts" }, "right": 3 },
+      "output": "give-up"
+    }
+  ],
+  "connections": { "give-up": "escalate", "default": "retry", "error": "error-handler" }
 }
 ```
 
@@ -1172,7 +1248,7 @@ Templates processed in:
 - `basePath` and `files[].path` fields of materialize nodes
 - registry-backed materialize file contents when the archive is requested
 
-NOT processed in `inputSchema` or `condition` fields.
+NOT processed in `inputSchema` or `cases` fields.
 
 ### Note References
 
@@ -1414,12 +1490,13 @@ Route based on skip value:
 {
   "type": "condition",
   "id": "check-skip",
-  "condition": {
-    "operator": "eq",
-    "left": { "contextPath": "skip" },
-    "right": "да"
-  },
-  "connections": { "true": "next-step", "false": "process-result" }
+  "cases": [
+    {
+      "when": { "operator": "eq", "left": { "contextPath": "skip" }, "right": "да" },
+      "output": "skipped"
+    }
+  ],
+  "connections": { "skipped": "next-step", "default": "process-result" }
 }
 ```
 

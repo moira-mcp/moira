@@ -26,7 +26,7 @@ Agent task with directive and completion condition.
 
 ### Condition
 
-Branch execution based on structured conditions.
+Branch execution to one of several outputs by ordered cases.
 
 ### Expression
 
@@ -125,14 +125,18 @@ The primary node type for agent tasks. Contains a directive (what to do) and com
 }
 ```
 
-| Property                   | Required | Description                                          |
-| -------------------------- | -------- | ---------------------------------------------------- |
-| `directive`                | Yes      | What the agent should do                             |
-| `completionCondition`      | Yes      | When the step is complete                            |
-| `inputSchema`              | No       | JSON Schema for response validation                  |
-| `inputSchema.globalInputs` | No       | Names of `variableRegistry` globals this node writes |
-| `inputSchema.properties`   | No       | Node-local outputs (referenced as `node-id.name`)    |
-| `connections.success`      | Yes      | Next node after valid input                          |
+| Property                   | Required | Description                                                    |
+| -------------------------- | -------- | -------------------------------------------------------------- |
+| `directive`                | Yes      | What the agent should do                                       |
+| `completionCondition`      | Yes      | When the step is complete                                      |
+| `inputSchema`              | No       | JSON Schema for response validation                            |
+| `inputSchema.globalInputs` | No       | Names of `variableRegistry` globals this node writes           |
+| `inputSchema.properties`   | No       | Node-local outputs (referenced as `node-id.name`)              |
+| `expressions`              | No       | Arithmetic expressions evaluated after the answer is validated |
+| `cases`                    | No       | Ordered routing cases evaluated on the node's validated answer |
+| `connections.success`      | Yes      | Default output, taken when no case holds                       |
+| `connections.error`        | No       | Control output taken when an expression on the node fails      |
+| `connections.timeout`      | No       | Reserved control output; a case may not name it                |
 
 In the example, `analysis_done` is a declared global (it must exist in `variableRegistry`) written by this node and readable elsewhere as `{{analysis_done}}`; `features` is a node-local output readable as `{{analyze-requirements.features}}`. A returned key that is neither a declared global nor a described local output is rejected.
 
@@ -144,35 +148,129 @@ response automatically.
 
 If a submission does not match `inputSchema`, the engine logs the rejection and pauses again at
 the same node. The corrective message describes the expected schema and errors without echoing the
-rejected payload. Per-node retry fields found in older definitions are compatibility-only and do
-not bound or redirect this validation cycle; model business retry and escalation explicitly in the
-workflow graph.
+rejected payload. The validation cycle has no per-node bound or redirect; model business retry and
+escalation explicitly in the workflow graph.
+
+### Routing on the answer
+
+An agent-directive node can decide where the run continues from its own validated answer. `cases`
+holds ordered `{ "when": <structured condition>, "output": "<connection key>" }` entries; the first
+`when` that holds selects its output, and when none holds the node takes `success`. The conditions
+read the context after the answer has been merged, so an answer field is readable by bare name
+(`review_outcome` for a declared global) and by node-local path (`review.review_outcome`).
+
+```json
+{
+  "id": "review",
+  "type": "agent-directive",
+  "directive": "Review the change",
+  "completionCondition": "Verdict recorded",
+  "inputSchema": {
+    "type": "object",
+    "globalInputs": ["review_outcome"],
+    "required": ["review_outcome"]
+  },
+  "cases": [
+    {
+      "when": { "operator": "eq", "left": { "contextPath": "review_outcome" }, "right": "blocked" },
+      "output": "blocked"
+    }
+  ],
+  "connections": {
+    "success": "merge",
+    "blocked": "fix-issues"
+  }
+}
+```
+
+`error` and `timeout` are reserved control outputs: a case may not name them, and they need no case.
 
 ## Condition Node
 
-Branch execution based on structured conditions:
+Branch execution on ordered cases. Each case pairs a structured condition with the connection key it
+selects; the first case whose `when` holds wins, and when none holds the node takes `default`. A
+two-way decision is one case plus `default`:
 
 ```json
 {
   "id": "check-result",
   "type": "condition",
-  "condition": {
-    "operator": "eq",
-    "left": { "contextPath": "status" },
-    "right": "success"
-  },
+  "cases": [
+    {
+      "when": { "operator": "eq", "left": { "contextPath": "status" }, "right": "success" },
+      "output": "passed"
+    }
+  ],
   "connections": {
-    "true": "success-path",
-    "false": "retry-step"
+    "passed": "success-path",
+    "default": "retry-step"
   }
 }
 ```
 
-| Property            | Required | Description                       |
-| ------------------- | -------- | --------------------------------- |
-| `condition`         | Yes      | Structured condition object       |
-| `connections.true`  | Yes      | Next node when condition is true  |
-| `connections.false` | Yes      | Next node when condition is false |
+Any number of outcomes is written the same way — one case per authored output:
+
+```json
+{
+  "id": "triage",
+  "type": "condition",
+  "cases": [
+    {
+      "when": { "operator": "eq", "left": { "contextPath": "size" }, "right": "small" },
+      "output": "fast"
+    },
+    {
+      "when": { "operator": "eq", "left": { "contextPath": "size" }, "right": "large" },
+      "output": "slow"
+    }
+  ],
+  "connections": {
+    "fast": "quick-path",
+    "slow": "long-path",
+    "default": "normal-path"
+  }
+}
+```
+
+| Property              | Required | Description                                               |
+| --------------------- | -------- | --------------------------------------------------------- |
+| `cases`               | Yes      | Ordered `{ when, output }` entries; at least one          |
+| `cases[].when`        | Yes      | Structured condition object                               |
+| `cases[].output`      | Yes      | Connection key this case selects                          |
+| `expressions`         | No       | Arithmetic expressions evaluated before the cases         |
+| `connections.default` | Yes      | Output taken when no case holds                           |
+| `connections.error`   | No       | Control output taken when an expression on the node fails |
+
+Every other key of `connections` is an authored output named by a case. `error` is reserved for
+control flow: a case may not name it, and it needs no case of its own.
+
+### Expressions on routing nodes
+
+Both `condition` and `agent-directive` accept `expressions` — the same sandboxed arithmetic
+interpreter and registry validation as the standalone [expression node](#expression-node).
+Assignments must target declared globals. They run before the cases (on an agent-directive node,
+after its answer is validated), so a case can read what they computed, and their assignments are
+published only when the node succeeds. A failing expression takes `connections.error` when the node
+has one; otherwise the node fails, exactly as a standalone expression node does.
+
+```json
+{
+  "id": "count-attempt",
+  "type": "condition",
+  "expressions": ["attempts = attempts + 1"],
+  "cases": [
+    {
+      "when": { "operator": "gte", "left": { "contextPath": "attempts" }, "right": 3 },
+      "output": "exhausted"
+    }
+  ],
+  "connections": {
+    "exhausted": "escalate",
+    "default": "retry-step",
+    "error": "handle-error"
+  }
+}
+```
 
 ### Structured Conditions
 

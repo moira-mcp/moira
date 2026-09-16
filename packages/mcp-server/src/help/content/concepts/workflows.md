@@ -110,11 +110,18 @@ Every workflow consists of:
 
 ### Metadata
 
-| Field         | Required | Description                    |
-| ------------- | -------- | ------------------------------ |
-| `name`        | Yes      | Human-readable workflow name   |
-| `version`     | Yes      | Semantic version string        |
-| `description` | Yes      | What the workflow accomplishes |
+| Field           | Required | Description                                             |
+| --------------- | -------- | ------------------------------------------------------- |
+| `name`          | Yes      | Human-readable workflow name                            |
+| `version`       | Yes      | Semantic version string                                 |
+| `description`   | Yes      | What the workflow accomplishes                          |
+| `schemaVersion` | No       | Integer definition-schema version; current value is `1` |
+
+`schemaVersion` describes the shape of the definition itself, next to the semver `version` that
+describes its content. A definition without it is version 0 and is upgraded automatically wherever
+it enters the system — validation, upload through the API, MCP or the CLI, the bundled catalog, and
+stored definitions read back — so you never migrate by hand. `moira-workflow <file> migrate`
+rewrites a file in place when you want the upgraded shape on disk.
 
 ### Variable Registry
 
@@ -179,7 +186,7 @@ schema come from the installation's node-type catalog.
 | `start`                 | Entry point for workflow execution                    |
 | `end`                   | Terminal node marking completion                      |
 | `agent-directive`       | Agent task with directive and completion condition    |
-| `condition`             | Branch based on structured conditions                 |
+| `condition`             | Branch to one of several outputs by ordered cases     |
 | `expression`            | Compute values using arithmetic expressions           |
 | `subgraph`              | Delegate to another workflow                          |
 | `user-notification`     | Notify through the current user's configured channels |
@@ -210,14 +217,15 @@ Nodes connect via the `connections` object that defines the flow. Each node type
 {
   "id": "check-status",
   "type": "condition",
-  "condition": {
-    "operator": "eq",
-    "left": { "contextPath": "status" },
-    "right": "success"
-  },
+  "cases": [
+    {
+      "when": { "operator": "eq", "left": { "contextPath": "status" }, "right": "success" },
+      "output": "passed"
+    }
+  ],
   "connections": {
-    "true": "success-path",
-    "false": "retry-path"
+    "passed": "success-path",
+    "default": "retry-path"
   }
 }
 ```

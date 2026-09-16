@@ -263,14 +263,19 @@ Supports conditionals inside loops:
 
 ### Conditional Branch
 
-Branch with a `condition` node that reads a value via `contextPath`:
+Branch with a `condition` node whose case reads a value via `contextPath`:
 
 ```json
 {
   "id": "check-tests",
   "type": "condition",
-  "condition": { "operator": "eq", "left": { "contextPath": "testsPassed" }, "right": true },
-  "connections": { "true": "deploy", "false": "fix-and-retry" }
+  "cases": [
+    {
+      "when": { "operator": "eq", "left": { "contextPath": "testsPassed" }, "right": true },
+      "output": "passed"
+    }
+  ],
+  "connections": { "passed": "deploy", "default": "fix-and-retry" }
 }
 ```
 
@@ -291,8 +296,13 @@ Loop using an `expression` node to increment a counter and a `condition` node to
 {
   "id": "check-limit",
   "type": "condition",
-  "condition": { "operator": "lt", "left": { "contextPath": "iterationCount" }, "right": 5 },
-  "connections": { "true": "improve", "false": "done" }
+  "cases": [
+    {
+      "when": { "operator": "lt", "left": { "contextPath": "iterationCount" }, "right": 5 },
+      "output": "under-limit"
+    }
+  ],
+  "connections": { "under-limit": "improve", "default": "done" }
 }
 ```
 
