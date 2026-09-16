@@ -18,16 +18,15 @@
  * run's timings, list and route facts and on the flow page with authoring.
  */
 
-import React, { useMemo, useState } from "react";
+import React, { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ChevronDown, Compass, PanelLeftClose, PanelLeftOpen } from "lucide-react";
-import { NodeFinder } from "./NodeFinder";
 import { cn } from "@/lib/utils";
 import { useModeGuideKey } from "../flow/editing";
 import { PassCount, StatusIcon } from "./status";
 import { CanvasDiagram } from "./CanvasView";
 import { formatDuration } from "./duration";
-import { stepsOf, type RunBlock, type RunViewProps } from "./model";
+import { type RunBlock, type RunViewProps } from "./model";
 
 /** One row of the contents: status, position, name, and the block's counts on the right. */
 function ContentsRow({
@@ -229,7 +228,7 @@ export function MapView({
 }): React.JSX.Element {
   const { t } = useTranslation();
   const guideKey = useModeGuideKey();
-  const { blocks, workflow, selectedBlockId, onSelectBlock } = props;
+  const { blocks, selectedBlockId, onSelectBlock } = props;
   // The contents sidebar folds away to give the diagram the whole width; the choice is kept per
   // browser so a reader who folded it finds it folded on the next run.
   const [collapsed, setCollapsed] = useState<boolean>(() => {
@@ -249,14 +248,6 @@ export function MapView({
       return !value;
     });
   };
-  const allSteps = useMemo(
-    () =>
-      stepsOf(
-        workflow,
-        blocks.flatMap((b) => b.nodeIds),
-      ),
-    [workflow, blocks],
-  );
 
   // On a phone the map is one scrolling column (the diagram at a readable fixed height, the
   // contents beneath it); from `lg` it is a row that fills the page's box and scrolls nowhere but
@@ -267,27 +258,29 @@ export function MapView({
       data-testid="map-view"
     >
       <div className="order-1 flex h-[55vh] flex-col overflow-hidden lg:order-2 lg:h-full lg:min-h-0 lg:flex-1">
-        <div className="flex items-stretch border-b bg-card">
-          <button
-            type="button"
-            onClick={toggleSidebar}
-            aria-expanded={!collapsed}
-            aria-label={t("pages.runPage.map.contents")}
-            title={t("pages.runPage.map.contents")}
-            data-testid="map-sidebar-toggle"
-            className="hidden shrink-0 items-center justify-center border-r px-2.5 text-muted-foreground hover:bg-accent hover:text-foreground lg:inline-flex"
-          >
-            {collapsed ? (
-              <PanelLeftOpen className="size-4" aria-hidden="true" />
-            ) : (
-              <PanelLeftClose className="size-4" aria-hidden="true" />
-            )}
-          </button>
-          <HeaderFacts progress={props.progress} className="min-w-0 flex-1 border-b-0" />
-        </div>
+        <HeaderFacts progress={props.progress} />
         <MapGuide guideKey={guideKey} />
         <div className="min-h-0 flex-1 overflow-hidden">
-          <CanvasDiagram {...props} />
+          <CanvasDiagram
+            {...props}
+            toolbarLeading={
+              <button
+                type="button"
+                onClick={toggleSidebar}
+                aria-expanded={!collapsed}
+                aria-label={t("pages.runPage.map.contents")}
+                title={t("pages.runPage.map.contents")}
+                data-testid="map-sidebar-toggle"
+                className="hidden h-8 w-8 items-center justify-center rounded-md border border-transparent text-muted-foreground hover:border-border hover:bg-accent hover:text-foreground lg:inline-flex"
+              >
+                {collapsed ? (
+                  <PanelLeftOpen className="size-4" aria-hidden="true" />
+                ) : (
+                  <PanelLeftClose className="size-4" aria-hidden="true" />
+                )}
+              </button>
+            }
+          />
         </div>
       </div>
 
@@ -301,7 +294,6 @@ export function MapView({
         data-collapsed={collapsed ? "true" : undefined}
       >
         {sidebar}
-        <NodeFinder blocks={blocks} steps={allSteps} onPick={onSelectBlock} />
         <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
           {t("pages.runPage.map.contents")}
         </p>

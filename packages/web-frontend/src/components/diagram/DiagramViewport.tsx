@@ -49,6 +49,8 @@ export type DiagramViewportProps<N extends Node = Node, E extends Edge = Edge> =
    * on screen; a diagram that knows its own overview placement takes over from here.
    */
   onFit?: (instance: ReactFlowInstance<N, E>) => void;
+  /** Mount React Flow's own zoom/fit cluster; a diagram with a toolbar of its own turns it off. */
+  showControls?: boolean;
 };
 
 /** The fit-to-view button whose action the diagram owns; keeps the stock control's class. */
@@ -85,6 +87,7 @@ export function DiagramViewport<N extends Node = Node, E extends Edge = Edge>({
   onReady,
   controlButtons,
   onFit,
+  showControls = true,
   children,
   ...rest
 }: DiagramViewportProps<N, E>): React.JSX.Element {
@@ -112,15 +115,17 @@ export function DiagramViewport<N extends Node = Node, E extends Edge = Edge>({
         proOptions={{ hideAttribution: true }}
         {...flowProps}
       >
-        <Controls
-          position={controlsPosition}
-          showInteractive={false}
-          showFitView={!onFit}
-          fitViewOptions={policy.fitViewOptions}
-        >
-          {onFit && <FitButton<N, E> onFit={onFit} />}
-          {controlButtons}
-        </Controls>
+        {showControls && (
+          <Controls
+            position={controlsPosition}
+            showInteractive={false}
+            showFitView={!onFit}
+            fitViewOptions={policy.fitViewOptions}
+          >
+            {onFit && <FitButton<N, E> onFit={onFit} />}
+            {controlButtons}
+          </Controls>
+        )}
         {children}
       </ReactFlow>
     </ReactFlowProvider>

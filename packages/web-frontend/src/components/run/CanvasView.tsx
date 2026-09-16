@@ -39,7 +39,8 @@ import { DiagramViewport } from "../diagram/DiagramViewport";
 import { diagramInteractionProps } from "../diagram/interaction";
 import { useOpeningPlacement } from "../diagram/placement";
 import { useLayoutPreset } from "../diagram/layoutPreset";
-import { LayoutPresetButtons } from "../diagram/LayoutPresetButtons";
+import { DiagramToolbar } from "../diagram/DiagramToolbar";
+import { NodeFinder } from "./NodeFinder";
 
 /** Gutter kept between the viewport edge and the first block when a definition opens. */
 const CANVAS_EDGE = 16;
@@ -54,7 +55,7 @@ import {
   type LaidOutEdge,
 } from "./layout";
 import { formatDuration } from "./duration";
-import { currentBlockId, type RunBlock, type RunViewProps } from "./model";
+import { currentBlockId, stepsOf, type RunBlock, type RunViewProps } from "./model";
 import { PARALLEL_CHIP_MIN, transitionKey } from "./chips";
 import { TransitionFocusProvider, isLit, useTransitionFocus } from "./focus";
 
@@ -72,7 +73,16 @@ type BlockNodeData = {
   vertical: boolean;
 };
 type BlockNode = Node<BlockNodeData, "block">;
-type RoutedEdge = Edge<{ laid: LaidOutEdge; vertical: boolean }, "routed">;
+type RoutedEdge = Edge<
+  {
+    laid: LaidOutEdge;
+    vertical: boolean;
+    /** The column the edge's vertical takes beside its source and beside its target (0 = innermost). */
+    outRank: number;
+    inRank: number;
+  },
+  "routed"
+>;
 
 /** The fact chips of a block: its steps, its passes, its time and the list it works through. */
 function blockFacts(block: RunBlock, t: TFunction): FactChip[] {
@@ -186,6 +196,14 @@ const SELF_LOOP_DIP = 26;
  * reaches it from the ports through short stubs; a transition back to the block itself dips
  * under its bottom double port.
  */
+/** Distance between the verticals of two edges leaving or entering neighbouring ports. */
+const PORT_COLUMN_STEP = 10;
+
+interface PortSlots {
+  outRank: number;
+  inRank: number;
+}
+
 function portedPath(
   laid: LaidOutEdge,
   sx: number,
@@ -193,17 +211,18 @@ function portedPath(
   tx: number,
   ty: number,
   vertical = false,
+  slots: PortSlots = { outRank: 0, inRank: 0 },
 ): { path: string; labelX: number; labelY: number } {
   if (vertical) {
     // The layout is horizontal and transposed: route in its space, then swap the axes back.
-    const logical = portedPoints(laid, sy, sx, ty, tx);
+    const logical = portedPoints(laid, sy, sx, ty, tx, slots);
     return {
       path: roundedPath(logical.points.map(([x, y]) => [y, x] as [number, number])),
       labelX: logical.labelY,
       labelY: logical.labelX,
     };
   }
-  const routed = portedPoints(laid, sx, sy, tx, ty);
+  const routed = portedPoints(laid, sx, sy, tx, ty, slots);
   return { path: roundedPath(routed.points), labelX: routed.labelX, labelY: routed.labelY };
 }
 
@@ -213,6 +232,7 @@ function portedPoints(
   sy: number,
   tx: number,
   ty: number,
+  slots: PortSlots,
 ): { points: Array<[number, number]>; labelX: number; labelY: number } {
   const points = pathPoints(laid.path);
   if (laid.from === laid.to) {
@@ -246,8 +266,10 @@ function portedPoints(
   }
   const ys = points.map((p) => p[1]);
   const laneY = laid.laneY ?? (laid.kind === "cycle" ? Math.max(...ys) : Math.min(...ys));
-  const out = sx + PORT_STUB;
-  const into = tx - PORT_STUB;
+  // Every edge at a card runs its vertical in a column of its own beside the card (`portRanks`),
+  // so two edges never share a line.
+  const out = sx + PORT_STUB + slots.outRank * PORT_COLUMN_STEP;
+  const into = tx - PORT_STUB - slots.inRank * PORT_COLUMN_STEP;
   return {
     points: [
       [sx, sy],
@@ -273,7 +295,7 @@ function RoutedEdgeView({
   const { t } = useTranslation();
   const focus = useTransitionFocus();
   if (!data) return null;
-  const { laid, vertical } = data;
+  const { laid, vertical, outRank, inRank } = data;
   const key = transitionKey(laid.from, laid.transition);
   const lit = isLit(focus, key, laid.from);
   const cycle = laid.kind === "cycle";
@@ -284,7 +306,10 @@ function RoutedEdgeView({
     onMouseEnter: () => focus.setHovered([key]),
     onMouseLeave: () => focus.setHovered(null),
   };
-  const ported = portedPath(laid, sourceX, sourceY, targetX, targetY, vertical);
+  const ported = portedPath(laid, sourceX, sourceY, targetX, targetY, vertical, {
+    outRank,
+    inRank,
+  });
   const anchor =
     laid.from === laid.to
       ? `translate(-50%, 0) translate(${ported.labelX}px, ${ported.labelY}px)`
@@ -354,6 +379,51 @@ function RoutedEdgeView({
   );
 }
 
+/**
+ * Column ranks of the lane edges at every card, per side. For one card and one side, the edges
+ * split into those whose lane lies above the card and those whose lane lies below; each group
+ * takes its own range of columns (the above group innermost), and within a group the ports are
+ * ordered so the port furthest from the lane is outermost.
+ */
+function portRanks(
+  edges: readonly LaidOutEdge[],
+  ports: ReadonlyMap<string, { outputs: string[]; inputs: string[] }>,
+  blockY: ReadonlyMap<string, number>,
+): { out: Map<string, number>; in: Map<string, number> } {
+  const out = new Map<string, number>();
+  const inn = new Map<string, number>();
+  type Item = { id: string; index: number; above: boolean };
+  const bySource = new Map<string, Item[]>();
+  const byTarget = new Map<string, Item[]>();
+  for (const laid of edges) {
+    if (laid.kind === "forward" || laid.from === laid.to || laid.laneY === undefined) continue;
+    const key = transitionKey(laid.from, laid.transition);
+    const outIndex = ports.get(laid.from)?.outputs.indexOf(key) ?? -1;
+    const inIndex = ports.get(laid.to)?.inputs.indexOf(key) ?? -1;
+    bySource.set(laid.from, [
+      ...(bySource.get(laid.from) ?? []),
+      { id: laid.id, index: outIndex, above: laid.laneY < (blockY.get(laid.from) ?? 0) },
+    ]);
+    byTarget.set(laid.to, [
+      ...(byTarget.get(laid.to) ?? []),
+      { id: laid.id, index: inIndex, above: laid.laneY < (blockY.get(laid.to) ?? 0) },
+    ]);
+  }
+  const assign = (groups: Map<string, Item[]>, into: Map<string, number>) => {
+    for (const items of groups.values()) {
+      // Above the card: the lowest port travels furthest, so it goes outermost — descending
+      // index. Below: the highest port travels furthest — ascending index.
+      const above = items.filter((i) => i.above).sort((a, b) => b.index - a.index);
+      const below = items.filter((i) => !i.above).sort((a, b) => a.index - b.index);
+      above.forEach((item, rank) => into.set(item.id, rank));
+      below.forEach((item, rank) => into.set(item.id, above.length + rank));
+    }
+  };
+  assign(bySource, out);
+  assign(byTarget, inn);
+  return { out, in: inn };
+}
+
 const nodeTypes = { block: BlockNodeView };
 const edgeTypes = { routed: RoutedEdgeView };
 
@@ -378,9 +448,11 @@ function useBlockLayout(
 function CanvasInner({
   progress,
   blocks,
+  workflow,
   selectedBlockId,
   onSelectBlock,
-}: RunViewProps): React.JSX.Element {
+  toolbarLeading,
+}: RunViewProps & { toolbarLeading?: React.ReactNode }): React.JSX.Element {
   const { t } = useTranslation();
   const { actualTheme } = useTheme();
   const [preset] = useLayoutPreset();
@@ -420,7 +492,23 @@ function CanvasInner({
     },
     [layout, blocks],
   );
-  const { onInit, onReady } = useOpeningPlacement(placeViewport, focusId);
+  const { onInit: placementInit, onReady } = useOpeningPlacement(placeViewport, focusId);
+  const rfRef = useRef<ReactFlowInstance<BlockNode, RoutedEdge> | null>(null);
+  const onInit = useCallback(
+    (rf: ReactFlowInstance<BlockNode, RoutedEdge>) => {
+      rfRef.current = rf;
+      placementInit(rf);
+    },
+    [placementInit],
+  );
+  const allSteps = useMemo(
+    () =>
+      stepsOf(
+        workflow,
+        blocks.flatMap((b) => b.nodeIds),
+      ),
+    [workflow, blocks],
+  );
   // The fit-to-view control: the whole process at a readable zoom when it fits, otherwise the
   // readable floor anchored at the first block, the same overview the definition opens with.
   const fitOverview = useCallback(
@@ -500,24 +588,43 @@ function CanvasInner({
     });
   }, [layout, blocks, selectedBlockId, onSelectBlock, progress.waitingFor, t]);
 
-  const edges = useMemo<RoutedEdge[]>(
-    () =>
-      (layout?.edges ?? []).map((laid) => ({
+  const edges = useMemo<RoutedEdge[]>(() => {
+    if (!layout) return [];
+    const ports = new Map(
+      nodes.map((n) => [
+        n.id,
+        { outputs: n.data.outputs.map((p) => p.id), inputs: n.data.inputs.map((p) => p.id) },
+      ]),
+    );
+    const blockY = new Map(layout.blocks.map((b) => [b.id, b.y]));
+    // The column each lane edge's vertical takes beside a card. Edges reaching the card from a
+    // lane above and from a lane below get disjoint column ranges; inside a range the port whose
+    // horizontal is furthest from the lane takes the outermost column, so no vertical crosses
+    // another port's horizontal on that side.
+    const ranks = portRanks(layout.edges, ports, blockY);
+    return layout.edges.map((laid) => {
+      const key = transitionKey(laid.from, laid.transition);
+      return {
         id: laid.id,
         source: laid.from,
         target: laid.to,
-        sourceHandle: `out:${transitionKey(laid.from, laid.transition)}`,
-        targetHandle: `in:${transitionKey(laid.from, laid.transition)}`,
+        sourceHandle: `out:${key}`,
+        targetHandle: `in:${key}`,
         type: "routed",
         selectable: false,
         focusable: false,
-        data: { laid, vertical: Boolean(layout?.transposed) },
+        data: {
+          laid,
+          vertical: Boolean(layout.transposed),
+          outRank: ranks.out.get(laid.id) ?? 0,
+          inRank: ranks.in.get(laid.id) ?? 0,
+        },
         // Cycles are drawn above forward edges so a loop is never hidden behind one; hub bundles
         // sit beneath everything so they read as background wiring.
         zIndex: laid.kind === "cycle" ? 1 : laid.kind === "hub" ? -1 : 0,
-      })),
-    [layout],
-  );
+      };
+    });
+  }, [layout, nodes]);
 
   if (!layout) {
     return (
@@ -535,80 +642,92 @@ function CanvasInner({
   // The box clips its own content: a block laid out beyond the fitted viewport must not reach
   // out of the diagram and stay hit-testable over the contents sidebar beside it.
   return (
-    <div
-      ref={wrapperRef}
-      className="h-full w-full overflow-hidden bg-muted/20"
-      data-testid="canvas-view"
-      data-canvas-size={`${Math.round(layout.width)}x${Math.round(layout.height)}`}
-    >
-      <DiagramViewport<BlockNode, RoutedEdge>
-        kind="canvas"
-        nodes={nodes}
-        edges={edges}
-        nodeTypes={nodeTypes}
-        edgeTypes={edgeTypes}
-        colorMode={actualTheme}
-        onInit={onInit}
-        onReady={onReady}
-        onFit={fitOverview}
-        controlButtons={<LayoutPresetButtons />}
+    <div className="flex h-full w-full flex-col overflow-hidden">
+      <DiagramToolbar
+        leading={toolbarLeading}
+        finder={<NodeFinder blocks={blocks} steps={allSteps} onPick={onSelectBlock} />}
+        onZoomIn={() => void rfRef.current?.zoomIn({ duration: 200 })}
+        onZoomOut={() => void rfRef.current?.zoomOut({ duration: 200 })}
+        onFit={() => rfRef.current && fitOverview(rfRef.current)}
+        testId="map-toolbar"
+      />
+      <div
+        ref={wrapperRef}
+        className="min-h-0 flex-1 overflow-hidden bg-muted/20"
+        data-testid="canvas-view"
+        data-canvas-size={`${Math.round(layout.width)}x${Math.round(layout.height)}`}
       >
-        <svg aria-hidden="true">
-          <defs>
-            <marker
-              id="run-arrow"
-              viewBox="0 0 10 10"
-              refX="9"
-              refY="5"
-              markerWidth="8"
-              markerHeight="8"
-              orient="auto-start-reverse"
-            >
-              <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--border)" />
-            </marker>
-            <marker
-              id="run-arrow-hub"
-              viewBox="0 0 10 10"
-              refX="9"
-              refY="5"
-              markerWidth="7"
-              markerHeight="7"
-              orient="auto-start-reverse"
-            >
-              <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--muted-foreground)" />
-            </marker>
-            <marker
-              id="run-arrow-cycle"
-              viewBox="0 0 10 10"
-              refX="9"
-              refY="5"
-              markerWidth="8"
-              markerHeight="8"
-              orient="auto-start-reverse"
-            >
-              <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--primary)" />
-            </marker>
-            <marker
-              id="run-arrow-cycle-muted"
-              viewBox="0 0 10 10"
-              refX="9"
-              refY="5"
-              markerWidth="7"
-              markerHeight="7"
-              orient="auto-start-reverse"
-            >
-              <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--primary)" fillOpacity={0.5} />
-            </marker>
-          </defs>
-        </svg>
-        <Background gap={24} size={1} />
-      </DiagramViewport>
+        <DiagramViewport<BlockNode, RoutedEdge>
+          kind="canvas"
+          nodes={nodes}
+          edges={edges}
+          nodeTypes={nodeTypes}
+          edgeTypes={edgeTypes}
+          colorMode={actualTheme}
+          onInit={onInit}
+          onReady={onReady}
+          onFit={fitOverview}
+          showControls={false}
+        >
+          <svg aria-hidden="true">
+            <defs>
+              <marker
+                id="run-arrow"
+                viewBox="0 0 10 10"
+                refX="9"
+                refY="5"
+                markerWidth="8"
+                markerHeight="8"
+                orient="auto-start-reverse"
+              >
+                <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--border)" />
+              </marker>
+              <marker
+                id="run-arrow-hub"
+                viewBox="0 0 10 10"
+                refX="9"
+                refY="5"
+                markerWidth="7"
+                markerHeight="7"
+                orient="auto-start-reverse"
+              >
+                <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--muted-foreground)" />
+              </marker>
+              <marker
+                id="run-arrow-cycle"
+                viewBox="0 0 10 10"
+                refX="9"
+                refY="5"
+                markerWidth="8"
+                markerHeight="8"
+                orient="auto-start-reverse"
+              >
+                <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--primary)" />
+              </marker>
+              <marker
+                id="run-arrow-cycle-muted"
+                viewBox="0 0 10 10"
+                refX="9"
+                refY="5"
+                markerWidth="7"
+                markerHeight="7"
+                orient="auto-start-reverse"
+              >
+                <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--primary)" fillOpacity={0.5} />
+              </marker>
+            </defs>
+          </svg>
+          <Background gap={24} size={1} />
+        </DiagramViewport>
+      </div>
     </div>
   );
 }
 
 /** The diagram alone, with its transition focus: the map view supplies the frame around it. */
-export function CanvasDiagram(props: RunViewProps): React.JSX.Element {
+export function CanvasDiagram(
+  props: RunViewProps & { toolbarLeading?: React.ReactNode },
+): React.JSX.Element {
   return (
     <TransitionFocusProvider pinnedBlock={props.selectedBlockId}>
       <CanvasInner {...props} />

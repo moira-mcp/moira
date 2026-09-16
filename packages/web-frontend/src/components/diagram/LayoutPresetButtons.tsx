@@ -8,6 +8,7 @@ import { ControlButton } from "@xyflow/react";
 import { AlignHorizontalJustifyCenter, ArrowDownUp, Rows3, Shrink } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { LAYOUT_PRESETS, useLayoutPreset, type LayoutPreset } from "./layoutPreset";
+import { ToolbarButton } from "./DiagramToolbar";
 
 const ICONS: Record<LayoutPreset, React.ComponentType<{ className?: string }>> = {
   default: Rows3,
@@ -16,8 +17,38 @@ const ICONS: Record<LayoutPreset, React.ComponentType<{ className?: string }>> =
   vertical: ArrowDownUp,
 };
 
-export function LayoutPresetButtons(): React.JSX.Element {
+export function LayoutPresetButtons({
+  variant = "controls",
+}: {
+  /** `controls`: React Flow control buttons; `toolbar`: plain toolbar buttons. */
+  variant?: "controls" | "toolbar";
+}): React.JSX.Element {
   const [preset, setPreset] = useLayoutPreset();
+  if (variant === "toolbar") {
+    return (
+      <div className="flex items-center gap-0.5" data-testid="layout-preset-buttons">
+        {LAYOUT_PRESETS.map((entry) => {
+          const Icon = ICONS[entry.id];
+          const active = entry.id === preset;
+          return (
+            <ToolbarButton
+              key={entry.id}
+              onClick={() => setPreset(entry.id)}
+              title={`${entry.label} — ${entry.hint}`}
+              label={entry.label}
+              active={active}
+              dataAttributes={{
+                "data-layout-preset": entry.id,
+                "data-active": active ? "true" : undefined,
+              }}
+            >
+              <Icon className="size-4" />
+            </ToolbarButton>
+          );
+        })}
+      </div>
+    );
+  }
   return (
     <div className="contents" data-testid="layout-preset-buttons">
       {LAYOUT_PRESETS.map((entry) => {

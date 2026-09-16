@@ -23,19 +23,16 @@ import React, { useState, useCallback, useEffect, useMemo, useRef } from "react"
 import {
   Background,
   MiniMap,
-  Panel,
   Node,
   Edge,
   ConnectionMode,
-  ControlButton,
   SelectionMode,
   type ReactFlowInstance as XyflowInstance,
 } from "@xyflow/react";
-import { ZoomIn } from "lucide-react";
 import { DiagramViewport } from "../diagram/DiagramViewport";
 import { useOpeningPlacement } from "../diagram/placement";
 import { useLayoutPreset } from "../diagram/layoutPreset";
-import { LayoutPresetButtons } from "../diagram/LayoutPresetButtons";
+import { DiagramToolbar } from "../diagram/DiagramToolbar";
 import { NodeFinder } from "../run/NodeFinder";
 
 import { graphModel, definitionBlocks } from "../run/graphModel";
@@ -702,87 +699,83 @@ export const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
   }
 
   return (
-    <div className={`h-full relative ${className}`}>
-      <TransitionFocusProvider pinnedBlock={null}>
-        <VariableProvider
-          value={{
-            registry: (workflow.variableRegistry ?? {}) as Record<string, VariableDefinition>,
-            onSelect: onVariableSelect,
-            selected: selectedVariable,
-          }}
-        >
-          <DiagramViewport
-            kind="graph"
-            controlsPosition="top-right"
-            nodes={nodes}
-            edges={edges}
-            // Disable change handlers for read-only view - major performance win
-            onNodesChange={undefined}
-            onEdgesChange={undefined}
-            onNodeClick={handleNodeClick}
-            // Without a click handler React Flow marks an unselectable edge `inactive` and takes
-            // its pointer events away, so it could never be hovered; the handler does nothing.
-            onEdgeClick={noopEdgeClick}
-            onInit={handleInit}
-            onReady={placementReady}
-            controlButtons={
-              showControls ? (
-                <div className="contents" data-testid="graph-layout-controls">
-                  <ControlButton
-                    onClick={handleFitView}
-                    title={t("components.workflowGraph.controls.fitViewTitle")}
-                    aria-label={t("components.workflowGraph.controls.fitView")}
-                    data-testid="graph-fit-view"
-                  >
-                    <ZoomIn />
-                  </ControlButton>
-                  <LayoutPresetButtons />
-                </div>
-              ) : undefined
-            }
-            nodeTypes={nodeTypes}
-            edgeTypes={edgeTypes}
-            connectionMode={ConnectionMode.Strict}
-            selectionMode={SelectionMode.Partial}
-            deleteKeyCode={null}
-            multiSelectionKeyCode={null}
-            colorMode={actualTheme}
-            style={{ backgroundColor }}
+    <div className={`h-full relative flex flex-col ${className}`}>
+      {showControls && (
+        <DiagramToolbar
+          finder={
+            <NodeFinder
+              blocks={graphBlocks}
+              steps={model.steps.map((s) => s.step)}
+              onPick={() => {}}
+              onPickStep={(stepId) => {
+                setFinderStep(stepId);
+                focusStep(stepId);
+                announceArrival(stepId);
+              }}
+              testId="graph-node-finder"
+            />
+          }
+          onZoomIn={() => void instanceRef.current?.zoomIn({ duration: 200 })}
+          onZoomOut={() => void instanceRef.current?.zoomOut({ duration: 200 })}
+          onFit={handleFitView}
+          testId="graph-toolbar"
+        />
+      )}
+      <div className="relative min-h-0 flex-1">
+        <TransitionFocusProvider pinnedBlock={null}>
+          <VariableProvider
+            value={{
+              registry: (workflow.variableRegistry ?? {}) as Record<string, VariableDefinition>,
+              onSelect: onVariableSelect,
+              selected: selectedVariable,
+            }}
           >
-            <GraphDefs />
-            <GraphMeasuredHeights onMeasured={handleMeasured} />
-            <Panel position="top-left" className="w-[280px]">
-              <NodeFinder
-                blocks={graphBlocks}
-                steps={model.steps.map((s) => s.step)}
-                onPick={() => {}}
-                onPickStep={(stepId) => {
-                  setFinderStep(stepId);
-                  focusStep(stepId);
-                  announceArrival(stepId);
-                }}
-                testId="graph-node-finder"
-              />
-            </Panel>
-            <Background gap={20} size={1} color={backgroundPatternColor} />
+            <DiagramViewport
+              kind="graph"
+              controlsPosition="top-right"
+              nodes={nodes}
+              edges={edges}
+              // Disable change handlers for read-only view - major performance win
+              onNodesChange={undefined}
+              onEdgesChange={undefined}
+              onNodeClick={handleNodeClick}
+              // Without a click handler React Flow marks an unselectable edge `inactive` and takes
+              // its pointer events away, so it could never be hovered; the handler does nothing.
+              onEdgeClick={noopEdgeClick}
+              onInit={handleInit}
+              onReady={placementReady}
+              showControls={false}
+              nodeTypes={nodeTypes}
+              edgeTypes={edgeTypes}
+              connectionMode={ConnectionMode.Strict}
+              selectionMode={SelectionMode.Partial}
+              deleteKeyCode={null}
+              multiSelectionKeyCode={null}
+              colorMode={actualTheme}
+              style={{ backgroundColor }}
+            >
+              <GraphDefs />
+              <GraphMeasuredHeights onMeasured={handleMeasured} />
+              <Background gap={20} size={1} color={backgroundPatternColor} />
 
-            {/* MiniMap with delayed render for better initial load performance */}
-            {showMinimap && showMiniMapDelayed && !mobile && (
-              <MiniMap
-                position="bottom-right"
-                nodeColor={(node) => {
-                  const nodeData = node.data as { color?: string };
-                  return nodeData?.color || "#3B82F6";
-                }}
-                maskColor="rgba(255, 255, 255, 0.2)"
-                nodeStrokeWidth={2}
-                zoomable={true}
-                pannable={true}
-              />
-            )}
-          </DiagramViewport>
-        </VariableProvider>
-      </TransitionFocusProvider>
+              {/* MiniMap with delayed render for better initial load performance */}
+              {showMinimap && showMiniMapDelayed && !mobile && (
+                <MiniMap
+                  position="bottom-right"
+                  nodeColor={(node) => {
+                    const nodeData = node.data as { color?: string };
+                    return nodeData?.color || "#3B82F6";
+                  }}
+                  maskColor="rgba(255, 255, 255, 0.2)"
+                  nodeStrokeWidth={2}
+                  zoomable={true}
+                  pannable={true}
+                />
+              )}
+            </DiagramViewport>
+          </VariableProvider>
+        </TransitionFocusProvider>
+      </div>
 
       {/* Legacy Node Detail Sheet — only when no external sidebar */}
       {showNodeDetails && !onNodeSelect && (
