@@ -3,7 +3,8 @@
   "metadata": {
     "name": "All Node Types Test",
     "version": "1.0.0",
-    "description": "Test workflow containing all supported node types for E2E testing"
+    "description": "Test workflow containing all supported node types for E2E testing",
+    "schemaVersion": 1
   },
   "nodes": [
     {
@@ -25,14 +26,19 @@
     {
       "type": "condition",
       "id": "condition-step",
-      "condition": {
-        "operator": "eq",
-        "left": "{{test_var}}",
-        "right": "value"
-      },
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": "{{test_var}}",
+            "right": "value"
+          },
+          "output": "true"
+        }
+      ],
       "connections": {
         "true": "expression-step",
-        "false": "telegram-step"
+        "default": "telegram-step"
       }
     },
     {

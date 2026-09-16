@@ -101,14 +101,19 @@ export const MCP_TEST_WORKFLOWS = {
         {
           type: "condition",
           id: "check",
-          condition: {
-            left: { contextPath: "testValue" },
-            operator: "eq",
-            right: "yes",
-          },
+          cases: [
+            {
+              when: {
+                left: { contextPath: "testValue" },
+                operator: "eq",
+                right: "yes",
+              },
+              output: "true",
+            },
+          ],
           connections: {
             true: "path_true",
-            false: "path_false",
+            default: "path_false",
           },
         },
         {

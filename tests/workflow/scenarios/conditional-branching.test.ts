@@ -40,14 +40,19 @@ const workflow: WorkflowGraph = {
     {
       type: "condition",
       id: "check-value",
-      condition: {
-        operator: "eq",
-        left: { contextPath: "value" },
-        right: "yes",
-      },
+      cases: [
+        {
+          when: {
+            operator: "eq",
+            left: { contextPath: "value" },
+            right: "yes",
+          },
+          output: "true",
+        },
+      ],
       connections: {
         true: "success-end",
-        false: "failure-end",
+        default: "failure-end",
       },
     },
     {

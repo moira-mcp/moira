@@ -71,6 +71,25 @@ export interface EndNode extends BaseNode {
   // Explicitly no connections property - terminal node
 }
 
+/**
+ * One routing case of a node that decides where the run continues. Cases are evaluated in
+ * authored order against the execution context (for an agent-directive node: the context after
+ * its validated answer has been merged); the first case whose `when` holds selects `output`,
+ * which names a key of the node's `connections`. When no case holds the node takes its default
+ * output (`default` on a condition node, `success` on an agent-directive node).
+ */
+export interface RoutingCase {
+  when: StructuredCondition;
+  output: string;
+}
+
+/**
+ * Connection keys a routing node reserves for control flow rather than for authored outcomes:
+ * `error` is taken when an expression on the node fails, `timeout` when the node times out.
+ * A case may not name them and they do not have to be covered by a case.
+ */
+export const RESERVED_CONTROL_OUTPUTS: readonly string[] = ["error", "timeout"];
+
 // 3. Agent Directive Node - Async agent tasks with safety features
 export interface AgentDirectiveNode extends BaseNode {
   type: "agent-directive";
@@ -83,28 +102,30 @@ export interface AgentDirectiveNode extends BaseNode {
   // global scope; a key described in `properties` is routed to the node-local scope; a key in
   // neither is rejected.
   inputSchema?: Record<string, unknown>;
+  /**
+   * Expressions evaluated after the agent's answer is validated and before routing; assignments
+   * write declared global variables. A failing expression routes to `connections.error` when it
+   * exists and fails the node otherwise, publishing nothing.
+   */
+  expressions?: string[];
+  /** Routing on the node's own validated answer; `success` is taken when no case holds. */
+  cases?: RoutingCase[];
 
-  // Legacy authoring fields retained for compatibility with stored definitions.
-  maxRetries?: number;
-  retryMessage?: string;
-  currentRetries?: number;
-
-  connections: {
-    success: string; // Next node on successful completion
-    error?: string; // Next node on error (v1: structure ready, not used)
-    timeout?: string; // Next node on timeout
-    maxRetriesExceeded?: string;
-  };
+  // `success` is the default output; `error`/`timeout` are control outputs; every other key is an
+  // authored output named by `cases`.
+  connections: { success: string; error?: string; timeout?: string } & Record<string, string>;
 }
 
-// 4. Condition Node - Structured condition evaluation
+// 4. Condition Node - ordered cases routing to N outputs
 export interface ConditionNode extends BaseNode {
   type: "condition";
-  condition: StructuredCondition; // NEW: Structured instead of string eval
-  connections: {
-    true: string; // Next node when condition evaluates to true
-    false: string; // Next node when condition evaluates to false
-  };
+  /** Expressions evaluated before the cases; see AgentDirectiveNode.expressions. */
+  expressions?: string[];
+  /** At least one case; the first whose `when` holds selects its output. */
+  cases: RoutingCase[];
+  // `default` is taken when no case holds; `error` when an expression fails; every other key is
+  // an authored output named by `cases`.
+  connections: { default: string; error?: string } & Record<string, string>;
 }
 
 // 5. Subgraph Node - Workflow composition and reuse
@@ -522,6 +543,25 @@ export function inlineGlobalInputs(
   } as unknown as GraphNode;
 }
 
+/** True when the node can carry `cases` (routing on its own result). */
+export function isRoutingNode(node: GraphNode): node is ConditionNode | AgentDirectiveNode {
+  return node.type === "condition" || node.type === "agent-directive";
+}
+
+/** The output a routing node takes when none of its cases holds. */
+export function defaultOutputOf(node: ConditionNode | AgentDirectiveNode): string {
+  return node.type === "condition" ? "default" : "success";
+}
+
+/**
+ * The connection keys of a routing node that its cases must cover: every key except the default
+ * output and the reserved control outputs (`error`, `timeout`).
+ */
+export function caseRoutableOutputs(node: ConditionNode | AgentDirectiveNode): string[] {
+  const reserved = new Set<string>([defaultOutputOf(node), ...RESERVED_CONTROL_OUTPUTS]);
+  return Object.keys(node.connections ?? {}).filter((key) => !reserved.has(key));
+}
+
 // Helper function for safe connection resolution
 export function getNextNodeId(node: GraphNode, outputPath: string): string | null {
   const connections = node.connections as Record<string, string> | undefined;
@@ -561,8 +601,11 @@ export function validateNodeConnections(node: GraphNode): { valid: boolean; erro
       break;
 
     case "condition":
-      if (!node.connections?.true || !node.connections?.false) {
-        errors.push('Condition node must have both "true" and "false" connections');
+      if (!node.connections?.default) {
+        errors.push('Condition node must have a "default" connection');
+      }
+      if (!Array.isArray(node.cases) || node.cases.length === 0) {
+        errors.push("Condition node must have at least one case");
       }
       break;
 

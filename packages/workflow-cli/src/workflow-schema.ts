@@ -538,8 +538,18 @@ export function renderWorkflowSchema(workflow: WorkflowSchemaInput): string {
       renderedNodes++;
       const preview = directivePreview(node);
       if (preview) lines.push(`    DIRECTIVE ${quotedText(preview)}`);
-      if (node.type === "condition") lines.push(`    CONDITION ${stableJson(node.condition)}`);
-      if (node.type === "expression")
+      if (node.type === "condition" || node.type === "agent-directive") {
+        (node.cases ?? []).forEach((routingCase) =>
+          lines.push(
+            `    CASE ${structuralToken(routingCase.output)} WHEN ${stableJson(routingCase.when)}`,
+          ),
+        );
+      }
+      if (
+        node.type === "expression" ||
+        node.type === "condition" ||
+        node.type === "agent-directive"
+      )
         (node.expressions ?? []).forEach((expression) =>
           lines.push(`    EXPRESSION ${quotedText(expression)}`),
         );

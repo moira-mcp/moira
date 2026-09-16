@@ -44,6 +44,7 @@ import { fileURLToPath } from "node:url";
 import type { WorkflowGraph, GraphNode } from "@mcp-moira/workflow-engine";
 import { renderWorkflowSchema } from "./workflow-schema.js";
 import { renderWorkflowDerivation } from "./workflow-derive.js";
+import { migrateWorkflowGraph } from "@mcp-moira/workflow-engine/migration";
 import {
   addBlock,
   clearConnectionLabel,
@@ -370,7 +371,8 @@ function moveNode(workflow: WorkflowGraph, nodeId: string, afterNodeId: string):
 
 interface UpdateOptions {
   directive?: string;
-  condition?: string;
+  cases?: string;
+  expressions?: string;
   message?: string;
   inputSchema?: string;
   completionCondition?: string;
@@ -406,13 +408,39 @@ function updateNode(
     console.log(c("green", `✓ Updated directive`));
   }
 
-  if (options.condition !== undefined) {
+  if (options.cases !== undefined) {
     try {
-      node.condition = JSON.parse(options.condition);
+      const parsed = JSON.parse(options.cases);
+      if (!Array.isArray(parsed)) throw new Error("cases must be a JSON array");
+      node.cases = parsed;
       changes++;
-      console.log(c("green", `✓ Updated condition`));
-    } catch {
-      console.log(c("red", `✗ Invalid JSON in condition: ${options.condition}`));
+      console.log(c("green", `✓ Updated cases`));
+    } catch (error) {
+      console.log(
+        c(
+          "red",
+          `✗ Invalid JSON in cases: ${error instanceof Error ? error.message : String(error)}`,
+        ),
+      );
+      process.exit(1);
+    }
+  }
+
+  if (options.expressions !== undefined) {
+    try {
+      const parsed = JSON.parse(options.expressions);
+      if (!Array.isArray(parsed) || parsed.some((item) => typeof item !== "string"))
+        throw new Error("expressions must be a JSON array of strings");
+      node.expressions = parsed;
+      changes++;
+      console.log(c("green", `✓ Updated expressions`));
+    } catch (error) {
+      console.log(
+        c(
+          "red",
+          `✗ Invalid JSON in expressions: ${error instanceof Error ? error.message : String(error)}`,
+        ),
+      );
       process.exit(1);
     }
   }
@@ -599,7 +627,7 @@ function updateNode(
     console.log(
       c(
         "yellow",
-        "No changes specified. Use --directive, --completion-condition, --input-schema, --condition, --message, --connections, --progress-node-id, --progress-active-label, --progress-active-content, --attach-progress-image, or --add-connection",
+        "No changes specified. Use --directive, --completion-condition, --input-schema, --cases, --expressions, --message, --connections, --progress-node-id, --progress-active-label, --progress-active-content, --attach-progress-image, or --add-connection",
       ),
     );
     process.exit(0);
@@ -1309,12 +1337,18 @@ function showStructure(workflow: WorkflowGraph, config: StructureConfig): void {
         console.log(`    ${c("dim", "Directive:")} ${directive.split("\n")[0]}`);
       }
 
-      if ("condition" in node && node.condition) {
-        const condition =
-          String(node.condition).length > MAX_CONDITION_LENGTH
-            ? String(node.condition).substring(0, MAX_CONDITION_LENGTH) + "..."
-            : String(node.condition);
-        console.log(`    ${c("dim", "Condition:")} ${condition}`);
+      if ("cases" in node && Array.isArray(node.cases)) {
+        for (const routingCase of node.cases as Array<{ when: unknown; output: string }>) {
+          const when = JSON.stringify(routingCase.when);
+          const shown =
+            when.length > MAX_CONDITION_LENGTH
+              ? when.substring(0, MAX_CONDITION_LENGTH) + "..."
+              : when;
+          console.log(`    ${c("dim", "Case:")} ${routingCase.output} when ${shown}`);
+        }
+      }
+      if ("expressions" in node && Array.isArray(node.expressions) && node.type !== "expression") {
+        console.log(`    ${c("dim", "Expressions:")} ${(node.expressions as string[]).join("; ")}`);
       }
 
       if ("message" in node && node.message) {
@@ -1417,11 +1451,11 @@ function cmdDiff(workflow1: WorkflowGraph, workflow2Path: string): void {
       )
         changes.push("inputSchema");
       if (
-        "condition" in node1 &&
-        "condition" in node2 &&
-        JSON.stringify(node1.condition) !== JSON.stringify(node2.condition)
+        "cases" in node1 &&
+        "cases" in node2 &&
+        JSON.stringify(node1.cases) !== JSON.stringify(node2.cases)
       )
-        changes.push("condition");
+        changes.push("cases");
       if ("message" in node1 && "message" in node2 && node1.message !== node2.message)
         changes.push("message");
       if (
@@ -1672,6 +1706,7 @@ ${c("cyan", "Commands:")}
   structure [--graph] [--detailed] Show workflow structure
   schema                           Print one deterministic control-flow schema
   derive                           Print the process projection: blocks, transitions, returns, diagnostics
+  migrate                          Upgrade the definition to the current schema version in place
   set-label <node> <key> <text> [--cause <text> --exit <text>]
                                    Label a connection; --cause/--exit explain it as a return
   clear-label <node> <key>         Remove a connection label
@@ -1715,7 +1750,8 @@ ${c("cyan", "Update Options:")}
   --progress-active-label <text|none>   Set or clear its active-only block label
   --progress-active-content <json|none> Set or clear its active-only structured content
   --attach-progress-image <true|false>  Toggle progress image on notification nodes
-  --condition "expression"             Update condition
+  --cases '[{"when":{...},"output":"key"}]'  Update routing cases (condition / agent-directive)
+  --expressions '["a = a + 1"]'       Update node expressions
   --message "text"                     Update message
   --connections '{"key":"target"}'     Update connections
   --add-connection <key> <target>      Add connection
@@ -1803,8 +1839,11 @@ ${c("cyan", "Examples:")}
       }
       config.options.directive = fs.readFileSync(filePath, "utf-8").trim();
       i++;
-    } else if (args[i] === "--condition" && args[i + 1]) {
-      config.options.condition = args[i + 1];
+    } else if (args[i] === "--cases" && args[i + 1]) {
+      config.options.cases = args[i + 1];
+      i++;
+    } else if (args[i] === "--expressions" && args[i + 1]) {
+      config.options.expressions = args[i + 1];
       i++;
     } else if (args[i] === "--message" && args[i + 1]) {
       config.options.message = args[i + 1];
@@ -2028,6 +2067,23 @@ async function main(): Promise<void> {
         process.exitCode = 1;
       }
       break;
+
+    case "migrate": {
+      // Upgrade the definition to the current schema version in place. The same pure migration
+      // runs wherever a definition enters the server, so a migrated file is exactly what the
+      // server would see; migrating it here lets the author read and edit the current shape.
+      const migration = migrateWorkflowGraph(workflow);
+      if (!migration.changed) {
+        console.log(c("green", `✓ Already at schema version ${migration.to}; nothing to migrate`));
+        break;
+      }
+      createBackup(config.file);
+      saveWorkflow(config.file, migration.graph, undefined, { ...saveOptions, force: true });
+      console.log(
+        c("green", `✓ Migrated from schema version ${migration.from} to ${migration.to}`),
+      );
+      break;
+    }
 
     case "set-label":
     case "clear-label":

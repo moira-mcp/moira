@@ -587,8 +587,10 @@ describe("execution run projection", () => {
           id: "gate",
           type: "condition",
           progressNodeId: "g",
-          condition: { operator: "eq", left: { contextPath: "go" }, right: true },
-          connections: { true: "do-b", false: "do-g" },
+          cases: [
+            { when: { operator: "eq", left: { contextPath: "go" }, right: true }, output: "true" },
+          ],
+          connections: { true: "do-b", default: "do-g" },
           connectionLabels: { true: "go" },
         },
         {

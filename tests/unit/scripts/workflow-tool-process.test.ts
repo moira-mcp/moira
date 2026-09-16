@@ -53,8 +53,13 @@ function fixture(): string {
         {
           id: "verify",
           type: "condition",
-          condition: { operator: "eq", left: { contextPath: "do.ok" }, right: true },
-          connections: { true: "end", false: "do" },
+          cases: [
+            {
+              when: { operator: "eq", left: { contextPath: "do.ok" }, right: true },
+              output: "true",
+            },
+          ],
+          connections: { true: "end", default: "do" },
         },
         { id: "end", type: "end", progressNodeId: "check" },
       ],
@@ -86,7 +91,7 @@ describe("workflow-tool process block authoring", () => {
       file,
       "set-label",
       "verify",
-      "false",
+      "default",
       "check failed",
       "--cause",
       "The check found a problem",
@@ -95,7 +100,7 @@ describe("workflow-tool process block authoring", () => {
       "--no-version-bump",
     ]);
     expect(read(file).nodes[2].connectionLabels).toEqual({
-      false: {
+      default: {
         label: "check failed",
         cycle: { cause: "The check found a problem", exit: "The check passes" },
       },
@@ -168,7 +173,7 @@ describe("workflow-tool process block authoring", () => {
   test.each([
     ["an unknown node", ["set-label", "ghost", "success", "x"]],
     ["an unknown connection key", ["set-label", "do", "failure", "x"]],
-    ["a return with only a cause", ["set-label", "verify", "false", "x", "--cause", "c"]],
+    ["a return with only a cause", ["set-label", "verify", "default", "x", "--cause", "c"]],
     ["moving a node to an unknown block", ["set-block", "do", "ghost"]],
     ["a duplicate block id", ["add-block", "work", "Work", "Again"]],
     ["editing an unknown block", ["edit-block", "ghost", "--summary", "x"]],

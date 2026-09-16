@@ -50,8 +50,8 @@ describe("Node Type Validation", () => {
         {
           id: "cond",
           type: "condition",
-          condition: { operator: "eq", left: "a", right: "b" },
-          connections: { true: "end", false: "end" },
+          cases: [{ when: { operator: "eq", left: "a", right: "b" }, output: "true" }],
+          connections: { true: "end", default: "end" },
         },
       ]);
 
@@ -66,8 +66,8 @@ describe("Node Type Validation", () => {
         {
           id: "cond",
           type: "condition",
-          condition: { operator: "equals", left: "a", right: "b" },
-          connections: { true: "end", false: "end" },
+          cases: [{ when: { operator: "equals", left: "a", right: "b" }, output: "true" }],
+          connections: { true: "end", default: "end" },
         },
       ]);
 
@@ -84,8 +84,8 @@ describe("Node Type Validation", () => {
         {
           id: "cond",
           type: "condition",
-          condition: { operator: "gt", right: 5 },
-          connections: { true: "end", false: "end" },
+          cases: [{ when: { operator: "gt", right: 5 }, output: "true" }],
+          connections: { true: "end", default: "end" },
         },
       ]);
 
@@ -101,8 +101,8 @@ describe("Node Type Validation", () => {
         {
           id: "cond",
           type: "condition",
-          condition: { operator: "lt", left: { contextPath: "count" } },
-          connections: { true: "end", false: "end" },
+          cases: [{ when: { operator: "lt", left: { contextPath: "count" } }, output: "true" }],
+          connections: { true: "end", default: "end" },
         },
       ]);
 
@@ -118,8 +118,8 @@ describe("Node Type Validation", () => {
         {
           id: "cond",
           type: "condition",
-          condition: { operator: "exists" },
-          connections: { true: "end", false: "end" },
+          cases: [{ when: { operator: "exists" }, output: "true" }],
+          connections: { true: "end", default: "end" },
         },
       ]);
 
@@ -135,8 +135,8 @@ describe("Node Type Validation", () => {
         {
           id: "cond",
           type: "condition",
-          condition: { operator: "and" },
-          connections: { true: "end", false: "end" },
+          cases: [{ when: { operator: "and" }, output: "true" }],
+          connections: { true: "end", default: "end" },
         },
       ]);
 
@@ -152,8 +152,8 @@ describe("Node Type Validation", () => {
         {
           id: "cond",
           type: "condition",
-          condition: { operator: "or", conditions: [] },
-          connections: { true: "end", false: "end" },
+          cases: [{ when: { operator: "or", conditions: [] }, output: "true" }],
+          connections: { true: "end", default: "end" },
         },
       ]);
 
@@ -169,8 +169,8 @@ describe("Node Type Validation", () => {
         {
           id: "cond",
           type: "condition",
-          condition: { operator: "not" },
-          connections: { true: "end", false: "end" },
+          cases: [{ when: { operator: "not" }, output: "true" }],
+          connections: { true: "end", default: "end" },
         },
       ]);
 
@@ -184,11 +184,16 @@ describe("Node Type Validation", () => {
         {
           id: "cond",
           type: "condition",
-          condition: {
-            operator: "and",
-            conditions: [{ operator: "eq", left: "a", right: "b" }, { operator: "invalid_op" }],
-          },
-          connections: { true: "end", false: "end" },
+          cases: [
+            {
+              when: {
+                operator: "and",
+                conditions: [{ operator: "eq", left: "a", right: "b" }, { operator: "invalid_op" }],
+              },
+              output: "true",
+            },
+          ],
+          connections: { true: "end", default: "end" },
         },
       ]);
 
@@ -205,17 +210,22 @@ describe("Node Type Validation", () => {
         {
           id: "cond",
           type: "condition",
-          condition: {
-            operator: "and",
-            conditions: [
-              { operator: "gt", left: { contextPath: "count" }, right: 0 },
-              {
-                operator: "not",
-                condition: { operator: "exists", value: { contextPath: "error" } },
+          cases: [
+            {
+              when: {
+                operator: "and",
+                conditions: [
+                  { operator: "gt", left: { contextPath: "count" }, right: 0 },
+                  {
+                    operator: "not",
+                    condition: { operator: "exists", value: { contextPath: "error" } },
+                  },
+                ],
               },
-            ],
-          },
-          connections: { true: "end", false: "end" },
+              output: "true",
+            },
+          ],
+          connections: { true: "end", default: "end" },
         },
       ]);
 
@@ -231,8 +241,8 @@ describe("Node Type Validation", () => {
           {
             id: "cond",
             type: "condition",
-            condition: { operator: op, left: "a", right: "b" },
-            connections: { true: "end", false: "end" },
+            cases: [{ when: { operator: op, left: "a", right: "b" }, output: "true" }],
+            connections: { true: "end", default: "end" },
           },
         ]);
 
@@ -242,6 +252,126 @@ describe("Node Type Validation", () => {
         );
         expect(opErrors).toHaveLength(0);
       }
+    });
+  });
+
+  describe("routing cases", () => {
+    test("a three-way condition with every output covered passes", async () => {
+      const wf = validSkeleton([
+        {
+          id: "route",
+          type: "condition",
+          cases: [
+            { when: { operator: "eq", left: { contextPath: "count" }, right: 1 }, output: "one" },
+            { when: { operator: "eq", left: { contextPath: "count" }, right: 2 }, output: "two" },
+          ],
+          connections: { one: "end", two: "end", default: "end", error: "end" },
+        },
+      ]);
+      const result = await validator.validateUnified(wf);
+      expect(result.issues.filter((i) => i.severity === "error")).toEqual([]);
+    });
+
+    test("a case naming an output that is not a connection is an unknown-case-output error", async () => {
+      const wf = validSkeleton([
+        {
+          id: "route",
+          type: "condition",
+          cases: [
+            { when: { operator: "exists", value: { contextPath: "count" } }, output: "missing" },
+          ],
+          connections: { default: "end" },
+        },
+      ]);
+      const result = await validator.validateUnified(wf);
+      const issue = result.issues.find(
+        (i) => i.nodeId === "route" && i.message.includes("unknown-case-output"),
+      );
+      expect(issue?.severity).toBe("error");
+      expect(issue?.message).toContain('"missing"');
+    });
+
+    test("an authored output no case names is an unreachable-output warning; error/timeout are exempt", async () => {
+      const wf = validSkeleton([
+        {
+          id: "route",
+          type: "condition",
+          cases: [{ when: { operator: "exists", value: { contextPath: "count" } }, output: "yes" }],
+          connections: { yes: "end", stray: "end", default: "end", error: "end" },
+        },
+      ]);
+      const result = await validator.validateUnified(wf);
+      const unreachable = result.issues.filter((i) => i.message.includes("unreachable-output"));
+      expect(unreachable.map((i) => i.field)).toEqual(["connections.stray"]);
+      expect(unreachable[0]!.severity).toBe("warning");
+      expect(result.valid).toBe(true);
+    });
+
+    test("a case may not name a reserved control output", async () => {
+      const wf = validSkeleton([
+        {
+          id: "route",
+          type: "condition",
+          cases: [
+            { when: { operator: "exists", value: { contextPath: "count" } }, output: "error" },
+          ],
+          connections: { default: "end", error: "end" },
+        },
+      ]);
+      const result = await validator.validateUnified(wf);
+      expect(
+        result.issues.some(
+          (i) => i.severity === "error" && i.message.includes("reserved control output"),
+        ),
+      ).toBe(true);
+    });
+
+    test("a directive's cases and expressions are validated like a condition's", async () => {
+      const wf = validSkeleton([
+        {
+          id: "ask",
+          type: "agent-directive",
+          directive: "Ask",
+          completionCondition: "Asked",
+          inputSchema: { type: "object", properties: { answer: { type: "string" } } },
+          expressions: ["count = count + (1"],
+          cases: [
+            {
+              when: { operator: "eq", left: { contextPath: "ask.answer" }, right: "x" },
+              output: "x",
+            },
+          ],
+          connections: { success: "end", x: "end", y: "end" },
+        },
+      ]);
+      const result = await validator.validateUnified(wf);
+      const errors = result.issues.filter((i) => i.severity === "error").map((i) => i.message);
+      expect(errors.some((m) => m.includes("unbalanced parentheses"))).toBe(true);
+      const warnings = result.issues.filter((i) => i.severity === "warning").map((i) => i.message);
+      expect(warnings.some((m) => m.includes("unreachable-output") && m.includes('"y"'))).toBe(
+        true,
+      );
+    });
+
+    test("the pre-routing condition shape is migrated, not rejected", async () => {
+      const wf = validSkeleton([
+        {
+          id: "cond",
+          type: "condition",
+          condition: { operator: "eq", left: "a", right: "b" },
+          connections: { true: "end", false: "end" },
+        },
+      ]);
+      const result = await validator.validateUnified(wf);
+      expect(result.issues.filter((i) => i.severity === "error")).toEqual([]);
+    });
+
+    test("a condition without cases is rejected", async () => {
+      const wf = validSkeleton([
+        { id: "cond", type: "condition", cases: [], connections: { default: "end" } },
+      ]);
+      const result = await validator.validateUnified(wf);
+      expect(result.valid).toBe(false);
     });
   });
 
@@ -384,8 +514,8 @@ describe("Node Type Validation", () => {
         {
           id: "cond",
           type: "condition",
-          condition: { operator: "exists", value: { contextPath: "user" } },
-          connections: { true: "step", false: "end" },
+          cases: [{ when: { operator: "exists", value: { contextPath: "user" } }, output: "true" }],
+          connections: { true: "step", default: "end" },
         },
         {
           id: "step",
@@ -415,8 +545,8 @@ describe("Node Type Validation", () => {
         {
           id: "cond",
           type: "condition",
-          condition: { operator: "invalid" },
-          connections: { true: "expr", false: "end" },
+          cases: [{ when: { operator: "invalid" }, output: "true" }],
+          connections: { true: "expr", default: "end" },
         },
         {
           id: "expr",
@@ -452,23 +582,27 @@ describe("Node Type Validation", () => {
       expect(startError!.message).toContain("start2");
     });
 
-    test("condition node with extra connection keys is rejected by schema", async () => {
+    test("condition node with a connection key no case names is warned as an unreachable output", async () => {
       const wf = makeWorkflow([
         { id: "start", type: "start", connections: { default: "cond" } },
         {
           id: "cond",
           type: "condition",
-          condition: { operator: "eq", left: "a", right: "b" },
-          connections: { true: "end", false: "end", other: "end" },
+          cases: [{ when: { operator: "eq", left: "a", right: "b" }, output: "true" }],
+          connections: { true: "end", default: "end", other: "end" },
         },
         { id: "end", type: "end" },
       ]);
 
       const result = await validator.validateUnified(wf);
-      expect(result.valid).toBe(false);
-      // AJV should reject the extra "other" connection key
-      const schemaError = result.issues.find((i) => i.type === "schema" && i.nodeId === "cond");
-      expect(schemaError).toBeDefined();
+      // An extra connection key is an authored output; without a case it can never be taken,
+      // which is reported as a warning (like an unreachable node) rather than rejected.
+      expect(result.valid).toBe(true);
+      const unreachable = result.issues.find(
+        (i) => i.nodeId === "cond" && i.message.includes("unreachable-output"),
+      );
+      expect(unreachable?.field).toBe("connections.other");
+      expect(unreachable?.severity).toBe("warning");
     });
 
     test("subgraph self-reference is an error, not warning", async () => {

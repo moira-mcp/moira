@@ -2443,6 +2443,7 @@
         "message": "Сообщение",
         "condition": "Условие",
         "expressions": "Выражения",
+        "cases": "Ветвления",
         "subgraphId": "ID подграфа",
         "validation": "Валидация",
         "inputSchema": "Схема ввода",

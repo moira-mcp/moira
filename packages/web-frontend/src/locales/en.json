@@ -2428,6 +2428,7 @@
         "message": "Message",
         "condition": "Condition",
         "expressions": "Expressions",
+        "cases": "Cases",
         "subgraphId": "Subgraph ID",
         "validation": "Validation",
         "inputSchema": "Input Schema",

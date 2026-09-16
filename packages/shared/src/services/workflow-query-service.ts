@@ -822,6 +822,20 @@ export function analyzeVariableUsage(workflow: WorkflowGraph): VariableAnalysis 
     // Handle object format: { operator: "lt", left: { contextPath: "var" }, right: 0 }
     if (typeof condition === "object") {
       const condObj = condition as Record<string, unknown>;
+      // Logical operators nest conditions; `exists` reads a value.
+      if (Array.isArray(condObj.conditions)) {
+        for (const nested of condObj.conditions) extractFromCondition(nested, nodeId);
+      }
+      if (condObj.condition && typeof condObj.condition === "object") {
+        extractFromCondition(condObj.condition, nodeId);
+      }
+      if (condObj.value && typeof condObj.value === "object") {
+        const value = condObj.value as Record<string, unknown>;
+        if (value.contextPath && typeof value.contextPath === "string") {
+          const varName = value.contextPath.split(".")[0];
+          addUsage(varName, { nodeId, field: "condition", context: JSON.stringify(condition) });
+        }
+      }
       if (condObj.left && typeof condObj.left === "object") {
         const left = condObj.left as Record<string, unknown>;
         if (left.contextPath && typeof left.contextPath === "string") {
@@ -940,8 +954,12 @@ export function analyzeVariableUsage(workflow: WorkflowGraph): VariableAnalysis 
     extractFromTemplate(nodeAny.completionCondition, node.id, "completionCondition");
     extractFromTemplate(nodeAny.message, node.id, "message");
 
-    // Usages: conditions
-    extractFromCondition(nodeAny.condition, node.id);
+    // Usages: routing cases (condition and agent-directive nodes)
+    if (Array.isArray(nodeAny.cases)) {
+      for (const routingCase of nodeAny.cases as Array<{ when?: unknown }>) {
+        extractFromCondition(routingCase?.when, node.id);
+      }
+    }
   }
 
   return analysis;

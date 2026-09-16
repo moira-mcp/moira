@@ -136,7 +136,7 @@ describe("GraphValidator Error Messages", () => {
             id: "check",
             type: "condition",
             // Missing required 'condition' field
-            connections: { true: "end", false: "end" },
+            connections: { true: "end", default: "end" },
           },
           { id: "end", type: "end" },
         ],
@@ -247,8 +247,10 @@ describe("GraphValidator Error Messages", () => {
           {
             id: "check",
             type: "condition",
-            condition: { operator: "eq", left: { contextPath: "x" }, right: 1 },
-            connections: { true: "end", false: "end" },
+            cases: [
+              { when: { operator: "eq", left: { contextPath: "x" }, right: 1 }, output: "true" },
+            ],
+            connections: { true: "end", default: "end" },
           },
           { id: "end", type: "end" },
         ],
@@ -312,8 +314,13 @@ describe("GraphValidator Error Messages", () => {
           {
             id: "check",
             type: "condition",
-            condition: { operator: "eq", left: { contextPath: "missing_var" }, right: 1 },
-            connections: { true: "end", false: "end" },
+            cases: [
+              {
+                when: { operator: "eq", left: { contextPath: "missing_var" }, right: 1 },
+                output: "true",
+              },
+            ],
+            connections: { true: "end", default: "end" },
           },
           { id: "end", type: "end" },
         ],
@@ -347,8 +354,13 @@ describe("GraphValidator Error Messages", () => {
             id: "check",
             // Root segment 'produce' is a node id → valid node-local reference.
             type: "condition",
-            condition: { operator: "eq", left: { contextPath: "produce.value" }, right: 1 },
-            connections: { true: "end", false: "end" },
+            cases: [
+              {
+                when: { operator: "eq", left: { contextPath: "produce.value" }, right: 1 },
+                output: "true",
+              },
+            ],
+            connections: { true: "end", default: "end" },
           },
           { id: "end", type: "end" },
         ],

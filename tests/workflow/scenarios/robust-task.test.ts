@@ -534,7 +534,7 @@ describe("Robust Task cause-aware contract", () => {
     expect(workflow.variableRegistry?.operating_mode?.enum).toEqual(["autonomous", "interactive"]);
     expect(node(workflow, "route-operating-mode-plan-approval").connections).toEqual({
       true: "check-all-steps-done",
-      false: "approve-plan",
+      default: "approve-plan",
     });
     expect(node(workflow, "notify-plan-ready").connections).toEqual({
       default: "route-operating-mode-plan-approval",
