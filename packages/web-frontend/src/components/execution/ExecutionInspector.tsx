@@ -264,9 +264,14 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
     [editable, executionId, fetchExecution, loadProgress, t],
   );
 
+  // The first load happens once per execution. `loadExecution` is recreated whenever one of its
+  // inputs changes identity (a URL parameter, a callback), and re-running it on every such
+  // change swapped the whole page for a loader — the "blink" on selecting a block.
+  const loadExecutionRef = useRef(loadExecution);
+  loadExecutionRef.current = loadExecution;
   useEffect(() => {
-    loadExecution();
-  }, [loadExecution]);
+    void loadExecutionRef.current();
+  }, [executionId]);
 
   // Fetch the graph's chunk while the run is loading, so the first switch to the graph view has
   // nothing to download and shows no skeleton.
@@ -582,7 +587,8 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
     }
   };
 
-  if (loading) {
+  // A page-wide loader only while there is nothing to show yet; a refresh keeps the page.
+  if (loading && !execution) {
     return (
       <div className="flex items-center justify-center h-full">
         <div className="text-muted-foreground">{t("pages.executionInspector.loading")}</div>
