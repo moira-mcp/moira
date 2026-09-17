@@ -59,7 +59,7 @@ export const VisibilityToggle: React.FC<VisibilityToggleProps> = ({
       className="gap-1.5"
       disabled={disabled}
       onClick={() => onChange(isPublic ? "private" : "public")}
-      title={t("access.toggleHint")}
+      data-hint={t("access.toggleHint")}
       data-testid={testId}
       data-visibility={visibility}
     >

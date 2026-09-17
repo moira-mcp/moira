@@ -101,9 +101,9 @@ describe("the outgoing connections of a routing node", () => {
   test("each chip's tooltip reads output → target so it survives truncation", () => {
     renderPanel([{ output: "blocker", summary: "a blocking defect was found" }]);
     const chips = screen.getAllByTestId("outgoing-connection");
-    expect(chips[0].getAttribute("title")).toBe(
+    expect(chips[0].getAttribute("data-hint")).toBe(
       "blocker → Fix the work · a blocking defect was found",
     );
-    expect(chips[3].getAttribute("title")).toBe("default → Ship it");
+    expect(chips[3].getAttribute("data-hint")).toBe("default → Ship it");
   });
 });

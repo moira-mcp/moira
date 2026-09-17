@@ -52,7 +52,7 @@ export function OutgoingConnectionChips({
             className="text-xs font-normal"
             data-testid="outgoing-connection"
             data-output={connection.connectionType}
-            title={
+            data-hint={
               summary
                 ? `${connection.connectionType} → ${target} · ${summary}`
                 : `${connection.connectionType} → ${target}`

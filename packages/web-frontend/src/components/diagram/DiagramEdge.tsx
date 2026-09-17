@@ -131,8 +131,15 @@ export function DiagramEdge({
       data-transition={transitionKey}
       data-focused={emphasised ? "true" : undefined}
       data-dimmed={dim ? "true" : undefined}
+      // The edge explains itself through the application's hint, anchored at the pointer (a
+      // long lane's box is nowhere near it), never through the browser's own title bubble; the
+      // same text is the accessible name. It is named, not advertised as a control: travel along
+      // it is a pointer gesture, the keyboard travels from the ports.
+      data-hint={title}
+      data-hint-at="pointer"
+      role="img"
+      aria-label={title}
     >
-      <title>{title}</title>
       {halo && (
         <path
           d={path}

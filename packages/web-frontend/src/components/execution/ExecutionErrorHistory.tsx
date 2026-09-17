@@ -345,7 +345,7 @@ export function ErrorCountBadge({ count, className }: ErrorCountBadgeProps) {
     <Badge
       variant="destructive"
       className={cn("gap-1", className)}
-      title={`${count} error${count > 1 ? "s" : ""}`}
+      data-hint={`${count} error${count > 1 ? "s" : ""}`}
     >
       <AlertTriangle className="h-3 w-3" />
       {count}

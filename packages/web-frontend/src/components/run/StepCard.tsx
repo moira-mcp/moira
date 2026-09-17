@@ -208,7 +208,7 @@ export function StepCard({
                       : {})}
                     data-edge-kind={connection.internal ? "internal" : "external"}
                     data-connection={connection.label}
-                    title={connection.targetName}
+                    data-hint={connection.targetName}
                     onMouseEnter={
                       onConnectionHover ? () => onConnectionHover(connection) : undefined
                     }

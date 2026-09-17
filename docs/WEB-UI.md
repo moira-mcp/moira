@@ -168,7 +168,11 @@ Tooltips are one surface across the application: `ui/tooltip.tsx`'s `TooltipCont
 diagram system's `Hint` both draw on the popover colours with a hairline border and a soft shadow,
 so no bubble inverts against the theme. `HintLayer` is mounted once in `App.tsx` and gives that same
 surface to any element carrying `data-hint`, which is what components use instead of the browser's
-native `title` (screen readers are served by `aria-label`).
+native `title` (screen readers are served by `aria-label`); an element asking for
+`data-hint-at="pointer"` — a diagram edge, whose box is nowhere near the pointer — is anchored at
+the pointer, and the layer's surface never takes the pointer itself. No component under the process
+pages sets a native `title` or an SVG `<title>`; `tests/unit/web-frontend/native-title-guard.test.ts`
+refuses one and `diagram-interaction.spec.ts` sweeps both pages' DOM for them.
 
 ### Shared Components
 

@@ -498,7 +498,9 @@ function CanvasInner({
   const rfRef = useRef<ReactFlowInstance<BlockNode, RoutedEdge> | null>(null);
   // Travelling along a transition (a port or an edge clicked): the far block comes into view,
   // the edge flashes and the block pulses on arrival, so the jump answers "where did that land".
-  const focus = useTransitionFocus();
+  // Only the stable `flash` is taken from the focus store: depending on the whole store would
+  // rebuild every node and edge on each hover, remounting the very edge under the pointer.
+  const { flash } = useTransitionFocus();
   const [arrival, requestArrival] = useRequest<{ blockId: string }>();
   useEffect(() => {
     if (!arrival) return;
@@ -521,10 +523,10 @@ function CanvasInner({
         maxZoom: 1,
         duration: 450,
       });
-      focus.flash([key]);
+      flash([key]);
       requestArrival({ blockId });
     },
-    [focus, requestArrival],
+    [flash, requestArrival],
   );
   const onInit = useCallback(
     (rf: ReactFlowInstance<BlockNode, RoutedEdge>) => {

@@ -130,14 +130,19 @@ export function Hint({
  * the pointer (or focus) carries `data-hint`, anchored to that element. Mount once at the root.
  */
 export function HintLayer(): React.JSX.Element | null {
-  const [target, setTarget] = useState<{ element: HTMLElement; text: string } | null>(null);
+  const [target, setTarget] = useState<{
+    element: Element;
+    text: string;
+    /** Where the hint is anchored when the element asked for the pointer (`data-hint-at`). */
+    point: { x: number; y: number } | null;
+  } | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
-    const show = (element: HTMLElement) => {
+    const show = (element: Element, point: { x: number; y: number } | null) => {
       const text = element.getAttribute("data-hint");
       if (!text) return;
       if (timer.current) clearTimeout(timer.current);
-      timer.current = setTimeout(() => setTarget({ element, text }), 250);
+      timer.current = setTimeout(() => setTarget({ element, text, point }), 250);
     };
     const hide = () => {
       if (timer.current) clearTimeout(timer.current);
@@ -145,9 +150,13 @@ export function HintLayer(): React.JSX.Element | null {
       setTarget(null);
     };
     const onOver = (event: Event) => {
-      const element = (event.target as Element | null)?.closest<HTMLElement>("[data-hint]");
+      const element = (event.target as Element | null)?.closest("[data-hint]");
       if (!element) return hide();
-      show(element);
+      // A long line's box is not where the pointer is: an element that says
+      // `data-hint-at="pointer"` anchors the hint at the pointer when there is one (focus has none).
+      const atPointer =
+        element.getAttribute("data-hint-at") === "pointer" && event instanceof MouseEvent;
+      show(element, atPointer ? { x: event.clientX, y: event.clientY } : null);
     };
     const onOut = (event: MouseEvent) => {
       const from = (event.target as Element | null)?.closest("[data-hint]");
@@ -170,7 +179,9 @@ export function HintLayer(): React.JSX.Element | null {
     };
   }, []);
   if (!target) return null;
-  const rect = target.element.getBoundingClientRect();
+  const rect = target.point
+    ? { left: target.point.x, top: target.point.y - 4, width: 1, height: 8 }
+    : target.element.getBoundingClientRect();
   const side: HintSide =
     (target.element.getAttribute("data-hint-side") as HintSide | null) ?? "top";
   return (
@@ -195,6 +206,10 @@ export function HintLayer(): React.JSX.Element | null {
             sideOffset={6}
             collisionPadding={8}
             className={cn(HINT_SURFACE, "animate-in fade-in-0 zoom-in-95")}
+            // The delegated hint is text, never a target: a surface that could come under the
+            // pointer (it is anchored at the pointer for a line) would steal the hover and hide
+            // itself, over and over.
+            style={{ pointerEvents: "none" }}
             data-slot="hint"
             data-hint-layer=""
           >

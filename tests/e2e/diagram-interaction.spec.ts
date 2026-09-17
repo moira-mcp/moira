@@ -18,6 +18,7 @@ import { test, expect, type Page } from "./fixtures.js";
 import { getTestBaseUrl } from "../utils/test-config.js";
 import { createAuthenticatedMCPClient, startWorkflowExecutionState } from "../utils/mcp-auth.js";
 import { loginAsAdmin } from "./helpers/auth-helper.js";
+import { runWithAnError } from "./helpers/erroring-run.js";
 import {
   GRAPH,
   MAP,
@@ -290,5 +291,168 @@ test("only the view being read is mounted: one diagram, one toolbar and one set 
     expect(await graphExtent(page)).toMatch(/^\d+x\d+$/);
   } finally {
     await run.cleanup();
+  }
+});
+
+/**
+ * Every native tooltip inside the page's own region: `title` attributes and SVG `<title>` children
+ * under the page root (the application shell around it is not this contract's surface).
+ */
+async function nativeTooltips(page: Page, root: string): Promise<string[]> {
+  return page.locator(root).evaluate((el) => {
+    const found: string[] = [];
+    for (const node of Array.from(el.querySelectorAll("[title]")))
+      found.push(`${node.tagName.toLowerCase()}[title="${node.getAttribute("title")}"]`);
+    for (const node of Array.from(el.querySelectorAll("title")))
+      found.push(`<title>${node.textContent}`);
+    return found;
+  });
+}
+
+/**
+ * Hover an edge until its hint is on screen. A fit is animated and the line's coordinates move
+ * with the camera, so the point is re-read and the pointer re-placed until the layer answers;
+ * the result is where the pointer finally is.
+ */
+async function hoverEdge(
+  page: Page,
+  selector: string,
+): Promise<{ x: number; y: number; transition: string }> {
+  let at = { x: 0, y: 0, transition: "" };
+  await expect
+    .poll(
+      async () => {
+        // While the camera still travels, no point of the line may be in view yet: that is a
+        // reason to poll again, not to fail.
+        try {
+          at = await edgePoint(page, selector);
+        } catch {
+          return -1;
+        }
+        // Leave and re-enter: the layer listens for the pointer entering an element, and a
+        // pointer already resting on the line raises no new event.
+        await page.mouse.move(at.x, at.y - 40);
+        const group = page.locator(selector).first();
+        const box = (await group.boundingBox())!;
+        await group.hover({ position: { x: at.x - box.x, y: at.y - box.y }, force: true });
+        await page.waitForTimeout(400);
+        return page.locator("[data-hint-layer]").count();
+      },
+      { timeout: 15000 },
+    )
+    .toBe(1);
+  return at;
+}
+
+test("an edge explains itself through the application's hint at the pointer, on the map and on the graph", async ({
+  page,
+}) => {
+  await page.addInitScript(() => window.localStorage.setItem("theme", "dark"));
+  await loginAsAdmin(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto(`${BASE_URL}/workflows/moira/quick-task`);
+  await expect(page.locator(`${MAP} [data-block-id="deliver"]`)).toBeVisible({ timeout: 15000 });
+  await page.getByTestId("flow-panel-collapse").click();
+  await page.getByTestId("toolbar-fit").click();
+  await restingCamera(page, MAP);
+  const port = page.locator(`${MAP} [data-block-id="scope"] [data-port="out"]`).first();
+  const transition = await port.getAttribute("data-transition");
+  await hoverEdge(page, `${MAP} [data-edge-kind][data-transition="${transition}"]`);
+  const hint = page.locator("[data-hint-layer]");
+  await expect(hint).toBeVisible();
+  // The hint names the transition the edge draws — the same label its ports carry.
+  const label = await page
+    .locator(`${MAP} [data-edge-kind][data-transition="${transition}"]`)
+    .getAttribute("aria-label");
+  expect(label).toBeTruthy();
+  await expect(hint).toContainText(label!.slice(0, 20));
+  await page.mouse.move(0, 0);
+  await expect(hint).toHaveCount(0);
+
+  // A return lane runs the width of the diagram: the hint must sit where the pointer is, not
+  // at the centre of the line's bounding box, which would be far from the pointer on such a line.
+  // The map's fit stops at its readable floor, so the return lanes further along the process are
+  // off-screen at this width: the contents takes the camera to the block the first return leaves.
+  await page.getByTestId("map-contents-plan-approval").click();
+  await restingCamera(page, MAP);
+  const laneSelector = `${MAP} [data-edge-kind="return"][data-transition^="plan-approval→"]`;
+  const lane = await hoverEdge(page, laneSelector);
+  const laneBox = await page
+    .locator(laneSelector)
+    .first()
+    .evaluate((group) => {
+      const rect = (group as SVGGElement).getBoundingClientRect();
+      return { cx: rect.left + rect.width / 2, cy: rect.top + rect.height / 2, w: rect.width };
+    });
+  expect(laneBox.w).toBeGreaterThan(200);
+  const box = await hint.boundingBox();
+  const hintX = box!.x + box!.width / 2;
+  const hintY = box!.y + box!.height;
+  const toPointer = Math.hypot(hintX - lane.x, hintY - lane.y);
+  const toBoxCentre = Math.hypot(hintX - laneBox.cx, hintY - laneBox.cy);
+  expect(toPointer).toBeLessThan(120);
+  expect(toPointer).toBeLessThan(toBoxCentre);
+
+  await page.mouse.move(0, 0);
+  await expect(hint).toHaveCount(0);
+  await page.goto(`${BASE_URL}/workflows/moira/quick-task?view=graph`);
+  await expect(page.locator(`${GRAPH} [data-graph-node]`).first()).toBeVisible({ timeout: 20000 });
+  // The graph opens on the current group; the edge between its first two steps is in view.
+  const graphEdge = `${GRAPH} [data-edge-kind="forward"][data-transition^="start"]`;
+  await expect(page.locator(graphEdge).first()).toHaveCount(1);
+  await hoverEdge(page, graphEdge);
+  await expect(hint).toHaveAttribute("data-slot", "hint");
+});
+
+test("nothing on the flow page or the run page falls back to a native tooltip: no title attribute, no SVG title", async ({
+  page,
+}) => {
+  const authenticated = await createAuthenticatedMCPClient();
+  const erroring = await runWithAnError(authenticated.client);
+  try {
+    await loginAsAdmin(page);
+    await page.setViewportSize({ width: 1440, height: 900 });
+
+    // The flow page as its owner, so the header's owner actions (visibility, edit) are rendered
+    // too: a copy of Quick Task belongs to the reader who copies it.
+    const copied = await page.request.post(`${BASE_URL}/api/workflows/moira/quick-task/copy`, {
+      data: { newName: `Tooltip sweep ${Date.now()}` },
+    });
+    expect(copied.status()).toBe(200);
+    const owned = ((await copied.json()) as { data: { workflowId: string } }).data.workflowId;
+    try {
+      for (const view of ["map", "graph"] as const) {
+        await page.goto(`${BASE_URL}/workflows/${owned}?view=${view}&block=plan`);
+        await expect(page.getByTestId("flow-page")).toBeVisible({ timeout: 20000 });
+        await expect(page.getByTestId("workflow-visibility-toggle")).toBeVisible();
+        await expect(page.getByTestId("flow-edit-toggle")).toBeVisible();
+        if (view === "graph") {
+          await page.locator('[data-graph-node="plan-review"]').click();
+          await expect(page.getByTestId("node-panel")).toHaveAttribute(
+            "data-node-id",
+            "plan-review",
+          );
+        }
+        expect(await nativeTooltips(page, '[data-testid="flow-page"]')).toEqual([]);
+      }
+    } finally {
+      await page.request.delete(`${BASE_URL}/api/workflows/${owned}`);
+    }
+
+    for (const view of ["map", "graph"] as const) {
+      await page.goto(`${BASE_URL}/executions/${erroring.processId}?view=${view}`);
+      await expect(page.getByTestId("run-page")).toBeVisible({ timeout: 20000 });
+      // The run has a refused answer: the header's error badge and the errors tab are rendered.
+      await expect(page.getByTestId("run-header").locator("text=/^1$/")).toBeVisible({
+        timeout: 15000,
+      });
+      await page
+        .locator('[role="tab"]')
+        .filter({ hasText: /Errors|Ошибки/ })
+        .click();
+      expect(await nativeTooltips(page, '[data-testid="run-page"]')).toEqual([]);
+    }
+  } finally {
+    await authenticated.cleanup();
   }
 });
