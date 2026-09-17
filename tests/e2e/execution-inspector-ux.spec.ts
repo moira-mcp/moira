@@ -24,8 +24,9 @@ async function openFirstExecution(page: Page, listUrl = `${BASE_URL}/executions`
 }
 
 /**
- * The technical node graph: the page's `graph` view when the run has a process view (the map
- * beside it is a React Flow instance of its own), else the only diagram in the main section.
+ * The technical node graph: the page's `graph` view when the run has a process view, else the
+ * only diagram in the main section. Only the view being read is mounted, so once the graph is
+ * shown it is the page's single React Flow instance.
  */
 async function showTechnicalGraph(page: Page) {
   const graphTab = page.getByTestId("run-modes").locator('[data-mode="graph"]');
@@ -34,7 +35,6 @@ async function showTechnicalGraph(page: Page) {
     await graphTab.click();
     await expect(page.getByTestId("execution-progress")).toHaveAttribute("data-view", "graph");
   }
-  // With a process view both diagrams are mounted and only one is shown; the graph is the last.
   const graph = page.locator(".react-flow").last();
   await expect(graph).toBeVisible({ timeout: 15000 });
   return graph;
@@ -144,7 +144,7 @@ test.describe("Run page toolbar and panel", () => {
     const inView = async () => {
       const box = await graph.boundingBox();
       const card = await graph
-        .locator('[data-graph-node] [data-step-card][aria-current="step"]')
+        .locator('[data-graph-node][data-current="true"]')
         .first()
         .boundingBox();
       return (
@@ -158,8 +158,9 @@ test.describe("Run page toolbar and panel", () => {
     };
     await expect.poll(inView, { timeout: 5000 }).toBe(true);
     const onCurrent = await transformOf();
-    // The fit-view control gives the overview back; the toolbar's current-node button returns.
-    await graph.locator(".react-flow__controls-fitview").click();
+    // The fit control in the diagram's toolbar gives the overview back; the header's
+    // current-node button returns.
+    await page.getByTestId("graph-toolbar").getByTestId("toolbar-fit").click();
     await expect.poll(transformOf, { timeout: 5000 }).not.toBe(onCurrent);
     const toolbar = page.locator(".border-b.bg-card").first();
     await toolbar.locator("button:has(svg.lucide-play)").click();
@@ -177,10 +178,12 @@ test.describe("Run page toolbar and panel", () => {
     const phone = await panel.boundingBox();
     const phonePage = await page.getByTestId("run-page").boundingBox();
     expect(Math.round(phone!.width)).toBe(Math.round(phonePage!.width));
-    // On a phone neither the map nor the technical graph draws a minimap over the blocks.
+    // On a phone the technical graph draws no navigator over its cards, and the map's navigator
+    // is the reader's own choice in the toolbar rather than something fixed to the diagram.
     await expect(page.getByTestId("canvas-view").locator(".react-flow")).toBeVisible({
       timeout: 15000,
     });
+    await page.getByTestId("map-toolbar").getByTestId("toolbar-minimap").click();
     await expect(page.getByTestId("canvas-view").locator(".react-flow__minimap")).toHaveCount(0);
     const graph = await showTechnicalGraph(page);
     await expect(graph.locator(".react-flow__minimap")).toHaveCount(0);

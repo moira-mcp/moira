@@ -18,6 +18,7 @@ import {
   type RunningWorkflowExecution,
 } from "../utils/mcp-auth.js";
 import { loginAsAdmin } from "./helpers/auth-helper.js";
+import { openPanelSection } from "./helpers/diagram.js";
 
 const BASE_URL = getTestBaseUrl();
 const workspace = "./moira-ws/quick-task-0000aaaa-0000-4000-8000-000000000000";
@@ -123,13 +124,11 @@ test("the map shows the repair loop as a repeated block and the block panel tell
     // The second review is where the run waits: the review block (review, check and repair steps)
     // is on its second pass; the plan block completed once, the execute block is not reached.
     const review = mapCard(page, "plan-review");
-    await expect(review).toHaveAttribute("aria-current", "step");
+    await expect(review).toHaveAttribute("data-current", "true");
     await expect(review).toHaveAttribute("data-status", "waiting");
     await expect(review).toContainText("×2");
     await expect(mapCard(page, "plan")).toHaveAttribute("data-status", "done");
     await expect(mapCard(page, "execute")).toHaveAttribute("data-status", "pending");
-    // A card carries the block's measured time, so a reader sees where the run spent itself.
-    await expect(review.locator("[data-block-total]")).toBeVisible();
 
     // The contents sidebar lists every block in process order with the same statuses.
     const contents = page.getByTestId("map-contents-list");
@@ -140,15 +139,18 @@ test("the map shows the repair loop as a repeated block and the block panel tell
     );
     await expect(page.getByTestId("map-contents-plan")).toHaveAttribute("data-status", "done");
 
-    // The repair loop is drawn as a cycle edge and named by a chip in its source block; hovering
-    // the chip lights the edge and shows the authored label.
-    await expect(page.locator('[data-edge-kind="cycle"]').first()).toBeVisible();
-    const chip = review.locator("[data-return-chip]").first();
-    await expect(chip).toContainText(/\d/);
-    await chip.hover();
-    await expect(page.locator('[data-edge-kind="cycle"][data-focused="true"]')).toHaveCount(1);
-    await expect(page.locator('[data-edge-label="cycle"]')).toContainText("review found issues");
+    // The repair loop is a transition of the review block back into itself: a dashed self edge
+    // under the card, named by the loop port on the card's own bottom band. Hovering that port
+    // lights the edge it names and nothing else.
+    const loop = "plan-review→plan-review:review found issues";
+    await expect(page.locator(`[data-edge-kind="self"][data-transition="${loop}"]`)).toHaveCount(1);
+    const loopPort = review.locator(`[data-port="loop"][data-transition="${loop}"]`);
+    await expect(loopPort).toContainText("review found issues");
+    await loopPort.hover();
+    await expect(page.locator('[data-edge-kind][data-focused="true"]')).toHaveCount(1);
+    await expect(page.locator(`[data-transition="${loop}"][data-focused="true"]`)).toHaveCount(1);
     await page.mouse.move(0, 0);
+    await expect(page.locator('[data-edge-kind][data-focused="true"]')).toHaveCount(0);
 
     // The block panel opens on the current block: its passes with durations, what its visits did,
     // and the steps with the evidence each demands back.
@@ -158,7 +160,15 @@ test("the map shows the repair loop as a repeated block and the block panel tell
     // Three passes through the review block's working steps: review, repair, review again.
     await expect(detail.getByTestId("block-timing-pass")).toHaveCount(3);
     await expect(detail.getByTestId("block-timing-total")).not.toHaveText("—");
+    // The card carries a measured time of its own, so the map answers "where did the run spend
+    // itself" without opening anything. It is not compared with the panel's total: the block is
+    // open, so the card shows the running pass and the two tick apart.
+    await expect(
+      review.locator("[data-step-facts] > *").filter({ hasText: /^\d+\s(s|min|h|с|мин|ч)\b/ }),
+    ).toHaveCount(1);
+    await openPanelSection(page, "panel-section-route");
     await expect(detail.getByTestId("block-route-visit").first()).toBeVisible();
+    await openPanelSection(page, "panel-section-steps");
     const currentStep = detail.locator('[data-node-id][aria-current="step"]');
     await expect(currentStep).toHaveAttribute("data-node-id", "plan-review");
     await expect(currentStep.locator("[data-node-inputs]")).toContainText("issues_count");
@@ -169,7 +179,6 @@ test("the map shows the repair loop as a repeated block and the block panel tell
     // selects the block, which is a deep link.
     await review.click();
     await expect(page).toHaveURL(/block=plan-review/);
-    await expect(review).toHaveAttribute("aria-pressed", "true");
     await expect(detail).toHaveAttribute("data-block-id", "plan-review");
     await page.getByTestId("map-contents-execute").click();
     await expect(page).toHaveURL(/block=execute/);
@@ -178,7 +187,8 @@ test("the map shows the repair loop as a repeated block and the block panel tell
     await expect(detail.getByTestId("block-timings-empty")).toBeVisible();
     await expect(detail.getByTestId("block-timing-total")).toHaveText("—");
 
-    // The finder answers "which block is this step in" and selects that block.
+    // The finder, folded into the toolbar, answers "which block is this step in" and selects it.
+    await page.getByTestId("map-toolbar").getByTestId("toolbar-finder").click();
     await page.getByTestId("map-node-finder").fill("fix-issues");
     await page.locator('[data-node-match="fix-issues"]').click();
     await expect(detail).toHaveAttribute("data-block-id", "verify");
@@ -189,17 +199,21 @@ test("the map shows the repair loop as a repeated block and the block panel tell
     await page.getByTestId("map-contents-scope").click();
     await expect(page).toHaveURL(/block=scope/);
     await expect(detail).toHaveAttribute("data-block-id", "scope");
-    const graphViewport = page
-      .locator('[data-testid="execution-progress"] .react-flow__viewport')
-      .last();
+    const graphViewport = page.locator('[data-testid="execution-progress"] .react-flow__viewport');
     const transformOf = () => graphViewport.evaluate((el) => window.getComputedStyle(el).transform);
     await detail.locator('[data-node-id="get-task"] button').click();
     await expect(page.getByTestId("execution-progress")).toHaveAttribute("data-view", "graph");
     await expect(page).toHaveURL(/view=graph/);
     await expect(graphViewport).toBeVisible({ timeout: 15000 });
+    // The panel follows the jump to its node level, and the graph is centred on that step.
+    await expect(page.getByTestId("node-panel")).toHaveAttribute("data-node-id", "get-task");
     await expect.poll(transformOf).not.toBe("none");
     const onGetTask = await transformOf();
+    // Back to the block level and on to another step: a different step, a different camera.
+    await page.getByTestId("node-panel-back").click();
+    await expect(detail).toHaveAttribute("data-block-id", "scope");
     await detail.locator('[data-node-id="start"] button').click();
+    await expect(page.getByTestId("node-panel")).toHaveAttribute("data-node-id", "start");
     await expect.poll(transformOf, { timeout: 5000 }).not.toBe(onGetTask);
   } finally {
     await run.cleanup();
@@ -214,6 +228,7 @@ test("the route cursor moves the whole page back through the run; both views are
     // The block panel's route facts are the recorded route of the selected block: the repair loop
     // stays inside the review block, so a revisit there is marked as a loop.
     await page.goto(`${BASE_URL}/executions/${run.executionId}?block=plan-review`);
+    await openPanelSection(page, "panel-section-route");
     const facts = page.getByTestId("block-route-facts");
     await expect(facts).toBeVisible();
     await expect(facts.getByTestId("block-route-loop").first()).toBeVisible();
@@ -327,6 +342,7 @@ test("answering the waiting step from the page continues the run and records the
     // The scope block's own facts name the adjustment and who made it.
     await page.getByTestId("map-contents-scope").click();
     await page.getByRole("tab", { name: /Block|Блок/ }).click();
+    await openPanelSection(page, "panel-section-route");
     const adjusted = page.getByTestId("block-route-facts").getByTestId("block-route-adjusted");
     await expect(adjusted).toHaveCount(1);
     await expect(adjusted).toContainText(/person|человек/i);

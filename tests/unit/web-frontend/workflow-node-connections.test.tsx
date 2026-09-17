@@ -9,6 +9,9 @@
  * required state is that each outgoing chip names its output; the plausible wrong state — the one
  * this test exists to catch — is a list of target names, which for a four-way condition prints the
  * same name three times and tells the reader nothing about the routing.
+ *
+ * The chips are read through `NodeDetailSheet`, the panel that still renders them after the flow
+ * page's node sidebar was retired; the sheet is the only surface a reader reaches them from.
  */
 
 import React from "react";
@@ -19,12 +22,12 @@ import type { Node } from "@xyflow/react";
 import { I18nextProvider } from "react-i18next";
 import i18n from "../../../packages/web-frontend/src/i18n";
 
-let WorkflowSidebar: typeof import("../../../packages/web-frontend/src/components/workflow/WorkflowSidebar").WorkflowSidebar;
+let NodeDetailSheet: typeof import("../../../packages/web-frontend/src/components/workflow/NodeDetailSheet").NodeDetailSheet;
 
 beforeAll(async () => {
-  WorkflowSidebar = (
-    await import("../../../packages/web-frontend/src/components/workflow/WorkflowSidebar")
-  ).WorkflowSidebar;
+  NodeDetailSheet = (
+    await import("../../../packages/web-frontend/src/components/workflow/NodeDetailSheet")
+  ).NodeDetailSheet;
 });
 
 beforeEach(async () => {
@@ -34,12 +37,6 @@ beforeEach(async () => {
 afterEach(() => {
   cleanup();
 });
-
-const WORKFLOW = {
-  id: "wf-1",
-  metadata: { name: "Review", description: "", version: "1.0.0" },
-  nodes: [],
-} as unknown as Parameters<typeof WorkflowSidebar>[0]["workflow"];
 
 /** A four-way review gate: three verdicts go back to the same block, one goes forward. */
 const OUTGOING = [
@@ -61,9 +58,10 @@ function conditionNode(cases?: Array<{ summary?: string; output: string }>): Nod
 function renderPanel(cases?: Array<{ summary?: string; output: string }>): void {
   render(
     <I18nextProvider i18n={i18n}>
-      <WorkflowSidebar
-        workflow={WORKFLOW}
-        selectedNode={conditionNode(cases)}
+      <NodeDetailSheet
+        open
+        onOpenChange={() => {}}
+        node={conditionNode(cases)}
         incomingNodes={[]}
         outgoingNodes={OUTGOING}
       />

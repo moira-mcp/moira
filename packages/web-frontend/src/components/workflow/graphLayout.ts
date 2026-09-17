@@ -8,6 +8,21 @@
  */
 
 import type { GraphModel } from "../run/graphModel";
+import type { LayoutPreset } from "../diagram/layoutPreset";
+
+/**
+ * What a layout preset means on the graph: how the block groups are stacked (`outer`) and how the
+ * steps run inside a group (`inner`). Cards keep their ports on the left and right in every case.
+ */
+export const GRAPH_PRESET_DIRECTIONS: Record<
+  LayoutPreset,
+  { outer: "DOWN" | "RIGHT"; inner: "DOWN" | "RIGHT" }
+> = {
+  default: { outer: "DOWN", inner: "RIGHT" },
+  compact: { outer: "DOWN", inner: "RIGHT" },
+  flow: { outer: "RIGHT", inner: "RIGHT" },
+  vertical: { outer: "DOWN", inner: "DOWN" },
+};
 
 export const GRAPH_CARD_WIDTH = 660;
 /** Least room before the first group along the card axis, where cross-block return lanes run. */

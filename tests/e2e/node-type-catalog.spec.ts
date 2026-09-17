@@ -4,6 +4,12 @@
  * The browser receives one distinctive extension declaration at the HTTP boundary, while the real
  * backend owns workflow storage, authentication and the base built-in catalog. This isolates the
  * browser's responsibility from the real-registry endpoint integration covered at its own level.
+ *
+ * What the browser has to do with that declaration is name the node by the title its type declares
+ * and read the node's stored configuration against the schema the type declares, saying key by key
+ * what it found: a declared key with a value, a declared key left unset, and a key the node carries
+ * that its type never declared. Since the node sidebar was retired, that readout is a section of
+ * the right panel's node level, reached by clicking the node's card on the technical graph.
  */
 
 import { test, expect } from "./fixtures.js";
@@ -12,7 +18,7 @@ import { loginAsAdmin } from "./helpers/auth-helper.js";
 
 const BASE_URL = getTestBaseUrl();
 
-test("custom catalog node renders its declaration, owner and config schema", async ({
+test("custom catalog node renders its owner and config schema in the node panel", async ({
   page,
 }, testInfo) => {
   const anonymousCatalog = await page.request.get(`${BASE_URL}/api/node-types`);
@@ -57,18 +63,24 @@ test("custom catalog node renders its declaration, owner and config schema", asy
     });
   });
 
+  // A plain definition with no process view: the right panel stands beside the graph regardless,
+  // and its node level is where a node's configuration is read.
   const createResponse = await page.request.post(`${BASE_URL}/api/workflows`, {
     headers: { "Content-Type": "application/json" },
     data: {
       visibility: "private",
       workflow: {
         metadata: {
-          name: "Custom Node Catalog Visual Check",
+          name: `Custom Node Catalog Visual Check ${Date.now()}`,
           version: "1.0.0",
           description: "Exercises the generic catalog renderer.",
         },
         nodes: [
-          { type: "start", id: "start", connections: { default: "send-message" } },
+          {
+            type: "start",
+            id: "start",
+            connections: { default: "send-message" },
+          },
           {
             type: "corporate-messenger.send",
             id: "send-message",
@@ -112,24 +124,33 @@ test("custom catalog node renders its declaration, owner and config schema", asy
         catalogWarnings.push(message.text());
       }
     });
-    await page.goto(`${BASE_URL}/workflows/admin/${slug}`);
-    await expect(page.locator(".react-flow")).toBeVisible({ timeout: 15000 });
+    await page.goto(`${BASE_URL}/workflows/admin/${slug}?view=graph`);
+    await expect(page.locator('[data-graph-node="send-message"]')).toBeVisible({ timeout: 20000 });
 
-    const customNode = page.locator(".react-flow__node-catalog");
-    await expect(customNode).toHaveCount(1);
-    await customNode.click();
+    // The node is drawn from the catalog rather than as an unknown type: the transformer says so
+    // in the class React Flow puts on it, and it logs no "not in the catalog" warning.
+    await expect(page.locator(".react-flow__node-catalog")).toHaveCount(1);
+    await page.locator('[data-graph-node="send-message"]').click();
 
-    const sidebar = page.locator('[data-testid="workflow-sidebar"]');
-    await expect(sidebar.getByText("Отправка сообщения", { exact: true })).toBeVisible();
-    await expect(sidebar.getByText("corporate-messenger.send", { exact: true })).toBeVisible();
-    await expect(sidebar.getByText(/corporate-messenger 2\.1\.0/)).toBeVisible();
-    await expect(sidebar.getByText("Message body", { exact: true })).toBeVisible();
-    await expect(sidebar.getByText("hello from extension", { exact: true })).toBeVisible();
-    await expect(sidebar.getByText("login", { exact: true })).toBeVisible();
-    await expect(sidebar.getByText("not set", { exact: true })).toBeVisible();
-    await expect(sidebar.getByText("chat", { exact: true })).toBeVisible();
+    const panel = page.getByTestId("node-panel");
+    await expect(panel).toHaveAttribute("data-node-id", "send-message");
+    // The node carries no label of its own, so the heading falls back to the title the type
+    // declares — the extension's own words, not the raw type string or the node id.
+    await expect(panel.getByRole("heading")).toHaveText("Отправка сообщения");
+    // The type itself is still said exactly, so the reader can match the node to its declaration.
+    await expect(page.getByTestId("node-panel-type")).toHaveText("corporate-messenger.send");
+    const configuration = page.getByTestId("node-panel-configuration");
+    // The extension that owns the type, with its version, names who the configuration belongs to.
+    await expect(configuration).toContainText(/corporate-messenger 2\.1\.0/);
+    // A declared key with a value, a declared key left unset, and a key the type never declared —
+    // each said in the reader's terms rather than dumped as raw JSON.
+    await expect(configuration.getByText("Message body", { exact: true })).toBeVisible();
+    await expect(configuration.getByText("hello from extension", { exact: true })).toBeVisible();
+    await expect(configuration.getByText("login", { exact: true })).toBeVisible();
+    await expect(configuration.getByText("not set", { exact: true })).toBeVisible();
+    await expect(configuration.getByText("chat", { exact: true })).toBeVisible();
     await expect(
-      sidebar.getByText("not declared by this node type", { exact: true }),
+      configuration.getByText("not declared by this node type", { exact: true }),
     ).toBeVisible();
     expect(catalogWarnings).toEqual([]);
 

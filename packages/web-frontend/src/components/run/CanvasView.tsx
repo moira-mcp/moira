@@ -30,7 +30,7 @@ import {
   type ReactFlowInstance,
 } from "@xyflow/react";
 import { Clock, ListChecks, Loader2, Repeat } from "lucide-react";
-import { PortedCard, type CardTone, type FactChip, type PortInfo } from "../diagram/PortedCard";
+import { PortedCard, type FactChip, type PortInfo } from "../diagram/PortedCard";
 import { DiagramEdge, DiagramMarkers, type DiagramEdgeKind } from "../diagram/DiagramEdge";
 import { INTERACTIVE } from "../diagram/interactive";
 import { ListMarker } from "../diagram/ListMarker";
@@ -50,18 +50,24 @@ import { NodeFinder } from "./NodeFinder";
 const CANVAS_EDGE = 16;
 /** Where the block row sits when a definition opens: this fraction of the viewport height from the top. */
 const CANVAS_ROW_ANCHOR = 0.3;
-import { PassCount, StatusChip } from "./status";
-import { BLOCK_WIDTH, layoutBlocks, type BlockLayout, type LaidOutEdge } from "./layout";
+import { BLOCK_TONE, PassCount, StatusChip } from "./status";
+import {
+  BLOCK_WIDTH,
+  layoutBlocks,
+  transitionKey,
+  type BlockLayout,
+  type LaidOutEdge,
+} from "./layout";
 import { formatDuration } from "./duration";
 import {
   currentBlockId,
+  listProgressLabel,
   orderNodeIds,
   stepsOf,
   type RunBlock,
   type RunViewProps,
   type StepInfo,
 } from "./model";
-import { transitionKey } from "./chips";
 import { TransitionFocusProvider, isFlashed, isLit, useTransitionFocus } from "./focus";
 
 type BlockNodeData = {
@@ -208,7 +214,7 @@ function blockFacts(
     facts.push({
       key: "list",
       icon: <ListChecks className="size-3" aria-hidden="true" />,
-      label: `${list.done ?? "?"}/${list.total ?? "?"}`,
+      label: listProgressLabel(list) ?? "",
       tip: list.items
         ? list.items
             .map(
@@ -221,15 +227,6 @@ function blockFacts(
   }
   return facts;
 }
-
-export const BLOCK_TONE: Record<RunBlock["status"], CardTone> = {
-  pending: "neutral",
-  active: "active",
-  waiting: "waiting",
-  done: "done",
-  repeated: "done",
-  skipped: "neutral",
-};
 
 function BlockNodeView({ data }: NodeProps<BlockNode>): React.JSX.Element {
   const { t } = useTranslation();
@@ -372,7 +369,7 @@ function portedPath(
  * port rank), drops into the laid path, and at the far end comes down beside the target's left
  * edge and enters its left port.
  */
-function stackedPoints(
+export function stackedPoints(
   laid: LaidOutEdge,
   sx: number,
   sy: number,
@@ -427,7 +424,7 @@ function stackedPoints(
   };
 }
 
-function portedPoints(
+export function portedPoints(
   laid: LaidOutEdge,
   sx: number,
   sy: number,
@@ -536,7 +533,7 @@ function RoutedEdgeView({
  * takes its own range of columns (the above group innermost), and within a group the ports are
  * ordered so the port furthest from the lane is outermost.
  */
-function portRanks(
+export function portRanks(
   edges: readonly LaidOutEdge[],
   ports: ReadonlyMap<string, { outputs: string[]; inputs: string[] }>,
   blockY: ReadonlyMap<string, number>,
@@ -584,9 +581,10 @@ export interface CanvasToolbarSlots {
 }
 
 const nodeTypes = { block: BlockNodeView };
+const noopEdgeClick = (): void => {};
 const edgeTypes = { routed: RoutedEdgeView };
 
-function useBlockLayout(
+export function useBlockLayout(
   blocks: RunBlock[],
   hubIds: string[],
   preset: "default" | "compact" | "flow" | "vertical",
@@ -935,6 +933,9 @@ function CanvasInner({
           onReady={onReady}
           onFit={fitOverview}
           showControls={false}
+          // Without a click handler React Flow marks an unselectable edge `inactive` and takes its
+          // pointer events away; the edge's own handler does the travelling.
+          onEdgeClick={noopEdgeClick}
         >
           <DiagramMarkers />
           {minimapOn && (

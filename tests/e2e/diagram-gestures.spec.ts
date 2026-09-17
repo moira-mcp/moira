@@ -54,7 +54,9 @@ const MODES = [
   {
     mode: "graph",
     diagram: ".react-flow",
-    panel: '[data-testid="workflow-sidebar"]',
+    // The graph no longer carries a node sidebar of its own: the page's right panel stands
+    // beside it, and a wheel over that panel must leave the diagram alone just the same.
+    panel: '[data-testid="flow-panel"]',
     minScale: 0.1,
     first: null,
   },

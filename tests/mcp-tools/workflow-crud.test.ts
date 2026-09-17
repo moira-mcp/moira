@@ -79,6 +79,82 @@ describe("MCP Workflow CRUD Tools E2E", () => {
     createdWorkflows.push(createdId);
   });
 
+  test("create_workflow accepts a progress block bound to the list it works through", async () => {
+    // Required state: the authoring schema takes `progress.nodes[].list` (items, title, current,
+    // done, total, indexBase — the paths the engine and the CLI accept) and the stored definition
+    // keeps it. Plausible wrong state: the schema is
+    // strict and refuses the key ("Unrecognized key(s) in object: 'list'"), so a run can never show
+    // done/total for the block.
+    const workflow = {
+      id: "test-crud-list-binding",
+      metadata: {
+        name: "Test CRUD List Binding",
+        version: "1.0.0",
+        description: "A block that works through a list",
+      },
+      variableRegistry: {
+        units: { type: "array", description: "Units of work", default: [] },
+        unit_index: { type: "number", description: "Current unit", default: 0 },
+        unit_done: { type: "number", description: "Units finished", default: 0 },
+        unit_total: { type: "number", description: "How many units", default: 0 },
+      },
+      nodes: [
+        { type: "start", id: "start", connections: { default: "work" }, progressNodeId: "doing" },
+        {
+          type: "agent-directive",
+          id: "work",
+          directive: "Do the current unit",
+          completionCondition: "The unit is done",
+          connections: { success: "end" },
+          inputSchema: { type: "object", properties: { done: { type: "boolean" } } },
+          progressNodeId: "doing",
+        },
+        { type: "end", id: "end", progressNodeId: "doing" },
+      ],
+      progress: {
+        title: "List binding",
+        nodes: [
+          {
+            id: "doing",
+            label: "Work through the units",
+            content: { summary: "One unit at a time." },
+            list: {
+              items: "units",
+              title: "title",
+              current: "unit_index",
+              done: "unit_done",
+              total: "unit_total",
+              indexBase: 0,
+            },
+          },
+        ],
+      },
+    };
+
+    const result = await callMCPTool(client, "manage", {
+      action: "create",
+      workflow,
+      overwrite: true,
+    });
+    expect(result).toHaveProperty("success", true);
+    expect(result).toHaveProperty("validation.valid", true);
+    createdWorkflows.push(result.workflowId);
+
+    const stored = await callMCPTool(client, "manage", {
+      action: "get",
+      workflowId: result.workflowId,
+    });
+    const definition = stored.workflow ?? stored;
+    expect(definition.progress.nodes[0].list).toEqual({
+      items: "units",
+      title: "title",
+      current: "unit_index",
+      done: "unit_done",
+      total: "unit_total",
+      indexBase: 0,
+    });
+  });
+
   test("create_workflow with overwrite replaces existing", async () => {
     const originalWorkflow = {
       ...CRUD_WORKFLOWS.SIMPLE_CREATE,

@@ -45,8 +45,8 @@ describe("diagramInteractionProps", () => {
   );
 
   test.each([
-    ["canvas", 0.2, 1.5],
-    ["graph", 0.1, 2],
+    ["canvas", 0.08, 1.5],
+    ["graph", 0.05, 2],
   ] as const)("%s zooms between %s and %s", (kind, minZoom, maxZoom) => {
     const props = diagramInteractionProps(kind);
     expect(props.minZoom).toBe(minZoom);

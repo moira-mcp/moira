@@ -1,17 +1,21 @@
 /**
  * The two views of a process — the map and the technical graph — behave as one page.
  *
- * Part one, on the run page and on the flow page alike: once a view has been shown, clicking a
- * block, a step, a panel tab, a view tab or a node on the graph never remounts the page. No page
- * loader appears, no diagram skeleton and no "laying out" placeholder comes back, the `view`
- * parameter in the URL is what changes, the page's shell element keeps its DOM identity across a
- * tab switch, and the state each view holds survives a switch away and back: the map keeps the
- * selected block, the graph keeps its viewport.
+ * Part one, on the run page and on the flow page alike: once a page has been shown, clicking a
+ * block, a step, a panel tab or a view tab never remounts it. No page loader appears, no diagram
+ * skeleton and no "laying out" placeholder comes back, the `view` parameter in the URL is what
+ * changes, and the page's shell element keeps its DOM identity across a tab switch. Only the view
+ * being read is mounted, so what a switch must carry is the selection, not a hidden diagram: the
+ * map keeps the block it was left on and the graph opens on that block's group and first step.
  *
- * Part two, the waiting actor of #233: a run paused on an agent step must not tell the reader
- * that it is waiting for them. The status chip and the block panel say the agent is on the step;
- * only a run stopped at a lock node's PIN gate reads as "waiting for you". The lock case is
- * seeded directly into the container's database: creating a lock at run time requires configured
+ * Part two, the map's own column: at 1440×900 the diagram owns the height and every card it draws
+ * is readable, whole and built the same way — a title band, ports on the card's own borders and
+ * the facts inside it; at 390×844 the page is one scrolling column.
+ *
+ * Part three, the waiting actor of #233: a run paused on an agent step must not tell the reader
+ * that it is waiting for them. The status chip, the legend and the block panel say the agent is on
+ * the step; only a run stopped at a lock node's PIN gate reads as "waiting for you". The lock case
+ * is seeded directly into the container's database: creating a lock at run time requires configured
  * Telegram PIN delivery and would send a real message, which a test must not do, and the state
  * under test is exactly "the run is paused on a node of type `lock`".
  */
@@ -22,24 +26,9 @@ import { getTestBaseUrl } from "../utils/test-config.js";
 import { createAuthenticatedMCPClient, startWorkflowExecutionState } from "../utils/mcp-auth.js";
 import { execSqliteInDocker } from "../utils/docker-command.js";
 import { loginAsAdmin } from "./helpers/auth-helper.js";
+import { MAP, expectNoLoaders, mapCardBoxes, openPanelSection } from "./helpers/diagram.js";
 
 const BASE_URL = getTestBaseUrl();
-
-/** Nothing on the page may say "the whole page is being rebuilt". */
-async function expectNoLoaders(page: Page): Promise<void> {
-  await expect(page.getByTestId("page-loader")).toHaveCount(0);
-  await expect(page.getByTestId("diagram-skeleton")).toHaveCount(0);
-  await expect(page.getByTestId("canvas-loading")).toHaveCount(0);
-  await expect(page.getByText(/Laying out the process|Раскладываю процесс/)).toHaveCount(0);
-}
-
-/** The computed transform of the technical graph's viewport (the graph's remembered position). */
-function graphTransform(page: Page, scope: string) {
-  return page
-    .locator(`${scope} .react-flow__viewport`)
-    .last()
-    .evaluate((el) => window.getComputedStyle(el).transform);
-}
 
 type NodeHandle = ElementHandle<Node> | null;
 
@@ -53,6 +42,12 @@ async function sameElement(page: Page, testId: string, before: NodeHandle): Prom
     before,
     after,
   ] as NodeHandle[]);
+}
+
+/** Open a step from the block panel, whose steps section opens folded. */
+async function openStepFromPanel(page: Page, nodeId: string): Promise<void> {
+  await openPanelSection(page, "panel-section-steps");
+  await page.getByTestId("block-detail").locator(`[data-node-id="${nodeId}"] button`).click();
 }
 
 test("the run page switches block, step, tab and view without remounting anything", async ({
@@ -85,12 +80,13 @@ test("the run page switches block, step, tab and view without remounting anythin
     expect(await sameElement(page, "run-page", shell)).toBe(true);
     await page.getByRole("tab", { name: /Block|Блок/ }).click();
 
-    // A step in the panel focuses the graph: the view parameter is what changes. The graph's
-    // chunk was fetched on mount, so its skeleton is never shown.
-    await page.getByTestId("block-detail").locator('[data-node-id="create-plan"] button').click();
+    // A step in the panel opens the graph: the view parameter is what changes, and the panel
+    // follows the jump to its node level.
+    await openStepFromPanel(page, "create-plan");
     await expect(page).toHaveURL(/view=graph/);
     await expect(progress).toHaveAttribute("data-view", "graph");
     await expect(page.locator("[data-graph-node]").first()).toBeVisible({ timeout: 15000 });
+    await expect(page.getByTestId("node-panel")).toHaveAttribute("data-node-id", "create-plan");
     await expectNoLoaders(page);
     // The map's selection is carried: the selected block's frame is the highlighted one, not
     // (only) the frame of the block the run is on.
@@ -100,39 +96,52 @@ test("the run page switches block, step, tab and view without remounting anythin
     );
     await expect(page.locator('[data-graph-group][data-selected="true"]')).toHaveCount(1);
 
-    // A node on the graph, then back to the map and to the graph again: the map still carries
-    // the block that was selected, and the graph the viewport it was left at.
-    await page.locator('[data-graph-node="create-plan"]').click();
-    // The run page shows a node's details in a sheet; reading it and closing it changes nothing
-    // about the views behind it.
-    const sheet = page.locator('[role="dialog"]');
-    await expect(sheet).toContainText("create-plan");
-    await page.keyboard.press("Escape");
-    await expect(sheet).toHaveCount(0);
-    await expectNoLoaders(page);
-    await expect
-      .poll(() => graphTransform(page, '[data-testid="execution-progress"]'))
-      .not.toBe("none");
-    const onGraph = await graphTransform(page, '[data-testid="execution-progress"]');
+    // Back to the map and to the graph again: only the view being read is mounted, and each
+    // switch is carried by the selection and the panel's level — the map returns to its block
+    // with the step still open, and the graph to that block's group with the step in view.
     await page.getByTestId("run-modes").locator('[data-mode="map"]').click();
     await expect(page).toHaveURL(/view=map/);
     await expect(page.getByTestId("canvas-view")).toBeVisible();
+    await expect(page.locator("[data-graph-node]")).toHaveCount(0);
     await expect(page).toHaveURL(/block=plan/);
+    await expect(page.getByTestId("node-panel")).toHaveAttribute("data-node-id", "create-plan");
+    await page.getByTestId("node-panel-back").click();
     await expect(page.getByTestId("block-detail")).toHaveAttribute("data-block-id", "plan");
     await expectNoLoaders(page);
     expect(await sameElement(page, "run-page", shell)).toBe(true);
     await page.getByTestId("run-modes").locator('[data-mode="graph"]').click();
     await expect(progress).toHaveAttribute("data-view", "graph");
-    // The viewport is read once the shown element is laid out again; it is the transform the
-    // graph was left at, not a fresh fit.
+    await expect(page.getByTestId("canvas-view")).toHaveCount(0);
+    await expect(page.locator('[data-graph-group][data-block-id="plan"]')).toHaveAttribute(
+      "data-selected",
+      "true",
+    );
+    const inGraphBox = async (selector: string) => {
+      const frame = (await page.getByTestId("graph-view").boundingBox())!;
+      const card = await page.locator(selector).boundingBox();
+      if (!card) return false;
+      const middle = { x: card.x + card.width / 2, y: card.y + card.height / 2 };
+      return (
+        middle.x >= frame.x &&
+        middle.y >= frame.y &&
+        middle.x <= frame.x + frame.width &&
+        middle.y <= frame.y + frame.height
+      );
+    };
     await expect
-      .poll(() => graphTransform(page, '[data-testid="execution-progress"]'))
-      .toBe(onGraph);
+      .poll(() => inGraphBox('[data-graph-node="create-plan"]'), { timeout: 10000 })
+      .toBe(true);
     await expectNoLoaders(page);
     expect(await sameElement(page, "run-page", shell)).toBe(true);
 
-    // A link that opens on the graph: the map is mounted only when first shown, so it opens on
-    // the run's current block at a readable size instead of a placement made in a hidden box.
+    // A node on the graph opens as the panel's node level rather than in a sheet over the page.
+    await page.locator('[data-graph-node="plan-review"]').click();
+    await expect(page.getByTestId("node-panel")).toHaveAttribute("data-node-id", "plan-review");
+    await expect(page.locator('[role="dialog"]')).toHaveCount(0);
+    await expectNoLoaders(page);
+
+    // A link that opens on the graph: the map is mounted only when it is first shown, so it opens
+    // on the run's current block at a readable size instead of a placement made in a hidden box.
     await page.goto(`${BASE_URL}/executions/${run.processId}?view=graph`);
     await expect(progress).toHaveAttribute("data-view", "graph");
     await expect(page.locator("[data-graph-node]").first()).toBeVisible({ timeout: 15000 });
@@ -140,16 +149,22 @@ test("the run page switches block, step, tab and view without remounting anythin
     await page.getByTestId("run-modes").locator('[data-mode="map"]').click();
     await expect(page.getByTestId("canvas-view")).toBeVisible();
     const diagram = (await page.getByTestId("canvas-view").boundingBox())!;
+    // The block the run is at is the one the map is centred on, and it is drawn at a readable
+    // size: a placement made while the map was hidden would leave the camera on the first block
+    // (or on nothing at all), so exactly one card — this one — has its middle inside the box.
     await expect
       .poll(async () => {
-        const current = (await cardBoxes(page)).find((card) => card.id === "scope");
-        return current
-          ? current.height >= 60 &&
-              current.x >= diagram.x - 1 &&
-              current.x + current.width <= diagram.x + diagram.width + 1
-          : false;
+        const cards = await mapCardBoxes(page);
+        const centred = cards.filter(
+          (card) =>
+            card.x + card.width / 2 >= diagram.x &&
+            card.x + card.width / 2 <= diagram.x + diagram.width &&
+            card.y + card.height / 2 >= diagram.y &&
+            card.y + card.height / 2 <= diagram.y + diagram.height,
+        );
+        return centred.map((card) => `${card.id}:${card.height >= 60}`);
       })
-      .toBe(true);
+      .toEqual(["scope:true"]);
     await expectNoLoaders(page);
   } finally {
     await authenticated.cleanup();
@@ -180,50 +195,40 @@ test("the flow page switches block, step, tab and view without remounting anythi
   await page.getByRole("tab", { name: /Block|Блок/ }).click();
 
   // A step focuses the graph, which is the page's other view.
-  await page.getByTestId("block-detail").locator('[data-node-id="execute-step"] button').click();
+  await openStepFromPanel(page, "execute-step");
   await expect(page).toHaveURL(/view=graph/);
   await expect(flow).toHaveAttribute("data-view", "graph");
   await expect(page.locator("[data-graph-node]").first()).toBeVisible({ timeout: 15000 });
   await expectNoLoaders(page);
 
-  // The block selected on the map is the highlighted frame on the graph.
+  // The block selected on the map is the highlighted frame on the graph, and a node clicked
+  // there opens as the panel's node level.
   await expect(page.locator('[data-graph-group][data-block-id="execute"]')).toHaveAttribute(
     "data-selected",
     "true",
   );
   await page.locator('[data-graph-node="execute-step"]').click();
-  await expect(page.getByTestId("workflow-sidebar")).toContainText("execute-step");
+  await expect(page.getByTestId("node-panel")).toHaveAttribute("data-node-id", "execute-step");
   await expectNoLoaders(page);
-  await expect.poll(() => graphTransform(page, '[data-testid="flow-view"]')).not.toBe("none");
-  const onGraph = await graphTransform(page, '[data-testid="flow-view"]');
+
+  // Back and forth: one diagram at a time, the selection carrying the switch.
   await page.getByTestId("flow-modes").locator('[data-mode="map"]').click();
   await expect(page).toHaveURL(/view=map/);
   await expect(page).toHaveURL(/block=execute/);
-  await expect(page.getByTestId("block-detail")).toHaveAttribute("data-block-id", "execute");
+  await expect(page.getByTestId("canvas-view")).toBeVisible();
+  await expect(page.locator("[data-graph-node]")).toHaveCount(0);
   await expectNoLoaders(page);
   expect(await sameElement(page, "flow-page", shell)).toBe(true);
   await page.getByTestId("flow-modes").locator('[data-mode="graph"]').click();
   await expect(flow).toHaveAttribute("data-view", "graph");
-  await expect.poll(() => graphTransform(page, '[data-testid="flow-view"]')).toBe(onGraph);
+  await expect(page.getByTestId("canvas-view")).toHaveCount(0);
+  await expect(page.locator('[data-graph-group][data-block-id="execute"]')).toHaveAttribute(
+    "data-selected",
+    "true",
+  );
   await expectNoLoaders(page);
   expect(await sameElement(page, "flow-page", shell)).toBe(true);
 });
-
-/** Every block card the map's diagram currently draws, with its box. */
-async function cardBoxes(page: Page) {
-  return page.locator('[data-testid="canvas-view"] [data-block-id]').evaluateAll((cards) =>
-    cards.map((card) => {
-      const box = card.getBoundingClientRect();
-      return {
-        id: card.getAttribute("data-block-id")!,
-        x: box.x,
-        y: box.y,
-        width: box.width,
-        height: box.height,
-      };
-    }),
-  );
-}
 
 test("the map gives the diagram the column on a desktop and one scrolling column on a phone", async ({
   page,
@@ -234,8 +239,8 @@ test("the map gives the diagram the column on a desktop and one scrolling column
   await expect(page.getByTestId("canvas-view")).toBeVisible();
   await expect(page.getByTestId("map-contents-list").locator("[data-block-id]")).toHaveCount(7);
 
-  // The diagram owns the column: the explanation above it costs one row, so the picture keeps
-  // most of the page's height instead of a strip at the bottom.
+  // The diagram owns the column: the explanation of the view is one button in the toolbar, so
+  // the picture keeps most of the page's height instead of a strip at the bottom.
   const desktop = (await page.getByTestId("canvas-view").boundingBox())!;
   expect(desktop.height).toBeGreaterThanOrEqual(600);
   await expect(page.getByTestId("guidance-map-body")).toHaveCount(0);
@@ -243,7 +248,7 @@ test("the map gives the diagram the column on a desktop and one scrolling column
   // The map opens readable: every card it draws is at least 60 px tall (a diagram squeezed into
   // a strip cannot manage that), and the block it opens on is wholly inside the diagram's box —
   // a card laid out beyond the box is invisible and yet still answers a click.
-  await expect.poll(async () => (await cardBoxes(page)).length).toBe(7);
+  await expect.poll(async () => (await mapCardBoxes(page)).length).toBe(7);
   const inside = (card: { x: number; y: number; width: number; height: number }) =>
     card.x >= desktop.x - 1 &&
     card.y >= desktop.y - 1 &&
@@ -251,66 +256,53 @@ test("the map gives the diagram the column on a desktop and one scrolling column
     card.y + card.height <= desktop.y + desktop.height + 1;
   await expect
     .poll(async () => {
-      const cards = await cardBoxes(page);
+      const cards = await mapCardBoxes(page);
       const short = cards.filter((card) => card.height < 60);
       const opened = cards.find((card) => card.id === "scope")!;
       return `short=${short.map((c) => `${c.id}:${Math.round(c.height)}`).join(",")} opened=${inside(opened)}`;
     })
     .toBe("short= opened=true");
 
-  // Fit-to-view gives the overview back without going below the readable floor: after zooming
-  // in on the middle of the process, the control returns to the first block wholly inside the
-  // box with every card still readable, not a centred strip of 30 px cards.
-  await page.getByTestId("canvas-view").locator(".react-flow__controls-zoomin").click();
-  await page.getByTestId("canvas-view").locator(".react-flow__controls-zoomin").click();
-  await page.getByTestId("canvas-view").locator(".react-flow__controls-fitview").click();
-  await expect
-    .poll(async () => {
-      const cards = await cardBoxes(page);
-      const short = cards.filter((card) => card.height < 60);
-      const first = cards.find((card) => card.id === "scope")!;
-      return `short=${short.map((c) => c.id).join(",")} first=${inside(first)}`;
-    })
-    .toBe("short= first=true");
-
-  // Every card's footer keeps its shape: the facts are one text line, and each transition chip
-  // sits inside its card and below that line — a chip drawn over the description, or facts
-  // wrapped into a column beside a long chip, fails here.
-  const footers = await page
-    .locator('[data-testid="canvas-view"] [data-block-id]')
-    .evaluateAll((cards) =>
-      cards.map((card) => {
-        const chips = card.querySelector('[data-testid="block-chips"]');
-        const facts = (chips?.previousElementSibling ?? card.querySelector(".mt-auto > span"))!;
-        const box = card.getBoundingClientRect();
-        const factsBox = facts.getBoundingClientRect();
-        const chipBoxes = [...(chips?.children ?? [])].map((chip) => chip.getBoundingClientRect());
-        return {
-          id: card.getAttribute("data-block-id"),
-          factsLines: Math.round(factsBox.height / 16),
-          chipsInside: chipBoxes.every(
-            (c) =>
-              c.left >= box.left - 1 &&
-              c.right <= box.right + 1 &&
-              c.bottom <= box.bottom + 1 &&
-              c.top >= factsBox.bottom - 1,
-          ),
-        };
-      }),
-    );
-  expect(footers.length).toBe(7);
-  expect(footers.filter((f) => f.factsLines > 1 || !f.chipsInside)).toEqual([]);
-  expect(footers.some((f) => f.id === "plan-review")).toBe(true);
+  // Every card is the same ported card: a title band across the top, the ports of its transitions
+  // on the card's own left and right borders, and the fact chips inside the card. A port drawn
+  // outside its card, or facts pushed past the card's bottom edge, fails here.
+  const shapes = await page.locator(`${MAP} [data-block-id]`).evaluateAll((cards) =>
+    cards.map((card) => {
+      const box = card.getBoundingClientRect();
+      const within = (element: Element | null) => {
+        if (!element) return true;
+        const at = element.getBoundingClientRect();
+        return (
+          at.left >= box.left - 1 &&
+          at.right <= box.right + 1 &&
+          at.top >= box.top - 1 &&
+          at.bottom <= box.bottom + 1
+        );
+      };
+      const ports = [...card.querySelectorAll("[data-port]")];
+      return {
+        id: card.getAttribute("data-block-id"),
+        band: Boolean(card.querySelector("[data-step-title]")),
+        ports: ports.length,
+        portsInside: ports.every(within),
+        factsInside: within(card.querySelector("[data-step-facts]")),
+      };
+    }),
+  );
+  expect(shapes).toHaveLength(7);
+  expect(shapes.filter((c) => !c.band || !c.portsInside || !c.factsInside)).toEqual([]);
+  // Every block of Quick Task takes part in at least one transition, so every card has ports.
+  expect(shapes.filter((c) => c.ports === 0)).toEqual([]);
 
   // A phone reads the map as one scrolling column: the diagram keeps a readable height, the
   // contents come beneath it, and scrolling the column reaches the last block.
   await page.setViewportSize({ width: 390, height: 844 });
   await page.reload();
   await expect(page.getByTestId("canvas-view")).toBeVisible();
-  const diagram = (await page.getByTestId("canvas-view").boundingBox())!;
-  expect(diagram.height).toBeGreaterThanOrEqual(300);
+  const phone = (await page.getByTestId("canvas-view").boundingBox())!;
+  expect(phone.height).toBeGreaterThanOrEqual(300);
   const contents = page.getByTestId("map-contents");
-  expect((await contents.boundingBox())!.y).toBeGreaterThanOrEqual(diagram.y + diagram.height - 1);
+  expect((await contents.boundingBox())!.y).toBeGreaterThanOrEqual(phone.y + phone.height - 1);
   const last = page.getByTestId("map-contents-deliver");
   expect((await last.boundingBox())!.y).toBeGreaterThan(844);
   await last.scrollIntoViewIfNeeded();
@@ -323,6 +315,14 @@ test("the map gives the diagram the column on a desktop and one scrolling column
 
 const NEVER_A_PERSON = /waiting for you|ждёт вас|your answer|вашего ответа/i;
 
+/** The status legend, which the run's toolbar keeps behind its own button. */
+async function openLegend(page: Page) {
+  await page.getByTestId("legend-open").click();
+  const legend = page.getByTestId("status-legend");
+  await expect(legend).toBeVisible();
+  return legend;
+}
+
 test("a run paused on an agent step says the agent is on the step, never that it waits for you", async ({
   page,
 }) => {
@@ -334,14 +334,14 @@ test("a run paused on an agent step says the agent is on the step, never that it
     await loginAsAdmin(page);
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto(`${BASE_URL}/executions/${run.processId}`);
-    const card = page.locator('[data-testid="canvas-view"] [data-block-id="scope"]');
+    const card = page.locator(`${MAP} [data-block-id="scope"]`);
     await expect(card).toHaveAttribute("data-status", "waiting");
     // The card's chip, the legend and the block panel's chip all word it as the agent's turn.
     await expect(card.locator('[data-status="waiting"]')).toHaveText(/agent on the step/i);
-    await expect(page.getByTestId("status-legend")).toContainText(/agent on the step/i);
     await expect(page.getByTestId("block-detail").locator('[data-status="waiting"]')).toHaveText(
       /agent on the step/i,
     );
+    await expect(await openLegend(page)).toContainText(/agent on the step/i);
     // Nowhere on the page does it claim a person is being waited for.
     await expect(page.getByTestId("run-page")).not.toContainText(NEVER_A_PERSON);
     await page.getByRole("tab", { name: /Variables|Переменные/ }).click();
@@ -452,13 +452,13 @@ test.describe("a run stopped at a lock node's PIN gate", () => {
     await loginAsAdmin(page);
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto(`${BASE_URL}/executions/${executionId}`);
-    const card = page.locator('[data-testid="canvas-view"] [data-block-id="gate"]');
+    const card = page.locator(`${MAP} [data-block-id="gate"]`);
     await expect(card).toHaveAttribute("data-status", "waiting");
     await expect(card.locator('[data-status="waiting"]')).toHaveText(NEVER_A_PERSON);
-    await expect(page.getByTestId("status-legend")).toContainText(NEVER_A_PERSON);
     await expect(page.getByTestId("block-detail").locator('[data-status="waiting"]')).toHaveText(
       NEVER_A_PERSON,
     );
+    await expect(await openLegend(page)).toContainText(NEVER_A_PERSON);
     // …and never the agent wording for this state.
     await expect(page.getByTestId("block-detail")).not.toContainText(/agent on the step/i);
   });

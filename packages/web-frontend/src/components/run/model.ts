@@ -332,6 +332,18 @@ export function orderNodeIds(
   return order;
 }
 
+/**
+ * `done/total` of a bound list as one wording everywhere: a counter the binding did not resolve
+ * reads as "—" (never "0", never "?"), on the card, in the contents and in the panel alike.
+ */
+export function listProgressLabel(
+  list: { done: number | null; total: number | null } | null | undefined,
+): string | null {
+  if (!list || (list.done === null && list.total === null)) return null;
+  const part = (n: number | null) => (n === null ? "—" : String(n));
+  return `${part(list.done)}/${part(list.total)}`;
+}
+
 export function stepsOf(
   workflow: WorkflowGraph | undefined,
   nodeIds: readonly string[],

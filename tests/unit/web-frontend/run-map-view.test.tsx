@@ -1,26 +1,28 @@
 /** @jest-environment jsdom */
 /**
- * The map: the header band, the diagram in the middle and the contents beside it. The header names
- * the run (task title, the title the run rendered, its goal and the projection's fact chips); the
- * contents list every block of the process in order with its position, its pass count and the
- * progress of the list it is bound to; the diagram's cards carry the same run facts — how many
- * passes, the time spent in the block, the time on the pass running now and the bound list's
- * done/total — and a block the run has not measured shows no timing at all rather than a zero. A
- * card's name is clamped to two lines with the whole name in the card's `title`, like its
- * description, so a long name cannot push the facts line out of the card.
+ * The map view: the diagram in the middle and the contents beside it. Naming the run is the page's
+ * job now (its `PageHeader` sits above the view), so what the map owns is checked here — the
+ * contents, the cards and the shape of the column.
  *
- * The layout the E2E pass found broken is checked here too, as far as jsdom can: the view's
- * explanation costs one collapsed row (its body is not even in the document until it is opened,
- * and the choice is remembered in `localStorage`), the diagram's box clips its own content, no
- * minimap is mounted over the blocks, and on a phone the map is one column — a fixed-height
- * diagram with the contents after it in document order.
+ * The contents list every block of the process in order with its index badge, its status, how many
+ * times it ran, the progress of the list it is bound to and, when the version's statistics carry
+ * one, the block's typical run time. The diagram's cards are ported cards: an index badge and the
+ * block's name in the title band, the status badge beside it, and the run facts as chips — how many
+ * passes, the time spent in the block, the time on the pass running now and the bound list's
+ * done/total. A block the run has not measured shows no timing at all rather than a zero, and a
+ * long name is clamped to two lines so it cannot push the facts out of the card.
+ *
+ * The layout the E2E pass found broken is checked here too, as far as jsdom can: the diagram's box
+ * clips its own content, the minimap is mounted only while the reader's stored flag says so, and on
+ * a phone the map is one column — a fixed-height diagram with the contents after it in document
+ * order.
  *
  * The ELK layout is stubbed (its own suite is `run-layout`), and the React Flow substrate is
  * replaced by a stub that renders each node through the diagram's own node component, so the real
  * card markup is under test without the canvas.
  */
 import { describe, expect, jest, test, beforeAll, beforeEach } from "@jest/globals";
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import { I18nextProvider } from "react-i18next";
 import React from "react";
 import i18n from "../../../packages/web-frontend/src/i18n";
@@ -137,7 +139,14 @@ jest.unstable_mockModule("@xyflow/react", () => ({
   BaseEdge: () => null,
   EdgeLabelRenderer: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   Background: () => null,
-  // Rendered as a marker so a minimap mounted over the blocks would be visible to the test.
+  ControlButton: ({ children, ...props }: React.ComponentProps<"button">) => (
+    <button type="button" {...props}>
+      {children}
+    </button>
+  ),
+  getSmoothStepPath: () => ["", 0, 0],
+  useStore: () => "",
+  // Rendered as a marker so the minimap is visible to the test wherever it is mounted.
   MiniMap: () => <div data-testid="diagram-minimap" />,
 }));
 jest.unstable_mockModule(
@@ -169,6 +178,9 @@ jest.unstable_mockModule("@/hooks/useTheme", () => ({
 jest.unstable_mockModule("../../../packages/web-frontend/src/components/run/layout", () => ({
   BLOCK_WIDTH,
   LABEL_MAX_WIDTH: 160,
+  PARALLEL_CHIP_MIN: 3,
+  transitionKey: (from: string, transition: { to: string; label: string }) =>
+    `${from}→${transition.to}:${transition.label}`,
   layoutBlocks: (blocks: RunBlock[]) =>
     Promise.resolve({
       blocks: blocks.map((block, index) => ({
@@ -177,6 +189,8 @@ jest.unstable_mockModule("../../../packages/web-frontend/src/components/run/layo
         y: 0,
         width: BLOCK_WIDTH,
         height: 150,
+        rank: index,
+        row: 0,
       })),
       edges: [],
       hubIds: [],
@@ -222,21 +236,32 @@ async function renderMap(
   return blocks;
 }
 
+/** The card of one block inside the stubbed diagram. */
+function cardOf(blockId: string): HTMLElement {
+  return screen
+    .getByTestId("diagram-nodes")
+    .querySelector<HTMLElement>(`[data-block-id="${blockId}"]`)!;
+}
+
 describe("the map view", () => {
-  test("names the run above the diagram: task, rendered title, goal and the projection's facts", async () => {
-    await renderMap();
-    const header = screen.getByTestId("run-header-facts");
-    expect(header.querySelector("[data-fact='taskTitle']")?.textContent).toBe("Robust Task");
-    expect(header.querySelector("[data-fact='title']")?.textContent).toBe("Robust Task · retry 2");
-    expect(header.querySelector("[data-fact='goal']")?.textContent).toBe(
-      "Finish the unit without leaving the flow",
-    );
-    const chips = within(screen.getByTestId("run-header-fact-chips")).getAllByTitle(/:/);
-    expect(chips.map((chip) => chip.textContent)).toEqual(["Attempt2 of 3", "Reviewfailed"]);
-    expect(chips.map((chip) => chip.getAttribute("data-fact-tone"))).toEqual([
-      "neutral",
-      "critical",
-    ]);
+  test("lists every block of the process in the contents, in order and with its counts", async () => {
+    const blocks = await renderMap();
+    const contents = screen.getByTestId("map-contents-list");
+    const rows = within(contents).getAllByRole("button");
+    expect(rows).toHaveLength(blocks.length);
+    expect(rows.map((row) => row.getAttribute("data-block-id"))).toEqual(blocks.map((b) => b.id));
+    for (const [index, row] of rows.entries()) {
+      // The position is the same badge the card carries, not a number typed into the row.
+      expect(row.querySelector("[data-step-index]")?.textContent).toBe(String(index + 1));
+      expect(row.textContent).toContain(blocks[index].name);
+      expect(row.getAttribute("data-status")).toBe(blocks[index].status);
+    }
+    // The repeated block shows its pass count, the bound one its list progress.
+    expect(rows[0].textContent).toContain("×3");
+    expect(rows[1].querySelector("[data-contents-list]")?.textContent).toBe("1/3");
+    // The selected block is the one the page marks, and the active block is the current step.
+    expect(rows[1].getAttribute("aria-pressed")).toBe("true");
+    expect(rows[1].getAttribute("aria-current")).toBe("step");
   });
 
   test("the contents name a block's typical run time when the version's statistics carry one", async () => {
@@ -280,7 +305,7 @@ describe("the map view", () => {
     expect(document.querySelectorAll("[data-contents-typical]")).toHaveLength(1);
   });
 
-  test("an unresolved list counter reads ? on the contents and the card, never 0", async () => {
+  test("an unresolved list counter reads — on the contents and the card, never 0", async () => {
     const base = projectionOf("robust-task");
     const bound = base.nodes.findIndex((node) => node.list !== null);
     const nodes = base.nodes.map((node, index) =>
@@ -288,89 +313,12 @@ describe("the map view", () => {
     );
     await renderMap({ nodes });
     const row = screen.getByTestId(`map-contents-${nodes[bound].id}`);
-    expect(within(row).getByTitle(/items done/i).textContent).toBe("?/3");
+    expect(row.querySelector("[data-contents-list]")?.textContent).toBe("—/3");
+    expect(cardOf(nodes[bound].id).textContent).toContain("—/3");
     expect(document.body.textContent).not.toContain("0/3");
   });
 
-  test("words the cards' durations in the interface language", async () => {
-    await i18n.changeLanguage("ru");
-    try {
-      await renderMap();
-      const totals = [...document.querySelectorAll("[data-block-total]")].map((n) => n.textContent);
-      expect(totals.length).toBeGreaterThan(0);
-      for (const total of totals) expect(total).toMatch(/\d+ (с|мин|ч)/);
-      expect(document.body.textContent).not.toMatch(/\d+ (s|min)\b/);
-    } finally {
-      await i18n.changeLanguage("en");
-    }
-  });
-
-  test("prints the title once when the projection fell back to the task title", async () => {
-    // A run without a rendered title gets the workflow name as `title`, the same text as
-    // `taskTitle`; the header shows it once, not as two identical lines.
-    await renderMap({ title: "Robust Task" });
-    const header = screen.getByTestId("run-header-facts");
-    expect(header.querySelector("[data-fact='taskTitle']")?.textContent).toBe("Robust Task");
-    expect(header.querySelector("[data-fact='title']")).toBeNull();
-  });
-
-  test("the view's explanation costs one collapsed row and remembers being opened", async () => {
-    await renderMap();
-    const toggle = screen.getByTestId("guidance-map-toggle");
-    // Closed by default: the body is not in the document at all, so it takes no height from the
-    // diagram — the defect was a callout block above the canvas.
-    expect(toggle.getAttribute("aria-expanded")).toBe("false");
-    expect(screen.queryByTestId("guidance-map-body")).toBeNull();
-    fireEvent.click(toggle);
-    expect(screen.getByTestId("guidance-map-body").textContent).toContain("Blocks are laid out");
-    expect(window.localStorage.getItem("moira.map.guide:pages.runPage.modeGuide")).toBe("open");
-    // A reader who opened it once gets it open on the next visit.
-    cleanup();
-    await renderMap();
-    expect(screen.getByTestId("guidance-map-toggle").getAttribute("aria-expanded")).toBe("true");
-  });
-
-  test("the diagram clips its own box, mounts no minimap and stacks the contents beneath it", async () => {
-    await renderMap();
-    // A block laid out beyond the fitted viewport must not reach over the contents beside it.
-    expect(screen.getByTestId("canvas-view").className).toContain("overflow-hidden");
-    // The contents sidebar is the navigation; a minimap would only cover the blocks.
-    expect(screen.queryByTestId("diagram-minimap")).toBeNull();
-    // On a phone the map is one column: a diagram of fixed readable height, the contents after it
-    // in document order, and no `h-full` that would squeeze the column into the page's leftovers.
-    const view = screen.getByTestId("map-view");
-    const diagram = screen.getByTestId("canvas-view").closest("div.h-\\[55vh\\]");
-    const contents = screen.getByTestId("map-contents");
-    expect(diagram).not.toBeNull();
-    expect(view.className).not.toMatch(/(^| )h-full( |$)/);
-    expect(view.className).toContain("lg:h-full");
-    expect(
-      diagram!.compareDocumentPosition(contents) & Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy();
-  });
-
-  test("lists every block of the process in the contents, in order and with its counts", async () => {
-    const blocks = await renderMap();
-    const contents = screen.getByTestId("map-contents-list");
-    const rows = within(contents).getAllByRole("button");
-    expect(rows).toHaveLength(blocks.length);
-    expect(rows.map((row) => row.getAttribute("data-block-id"))).toEqual(blocks.map((b) => b.id));
-    for (const [index, row] of rows.entries()) {
-      expect(row.textContent).toContain(`${index + 1}.`);
-      expect(row.textContent).toContain(blocks[index].name);
-      expect(row.getAttribute("data-status")).toBe(blocks[index].status);
-    }
-    // The repeated block shows its pass count, the bound one its list progress.
-    expect(rows[0].textContent).toContain("×3");
-    expect(within(rows[1]).getByTitle(/items done/i).textContent).toBe("1/3");
-    // The selected block is the one the page marks, and the active block is the current step.
-    expect(rows[1].getAttribute("aria-pressed")).toBe("true");
-    expect(rows[1].getAttribute("aria-current")).toBe("step");
-    // The finder is part of the contents, so a step can be traced back to its block.
-    expect(screen.getByTestId("map-node-finder").tagName).toBe("INPUT");
-  });
-
-  test("the diagram's cards carry the pass count, the times and the bound list's progress", async () => {
+  test("the diagram's cards are ported cards carrying the pass count, the times and the bound list", async () => {
     const blocks = await renderMap();
     const cards = screen
       .getByTestId("diagram-nodes")
@@ -378,27 +326,51 @@ describe("the map view", () => {
     expect(cards).toHaveLength(blocks.length);
     const [done, active, pending] = [...cards];
 
+    // The title band: the block's position as the same badge the contents carry, and its name.
+    const band = (card: HTMLElement) => card.querySelector<HTMLElement>("[data-step-title]")!;
+    expect(band(done).querySelector("[data-step-index]")?.textContent).toBe("1");
+    expect(band(done).textContent).toContain(blocks[0].name);
+    // The card's colour follows the run status, so the state reads without hovering anything.
+    expect(done.getAttribute("data-tone")).toBe("done");
+    expect(active.getAttribute("data-tone")).toBe("active");
+    expect(pending.getAttribute("data-tone")).toBe("neutral");
+    expect(active.getAttribute("data-current")).toBe("true");
+
     // A block that ran three times and took a minute and a half: the count and the total, no
     // "current", because no pass of it is open.
-    expect(done.textContent).toContain("×3");
     expect(done.getAttribute("data-status")).toBe("repeated");
-    expect(within(done).getByTitle(/time spent in this block/i).textContent).toContain(
-      "1 min 30 s",
-    );
-    expect(within(done).queryByTitle(/pass running now/i)).toBeNull();
+    const facts = (card: HTMLElement) => card.querySelector<HTMLElement>("[data-step-facts]")!;
+    expect(facts(done).textContent).toContain("×3");
+    expect(facts(done).textContent).toContain("1 min 30 s");
 
-    // The block the run is in: its total, the open pass's own time and the list's done/total.
-    expect(within(active).getByTitle(/time spent in this block/i).textContent).toContain("30 s");
-    expect(within(active).getByTitle(/pass running now/i).textContent).toContain("30 s");
-    expect(within(active).getByTitle(/items done/i).textContent).toContain("1/3");
+    // The block the run is in: the open pass's own time and the list's done/total.
+    expect(facts(active).textContent).toContain("30 s");
+    expect(facts(active).textContent).toContain("1/3");
+    // The bound list is drawn on the card itself, item by item, each with the marker of its
+    // state: a check for done, an arrow for the one in progress, a dot for the rest.
+    const items = active.querySelectorAll("[data-block-list-items] li");
+    expect([...items].map((item) => item.textContent)).toEqual(["✓first", "▶second", "·third"]);
 
-    // A block the run has not entered says nothing about time rather than "0 s".
-    expect(within(pending).queryByTitle(/time spent in this block/i)).toBeNull();
-    expect(within(pending).queryByTitle(/pass running now/i)).toBeNull();
-    expect(pending.textContent).not.toContain("0 s");
+    // A block the run has not entered says nothing about time rather than "0 s": its only fact
+    // is how many steps it holds.
+    expect(facts(pending).children).toHaveLength(1);
+    expect(facts(pending).textContent).toContain("steps");
+    expect(facts(pending).textContent).not.toMatch(/\b\d+ (s|min|h)\b/);
   });
 
-  test("a card clamps a long block name to two lines and keeps the whole name in its title", async () => {
+  test("words the cards' durations in the interface language", async () => {
+    await i18n.changeLanguage("ru");
+    try {
+      const blocks = await renderMap();
+      const facts = cardOf(blocks[0].id).querySelector<HTMLElement>("[data-step-facts]")!;
+      expect(facts.textContent).toMatch(/\d+ (с|мин|ч)/);
+      expect(document.body.textContent).not.toMatch(/\d+ (s|min)\b/);
+    } finally {
+      await i18n.changeLanguage("en");
+    }
+  });
+
+  test("a card clamps a long block name to two lines and keeps the whole name in the band", async () => {
     const base = projectionOf("robust-task");
     const longName =
       "Reconcile the plan with the review findings and the user's late scope change".padEnd(
@@ -410,14 +382,38 @@ describe("the map view", () => {
       index === 0 ? { ...node, label: longName } : node,
     );
     await renderMap({ nodes });
-    const card = screen
-      .getByTestId("diagram-nodes")
-      .querySelector<HTMLElement>(`[data-block-id="${nodes[0].id}"]`)!;
-    expect(card.getAttribute("title")).toBe(longName);
-    const name = card.querySelector<HTMLElement>("[data-block-name]")!;
+    const name = cardOf(nodes[0].id).querySelector<HTMLElement>("[data-step-title] .line-clamp-2")!;
     expect(name.textContent).toContain(longName);
     // jsdom lays nothing out: the clamp is the class the stylesheet turns into two lines, the
     // same rule the description uses; the geometry is checked in the browser by the E2E pass.
     expect(name.className).toContain("line-clamp-2");
+  });
+
+  test("the minimap is mounted only while the reader's stored flag keeps it on", async () => {
+    // The contents sidebar is the navigation, so the minimap is the reader's choice — and the
+    // choice is the one the toolbar's switch writes, not a fresh default on every visit.
+    await renderMap();
+    expect(screen.getByTestId("diagram-minimap")).toBeDefined();
+    cleanup();
+    window.localStorage.setItem("moira.diagram.minimap", "0");
+    await renderMap();
+    expect(screen.queryByTestId("diagram-minimap")).toBeNull();
+  });
+
+  test("the diagram clips its own box and stacks the contents beneath it on a phone", async () => {
+    await renderMap();
+    // A block laid out beyond the fitted viewport must not reach over the contents beside it.
+    expect(screen.getByTestId("canvas-view").className).toContain("overflow-hidden");
+    // On a phone the map is one column: a diagram of fixed readable height, the contents after it
+    // in document order, and no `h-full` that would squeeze the column into the page's leftovers.
+    const view = screen.getByTestId("map-view");
+    const diagram = screen.getByTestId("canvas-view").closest("div.h-\\[55vh\\]");
+    const contents = screen.getByTestId("map-contents");
+    expect(diagram).not.toBeNull();
+    expect(view.className).not.toMatch(/(^| )h-full( |$)/);
+    expect(view.className).toContain("lg:h-full");
+    expect(
+      diagram!.compareDocumentPosition(contents) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
   });
 });

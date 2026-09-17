@@ -355,7 +355,11 @@ describe("TypicalDurations", () => {
     expect(screen.getByTestId("typical-durations-error").textContent).toBe(
       "typical durations unavailable",
     );
-    expect(screen.getByTestId("typical-durations-error").getAttribute("title")).toBe("HTTP 500");
+    // The failure itself is the hint the delegated tooltip layer draws; a native `title` would
+    // be drawn by the browser in its own colours instead.
+    expect(screen.getByTestId("typical-durations-error").getAttribute("data-hint")).toBe(
+      "HTTP 500",
+    );
     expect(screen.queryByTestId("typical-durations-empty")).toBeNull();
   });
 });

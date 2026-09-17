@@ -190,6 +190,7 @@ function Port({
       onMouseEnter={() => onHover?.([port.id])}
       onMouseLeave={() => onHover?.(null)}
       data-port={side}
+      data-port-kind={port.kind}
       data-transition={port.id}
       data-peer={port.peer}
       data-lit={lit ? "true" : undefined}
@@ -215,15 +216,6 @@ function Port({
     >
       {row}
     </Hint>
-  );
-}
-
-/** Tooltip body: wide, left-aligned, keeps line breaks, monospace for authored text. */
-export function TipBody({ children }: { children: React.ReactNode }): React.JSX.Element {
-  return (
-    <div className="max-w-[440px] whitespace-pre-wrap text-left font-mono text-[11px] leading-[1.5] [text-wrap:initial]">
-      {children}
-    </div>
   );
 }
 

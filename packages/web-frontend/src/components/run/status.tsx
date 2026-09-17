@@ -10,6 +10,7 @@ import { useEditing } from "../flow/editing";
 import { cn } from "@/lib/utils";
 import { blockStatusLabel, type WaitingFor } from "./waiting";
 import type { ExecutionBlockStatus } from "./model";
+import type { CardTone } from "../diagram/PortedCard";
 
 interface StatusStyle {
   icon: React.ComponentType<{ className?: string }>;
@@ -59,6 +60,16 @@ export const STATUS_STYLE: Record<ExecutionBlockStatus, StatusStyle> = {
     chip: "bg-warning text-warning-foreground",
     tint: "text-warning-foreground",
   },
+};
+
+/** The card tone a block's run status selects (accent bar, ground, glow, index badge). */
+export const BLOCK_TONE: Record<ExecutionBlockStatus, CardTone> = {
+  pending: "neutral",
+  active: "active",
+  waiting: "waiting",
+  done: "done",
+  repeated: "done",
+  skipped: "neutral",
 };
 
 export const STATUS_ORDER: ExecutionBlockStatus[] = [

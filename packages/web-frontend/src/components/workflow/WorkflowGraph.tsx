@@ -34,24 +34,10 @@ import { useOpeningPlacement } from "../diagram/placement";
 import { DiagramToolbar } from "../diagram/DiagramToolbar";
 import { NodeFinder } from "../run/NodeFinder";
 import { useStoredFlag } from "../diagram/useStoredFlag";
-import { useLayoutPreset, type LayoutPreset } from "../diagram/layoutPreset";
-
-/**
- * What a layout preset means on the graph: how the block groups are stacked (`outer`) and how the
- * steps run inside a group (`inner`). Cards keep their ports on the left and right in every case.
- */
-const GRAPH_PRESET_DIRECTIONS: Record<
-  LayoutPreset,
-  { outer: "DOWN" | "RIGHT"; inner: "DOWN" | "RIGHT" }
-> = {
-  default: { outer: "DOWN", inner: "RIGHT" },
-  compact: { outer: "DOWN", inner: "RIGHT" },
-  flow: { outer: "RIGHT", inner: "RIGHT" },
-  vertical: { outer: "DOWN", inner: "DOWN" },
-};
+import { useLayoutPreset } from "../diagram/layoutPreset";
 
 import { graphModel, definitionBlocks } from "../run/graphModel";
-import { graphSpacing, GRAPH_MARGIN, layoutGraph } from "./graphLayout";
+import { graphSpacing, GRAPH_MARGIN, GRAPH_PRESET_DIRECTIONS, layoutGraph } from "./graphLayout";
 import {
   BlockGroupView,
   GraphDefs,

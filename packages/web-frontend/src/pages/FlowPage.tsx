@@ -57,13 +57,12 @@ import { ShareDialog } from "../components/workflow/ShareDialog";
 import { ConfirmDialog } from "../components/confirm-dialog";
 import { PageLoader } from "../components/page-loader";
 import { PageHeader } from "../components/diagram/PageHeader";
-import { ContentsLayout } from "../components/run/ContentsSidebar";
+import {
+  ContentsLayout,
+  ContentsToggleProvider,
+  ContentsToggleSlot,
+} from "../components/run/ContentsSidebar";
 
-/** The contents fold button, handed from the graph's layout into the graph's toolbar. */
-const GraphContentsToggle = React.createContext<React.ReactNode>(null);
-function GraphContentsToggleSlot(): React.JSX.Element {
-  return <>{React.useContext(GraphContentsToggle)}</>;
-}
 import { DiagramSkeleton } from "../components/route-skeleton";
 import { InlineError } from "../components/inline-error";
 import { useWorkflowApp } from "../hooks/useWorkflowData";
@@ -77,6 +76,7 @@ import type { WorkflowGraph } from "../types/workflow-types";
 import { MapView } from "../components/run/MapView";
 import { BlockDetailPanel } from "../components/run/BlockDetailPanel";
 import { NodePanel } from "../components/run/NodePanel";
+import { useNodeTypes } from "../hooks/useNodeTypes";
 import { useStoredFlag } from "../components/diagram/useStoredFlag";
 import type { HighlightRequest } from "../components/diagram/useHighlightTarget";
 import { PanelRightClose, PanelRightOpen } from "lucide-react";
@@ -137,7 +137,7 @@ export function flowGuideSteps(isOwner: boolean): GuideStep<FlowViewMode, FlowPa
     },
     {
       id: "loop",
-      targets: { map: "[data-return-chip]" },
+      targets: { map: '[data-port-kind="return"]' },
       fallbackView: "map",
     },
     {
@@ -203,6 +203,7 @@ export const FlowPage: React.FC = () => {
   }, []);
 
   const detail = workflowDetail.workflow;
+  const { index: nodeTypeIndex } = useNodeTypes();
   const fileInfo = detail?.fileInfo;
   const savedWorkflow = detail?.workflow;
   const isOwner = fileInfo?.accessType === "owner";
@@ -521,7 +522,7 @@ export const FlowPage: React.FC = () => {
             showNodeDetails={false}
             showControls={true}
             toolbarModes={flowModes}
-            toolbarLeading={<GraphContentsToggleSlot />}
+            toolbarLeading={<ContentsToggleSlot />}
             toolbarTrailing={flowTrailing}
             showMinimap
             focusRequest={focusRequest}
@@ -556,6 +557,28 @@ export const FlowPage: React.FC = () => {
           }
           meta={savedWorkflow ? `v${savedWorkflow.metadata.version}` : undefined}
           description={savedWorkflow?.metadata.description}
+          facts={
+            savedWorkflow ? (
+              <>
+                {(savedWorkflow.metadata.tags ?? []).map((tag) => (
+                  <span
+                    key={tag}
+                    className="rounded-full border bg-muted/40 px-2 py-0.5 text-[11px] text-muted-foreground"
+                    data-testid="flow-tag"
+                  >
+                    {tag}
+                  </span>
+                ))}
+                <span
+                  className="rounded-full border bg-muted/40 px-2 py-0.5 text-[11px] tabular-nums text-muted-foreground"
+                  data-testid="flow-node-count"
+                >
+                  {savedWorkflow.nodes.length}{" "}
+                  {t("components.workflowSidebar.totalNodes", "total nodes")}
+                </span>
+              </>
+            ) : undefined
+          }
           actions={
             <>
               <div className="hidden md:flex items-center gap-2">
@@ -773,8 +796,8 @@ export const FlowPage: React.FC = () => {
                 </ul>
               )}
 
-              {/* Both views stay mounted once shown and are only hidden, so the map keeps its
-                  selection and the graph its viewport across a switch. */}
+              {/* Only the shown view is mounted: the selection lives in the URL and the graph
+                  re-centres on its focus request, so a switch loses nothing. */}
               <div className="lg:flex-1 lg:min-h-0">
                 {progress && mode === "map" && (
                   <div className="lg:h-full">
@@ -813,9 +836,9 @@ export const FlowPage: React.FC = () => {
                     testId="graph-view"
                   >
                     {(toggle) => (
-                      <GraphContentsToggle.Provider value={toggle}>
+                      <ContentsToggleProvider value={toggle}>
                         <div className="h-[60vh] lg:h-full">{technicalGraph}</div>
-                      </GraphContentsToggle.Provider>
+                      </ContentsToggleProvider>
                     )}
                   </ContentsLayout>
                 )}
@@ -823,7 +846,9 @@ export const FlowPage: React.FC = () => {
               </div>
             </section>
 
-            {process && (
+            {/* The panel is the only home of a node's details, so it exists without a process view
+                too (its block level then shows the empty-state callout). */}
+            {
               <aside
                 className={cn(
                   "relative flex flex-col bg-card overflow-hidden border-t lg:border-t-0 lg:border-l",
@@ -890,6 +915,8 @@ export const FlowPage: React.FC = () => {
                           onBack={handleClearSelection}
                           onFocusNode={focusNode}
                           onSelectVariable={goToVariable}
+                          validation={detail?.validation ?? null}
+                          nodeTypes={nodeTypeIndex}
                         />
                       ) : (
                         <BlockDetailPanel
@@ -919,7 +946,7 @@ export const FlowPage: React.FC = () => {
                   </Tabs>
                 </div>
               </aside>
-            )}
+            }
           </div>
         )}
 

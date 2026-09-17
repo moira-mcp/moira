@@ -18,6 +18,9 @@ import { systemCatalogGraph } from "../helpers/catalog-graphs.js";
 
 const BASE_URL = getTestBaseUrl();
 
+/** A measured duration as the interface writes it: `12 s`, `1 min 20 s`, `2 h 05 min`. */
+const DURATION = /^\d+\s(s|min|h|с|мин|ч)\b/;
+
 test("renders live SDF progress in the image endpoint and on the run page", async ({ page }) => {
   const authenticated = await createAuthenticatedMCPClient();
 
@@ -73,14 +76,19 @@ test("renders live SDF progress in the image endpoint and on the run page", asyn
     // lanes header and are not shown by either of the two views.)
     await expect(page.getByTestId("run-page")).toContainText(/Software Development/);
     const intake = page.locator('[data-testid="canvas-view"] [data-block-id="intake"]');
-    await expect(intake).toHaveAttribute("aria-current", "step");
+    await expect(intake).toHaveAttribute("data-current", "true");
     await expect(intake).toHaveAttribute("data-status", "waiting");
     // The run waits on an agent step, not on a person.
     await expect(intake).toContainText(/agent on the step/i);
-    // The answered pass is measured, so the card and the panel carry a duration rather than "—".
-    await expect(intake.locator("[data-block-total]")).toBeVisible();
+    // The answered pass is measured, so the panel carries a duration rather than "—" and the
+    // card carries a time fact of its own. The two are not compared: the block is still open, so
+    // the card shows the running pass while the panel shows the total, and they tick apart.
     await expect(page.getByTestId("block-detail")).toHaveAttribute("data-block-id", "intake");
+    await expect(page.getByTestId("block-timings")).toHaveAttribute("data-recorded", "true");
     await expect(page.getByTestId("block-timing-total")).not.toHaveText("—");
+    await expect(intake.locator("[data-step-facts] > *").filter({ hasText: DURATION })).toHaveCount(
+      1,
+    );
 
     // The implement block is bound to the plan's unit list, so it reports how much of that list
     // is done — on its card on the map and, once selected, in its panel.

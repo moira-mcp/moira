@@ -11,6 +11,7 @@ import { test, expect, type Page } from "./fixtures.js";
 import { getTestBaseUrl } from "../utils/test-config.js";
 import { createAuthenticatedMCPClient, startWorkflowExecutionState } from "../utils/mcp-auth.js";
 import { loginAsAdmin } from "./helpers/auth-helper.js";
+import { openPanelSection } from "./helpers/diagram.js";
 
 const BASE_URL = getTestBaseUrl();
 
@@ -66,6 +67,7 @@ test("the flow page's block panel lays the steps of the densest SDF block on one
       .evaluateAll((els) => els.map((el) => el.getAttribute("data-block-id")!));
     expect(ids.length).toBeGreaterThan(1);
     let densest = { id: ids[0], count: 0 };
+    await openPanelSection(page, "panel-section-steps");
     for (const blockId of ids) {
       await page.getByTestId(`map-contents-${blockId}`).click();
       await expect(page.getByTestId("block-detail")).toHaveAttribute("data-block-id", blockId);
@@ -103,6 +105,8 @@ test("the run page's block panel uses the same cards and its tab strip never scr
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto(`${BASE_URL}/executions/${run.processId}`);
     await expect(page.getByTestId("block-detail")).toBeVisible();
+    // The steps of a block are one folded section of the panel; the reader opens it to read them.
+    await openPanelSection(page, "panel-section-steps");
     const stepList = '[data-testid="block-detail"] [data-testid="step-list"]';
     await expect(page.locator(`${stepList} [data-step-card]`).first()).toBeVisible();
     await expectOneGrid(page, stepList);
@@ -144,8 +148,11 @@ test("the run page's block panel uses the same cards and its tab strip never scr
     expect(await overflow()).toBeLessThanOrEqual(0);
     await contained();
     await expect(page.getByRole("tab", { name: /Locks|Блокировки/ })).toBeVisible();
-    // Tabs say what they hold.
-    await expect(page.getByRole("tab", { name: /Errors|Ошибки/ })).toHaveAttribute("title", /.+/);
+    // Tabs say what they hold, through the application's own hint rather than a browser title.
+    await expect(page.getByRole("tab", { name: /Errors|Ошибки/ })).toHaveAttribute(
+      "data-hint",
+      /.+/,
+    );
     // Pass counts are secondary text, not a badge in the status chip.
     await expect(page.locator('[data-testid="status-iterations"]')).toHaveCount(0);
   } finally {

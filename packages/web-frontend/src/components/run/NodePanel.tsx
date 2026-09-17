@@ -20,6 +20,11 @@ import {
 } from "../diagram/VariableText";
 import type { VariableDefinition } from "../diagram/VariableText";
 import type { WorkflowGraph } from "../../types/workflow-types";
+import type { WorkflowValidationStatus } from "../../types/react-flow-types";
+import type { NodeTypeIndex } from "../../types/node-type-catalog";
+import { NodeSchemaReadout } from "../workflow/NodeSchemaReadout";
+import { NodePlaybookReferences, collectNodeReferences } from "../workflow/NodePlaybookReferences";
+import { AlertCircle, AlertTriangle } from "lucide-react";
 import { blockById, nodeOwners, stepsOf, type RunBlock } from "./model";
 
 export function NodePanel({
@@ -29,10 +34,16 @@ export function NodePanel({
   onBack,
   onFocusNode,
   onSelectVariable,
+  validation,
+  nodeTypes,
 }: {
   workflow: WorkflowGraph;
   blocks: RunBlock[];
   nodeId: string;
+  /** The definition's validation status; the node's own errors and warnings are shown. */
+  validation?: WorkflowValidationStatus | null;
+  /** The node-type catalog Moira serves: a catalog-drawn node shows its configuration against it. */
+  nodeTypes?: NodeTypeIndex;
   /** Back to the block level. */
   onBack: () => void;
   /** Bring the step into view on the graph. */
@@ -44,6 +55,7 @@ export function NodePanel({
   const step = useMemo(() => stepsOf(workflow, [nodeId])[0], [workflow, nodeId]);
   const owners = useMemo(() => nodeOwners(blocks), [blocks]);
   const owner = blockById(blocks).get(owners.get(nodeId) ?? "") ?? null;
+  const described = nodeTypes?.[step.type];
   const node = workflow.nodes.find((n) => n.id === nodeId) as unknown as
     (Record<string, unknown> & { connections?: Record<string, string> }) | undefined;
   const nameOf = (id: string) => {
@@ -51,6 +63,30 @@ export function NodePanel({
     const label = (target as { progressActiveLabel?: string } | undefined)?.progressActiveLabel;
     return label ?? target?.metadata?.displayName ?? id;
   };
+  // What the flow page's node sidebar used to show and the panel now owns: the node's own
+  // validation, the playbooks its texts name, a catalog-drawn node's configuration read against
+  // the schema its type declares, the raw input schema, a subgraph id, a materialize declaration.
+  const errors = validation?.nodeValidation?.[nodeId]?.errors ?? [];
+  const warnings = validation?.nodeValidation?.[nodeId]?.warnings ?? [];
+  const body = (node ?? {}) as Record<string, unknown>;
+  const basePath = typeof body.basePath === "string" ? body.basePath : undefined;
+  const filePaths = Array.isArray(body.filePaths)
+    ? (body.filePaths as unknown[]).filter((f): f is string => typeof f === "string")
+    : undefined;
+  const playbookTexts = [
+    step.text ?? undefined,
+    step.completionCondition ?? undefined,
+    basePath,
+    ...(filePaths ?? []),
+  ];
+  const playbooks = collectNodeReferences(playbookTexts);
+  const nodeConfig = described
+    ? described.schemaScope === "node"
+      ? body
+      : ((body.config as Record<string, unknown> | undefined) ?? {})
+    : undefined;
+  const inputSchema = body.inputSchema as Record<string, unknown> | undefined;
+  const graphId = typeof body.graphId === "string" ? body.graphId : undefined;
   return (
     <VariableProvider
       value={{
@@ -81,8 +117,19 @@ export function NodePanel({
           <NodeTypeTag type={step.type} />
           <div className="min-w-0 flex-1">
             <h3 className="text-sm font-semibold leading-tight">
-              <TemplateText text={step.progressLabel ?? step.displayName ?? step.id} compact />
+              <TemplateText
+                text={step.progressLabel ?? step.displayName ?? described?.title ?? step.id}
+                compact
+              />
             </h3>
+            {described && (
+              <code
+                className="mt-0.5 block truncate font-mono text-[11px] text-muted-foreground"
+                data-testid="node-panel-type"
+              >
+                {step.type}
+              </code>
+            )}
             {step.progressContent && (
               <p className="mt-1 text-xs leading-5 text-muted-foreground">
                 <TemplateText text={step.progressContent} />
@@ -103,6 +150,29 @@ export function NodePanel({
           )}
         </div>
 
+        {(errors.length > 0 || warnings.length > 0) && (
+          <PanelSection
+            id="validation"
+            title={t("components.workflowGraph.nodeDetails.validation", "Validation")}
+            summary={String(errors.length + warnings.length)}
+            testId="node-panel-validation"
+          >
+            <ul className="space-y-1 text-xs">
+              {errors.map((message, index) => (
+                <li key={`e${index}`} className="flex items-start gap-2 text-destructive">
+                  <AlertCircle className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
+                  <span>{message}</span>
+                </li>
+              ))}
+              {warnings.map((message, index) => (
+                <li key={`w${index}`} className="flex items-start gap-2 text-warning-foreground">
+                  <AlertTriangle className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
+                  <span>{message}</span>
+                </li>
+              ))}
+            </ul>
+          </PanelSection>
+        )}
         {step.text && (
           <PanelSection
             id={step.routing ? "message" : "directive"}
@@ -172,6 +242,70 @@ export function NodePanel({
                 </li>
               ))}
             </ol>
+          </PanelSection>
+        )}
+        {playbooks.length > 0 && (
+          <PanelSection
+            id="playbooks"
+            title={t("components.workflowGraph.nodeDetails.playbooks", "Playbooks")}
+            summary={String(playbooks.length)}
+            testId="node-panel-playbooks"
+          >
+            <NodePlaybookReferences texts={playbookTexts} />
+          </PanelSection>
+        )}
+        {described && nodeConfig !== undefined && (
+          <PanelSection
+            id="configuration"
+            title={t("components.workflowSidebar.configuration", "Configuration")}
+            summary={
+              described.extensionName
+                ? `${t("components.workflowSidebar.providedBy", "Provided by extension")} ${described.extensionName}${described.extensionVersion ? ` ${described.extensionVersion}` : ""}`
+                : undefined
+            }
+            testId="node-panel-configuration"
+          >
+            <NodeSchemaReadout schema={described.schema ?? null} value={nodeConfig} />
+          </PanelSection>
+        )}
+        {graphId && (
+          <PanelSection
+            id="subgraph"
+            title={t("components.workflowGraph.nodeDetails.subgraphId", "Subgraph ID")}
+            testId="node-panel-subgraph"
+          >
+            <code className="rounded bg-muted px-2 py-1 font-mono text-xs">{graphId}</code>
+          </PanelSection>
+        )}
+        {basePath && filePaths && (
+          <PanelSection
+            id="materialize"
+            title="Materialize"
+            summary={String(filePaths.length)}
+            testId="node-panel-materialize"
+          >
+            <code className="block overflow-x-auto rounded bg-muted px-2 py-1 font-mono text-xs">
+              {basePath}
+            </code>
+            <ul className="mt-1 space-y-0.5">
+              {filePaths.map((path) => (
+                <li key={path} className="break-all font-mono text-xs">
+                  {path}
+                </li>
+              ))}
+            </ul>
+          </PanelSection>
+        )}
+        {inputSchema && Object.keys(inputSchema).length > 0 && (
+          <PanelSection
+            id="input-schema"
+            title={t("components.workflowGraph.nodeDetails.inputSchema", "Input Schema")}
+            defaultOpen={false}
+            testId="node-panel-input-schema"
+          >
+            <pre className="max-h-64 overflow-auto rounded-md bg-muted p-2 text-[11px]">
+              {JSON.stringify(inputSchema, null, 2)}
+            </pre>
           </PanelSection>
         )}
         {node?.connections && Object.keys(node.connections).length > 0 && (

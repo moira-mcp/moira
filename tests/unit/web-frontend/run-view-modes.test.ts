@@ -76,7 +76,7 @@ describe("the run page's walkthrough", () => {
   test("the map anchors the steps about the process itself", () => {
     const byId = new Map(GUIDE_STEPS.map((step) => [step.id, step]));
     expect(byId.get("process")?.targets.map).toContain("data-block-id");
-    expect(byId.get("loop")?.targets.map).toBe("[data-return-chip]");
+    expect(byId.get("loop")?.targets.map).toBe('[data-port-kind="return"]');
     expect(byId.get("route")?.targets.map).toBe('[data-testid="run-cursor"]');
     expect(byId.get("route")?.needsRoute).toBe(true);
   });

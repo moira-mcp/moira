@@ -18,13 +18,14 @@
  * run's timings, list and route facts and on the flow page with authoring.
  */
 
-import React, { useState } from "react";
+import React from "react";
 import { useTranslation } from "react-i18next";
 import { Compass } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useModeGuideKey } from "../flow/editing";
 import { CanvasDiagram } from "./CanvasView";
 import { ContentsLayout } from "./ContentsSidebar";
+import { useStoredFlag } from "../diagram/useStoredFlag";
 import { type RunViewProps } from "./model";
 
 /**
@@ -34,12 +35,13 @@ import { type RunViewProps } from "./model";
  */
 function MapGuide({ guideKey }: { guideKey: string }): React.JSX.Element {
   const { t } = useTranslation();
-  const [open, setOpen] = useState(false);
+  // The reader's choice to keep the explanation open is remembered per page.
+  const [open, toggleOpen] = useStoredFlag(`moira.map.guide:${guideKey}`, false);
   return (
     <div className="relative" data-testid="guidance-map">
       <button
         type="button"
-        onClick={() => setOpen((was) => !was)}
+        onClick={toggleOpen}
         aria-expanded={open}
         data-hint={t("pages.runPage.guide.howToRead", { defaultValue: "Как читать эту схему" })}
         aria-label={t("pages.runPage.guide.howToRead", { defaultValue: "Как читать эту схему" })}

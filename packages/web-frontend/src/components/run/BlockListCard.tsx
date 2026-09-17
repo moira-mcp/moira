@@ -12,15 +12,7 @@ import { ListMarker } from "../diagram/ListMarker";
 import { useHighlightTarget, type HighlightRequest } from "../diagram/useHighlightTarget";
 import { cn } from "@/lib/utils";
 import { formatDuration } from "./duration";
-import type { RunBlock, RunList } from "./model";
-
-/** `3 / 7` with "—" for a counter the binding did not resolve. */
-function counters(list: NonNullable<RunList>): { done: string; total: string } {
-  return {
-    done: list.done === null ? "—" : String(list.done),
-    total: list.total === null ? "—" : String(list.total),
-  };
-}
+import { listProgressLabel, type RunBlock } from "./model";
 
 export function BlockListCard({
   block,
@@ -37,7 +29,7 @@ export function BlockListCard({
   const ref = useRef<HTMLElement>(null);
   useHighlightTarget(ref, highlight, (name) => `[data-index="${name}"]`);
   if (!list) return null;
-  const { done, total } = counters(list);
+  const [done, total] = (listProgressLabel(list) ?? "—/—").split("/");
   return (
     <section
       ref={ref}

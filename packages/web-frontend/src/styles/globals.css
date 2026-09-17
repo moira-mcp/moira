@@ -240,3 +240,15 @@
 @utility edge-flash {
   animation: edge-flash 0.6s ease-in-out 3;
 }
+
+/* A reader who asked for less motion gets the states without the animation. */
+@media (prefers-reduced-motion: reduce) {
+  .card-breathe,
+  .card-breathe-slow,
+  .card-arrive,
+  .marker-pulse,
+  .edge-flash,
+  .animate-pulse {
+    animation: none;
+  }
+}

@@ -272,6 +272,8 @@ test.describe("Playbooks", () => {
         action: "create",
         workflow: {
           metadata: { name: `Linked flow ${stamp}`, version: "1.0.0", description: "Link" },
+          // No process view is declared: the reference is read in the node level of the flow
+          // page's right panel, which stands beside the graph of a plain definition too.
           nodes: [
             { id: "start", type: "start", connections: { default: "work" } },
             {
@@ -291,8 +293,9 @@ test.describe("Playbooks", () => {
       // A tall viewport keeps the list's sticky pagination bar off the cards this test clicks.
       await page.setViewportSize({ width: 1280, height: 1400 });
       await page.goto(`${BASE_URL}/workflows/${workflowId}?view=graph`);
-      await expect(page.locator(".react-flow")).toBeVisible({ timeout: 15000 });
-      await page.locator('.react-flow__node[data-id="work"]').click();
+      await expect(page.locator('[data-graph-node="work"]')).toBeVisible({ timeout: 20000 });
+      await page.locator('[data-graph-node="work"]').click();
+      await expect(page.getByTestId("node-panel")).toHaveAttribute("data-node-id", "work");
       await page.getByTestId(`playbook-reference-${mine}`).click();
       await expect(page).toHaveURL(/\/playbooks/);
       const landing = page.getByTestId("linked-playbook-editor");

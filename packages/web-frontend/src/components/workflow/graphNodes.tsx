@@ -49,10 +49,6 @@ export type StepNodeData = Record<string, unknown> & {
   visited?: boolean;
 };
 
-/** Where the `index`-th of `count` handles sits along a card's edge, as a CSS percentage. */
-export function handleOffset(index: number, count: number): string {
-  return `${((index + 1) / (count + 1)) * 100}%`;
-}
 export type StepNode = Node<StepNodeData>;
 
 export type BlockGroupData = {

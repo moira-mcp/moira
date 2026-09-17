@@ -18,10 +18,9 @@ import { cn } from "@/lib/utils";
 import { GuidanceCallout } from "./Guidance";
 import { PanelSection } from "../diagram/PanelSection";
 import { IndexBadge } from "../diagram/IndexBadge";
-import { BLOCK_TONE } from "./CanvasView";
 import type { HighlightRequest } from "../diagram/useHighlightTarget";
 import { formatDuration } from "./duration";
-import { StatusChip } from "./status";
+import { StatusChip, BLOCK_TONE } from "./status";
 import { StepList } from "./StepList";
 import { StepCard, StepCardList } from "./StepCard";
 import { BlockTimings } from "./BlockTimings";
@@ -47,6 +46,7 @@ import {
   blockById,
   blockWrites,
   formatValue,
+  listProgressLabel,
   stepConnections,
   orderNodeIds,
   stepsOf,
@@ -257,7 +257,7 @@ export function BlockDetailPanel({
         <PanelSection
           id="list"
           title={t("pages.runPage.blockDetail.list", { defaultValue: "Список" })}
-          summary={`${block.list.done ?? "?"}/${block.list.total ?? "?"}${block.list.currentTitle ? ` · ${block.list.currentTitle}` : ""}`}
+          summary={`${listProgressLabel(block.list)}${block.list.currentTitle ? ` · ${block.list.currentTitle}` : ""}`}
           openToken={listHighlight?.token}
         >
           <BlockListCard block={block} highlight={listHighlight} />

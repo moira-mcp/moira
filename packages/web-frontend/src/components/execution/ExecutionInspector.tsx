@@ -61,14 +61,10 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 import { MODES, resolveMode } from "../run/modes";
 import { MapView } from "../run/MapView";
-import { ContentsLayout } from "../run/ContentsSidebar";
+import { ContentsLayout, ContentsToggleProvider, ContentsToggleSlot } from "../run/ContentsSidebar";
 import { PageHeader } from "../diagram/PageHeader";
+import { useNodeTypes } from "../../hooks/useNodeTypes";
 
-/** The contents fold button, handed from the graph's layout into the graph's toolbar. */
-const GraphContentsToggle = React.createContext<React.ReactNode>(null);
-function GraphContentsToggleSlot(): React.JSX.Element {
-  return <>{React.useContext(GraphContentsToggle)}</>;
-}
 import { BlockDetailPanel } from "../run/BlockDetailPanel";
 import { NodePanel } from "../run/NodePanel";
 import { useStoredFlag } from "../diagram/useStoredFlag";
@@ -435,6 +431,7 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
   // A step clicked on the graph opens as the second level of the block panel: its block becomes
   // the selected block, the panel shows the step with a breadcrumb back to the block.
   const [panelNodeId, setPanelNodeId] = useState<string | null>(null);
+  const { index: nodeTypeIndex } = useNodeTypes();
   const [panelCollapsed, togglePanel] = useStoredFlag("moira.run.panelCollapsed");
   // A variable reference token was clicked: open the variables tab and mark the variable there.
   const [variableHighlight, setVariableHighlight] = useState<HighlightRequest | null>(null);
@@ -473,9 +470,16 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
   // the selection was made while the graph was hidden (a hidden viewport cannot be fitted).
   useEffect(() => {
     if (mode !== "graph" || !selectedBlockId) return;
-    const first = blocks.find((b) => b.id === selectedBlockId)?.nodeIds[0];
+    const block = blocks.find((b) => b.id === selectedBlockId);
+    const first = block?.nodeIds[0];
     if (!first) return;
-    setFocusRequest((previous) => ({ nodeId: first, token: (previous?.token ?? 0) + 1 }));
+    // A focus already aimed at a step of this block (a step row, a chip) wins over the block's
+    // first step: that request opened the graph, so it must not be overwritten here.
+    setFocusRequest((previous) =>
+      previous && block?.nodeIds.includes(previous.nodeId)
+        ? previous
+        : { nodeId: first, token: (previous?.token ?? 0) + 1 },
+    );
     // eslint-disable-next-line react-hooks/exhaustive-deps -- only the tab change re-focuses
   }, [mode]);
 
@@ -716,7 +720,7 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
     </>
   ) : null;
 
-  const graphContentsToggle = <GraphContentsToggleSlot />;
+  const graphContentsToggle = <ContentsToggleSlot />;
   const technicalGraph = (
     <Suspense fallback={<DiagramSkeleton />}>
       <WorkflowGraph
@@ -945,9 +949,9 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
                     testId="graph-view"
                   >
                     {(toggle) => (
-                      <GraphContentsToggle.Provider value={toggle}>
+                      <ContentsToggleProvider value={toggle}>
                         <div className="h-[60vh] lg:h-full">{technicalGraph}</div>
-                      </GraphContentsToggle.Provider>
+                      </ContentsToggleProvider>
                     )}
                   </ContentsLayout>
                 )}
@@ -1094,6 +1098,8 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
                       onBack={() => setPanelNodeId(null)}
                       onFocusNode={focusNode}
                       onSelectVariable={goToVariable}
+                      validation={workflow.validation ?? null}
+                      nodeTypes={nodeTypeIndex}
                     />
                   ) : (
                     <BlockDetailPanel

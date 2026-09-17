@@ -172,6 +172,109 @@ All cards use `CardShell` and follow these patterns:
 | Success             | `border-success/30 text-success`               |
 | Warning             | `bg-warning/10 text-warning border-warning/30` |
 
+## Diagram design system
+
+The process surfaces — the map and the technical graph on the run page (`/executions/:id`) and the
+flow page (`/workflows/:id`), their contents sidebar and their right panel — are built from one
+set of tokens and primitives under `packages/web-frontend/src/components/diagram/`. The map and the
+graph share the card, the edge, the toolbar, the tooltip, the contents and the focus store; they
+differ only in layout. Where these surfaces are composed into pages is documented in
+`docs/WEB-UI.md`; this section is the vocabulary.
+
+### Tokens
+
+| Token                          | Values                                                                                                                                         | Source                                   |
+| ------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------- |
+| Card tone (`CardTone`)         | `neutral`, `active`, `waiting`, `done`, `error` → accent bar, ground gradient, rule under the title, index badge, `--card-accent` for the glow | `diagram/PortedCard.tsx` (`TONE_STYLE`)  |
+| Block status → tone            | run status mapped to a `CardTone`                                                                                                              | `run/status.tsx` (`BLOCK_TONE`)          |
+| Status style                   | icon, surface, chip and tint per block status                                                                                                  | `run/status.tsx` (`STATUS_STYLE`)        |
+| Node type                      | badge colour and glyph per node type                                                                                                           | `run/nodeTypeStyle.tsx` (`NodeTypeTag`)  |
+| Edge kind (`DiagramEdgeKind`)  | `forward`, `external`, `skip`, `hub`, `return`, `self` → stroke, width, opacity, dash, arrowhead                                               | `diagram/DiagramEdge.tsx` (`EDGE_LOOK`)  |
+| Port kind (`PortInfo["kind"]`) | `forward`, `external`, `default`, `return`, `error` → pill border and text colour, handle colour                                               | `diagram/PortedCard.tsx` (`PORT_TONE`)   |
+| Interactive affordance         | `clickable`, `hoverOnly`, `static` → cursor, hover treatment, focus ring                                                                       | `diagram/interactive.ts` (`INTERACTIVE`) |
+| Animation                      | `card-breathe`, `card-breathe-slow`, `card-arrive`, `marker-pulse`, `edge-flash`                                                               | `styles/globals.css`                     |
+| Layout preset                  | `default`, `compact`, `flow`, `vertical`, kept per browser                                                                                     | `diagram/layoutPreset.ts`                |
+
+The affordance rule is absolute: `clickable` goes somewhere and gets a pointer cursor with a
+primary hover border; `hoverOnly` only explains itself and gets the help cursor with no hover
+border; `static` is text. Nothing that cannot be clicked looks like a button.
+
+Every animation is a glow, a pulse or a flash layered over a state that colour, ring and fill
+already carry, and a single `prefers-reduced-motion: reduce` block in `globals.css` turns all of
+them off.
+
+### Primitives
+
+| Primitive                                                                                           | What it is                                                                                                                                                                                                                                        |
+| --------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Hint` / `HintBody`                                                                                 | The tooltip: popover surface, one side and delay, plain or monospace body, optional heading, three widths                                                                                                                                         |
+| `HintLayer`                                                                                         | One delegated listener mounted in `App.tsx` that draws the same tooltip for any `data-hint` element                                                                                                                                               |
+| `VariableRef` / `TemplateText` / `ExpressionText` / `ConditionText`                                 | Authored text with its `{{name}}` references, expression identifiers and condition paths as tokens that explain the variable from the registry and jump to its definition; braces are kept as authored                                            |
+| `IndexBadge`                                                                                        | A block's ordinal, toned by its status, on the card, in the contents and at the head of the block panel                                                                                                                                           |
+| `ListMarker`                                                                                        | One item of a bound list: done, in progress, pending — as an icon or as a text glyph                                                                                                                                                              |
+| `Port`                                                                                              | A pill on a card's border with a React Flow handle in it, naming one end of a transition; hover lights the link, click travels to the far end, `Enter` and `Space` do the same from the keyboard                                                  |
+| `PortedCard`                                                                                        | Title band (index badge, title, status chip or type badge, pass count) + input port column + centre (description, fact chips, children) + output port column + a bottom double port for self-loops; the card is as tall as its longer port column |
+| `DiagramEdge` + `DiagramMarkers`                                                                    | The one line: kind × state, a halo so crossings read as over and under, and one marker set whose arrowheads keep their size at any stroke width (`markerUnits="userSpaceOnUse"`)                                                                  |
+| `PanelSection`                                                                                      | A panel group: header with a right-hand summary and a chevron, fold state kept per section, an `openToken` that unfolds it when a jump lands inside                                                                                               |
+| `PageHeader` (`diagram/PageHeader.tsx`, distinct from the list pages' `components/page-header.tsx`) | The page's text and its own actions: back, name, version or id, badges, description, fact chips. Nothing functional                                                                                                                               |
+| `DiagramToolbar` + `LayoutPresetButtons`                                                            | The page's functions: view modes, leading slot, the folded step finder, the presets, zoom/fit, the minimap switch, trailing slot. It wraps to a second row rather than cutting buttons off                                                        |
+| `ContentsSidebar` / `ContentsRow` / `ContentsLayout`                                                | The process's table of contents and the layout that places it beside either diagram                                                                                                                                                               |
+| `NodeFinder`                                                                                        | Search over the steps; a pick selects the owning block and, where the surface can, the step itself                                                                                                                                                |
+| `useHighlightTarget`                                                                                | Scrolls a named target into view and pulses it, so every "go to X" ends with X visibly marked                                                                                                                                                     |
+| `useStoredFlag`                                                                                     | A boolean the reader toggles and the browser remembers                                                                                                                                                                                            |
+
+Organisms compose them: the map (`run/CanvasView.tsx`), the technical graph
+(`workflow/WorkflowGraph.tsx`), the contents sidebar, and the right panel's block level
+(`run/BlockDetailPanel.tsx`) and node level (`run/NodePanel.tsx`).
+
+### States
+
+The same state reads the same way on every surface.
+
+| State                            | Card                                     | Edge         | Port                    | Panel or contents row  |
+| -------------------------------- | ---------------------------------------- | ------------ | ----------------------- | ---------------------- |
+| rest                             | tone by status                           | kind's look  | kind's look             | plain                  |
+| hovered                          | primary ring                             | lit          | primary border and fill | accent background      |
+| near (linked to what is hovered) | primary ring                             | lit          | lit                     | —                      |
+| dim (something else focused)     | —                                        | faded out    | —                       | —                      |
+| selected / pinned                | primary ring, all its connectors lit     | lit          | lit                     | accent background      |
+| current                          | `active` tone, breathing, pulsing marker | —            | —                       | active icon            |
+| arrived                          | `card-arrive` ring                       | `edge-flash` | —                       | highlight ring + pulse |
+| visited                          | `done` tone                              | —            | —                       | check icon             |
+| error                            | `error` tone, destructive ring           | —            | error tone              | error icon             |
+
+### Interaction contract
+
+- Hovering a card lights every connection it takes part in and rings the cards at their far end;
+  everything else recedes so one path can be followed across the diagram.
+- Hovering a port or an edge lights that one transition and shows its condition, its target and, for
+  a return, its cause and exit.
+- Clicking a port or an edge travels to the far end: the camera moves there, the edge flashes and
+  the card pulses on arrival.
+- Clicking a block card selects the block; the panel opens at its block level and the selection goes
+  into the URL.
+- Clicking a contents row selects the block and moves that view's camera to it with the same arrival
+  pulse, on the map and on the graph alike.
+- Clicking a step — in the panel's step list, in a card's steps tooltip, in the node panel's
+  connections — switches to the graph view, selects the step's block, brings the step into view with
+  an arrival pulse and opens the panel's node level on it. The finder does the same on the graph; on
+  the map it selects the block that owns the step.
+- Clicking an item of a block's bound list opens the block panel's list section at that item and
+  marks it.
+- Clicking a variable token opens the variables surface with that variable highlighted.
+- A fact chip is `hoverOnly`: it explains itself and does nothing on click.
+- Changing a layout preset re-lays both diagrams and returns the camera to the current focus.
+- Ports and rows are reachable with `Tab`, and `Enter` acts as a click.
+
+### Wording that must stay one wording
+
+- A bound list's progress is rendered by `listProgressLabel` (`run/model.ts`) on the card, in the
+  contents and in the panel alike: a counter the binding did not resolve reads as `—`, never as `0`
+  and never as `?`.
+- Durations come from `formatDuration` and clock times from `formatClock` (`run/duration.ts`).
+- A block's status wording comes from `blockStatusLabel` (`run/waiting.ts`), so the chip, the legend
+  and the block texts agree on who is being waited for.
+
 ## Dark/Light Theme
 
 - Colors switch via CSS custom properties in `globals.css`

@@ -4,12 +4,19 @@
  * cursor move keep the projection mounted through the pending progress request; on the flow page
  * a save keeps the views strip and the diagram mounted through the two refetches (detail and
  * process) and shows a slim pending indicator instead of the page loader.
+ *
+ * The map has a flicker class of its own: choosing a block is a selection, not a reload. Picking
+ * one from the contents or by clicking its card shows no loader, keeps the diagram container's
+ * very DOM node, and moves the camera only as far as that click asked — a second pick of the
+ * block already chosen moves nothing — and a projection refetch held open and then answered
+ * leaves every block exactly where it was laid out.
  */
 
 import { test, expect, type Page, type Route } from "./fixtures.js";
 import { getTestBaseUrl } from "../utils/test-config.js";
 import { createAuthenticatedMCPClient, startWorkflowExecutionState } from "../utils/mcp-auth.js";
 import { loginAsAdmin } from "./helpers/auth-helper.js";
+import { MAP, cameraOf, expectNoLoaders, mapCardBoxes, settledCamera } from "./helpers/diagram.js";
 
 const BASE_URL = getTestBaseUrl();
 
@@ -160,6 +167,84 @@ test("the run page keeps its projection through a refresh, a mode switch and a c
   }
 });
 
+test("choosing a block on the map moves the camera and nothing else", async ({ page }) => {
+  const authenticated = await createAuthenticatedMCPClient();
+  const run = await startWorkflowExecutionState(authenticated.client, "moira/quick-task", {
+    skipTelegramCheck: true,
+  });
+  try {
+    await loginAsAdmin(page);
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto(`${BASE_URL}/executions/${run.processId}`);
+    await expect(page.locator(`${MAP} [data-block-id="deliver"]`)).toBeVisible({ timeout: 15000 });
+    await settledCamera(page, MAP);
+
+    /** The diagram's own container element, which a remount would replace. */
+    const container = () => page.getByTestId("canvas-view").elementHandle();
+    const sameContainer = async (before: Awaited<ReturnType<typeof container>>) => {
+      const after = await container();
+      return page.evaluate(
+        (pair: (Node | null)[]) => pair[0] !== null && pair[0] === pair[1],
+        [before, after],
+      );
+    };
+    /** Where the laid-out blocks sit on screen, rounded to the pixel. */
+    const positions = async () =>
+      (await mapCardBoxes(page))
+        .map((card) => `${card.id}@${Math.round(card.x)},${Math.round(card.y)}`)
+        .join(" ");
+
+    const mounted = await container();
+    // From the contents: the camera travels to the block asked for, and that is the only change.
+    const beforeContents = await cameraOf(page, MAP);
+    await page.getByTestId("map-contents-verify").click();
+    await expect(page.getByTestId("block-detail")).toHaveAttribute("data-block-id", "verify");
+    await expect.poll(() => cameraOf(page, MAP), { timeout: 5000 }).not.toBe(beforeContents);
+    await expectNoLoaders(page);
+    expect(await sameContainer(mounted)).toBe(true);
+
+    // The reader pans, then picks the block that is already chosen: nothing is placed again.
+    const diagram = (await page.getByTestId("canvas-view").boundingBox())!;
+    await page.mouse.move(diagram.x + diagram.width / 2, diagram.y + diagram.height / 2);
+    await page.mouse.wheel(0, 160);
+    await expect.poll(() => cameraOf(page, MAP), { timeout: 5000 }).not.toBe(beforeContents);
+    const panned = await cameraOf(page, MAP);
+    await page.getByTestId("map-contents-verify").click();
+    await page.waitForTimeout(700);
+    expect(await cameraOf(page, MAP)).toBe(panned);
+    await expectNoLoaders(page);
+
+    // From the card itself: the same contract, and still the same container.
+    const onCard = await cameraOf(page, MAP);
+    await page.locator(`${MAP} [data-block-id="plan"]`).click();
+    await expect(page.getByTestId("block-detail")).toHaveAttribute("data-block-id", "plan");
+    await expect.poll(() => cameraOf(page, MAP), { timeout: 5000 }).not.toBe(onCard);
+    await expectNoLoaders(page);
+    expect(await sameContainer(mounted)).toBe(true);
+
+    // A projection refetch, held open and then answered, re-lays nothing: the same layout is
+    // kept, so every block is exactly where it was and the camera has not moved either.
+    await page.waitForTimeout(700);
+    const laidOut = await positions();
+    const camera = await cameraOf(page, MAP);
+    const held = await holdRequests(page, `**/api/executions/${run.processId}/progress**`);
+    const refresh = page.locator("button[data-pending], button:has(svg.lucide-refresh-cw)").first();
+    await refresh.click();
+    await held.started;
+    await expect(refresh).toHaveAttribute("data-pending", "true");
+    await expectNoLoaders(page);
+    expect(await positions()).toBe(laidOut);
+    held.release();
+    await expect(refresh).not.toHaveAttribute("data-pending", "true");
+    await expectNoLoaders(page);
+    expect(await positions()).toBe(laidOut);
+    expect(await cameraOf(page, MAP)).toBe(camera);
+    expect(await sameContainer(mounted)).toBe(true);
+  } finally {
+    await authenticated.cleanup();
+  }
+});
+
 test("the flow page keeps the modes strip and the diagram through the refetches after a save", async ({
   page,
 }) => {
@@ -176,6 +261,7 @@ test("the flow page keeps the modes strip and the diagram through the refetches 
     await expect(page.getByTestId("page-loader")).toHaveCount(0);
     // The block panel carries the block's editors, so the block is selected first.
     await page.getByTestId("map-contents-plan").click();
+    await expect(page.getByTestId("block-detail")).toHaveAttribute("data-block-id", "plan");
     await page.getByTestId("edit-block-label-plan").fill("Plan (renamed)");
     await expect(page.getByTestId("flow-edit-save")).toBeEnabled();
     // The map is the default view, so its diagram is already mounted.

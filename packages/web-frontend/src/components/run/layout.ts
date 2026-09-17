@@ -26,17 +26,20 @@
  */
 
 import type { RunBlock, RunTransition } from "./model";
-import { PARALLEL_CHIP_MIN } from "./chips";
+/**
+ * Parallel forward transitions between one pair of adjacent blocks from this many up are drawn
+ * as one bundle (the ports name each of them) instead of a fan of lines.
+ */
+export const PARALLEL_CHIP_MIN = 3;
+
+/** The key a transition's edge and its two ports share. */
+export function transitionKey(from: string, transition: Pick<RunTransition, "to" | "label">) {
+  return `${from}→${transition.to}:${transition.label}`;
+}
 
 export const BLOCK_WIDTH = 560;
 const BLOCK_BASE_HEIGHT = 74;
 const LINE_HEIGHT = 18;
-const NAME_LINE_HEIGHT = 20;
-const CHARS_PER_LINE = 38;
-const NAME_CHARS_PER_LINE = 22;
-/** The card clamps its name to this many lines (`line-clamp-2` in `CanvasView`). */
-const MAX_NAME_LINES = 2;
-const MAX_DESCRIPTION_LINES = 3;
 const BASE_NODE_SEP = 40;
 /** The least gap between ranks; it grows to hold the widest label pill drawn at rest in a gap. */
 const MIN_RANK_SEP = 150;
@@ -53,8 +56,6 @@ const SELF_LOOP_DEPTH = 36;
 const MARGIN = 24;
 /** How far into the gap between ranks a hub bundle's vertical run sits, off the label pills' centre. */
 const HUB_GAP_INSET = 24;
-/** The hub port sits this far below the hub's top on its left edge, clear of skip-lane landings. */
-const HUB_PORT_INSET = 24;
 /**
  * How far into a gap a skip's or a return's vertical sits when it has to leave its block's column
  * to clear a block on a row between; distinct from the hub bundles' inset so the runs never share
@@ -107,35 +108,8 @@ function lineCount(text: string, charsPerLine: number, max: number): number {
   return Math.min(max, Math.max(1, Math.ceil(text.length / charsPerLine)));
 }
 
-/** Height is a pure function of the block's text so layout stays deterministic. */
-/** Chips (hub exits, skips, returns) wrap inside the block; two fit one row at the block width
- * when their names are short, a chip named longer than this takes a row of its own. */
-const CHIPS_PER_ROW = 2;
-const CHIP_SHARED_ROW_CHARS = 14;
-const CHIP_ROW_HEIGHT = 24;
-
-/** Rows the chips take: long-named chips one each, the short ones two per row. */
-export function chipRowCount(chipNames: readonly string[]): number {
-  const long = chipNames.filter((name) => name.length > CHIP_SHARED_ROW_CHARS).length;
-  return long + Math.ceil((chipNames.length - long) / CHIPS_PER_ROW);
-}
 /** Parallel forward transitions between one pair of blocks spread by this much per transition. */
 const PARALLEL_STEP = 26;
-
-export function estimateBlockHeight(
-  name: string,
-  description: string,
-  hasNote: boolean,
-  chipNames: readonly string[],
-): number {
-  return (
-    BLOCK_BASE_HEIGHT +
-    lineCount(name, NAME_CHARS_PER_LINE, MAX_NAME_LINES) * NAME_LINE_HEIGHT +
-    lineCount(description, CHARS_PER_LINE, MAX_DESCRIPTION_LINES) * LINE_HEIGHT +
-    (hasNote ? LINE_HEIGHT : 0) +
-    chipRowCount(chipNames) * CHIP_ROW_HEIGHT
-  );
-}
 
 /**
  * A ported block card is as tall as its longer port column (one row per transition in or out,
@@ -225,19 +199,23 @@ async function placeBlocks(
       "elk.randomSeed": "1",
       "elk.spacing.nodeNode": String(nodeSep),
       "elk.layered.spacing.nodeNodeBetweenLayers": String(rankSep),
-      // Network simplex places every node as close to its neighbours as the layering allows, so a
-      // fork's branches hug the line and a nested fork moves out only as far as its depth needs;
-      // the post-compaction pulls stragglers back in. (Brandes-Köpf, the alternative, aligns
-      // nodes on straight lines and spreads branches over the whole height.)
+      // Network simplex keeps every node as close to its neighbours as the layering allows. No
+      // post-compaction: it moves columns after layering, so the drawn gaps would no longer be the
+      // rank separation the lanes and label pills were sized for (they ran into the next card).
       "elk.layered.nodePlacement.strategy": "NETWORK_SIMPLEX",
       "elk.layered.nodePlacement.networkSimplex.nodeFlexibility": "NODE_SIZE",
-      "elk.layered.compaction.postCompaction.strategy": "EDGE_LENGTH",
-      "elk.layered.compaction.postCompaction.constraints": "SEQUENCE",
       "elk.layered.crossingMinimization.strategy": "LAYER_SWEEP",
       "elk.layered.considerModelOrder.strategy": "NODES_AND_EDGES",
       "elk.padding": `[top=${MARGIN},left=${MARGIN},bottom=${MARGIN},right=${MARGIN}]`,
     },
-    children: blocks.map((block) => ({ id: block.id, ...sizes.get(block.id)! })),
+    // Every block of a layer starts at the layer's left edge: the drawn columns (`rank`) are read
+    // back from distinct x values, and a narrower block centred in a wide layer (the stacked
+    // preset swaps widths and heights) would otherwise invent a column of its own.
+    children: blocks.map((block) => ({
+      id: block.id,
+      ...sizes.get(block.id)!,
+      layoutOptions: { "elk.alignment": "LEFT" },
+    })),
     edges: edges.filter((edge) => (seen.has(edge.id) ? false : (seen.add(edge.id), true))),
   });
   return (laid.children ?? []).map((child) => ({
@@ -449,11 +427,6 @@ export function crossesBlock(
       Math.min(ay, by) < b.y + b.height &&
       Math.max(ay, by) > b.y,
   );
-}
-
-/** Where every bundled hub edge enters a hub: a point near the top of its left edge. */
-export function hubPort(block: Pick<LaidOutBlock, "x" | "y">): { x: number; y: number } {
-  return { x: block.x, y: block.y + HUB_PORT_INSET };
 }
 
 export interface LayoutBlocksOptions {

@@ -10,12 +10,11 @@ import React, { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { PassCount, StatusIcon } from "./status";
-import { BLOCK_TONE } from "./CanvasView";
+import { BLOCK_TONE, PassCount, StatusIcon } from "./status";
 import { IndexBadge } from "../diagram/IndexBadge";
 import { INTERACTIVE } from "../diagram/interactive";
 import { formatDuration } from "./duration";
-import type { RunBlock } from "./model";
+import { listProgressLabel, type RunBlock } from "./model";
 
 const SIDEBAR_KEY = "moira.map.sidebarCollapsed";
 
@@ -30,10 +29,7 @@ export function ContentsRow({
   onSelect: (id: string) => void;
 }): React.JSX.Element {
   const { t } = useTranslation();
-  const bound =
-    block.list && (block.list.done !== null || block.list.total !== null)
-      ? `${block.list.done ?? "?"}/${block.list.total ?? "?"}`
-      : null;
+  const bound = listProgressLabel(block.list);
   const typical = block.stats?.run.medianMs ?? null;
   return (
     <li>
@@ -145,6 +141,16 @@ export function useContentsSidebar(): [boolean, () => void] {
       return !value;
     });
   return [collapsed, toggle];
+}
+
+/**
+ * The fold button handed from `ContentsLayout` into a diagram whose toolbar is built elsewhere
+ * (the graph mounts its own): the layout provides it, the diagram's toolbar renders the slot.
+ */
+const ContentsToggleContext = React.createContext<React.ReactNode>(null);
+export const ContentsToggleProvider = ContentsToggleContext.Provider;
+export function ContentsToggleSlot(): React.JSX.Element {
+  return <>{React.useContext(ContentsToggleContext)}</>;
 }
 
 /** The toolbar button that folds the contents sidebar. */

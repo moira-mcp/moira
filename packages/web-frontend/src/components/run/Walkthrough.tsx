@@ -61,7 +61,7 @@ export const GUIDE_STEPS: GuideStep[] = [
   },
   {
     id: "loop",
-    targets: { map: "[data-return-chip]" },
+    targets: { map: '[data-port-kind="return"]' },
     fallbackView: "map",
   },
   {
