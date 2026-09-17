@@ -14,6 +14,7 @@
 import type { ProgressListBinding } from "../interfaces/core-interfaces.js";
 import type { ExecutionVisit } from "../types/base-types.js";
 import { PathResolver } from "./path-resolver.js";
+import { listProgressLabel } from "./progress-facts.js";
 import type {
   ExecutionBlockList,
   ExecutionBlockTiming,
@@ -245,11 +246,14 @@ export function nearestBoundList(progress: ExecutionProgress | null): ExecutionB
   return candidates[0]?.list ?? null;
 }
 
-/** `done/total: current item` for notification text; null when no bound list is near. */
+/**
+ * `done/total: current item` for notification text, worded as the map and the picture word it
+ * (an unresolved counter reads `—`); null when no bound list is near.
+ */
 export function boundListLine(progress: ExecutionProgress | null): string | null {
   const list = nearestBoundList(progress);
-  if (!list || (list.done === null && list.total === null)) return null;
-  const count = `${list.done ?? "?"}/${list.total ?? "?"}`;
+  const count = listProgressLabel(list);
+  if (!list || count === null) return null;
   return list.currentTitle ? `📝 ${count}: ${list.currentTitle}` : `📝 ${count}`;
 }
 

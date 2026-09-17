@@ -20,6 +20,8 @@ import type {
 } from "@mcp-moira/workflow-engine/progress-visual";
 
 export type { ExecutionBlockStatus, ExecutionProgress };
+/** `done/total` of a bound list, worded once for the card, the contents, the panel and the picture. */
+export { listProgressLabel } from "@mcp-moira/workflow-engine/progress-visual";
 export type { BlockDurationStatistics, WorkflowVersionStatistics };
 
 /** A block's passes with their durations, as the projection carries them. */
@@ -330,18 +332,6 @@ export function orderNodeIds(
   for (const id of entries.length > 0 ? entries : nodeIds.slice(0, 1)) walk(id);
   for (const id of nodeIds) walk(id);
   return order;
-}
-
-/**
- * `done/total` of a bound list as one wording everywhere: a counter the binding did not resolve
- * reads as "—" (never "0", never "?"), on the card, in the contents and in the panel alike.
- */
-export function listProgressLabel(
-  list: { done: number | null; total: number | null } | null | undefined,
-): string | null {
-  if (!list || (list.done === null && list.total === null)) return null;
-  const part = (n: number | null) => (n === null ? "—" : String(n));
-  return `${part(list.done)}/${part(list.total)}`;
 }
 
 export function stepsOf(

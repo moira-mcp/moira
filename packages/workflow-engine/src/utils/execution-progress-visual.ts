@@ -1,3 +1,20 @@
+/**
+ * The visual model of the progress picture: the run's header (task, title, goal, facts) above the
+ * process drawn the way the run page's map draws it — every block a ported card with a title band
+ * (index badge, name, status chip, pass count), input ports on the left named by the transitions
+ * that arrive, output ports on the right named by the transitions that leave, a double port at the
+ * bottom for the transitions back to the card itself, and a centre with the description, the run
+ * facts (time spent, `done/total` with the current item, the typical durations of the version)
+ * and, in the `cards` view, the block's content lines. The geometry is the map's own
+ * (`process-layout`, `process-geometry`): the same blocks and transitions go through the same
+ * layout, the picture measuring its cards with its own text metric and passing the sizes in.
+ *
+ * The rows preset is drawn when the viewport holds it at the type scale; otherwise — and always
+ * below the phone width — the stacked preset, which a viewport of any width holds one column at a
+ * time; a drawing still wider than the viewport is scaled down as one piece, never re-wrapped.
+ * Everything here is pure and deterministic; the renderer draws exactly what was measured.
+ */
+
 import type {
   ExecutionBlockStatus,
   ExecutionProgress,
@@ -7,12 +24,22 @@ import type {
   ProgressFactTone,
 } from "./execution-progress-contract.js";
 import type { ProcessProjection, ProcessTransition } from "./process-derivation.js";
+import type { BlockDurationStatistics, WorkflowVersionStatistics } from "./execution-statistics.js";
 import {
   ellipsizeProgressText,
   formatProgressDuration,
   progressTextWidth,
   wrapProgressTextToWidth,
 } from "./execution-progress-text.js";
+import { listProgressLabel } from "./progress-facts.js";
+import {
+  layoutBlocks,
+  transitionKey,
+  type BlockLayout,
+  type LayoutBlock,
+  type LayoutBlocksOptions,
+} from "./process-layout.js";
+import { portRanks, portedPath } from "./process-geometry.js";
 export type {
   ExecutionBlockList,
   ExecutionBlockStatus,
@@ -33,10 +60,14 @@ export type {
   DurationSample,
   WorkflowVersionStatistics,
 } from "./execution-statistics.js";
+/** The one model the map and the picture share: the facts wording and the process geometry. */
+export * from "./progress-facts.js";
+export * from "./process-layout.js";
+export * from "./process-geometry.js";
 
 export type ProgressTheme = "light" | "dark";
-/** `cards`: every block as a content card (the default). `process`: the aggregated block view —
- * compact blocks with the process's labelled transitions and loops, as the run page's canvas. */
+/** `cards`: every block with its content lines (the default). `process`: the compact cards alone,
+ * the run page's map as a picture. */
 export type ProgressView = "cards" | "process";
 export interface ProgressVisualOptions {
   theme?: ProgressTheme;
@@ -45,7 +76,7 @@ export interface ProgressVisualOptions {
   view?: ProgressView;
   /** Block ids (or authored node ids, resolved to their block) left out of the image. */
   hide?: string[];
-  /** Block ids (or authored node ids) drawn as a label-only chip. */
+  /** Block ids (or authored node ids) drawn as a title band alone. */
   collapse?: string[];
 }
 export type ProgressVisualLineKind = "summary" | "detail" | "outcome" | "next";
@@ -73,63 +104,111 @@ export interface ProgressVisualBox {
   width: number;
   height: number;
 }
-/** The repeat-count badge beside a repeated block's state mark. */
+/** A pill of text with its box: the `×n` badge, the status chip, the index badge. */
 export interface ProgressVisualBadge extends ProgressVisualBox {
   text: string;
 }
-export interface ProgressVisualNode {
+/** The card's colour, as the map's `BLOCK_TONE` selects it from the run status. */
+export type ProgressCardTone = "neutral" | "active" | "waiting" | "done";
+/** The port's colour, as the map's `PORT_TONE`: an ordinary transition, one into a hub, a return. */
+export type ProgressPortKind = "forward" | "external" | "return";
+/** The edge's colour, weight and dash, as the map's `EDGE_LOOK`. */
+export type ProgressEdgeKind = "forward" | "skip" | "hub" | "return" | "self";
+
+/** One port on a card: a pill inside the card and the handle on the card's border. */
+export interface ProgressVisualPort extends ProgressVisualBox {
+  /** The transition key the port and its edge share. */
+  id: string;
+  kind: ProgressPortKind;
+  /** The port's name: the source block for an input, the transition label for an output. */
+  label: string;
+  /** Secondary text: the transition label for an input, the target block for an output. */
+  detail: string | null;
+  /** What is drawn, fitted to the pill: the name, and the detail after it when there is room. */
+  text: string;
+  detailText: string | null;
+  /** Where the drawn text starts; the detail starts at `detailX` (right after the name). */
+  textX: number;
+  detailX: number;
+  /** Where the edge attaches, on the card's border. */
+  handleX: number;
+  handleY: number;
+}
+
+export interface ProgressVisualNode extends ProgressVisualBox {
   id: string;
   label: string;
   labelLines: string[];
-  /** The state mark (✓ ◐ ● – ○) and where it is drawn; the title starts at `titleX`. */
-  mark: string;
-  markX: number;
-  titleX: number;
-  /** `×N` for a repeated block, placed beside the mark and clear of the title. */
-  badge: ProgressVisualBadge | null;
-  /** The status word under the title: who is on the block, or what became of it. */
-  statusLine: string;
-  /** Time spent and, for a bound block, `done/total: current item`; one line, ellipsised. */
-  factsLine: string;
-  lines: ProgressVisualLine[];
-  /** Baselines of the first title line, the status line, the facts line and the first content line. */
-  titleY: number;
-  statusY: number;
-  factsY: number;
-  contentY: number;
-  /** Content lines start at `contentX`; every text line of the block ends before `textRight`. */
-  contentX: number;
-  textRight: number;
+  /** One-based position in process order, the index badge's number. */
+  index: number;
   state: ExecutionProgressState;
   status: ExecutionBlockStatus;
-  /** Completed passes; shown for repeated blocks. */
+  tone: ProgressCardTone;
+  /** Completed passes; `×n` is shown when the block ran more than once. */
   iterations: number;
-  /** Drawn as a label-only chip. */
+  /** Drawn as the title band alone, without ports. */
   collapsed: boolean;
+  /** The row and the drawn column the layout gave the block. */
   row: number;
-  x: number;
-  y: number;
-  width: number;
-  height: number;
+  rank: number;
+  /** The title band: its height, the index badge, the title's first baseline and start. */
+  bandHeight: number;
+  indexBadge: ProgressVisualBadge;
+  titleX: number;
+  titleY: number;
+  /** The status chip at the band's right, and the pass count before it when the block repeated. */
+  chip: ProgressVisualBadge;
+  /** The chip's words, as the map words them (`agent on the step`, `waiting for you`, …). */
+  statusLine: string;
+  badge: ProgressVisualBadge | null;
+  /** The centre: its left edge and right edge (text never passes `textRight`). */
+  contentX: number;
+  textRight: number;
+  /** The description, two lines at most; baseline of the first at `descriptionY`. */
+  descriptionLines: string[];
+  descriptionY: number;
+  /** Time spent and, for a bound block, `done/total: current item`; one line, ellipsised. */
+  factsLine: string;
+  factsY: number;
+  /** `typically …` from the version's statistics; null when none were given or sampled. */
+  typicalLine: string | null;
+  typicalY: number;
+  /** Content lines (`cards` view); baseline of the first at `contentY`. */
+  lines: ProgressVisualLine[];
+  contentY: number;
+  inputs: ProgressVisualPort[];
+  outputs: ProgressVisualPort[];
+  /** Transitions back to the card itself, on the band beneath the centre; empty without any. */
+  selfPorts: ProgressVisualPort[];
+  /** The top of the self-loop band, or null when the card has none. */
+  selfBandY: number | null;
   focusNodeId: string | null;
 }
+
 export interface ProgressVisualEdge {
+  id: string;
   source: string;
   target: string;
-  direction: "forward" | "backward" | "cross-row";
+  kind: ProgressEdgeKind;
+  /** SVG path in diagram coordinates, from the source port's handle to the target port's. */
   path: string;
-  /** Transition label (process view only). */
-  label: string | null;
-  labelLines: string[];
-  /** Anchor of the label text. */
-  labelX: number;
-  labelY: number;
-  labelAnchor: "start" | "middle" | "end";
-  /** The label's box; null when the edge carries no gutter or connector label. */
-  labelBox: ProgressVisualBox | null;
-  /** A return to an earlier block (or to itself), drawn dashed with the transition label. */
+  /** The transition label; the ports name it, the line itself carries no text. */
+  label: string;
   cycle: boolean;
 }
+
+/** Where the diagram (the laid-out process) sits in the image and how it was scaled to fit. */
+export interface ProgressVisualDiagram {
+  x: number;
+  y: number;
+  /** The drawing's own size, before scaling. */
+  width: number;
+  height: number;
+  /** ≤ 1: the drawing was wider than the image and was scaled down as one piece. */
+  scale: number;
+  preset: "default" | "vertical";
+}
+
 export interface ProgressVisualModel {
   taskTitle: string;
   taskTitleLines: string[];
@@ -144,31 +223,26 @@ export interface ProgressVisualModel {
   type: ProgressTypeScale;
   width: number;
   height: number;
-  /** Header text (task, title, goal) starts at `headerX`, its first baseline at `headerY`, and stays narrower than `headerWidth`. */
+  /** Header text starts at `headerX`, its first baseline at `headerY`, and stays narrower than `headerWidth`. */
   headerX: number;
   headerY: number;
   headerWidth: number;
   stagesTop: number;
   stagesHeight: number;
+  diagram: ProgressVisualDiagram;
+  /** The shared layout the cards and edges were placed by (diagram coordinates). */
+  layout: BlockLayout;
   nodes: ProgressVisualNode[];
   edges: ProgressVisualEdge[];
 }
 
-const CARD_WIDTH = 280;
-const CARD_MIN_WIDTH = 240;
-const CARD_GAP_X = 32;
-const CARD_GAP_Y = 52;
 const PADDING_X = 40;
 const PADDING_BOTTOM = 32;
 const HEADER_TOP = 28;
-const CARD_PADDING_TOP = 12;
-const CARD_PADDING_BOTTOM = 14;
-const CONTENT_GAP = 8;
 const FACT_GAP = 12;
 const FACT_MIN_WIDTH = 180;
 const FACT_PADDING_X = 12;
-const LABEL_GAP = 4;
-/** A viewport this wide or narrower is a phone: one column and the larger type. */
+/** A viewport this wide or narrower is a phone: the stacked preset and the larger type. */
 export const PROGRESS_PHONE_MAX_WIDTH = 720;
 
 /** Font sizes (px) and the line heights they are set on; `header` and `fact` are the top of the image. */
@@ -176,17 +250,15 @@ export interface ProgressTypeScale {
   /** Block title. */
   title: number;
   titleLine: number;
-  /** Block content, the status word and the facts line. */
+  /** Block description, facts and content. */
   content: number;
   contentLine: number;
-  /** Transition labels beside connectors and in the gutters. */
+  /** Port pills and the status chip. */
   label: number;
   labelLine: number;
-  /** The `×n` badge and its box height. */
+  /** The `×n` badge, the index badge and their box height. */
   badge: number;
   badgeHeight: number;
-  /** The state mark (✓ ◐ ● – ○). */
-  mark: number;
   header: {
     task: number;
     taskLine: number;
@@ -196,34 +268,46 @@ export interface ProgressTypeScale {
     goalLine: number;
   };
   fact: { label: number; value: number; line: number };
+  /** The ported card's measures at this scale. */
+  card: {
+    /** Width of a port column and of the centre column. */
+    portColumn: number;
+    centre: number;
+    /** Height of a port pill and the step between two pills. */
+    pill: number;
+    pillStep: number;
+    /** Padding inside the card and inside a pill. */
+    padding: number;
+    pillPadding: number;
+  };
 }
 
 const DESKTOP_TYPE: ProgressTypeScale = {
   title: 14,
-  titleLine: 20,
+  titleLine: 18,
   content: 12,
-  contentLine: 18,
+  contentLine: 17,
   label: 11,
   labelLine: 14,
   badge: 11,
-  badgeHeight: 16,
-  mark: 18,
+  badgeHeight: 18,
   header: { task: 20, taskLine: 26, title: 13, titleLine: 18, goal: 14, goalLine: 20 },
   fact: { label: 11, value: 13, line: 17 },
+  card: { portColumn: 150, centre: 220, pill: 20, pillStep: 26, padding: 10, pillPadding: 8 },
 };
 
 const PHONE_TYPE: ProgressTypeScale = {
   title: 18,
-  titleLine: 24,
+  titleLine: 22,
   content: 14,
-  contentLine: 20,
+  contentLine: 19,
   label: 12,
   labelLine: 16,
   badge: 12,
-  badgeHeight: 18,
-  mark: 22,
+  badgeHeight: 20,
   header: { task: 24, taskLine: 30, title: 15, titleLine: 20, goal: 16, goalLine: 22 },
   fact: { label: 12, value: 15, line: 19 },
+  card: { portColumn: 132, centre: 168, pill: 22, pillStep: 28, padding: 10, pillPadding: 8 },
 };
 
 /** The type scale for a viewport: the phone scale up to `PROGRESS_PHONE_MAX_WIDTH`, the desktop one above. */
@@ -356,10 +440,12 @@ export function applyProgressVisibility(
         Boolean(transition.cycle),
       )) {
         if (!shownSet.has(visible.to)) continue;
-        const same = list.find((t) => t.to === visible.to && t.cycle === visible.cycle);
-        if (same) {
-          if (!same.label.includes(visible.label)) same.label = `${same.label}; ${visible.label}`;
-        } else list.push(visible);
+        // Two authored transitions between one pair of blocks stay two ports, as on the map;
+        // only an exact repeat (the same label through the same hidden blocks) is folded.
+        const same = list.some(
+          (t) => t.to === visible.to && t.cycle === visible.cycle && t.label === visible.label,
+        );
+        if (!same) list.push(visible);
       }
     }
     transitions.set(block.id, list);
@@ -432,42 +518,94 @@ export function progressStatusText(
   }
 }
 
-/** `done/total` of a bound block, `?` for an unresolved counter; null when neither resolves. */
-export function progressListCount(list: ExecutionProgressNode["list"]): string | null {
-  return list && (list.done !== null || list.total !== null)
-    ? `${list.done ?? "?"}/${list.total ?? "?"}`
-    : null;
+/** The card tone a block's run status selects; the map's `BLOCK_TONE`. */
+export function progressCardTone(status: ExecutionBlockStatus): ProgressCardTone {
+  switch (status) {
+    case "active":
+      return "active";
+    case "waiting":
+      return "waiting";
+    case "done":
+    case "repeated":
+      return "done";
+    default:
+      return "neutral";
+  }
 }
 
 /**
  * The facts of a block on one line, from the fullest form to the one that must survive: the time
  * spent (`total`, plus the open pass while one runs) and, for a bound block, `done/total` with the
- * current item. Nothing measured reads `—`; an unknown done count reads `?`, as the notification
- * footer does. `progressFactsCandidates` lists the forms in order of preference — with the open
- * pass, without it, without the item's title, the count alone — so a narrow box drops the least
- * important part before anything is cut; `progressFactsText` is the fullest form.
+ * current item. Nothing measured reads `—`; a counter the binding did not resolve reads `—` too,
+ * as the map's `listProgressLabel` words it. `progressFactsCandidates` lists the forms in order of
+ * preference — with the open pass, without it, without the item's title, the count alone — so a
+ * narrow box drops the least important part before anything is cut; `progressFactsText` is the
+ * fullest form.
  */
 export function progressFactsCandidates(node: ExecutionProgressNode): string[] {
-  const total = formatProgressDuration(node.timing.totalMs);
+  // As the map's chips: a block the run has not measured carries no time at all (never `0 s`,
+  // and no dash either), and a block bound to no list carries no count.
+  const measured = node.timing.totalMs !== null || node.timing.currentMs !== null;
+  const total = measured ? formatProgressDuration(node.timing.totalMs) : null;
   const withPass =
     node.timing.currentMs !== null
       ? `${total} · this pass ${formatProgressDuration(node.timing.currentMs)}`
       : null;
   const list = node.list;
-  const count = progressListCount(list);
-  if (!list || count === null) return withPass ? [withPass, total] : [total];
+  const count = listProgressLabel(list);
+  if (!list || count === null) return [withPass, total].filter((f): f is string => f !== null);
   const titled = list.currentTitle ? `${count}: ${list.currentTitle}` : count;
   const forms = [
     withPass ? `${withPass} · ${titled}` : null,
-    `${total} · ${titled}`,
-    `${total} · ${count}`,
+    total ? `${total} · ${titled}` : titled,
+    total ? `${total} · ${count}` : count,
     count,
   ].filter((form): form is string => form !== null);
   return [...new Set(forms)];
 }
 
+/** The fullest facts form; empty for a block with nothing measured and no list. */
 export function progressFactsText(node: ExecutionProgressNode): string {
-  return progressFactsCandidates(node)[0];
+  return progressFactsCandidates(node)[0] ?? "";
+}
+
+/**
+ * What the block typically costs on this version, as the map's typical durations read: the median
+ * time a run spends in the block, the median pass when the block usually repeats, and the median
+ * pass count. Null when the version has no sampled run for the block.
+ */
+export function progressTypicalCandidates(stats: BlockDurationStatistics | undefined): string[] {
+  if (!stats) return [];
+  const sampled = Math.max(stats.pass.sampleCount, stats.run.sampleCount);
+  if (sampled === 0 || stats.run.medianMs === null) return [];
+  const run = `typically ${formatProgressDuration(stats.run.medianMs)}`;
+  if (stats.typicalPasses === null || stats.typicalPasses <= 1) return [run];
+  const passes = `×${stats.typicalPasses}`;
+  const forms = [
+    stats.pass.medianMs !== null
+      ? `${run} · pass ${formatProgressDuration(stats.pass.medianMs)} · ${passes}`
+      : null,
+    `${run} · ${passes}`,
+    run,
+  ];
+  return forms.filter((form): form is string => form !== null);
+}
+
+/** The fullest typical form; null when the version has no sampled run for the block. */
+export function progressTypicalText(stats: BlockDurationStatistics | undefined): string | null {
+  return progressTypicalCandidates(stats)[0] ?? null;
+}
+
+/** The typical form that fits the box, the last one ellipsised when even it does not. */
+function fitTypicalLine(
+  stats: BlockDurationStatistics | undefined,
+  width: number,
+  font: number,
+): string | null {
+  const candidates = progressTypicalCandidates(stats);
+  if (!candidates.length) return null;
+  const whole = candidates.find((text) => progressTextWidth(text, font) <= width);
+  return whole ?? ellipsizeProgressText(candidates[candidates.length - 1], width, font);
 }
 
 /**
@@ -477,13 +615,11 @@ export function progressFactsText(node: ExecutionProgressNode): string {
  */
 function fitFactsLine(node: ExecutionProgressNode, width: number, font: number): string {
   const candidates = progressFactsCandidates(node);
+  if (!candidates.length) return "";
   const fits = (text: string) => progressTextWidth(text, font) <= width;
   const list = node.list;
-  const count = progressListCount(list);
+  const count = listProgressLabel(list);
   if (fits(candidates[0])) return candidates[0];
-  // The fullest form does not fit: cut the item's title on the form without the open pass, as
-  // long as the count stays intact — a cut title still names the item, a dropped one does not;
-  // otherwise the shorter whole forms, then the count alone, cut if even that is too wide.
   const titled = candidates.find(
     (candidate) =>
       !!count &&
@@ -499,149 +635,388 @@ function fitFactsLine(node: ExecutionProgressNode, width: number, font: number):
   return whole ?? ellipsizeProgressText(candidates[candidates.length - 1], width, font);
 }
 
-/** The mark for a block status; the repeat count is a badge of its own, not part of the mark. */
-function progressStatusMark(status: ExecutionBlockStatus): string {
-  return status === "repeated" || status === "done"
-    ? "✓"
-    : status === "waiting"
-      ? "◐"
-      : status === "active"
-        ? "●"
-        : status === "skipped"
-          ? "–"
-          : "○";
+/** A pill's width for its text at the badge face: text plus padding. */
+function pillWidth(text: string, type: ProgressTypeScale): number {
+  return progressTextWidth(text, type.badge, "semibold") + 2 * type.card.pillPadding;
+}
+
+interface PortSpec {
+  id: string;
+  kind: ProgressPortKind;
+  label: string;
+  detail: string | null;
 }
 
 /**
- * A block's header row: the mark, the optional count badge beside it and the title after both,
- * wrapped to the width that remains. The badge's `y` is relative to the block top until the
- * block is placed.
+ * A port's pill at the badge face: the name first, ellipsised to the pill when it alone does not
+ * fit; the detail after it in the room that remains, dropped when fewer than a few glyphs would
+ * fit. Positions are relative to the pill's left edge.
  */
-function blockHeader(
-  status: ExecutionBlockStatus,
-  iterations: number,
-  label: string,
-  x: number,
-  width: number,
+function fitPort(
+  spec: PortSpec,
+  pillInner: number,
   type: ProgressTypeScale,
-): Pick<ProgressVisualNode, "mark" | "markX" | "titleX" | "badge" | "labelLines" | "textRight"> {
-  const mark = progressStatusMark(status);
-  const markX = x + 14;
-  let titleX = Math.max(x + 38, markX + progressTextWidth(mark, type.mark, "bold") + 8);
-  let badge: ProgressVisualBadge | null = null;
-  const titleY = CARD_PADDING_TOP + type.title;
-  if (status === "repeated") {
-    const text = `×${iterations}`;
-    const badgeWidth = progressTextWidth(text, type.badge, "semibold") + 10;
-    badge = {
-      text,
-      x: titleX - 2,
-      y: titleY - type.badgeHeight + 4,
-      width: badgeWidth,
-      height: type.badgeHeight,
-    };
-    titleX = badge.x + badgeWidth + 8;
+): Pick<ProgressVisualPort, "text" | "detailText" | "textX" | "detailX"> {
+  const font = type.label;
+  // A return port carries the return glyph before its name.
+  const prefix = spec.kind === "return" ? "↩ " : "";
+  const name = ellipsizeProgressText(prefix + spec.label, pillInner, font, "semibold");
+  const nameWidth = progressTextWidth(name, font, "semibold");
+  const gap = progressTextWidth(" ", font);
+  const room = pillInner - nameWidth - gap;
+  let detailText: string | null = null;
+  if (spec.detail && room >= progressTextWidth("abc…", font)) {
+    detailText = ellipsizeProgressText(spec.detail, room, font);
   }
-  const textRight = x + width - 14;
-  const labelLines = wrapProgressTextToWidth(
-    label,
-    Math.max(40, textRight - titleX),
-    type.title,
-    "bold",
-  );
   return {
-    mark,
-    markX,
-    titleX,
-    badge,
-    labelLines: labelLines.length ? labelLines : [label],
-    textRight,
+    text: name,
+    detailText,
+    textX: type.card.pillPadding,
+    detailX: type.card.pillPadding + nameWidth + gap,
   };
 }
 
+/** A block's ports, from the visible transitions: inputs from other blocks, outputs, self loops. */
+function portSpecs(
+  id: string,
+  nodes: readonly ExecutionProgressNode[],
+  transitions: ReadonlyMap<string, VisibleTransition[]>,
+  hubs: ReadonlySet<string>,
+): { inputs: PortSpec[]; outputs: PortSpec[]; self: PortSpec[] } {
+  const nameOf = (blockId: string) => {
+    const index = nodes.findIndex((node) => node.id === blockId);
+    return index === -1 ? blockId : `${index + 1}. ${nodes[index].label}`;
+  };
+  const inputs: PortSpec[] = [];
+  for (const other of nodes) {
+    if (other.id === id) continue;
+    for (const transition of transitions.get(other.id) ?? []) {
+      if (transition.to !== id) continue;
+      inputs.push({
+        id: transitionKey(other.id, transition),
+        kind: transition.cycle ? "return" : "forward",
+        label: nameOf(other.id),
+        detail: transition.label,
+      });
+    }
+  }
+  const outputs: PortSpec[] = [];
+  const self: PortSpec[] = [];
+  for (const transition of transitions.get(id) ?? []) {
+    const spec: PortSpec = {
+      id: transitionKey(id, transition),
+      kind: transition.cycle ? "return" : hubs.has(transition.to) ? "external" : "forward",
+      label: transition.label,
+      detail: transition.to === id ? null : nameOf(transition.to),
+    };
+    (transition.to === id ? self : outputs).push(spec);
+  }
+  return { inputs, outputs, self };
+}
+
 /**
- * A block's body under its title: the status word, the facts line (ellipsised to the text
- * width) and the content lines, with every baseline relative to the block top and the height
- * the block needs. A collapsed block is its title alone.
+ * A card measured with the picture's text metric: its size, and every text and box relative to
+ * the card's top-left corner. `placeCard` moves it to where the layout put it.
  */
-function blockBody(
+function measureCard(
   node: ExecutionProgressNode,
-  waitingFor: ExecutionProgress["waitingFor"],
-  header: Pick<ProgressVisualNode, "titleX" | "labelLines" | "textRight">,
-  x: number,
-  collapsed: boolean,
-  lines: ProgressVisualLine[],
-  type: ProgressTypeScale,
-): Pick<
-  ProgressVisualNode,
-  "statusLine" | "factsLine" | "titleY" | "statusY" | "factsY" | "contentY" | "contentX" | "height"
-> {
-  const titleY = CARD_PADDING_TOP + type.title;
-  const titleBottom = titleY + (header.labelLines.length - 1) * type.titleLine;
-  const textWidth = Math.max(24, header.textRight - header.titleX);
-  const statusLine = ellipsizeProgressText(
-    progressStatusText(node.status, node.iterations, waitingFor),
-    textWidth,
-    type.content,
+  index: number,
+  description: string,
+  ports: { inputs: PortSpec[]; outputs: PortSpec[]; self: PortSpec[] },
+  options: {
+    collapsed: boolean;
+    view: ProgressView;
+    waitingFor: ExecutionProgress["waitingFor"];
+    stats: BlockDurationStatistics | undefined;
+    type: ProgressTypeScale;
+  },
+): ProgressVisualNode {
+  const { type, collapsed, view } = options;
+  const { card } = type;
+  const inputs = collapsed ? [] : ports.inputs;
+  const outputs = collapsed ? [] : ports.outputs;
+  const selfPorts = collapsed ? [] : ports.self;
+  const leftColumn = inputs.length ? card.portColumn : 0;
+  const rightColumn = outputs.length ? card.portColumn : 0;
+  const width = leftColumn + card.centre + rightColumn;
+
+  // The title band: index badge, the title wrapped between the badge and the chip (two lines at
+  // most), the pass count and the status chip at the right.
+  const statusLine = progressStatusText(node.status, node.iterations, options.waitingFor);
+  // The chip is the map's status word alone; the pass count is the `×n` badge beside it.
+  const chipText = ellipsizeProgressText(
+    node.status === "repeated" ? "repeated" : statusLine,
+    Math.floor(width * 0.4),
+    type.badge,
     "semibold",
   );
-  const factsLine = fitFactsLine(node, textWidth, type.content);
-  const statusY = titleBottom + type.contentLine + 2;
-  const factsY = statusY + type.contentLine;
-  const contentY = factsY + type.contentLine + CONTENT_GAP;
-  const lastBaseline = collapsed
-    ? titleBottom
-    : lines.length
-      ? contentY + (lines.length - 1) * type.contentLine
-      : factsY;
+  const chipWidth = pillWidth(chipText, type);
+  const badgeText = node.iterations > 1 ? `×${node.iterations}` : null;
+  const badgeWidth = badgeText ? progressTextWidth(badgeText, type.badge, "semibold") : 0;
+  const indexText = String(index + 1);
+  const indexWidth = Math.max(type.badgeHeight, pillWidth(indexText, type));
+  const titleX = card.padding + indexWidth + 8;
+  const titleRight = width - card.padding - chipWidth - (badgeText ? badgeWidth + 8 : 0) - 8;
+  const titleWidth = Math.max(40, titleRight - titleX);
+  const wrapped = wrapProgressTextToWidth(node.label, titleWidth, type.title, "bold");
+  const labelLines = wrapped.length
+    ? wrapped.length > 2
+      ? [
+          wrapped[0],
+          ellipsizeProgressText(wrapped.slice(1).join(" "), titleWidth, type.title, "bold"),
+        ]
+      : wrapped
+    : [node.label];
+  const bandHeight = Math.max(
+    type.badgeHeight + 2 * card.padding,
+    labelLines.length * type.titleLine + 2 * card.padding,
+  );
+  const titleY = Math.round((bandHeight - labelLines.length * type.titleLine) / 2) + type.title;
+  const badgeY = Math.round((bandHeight - type.badgeHeight) / 2);
+  const indexBadge = {
+    text: indexText,
+    x: card.padding,
+    y: badgeY,
+    width: indexWidth,
+    height: type.badgeHeight,
+  };
+  const chip = {
+    text: chipText,
+    x: width - card.padding - chipWidth,
+    y: badgeY,
+    width: chipWidth,
+    height: type.badgeHeight,
+  };
+  const badge = badgeText
+    ? {
+        text: badgeText,
+        x: chip.x - 8 - badgeWidth,
+        y: badgeY,
+        width: badgeWidth,
+        height: type.badgeHeight,
+      }
+    : null;
+
+  // The centre: description (two lines), facts, typical, content lines.
+  const contentX = leftColumn + card.padding;
+  const textRight = leftColumn + card.centre - card.padding;
+  const centreWidth = Math.max(24, textRight - contentX);
+  let cursor = bandHeight + card.padding + type.content;
+  let descriptionLines: string[] = [];
+  let factsLine = "";
+  let typicalLine: string | null = null;
+  let lines: ProgressVisualLine[] = [];
+  let descriptionY = 0;
+  let factsY = 0;
+  let typicalY = 0;
+  let contentY = 0;
+  let centreBottom = bandHeight;
+  if (!collapsed) {
+    const described = wrapProgressTextToWidth(description, centreWidth, type.content);
+    descriptionLines =
+      described.length > 2
+        ? [
+            described[0],
+            ellipsizeProgressText(described.slice(1).join(" "), centreWidth, type.content),
+          ]
+        : described;
+    descriptionY = cursor;
+    cursor += descriptionLines.length * type.contentLine;
+    if (descriptionLines.length) cursor += 2;
+    factsLine = fitFactsLine(node, centreWidth, type.content);
+    if (factsLine) {
+      factsY = cursor;
+      cursor += type.contentLine;
+    }
+    const typical = fitTypicalLine(options.stats, centreWidth, type.content);
+    if (typical) {
+      typicalLine = typical;
+      typicalY = cursor;
+      cursor += type.contentLine;
+    }
+    if (view === "cards") {
+      // A summary that says what the description or the name already says is not repeated, as
+      // the map's `runBlocks` drops it.
+      const summary = node.content.summary?.trim();
+      const content =
+        summary && [description, node.label].some((text) => text.trim() === summary)
+          ? { ...node.content, summary: null }
+          : node.content;
+      lines = contentLines(content, centreWidth, type);
+      if (lines.length) {
+        cursor += 4;
+        contentY = cursor;
+        cursor += lines.length * type.contentLine;
+      }
+    }
+    centreBottom = cursor - type.content + card.padding;
+  }
+  const rows = Math.max(inputs.length, outputs.length);
+  const portsBottom =
+    bandHeight +
+    card.padding +
+    rows * card.pillStep -
+    (rows ? card.pillStep - card.pill : 0) +
+    card.padding;
+  const bodyBottom = collapsed
+    ? bandHeight
+    : Math.max(centreBottom, portsBottom, bandHeight + 2 * card.padding + card.pill);
+  const selfBandHeight = selfPorts.length ? card.pill + 2 * card.padding : 0;
+  const selfBandY = selfPorts.length ? bodyBottom : null;
+  const height = bodyBottom + selfBandHeight;
+
+  // Ports: a column of pills centred vertically in the body, the handle on the border beside each.
+  const column = (specs: PortSpec[], side: "in" | "out"): ProgressVisualPort[] => {
+    const columnTop =
+      bandHeight +
+      Math.round(
+        (bodyBottom - bandHeight - (specs.length * card.pillStep - (card.pillStep - card.pill))) /
+          2,
+      );
+    const pillW = card.portColumn - 2 * card.padding;
+    return specs.map((spec, i) => {
+      const x = side === "in" ? card.padding : width - card.portColumn + card.padding;
+      const y = columnTop + i * card.pillStep;
+      return {
+        ...spec,
+        ...fitPort(spec, pillW - 2 * card.pillPadding, type),
+        x,
+        y,
+        width: pillW,
+        height: card.pill,
+        handleX: side === "in" ? 0 : width,
+        handleY: y + card.pill / 2,
+      };
+    });
+  };
+  const selfRow = (specs: PortSpec[]): ProgressVisualPort[] => {
+    if (!specs.length) return [];
+    const gap = 8;
+    const pillW = Math.min(
+      Math.floor((width - 2 * card.padding - gap * (specs.length - 1)) / specs.length),
+      card.portColumn + 40,
+    );
+    const total = pillW * specs.length + gap * (specs.length - 1);
+    const startX = Math.round((width - total) / 2);
+    return specs.map((spec, i) => ({
+      ...spec,
+      ...fitPort(spec, pillW - 2 * card.pillPadding, type),
+      x: startX + i * (pillW + gap),
+      y: selfBandY! + card.padding,
+      width: pillW,
+      height: card.pill,
+      // One double port for every self loop: the edge leaves the left dot (`handleX`) and
+      // re-enters the right one, 18 px on.
+      handleX: width / 2 - 9,
+      handleY: height,
+    }));
+  };
   return {
-    statusLine,
-    factsLine,
+    id: node.id,
+    label: node.label,
+    labelLines,
+    index: index + 1,
+    state: node.state,
+    status: node.status,
+    tone: progressCardTone(node.status),
+    iterations: node.iterations,
+    collapsed,
+    row: 0,
+    rank: 0,
+    bandHeight,
+    indexBadge,
+    titleX,
     titleY,
-    statusY,
+    chip,
+    statusLine,
+    badge,
+    contentX,
+    textRight,
+    descriptionLines,
+    descriptionY,
+    factsLine,
     factsY,
+    typicalLine,
+    typicalY,
+    lines,
     contentY,
-    contentX: x + 18,
-    height: lastBaseline + CARD_PADDING_BOTTOM,
+    inputs: column(inputs, "in"),
+    outputs: column(outputs, "out"),
+    selfPorts: selfRow(selfPorts),
+    selfBandY,
+    x: 0,
+    y: 0,
+    width,
+    height,
+    focusNodeId: node.focusNodeId,
   };
 }
 
-/** Move a block whose baselines and badge are relative to its top to the absolute `y`. */
-function placeBlock(node: ProgressVisualNode, y: number): void {
-  node.y = y;
-  node.titleY += y;
-  node.statusY += y;
-  node.factsY += y;
-  node.contentY += y;
-  if (node.badge) node.badge.y += y;
+/** Move a measured card (everything relative to its corner) to `x`, `y`. */
+function placeCard(
+  card: ProgressVisualNode,
+  x: number,
+  y: number,
+  row: number,
+  rank: number,
+): void {
+  card.x = x;
+  card.y = y;
+  card.row = row;
+  card.rank = rank;
+  card.titleY += y;
+  card.titleX += x;
+  card.contentX += x;
+  card.textRight += x;
+  card.descriptionY += y;
+  card.factsY += y;
+  card.typicalY += y;
+  card.contentY += y;
+  if (card.selfBandY !== null) card.selfBandY += y;
+  for (const box of [card.indexBadge, card.chip, card.badge]) {
+    if (!box) continue;
+    box.x += x;
+    box.y += y;
+  }
+  for (const port of [...card.inputs, ...card.outputs, ...card.selfPorts]) {
+    port.x += x;
+    port.y += y;
+    port.handleX += x;
+    port.handleY += y;
+  }
 }
 
-export function buildExecutionProgressVisualModel(
+/** The blocks the shared layout reads, from the visible projection. */
+export function progressLayoutBlocks(
+  progress: ExecutionProgress,
+  visible: ReturnType<typeof applyProgressVisibility>,
+): LayoutBlock[] {
+  const description = new Map(
+    progress.process.blocks.map((block) => [block.id, block.description]),
+  );
+  return visible.nodes.map((node, index) => ({
+    id: node.id,
+    index,
+    description: description.get(node.id) ?? "",
+    transitions: (visible.transitions.get(node.id) ?? []).map((transition) => ({
+      to: transition.to,
+      label: transition.label,
+      cycle: transition.cycle,
+    })),
+  }));
+}
+
+export async function buildExecutionProgressVisualModel(
   progress: ExecutionProgress,
   options: ProgressVisualOptions = {},
-): ProgressVisualModel {
+  statistics?: WorkflowVersionStatistics | null,
+): Promise<ProgressVisualModel> {
   const normalized = normalizeProgressVisualOptions(options);
-  const processView = normalized.view === "process";
   const visible = applyProgressVisibility(progress, normalized.hide, normalized.collapse);
-  const shownNodes = visible.nodes;
   const width = normalized.viewportWidth;
   const type = progressTypeScale(width);
   const phone = width <= PROGRESS_PHONE_MAX_WIDTH;
   const availableWidth = width - PADDING_X * 2;
-  // A phone reads one column of full-width cards; wider viewports keep the card grid.
-  const columns = phone
-    ? 1
-    : Math.max(1, Math.floor((availableWidth + CARD_GAP_X) / (CARD_MIN_WIDTH + CARD_GAP_X)));
-  const cardWidth = phone
-    ? availableWidth
-    : Math.min(
-        CARD_WIDTH,
-        Math.floor((availableWidth - CARD_GAP_X * Math.max(0, columns - 1)) / columns),
-      );
-  const actualColumns = Math.max(
-    1,
-    Math.floor((availableWidth + CARD_GAP_X) / (cardWidth + CARD_GAP_X)),
-  );
   const taskTitle = progress.taskTitle || progress.title || "Execution progress";
   const taskTitleLines = wrapProgressTextToWidth(
     taskTitle,
@@ -695,109 +1070,111 @@ export function buildExecutionProgressVisualModel(
     factY += factRows[row] + FACT_GAP;
   }
   const nodesTop = facts.length ? factY + 18 : cursorY + 24;
-  if (processView) {
-    return layoutProcessColumn(progress, normalized, visible, {
-      width,
-      type,
-      taskTitle,
-      taskTitleLines,
-      titleLines,
-      goalLines,
-      facts,
-      nodesTop,
-    });
+
+  // The cards, measured; then the shared layout with those sizes.
+  const statsById = new Map((statistics?.blocks ?? []).map((entry) => [entry.blockId, entry]));
+  const layoutInput = progressLayoutBlocks(progress, visible);
+  const descriptionOf = new Map(layoutInput.map((block) => [block.id, block.description]));
+  const cards = visible.nodes.map((node, index) =>
+    measureCard(
+      node,
+      index,
+      descriptionOf.get(node.id) ?? "",
+      portSpecs(node.id, visible.nodes, visible.transitions, visible.hubs),
+      {
+        collapsed: visible.collapsed.has(node.id),
+        view: normalized.view,
+        waitingFor: progress.waitingFor,
+        stats: statsById.get(node.id),
+        type,
+      },
+    ),
+  );
+  const sizes = new Map(cards.map((card) => [card.id, { width: card.width, height: card.height }]));
+  const hubIds = [...visible.hubs];
+  const lay = (preset: LayoutBlocksOptions["preset"]) =>
+    layoutBlocks(layoutInput, hubIds, { preset, sizes });
+  // The rows preset when the image holds it at the type scale; the stacked preset otherwise,
+  // and always on a phone.
+  let preset: ProgressVisualDiagram["preset"] = "vertical";
+  let layout: BlockLayout;
+  if (phone) layout = await lay("vertical");
+  else {
+    const rows = await lay("default");
+    if (rows.width <= availableWidth) {
+      preset = "default";
+      layout = rows;
+    } else layout = await lay("vertical");
   }
-  const nodes = shownNodes.map((node, index): ProgressVisualNode => {
-    const x = PADDING_X + (index % actualColumns) * (cardWidth + CARD_GAP_X);
-    const header = blockHeader(node.status, node.iterations, node.label, x, cardWidth, type);
-    const collapsed = visible.collapsed.has(node.id);
-    const lines = collapsed ? [] : contentLines(node.content, header.textRight - (x + 18), type);
-    const body = blockBody(node, progress.waitingFor, header, x, collapsed, lines, type);
+  const scale = layout.width > availableWidth ? availableWidth / layout.width : 1;
+  const diagram: ProgressVisualDiagram = {
+    x: PADDING_X,
+    y: nodesTop,
+    width: layout.width,
+    height: layout.height,
+    scale,
+    preset,
+  };
+  const laidById = new Map(layout.blocks.map((block) => [block.id, block]));
+  for (const card of cards) {
+    const laid = laidById.get(card.id)!;
+    placeCard(card, laid.x, laid.y, laid.row, laid.rank);
+  }
+  const cardById = new Map(cards.map((card) => [card.id, card]));
+  const portOf = (card: ProgressVisualNode, key: string, side: "in" | "out") => {
+    const ports =
+      side === "in" ? [...card.inputs, ...card.selfPorts] : [...card.outputs, ...card.selfPorts];
+    return ports.find((port) => port.id === key) ?? null;
+  };
+  const ports = new Map(
+    cards.map((card) => [
+      card.id,
+      {
+        outputs: [...card.outputs, ...card.selfPorts].map((port) => port.id),
+        inputs: [...card.inputs, ...card.selfPorts].map((port) => port.id),
+      },
+    ]),
+  );
+  const ranks = portRanks(layout.edges, ports, new Map(layout.blocks.map((b) => [b.id, b.y])));
+  const edges: ProgressVisualEdge[] = layout.edges.map((laid) => {
+    const key = transitionKey(laid.from, laid.transition);
+    const source = cardById.get(laid.from)!;
+    const target = cardById.get(laid.to)!;
+    const self = laid.from === laid.to;
+    // A collapsed card has no ports: its edges meet the card at the middle of its borders.
+    const out = portOf(source, key, "out");
+    const into = portOf(target, key, "in");
+    const sx = out ? out.handleX : source.x + source.width;
+    const sy = out ? out.handleY : source.y + source.height / 2;
+    const tx = into ? (self ? into.handleX + 18 : into.handleX) : target.x;
+    const ty = into ? into.handleY : target.y + target.height / 2;
+    // A self loop of a collapsed card still dips beneath the card, out of its bottom edge.
+    const [fx, fy, gx, gy] =
+      self && !out
+        ? [
+            source.x + source.width / 2 - 9,
+            source.y + source.height,
+            source.x + source.width / 2 + 9,
+            source.y + source.height,
+          ]
+        : [sx, sy, tx, ty];
+    const routed = portedPath(laid, fx, fy, gx, gy, Boolean(layout.transposed), {
+      outRank: ranks.out.get(laid.id) ?? 0,
+      inRank: ranks.in.get(laid.id) ?? 0,
+    });
+    const kind: ProgressEdgeKind = self ? "self" : laid.kind === "cycle" ? "return" : laid.kind;
     return {
-      id: node.id,
-      label: node.label,
-      ...header,
-      ...body,
-      lines,
-      state: node.state,
-      status: node.status,
-      iterations: node.iterations,
-      collapsed,
-      row: Math.floor(index / actualColumns),
-      x,
-      y: 0,
-      width: cardWidth,
-      focusNodeId: node.focusNodeId,
+      id: laid.id,
+      source: laid.from,
+      target: laid.to,
+      kind,
+      path: routed.path,
+      label: laid.transition.label,
+      cycle: laid.kind === "cycle",
     };
   });
-  const rowHeights: number[] = [];
-  const rowTops: number[] = [];
-  nodes.forEach((node) => {
-    rowHeights[node.row] = Math.max(rowHeights[node.row] ?? 0, node.height);
-  });
-  let rowY = nodesTop;
-  for (let row = 0; row < rowHeights.length; row++) {
-    rowTops[row] = rowY;
-    nodes.forEach((node) => {
-      if (node.row === row) placeBlock(node, rowY);
-    });
-    rowY += rowHeights[row] + CARD_GAP_Y;
-  }
-
-  const byId = new Map(nodes.map((node, index) => [node.id, { node, index }]));
-  const edges: ProgressVisualEdge[] = [];
-  // Cards view: the display chain, unlabelled.
-  for (const source of shownNodes) {
-    const sourceEntry = byId.get(source.id);
-    const targetEntry = source.connections.default
-      ? byId.get(source.connections.default)
-      : undefined;
-    if (!sourceEntry || !targetEntry) continue;
-    const sameRow = sourceEntry.node.row === targetEntry.node.row;
-    const forward = targetEntry.index > sourceEntry.index;
-    let direction: ProgressVisualEdge["direction"];
-    let path: string;
-    if (!sameRow) {
-      direction = "cross-row";
-      const startX = sourceEntry.node.x + sourceEntry.node.width / 2;
-      const endX = targetEntry.node.x + targetEntry.node.width / 2;
-      const movingDown = targetEntry.node.row > sourceEntry.node.row;
-      const startY = movingDown ? sourceEntry.node.y + sourceEntry.node.height : sourceEntry.node.y;
-      const sourceBoundary = movingDown
-        ? rowTops[sourceEntry.node.row] + rowHeights[sourceEntry.node.row]
-        : rowTops[sourceEntry.node.row];
-      const targetBoundary = movingDown
-        ? rowTops[targetEntry.node.row]
-        : rowTops[targetEntry.node.row] + rowHeights[targetEntry.node.row];
-      const corridorX = PADDING_X / 2;
-      path = `M ${startX} ${startY} L ${startX} ${sourceBoundary} L ${corridorX} ${sourceBoundary} L ${corridorX} ${targetBoundary} L ${endX} ${targetBoundary}`;
-    } else if (forward) {
-      direction = "forward";
-      const y = sourceEntry.node.y + Math.min(sourceEntry.node.height, targetEntry.node.height) / 2;
-      path = `M ${sourceEntry.node.x + sourceEntry.node.width} ${y} L ${targetEntry.node.x} ${y}`;
-    } else {
-      direction = "backward";
-      const startX = sourceEntry.node.x + sourceEntry.node.width / 2;
-      const endX = targetEntry.node.x + targetEntry.node.width / 2;
-      const edgeY =
-        sourceEntry.node.y + Math.max(sourceEntry.node.height, targetEntry.node.height) + 24;
-      path = `M ${startX} ${sourceEntry.node.y + sourceEntry.node.height} C ${startX} ${edgeY}, ${endX} ${edgeY}, ${endX} ${targetEntry.node.y + targetEntry.node.height}`;
-    }
-    edges.push({
-      source: source.id,
-      target: targetEntry.node.id,
-      direction,
-      path,
-      label: null,
-      labelLines: [],
-      labelX: 0,
-      labelY: 0,
-      labelAnchor: "middle",
-      labelBox: null,
-      cycle: false,
-    });
-  }
-  const height = Math.max(nodesTop + 96, rowY - CARD_GAP_Y + PADDING_BOTTOM);
+  const stagesHeight = Math.round(layout.height * scale);
+  const height = Math.max(nodesTop + 96, nodesTop + stagesHeight + PADDING_BOTTOM);
   return {
     taskTitle,
     taskTitleLines,
@@ -816,390 +1193,9 @@ export function buildExecutionProgressVisualModel(
     headerWidth: availableWidth,
     stagesTop: nodesTop,
     stagesHeight: height - nodesTop,
-    nodes,
-    edges,
-  };
-}
-
-const COLUMN_MAX_WIDTH = 440;
-const COLUMN_MIN_WIDTH = 220;
-const COLUMN_GAP_Y = 44;
-const LANE_STEP = 26;
-const LANE_BASE = 22;
-
-interface ProcessArc {
-  source: string;
-  target: string;
-  label: string;
-  cycle: boolean;
-  from: number;
-  to: number;
-  lane: number;
-  /** A forward transition into a hub: drawn on the hub's bundled lane, labelled inside its source. */
-  hub: boolean;
-}
-
-/** Lanes by span: an arc nested inside another takes the lane inside it; returns the lane count. */
-function assignLanes(side: ProcessArc[]): number {
-  const sorted = [...side].sort(
-    (a, b) => Math.abs(a.to - a.from) - Math.abs(b.to - b.from) || a.from - b.from,
-  );
-  const placed: ProcessArc[] = [];
-  for (const arc of sorted) {
-    const lo = Math.min(arc.from, arc.to);
-    const hi = Math.max(arc.from, arc.to);
-    let lane = 0;
-    for (;;) {
-      const clash = placed.some((other) => {
-        const olo = Math.min(other.from, other.to);
-        const ohi = Math.max(other.from, other.to);
-        return other.lane === lane && olo < hi && ohi > lo;
-      });
-      if (!clash) break;
-      lane += 1;
-    }
-    arc.lane = lane;
-    placed.push(arc);
-  }
-  return placed.length ? Math.max(...placed.map((arc) => arc.lane)) + 1 : 0;
-}
-
-/**
- * The aggregated block view: one column of compact blocks in process order. Adjacent forward
- * transitions are short connectors with their label beside them; forward skips are arcs in the
- * right gutter and returns dashed arcs in the left gutter, each on a lane by its span so arcs nest
- * instead of crossing, labelled at their midpoint. Forward transitions into a hub block share one
- * bundled lane per hub in the right gutter and enter the hub at a single port; their labels are
- * written inside the source block rather than beside the bundle, so the connection is visible
- * without the gutter labels of several sources piling up. It is the run page's lanes picture turned
- * vertical, which any viewport width can hold.
- */
-function layoutProcessColumn(
-  progress: ExecutionProgress,
-  normalized: Required<ProgressVisualOptions>,
-  visible: ReturnType<typeof applyProgressVisibility>,
-  header: {
-    width: number;
-    type: ProgressTypeScale;
-    taskTitle: string;
-    taskTitleLines: string[];
-    titleLines: string[];
-    goalLines: string[];
-    facts: ProgressVisualFact[];
-    nodesTop: number;
-  },
-): ProgressVisualModel {
-  const { width, nodesTop, type } = header;
-  const labelFont = type.label;
-  const labelLine = type.labelLine;
-  const blockLabel = new Map(visible.nodes.map((node) => [node.id, node.label]));
-  const index = new Map(visible.nodes.map((node, i) => [node.id, i]));
-
-  const arcs: ProcessArc[] = [];
-  const inline = new Map<string, string[]>();
-  for (const node of visible.nodes) {
-    for (const transition of visible.transitions.get(node.id) ?? []) {
-      const to = index.get(transition.to);
-      const from = index.get(node.id);
-      if (to === undefined || from === undefined) continue;
-      const hub = !transition.cycle && visible.hubs.has(transition.to) && to > from + 1;
-      if (hub) {
-        inline.set(node.id, [
-          ...(inline.get(node.id) ?? []),
-          `${transition.label} → ${blockLabel.get(transition.to) ?? transition.to}`,
-        ]);
-      }
-      arcs.push({
-        source: node.id,
-        target: transition.to,
-        label: transition.label,
-        cycle: transition.cycle || to <= from,
-        from,
-        to,
-        lane: 0,
-        hub,
-      });
-    }
-  }
-  // Every forward skip takes a right-gutter lane by its span; the skips into one hub are laid out
-  // as a single bundle spanning from the earliest source to the hub, and each takes the bundle's lane.
-  const skips = arcs.filter((arc) => !arc.cycle && arc.to !== arc.from + 1);
-  const bundles = new Map<string, ProcessArc>();
-  for (const arc of skips.filter((arc) => arc.hub)) {
-    const bundle = bundles.get(arc.target);
-    if (bundle) bundle.from = Math.min(bundle.from, arc.from);
-    else bundles.set(arc.target, { ...arc });
-  }
-  const rightLanes = assignLanes([...skips.filter((arc) => !arc.hub), ...bundles.values()]);
-  for (const arc of skips) if (arc.hub) arc.lane = bundles.get(arc.target)!.lane;
-  const leftLanes = assignLanes(arcs.filter((arc) => arc.cycle));
-
-  // Gutter labels: every arc that is neither an adjacent connector nor a hub bundle. Each side's
-  // gutter holds its lanes plus a label area sized by the widest label (bounded), and the column
-  // keeps its minimum width by shrinking the label areas rather than overflowing the viewport;
-  // labels wrap to whatever the area leaves them.
-  const labelWidthOf = (label: string) => progressTextWidth(label, labelFont, "semibold");
-  const gutterArcs = arcs.filter((arc) => !arc.hub && (arc.cycle || arc.to !== arc.from + 1));
-  const leftArcs = gutterArcs.filter((arc) => arc.cycle);
-  const rightArcs = gutterArcs.filter((arc) => !arc.cycle);
-  const lanesPart = (lanes: number) => (lanes ? LANE_BASE + lanes * LANE_STEP : 0);
-  // A side's label area never drops below its widest word, so labels wrap between words and
-  // never split one.
-  const widestWordOf = (side: ProcessArc[]) =>
-    Math.max(0, ...side.flatMap((a) => a.label.split(/\s+/u).map(labelWidthOf)));
-  const labelSpaceOf = (side: ProcessArc[]) =>
-    side.length
-      ? Math.min(240, Math.max(120, Math.max(...side.map((a) => labelWidthOf(a.label))) + 8))
-      : 0;
-  const leftFloor = leftArcs.length ? Math.max(72, widestWordOf(leftArcs) + 8) : 0;
-  const rightFloor = rightArcs.length ? Math.max(72, widestWordOf(rightArcs) + 8) : 0;
-  let leftLabelSpace = Math.max(labelSpaceOf(leftArcs), leftFloor);
-  let rightLabelSpace = Math.max(labelSpaceOf(rightArcs), rightFloor);
-  const gutterOf = (lanes: number, labelSpace: number) =>
-    Math.max(PADDING_X, lanesPart(lanes) + labelSpace + (labelSpace ? 12 : 0));
-  const overBudget = () =>
-    gutterOf(leftLanes, leftLabelSpace) + gutterOf(rightLanes, rightLabelSpace) + COLUMN_MIN_WIDTH >
-    width;
-  if (overBudget()) {
-    const cut = Math.ceil(
-      (gutterOf(leftLanes, leftLabelSpace) +
-        gutterOf(rightLanes, rightLabelSpace) +
-        COLUMN_MIN_WIDTH -
-        width) /
-        2,
-    );
-    if (leftLabelSpace) leftLabelSpace = Math.max(leftFloor, leftLabelSpace - cut);
-    if (rightLabelSpace) rightLabelSpace = Math.max(rightFloor, rightLabelSpace - cut);
-  }
-  // When the viewport cannot hold the lanes, the column and both label areas, a side's labels
-  // move inside their source blocks (as the hub labels always are): first the forward skips on
-  // the right, then the returns on the left. The arcs stay drawn; nothing is truncated.
-  let rightInline = false;
-  let leftInline = false;
-  if (overBudget() && rightLabelSpace) {
-    rightInline = true;
-    rightLabelSpace = 0;
-  }
-  if (overBudget() && leftLabelSpace) {
-    leftInline = true;
-    leftLabelSpace = 0;
-  }
-  for (const arc of gutterArcs) {
-    const inlined = arc.cycle ? leftInline : rightInline;
-    if (!inlined) continue;
-    inline.set(arc.source, [
-      ...(inline.get(arc.source) ?? []),
-      `${arc.cycle ? "↩ " : ""}${arc.label} → ${blockLabel.get(arc.target) ?? arc.target}`,
-    ]);
-  }
-  const leftGutter = gutterOf(leftLanes, leftLabelSpace);
-  const rightGutter = gutterOf(rightLanes, rightLabelSpace);
-  const columnWidth = Math.max(
-    COLUMN_MIN_WIDTH,
-    Math.min(COLUMN_MAX_WIDTH, width - leftGutter - rightGutter),
-  );
-  const columnX =
-    leftGutter + Math.max(0, Math.floor((width - leftGutter - rightGutter - columnWidth) / 2));
-  // Gutter labels sit beyond the outermost lane of their side, never across a lane line.
-  const leftOuter = columnX - LANE_BASE - Math.max(0, leftLanes - 1) * LANE_STEP;
-  const rightOuter = columnX + columnWidth + LANE_BASE + Math.max(0, rightLanes - 1) * LANE_STEP;
-  const leftArea = { x0: PADDING_X / 2, x1: leftOuter - 8 };
-  const rightArea = { x0: rightOuter + 8, x1: width - PADDING_X / 2 };
-  const areaWidth = (area: { x0: number; x1: number }) => Math.max(48, area.x1 - area.x0);
-
-  // Adjacent connectors carry their label beside the line, inside the gap between the two
-  // blocks; a label that needs more lines than the gap holds widens that gap.
-  const connectorLabelWidth = Math.max(60, Math.floor(columnWidth / 2) - 14);
-  const gapAfter = new Map<string, number>();
-  const connectorLines = new Map<string, string[]>();
-  for (const arc of arcs) {
-    if (arc.cycle || arc.hub || arc.to !== arc.from + 1) continue;
-    const lines = wrapProgressTextToWidth(
-      arc.label,
-      Math.max(connectorLabelWidth, widestWordOf([arc])),
-      labelFont,
-      "semibold",
-    );
-    connectorLines.set(`${arc.source}>${arc.target}`, lines);
-    const needed = lines.length * labelLine + 16;
-    gapAfter.set(arc.source, Math.max(gapAfter.get(arc.source) ?? COLUMN_GAP_Y, needed));
-  }
-
-  let y = nodesTop;
-  const nodes: ProgressVisualNode[] = visible.nodes.map((node, i): ProgressVisualNode => {
-    const collapsed = visible.collapsed.has(node.id);
-    const header = blockHeader(
-      node.status,
-      node.iterations,
-      node.label,
-      columnX,
-      columnWidth,
-      type,
-    );
-    const inlineWidth = header.textRight - (columnX + 18);
-    const lines: ProgressVisualLine[] = collapsed
-      ? []
-      : (inline.get(node.id) ?? []).flatMap((text) =>
-          wrapContentLines(text, "next", inlineWidth, type),
-        );
-    const body = blockBody(node, progress.waitingFor, header, columnX, collapsed, lines, type);
-    const placed: ProgressVisualNode = {
-      id: node.id,
-      label: node.label,
-      ...header,
-      ...body,
-      lines,
-      state: node.state,
-      status: node.status,
-      iterations: node.iterations,
-      collapsed,
-      row: i,
-      x: columnX,
-      y: 0,
-      width: columnWidth,
-      focusNodeId: node.focusNodeId,
-    };
-    placeBlock(placed, y);
-    y += placed.height + (gapAfter.get(node.id) ?? COLUMN_GAP_Y);
-    return placed;
-  });
-  const byId = new Map(nodes.map((node) => [node.id, node]));
-  const edges: ProgressVisualEdge[] = [];
-  // Gutter labels are placed after every arc is known: each starts centred on its arc's start
-  // and may slide along the arc's vertical run; the labels of one side are then stacked in
-  // vertical order so no two overlap, whichever block their arcs leave.
-  interface PendingLabel {
-    edge: ProgressVisualEdge;
-    right: boolean;
-    top: number;
-    lo: number;
-    hi: number;
-    width: number;
-    height: number;
-    order: number;
-  }
-  const pending: PendingLabel[] = [];
-  for (const arc of arcs) {
-    const source = byId.get(arc.source)!;
-    const target = byId.get(arc.target)!;
-    const adjacent = !arc.cycle && arc.to === arc.from + 1;
-    if (adjacent) {
-      const lines = connectorLines.get(`${arc.source}>${arc.target}`) ?? [];
-      const x = source.x + source.width / 2;
-      const y1 = source.y + source.height;
-      const y2 = target.y;
-      const boxHeight = lines.length * labelLine;
-      const top = y1 + Math.max(2, (y2 - y1 - boxHeight) / 2);
-      const boxWidth = Math.max(0, ...lines.map(labelWidthOf));
-      edges.push({
-        source: arc.source,
-        target: arc.target,
-        direction: "forward",
-        path: `M ${x} ${y1} L ${x} ${y2}`,
-        label: arc.label,
-        labelLines: lines,
-        labelX: x + 10,
-        labelY: top + labelFont,
-        labelAnchor: "start",
-        labelBox: lines.length ? { x: x + 10, y: top, width: boxWidth, height: boxHeight } : null,
-        cycle: false,
-      });
-      continue;
-    }
-    const right = !arc.cycle;
-    const laneX = right
-      ? columnX + columnWidth + LANE_BASE + arc.lane * LANE_STEP
-      : columnX - LANE_BASE - arc.lane * LANE_STEP;
-    // A self-return leaves the block's upper half and re-enters its lower half, so the loop is
-    // a visible bracket rather than a flat stub.
-    const self = arc.source === arc.target;
-    const startY = self ? source.y + source.height / 3 : source.y + source.height / 2;
-    const endY = self ? target.y + (target.height * 2) / 3 : target.y + target.height / 2;
-    const startX = right ? source.x + source.width : source.x;
-    const endX = right ? target.x + target.width : target.x;
-    const area = right ? rightArea : leftArea;
-    // A hub connector carries its label inside the source block (the "next" line), not in the
-    // gutter; so does every arc of a side whose labels moved inline.
-    const inlined = arc.hub || (right ? rightInline : leftInline);
-    const lines = inlined
-      ? []
-      : wrapProgressTextToWidth(arc.label, areaWidth(area), labelFont, "semibold");
-    const edge: ProgressVisualEdge = {
-      source: arc.source,
-      target: arc.target,
-      direction: right ? "forward" : "backward",
-      path: `M ${startX} ${startY} L ${laneX} ${startY} L ${laneX} ${endY} L ${endX} ${endY}`,
-      label: arc.label,
-      labelLines: lines,
-      labelX: right ? area.x0 : area.x1,
-      labelY: startY,
-      labelAnchor: right ? "start" : "end",
-      labelBox: null,
-      cycle: arc.cycle,
-    };
-    edges.push(edge);
-    if (!lines.length) continue;
-    const boxHeight = lines.length * labelLine + 2;
-    const lo = Math.min(startY, endY);
-    const hi = Math.max(startY, endY) - boxHeight;
-    const centred = startY - boxHeight / 2;
-    pending.push({
-      edge,
-      right,
-      top: hi >= lo ? Math.min(Math.max(centred, lo), hi) : centred,
-      lo,
-      hi,
-      width: Math.max(0, ...lines.map(labelWidthOf)),
-      height: boxHeight,
-      order: arc.from,
-    });
-  }
-  for (const side of [false, true]) {
-    const labels = pending
-      .filter((label) => label.right === side)
-      .sort((a, b) => a.top - b.top || a.order - b.order);
-    let floor = -Infinity;
-    for (const label of labels) {
-      const top = Math.max(label.top, floor);
-      const area = side ? rightArea : leftArea;
-      label.edge.labelBox = {
-        x: side ? area.x0 : area.x1 - label.width,
-        y: top,
-        width: label.width,
-        height: label.height,
-      };
-      label.edge.labelY = top + labelFont;
-      floor = top + label.height + LABEL_GAP;
-    }
-  }
-  const lowestLabel = Math.max(
-    0,
-    ...edges.map((edge) => (edge.labelBox ? edge.labelBox.y + edge.labelBox.height : 0)),
-  );
-  const height = Math.max(
-    nodesTop + 96,
-    y - COLUMN_GAP_Y + PADDING_BOTTOM,
-    lowestLabel + PADDING_BOTTOM,
-  );
-  return {
-    taskTitle: header.taskTitle,
-    taskTitleLines: header.taskTitleLines,
-    title: progress.title,
-    titleLines: header.titleLines,
-    goal: progress.goal,
-    goalLines: header.goalLines,
-    facts: header.facts,
-    theme: normalized.theme,
-    view: "process",
-    type,
-    width,
-    height,
-    headerX: PADDING_X,
-    headerY: HEADER_TOP,
-    headerWidth: width - PADDING_X * 2,
-    stagesTop: nodesTop,
-    stagesHeight: height - nodesTop,
-    nodes,
+    diagram,
+    layout,
+    nodes: cards,
     edges,
   };
 }

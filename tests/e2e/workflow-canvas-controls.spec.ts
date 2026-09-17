@@ -113,14 +113,18 @@ for (const { view, toolbar, diagram, ready, finder } of VIEWS) {
       await expect.poll(cardsOutside, { timeout: 10000 }).toBe(0);
     }
 
-    // The navigator is the reader's choice and it is remembered: switched off it leaves the
-    // diagram, and it is still off after a reload.
+    // The navigator is the reader's choice and it is remembered: it opens folded (unfolded it
+    // would cover the diagram's corner and the cards under it), switched on it appears, and it
+    // is still on after a reload; switched off it leaves the diagram again.
+    await expect(page.locator(".react-flow__minimap")).toHaveCount(0);
+    await expect(strip.getByTestId("toolbar-minimap")).not.toHaveAttribute("aria-pressed", "true");
+    await strip.getByTestId("toolbar-minimap").click();
     await expect(page.locator(".react-flow__minimap")).toHaveCount(1);
     await expect(strip.getByTestId("toolbar-minimap")).toHaveAttribute("aria-pressed", "true");
-    await strip.getByTestId("toolbar-minimap").click();
-    await expect(page.locator(".react-flow__minimap")).toHaveCount(0);
     await page.reload();
     await expect(page.locator(ready)).toBeVisible({ timeout: 20000 });
+    await expect(page.locator(".react-flow__minimap")).toHaveCount(1);
+    await page.getByTestId(toolbar).getByTestId("toolbar-minimap").click();
     await expect(page.locator(".react-flow__minimap")).toHaveCount(0);
     await expect(page.getByTestId(toolbar).getByTestId("toolbar-minimap")).not.toHaveAttribute(
       "aria-pressed",

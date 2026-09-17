@@ -51,7 +51,7 @@ frontend/src/
 │   │   ├── VariableText.tsx                                                # `{{name}}`, expression and condition tokens with the registry tooltip
 │   │   ├── DiagramViewport.tsx / interaction.ts / placement.ts             # React Flow wrapper, gesture policy, opening placement
 │   │   ├── reveal.ts                                                       # `requestReveal`: bring an element inside a diagram into the camera
-│   │   └── layoutPreset.ts / interactive.ts / useHighlightTarget.ts / useStoredFlag.ts
+│   │   └── layoutPreset.ts / interactive.ts / useHighlightTarget.ts / useStoredFlag.ts / useRequest.ts
 │   ├── flow/                    # Flow page: the definition as a process, edited in place (`guideSteps.ts`: its walkthrough)
 │   │   ├── editing.tsx / model.ts / modes.ts        # Edit set (apply, export diff), run-less projection, the two views
 │   │   ├── RegistryPanel.tsx                        # The variable registry (panel tab)
@@ -66,8 +66,8 @@ frontend/src/
 │   │   ├── variableRows.ts / variableTree.tsx                              # Variables grouping model; shared rows, groups, tree, leaf editor
 │   │   ├── StepCard.tsx / TabBadge.tsx                                      # One step card for every panel list; the panel badge
 │   │   ├── RunCursor.tsx / Walkthrough.tsx / DiagramGuide.tsx / Guidance.tsx / status.tsx  # Cursor, walkthrough, the compass note per view, callouts, status vocabulary and the card tone per status
-│   │   ├── model.ts / route.ts / layout.ts / focus.tsx                      # Pure view helpers; the map's ELK layout and presets; the lit-connector store
-│   │   ├── duration.ts / waiting.ts                                         # Duration and clock formatting; who-is-waited-for wording
+│   │   ├── model.ts / route.ts / layout.ts / focus.tsx                      # Pure view helpers; the map's door to the engine's layout, geometry and presets; the lit-connector store
+│   │   ├── duration.ts / waiting.ts                                         # The engine's duration split worded in the interface language, clock formatting; who-is-waited-for wording
 │   │   └── modes.ts / nodeTypeStyle.tsx
 │   └── workflow/                # Workflow management
 │       ├── WorkflowExplorer.tsx # Workflow list with FilterBar + DataListView + useDebounce
@@ -554,7 +554,8 @@ live URL so a duplicate change pushes no history entry.
   workflow without `progress`): the technical node graph fills the main area.
 - Panel (beside the run on `lg` and wider, stacked under it below, capped at 38 vh on a phone) with
   tabs: **Block** (default when a process view exists), **Variables**, **Errors**,
-  **Steps** and **Locks**.
+  **Steps** and **Locks**. The tab strip is a container (`run-panel-tabs`): the tab icons appear only
+  from a 520 px strip, so the labels keep one row in either language at the desktop panel width.
 
 **Views** (`components/run/`):
 
@@ -581,8 +582,10 @@ live URL so a duplicate change pushes no history entry.
   given, its `stats` — and `RunProgress` is the projection with an optional `statistics`; a rendered
   summary that equals the block's description or its name (an untemplated `content.summary`, or
   one that renders to the label) is dropped so the views show it once, under the title.
-- `CanvasDiagram` (`CanvasView.tsx`) — React Flow over an ELK layered layout (`layout.ts`, `elkjs`
-  loaded on first use) whose columns come from ELK and whose rows are derived (`blockRows`, a
+- `CanvasDiagram` (`CanvasView.tsx`) — React Flow over an ELK layered layout (`layoutBlocks` in the
+  engine's `progress-visual` entry — `process-layout.ts`, re-exported by `run/layout.ts` together
+  with the port geometry of `process-geometry.ts`, so the progress picture lays the same process
+  out the same way; `elkjs` loaded on first use) whose columns come from ELK and whose rows are derived (`blockRows`, a
   pure function of the blocks, the hubs and the drawn columns): the main sequence — the longest
   forward chain from the start block, ties toward the higher process index — on one row; each
   side branch (a maximal chain of off-sequence blocks linked by forward transitions) on a row of
@@ -624,7 +627,8 @@ live URL so a duplicate change pushes no history entry.
   a projection refresh returns the same layout object and never blanks the map.
 - Mounts through `DiagramViewport` with its own `DiagramToolbar` (`map-toolbar`) and an optional
   minimap (`map-minimap`, switched from the toolbar, kept per browser under
-  `moira.diagram.minimap`). It opens at the fitted zoom (never below three quarters) on the first
+  `moira.diagram.minimap`; it opens folded so no card lies under it until the reader switches it
+  on). It opens at the fitted zoom (never below three quarters) on the first
   block with the block row in the upper third, or centred on the current block on a run; a preset
   change or a block selected elsewhere moves the camera there, animated, and pulses the card. The
   fit-to-view control (`onFit`) fits the whole process at a readable zoom when it fits the viewport
@@ -632,7 +636,10 @@ live URL so a duplicate change pushes no history entry.
 
 **Diagram substrate** (`components/diagram/`): the primitives, tokens, states and interaction rules
 the map, the graph and the panels share are documented as one system in
-`docs/DESIGN-SYSTEM.md` → _Diagram design system_. `DiagramViewport` wraps `ReactFlowProvider` +
+`docs/DESIGN-SYSTEM.md` → _Diagram design system_. Every request one surface makes of another —
+focus this node, highlight that variable, unfold this section, mark that card as arrived — is a
+`useRequest` value (`useRequest.ts`: a payload plus a token, so the same request twice is two
+requests and `send(null)` withdraws it). `DiagramViewport` wraps `ReactFlowProvider` +
 `ReactFlow` with the one interaction policy every diagram shares (`interaction.ts`,
 `diagramInteractionProps(kind)`, `DiagramKind` = `canvas | graph`: a plain wheel pans freely,
 `zoomOnScroll` off, pinch zooms, drag pans, nodes fixed, page scroll prevented under the pointer,
@@ -1488,7 +1495,8 @@ The graph is the process view's detailed layer, not a separate rendering:
   `currentNodeId` fits the view to that node; a definition opens readable on its first block at
   `GRAPH_OPENING_ZOOM`. The placement key includes the layout generation, so it is applied again
   after the measured second pass. The minimap (`showMinimap`, passed by both process pages) renders
-  after an idle callback, only while the toolbar's switch is on (`moira.diagram.minimap`) and not on
+  after an idle callback, only while the toolbar's switch is on (`moira.diagram.minimap`, off by
+  default, so a card in the corner stays clickable) and not on
   a phone (`useIsMobile`), where it would cover the graph. The block selected in the contents or on
   the map (`selectedBlockId`) is the ringed group (`data-selected` on `BlockGroupView`), brought
   into view and pulsed on arrival.

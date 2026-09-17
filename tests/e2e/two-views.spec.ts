@@ -135,9 +135,7 @@ test("the run page switches block, step, tab and view without remounting anythin
     expect(await sameElement(page, "run-page", shell)).toBe(true);
 
     // A node on the graph opens as the panel's node level rather than in a sheet over the page.
-    // The navigator sits over the graph's bottom-right corner and, depending on where the camera
-    // came to rest, over a card; a reader folds it from the toolbar, and so does this.
-    await page.getByTestId("toolbar-minimap").click();
+    // The navigator opens folded, so no card lies under it and the click lands on the card.
     await expect(page.getByTestId("rf__minimap")).toHaveCount(0);
     await page.locator('[data-graph-node="plan-review"]').click();
     await expect(page.getByTestId("node-panel")).toHaveAttribute("data-node-id", "plan-review");

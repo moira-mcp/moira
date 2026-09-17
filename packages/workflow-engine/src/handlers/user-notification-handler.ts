@@ -8,6 +8,10 @@ import { isUserNotificationNode } from "../types/index.js";
 import { NodeResultBuilder, type NodeExecutionResult } from "../types/node-execution.js";
 import type { AgentMessageQueue } from "../services/agent-message-queue.js";
 import { getActiveUserCommunicationService } from "../services/user-communication-provider.js";
+import {
+  ProgressStatisticsService,
+  statisticsForRun,
+} from "../services/progress-statistics-service.js";
 import type { UserCommunicationService } from "../services/user-communication.js";
 import { renderExecutionProgressImage } from "../utils/execution-progress-image.js";
 import { progressFooterLines } from "../utils/execution-progress-lists.js";
@@ -124,9 +128,17 @@ export class UserNotificationHandler implements INodeHandler {
     const persisted = await repository.getExecution(context.executionId);
     if (!graph?.progress || !persisted) throw new Error("progress_unavailable");
     // The route persisted so far ends at the last pause; this node runs inside the current cycle.
+    // The picture carries the typical durations of the run's version over its owner's runs.
+    const statistics = await statisticsForRun(
+      new ProgressStatisticsService(repository),
+      graph,
+      persisted,
+    );
     const rendered = await this.progressImageRenderer(
       graph,
       withInFlightPause(graph, persisted, node.id),
+      {},
+      statistics,
     );
     if (!rendered) throw new Error("progress_unavailable");
     return {

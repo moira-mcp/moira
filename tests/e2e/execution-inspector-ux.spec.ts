@@ -179,10 +179,14 @@ test.describe("Run page toolbar and panel", () => {
     const phonePage = await page.getByTestId("run-page").boundingBox();
     expect(Math.round(phone!.width)).toBe(Math.round(phonePage!.width));
     // On a phone the technical graph draws no navigator over its cards, and the map's navigator
-    // is the reader's own choice in the toolbar rather than something fixed to the diagram.
+    // is the reader's own choice in the toolbar rather than something fixed to the diagram: it
+    // opens folded and appears only once switched on.
     await expect(page.getByTestId("canvas-view").locator(".react-flow")).toBeVisible({
       timeout: 15000,
     });
+    await expect(page.getByTestId("canvas-view").locator(".react-flow__minimap")).toHaveCount(0);
+    await page.getByTestId("map-toolbar").getByTestId("toolbar-minimap").click();
+    await expect(page.getByTestId("canvas-view").locator(".react-flow__minimap")).toHaveCount(1);
     await page.getByTestId("map-toolbar").getByTestId("toolbar-minimap").click();
     await expect(page.getByTestId("canvas-view").locator(".react-flow__minimap")).toHaveCount(0);
     const graph = await showTechnicalGraph(page);

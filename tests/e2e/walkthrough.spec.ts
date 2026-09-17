@@ -187,6 +187,14 @@ async function inRussian(page: Page, processId: string): Promise<void> {
     "Свернуть панель",
   );
   await expect(page.getByTestId("route-summary")).toContainText("визитов");
+  // The panel's tab strip holds the five Russian labels on one row at 1600 px: a wrapped strip
+  // would put "Блокировки" on a second row over the panel's content.
+  const tabTops = await page
+    .getByTestId("run-panel-tabs")
+    .getByRole("tab")
+    .evaluateAll((tabs) => tabs.map((tab) => Math.round(tab.getBoundingClientRect().top)));
+  expect(tabTops).toHaveLength(5);
+  expect(new Set(tabTops).size).toBe(1);
   expect(await englishLeaks(page)).toEqual([]);
 
   await page.goto(`${BASE_URL}/executions/${processId}?lang=ru&view=graph`);

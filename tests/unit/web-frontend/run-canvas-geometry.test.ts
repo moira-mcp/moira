@@ -1,49 +1,23 @@
-/** @jest-environment jsdom */
 /**
  * The geometry the map's diagram draws between the ports of two cards, once the layout has decided
  * the lanes.
  *
- * The layout (`run-layout`) says where a block sits and which lane an edge travels; this module
- * says how the line gets from a port on a card's border to that lane and back. Three rules are
+ * The layout (`run-layout`) says where a block sits and which lane an edge travels; the engine's
+ * `process-geometry`, reached through the map's `run/layout` door, says how the line gets from a
+ * port on a card's border to that lane and back — the progress picture draws the same paths. Three rules are
  * under test: a lane edge leaves its source port sideways into a column of its own beside the card
  * (`portRanks`), so two edges at one card never share a vertical; the stacked preset is the same
  * layout transposed, so the drawn path leaves the right port and enters the left one while keeping
  * the lane the layout gave it; and a transition back to the card itself dips under its bottom port.
  */
 
-import { describe, expect, jest, test, beforeAll } from "@jest/globals";
-import React from "react";
-
-// The geometry is pure, but it lives beside the diagram's React components; the substrate they
-// import is not part of this test.
-jest.unstable_mockModule("@xyflow/react", () => ({
-  Handle: () => null,
-  Position: { Left: "left", Top: "top", Right: "right", Bottom: "bottom" },
-  BaseEdge: () => null,
-  Background: () => null,
-  MiniMap: () => null,
-  ControlButton: ({ children }: { children?: React.ReactNode }) => <>{children}</>,
-  getSmoothStepPath: () => ["", 0, 0],
-  useStore: () => "",
-}));
-
-// The viewport module pulls React Flow's stylesheet, which no unit test needs.
-jest.unstable_mockModule(
-  "../../../packages/web-frontend/src/components/diagram/DiagramViewport",
-  () => ({ DiagramViewport: () => null }),
-);
-
-type LaidOutEdge =
-  import("../../../packages/web-frontend/src/components/run/layout.js").LaidOutEdge;
-
-let portedPoints: typeof import("../../../packages/web-frontend/src/components/run/CanvasView.js").portedPoints;
-let stackedPoints: typeof import("../../../packages/web-frontend/src/components/run/CanvasView.js").stackedPoints;
-let portRanks: typeof import("../../../packages/web-frontend/src/components/run/CanvasView.js").portRanks;
-
-beforeAll(async () => {
-  ({ portedPoints, stackedPoints, portRanks } =
-    await import("../../../packages/web-frontend/src/components/run/CanvasView.js"));
-});
+import { describe, expect, test } from "@jest/globals";
+import {
+  portRanks,
+  portedPoints,
+  stackedPoints,
+  type LaidOutEdge,
+} from "../../../packages/web-frontend/src/components/run/layout.js";
 
 const TRANSITION = { to: "b", label: "done", edges: ["a.done"] };
 

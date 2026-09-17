@@ -174,13 +174,10 @@ jest.unstable_mockModule(
 jest.unstable_mockModule("@/hooks/useTheme", () => ({
   useTheme: () => ({ theme: "light", actualTheme: "light", setTheme: () => {} }),
 }));
-// The ELK layout is asynchronous and has its own suite; here every block sits on one row.
-jest.unstable_mockModule("../../../packages/web-frontend/src/components/run/layout", () => ({
-  BLOCK_WIDTH,
-  LABEL_MAX_WIDTH: 160,
-  PARALLEL_CHIP_MIN: 3,
-  transitionKey: (from: string, transition: { to: string; label: string }) =>
-    `${from}→${transition.to}:${transition.label}`,
+// The ELK layout is asynchronous and has its own suite; here every block sits on one row. The
+// rest of the map's layout door (the transition key, the port geometry) is the engine's real one.
+jest.unstable_mockModule("../../../packages/web-frontend/src/components/run/layout", async () => ({
+  ...(await import("@mcp-moira/workflow-engine/progress-visual")),
   layoutBlocks: (blocks: RunBlock[]) =>
     Promise.resolve({
       blocks: blocks.map((block, index) => ({
@@ -389,9 +386,14 @@ describe("the map view", () => {
     expect(name.className).toContain("line-clamp-2");
   });
 
-  test("the minimap is mounted only while the reader's stored flag keeps it on", async () => {
-    // The contents sidebar is the navigation, so the minimap is the reader's choice — and the
-    // choice is the one the toolbar's switch writes, not a fresh default on every visit.
+  test("the minimap opens folded and is mounted only while the reader's stored flag keeps it on", async () => {
+    // The contents sidebar is the navigation; unfolded, the navigator covers the diagram's corner
+    // and the cards under it, so it is the reader's choice — the one the toolbar's switch writes,
+    // remembered across visits, and off until they make it.
+    await renderMap();
+    expect(screen.queryByTestId("diagram-minimap")).toBeNull();
+    cleanup();
+    window.localStorage.setItem("moira.diagram.minimap", "1");
     await renderMap();
     expect(screen.getByTestId("diagram-minimap")).toBeDefined();
     cleanup();

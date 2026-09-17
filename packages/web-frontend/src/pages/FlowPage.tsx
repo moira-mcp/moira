@@ -78,7 +78,7 @@ import { BlockDetailPanel } from "../components/run/BlockDetailPanel";
 import { NodePanel } from "../components/run/NodePanel";
 import { useNodeTypes } from "../hooks/useNodeTypes";
 import { useStoredFlag } from "../components/diagram/useStoredFlag";
-import type { HighlightRequest } from "../components/diagram/useHighlightTarget";
+import { useRequest } from "../components/diagram/useRequest";
 import { PanelRightClose, PanelRightOpen } from "lucide-react";
 import { GuidanceHint } from "../components/run/Guidance";
 import { Walkthrough } from "../components/run/Walkthrough";
@@ -138,14 +138,17 @@ export const FlowPage: React.FC = () => {
   const [shareDialogOpen, setShareDialogOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [selectedNode, setSelectedNode] = useState<Node | null>(null);
-  const [focusRequest, setFocusRequest] = useState<{ nodeId: string; token: number } | null>(null);
+  const [focusRequest, requestFocus] = useRequest<{ nodeId: string }>();
   const [chosenTab, setChosenTab] = useState<FlowPanelTab>("block");
   const [panelCollapsed, togglePanel] = useStoredFlag("moira.flow.panelCollapsed");
-  const [variableHighlight, setVariableHighlight] = useState<HighlightRequest | null>(null);
-  const goToVariable = useCallback((name: string) => {
-    setChosenTab("variables");
-    setVariableHighlight((previous) => ({ name, token: (previous?.token ?? 0) + 1 }));
-  }, []);
+  const [variableHighlight, requestVariableHighlight] = useRequest<{ name: string }>();
+  const goToVariable = useCallback(
+    (name: string) => {
+      setChosenTab("variables");
+      requestVariableHighlight({ name });
+    },
+    [requestVariableHighlight],
+  );
   const [edits, setEdits] = useFlowEdits();
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -263,7 +266,7 @@ export const FlowPage: React.FC = () => {
     if (mode !== "graph" || !selectedBlockId) return;
     const first = blocks.find((b) => b.id === selectedBlockId)?.nodeIds[0];
     if (!first) return;
-    setFocusRequest((previous) => ({ nodeId: first, token: (previous?.token ?? 0) + 1 }));
+    requestFocus({ nodeId: first });
     // eslint-disable-next-line react-hooks/exhaustive-deps -- only the tab change re-focuses
   }, [mode]);
   const shownBlock = blocks.find((b) => b.id === (selectedBlockId ?? blocks[0]?.id)) ?? null;
@@ -348,9 +351,9 @@ export const FlowPage: React.FC = () => {
   const focusNode = useCallback(
     (nodeId: string) => {
       update({ [VIEW_PARAM]: "graph" });
-      setFocusRequest((previous) => ({ nodeId, token: (previous?.token ?? 0) + 1 }));
+      requestFocus({ nodeId });
     },
-    [update],
+    [update, requestFocus],
   );
 
   const handleNodeSelect = useCallback(
@@ -375,11 +378,8 @@ export const FlowPage: React.FC = () => {
   }, []);
   const onPanel = useCallback((tab: FlowPanelTab) => setChosenTab(tab), []);
   // A panel section the walkthrough asked to unfold so its step has something to point at.
-  const [sectionOpen, setSectionOpen] = useState<HighlightRequest | null>(null);
-  const onSection = useCallback(
-    (id: string) => setSectionOpen((previous) => ({ name: id, token: (previous?.token ?? 0) + 1 })),
-    [],
-  );
+  const [sectionOpen, requestSection] = useRequest<{ name: string }>();
+  const onSection = useCallback((id: string) => requestSection({ name: id }), [requestSection]);
 
   // --- Render
   const ownerActions = (
@@ -779,11 +779,7 @@ export const FlowPage: React.FC = () => {
                         update({ [BLOCK_PARAM]: blockId });
                         if (blockId) setChosenTab("block");
                         const first = blocks.find((b) => b.id === blockId)?.nodeIds[0];
-                        if (first)
-                          setFocusRequest((previous) => ({
-                            nodeId: first,
-                            token: (previous?.token ?? 0) + 1,
-                          }));
+                        if (first) requestFocus({ nodeId: first });
                       }}
                       cursor={null}
                       onSetCursor={() => {}}

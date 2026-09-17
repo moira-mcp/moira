@@ -383,24 +383,19 @@ of being silently truncated.
 grant with `downloadUrl`, `expiresAt`, `mimeType`, `executionRevision` and the normalised
 `options`. The optional body accepts `theme: "light"|"dark"`, `viewportWidth` from 480 through
 4096, `view: "cards"|"process"`, `hide` and `collapse` (arrays of up to 100 block ids or authored
-node ids). `cards` (the default) is the content grid: every block as a card with its status
-word (`waiting for you` only at a person's gate, `agent on the step`, `completed`, `repeated ×n`,
-`skipped`, `pending`), a facts line (time spent, the open pass, and for a bound block
-`done/total: current item`; `—` when unmeasured, `?` for an unresolved counter; a line too
-wide for the card drops the open pass and cuts the item's title before the count), then its
-summary, details, outcome and next
-text, chained in display order — one column at a viewport of 720 px or less, where both views use
-a phone type scale. `process` is the aggregated block view: one compact block per row in process
-order with its status mark and, for a repeated block, a small `×N` badge, the same status word and
-facts line, the process's transitions as labelled connectors, forward skips as arcs on the
-right, returns as dashed arcs on the left carrying the transition label (nested by span, labels
-stacked without overlap; the cause and exit of a loop are not drawn — the run page and `session
-progress` carry them), and transitions into hub blocks as bundled connectors in the right gutter
-(one lane and one port per hub) labelled inside the source block. At a width that cannot hold the
-lanes, the column and the label areas, the skips' labels and then the returns' labels move inside
-their source blocks. A block named in `hide` (a node id names the block that owns it) is left
-out and every transition into it is re-targeted to where it led, labels joined with "→"; a block
-in `collapse` is drawn as a label-only chip. An id that names no block or node of the workflow's
+node ids). Both views draw the run page's map: every block as a ported card (index badge, name, pass count
+and status chip in the title band, toned by status; input ports naming the source block, output
+ports named by the transition label, dashed return ports and a double self port; a facts line
+with the time spent, the open pass and, for a bound block, `done/total: current item` — no
+time for a block that never ran, `—` for a counter the binding did not resolve; a `typically …` line from the version's statistics
+over the owner's other completed runs), with the process's transitions as the map's forward,
+skip, hub, return and self edges. `cards` (the default) keeps the block's summary, details,
+outcome and next text inside the card; `process` is the compact card alone. The rows layout is
+used when it fits the image, the stacked one otherwise and at a viewport of 720 px or less, where
+the phone type scale applies; a wider drawing is scaled down as one piece. A block named in
+`hide` (a node id names the block that owns it) is left out and every transition into it is
+re-targeted to where it led, labels joined with "→"; a block in `collapse` is drawn as its title
+band alone. An id that names no block or node of the workflow's
 process is refused at mint (400), as is an invalid `view`; the stored options are the resolved
 block ids, so a grant is always honourable. `GET
 /api/public/execution-progress-image/:token` uses the token as authorization and returns the exact

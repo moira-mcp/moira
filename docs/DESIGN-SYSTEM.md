@@ -224,10 +224,17 @@ them off.
 | `requestReveal` (`diagram/reveal.ts`)                                                               | Brings an element that sits inside a diagram into the camera: the mounted `DiagramViewport` fits its view to the node containing it, since `scrollIntoView` cannot reach a transformed canvas                                                     |
 | `DiagramGuide` (`run/DiagramGuide.tsx`)                                                             | The compass note on how to read the open view, one per page and view, remembered per reader                                                                                                                                                       |
 | `useStoredFlag`                                                                                     | A boolean the reader toggles and the browser remembers                                                                                                                                                                                            |
+| `useRequest`                                                                                        | A request one surface makes of another (focus, highlight, unfold, arrival): a payload plus a token, minted afresh for every request so the answering effect runs again; `send(null)` withdraws it                                                 |
 
 Organisms compose them: the map (`run/CanvasView.tsx`), the technical graph
 (`workflow/WorkflowGraph.tsx`), the contents sidebar, and the right panel's block level
-(`run/BlockDetailPanel.tsx`) and node level (`run/NodePanel.tsx`).
+(`run/BlockDetailPanel.tsx`) and node level (`run/NodePanel.tsx`). The progress picture
+(`packages/workflow-engine/src/utils/execution-progress-renderer.ts`, the PNG behind `session
+progress-image-token` and the notification attachment) draws the same ported cards, ports and edge
+kinds as SVG without a browser: the map's layout (`process-layout.ts`), port geometry
+(`process-geometry.ts`) and facts wording (`progress-facts.ts`) live in the engine's
+`progress-visual` entry and the map imports them, so the picture and the map are one drawing of
+one model; the picture's colours are the same tokens as literal hex per theme.
 
 ### States
 
@@ -266,14 +273,19 @@ The same state reads the same way on every surface.
 - Clicking a variable token opens the variables surface with that variable highlighted.
 - A fact chip is `hoverOnly`: it explains itself and does nothing on click.
 - Changing a layout preset re-lays both diagrams and returns the camera to the current focus.
+- The navigator (minimap) opens folded on both diagrams and is remembered once switched on, so a
+  card in the diagram's corner is never under it by default.
 - Ports and rows are reachable with `Tab`, and `Enter` acts as a click.
 
 ### Wording that must stay one wording
 
-- A bound list's progress is rendered by `listProgressLabel` (`run/model.ts`) on the card, in the
-  contents and in the panel alike: a counter the binding did not resolve reads as `—`, never as `0`
+- A bound list's progress is rendered by `listProgressLabel` (the engine's `progress-facts.ts`,
+  re-exported by `run/model.ts`) on the card, in the contents, in the panel, in the picture and in
+  the notification footer alike: a counter the binding did not resolve reads as `—`, never as `0`
   and never as `?`.
-- Durations come from `formatDuration` and clock times from `formatClock` (`run/duration.ts`).
+- Durations are split once by the engine's `splitDuration` and worded by `wordDuration`: in the
+  interface language through `formatDuration` (`run/duration.ts`), in English in the picture;
+  clock times come from `formatClock`.
 - A block's status wording comes from `blockStatusLabel` (`run/waiting.ts`), so the chip, the legend
   and the block texts agree on who is being waited for.
 

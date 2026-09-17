@@ -28,6 +28,9 @@ import { DiagramEdge, DiagramMarkers, type DiagramEdgeKind } from "../diagram/Di
 import type { GraphLink, GraphStep } from "../run/graphModel";
 import type { ExecutionBlockStatus } from "../run/model";
 import { GRAPH_CARD_WIDTH, type GraphRoute } from "./graphLayout";
+import { roundedPath } from "@mcp-moira/workflow-engine/progress-visual";
+/** The rounded polyline every edge is drawn with — the engine's, shared with the map and the picture. */
+export { roundedPath };
 
 export type StepNodeData = Record<string, unknown> & {
   graph: GraphStep;
@@ -77,32 +80,6 @@ export type GraphEdgeData = {
   horizontal: boolean;
   onGoTo?: (stepId: string, linkId: string) => void;
 };
-
-/** An SVG path along `points` with the corners rounded. */
-export function roundedPath(points: ReadonlyArray<[number, number]>, radius = 10): string {
-  if (points.length < 2) return "";
-  const parts = [`M ${points[0][0]} ${points[0][1]}`];
-  for (let i = 1; i < points.length - 1; i += 1) {
-    const [px, py] = points[i - 1];
-    const [cx, cy] = points[i];
-    const [nx, ny] = points[i + 1];
-    const inLen = Math.hypot(cx - px, cy - py);
-    const outLen = Math.hypot(nx - cx, ny - cy);
-    const r = Math.min(radius, inLen / 2, outLen / 2);
-    if (r <= 0 || inLen === 0 || outLen === 0) {
-      parts.push(`L ${cx} ${cy}`);
-      continue;
-    }
-    const ax = cx - ((cx - px) / inLen) * r;
-    const ay = cy - ((cy - py) / inLen) * r;
-    const bx = cx + ((nx - cx) / outLen) * r;
-    const by = cy + ((ny - cy) / outLen) * r;
-    parts.push(`L ${ax} ${ay} Q ${cx} ${cy} ${bx} ${by}`);
-  }
-  const [lx, ly] = points[points.length - 1];
-  parts.push(`L ${lx} ${ly}`);
-  return parts.join(" ");
-}
 
 /**
  * The points a routed edge passes, from the source handle to the target handle: out along the

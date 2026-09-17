@@ -87,22 +87,25 @@ for its block; other blocks focus their first mapped primary node in workflow or
 skipped blocks keep summary, details, and next guidance but hide `outcome`, so an older revision
 or unit result cannot appear current during an engine-owned transition.
 
-The engine exposes one shared content-rich visual model and a bounded light/dark PNG renderer. The
-model keeps the complete task, goal, facts, completed outcomes, current activity, details and next
-action visible without hover. Every block is drawn in the web map's language: its status word
-(`waiting for you` only when a person must act, `agent on the step` while the agent is on it,
-`completed`, `repeated ×n`, `skipped`, `pending`) and one facts line with the time spent and, for
-a block bound to a list, `done/total` with the current item. Text wraps to the block's width, a
-token too wide for its line is ellipsised, a facts line too wide for its box loses the open pass
-and then the item's title before its `done/total` count, and every label stays inside the picture;
-at a viewport of 720 px or less the image is one column in a phone-readable type scale, wider
-images pack blocks into deterministic left-to-right rows.
+The engine renders the run's progress picture as the run page's map, rasterised: the same ported
+cards (a title band with the block's number, name, pass count and status word — `waiting for you`
+only when a person must act, `agent on the step` while the agent is on it, `completed`,
+`repeated`, `skipped` (the name struck through), `pending` —
+toned by status; input ports naming the source block,
+output ports named by the transition label, dashed return ports, a double port for self
+transitions; a facts line with the time spent and, for a block bound to a list, `done/total` with
+the current item, no time for a block that never ran and `—` for a counter the binding did not
+resolve; a `typically …` line from the
+version's statistics over the owner's other completed runs) and the same edges (forward, skip,
+hub, return, self), laid out by the same layout the web map uses; light or dark, from the same
+projection. Text wraps to the card's width and every label stays inside its box; at a viewport
+of 720 px or less the picture uses the phone type scale and the stacked layout, wider pictures
+the rows layout when it fits and the stacked one otherwise.
 Agents request a short-lived, revision-bound, single-use download URL through `session
 progress-image-token`; the binary does not pass through MCP. The token takes optional `theme`
-(`light|dark`), `viewportWidth` (480–4096), `view` — `cards` (the default content grid) or
-`process` (the aggregated block view: blocks in process order with labelled transitions, returns
-as dashed arcs with the transition label, hub transitions written inside their source, as the run
-page's map shows them; a loop's cause and exit are on the run page, not in the image) — and `hide` / `collapse`: block ids or authored node ids (a node names its block)
+(`light|dark`), `viewportWidth` (480–4096), `view` — `cards` (the default: the card keeps the block's summary, details, outcome and next
+text) or `process` (the compact card alone, the map as the run page shows it; a loop's cause and
+exit are on the run page's ports, not in the image) — and `hide` / `collapse`: block ids or authored node ids (a node names its block)
 left out of the image with their transitions collapsed onto the neighbours, or drawn as a
 label-only chip. Unknown ids are refused when the token is minted. A `user-notification` node may set
 `attachProgressImage: true` and use its normal message as the image caption. Such a node must belong to

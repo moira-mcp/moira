@@ -10,6 +10,7 @@
 
 import type { IDataRepository } from "../interfaces/data-repository.js";
 import type { WorkflowGraph } from "../interfaces/core-interfaces.js";
+import type { WorkflowExecution } from "../types/base-types.js";
 import {
   computeVersionStatistics,
   type WorkflowVersionStatistics,
@@ -83,4 +84,21 @@ export class ProgressStatisticsService {
   static resetCache(): void {
     ProgressStatisticsService.cache.clear();
   }
+}
+
+/**
+ * The statistics a run's progress picture is drawn with: the typical durations of the version the
+ * run started on, over its owner's completed runs without this one — what the run page draws
+ * beside the same blocks. A run recorded before version stamps existed has none.
+ */
+export async function statisticsForRun(
+  statistics: Pick<ProgressStatisticsService, "forVersion">,
+  workflow: WorkflowGraph,
+  execution: Pick<WorkflowExecution, "workflowId" | "workflowVersion" | "userId" | "executionId">,
+): Promise<WorkflowVersionStatistics | null> {
+  if (!execution.workflowVersion) return null;
+  return statistics.forVersion(execution.workflowId, workflow, execution.workflowVersion, {
+    userId: execution.userId,
+    excludeExecutionId: execution.executionId,
+  });
 }

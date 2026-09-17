@@ -16,6 +16,10 @@ import { IGraphExecutionEngine } from "../interfaces/graph-execution-engine.js";
 import { AgentMessageQueue } from "../services/agent-message-queue.js";
 import { getTelegramClient } from "../services/telegram-client-factory.js";
 import {
+  ProgressStatisticsService,
+  statisticsForRun,
+} from "../services/progress-statistics-service.js";
+import {
   TelegramError,
   TelegramErrorType,
   getActionableTelegramErrorMessage,
@@ -224,9 +228,17 @@ export class TelegramNotificationHandler implements INodeHandler {
           "Workflow has no progress graph",
         );
       // The route persisted so far ends at the last pause; this node runs inside the current cycle.
+      // The picture carries the typical durations of the run's version over its owner's runs.
+      const statistics = await statisticsForRun(
+        new ProgressStatisticsService(repository),
+        graph,
+        persisted,
+      );
       const rendered = await this.progressImageRenderer(
         graph,
         withInFlightPause(graph, persisted, node.id),
+        {},
+        statistics,
       );
       if (!rendered)
         throw this.createTelegramError(

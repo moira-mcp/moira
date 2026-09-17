@@ -377,7 +377,7 @@ describe("the execution as a notification sees it", () => {
     expect(copy.waitingForInputNodeId).toBeNull();
   });
 
-  test("a lock gate after the notification is drawn as waiting for the reader, a directive as the agent's step", () => {
+  test("a lock gate after the notification is drawn as waiting for the reader, a directive as the agent's step", async () => {
     const graph = {
       metadata: { name: "Gate", version: "1.0.0", description: "x" },
       variableRegistry: {},
@@ -404,7 +404,7 @@ describe("the execution as a notification sees it", () => {
     const projected = projectExecutionRun(graph, withInFlightPause(graph, base(), "notify"))!;
     expect(projected.waitingFor).toBe("user");
     expect(projected.nodes[0].status).toBe("waiting");
-    const model = buildExecutionProgressVisualModel(projected, { viewportWidth: 720 });
+    const model = await buildExecutionProgressVisualModel(projected, { viewportWidth: 720 });
     expect(model.nodes[0].statusLine).toBe("waiting for you");
     const svg = renderProgressVisualSvg(model);
     expect(svg).toContain("waiting for you");
@@ -425,7 +425,7 @@ describe("the execution as a notification sees it", () => {
           : n,
       ),
     } as unknown as WorkflowGraph;
-    const agentModel = buildExecutionProgressVisualModel(
+    const agentModel = await buildExecutionProgressVisualModel(
       projectExecutionRun(agentGraph, withInFlightPause(agentGraph, base(), "notify"))!,
       { viewportWidth: 720 },
     );

@@ -21,6 +21,12 @@ import { TabBadge } from "../run/TabBadge";
 
 /** One tab of the panel strip: content-sized, underline when active, never stretched. */
 const TAB_CLASS = "h-8 flex-none gap-1.5 px-2 text-xs";
+/**
+ * The tab icons are drawn only when the strip is wide enough for the labels and the icons on one
+ * row (a container query on the strip): on the desktop panel the Russian labels alone fill the
+ * row, and a wrapped strip would paint its second row over the content.
+ */
+const TAB_ICON = "hidden size-3.5 @[520px]:inline";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { apiClient } from "../../services/api-client";
@@ -68,7 +74,7 @@ import { useNodeTypes } from "../../hooks/useNodeTypes";
 import { BlockDetailPanel } from "../run/BlockDetailPanel";
 import { NodePanel } from "../run/NodePanel";
 import { useStoredFlag } from "../diagram/useStoredFlag";
-import type { HighlightRequest } from "../diagram/useHighlightTarget";
+import { useRequest } from "../diagram/useRequest";
 import { PanelRightClose, PanelRightOpen } from "lucide-react";
 import { RouteSummary } from "../run/RouteSummary";
 import { nodeOwners } from "../run/model";
@@ -201,7 +207,7 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
   const [lockResult, setLockResult] = useState<{ lockId: string; pin: string } | null>(null);
 
   // Technical node graph focus: the node to bring into view once the graph is mounted.
-  const [focusRequest, setFocusRequest] = useState<{ nodeId: string; token: number } | null>(null);
+  const [focusRequest, requestFocus] = useRequest<{ nodeId: string }>();
 
   // Copy to clipboard state
   const [copied, setCopied] = useState(false);
@@ -435,23 +441,26 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
   const { index: nodeTypeIndex } = useNodeTypes();
   const [panelCollapsed, togglePanel] = useStoredFlag("moira.run.panelCollapsed");
   // A variable reference token was clicked: open the variables tab and mark the variable there.
-  const [variableHighlight, setVariableHighlight] = useState<HighlightRequest | null>(null);
+  const [variableHighlight, requestVariableHighlight] = useRequest<{ name: string }>();
   // A list item clicked on a block card: the block panel opens its list section at that item.
-  const [listHighlight, setListHighlight] = useState<HighlightRequest | null>(null);
+  const [listHighlight, requestListHighlight] = useRequest<{ name: string }>();
   // A panel section the walkthrough asked to unfold so its step has something to point at.
-  const [sectionOpen, setSectionOpen] = useState<HighlightRequest | null>(null);
+  const [sectionOpen, requestSection] = useRequest<{ name: string }>();
   const selectListItem = useCallback(
     (blockId: string, index: number) => {
       update({ [BLOCK_PARAM]: blockId });
       setChosenTab("block");
-      setListHighlight((previous) => ({ name: String(index), token: (previous?.token ?? 0) + 1 }));
+      requestListHighlight({ name: String(index) });
     },
-    [update],
+    [update, requestListHighlight],
   );
-  const goToVariable = useCallback((name: string) => {
-    setChosenTab("variables");
-    setVariableHighlight((previous) => ({ name, token: (previous?.token ?? 0) + 1 }));
-  }, []);
+  const goToVariable = useCallback(
+    (name: string) => {
+      setChosenTab("variables");
+      requestVariableHighlight({ name });
+    },
+    [requestVariableHighlight],
+  );
   const [legendOpen, setLegendOpen] = useState(false);
   const handleNodeClick = useCallback(
     (_event: React.MouseEvent, node: { id: string }) => {
@@ -478,11 +487,8 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
     if (!first) return;
     // A focus already aimed at a step of this block (a step row, a chip) wins over the block's
     // first step: that request opened the graph, so it must not be overwritten here.
-    setFocusRequest((previous) =>
-      previous && block?.nodeIds.includes(previous.nodeId)
-        ? previous
-        : { nodeId: first, token: (previous?.token ?? 0) + 1 },
-    );
+    if (focusRequest && block?.nodeIds.includes(focusRequest.nodeId)) return;
+    requestFocus({ nodeId: first });
     // eslint-disable-next-line react-hooks/exhaustive-deps -- only the tab change re-focuses
   }, [mode]);
 
@@ -492,12 +498,12 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
       // The step's block becomes the selection, so the panel's node level survives the jump.
       const owner = nodeOwners(blocks).get(nodeId) ?? null;
       update({ [VIEW_PARAM]: "graph", ...(owner ? { [BLOCK_PARAM]: owner } : {}) });
-      setFocusRequest((previous) => ({ nodeId, token: (previous?.token ?? 0) + 1 }));
+      requestFocus({ nodeId });
       // The panel follows the jump to its node level.
       setPanelNodeId(nodeId);
       setChosenTab("block");
     },
-    [update, blocks],
+    [update, blocks, requestFocus],
   );
 
   const handleCurrentNodeClick = useCallback(() => {
@@ -586,10 +592,7 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
   const onPanel = useCallback((tab: PanelTab) => setChosenTab(tab), []);
   // The walkthrough points inside sections the panel remembers as folded; this unfolds the one
   // the current step needs, the same way a click on a list item unfolds the list.
-  const onSection = useCallback(
-    (id: string) => setSectionOpen((previous) => ({ name: id, token: (previous?.token ?? 0) + 1 })),
-    [],
-  );
+  const onSection = useCallback((id: string) => requestSection({ name: id }), [requestSection]);
 
   const getCurrentNode = () => {
     if (!execution?.currentNodeId || !workflow?.workflow?.nodes) return null;
@@ -939,11 +942,7 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
                           setChosenTab("block");
                         // The graph opens on the block's first step when the reader goes there.
                         const first = blocks.find((b) => b.id === id)?.nodeIds[0];
-                        if (first)
-                          setFocusRequest((previous) => ({
-                            nodeId: first,
-                            token: (previous?.token ?? 0) + 1,
-                          }));
+                        if (first) requestFocus({ nodeId: first });
                       }}
                       cursor={cursor}
                       onSetCursor={(at) => update({ [AT_PARAM]: at === null ? null : String(at) })}
@@ -1014,13 +1013,14 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
               onValueChange={(value) => setChosenTab(value as PanelTab)}
               className="flex flex-col h-full"
             >
-              {/* The panel strip: underline tabs that wrap on a narrow panel instead of scrolling;
-                each tab says what it holds, and counters and warnings are one badge. The list's
-                height must follow the wrapped rows (the tabs variant fixes it at one row, hence
-                the important override), so the second row never paints over the content. */}
+              {/* The panel strip: underline tabs on one row, each saying what it holds, with
+                counters and warnings as one badge; the icons come back only when the strip is
+                wide enough for them (`@container`), so the labels never wrap onto a second row
+                that would paint over the content. The list's height follows its content (the
+                tabs variant fixes it at one row, hence the important override). */}
               <TabsList
                 variant="line"
-                className="!h-auto w-full flex-wrap justify-start gap-x-0 gap-y-1 rounded-none border-b bg-card py-1 pl-2 pr-10"
+                className="@container !h-auto w-full flex-wrap justify-start gap-x-0 gap-y-1 rounded-none border-b bg-card py-1 pl-2 pr-10"
                 data-testid="run-panel-tabs"
               >
                 {progress && (
@@ -1029,7 +1029,7 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
                     className={TAB_CLASS}
                     data-hint={t("pages.runPage.tabHints.block")}
                   >
-                    <Boxes className="size-3.5" />
+                    <Boxes className={TAB_ICON} />
                     {t("pages.runPage.tabs.block")}
                   </TabsTrigger>
                 )}
@@ -1038,7 +1038,7 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
                   className={TAB_CLASS}
                   data-hint={t("pages.runPage.tabHints.variables")}
                 >
-                  <Variable className="size-3.5" />
+                  <Variable className={TAB_ICON} />
                   {t("pages.runPage.tabs.variables")}
                   <TabBadge
                     warning={Boolean(answerable && waiting)}
@@ -1052,7 +1052,7 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
                   className={TAB_CLASS}
                   data-hint={t("pages.runPage.tabHints.errors")}
                 >
-                  <AlertTriangle className="size-3.5" />
+                  <AlertTriangle className={TAB_ICON} />
                   {t("pages.executionInspector.tabs.errors")}
                   <TabBadge
                     count={errorsCount}
@@ -1076,7 +1076,7 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
                   className={TAB_CLASS}
                   data-hint={t("pages.runPage.tabHints.steps")}
                 >
-                  <ListChecks className="size-3.5" />
+                  <ListChecks className={TAB_ICON} />
                   {t("pages.executionInspector.tabs.steps")}
                 </TabsTrigger>
                 <TabsTrigger
@@ -1084,7 +1084,7 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
                   className={TAB_CLASS}
                   data-hint={t("pages.runPage.tabHints.locks")}
                 >
-                  <Lock className="size-3.5" />
+                  <Lock className={TAB_ICON} />
                   {t("pages.executionInspector.tabs.locks")}
                   <TabBadge
                     warning={locks.some((l) => l.status === "active")}

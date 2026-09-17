@@ -1,10 +1,12 @@
 import { describe, expect, jest, test } from "@jest/globals";
 import {
   ProgressImageService,
+  statisticsForRun,
   type ProgressImageTokenStore,
   type WorkflowExecution,
   type WorkflowGraph,
   type IDataRepository,
+  type WorkflowVersionStatistics,
 } from "@mcp-moira/workflow-engine";
 import type { WorkflowToken } from "@mcp-moira/shared";
 
@@ -199,5 +201,85 @@ describe("progress image grants", () => {
     expect(minted.expiresAt).toBe(100 + 5 * 60 * 1000);
     expect(minted.expiresAt).toBeLessThanOrEqual(f.currentGrant()!.expiresAt);
     clock.mockRestore();
+  });
+});
+
+/** The typical durations a picture would draw: one block with a measured pass. */
+function versionStatistics(workflowVersion: string): WorkflowVersionStatistics {
+  const sample = {
+    sampleCount: 2,
+    medianMs: 60000,
+    p25Ms: 50000,
+    p75Ms: 70000,
+    minMs: 50000,
+    maxMs: 70000,
+  };
+  return {
+    workflowId: "workflow",
+    workflowVersion,
+    sampledRuns: 2,
+    versionNotRecorded: 0,
+    blocks: [{ blockId: "work", pass: sample, run: sample, typicalPasses: 1, items: [] }],
+    computedAt: 1,
+  };
+}
+
+describe("the statistics a picture is drawn with", () => {
+  test("a version-stamped run gets its version's statistics for its owner with itself excluded; an unstamped run gets none", async () => {
+    const f = fixture();
+    const asked: unknown[] = [];
+    const statistics = {
+      forVersion: async (...args: unknown[]) => {
+        asked.push(args);
+        return versionStatistics("2.0.0");
+      },
+    };
+    const stamped = { ...f.execution, workflowVersion: "2.0.0" };
+    expect(await statisticsForRun(statistics, f.graph, stamped)).toEqual(
+      versionStatistics("2.0.0"),
+    );
+    expect(asked).toEqual([
+      ["workflow", f.graph, "2.0.0", { userId: "owner", excludeExecutionId: "execution" }],
+    ]);
+    expect(
+      await statisticsForRun(statistics, f.graph, { ...f.execution, workflowVersion: null }),
+    ).toBeNull();
+    expect(asked).toHaveLength(1);
+  });
+
+  test("redeeming a grant hands the run's statistics to the renderer, so the picture carries them", async () => {
+    const f = fixture();
+    const stamped = { ...f.execution, workflowVersion: "2.0.0" };
+    const repository = {
+      getExecution: async () => stamped,
+      getWorkflowGraph: async () => f.graph,
+    } as unknown as IDataRepository;
+    const received: unknown[] = [];
+    const renderer = async (
+      _graph: WorkflowGraph,
+      _execution: WorkflowExecution,
+      _options: unknown,
+      statistics?: WorkflowVersionStatistics | null,
+    ) => {
+      received.push(statistics);
+      return {
+        buffer: Buffer.from("png"),
+        mimeType: "image/png" as const,
+        width: 1,
+        height: 1,
+        workflowVersion: "2.0.0",
+        executionRevision: 4,
+      };
+    };
+    const service = new ProgressImageService(
+      repository,
+      f.tokens,
+      () => "https://moira.test/",
+      renderer as unknown as ConstructorParameters<typeof ProgressImageService>[3],
+      { forVersion: async () => versionStatistics("2.0.0") },
+    );
+    await service.mint("execution", "owner");
+    expect(await service.redeem("opaque")).not.toBeNull();
+    expect(received).toEqual([versionStatistics("2.0.0")]);
   });
 });

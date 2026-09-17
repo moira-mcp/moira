@@ -215,7 +215,9 @@ export const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
   toolbarLeading,
   toolbarTrailing,
 }) => {
-  const [minimapOn, toggleMinimap] = useStoredFlag("moira.diagram.minimap", true);
+  // Folded by default: unfolded, the navigator covers the graph's bottom-right corner and the
+  // cards under it; the reader opens it from the toolbar.
+  const [minimapOn, toggleMinimap] = useStoredFlag("moira.diagram.minimap", false);
   // A connection chip names its other end the way the map does: the authored display name, else
   // the node id. The technical graph's `data.label` falls back to the node type ("Agent Task"),
   // which names nothing when three chips lead to three different agent nodes.

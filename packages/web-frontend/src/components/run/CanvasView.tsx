@@ -35,7 +35,6 @@ import { DiagramEdge, DiagramMarkers, type DiagramEdgeKind } from "../diagram/Di
 import { INTERACTIVE } from "../diagram/interactive";
 import { ListMarker } from "../diagram/ListMarker";
 import { NodeTypeTag } from "./nodeTypeStyle";
-import { roundedPath } from "../workflow/graphNodes";
 import { cn } from "@/lib/utils";
 import { useTheme } from "@/hooks/useTheme";
 import { DiagramViewport } from "../diagram/DiagramViewport";
@@ -43,6 +42,7 @@ import { diagramInteractionProps } from "../diagram/interaction";
 import { useOpeningPlacement } from "../diagram/placement";
 import { useLayoutPreset } from "../diagram/layoutPreset";
 import { useStoredFlag } from "../diagram/useStoredFlag";
+import { useRequest } from "../diagram/useRequest";
 import { DiagramToolbar } from "../diagram/DiagramToolbar";
 import { NodeFinder } from "./NodeFinder";
 
@@ -54,6 +54,8 @@ import { BLOCK_TONE, PassCount, StatusChip } from "./status";
 import {
   BLOCK_WIDTH,
   layoutBlocks,
+  portRanks,
+  portedPath,
   transitionKey,
   type BlockLayout,
   type LaidOutEdge,
@@ -318,170 +320,6 @@ function BlockNodeView({ data }: NodeProps<BlockNode>): React.JSX.Element {
   );
 }
 
-/** The points of a laid path (`M x y L x y …`), so a lane can be read back from it. */
-function pathPoints(path: string): Array<[number, number]> {
-  const points: Array<[number, number]> = [];
-  for (const match of path.matchAll(/[ML]\s*(-?[\d.]+)\s+(-?[\d.]+)/g)) {
-    points.push([Number(match[1]), Number(match[2])]);
-  }
-  return points;
-}
-
-/** How far an edge runs out of its port before it turns. */
-const PORT_STUB = 20;
-const SELF_LOOP_DIP = 26;
-
-/**
- * The edge from its source port to its target port: a forward elbow keeps its vertical in the
- * gap the layout chose; a skip, a hub bundle or a return keeps the lane the layout gave it and
- * reaches it from the ports through short stubs; a transition back to the block itself dips
- * under its bottom double port.
- */
-/** Distance between the verticals of two edges leaving or entering neighbouring ports. */
-const PORT_COLUMN_STEP = 10;
-
-interface PortSlots {
-  outRank: number;
-  inRank: number;
-}
-
-function portedPath(
-  laid: LaidOutEdge,
-  sx: number,
-  sy: number,
-  tx: number,
-  ty: number,
-  vertical = false,
-  slots: PortSlots = { outRank: 0, inRank: 0 },
-): { path: string; labelX: number; labelY: number } {
-  if (vertical && laid.from !== laid.to) {
-    const routed = stackedPoints(laid, sx, sy, tx, ty, slots);
-    return { path: roundedPath(routed.points), labelX: routed.labelX, labelY: routed.labelY };
-  }
-  const routed = portedPoints(laid, sx, sy, tx, ty, slots);
-  return { path: roundedPath(routed.points), labelX: routed.labelX, labelY: routed.labelY };
-}
-
-/**
- * The stacked layout (blocks top to bottom, lanes in the gaps between columns) is the row layout
- * transposed, so its laid path leaves the source's bottom edge and reaches the target's top edge.
- * The ports stay on the sides: the edge leaves the right port, runs a stub out (one column per
- * port rank), drops into the laid path, and at the far end comes down beside the target's left
- * edge and enters its left port.
- */
-export function stackedPoints(
-  laid: LaidOutEdge,
-  sx: number,
-  sy: number,
-  tx: number,
-  ty: number,
-  slots: PortSlots,
-): { points: Array<[number, number]>; labelX: number; labelY: number } {
-  const logical = pathPoints(laid.path).map(([x, y]) => [y, x] as [number, number]);
-  const outX = sx + PORT_STUB + slots.outRank * PORT_COLUMN_STEP;
-  const inX = tx - PORT_STUB - slots.inRank * PORT_COLUMN_STEP;
-  // The laid path's first and last points sit on the source's bottom and the target's top edge;
-  // the points after and before them are straight below and above, in the row gaps.
-  const inner = logical.slice(1, -1);
-  if (inner.length === 0) {
-    const midY = (sy + ty) / 2;
-    const points: Array<[number, number]> = [
-      [sx, sy],
-      [outX, sy],
-      [outX, midY],
-      [inX, midY],
-      [inX, ty],
-      [tx, ty],
-    ];
-    return { points, labelX: (outX + inX) / 2, labelY: midY };
-  }
-  const first = inner[0];
-  const last = inner[inner.length - 1];
-  const points: Array<[number, number]> = [
-    [sx, sy],
-    [outX, sy],
-    [outX, first[1]],
-    ...inner.slice(1, -1),
-    [inX, last[1]],
-    [inX, ty],
-    [tx, ty],
-  ];
-  // The label sits on the longest run of the path.
-  let best = 0;
-  let bestLength = -1;
-  for (let i = 0; i + 1 < points.length; i++) {
-    const length =
-      Math.abs(points[i + 1][0] - points[i][0]) + Math.abs(points[i + 1][1] - points[i][1]);
-    if (length > bestLength) {
-      bestLength = length;
-      best = i;
-    }
-  }
-  return {
-    points,
-    labelX: (points[best][0] + points[best + 1][0]) / 2,
-    labelY: (points[best][1] + points[best + 1][1]) / 2,
-  };
-}
-
-export function portedPoints(
-  laid: LaidOutEdge,
-  sx: number,
-  sy: number,
-  tx: number,
-  ty: number,
-  slots: PortSlots,
-): { points: Array<[number, number]>; labelX: number; labelY: number } {
-  const points = pathPoints(laid.path);
-  if (laid.from === laid.to) {
-    const dip = Math.max(sy, ty) + SELF_LOOP_DIP;
-    return {
-      points: [
-        [sx, sy],
-        [sx, dip],
-        [tx, dip],
-        [tx, ty],
-      ],
-      labelX: (sx + tx) / 2,
-      labelY: dip + 10,
-    };
-  }
-  if (laid.kind === "forward") {
-    const midX = points.length >= 3 ? points[1][0] : (sx + tx) / 2;
-    const pts: Array<[number, number]> =
-      Math.abs(sy - ty) < 1
-        ? [
-            [sx, sy],
-            [tx, ty],
-          ]
-        : [
-            [sx, sy],
-            [midX, sy],
-            [midX, ty],
-            [tx, ty],
-          ];
-    return { points: pts, labelX: midX, labelY: Math.min(sy, ty) - 4 };
-  }
-  const ys = points.map((p) => p[1]);
-  const laneY = laid.laneY ?? (laid.kind === "cycle" ? Math.max(...ys) : Math.min(...ys));
-  // Every edge at a card runs its vertical in a column of its own beside the card (`portRanks`),
-  // so two edges never share a line.
-  const out = sx + PORT_STUB + slots.outRank * PORT_COLUMN_STEP;
-  const into = tx - PORT_STUB - slots.inRank * PORT_COLUMN_STEP;
-  return {
-    points: [
-      [sx, sy],
-      [out, sy],
-      [out, laneY],
-      [into, laneY],
-      [into, ty],
-      [tx, ty],
-    ],
-    labelX: (out + into) / 2,
-    labelY: laneY,
-  };
-}
-
 const EDGE_KIND: Record<LaidOutEdge["kind"], DiagramEdgeKind> = {
   forward: "forward",
   skip: "skip",
@@ -508,9 +346,13 @@ function RoutedEdgeView({
     outRank,
     inRank,
   });
-  const title = cycle
-    ? `${laid.transition.label} — ${laid.transition.cycle?.cause} — ${t("pages.runPage.map.endsWhen")} ${laid.transition.cycle?.exit}`
-    : laid.transition.label;
+  // The layout keeps only that a transition returns; the map's transitions carry the cause and
+  // the exit of the return, which the edge's title reads.
+  const returned = typeof laid.transition.cycle === "object" ? laid.transition.cycle : null;
+  const title =
+    cycle && returned
+      ? `${laid.transition.label} — ${returned.cause} — ${t("pages.runPage.map.endsWhen")} ${returned.exit}`
+      : laid.transition.label;
   return (
     <DiagramEdge
       id={id}
@@ -525,51 +367,6 @@ function RoutedEdgeView({
       onClick={() => onGoTo(laid.to, key)}
     />
   );
-}
-
-/**
- * Column ranks of the lane edges at every card, per side. For one card and one side, the edges
- * split into those whose lane lies above the card and those whose lane lies below; each group
- * takes its own range of columns (the above group innermost), and within a group the ports are
- * ordered so the port furthest from the lane is outermost.
- */
-export function portRanks(
-  edges: readonly LaidOutEdge[],
-  ports: ReadonlyMap<string, { outputs: string[]; inputs: string[] }>,
-  blockY: ReadonlyMap<string, number>,
-): { out: Map<string, number>; in: Map<string, number> } {
-  const out = new Map<string, number>();
-  const inn = new Map<string, number>();
-  type Item = { id: string; index: number; above: boolean };
-  const bySource = new Map<string, Item[]>();
-  const byTarget = new Map<string, Item[]>();
-  for (const laid of edges) {
-    if (laid.kind === "forward" || laid.from === laid.to || laid.laneY === undefined) continue;
-    const key = transitionKey(laid.from, laid.transition);
-    const outIndex = ports.get(laid.from)?.outputs.indexOf(key) ?? -1;
-    const inIndex = ports.get(laid.to)?.inputs.indexOf(key) ?? -1;
-    bySource.set(laid.from, [
-      ...(bySource.get(laid.from) ?? []),
-      { id: laid.id, index: outIndex, above: laid.laneY < (blockY.get(laid.from) ?? 0) },
-    ]);
-    byTarget.set(laid.to, [
-      ...(byTarget.get(laid.to) ?? []),
-      { id: laid.id, index: inIndex, above: laid.laneY < (blockY.get(laid.to) ?? 0) },
-    ]);
-  }
-  const assign = (groups: Map<string, Item[]>, into: Map<string, number>) => {
-    for (const items of groups.values()) {
-      // Above the card: the lowest port travels furthest, so it goes outermost — descending
-      // index. Below: the highest port travels furthest — ascending index.
-      const above = items.filter((i) => i.above).sort((a, b) => b.index - a.index);
-      const below = items.filter((i) => !i.above).sort((a, b) => a.index - b.index);
-      above.forEach((item, rank) => into.set(item.id, rank));
-      below.forEach((item, rank) => into.set(item.id, above.length + rank));
-    }
-  };
-  assign(bySource, out);
-  assign(byTarget, inn);
-  return { out, in: inn };
 }
 
 /** What the map view puts into the diagram's toolbar around the shared controls. */
@@ -636,7 +433,9 @@ function CanvasInner({
   toolbarLeading,
   toolbarTrailing,
 }: RunViewProps & CanvasToolbarSlots): React.JSX.Element {
-  const [minimapOn, toggleMinimap] = useStoredFlag("moira.diagram.minimap", true);
+  // The navigator sits over the diagram's bottom-right corner and takes the clicks of any card
+  // under it, so it opens folded; a reader who wants it unfolds it from the toolbar.
+  const [minimapOn, toggleMinimap] = useStoredFlag("moira.diagram.minimap", false);
   const { t } = useTranslation();
   const { actualTheme } = useTheme();
   const [preset] = useLayoutPreset();
@@ -646,7 +445,7 @@ function CanvasInner({
   // "current" block). On a
   // run, once that fit is in place, the block that is active or waiting is centred at a readable
   // zoom; the fit-view control gives the overview back and the map's contents sidebar is the
-  // navigation, so no minimap covers the blocks.
+  // navigation.
   const focusId = currentBlockId(blocks);
   const wrapperRef = useRef<HTMLDivElement>(null);
   const placeViewport = useCallback(
@@ -700,21 +499,20 @@ function CanvasInner({
   // Travelling along a transition (a port or an edge clicked): the far block comes into view,
   // the edge flashes and the block pulses on arrival, so the jump answers "where did that land".
   const focus = useTransitionFocus();
-  const [arrival, setArrival] = useState<{ blockId: string; token: number } | null>(null);
+  const [arrival, requestArrival] = useRequest<{ blockId: string }>();
   useEffect(() => {
     if (!arrival) return;
-    const timer = setTimeout(() => setArrival(null), 1800);
+    const timer = setTimeout(() => requestArrival(null), 1800);
     return () => clearTimeout(timer);
-  }, [arrival]);
+  }, [arrival, requestArrival]);
   // A block picked elsewhere (the contents, a panel link): the camera moves through the
   // placement key; the block pulses so the move reads as an arrival.
   const lastSelected = useRef<string | null>(selectedBlockId);
   useEffect(() => {
     if (selectedBlockId === lastSelected.current) return;
     lastSelected.current = selectedBlockId;
-    if (selectedBlockId)
-      setArrival((previous) => ({ blockId: selectedBlockId, token: (previous?.token ?? 0) + 1 }));
-  }, [selectedBlockId]);
+    if (selectedBlockId) requestArrival({ blockId: selectedBlockId });
+  }, [selectedBlockId, requestArrival]);
   const goTo = useCallback(
     (blockId: string, key: string) => {
       void rfRef.current?.fitView({
@@ -724,9 +522,9 @@ function CanvasInner({
         duration: 450,
       });
       focus.flash([key]);
-      setArrival((previous) => ({ blockId, token: (previous?.token ?? 0) + 1 }));
+      requestArrival({ blockId });
     },
-    [focus],
+    [focus, requestArrival],
   );
   const onInit = useCallback(
     (rf: ReactFlowInstance<BlockNode, RoutedEdge>) => {

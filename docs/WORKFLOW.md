@@ -575,45 +575,44 @@ An `outcome` is exposed only for a completed or current block. Pending blocks ke
 summary, details, and next guidance but suppress an old outcome, so an engine-owned revision or unit
 transition cannot temporarily present a prior result as current truth.
 
-The shared visual model renders the full task identity and goal, facts, and every block's
-structured content without hover-only information. It wraps valid text without truncation, packs
-cards into deterministic left-to-right rows for the requested viewport, and draws the process's
-transitions and returns between the cards without affecting execution. `session progress-image-token`
-and the matching HTTP endpoint render that model as a
-bounded light/dark PNG behind a short-lived, revision-bound, single-use URL; `view: "process"`
-renders the aggregated block view instead (blocks in process order with the process's labelled
-transitions and dashed returns; transitions into a hub block share one bundled connector per hub
-in the right gutter, labelled inside the source block), and `hide` / `collapse` leave named blocks
-out or reduce them to a chip (see `docs/API.md`). Every drawn block carries, under its
-title, a status word — `waiting for you` only for the waiting block when the projection's
-`waitingFor` is `user`, `agent on the step` for the waiting or active block otherwise,
-`completed`, `repeated ×n`, `skipped`, `pending` — and one facts line: the time spent (`total`, `·
-this pass …` while a pass is open) and, for a bound block, `done/total: current item`; an
-unmeasured value reads `—`. Colours follow the web map (current and waiting accent, completed
-green, skipped muted and struck through, pending muted). The model owns the type scale
-(`progressTypeScale`: at a viewport of 720 px or less the cards view lays out one column and both
-views use the phone scale — title 18 px, content and facts 14 px, labels 12 px; wider images keep
-the desktop scale, content never below 12 px) and every text position; the renderer draws at the
-sizes the model measured. The model measures its text with its own
-metric (`progressTextWidth`, a per-glyph-class width for the rendered face that errs wide), wraps
-every line by that width, ellipsises a token wider than its line, shortens a facts line wider
-than its box by priority (the open pass goes first, then the item's title is cut while
-`done/total` stays intact, then the title, and only then the count itself; the count is shown
-when either counter resolves and an unresolved one reads `?`, as the notification footer and
-the run page's map word it), and places every label and badge as a box that overlaps nothing and lies inside the canvas:
-a block's title starts after its state mark and, for a repeated block, after a small `×N` count
-badge; gutter labels of one side are
-stacked in vertical order beside the outermost lane, wrapped to the gutter's label area and
-never split inside a word; a connector's label sits in the gap between its two blocks, which
-widens when the label needs more lines; when a viewport cannot hold the lanes, the column and
-both label areas, the forward skips' labels move inside their source blocks (as hub labels
-are), then the returns' labels (prefixed `↩`), and the arcs stay drawn. A
-`user-notification` node can set `attachProgressImage: true`; it must belong to a block
-and sends the rendered PNG through the current user's configured channels with its normal message.
-The deprecated `telegram-notification` compatibility node retains the same progress attachment.
+The progress picture is the run page's map, rasterised: the same ported cards, ports and edge
+kinds, laid out by the same `layoutBlocks` (the engine's `progress-visual` entry, which the web
+map imports), from the same projection. `session progress-image-token` and the matching HTTP
+endpoint render it as a bounded light/dark PNG behind a short-lived, revision-bound, single-use
+URL. Every block is a card with a title band — index badge, name (two lines at most), `×n` pass
+count and the status chip (`waiting for you` only for the waiting block when the projection's
+`waitingFor` is `user`, `agent on the step` for the waiting or active block otherwise, `completed`,
+`repeated`, `skipped` with the name struck through, `pending`) — toned by its status as the map tones it
+(neutral, active, waiting, done), a column of input ports on the left naming the source block with
+the transition label as detail, output ports on the right named by the label with the target
+block, dashed amber return ports and a double bottom port for transitions into the same block,
+and a centre with the description, the facts line — the time spent (`total`, `· this pass …`
+while a pass is open; nothing for a block that never ran) and, for a bound block, `done/total:
+current item` with `—` for a counter the binding did not resolve — and, when the picture is
+rendered with the version's statistics, a `typically …` line (the typical run and pass and the
+usual pass count, shortened by priority). Transitions are drawn as the map draws them: forward
+elbows, dotted skips, thin hub bundles, dashed primary returns and self loops, with the same
+arrowheads and a halo where lines cross. `view: "cards"` (the default) keeps the block's structured
+content (summary, details, outcome, next) inside the card; `view: "process"` is the compact card
+alone. The rows preset is used when the drawing fits the image at its type scale, the stacked
+(top-to-bottom) preset otherwise and always at the phone width (720 px or less, where the phone
+type scale applies); a drawing still wider than the image is scaled down as one piece, never
+re-wrapped. `hide` leaves named blocks out and re-targets their transitions onto the neighbours'
+ports (a return that ends on its own source becomes a self loop), `collapse` draws a block as its
+title band alone with the edges meeting its borders (see `docs/API.md`). Colours are the
+interface's own tokens as literal hex per theme, since the raster has no CSS. The model measures
+text with its own metric (`progressTextWidth`, a per-glyph-class width for the rendered face that
+errs wide), wraps by that width, ellipsises a token wider than its line and shortens the facts
+and typical lines by priority, so every label lies inside its box. A `user-notification` node
+can set `attachProgressImage: true`; it must belong to a block and sends the rendered PNG through
+the current user's configured channels with its normal message, drawn with the run owner's
+statistics for the version the run started on. The deprecated `telegram-notification`
+compatibility node retains the same progress attachment.
 
 Engine callers that hold a workflow and execution use
-`renderExecutionProgressImage(workflow, execution, options?)`. It returns `null` when no progress
+`renderExecutionProgressImage(workflow, execution, options?, statistics?)`; the optional
+`statistics` are the version's `WorkflowVersionStatistics` (`ProgressStatisticsService.forVersion`
+for the run's owner, obtained through `statisticsForRun`) and draw each card's `typically …` line. It returns `null` when no progress
 definition exists; otherwise it returns `{ buffer, mimeType: "image/png", width, height,
 workflowVersion, executionRevision }`. Projection/render failures propagate. The lower-level
 projection and PNG adapter remain available when their narrower contracts are required.

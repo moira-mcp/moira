@@ -1,18 +1,18 @@
 /**
- * The progress image keeps every text inside its box and every label inside the canvas. For the
+ * The progress picture keeps every text inside its box and every box inside the image. For the
  * six annotated flows and the bundled SDF projection (long titles, a bound list with a current
  * item, repeated blocks, timings), at 480, 720 and 1280 px, in both views and both themes: every
- * node line (title, status word, facts, content), every fact-chip line and every header line
- * measured with the model's own metric at the model's own type scale fits the width it was
- * wrapped for; every node, fact and label box lies within the image; label boxes intersect no
- * other label box, no block box and no lane line of another arc; the count badge sits beside the
- * state mark and clear of the title; the model is deterministic. The metric errs wide, so a box
- * that clears here clears on the PNG.
+ * text of a card (title, chip, facts, typical, description, content, port pills) measured with the
+ * model's own metric at the model's own type scale fits the width it was wrapped for; every card,
+ * port pill, badge and chip lies inside its card and the diagram inside the image; the pass count
+ * sits between the title and the chip; a phone stacks the cards with the phone type scale; the
+ * model is deterministic. The metric errs wide, so a box that clears here clears on the PNG.
  */
 
 import { describe, expect, test } from "@jest/globals";
 import {
   buildExecutionProgressVisualModel,
+  overlappingBlocks,
   progressTextWidth,
   projectExecutionRun,
   wrapProgressTextToWidth,
@@ -58,7 +58,7 @@ function flowProgress(slug: string): ExecutionProgress {
     visits: [],
   };
   const progress = projectExecutionRun(workflow, execution)!;
-  // A run that repeated every block with a return, twelve times: the widest badge the flows produce.
+  // A run that repeated every block with a return, twelve times: the widest pass count the flows produce.
   const returning = new Set(
     progress.process.blocks.filter((b) => b.transitions.some((t) => t.cycle)).map((b) => b.id),
   );
@@ -110,104 +110,106 @@ const FIXTURES: Array<[string, () => ExecutionProgress]> = [
   ["software-development-flow run (long titles, bound list, repeated blocks)", sdfProgress],
 ];
 
+const within = (inner: ProgressVisualBox, outer: ProgressVisualBox, slack = 0) =>
+  inner.x >= outer.x - slack &&
+  inner.y >= outer.y - slack &&
+  inner.x + inner.width <= outer.x + outer.width + slack &&
+  inner.y + inner.height <= outer.y + outer.height + slack;
+
 const intersects = (a: ProgressVisualBox, b: ProgressVisualBox): boolean =>
   a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
 
-const insideCanvas = (box: ProgressVisualBox, model: ProgressVisualModel) =>
-  box.x >= 0 &&
-  box.y >= 0 &&
-  box.x + box.width <= model.width &&
-  box.y + box.height <= model.height;
-
-/** The vertical runs of an edge path: `L x y` pairs sharing an x with the previous point. */
-function verticalRuns(path: string): Array<{ x: number; y0: number; y1: number }> {
-  const points = [...path.matchAll(/([ML])\s+(-?[\d.]+)\s+(-?[\d.]+)/g)].map((m) => ({
-    x: Number(m[2]),
-    y: Number(m[3]),
-  }));
-  const runs: Array<{ x: number; y0: number; y1: number }> = [];
-  for (let i = 1; i < points.length; i += 1) {
-    if (points[i].x === points[i - 1].x && points[i].y !== points[i - 1].y)
-      runs.push({
-        x: points[i].x,
-        y0: Math.min(points[i].y, points[i - 1].y),
-        y1: Math.max(points[i].y, points[i - 1].y),
-      });
-  }
-  return runs;
-}
-
-function titleBox(node: ProgressVisualModel["nodes"][number], model: ProgressVisualModel) {
+/** Every text line of a card with the width it must fit and its measured width. */
+function cardTextLines(node: ProgressVisualModel["nodes"][number], model: ProgressVisualModel) {
   const { type } = model;
-  return {
-    x: node.titleX,
-    y: node.titleY - type.title,
-    width: Math.max(...node.labelLines.map((line) => progressTextWidth(line, type.title, "bold"))),
-    height: node.labelLines.length * type.titleLine,
-  };
-}
-
-/** Every text line of a node with the width it must fit and its measured width. */
-function nodeTextLines(node: ProgressVisualModel["nodes"][number], model: ProgressVisualModel) {
-  const { type } = model;
-  const titleWidth = node.textRight - node.titleX;
-  const contentWidth = node.textRight - node.contentX;
+  const titleWidth = node.chip.x - (node.badge ? node.badge.width + 8 : 0) - 8 - node.titleX;
+  const centreWidth = node.textRight - node.contentX;
   const lines = node.labelLines.map((line) => ({
     kind: "title",
     line,
     fits: titleWidth,
     measured: progressTextWidth(line, type.title, "bold"),
   }));
+  lines.push({
+    kind: "chip",
+    line: node.chip.text,
+    fits: node.chip.width - 2 * type.card.pillPadding,
+    measured: progressTextWidth(node.chip.text, type.badge, "semibold"),
+  });
   if (!node.collapsed) {
-    lines.push(
-      {
-        kind: "status",
-        line: node.statusLine,
-        fits: titleWidth,
-        measured: progressTextWidth(node.statusLine, type.content, "semibold"),
-      },
-      {
+    for (const line of node.descriptionLines)
+      lines.push({
+        kind: "description",
+        line,
+        fits: centreWidth,
+        measured: progressTextWidth(line, type.content),
+      });
+    if (node.factsLine)
+      lines.push({
         kind: "facts",
         line: node.factsLine,
-        fits: titleWidth,
+        fits: centreWidth,
         measured: progressTextWidth(node.factsLine, type.content),
-      },
-    );
+      });
+    if (node.typicalLine)
+      lines.push({
+        kind: "typical",
+        line: node.typicalLine,
+        fits: centreWidth,
+        measured: progressTextWidth(node.typicalLine, type.content),
+      });
+    for (const line of node.lines)
+      lines.push({
+        kind: line.kind,
+        line: line.prefix + line.text,
+        fits: centreWidth,
+        measured: progressTextWidth(
+          line.prefix + line.text,
+          type.content,
+          line.kind === "summary" ? "semibold" : "regular",
+        ),
+      });
+    for (const port of [...node.inputs, ...node.outputs, ...node.selfPorts]) {
+      const inner = port.width - 2 * type.card.pillPadding;
+      lines.push({
+        kind: "port",
+        line: port.text,
+        fits: inner,
+        measured: progressTextWidth(port.text, type.label, "semibold"),
+      });
+      if (port.detailText)
+        lines.push({
+          kind: "port detail",
+          line: port.detailText,
+          fits: inner - (port.detailX - type.card.pillPadding),
+          measured: progressTextWidth(port.detailText, type.label),
+        });
+    }
   }
-  for (const line of node.lines)
-    lines.push({
-      kind: line.kind,
-      line: line.prefix + line.text,
-      fits: contentWidth,
-      measured: progressTextWidth(
-        line.prefix + line.text,
-        type.content,
-        line.kind === "summary" ? "semibold" : "regular",
-      ),
-    });
   return lines;
 }
 
 describe("progress image geometry", () => {
   describe.each(FIXTURES)("%s", (_name, fixture) => {
     test.each(WIDTHS)(
-      "at %i px every text line fits its box, every box lies inside the image and no label overlaps anything, in both views and themes",
-      (width) => {
+      "at %i px every text fits its box, every box lies inside its card and the diagram inside the image, in both views and themes",
+      async (width) => {
         const progress = fixture();
         for (const view of VIEWS)
           for (const theme of THEMES) {
-            const model = buildExecutionProgressVisualModel(progress, {
+            const model = await buildExecutionProgressVisualModel(progress, {
               viewportWidth: width,
               view,
               theme,
             });
-            const { type } = model;
+            const { type, diagram } = model;
             expect(model.width).toBe(width);
-            // The phone type scale below 720 px; content never below 12 px anywhere.
+            // The phone type scale and the stacked preset below 720 px; content never below 12 px.
             if (width <= 720) {
               expect(type.title).toBeGreaterThanOrEqual(18);
               expect(type.content).toBeGreaterThanOrEqual(14);
               expect(type.label).toBeGreaterThanOrEqual(12);
+              expect(diagram.preset).toBe("vertical");
             }
             expect(type.content).toBeGreaterThanOrEqual(12);
             // Header lines fit the header width.
@@ -221,8 +223,9 @@ describe("progress image geometry", () => {
                   model.headerWidth,
                 );
             // Fact chips: inside the image, every line inside the chip.
+            const image = { x: 0, y: 0, width: model.width, height: model.height };
             for (const fact of model.facts) {
-              expect(insideCanvas(fact, model)).toBe(true);
+              expect(within(fact, image)).toBe(true);
               for (const line of fact.labelLines)
                 expect(progressTextWidth(line, type.fact.label, "semibold")).toBeLessThanOrEqual(
                   fact.width - 24,
@@ -232,72 +235,70 @@ describe("progress image geometry", () => {
                   fact.width - 24,
                 );
             }
-            // Nodes: inside the image, one column on a phone, every text line inside the block.
-            const columns = new Set(model.nodes.map((node) => node.x)).size;
-            if (width <= 720) expect(columns).toBe(1);
+            // The diagram, scaled, lies inside the image under the header.
+            const drawn = {
+              x: diagram.x,
+              y: diagram.y,
+              width: diagram.width * diagram.scale,
+              height: diagram.height * diagram.scale,
+            };
+            expect(drawn.y).toBeGreaterThanOrEqual(model.stagesTop);
+            expect(within(drawn, image, 1)).toBe(true);
+            expect(overlappingBlocks(model.layout)).toEqual([]);
+            // Cards: inside the diagram, every box of the card inside the card, every text fitting.
+            const canvas = { x: 0, y: 0, width: diagram.width, height: diagram.height };
             for (const node of model.nodes) {
-              expect(insideCanvas(node, model)).toBe(true);
-              expect(node.textRight).toBeLessThanOrEqual(node.x + node.width);
-              for (const text of nodeTextLines(node, model)) {
+              expect(within(node, canvas)).toBe(true);
+              expect(within(node.indexBadge, node)).toBe(true);
+              expect(within(node.chip, node)).toBe(true);
+              expect(node.indexBadge.x + node.indexBadge.width).toBeLessThan(node.titleX);
+              for (const text of cardTextLines(node, model))
                 expect({ ...text, fitsInBox: text.measured <= text.fits }).toMatchObject({
                   fitsInBox: true,
                 });
+              for (const port of [...node.inputs, ...node.outputs, ...node.selfPorts]) {
+                expect(within(port, node)).toBe(true);
+                expect(port.handleY).toBeGreaterThanOrEqual(node.y);
+                expect(port.handleY).toBeLessThanOrEqual(node.y + node.height);
               }
-              // The block's last baseline stays above its bottom edge.
-              const lastBaseline = node.collapsed
-                ? node.titleY + (node.labelLines.length - 1) * type.titleLine
-                : node.lines.length
-                  ? node.contentY + (node.lines.length - 1) * type.contentLine
-                  : node.factsY;
-              expect(lastBaseline).toBeLessThan(node.y + node.height);
-              expect(node.titleY - type.title).toBeGreaterThanOrEqual(node.y);
-              const title = titleBox(node, model);
-              expect(node.titleX).toBeGreaterThan(node.markX);
+              // The ports of one column never overlap each other.
+              for (const column of [node.inputs, node.outputs, node.selfPorts])
+                for (let i = 0; i < column.length; i += 1)
+                  for (let j = i + 1; j < column.length; j += 1)
+                    expect(intersects(column[i], column[j])).toBe(false);
+              // The pass count sits between the title and the chip, clear of both.
               if (node.status === "repeated") {
                 expect(node.badge).not.toBeNull();
-                const badge = node.badge!;
-                expect(badge.text).toBe(`×${node.iterations}`);
-                expect(badge.x).toBeGreaterThan(node.markX);
-                expect(badge.x + badge.width).toBeLessThan(node.titleX);
-                expect(intersects(badge, title)).toBe(false);
-                expect(badge.y).toBeGreaterThanOrEqual(node.y);
-                expect(badge.y + badge.height).toBeLessThanOrEqual(node.y + node.height);
+                expect(node.badge!.text).toBe(`×${node.iterations}`);
+                expect(node.badge!.x + node.badge!.width).toBeLessThan(node.chip.x);
+                expect(within(node.badge!, node)).toBe(true);
+                const title = {
+                  x: node.titleX,
+                  y: node.titleY - type.title,
+                  width: Math.max(
+                    ...node.labelLines.map((line) => progressTextWidth(line, type.title, "bold")),
+                  ),
+                  height: node.labelLines.length * type.titleLine,
+                };
+                expect(intersects(node.badge!, title)).toBe(false);
               } else expect(node.badge).toBeNull();
-            }
-            const labels = model.edges
-              .filter((e) => e.labelBox)
-              .map((e) => ({ edge: e, box: e.labelBox! }));
-            // Labels: pairwise disjoint, inside the image, clear of every block.
-            for (let i = 0; i < labels.length; i += 1) {
-              const { box } = labels[i];
-              expect(insideCanvas(box, model)).toBe(true);
-              for (let j = i + 1; j < labels.length; j += 1) {
-                expect(intersects(box, labels[j].box)).toBe(false);
-              }
-              for (const node of model.nodes) expect(intersects(box, node)).toBe(false);
-              // Clear of every vertical lane run that is not the label's own arc.
-              for (const other of model.edges) {
-                if (other === labels[i].edge) continue;
-                for (const run of verticalRuns(other.path)) {
-                  const crosses =
-                    run.x >= box.x &&
-                    run.x <= box.x + box.width &&
-                    run.y0 < box.y + box.height &&
-                    run.y1 > box.y;
-                  expect(crosses).toBe(false);
-                }
-              }
-            }
-            // Every gutter and connector label of the process view carries its whole text.
-            if (view === "process") {
-              for (const edge of model.edges) {
-                if (!edge.labelBox) continue;
-                expect(edge.labelLines.join(" ")).toBe(edge.label);
-              }
+              // The last baseline stays above the card's centre bottom.
+              const lastBaseline = Math.max(
+                node.descriptionY +
+                  Math.max(0, node.descriptionLines.length - 1) * type.contentLine,
+                node.factsY,
+                node.typicalY,
+                node.lines.length ? node.contentY + (node.lines.length - 1) * type.contentLine : 0,
+              );
+              expect(lastBaseline).toBeLessThan((node.selfBandY ?? node.y + node.height) + 1);
             }
             // Deterministic.
             expect(
-              buildExecutionProgressVisualModel(progress, { viewportWidth: width, view, theme }),
+              await buildExecutionProgressVisualModel(progress, {
+                viewportWidth: width,
+                view,
+                theme,
+              }),
             ).toEqual(model);
           }
       },

@@ -5,6 +5,8 @@
  * width are built on it, as is the duration wording the facts line reads.
  */
 
+import { splitDuration, wordDuration } from "./progress-facts.js";
+
 export type ProgressFontWeight = "regular" | "semibold" | "bold";
 
 const NARROW = /[iljtfrI.,:;'|!()`·[\]]/u;
@@ -97,18 +99,10 @@ export function wrapProgressTextToWidth(
 }
 
 /**
- * A duration as the run page words it: `12 s`, `1 min 20 s`, `2 h 05 min`. `null` — a pass
- * recorded before timestamps existed, or a block the run has not entered — reads as `—`, never
- * as `0 s`.
+ * A duration as the run page words it, in English: `12 s`, `1 min 20 s`, `2 h 05 min`. `null` — a
+ * pass recorded before timestamps existed, or a block the run has not entered — reads as `—`,
+ * never as `0 s`. The split is the shared one; the interface words the same split in its language.
  */
 export function formatProgressDuration(ms: number | null | undefined): string {
-  if (ms === null || ms === undefined || !Number.isFinite(ms)) return "—";
-  const seconds = Math.max(0, Math.round(ms / 1000));
-  if (seconds < 60) return `${seconds} s`;
-  const minutes = Math.floor(seconds / 60);
-  const rest = seconds % 60;
-  if (minutes < 60) return rest ? `${minutes} min ${rest} s` : `${minutes} min`;
-  const hours = Math.floor(minutes / 60);
-  const restMinutes = minutes % 60;
-  return `${hours} h ${String(restMinutes).padStart(2, "0")} min`;
+  return wordDuration(splitDuration(ms), { s: "s", min: "min", h: "h" });
 }

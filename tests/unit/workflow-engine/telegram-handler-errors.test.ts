@@ -135,10 +135,12 @@ describe("TelegramNotificationHandler Error Handling", () => {
       lastVisitNode?: string;
     }> = [];
     const pictures: string[] = [];
-    handler = new TelegramNotificationHandler(async (workflow, execution) => {
+    const statisticsReceived: unknown[] = [];
+    handler = new TelegramNotificationHandler(async (workflow, execution, _options, statistics) => {
+      statisticsReceived.push(statistics ?? null);
       pictures.push(
         renderProgressVisualSvg(
-          buildExecutionProgressVisualModel(projectExecutionRun(workflow, execution)!),
+          await buildExecutionProgressVisualModel(projectExecutionRun(workflow, execution)!),
         ),
       );
       renderedFor.push({
@@ -205,6 +207,32 @@ describe("TelegramNotificationHandler Error Handling", () => {
     expect(renderedFor).toEqual([
       { currentNodeId: "test-telegram-node", waitingOn: null, lastVisitNode: "test-telegram-node" },
     ]);
+    // An unstamped run's picture is drawn without statistics; a version-stamped run's carries the
+    // statistics of that version over the owner's completed runs.
+    expect(statisticsReceived).toEqual([null]);
+    statisticsReceived.length = 0;
+    mockRepository.getExecution = jest.fn(async () => ({ ...execution, workflowVersion: "1.0.0" }));
+    (mockRepository as any).summarizeExecutionsByWorkflowVersion = jest.fn(async () => ({
+      count: 0,
+      lastCompletedAt: null,
+      unstamped: 0,
+    }));
+    (mockRepository as any).listExecutionsByWorkflowVersion = jest.fn(async () => []);
+    await handler.execute(
+      createTelegramNode({ progressNodeId: "notify", attachProgressImage: true }),
+      createContext(),
+      messageQueue,
+      mockRepository,
+      mockEngine,
+    );
+    expect(statisticsReceived).toEqual([
+      expect.objectContaining({
+        workflowId: "test-workflow",
+        workflowVersion: "1.0.0",
+        sampledRuns: 0,
+      }),
+    ]);
+    mockRepository.getExecution = jest.fn(async () => execution);
 
     // A notification that leads to a lock gate renders the image from the same copy the footer
     // describes: the run waiting on the gate, so the picture says «waiting for you» too.

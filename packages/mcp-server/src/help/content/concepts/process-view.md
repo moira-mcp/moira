@@ -98,7 +98,9 @@ flow (a runtime adjustment) is shown as such with who made it. A route cursor sh
 stood at any earlier visit, and the execution's owner can answer the step the run waits for from
 the page; the answer is validated like an agent's and recorded as an adjustment (see the
 _Reading a run_ guide). A run recorded before routes existed shows only its current block and
-says that no route was recorded.
+says that no route was recorded. The run's progress picture (`session progress-image-token`, the
+notification attachment) is this map rasterised: the same cards, ports, edges, statuses, facts
+and typical durations from the same projection (see the _Workflows_ concept).
 
 ## Making a workflow readable
 

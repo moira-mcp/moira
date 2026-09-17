@@ -1,32 +1,20 @@
 /**
- * Durations as people read them. `null` — a pass recorded before timestamps existed, or a block
- * the run has not entered — reads as "—", never as "0 s".
+ * Durations as people read them: the engine's one split of a duration (`splitDuration`, the one
+ * the progress picture words in English), worded here in the interface language. `null` — a pass
+ * recorded before timestamps existed, or a block the run has not entered — reads as "—", never
+ * as "0 s".
  */
 
 import type { TFunction } from "i18next";
+import { splitDuration, wordDuration } from "@mcp-moira/workflow-engine/progress-visual";
 
-/** The unit words in the interface language. */
-function unit(key: "s" | "min" | "h", t: TFunction): string {
-  return t(`pages.runPage.timing.unit.${key}`);
-}
-
-/**
- * `12 s`, `1 min 20 s`, `2 h 05 min`; "—" when nothing was measured. The units are worded by the
- * calling component's `t`, so every duration on a page reads in the interface language.
- */
+/** `12 s`, `1 min 20 s`, `2 h 05 min`; "—" when nothing was measured; units by the caller's `t`. */
 export function formatDuration(ms: number | null | undefined, t: TFunction): string {
-  if (ms === null || ms === undefined || !Number.isFinite(ms)) return "—";
-  const seconds = Math.max(0, Math.round(ms / 1000));
-  if (seconds < 60) return `${seconds} ${unit("s", t)}`;
-  const minutes = Math.floor(seconds / 60);
-  const rest = seconds % 60;
-  if (minutes < 60)
-    return rest
-      ? `${minutes} ${unit("min", t)} ${rest} ${unit("s", t)}`
-      : `${minutes} ${unit("min", t)}`;
-  const hours = Math.floor(minutes / 60);
-  const restMinutes = minutes % 60;
-  return `${hours} ${unit("h", t)} ${String(restMinutes).padStart(2, "0")} ${unit("min", t)}`;
+  return wordDuration(splitDuration(ms), {
+    s: t("pages.runPage.timing.unit.s"),
+    min: t("pages.runPage.timing.unit.min"),
+    h: t("pages.runPage.timing.unit.h"),
+  });
 }
 
 /** Wall-clock time of an epoch stamp in the interface locale; "—" when the stamp is absent. */
