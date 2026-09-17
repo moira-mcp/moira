@@ -15,44 +15,13 @@ import {
   advanceWorkflowExecution,
   createAuthenticatedMCPClient,
   startWorkflowExecutionState,
-  type RunningWorkflowExecution,
 } from "../utils/mcp-auth.js";
 import { loginAsAdmin } from "./helpers/auth-helper.js";
 import { openPanelSection } from "./helpers/diagram.js";
+import { QUICK_TASK_WORKSPACE, quickTaskWithRepairLoop } from "./helpers/quick-task.js";
 
 const BASE_URL = getTestBaseUrl();
-const workspace = "./moira-ws/quick-task-0000aaaa-0000-4000-8000-000000000000";
-
-/** Drive a Quick Task through one rejected plan review into the second review: a real loop. */
-async function quickTaskWithRepairLoop(
-  client: Awaited<ReturnType<typeof createAuthenticatedMCPClient>>["client"],
-): Promise<RunningWorkflowExecution> {
-  const run = await startWorkflowExecutionState(client, "moira/quick-task", {
-    skipTelegramCheck: true,
-  });
-  await advanceWorkflowExecution(client, run, {
-    task_file: `${workspace}/task.md`,
-    execution_file: `${workspace}/execution.md`,
-    operating_mode: "autonomous",
-    progress_scope_outcome: "Task contract captured",
-  });
-  await advanceWorkflowExecution(client, run, {
-    current_plan_file: `${workspace}/plans/001/plan.md`,
-    total_steps: 3,
-    progress_plan_outcome: "Three-unit plan ready for review",
-  });
-  await advanceWorkflowExecution(client, run, {
-    review_file: `${workspace}/plans/001/review.md`,
-    issues_count: 1,
-    progress_plan_outcome: "Plan review found a blocking issue",
-  });
-  await advanceWorkflowExecution(client, run, {
-    current_plan_file: `${workspace}/plans/002/plan.md`,
-    total_steps: 3,
-    progress_plan_outcome: "Corrected plan replaced the rejected revision",
-  });
-  return run;
-}
+const workspace = QUICK_TASK_WORKSPACE;
 
 type ProgressMode = "live" | "none" | "error" | "slow";
 
@@ -282,12 +251,11 @@ test("the route cursor moves the whole page back through the run; both views are
       await expect(page.getByTestId("map-view")).toBeVisible();
     }
 
-    // The walkthrough opens from the header and lives in the URL.
+    // The walkthrough opens from the toolbar and lives in the URL; `walkthrough.spec.ts` runs
+    // every one of its steps through in both views.
     await page.getByTestId("guide-open").click();
+    await expect(page).toHaveURL(/guide=1/);
     await expect(page.getByTestId("walkthrough")).toHaveAttribute("data-guide-step", "process");
-    await page.getByTestId("walkthrough-next").click();
-    await expect(page).toHaveURL(/guide=2/);
-    await expect(page.getByTestId("walkthrough")).toHaveAttribute("data-guide-step", "agent");
   } finally {
     await run.cleanup();
   }
@@ -410,8 +378,11 @@ test("shows the loading state and keeps the page usable on a phone without a pro
     // The explanation of the view costs one row: its body is closed until the reader opens it,
     // so the picture keeps at least two fifths of the viewport (a broken layout once left the
     // diagram a strip about a hundred pixels tall).
-    await expect(page.getByTestId("guidance-map-toggle")).toHaveAttribute("aria-expanded", "false");
-    await expect(page.getByTestId("guidance-map-body")).toHaveCount(0);
+    await expect(page.getByTestId("diagram-guide-toggle")).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+    await expect(page.getByTestId("diagram-guide-body")).toHaveCount(0);
     const picture = (await page.getByTestId("execution-progress").boundingBox())!;
     expect(picture.height).toBeGreaterThanOrEqual(900 * 0.4);
 

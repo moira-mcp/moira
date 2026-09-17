@@ -57,19 +57,13 @@ describe("the gaps a graph preset asks for", () => {
 
 describe("the directions a graph preset asks for", () => {
   test("every preset the reader can choose has a direction pair", () => {
-    expect(Object.keys(GRAPH_PRESET_DIRECTIONS).sort()).toEqual(
-      LAYOUT_PRESETS.map((preset) => preset.id).sort(),
-    );
+    expect(Object.keys(GRAPH_PRESET_DIRECTIONS).sort()).toEqual([...LAYOUT_PRESETS].sort());
   });
 
   test("only the flow preset puts the block groups in a row; only the stacked one turns the steps", () => {
-    const inRow = LAYOUT_PRESETS.map((p) => p.id).filter(
-      (id) => GRAPH_PRESET_DIRECTIONS[id].outer === "RIGHT",
-    );
+    const inRow = LAYOUT_PRESETS.filter((id) => GRAPH_PRESET_DIRECTIONS[id].outer === "RIGHT");
     expect(inRow).toEqual(["flow"]);
-    const turned = LAYOUT_PRESETS.map((p) => p.id).filter(
-      (id) => GRAPH_PRESET_DIRECTIONS[id].inner === "DOWN",
-    );
+    const turned = LAYOUT_PRESETS.filter((id) => GRAPH_PRESET_DIRECTIONS[id].inner === "DOWN");
     expect(turned).toEqual(["vertical"]);
   });
 });

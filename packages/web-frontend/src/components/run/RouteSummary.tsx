@@ -46,13 +46,10 @@ export function RouteSummary({
   const summary = useMemo(() => routeSummary(route, workflow, blocks), [route, workflow, blocks]);
   if (route.length === 0) return null;
   const parts: Array<[string, number]> = [
-    [t("pages.runPage.route.stat.visits", { defaultValue: "визитов" }), summary.visits],
-    [t("pages.runPage.route.stat.working", { defaultValue: "рабочих" }), summary.working],
-    [t("pages.runPage.route.stat.loops", { defaultValue: "циклов" }), summary.loops],
-    [
-      t("pages.runPage.route.stat.adjustments", { defaultValue: "корректировок" }),
-      summary.adjustments,
-    ],
+    [t("pages.runPage.route.stat.visits"), summary.visits],
+    [t("pages.runPage.route.stat.working"), summary.working],
+    [t("pages.runPage.route.stat.loops"), summary.loops],
+    [t("pages.runPage.route.stat.adjustments"), summary.adjustments],
   ];
   return (
     <p

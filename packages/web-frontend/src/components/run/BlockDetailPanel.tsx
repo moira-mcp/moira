@@ -157,6 +157,7 @@ export function BlockDetailPanel({
   onSetCursor,
   onFocusNode,
   listHighlight = null,
+  openSection = null,
 }: {
   block: RunBlock | null;
   blocks: RunBlock[];
@@ -180,9 +181,17 @@ export function BlockDetailPanel({
   onFocusNode: (nodeId: string) => void;
   /** A list item to open the list section at and mark (from a click on the card). */
   listHighlight?: HighlightRequest | null;
+  /**
+   * A section to unfold: `name` is the section's id and a new `token` unfolds it again. The
+   * walkthrough uses it so a step can point inside a section the reader keeps folded.
+   */
+  openSection?: HighlightRequest | null;
 }): React.JSX.Element {
   const { t } = useTranslation();
   const { definition, enabled: editing } = useEditing();
+  /** The unfold token for one section: only the section that was asked for gets it. */
+  const unfold = (id: string): number | undefined =>
+    openSection?.name === id ? openSection.token : undefined;
   const steps = useMemo(
     () => (block ? stepsOf(workflow, orderNodeIds(workflow, block.nodeIds)) : []),
     [workflow, block],
@@ -243,7 +252,7 @@ export function BlockDetailPanel({
       {progress && (
         <PanelSection
           id="timings"
-          title={t("pages.runPage.blockDetail.time", { defaultValue: "Время" })}
+          title={t("pages.runPage.blockDetail.time")}
           summary={
             block.timing.totalMs !== null
               ? `${formatDuration(block.timing.totalMs, t)}${block.iterations > 1 ? ` · ×${block.iterations}` : ""}`
@@ -256,7 +265,7 @@ export function BlockDetailPanel({
       {progress && block.list && (block.list.done !== null || block.list.total !== null) && (
         <PanelSection
           id="list"
-          title={t("pages.runPage.blockDetail.list", { defaultValue: "Список" })}
+          title={t("pages.runPage.blockDetail.list")}
           summary={`${listProgressLabel(block.list)}${block.list.currentTitle ? ` · ${block.list.currentTitle}` : ""}`}
           openToken={listHighlight?.token}
         >
@@ -336,9 +345,7 @@ export function BlockDetailPanel({
       {progress && route && onSetCursor && (
         <PanelSection
           id="route"
-          title={t("pages.runPage.blockDetail.routeFacts", {
-            defaultValue: "Что здесь происходило",
-          })}
+          title={t("pages.runPage.blockDetail.routeFacts")}
           defaultOpen={false}
           summary={String(block.visits)}
         >
@@ -351,6 +358,7 @@ export function BlockDetailPanel({
         title={t("pages.runPage.blockDetail.steps")}
         summary={String(block.nodeIds.length)}
         defaultOpen={false}
+        openToken={unfold("steps")}
       >
         {editing ? (
           <EditableSteps

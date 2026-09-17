@@ -9,6 +9,7 @@
  */
 
 import React, { useEffect } from "react";
+import { useTranslation } from "react-i18next";
 import {
   getSmoothStepPath,
   useStore,
@@ -137,22 +138,25 @@ export function routedPoints(
 }
 export type GraphEdge = Edge<GraphEdgeData, "graph">;
 
+/** How a component names things for the reader; passed in so these helpers stay plain functions. */
+type Translate = (key: string, options?: Record<string, unknown>) => string;
+
 /** The fact chips of a step: the directive, what it returns, its expressions, its cases. */
-function stepFacts(graph: GraphStep): FactChip[] {
+function stepFacts(graph: GraphStep, t: Translate): FactChip[] {
   const step = graph.step;
   const facts: FactChip[] = [];
   if (step.text) {
     facts.push({
       key: "directive",
       icon: <FileText className="size-3" aria-hidden="true" />,
-      label: step.routing ? "message" : "directive",
+      label: t(`components.diagram.stepFacts.${step.routing ? "message" : "directive"}`),
       tip: (
         <>
           <TemplateText text={step.text} />
           {step.completionCondition && (
             <>
               {"\n\n"}
-              <b>completion</b>
+              <b>{t("components.diagram.stepFacts.completion")}</b>
               {"\n"}
               <TemplateText text={step.completionCondition} />
             </>
@@ -165,12 +169,12 @@ function stepFacts(graph: GraphStep): FactChip[] {
     facts.push({
       key: "returns",
       icon: <Undo2 className="size-3" aria-hidden="true" />,
-      label: "returns",
+      label: t("components.diagram.stepFacts.returns"),
       count: step.evidence.length,
       tip: step.evidence
         .map(
           (field) =>
-            `${field.name}${field.type ? `: ${field.type}` : ""}${field.required ? " · required" : ""}${
+            `${field.name}${field.type ? `: ${field.type}` : ""}${field.required ? ` · ${t("components.diagram.stepFacts.required")}` : ""}${
               field.description ? ` — ${field.description}` : ""
             }`,
         )
@@ -181,7 +185,7 @@ function stepFacts(graph: GraphStep): FactChip[] {
     facts.push({
       key: "expressions",
       icon: <FunctionSquare className="size-3" aria-hidden="true" />,
-      label: "expressions",
+      label: t("components.diagram.stepFacts.expressions"),
       count: step.expressions.length,
       tip: (
         <>
@@ -199,6 +203,7 @@ function stepFacts(graph: GraphStep): FactChip[] {
 }
 
 export function StepNodeView({ data, selected }: NodeProps<StepNode>): React.JSX.Element {
+  const { t } = useTranslation();
   const focus = useTransitionFocus();
   const { graph, current, error, inputs, outputs, selfLoops, arrived, visited, onGoTo } = data;
   const links = [...inputs, ...outputs, ...selfLoops].map((port) => port.id);
@@ -218,7 +223,7 @@ export function StepNodeView({ data, selected }: NodeProps<StepNode>): React.JSX
           <TemplateText text={step.text} />
         ) : null
       }
-      facts={stepFacts(graph)}
+      facts={stepFacts(graph, t)}
       inputs={inputs}
       outputs={outputs}
       selfLoops={selfLoops}
@@ -240,7 +245,12 @@ export function StepNodeView({ data, selected }: NodeProps<StepNode>): React.JSX
 }
 
 /** The tooltip of an output port: the case that selects it, or the default output. */
-export function outputTip(graph: GraphStep, label: string, targetName: string): React.ReactNode {
+export function outputTip(
+  graph: GraphStep,
+  label: string,
+  targetName: string,
+  t: Translate,
+): React.ReactNode {
   const cases = graph.step.cases.filter((c) => c.output === label);
   if (cases.length > 0) {
     return (
@@ -248,7 +258,7 @@ export function outputTip(graph: GraphStep, label: string, targetName: string): 
         {cases.map((c, i) => (
           <React.Fragment key={i}>
             {i > 0 && "\n"}
-            <b>case</b> <ConditionText when={c.when} />
+            <b>{t("components.diagram.outputTip.case")}</b> <ConditionText when={c.when} />
           </React.Fragment>
         ))}
         {"\n→ "}
@@ -256,8 +266,9 @@ export function outputTip(graph: GraphStep, label: string, targetName: string): 
       </>
     );
   }
-  if (label === "error" || label === "timeout") return `${label} — control output\n→ ${targetName}`;
-  return `${label} — taken when no case holds\n→ ${targetName}`;
+  if (label === "error" || label === "timeout")
+    return `${label} — ${t("components.diagram.outputTip.controlOutput")}\n→ ${targetName}`;
+  return `${label} — ${t("components.diagram.outputTip.fallback")}\n→ ${targetName}`;
 }
 
 export function BlockGroupView({ data }: NodeProps<BlockGroupNode>): React.JSX.Element {

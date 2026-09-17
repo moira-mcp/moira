@@ -135,6 +135,10 @@ test("the run page switches block, step, tab and view without remounting anythin
     expect(await sameElement(page, "run-page", shell)).toBe(true);
 
     // A node on the graph opens as the panel's node level rather than in a sheet over the page.
+    // The navigator sits over the graph's bottom-right corner and, depending on where the camera
+    // came to rest, over a card; a reader folds it from the toolbar, and so does this.
+    await page.getByTestId("toolbar-minimap").click();
+    await expect(page.getByTestId("rf__minimap")).toHaveCount(0);
     await page.locator('[data-graph-node="plan-review"]').click();
     await expect(page.getByTestId("node-panel")).toHaveAttribute("data-node-id", "plan-review");
     await expect(page.locator('[role="dialog"]')).toHaveCount(0);
@@ -243,7 +247,7 @@ test("the map gives the diagram the column on a desktop and one scrolling column
   // the picture keeps most of the page's height instead of a strip at the bottom.
   const desktop = (await page.getByTestId("canvas-view").boundingBox())!;
   expect(desktop.height).toBeGreaterThanOrEqual(600);
-  await expect(page.getByTestId("guidance-map-body")).toHaveCount(0);
+  await expect(page.getByTestId("diagram-guide-body")).toHaveCount(0);
 
   // The map opens readable: every card it draws is at least 60 px tall (a diagram squeezed into
   // a strip cannot manage that), and the block it opens on is wholly inside the diagram's box —

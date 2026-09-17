@@ -81,7 +81,9 @@ import { useStoredFlag } from "../components/diagram/useStoredFlag";
 import type { HighlightRequest } from "../components/diagram/useHighlightTarget";
 import { PanelRightClose, PanelRightOpen } from "lucide-react";
 import { GuidanceHint } from "../components/run/Guidance";
-import { Walkthrough, type GuideStep } from "../components/run/Walkthrough";
+import { Walkthrough } from "../components/run/Walkthrough";
+import { DiagramGuide } from "../components/run/DiagramGuide";
+import { flowGuideSteps, type FlowPanelTab } from "../components/flow/guideSteps";
 import { runBlocks } from "../components/run/model";
 import { RegistryPanel } from "../components/flow/RegistryPanel";
 import { FLOW_MODES, resolveFlowMode, type FlowViewMode } from "../components/flow/modes";
@@ -107,49 +109,6 @@ const VIEW_PARAM = "view";
 const BLOCK_PARAM = "block";
 const GUIDE_PARAM = "guide";
 const EDIT_PARAM = "edit";
-
-type FlowPanelTab = "block" | "variables";
-
-const EVERY_MODE = (selector: string): Partial<Record<FlowViewMode, string>> => ({
-  map: selector,
-  graph: selector,
-});
-
-/** The flow page's walkthrough: block, step, evidence, loop, editing, explore. */
-export function flowGuideSteps(isOwner: boolean): GuideStep<FlowViewMode, FlowPanelTab>[] {
-  return [
-    {
-      id: "process",
-      targets: { map: '[data-testid="map-contents-list"] [data-block-id]' },
-      fallbackView: "map",
-    },
-    {
-      id: "agent",
-      targets: EVERY_MODE('[data-testid="block-detail"] [data-node-id]'),
-      fallbackView: "map",
-      panel: "block",
-    },
-    {
-      id: "evidence",
-      targets: EVERY_MODE('[data-testid="block-detail"] [data-node-inputs]'),
-      fallbackView: "map",
-      panel: "block",
-    },
-    {
-      id: "loop",
-      targets: { map: '[data-port-kind="return"]' },
-      fallbackView: "map",
-    },
-    {
-      id: "edit",
-      targets: EVERY_MODE(
-        isOwner ? '[data-testid="flow-edit-toggle"]' : '[data-testid="flow-header"]',
-      ),
-      fallbackView: "map",
-    },
-    { id: "explore", targets: EVERY_MODE('[data-testid="flow-modes"]'), fallbackView: "map" },
-  ];
-}
 
 /** The slim pending state of a refetch: the content stays, this says a refresh is running. */
 function PendingIndicator(): React.JSX.Element {
@@ -415,6 +374,12 @@ export const FlowPage: React.FC = () => {
     setSelectedNode(null);
   }, []);
   const onPanel = useCallback((tab: FlowPanelTab) => setChosenTab(tab), []);
+  // A panel section the walkthrough asked to unfold so its step has something to point at.
+  const [sectionOpen, setSectionOpen] = useState<HighlightRequest | null>(null);
+  const onSection = useCallback(
+    (id: string) => setSectionOpen((previous) => ({ name: id, token: (previous?.token ?? 0) + 1 })),
+    [],
+  );
 
   // --- Render
   const ownerActions = (
@@ -523,7 +488,12 @@ export const FlowPage: React.FC = () => {
             showControls={true}
             toolbarModes={flowModes}
             toolbarLeading={<ContentsToggleSlot />}
-            toolbarTrailing={flowTrailing}
+            toolbarTrailing={
+              <>
+                <DiagramGuide mode="graph" />
+                {flowTrailing}
+              </>
+            }
             showMinimap
             focusRequest={focusRequest}
             selectedNodeId={focusRequest?.nodeId ?? null}
@@ -573,8 +543,7 @@ export const FlowPage: React.FC = () => {
                   className="rounded-full border bg-muted/40 px-2 py-0.5 text-[11px] tabular-nums text-muted-foreground"
                   data-testid="flow-node-count"
                 >
-                  {savedWorkflow.nodes.length}{" "}
-                  {t("components.workflowSidebar.totalNodes", "total nodes")}
+                  {savedWorkflow.nodes.length} {t("components.workflowSidebar.totalNodes")}
                 </span>
               </>
             ) : undefined
@@ -610,11 +579,7 @@ export const FlowPage: React.FC = () => {
               <div className="md:hidden">
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      aria-label={t("common.actions", { defaultValue: "Actions" })}
-                    >
+                    <Button variant="ghost" size="icon" aria-label={t("common.actions")}>
                       <MoreHorizontal className="h-4 w-4" />
                     </Button>
                   </DropdownMenuTrigger>
@@ -862,12 +827,8 @@ export const FlowPage: React.FC = () => {
                   <button
                     type="button"
                     onClick={togglePanel}
-                    data-hint={t("pages.flowPage.panel.collapse", {
-                      defaultValue: "Свернуть панель",
-                    })}
-                    aria-label={t("pages.flowPage.panel.collapse", {
-                      defaultValue: "Свернуть панель",
-                    })}
+                    data-hint={t("pages.flowPage.panel.collapse")}
+                    aria-label={t("pages.flowPage.panel.collapse")}
                     className="absolute right-1 top-1 z-10 inline-flex h-8 w-8 items-center justify-center rounded-md border bg-card/90 text-muted-foreground shadow-sm hover:bg-accent hover:text-foreground"
                     data-testid="flow-panel-collapse"
                   >
@@ -878,12 +839,8 @@ export const FlowPage: React.FC = () => {
                   <button
                     type="button"
                     onClick={togglePanel}
-                    data-hint={t("pages.flowPage.panel.expand", {
-                      defaultValue: "Развернуть панель",
-                    })}
-                    aria-label={t("pages.flowPage.panel.expand", {
-                      defaultValue: "Развернуть панель",
-                    })}
+                    data-hint={t("pages.flowPage.panel.expand")}
+                    aria-label={t("pages.flowPage.panel.expand")}
                     className="flex h-10 w-full items-center justify-center text-muted-foreground hover:bg-accent hover:text-foreground"
                     data-testid="flow-panel-expand"
                   >
@@ -931,6 +888,7 @@ export const FlowPage: React.FC = () => {
                             update({ [BLOCK_PARAM]: blockId });
                           }}
                           onFocusNode={focusNode}
+                          openSection={sectionOpen}
                         />
                       )}
                     </TabsContent>
@@ -959,6 +917,7 @@ export const FlowPage: React.FC = () => {
             onNavigate={update}
             onPanel={onPanel}
             steps={guideSteps}
+            onSection={onSection}
             textKey="pages.flowPage.guide"
           />
         )}

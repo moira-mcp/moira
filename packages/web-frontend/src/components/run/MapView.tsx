@@ -19,52 +19,10 @@
  */
 
 import React from "react";
-import { useTranslation } from "react-i18next";
-import { Compass } from "lucide-react";
-import { cn } from "@/lib/utils";
-import { useModeGuideKey } from "../flow/editing";
 import { CanvasDiagram } from "./CanvasView";
 import { ContentsLayout } from "./ContentsSidebar";
-import { useStoredFlag } from "../diagram/useStoredFlag";
+import { DiagramGuide } from "./DiagramGuide";
 import { type RunViewProps } from "./model";
-
-/**
- * The explanation of the view as one line: a title with a disclosure that opens the body. It is
- * closed by default so the diagram keeps the column, and the reader's choice is remembered per
- * page in `localStorage` — a browser that refuses storage simply keeps the default.
- */
-function MapGuide({ guideKey }: { guideKey: string }): React.JSX.Element {
-  const { t } = useTranslation();
-  // The reader's choice to keep the explanation open is remembered per page.
-  const [open, toggleOpen] = useStoredFlag(`moira.map.guide:${guideKey}`, false);
-  return (
-    <div className="relative" data-testid="guidance-map">
-      <button
-        type="button"
-        onClick={toggleOpen}
-        aria-expanded={open}
-        data-hint={t("pages.runPage.guide.howToRead", { defaultValue: "Как читать эту схему" })}
-        aria-label={t("pages.runPage.guide.howToRead", { defaultValue: "Как читать эту схему" })}
-        className={cn(
-          "inline-flex h-8 w-8 items-center justify-center rounded-md border border-transparent text-muted-foreground hover:border-border hover:bg-accent hover:text-foreground",
-          open && "border-primary/50 bg-primary/10 text-primary",
-        )}
-        data-testid="guidance-map-toggle"
-      >
-        <Compass className="size-4" aria-hidden="true" />
-      </button>
-      {open && (
-        <div
-          className="absolute right-0 top-full z-20 mt-1 w-[360px] rounded-lg border bg-popover p-3 text-xs leading-5 text-popover-foreground shadow-md"
-          data-testid="guidance-map-body"
-        >
-          <p className="mb-1 font-medium text-primary">{t(`${guideKey}.map.title`)}</p>
-          {t(`${guideKey}.map.body`)}
-        </div>
-      )}
-    </div>
-  );
-}
 
 export function MapView({
   sidebar,
@@ -82,7 +40,6 @@ export function MapView({
   /** The page's trailing controls (legend, guide), placed after the diagram's. */
   toolbarTrailing?: React.ReactNode;
 }): React.JSX.Element {
-  const guideKey = useModeGuideKey();
   const { blocks, selectedBlockId, onSelectBlock } = props;
   return (
     <ContentsLayout
@@ -98,7 +55,7 @@ export function MapView({
           toolbarModes={toolbarModes}
           toolbarTrailing={
             <>
-              <MapGuide guideKey={guideKey} />
+              <DiagramGuide mode="map" />
               {toolbarTrailing}
             </>
           }

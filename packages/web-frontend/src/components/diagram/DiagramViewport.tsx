@@ -6,7 +6,7 @@
  * background or a minimap — is passed in as props and children, not duplicated here.
  */
 
-import React, { useCallback, useMemo } from "react";
+import React, { useCallback, useMemo, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import {
   ControlButton,
@@ -23,6 +23,7 @@ import {
 import "@xyflow/react/dist/style.css";
 import { Maximize } from "lucide-react";
 import { diagramInteractionProps, type DiagramKind } from "./interaction";
+import { REVEAL_EVENT } from "./reveal";
 
 export { diagramInteractionProps, type DiagramKind } from "./interaction";
 
@@ -81,6 +82,26 @@ function FitButton<N extends Node, E extends Edge>({
  */
 const keepNodesClickable = (): void => {};
 
+/**
+ * The diagram's side of `requestReveal` (see `./reveal`): the viewport moves its camera to the
+ * node containing the element that asked. Only the mounted diagram hears the event, and only for
+ * nodes it draws.
+ */
+function RevealListener(): null {
+  const flow = useReactFlow();
+  useEffect(() => {
+    const onReveal = (event: Event) => {
+      const node = (event.target as Element | null)?.closest<HTMLElement>(".react-flow__node");
+      const id = node?.dataset.id;
+      if (!id || !flow.getNode(id)) return;
+      void flow.fitView({ nodes: [{ id }], padding: 0.3, maxZoom: 1, duration: 400 });
+    };
+    document.addEventListener(REVEAL_EVENT, onReveal);
+    return () => document.removeEventListener(REVEAL_EVENT, onReveal);
+  }, [flow]);
+  return null;
+}
+
 export function DiagramViewport<N extends Node = Node, E extends Edge = Edge>({
   kind,
   controlsPosition = "top-right",
@@ -105,6 +126,7 @@ export function DiagramViewport<N extends Node = Node, E extends Edge = Edge>({
   );
   return (
     <ReactFlowProvider>
+      <RevealListener />
       <ReactFlow<N, E>
         {...policy}
         onInit={handleInit}

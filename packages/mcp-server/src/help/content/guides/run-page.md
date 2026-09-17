@@ -13,34 +13,52 @@ variables panel instead.
 
 The two tabs above the picture show the same run in two ways; the choice is in the URL as `view`.
 
-- **Map** (default) — the process as a diagram with its table of contents. A compact band above
-  the diagram names the run: its task, the title it rendered for itself when that differs, its
-  goal and the projection's facts as chips. The diagram draws the blocks left to right in process
-  order: the main sequence of the process on one row, each side branch on a row of its own
-  above or below it, and a block many others lead into or that is reached only by loops beneath
-  them; adjacent forward transitions as arrows with their labels, loops as thin dashed lines
-  below and transitions that skip blocks above; a block that many other blocks lead into (a
-  replan or stop block) receives one thin line from each of them. Every loop, skip and exit into
-  such a block is named by a chip in its source block, and so are three or more parallel
-  transitions into the next block (one chip with their count); hover the chip (or the line) to
-  light it and read its label, and select a block to keep its lines lit. The block the run is on
-  is marked _in progress_, _agent on the step_ or _waiting for you_; a completed block shows a
-  tick, a block that ran several times shows its pass count (×2, ×3), a block the run bypassed is
-  struck through as _skipped_, and blocks not reached yet are dimmed. Under the name and the
-  description a card shows its step count, the time spent in it so far and, when it is bound to a
-  list, `done/total`. The map opens on the current block; scroll or drag to pan, pinch (or hold
-  Ctrl and scroll) to zoom; the fit control shows the whole process at a readable size or, when
-  the process is wider than the view, its beginning. The contents on the left list every block
-  with its status, pass count, `done/total` and, when the owner's other completed runs of this
-  version give one, how long the block typically takes; click one to select it, or type a step's id or
-  text into the finder above to find the block that owns it. The one-line note above the diagram
-  opens into an explanation of the view and remembers whether you left it open.
+- **Map** (default) — the process as a diagram with its table of contents. The header above
+  names the run: its task, its goal and the projection's facts as chips. The diagram draws the
+  blocks left to right in process order: the main sequence on one row, each side branch on a row of
+  its own above or below it, and a block many others lead into or that only loops reach beneath
+  them. Each block is one card: a title band with the block's number badge, its name and its
+  status, then its description and its fact chips (steps, time spent, pass count, `done/total` for
+  a block bound to a list), with a column of input ports on the left and output ports on the
+  right. A port names the transition and the block at the other end. A transition that sends the
+  work back is a dashed return port marked ↻, every transition a block makes to itself shares the
+  double port under the card, and a long link runs through the nearest free lane between rows
+  rather than over the diagram. Hover a port or a line to light that one transition and read its
+  condition or, for a return, its cause and exit; hover a card to light every connection it takes
+  part in; click a port or a line to travel to the other end; select a block to keep its lines
+  lit. The steps chip opens a tooltip listing the block's steps as small cards — click one to open
+  it on the graph. The block the run is on is marked _in progress_, _agent on the step_ or
+  _waiting for you_ and breathes; a completed block shows a tick, a block that ran several times
+  its pass count (×2, ×3), a block the run bypassed is struck through as _skipped_, and blocks not
+  reached yet are dimmed. The map opens on the current block; scroll or drag to pan, pinch (or hold
+  Ctrl and scroll) to zoom; the fit control shows the whole process. The contents on the left lists
+  every block with its status, pass count, `done/total` and, when the owner's other completed runs
+  of this version give one, how long the block typically takes; click one to select it and move the
+  camera there.
 - **Graph** — the technical node graph: every workflow node as a step card grouped by block in
-  process order, the run's block statuses as tints, the current step marked, and every long or
-  returning connection named by chips in both cards instead of drawn. The block selected on the
-  map keeps its frame highlighted here; the fit and direction controls are in the zoom cluster.
-  Clicking a card opens its details: definition, evidence, and its connections as `output →
-target` with the case that selects each output.
+  process order, the run's block statuses as the groups' tints, the step the run is on breathing
+  and the steps it has been through toned as done. A step card has the same title band, side ports
+  and fact chips as a block card on the map; its chips carry the directive, the fields it must
+  return and its expressions — hover one to read the full text. Every connection is drawn as a line
+  between side ports, loops and links into other blocks included; an output port is named by the
+  case that selects it, `success` and `default` are the outputs taken when no case holds, and
+  `error` and `timeout` are control outputs. Hovering, clicking and selecting work exactly as on
+  the map. The block selected on the map keeps its group ringed here, and the contents beside the
+  graph moves the camera to a block's group. Clicking a card opens the panel's node level: the
+  directive, the completion condition, the returned fields, the expressions, the cases, the
+  connections as `output → target` with the case that selects each output, the validation, the
+  playbooks and a catalog-drawn node's configuration, with a breadcrumb back to the block and a
+  "Show on the graph" action that brings the step into view.
+
+Both views share one toolbar above the diagram: the **Map / Graph** switch, the contents fold
+button, the route cursor, the step finder (it answers "which block is this step in" and, on the
+graph, opens that step), the layout presets, zoom and fit, the navigator switch, the compass, the
+status legend and **Explain this page**. The presets re-lay the open diagram and bring the camera
+back to the block you were reading; each view words them for what it moves — on the map _Rows_,
+_Compact_, _Balanced_ (branches on both sides of the main line) and _Top to bottom_, on the graph
+_Stacked groups_, _Compact_, _Groups in a row_ and _Steps top to bottom_ — and both views follow
+the one you chose. The compass opens a note on how to read the view that is open and remembers
+whether you left it open.
 
 Switching tabs keeps the page as it is: the map keeps its selected block, the graph the position
 you left it at, and nothing reloads.
@@ -70,7 +88,8 @@ amber count says how many steps ran without a playbook they name), and a `!` bad
   facts — each visit with the connection it left through, what it changed and who set it; then
   its steps as cards of one shape — the type badge in the same place on every card, then the
   step's name, the first sentence of its instruction and the fields it must return, the evidence
-  Moira validates before the run continues. Clicking a step shows it on the graph view.
+  Moira validates before the run continues. Clicking a step opens it on the graph view and at the
+  panel's node level.
 - **Variables** — the run's values as two collapsible groups of aligned rows: every declared
   variable (name, current value, a small count that opens the history of the steps that changed
   it) and every step's outputs under its step. Objects open as a tree inside the row. A declared
@@ -108,5 +127,8 @@ is behind the server's (reload and answer again).
 ## Explaining the page
 
 **Explain this page** walks through the page in six steps — block, step, evidence, loop, route,
-and the views — highlighting the element that shows each on the live run. The step is in the URL as
-`guide`, so a position can be linked to. The map's one-line note opens into what the view is for.
+and the views — highlighting the element that shows each on the live run, in whichever view is
+open: a contents row, the current step in the block panel (the section it sits in unfolds), the
+evidence a step must return, a return port, the route cursor and the toolbar. A highlighted card
+inside the diagram is brought into the camera. The step is in the URL as `guide`, so a position can
+be linked to. The compass in the toolbar opens the note about the open view.

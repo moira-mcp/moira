@@ -76,6 +76,7 @@ import { VariablesPanel } from "../run/VariablesPanel";
 import { RunCursor } from "../run/RunCursor";
 import { StatusLegend } from "../run/status";
 import { Walkthrough, type PanelTab } from "../run/Walkthrough";
+import { DiagramGuide } from "../run/DiagramGuide";
 import { currentBlockId, runBlocks, stepsOf, waitingStep } from "../run/model";
 import { StepCard, StepCardList } from "../run/StepCard";
 import type { RunBlock, RunProgress } from "../run/model";
@@ -437,6 +438,8 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
   const [variableHighlight, setVariableHighlight] = useState<HighlightRequest | null>(null);
   // A list item clicked on a block card: the block panel opens its list section at that item.
   const [listHighlight, setListHighlight] = useState<HighlightRequest | null>(null);
+  // A panel section the walkthrough asked to unfold so its step has something to point at.
+  const [sectionOpen, setSectionOpen] = useState<HighlightRequest | null>(null);
   const selectListItem = useCallback(
     (blockId: string, index: number) => {
       update({ [BLOCK_PARAM]: blockId });
@@ -581,6 +584,12 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
   );
 
   const onPanel = useCallback((tab: PanelTab) => setChosenTab(tab), []);
+  // The walkthrough points inside sections the panel remembers as folded; this unfolds the one
+  // the current step needs, the same way a click on a list item unfolds the list.
+  const onSection = useCallback(
+    (id: string) => setSectionOpen((previous) => ({ name: id, token: (previous?.token ?? 0) + 1 })),
+    [],
+  );
 
   const getCurrentNode = () => {
     if (!execution?.currentNodeId || !workflow?.workflow?.nodes) return null;
@@ -688,8 +697,8 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
           type="button"
           onClick={() => setLegendOpen((was) => !was)}
           aria-expanded={legendOpen}
-          data-hint={t("pages.runPage.legend.title", { defaultValue: "Легенда статусов" })}
-          aria-label={t("pages.runPage.legend.title", { defaultValue: "Легенда статусов" })}
+          data-hint={t("pages.runPage.legend.title")}
+          aria-label={t("pages.runPage.legend.title")}
           className={cn(
             "inline-flex h-8 w-8 items-center justify-center rounded-md border border-transparent text-muted-foreground hover:border-border hover:bg-accent hover:text-foreground",
             legendOpen && "border-primary/50 bg-primary/10 text-primary",
@@ -746,7 +755,12 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
             {runControls}
           </>
         }
-        toolbarTrailing={runTrailing}
+        toolbarTrailing={
+          <>
+            <DiagramGuide mode="graph" />
+            {runTrailing}
+          </>
+        }
       />
     </Suspense>
   );
@@ -851,9 +865,7 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
                   <Lock className="h-4 w-4" />
                 </Button>
               </TooltipTrigger>
-              <TooltipContent>
-                {t("pages.executionInspector.toolbar.lock", "Lock Execution")}
-              </TooltipContent>
+              <TooltipContent>{t("pages.executionInspector.toolbar.lock")}</TooltipContent>
             </Tooltip>
           )}
 
@@ -976,8 +988,8 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
             <button
               type="button"
               onClick={togglePanel}
-              data-hint={t("pages.runPage.panel.collapse", { defaultValue: "Свернуть панель" })}
-              aria-label={t("pages.runPage.panel.collapse", { defaultValue: "Свернуть панель" })}
+              data-hint={t("pages.runPage.panel.collapse")}
+              aria-label={t("pages.runPage.panel.collapse")}
               className="absolute right-1 top-1 z-10 inline-flex h-8 w-8 items-center justify-center rounded-md border bg-card/90 text-muted-foreground shadow-sm hover:bg-accent hover:text-foreground"
               data-testid="run-panel-collapse"
             >
@@ -988,8 +1000,8 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
             <button
               type="button"
               onClick={togglePanel}
-              data-hint={t("pages.runPage.panel.expand", { defaultValue: "Развернуть панель" })}
-              aria-label={t("pages.runPage.panel.expand", { defaultValue: "Развернуть панель" })}
+              data-hint={t("pages.runPage.panel.expand")}
+              aria-label={t("pages.runPage.panel.expand")}
               className="flex h-10 w-full items-center justify-center text-muted-foreground hover:bg-accent hover:text-foreground"
               data-testid="run-panel-expand"
             >
@@ -1115,6 +1127,7 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
                       onSetCursor={(at) => update({ [AT_PARAM]: at === null ? null : String(at) })}
                       onFocusNode={focusNode}
                       listHighlight={listHighlight}
+                      openSection={sectionOpen}
                     />
                   )}
                 </TabsContent>
@@ -1300,18 +1313,15 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
             <DialogTitle className="flex items-center gap-2">
               <Lock className="h-5 w-5 text-yellow-600" />
               {lockResult
-                ? t("pages.executionInspector.lockDialog.success", "Execution Locked")
-                : t("pages.executionInspector.lockDialog.title", "Lock Execution")}
+                ? t("pages.executionInspector.lockDialog.success")
+                : t("pages.executionInspector.lockDialog.title")}
             </DialogTitle>
           </DialogHeader>
 
           {lockResult ? (
             <div className="space-y-4 py-2">
               <p className="text-sm text-muted-foreground">
-                {t(
-                  "pages.executionInspector.lockDialog.successMessage",
-                  "Execution has been locked. Share the PIN with the agent to unlock.",
-                )}
+                {t("pages.executionInspector.lockDialog.successMessage")}
               </p>
               <div className="p-3 bg-muted rounded-md text-center">
                 <div className="text-xs text-muted-foreground mb-1">PIN</div>
@@ -1324,23 +1334,17 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
                     setLockResult(null);
                   }}
                 >
-                  {t("common.close", "Close")}
+                  {t("common.close")}
                 </Button>
               </DialogFooter>
             </div>
           ) : (
             <div className="space-y-4 py-2">
               <p className="text-sm text-muted-foreground">
-                {t(
-                  "pages.executionInspector.lockDialog.description",
-                  "Locking will pause the execution. Provide a reason for locking.",
-                )}
+                {t("pages.executionInspector.lockDialog.description")}
               </p>
               <Input
-                placeholder={t(
-                  "pages.executionInspector.lockDialog.reasonPlaceholder",
-                  "Reason for locking...",
-                )}
+                placeholder={t("pages.executionInspector.lockDialog.reasonPlaceholder")}
                 value={lockReason}
                 onChange={(e) => setLockReason(e.target.value)}
                 onKeyDown={(e) => {
@@ -1352,7 +1356,7 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
               />
               <DialogFooter>
                 <Button variant="outline" onClick={() => setLockDialogOpen(false)}>
-                  {t("common.cancel", "Cancel")}
+                  {t("common.cancel")}
                 </Button>
                 <Button
                   onClick={handleCreateLock}
@@ -1361,7 +1365,7 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
                 >
                   {locking && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
                   <Lock className="h-4 w-4 mr-2" />
-                  {t("pages.executionInspector.lockDialog.confirm", "Lock")}
+                  {t("pages.executionInspector.lockDialog.confirm")}
                 </Button>
               </DialogFooter>
             </div>
@@ -1377,6 +1381,7 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
           routeRecorded={progress.routeRecorded}
           onNavigate={update}
           onPanel={onPanel}
+          onSection={onSection}
         />
       )}
     </div>

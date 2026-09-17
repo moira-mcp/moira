@@ -7,9 +7,11 @@
  */
 
 import React, { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Map as MapIcon, Maximize, Search, X, ZoomIn, ZoomOut } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { LayoutPresetButtons } from "./LayoutPresetButtons";
+import type { PresetSurface } from "./layoutPreset";
 
 export function ToolbarButton({
   onClick,
@@ -55,12 +57,12 @@ export function DiagramToolbar({
   modes,
   leading,
   finder,
-  finderLabel = "Найти шаг",
   onZoomIn,
   onZoomOut,
   onFit,
   minimap,
   trailing,
+  surface = "map",
   testId = "diagram-toolbar",
 }: {
   /** The page's view-mode switch (map / graph), first in the row. */
@@ -68,16 +70,19 @@ export function DiagramToolbar({
   leading?: React.ReactNode;
   /** The step finder; shown when the search button is pressed. Receives `onClose` via context-free prop. */
   finder?: (close: () => void) => React.ReactNode;
-  finderLabel?: string;
   onZoomIn: () => void;
   onZoomOut: () => void;
   onFit: () => void;
   /** The minimap switch, when the diagram has one. */
   minimap?: { on: boolean; toggle: () => void };
   trailing?: React.ReactNode;
+  /** Which diagram this toolbar belongs to; picks the presets' wording. */
+  surface?: PresetSurface;
   testId?: string;
 }): React.JSX.Element {
+  const { t } = useTranslation();
   const [finderOpen, setFinderOpen] = useState(false);
+  const finderText = t("components.diagram.toolbar.finder");
   return (
     <div
       // Wraps when the diagram's column is narrow (both sidebars open): a second short row beats
@@ -93,8 +98,8 @@ export function DiagramToolbar({
         <div className={cn("flex min-w-0 items-center gap-1", finderOpen && "flex-1")}>
           <ToolbarButton
             onClick={() => setFinderOpen((open) => !open)}
-            title={finderLabel}
-            label={finderLabel}
+            title={finderText}
+            label={finderText}
             active={finderOpen}
             dataAttributes={{ "data-testid": "toolbar-finder" }}
           >
@@ -108,28 +113,28 @@ export function DiagramToolbar({
         </div>
       )}
       <div className="ml-auto flex shrink-0 items-center gap-0.5">
-        <LayoutPresetButtons variant="toolbar" />
+        <LayoutPresetButtons variant="toolbar" surface={surface} />
         <ToolbarDivider />
         <ToolbarButton
           onClick={onZoomOut}
-          title="Отдалить"
-          label="Отдалить"
+          title={t("components.diagram.toolbar.zoomOut")}
+          label={t("components.diagram.toolbar.zoomOut")}
           dataAttributes={{ "data-testid": "toolbar-zoom-out" }}
         >
           <ZoomOut className="size-4" />
         </ToolbarButton>
         <ToolbarButton
           onClick={onZoomIn}
-          title="Приблизить"
-          label="Приблизить"
+          title={t("components.diagram.toolbar.zoomIn")}
+          label={t("components.diagram.toolbar.zoomIn")}
           dataAttributes={{ "data-testid": "toolbar-zoom-in" }}
         >
           <ZoomIn className="size-4" />
         </ToolbarButton>
         <ToolbarButton
           onClick={onFit}
-          title="Показать всё"
-          label="Показать всё"
+          title={t("components.diagram.toolbar.fit")}
+          label={t("components.diagram.toolbar.fit")}
           dataAttributes={{ "data-testid": "toolbar-fit" }}
         >
           <Maximize className="size-4" />
@@ -137,8 +142,8 @@ export function DiagramToolbar({
         {minimap && (
           <ToolbarButton
             onClick={minimap.toggle}
-            title="Навигатор в углу схемы"
-            label="Навигатор"
+            title={t("components.diagram.toolbar.minimapHint")}
+            label={t("components.diagram.toolbar.minimap")}
             active={minimap.on}
             dataAttributes={{ "data-testid": "toolbar-minimap" }}
           >

@@ -50,8 +50,9 @@ frontend/src/
 │   │   ├── PanelSection.tsx / IndexBadge.tsx / ListMarker.tsx              # Panel section rhythm; the ordinal badge; the list-item marker
 │   │   ├── VariableText.tsx                                                # `{{name}}`, expression and condition tokens with the registry tooltip
 │   │   ├── DiagramViewport.tsx / interaction.ts / placement.ts             # React Flow wrapper, gesture policy, opening placement
+│   │   ├── reveal.ts                                                       # `requestReveal`: bring an element inside a diagram into the camera
 │   │   └── layoutPreset.ts / interactive.ts / useHighlightTarget.ts / useStoredFlag.ts
-│   ├── flow/                    # Flow page: the definition as a process, edited in place
+│   ├── flow/                    # Flow page: the definition as a process, edited in place (`guideSteps.ts`: its walkthrough)
 │   │   ├── editing.tsx / model.ts / modes.ts        # Edit set (apply, export diff), run-less projection, the two views
 │   │   ├── RegistryPanel.tsx                        # The variable registry (panel tab)
 │   │   └── EditControls.tsx                         # In-place editors (block text, transitions, owner, node text)
@@ -64,7 +65,7 @@ frontend/src/
 │   │   ├── NodeFinder.tsx                                                   # Step search, mounted in both diagram toolbars
 │   │   ├── variableRows.ts / variableTree.tsx                              # Variables grouping model; shared rows, groups, tree, leaf editor
 │   │   ├── StepCard.tsx / TabBadge.tsx                                      # One step card for every panel list; the panel badge
-│   │   ├── RunCursor.tsx / Walkthrough.tsx / Guidance.tsx / status.tsx      # Cursor, guide, notes, status vocabulary and the card tone per status
+│   │   ├── RunCursor.tsx / Walkthrough.tsx / DiagramGuide.tsx / Guidance.tsx / status.tsx  # Cursor, walkthrough, the compass note per view, callouts, status vocabulary and the card tone per status
 │   │   ├── model.ts / route.ts / layout.ts / focus.tsx                      # Pure view helpers; the map's ELK layout and presets; the lit-connector store
 │   │   ├── duration.ts / waiting.ts                                         # Duration and clock formatting; who-is-waited-for wording
 │   │   └── modes.ts / nodeTypeStyle.tsx
@@ -558,9 +559,10 @@ live URL so a duplicate change pushes no history entry.
 **Views** (`components/run/`):
 
 - `MapView` — one component for both pages: the layered diagram (`CanvasDiagram` from
-  `CanvasView.tsx`) inside a `ContentsLayout`, with the guidance as a toolbar disclosure
-  (`guidance-map` with `guidance-map-toggle` / `guidance-map-body`, closed by default, its state
-  remembered per page in `localStorage` under `moira.map.guide:<page key>`) and the step finder
+  `CanvasView.tsx`) inside a `ContentsLayout`, with the compass note (`DiagramGuide`, mounted in
+  the toolbar of both diagrams: `diagram-guide` with `diagram-guide-toggle` / `diagram-guide-body`,
+  closed by default, its state remembered per page and view in `localStorage` under
+  `moira.diagram.guide:<page key>.<mode>`, its text under `pages.<page>.modeGuide.<mode>`) and the step finder
   (`map-node-finder`, which answers "which block is this step in" and selects that block) folded
   into the toolbar's search button. The map holds no block narrative and no page text: the
   `PageHeader` names the run or the flow, and the page's panel carries the block's story.
@@ -722,11 +724,16 @@ refusal shown inline); `ExecutionErrorHistory`; `StepProgression`. The lazily lo
 whether the answer was accepted or refused, because a rejected answer is still an engine step that
 advances the revision.
 
-**Walkthrough** (`Walkthrough.tsx`): six anchored steps (process, agent, evidence, loop, route,
-explore), each with a selector per view and a fallback view, the current block and panel tab it
-needs (the loop step anchors to a return port, `[data-port-kind="return"]`); the highlight is a ring
-on the target element. **Guidance** callouts introduce the panels (on a phone they fold to their
-title); the map's guidance is the toolbar disclosure described above.
+**Walkthrough** (`Walkthrough.tsx`; the flow page's steps in `components/flow/guideSteps.ts`): six
+anchored steps (process, agent, evidence, loop, route, explore), each with a selector for both
+views — the contents row, the step and its evidence in the block panel, a return port
+(`[data-port-kind="return"]`), the route cursor and the open view's toolbar — plus the current
+block, the panel tab and the panel section (`section`, unfolded through `BlockDetailPanel`'s
+`openSection` request) it needs, so a step never switches the reader's view. The highlight is a
+ring on the target element, applied once the element has come to rest; the element is scrolled
+into view and, when it sits inside a diagram, `requestReveal` (`diagram/reveal.ts`) asks the
+mounted `DiagramViewport` to move its camera to the node containing it. **Guidance** callouts
+introduce the panels (on a phone they fold to their title); the compass note is described above.
 
 **Lock Dialog:**
 
@@ -1694,6 +1701,11 @@ i18n
     },
   });
 ```
+
+The diagram, run and flow components carry no translation fallbacks — no `defaultValue`, no
+second-argument default — so a key missing from one language surfaces in the parity test rather
+than as silent English; the layout presets are worded per surface under
+`components.diagram.presets.<map|graph>.<id>` and resolved where they render (`LayoutPresetButtons`).
 
 ### Adding New Language
 

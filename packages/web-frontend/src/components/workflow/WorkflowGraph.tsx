@@ -224,7 +224,17 @@ export const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
       workflow.nodes.find((n) => n.id === nodeId)?.metadata?.displayName || nodeId,
     [workflow.nodes],
   );
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+  // A stable translator for the layout effect. react-i18next hands out a fresh `t` on every
+  // render, so depending on it there lays the graph out again forever and detaches the cards
+  // mid-interaction; the effect watches the language instead and reads the current `t` through
+  // this ref, so a language switch does rebuild the port tooltips.
+  const translateRef = useRef(t);
+  translateRef.current = t;
+  const translate = useCallback(
+    (key: string, options?: Record<string, unknown>): string => translateRef.current(key, options),
+    [],
+  );
   const mobile = useIsMobile();
   const { actualTheme } = useTheme();
   // The React Flow instance arrives through the viewport's init callback; the layout effects and
@@ -608,7 +618,7 @@ export const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
                 id: link.id,
                 label: link.label,
                 kind: "return",
-                tip: source ? outputTip(source, link.label, targetName) : link.label,
+                tip: source ? outputTip(source, link.label, targetName, translate) : link.label,
                 peer: link.target,
               },
             ]);
@@ -623,7 +633,7 @@ export const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
                 ? `${blockNameOf.get(targetBlock ?? "") ?? ""} › ${targetName}`
                 : targetName,
               kind: outKind,
-              tip: source ? outputTip(source, link.label, targetName) : link.label,
+              tip: source ? outputTip(source, link.label, targetName, translate) : link.label,
               peer: link.target,
             },
           ]);
@@ -725,6 +735,9 @@ export const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
     focusStep,
     goTo,
     preset,
+    translate,
+    // The port tooltips are written in the reader's language; a language change rebuilds them.
+    i18n.language,
   ]);
 
   /**
@@ -786,6 +799,7 @@ export const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
     <div className={`h-full relative flex flex-col ${className}`}>
       {showControls && (
         <DiagramToolbar
+          surface="graph"
           modes={toolbarModes}
           leading={toolbarLeading}
           trailing={toolbarTrailing}

@@ -97,7 +97,7 @@ export function NodePanel({
       <div className="space-y-3 p-3" data-testid="node-panel" data-node-id={nodeId}>
         <nav
           className="flex flex-wrap items-center gap-1 text-xs text-muted-foreground"
-          aria-label="breadcrumb"
+          aria-label={t("components.nodePanel.breadcrumb")}
           data-testid="node-panel-breadcrumb"
         >
           <button
@@ -145,7 +145,7 @@ export function NodePanel({
               data-testid="node-panel-focus"
             >
               <Crosshair className="size-3.5" aria-hidden="true" />
-              {t("pages.runPage.map.showOnGraph", { defaultValue: "На графе" })}
+              {t("components.nodePanel.showOnGraph")}
             </Button>
           )}
         </div>
@@ -153,7 +153,7 @@ export function NodePanel({
         {(errors.length > 0 || warnings.length > 0) && (
           <PanelSection
             id="validation"
-            title={t("components.workflowGraph.nodeDetails.validation", "Validation")}
+            title={t("components.workflowGraph.nodeDetails.validation")}
             summary={String(errors.length + warnings.length)}
             testId="node-panel-validation"
           >
@@ -176,7 +176,7 @@ export function NodePanel({
         {step.text && (
           <PanelSection
             id={step.routing ? "message" : "directive"}
-            title={step.routing ? "message" : "directive"}
+            title={t(`components.nodePanel.sections.${step.routing ? "message" : "directive"}`)}
             testId="node-panel-directive"
           >
             <p className="whitespace-pre-wrap break-words text-xs leading-5 [overflow-wrap:anywhere]">
@@ -185,7 +185,7 @@ export function NodePanel({
           </PanelSection>
         )}
         {step.completionCondition && (
-          <PanelSection id="completion" title="completion">
+          <PanelSection id="completion" title={t("components.nodePanel.sections.completion")}>
             <p className="whitespace-pre-wrap text-xs leading-5 text-muted-foreground">
               <TemplateText text={step.completionCondition} />
             </p>
@@ -193,8 +193,8 @@ export function NodePanel({
         )}
         {step.evidence.length > 0 && (
           <PanelSection
-            id={t("pages.runPage.blockDetail.returns")}
-            title={t("pages.runPage.blockDetail.returns")}
+            id="returns"
+            title={t("components.nodePanel.sections.returns")}
             testId="node-panel-returns"
           >
             <ul className="space-y-1 text-xs">
@@ -205,7 +205,9 @@ export function NodePanel({
                     {field.type && <span className="text-muted-foreground">: {field.type}</span>}
                   </code>
                   {field.required && (
-                    <span className="text-[10px] uppercase text-muted-foreground">required</span>
+                    <span className="text-[10px] uppercase text-muted-foreground">
+                      {t("components.nodePanel.required")}
+                    </span>
                   )}
                   {field.description && (
                     <span className="text-muted-foreground">{field.description}</span>
@@ -216,7 +218,11 @@ export function NodePanel({
           </PanelSection>
         )}
         {step.expressions.length > 0 && (
-          <PanelSection id="expressions" title="expressions" testId="node-panel-expressions">
+          <PanelSection
+            id="expressions"
+            title={t("components.nodePanel.sections.expressions")}
+            testId="node-panel-expressions"
+          >
             <ul className="space-y-0.5 font-mono text-[11px]">
               {step.expressions.map((expression, index) => (
                 <li key={index}>
@@ -227,7 +233,11 @@ export function NodePanel({
           </PanelSection>
         )}
         {step.cases.length > 0 && (
-          <PanelSection id="cases" title="cases" testId="node-panel-cases">
+          <PanelSection
+            id="cases"
+            title={t("components.nodePanel.sections.cases")}
+            testId="node-panel-cases"
+          >
             <ol className="space-y-1 text-[11px]">
               {step.cases.map((c, index) => (
                 <li key={index} className="flex flex-wrap items-center gap-1 font-mono">
@@ -247,7 +257,7 @@ export function NodePanel({
         {playbooks.length > 0 && (
           <PanelSection
             id="playbooks"
-            title={t("components.workflowGraph.nodeDetails.playbooks", "Playbooks")}
+            title={t("components.workflowGraph.nodeDetails.playbooks")}
             summary={String(playbooks.length)}
             testId="node-panel-playbooks"
           >
@@ -257,10 +267,10 @@ export function NodePanel({
         {described && nodeConfig !== undefined && (
           <PanelSection
             id="configuration"
-            title={t("components.workflowSidebar.configuration", "Configuration")}
+            title={t("components.workflowSidebar.configuration")}
             summary={
               described.extensionName
-                ? `${t("components.workflowSidebar.providedBy", "Provided by extension")} ${described.extensionName}${described.extensionVersion ? ` ${described.extensionVersion}` : ""}`
+                ? `${t("components.workflowSidebar.providedBy")} ${described.extensionName}${described.extensionVersion ? ` ${described.extensionVersion}` : ""}`
                 : undefined
             }
             testId="node-panel-configuration"
@@ -271,7 +281,7 @@ export function NodePanel({
         {graphId && (
           <PanelSection
             id="subgraph"
-            title={t("components.workflowGraph.nodeDetails.subgraphId", "Subgraph ID")}
+            title={t("components.workflowGraph.nodeDetails.subgraphId")}
             testId="node-panel-subgraph"
           >
             <code className="rounded bg-muted px-2 py-1 font-mono text-xs">{graphId}</code>
@@ -280,7 +290,7 @@ export function NodePanel({
         {basePath && filePaths && (
           <PanelSection
             id="materialize"
-            title="Materialize"
+            title={t("components.nodePanel.sections.materialize")}
             summary={String(filePaths.length)}
             testId="node-panel-materialize"
           >
@@ -299,7 +309,7 @@ export function NodePanel({
         {inputSchema && Object.keys(inputSchema).length > 0 && (
           <PanelSection
             id="input-schema"
-            title={t("components.workflowGraph.nodeDetails.inputSchema", "Input Schema")}
+            title={t("components.workflowGraph.nodeDetails.inputSchema")}
             defaultOpen={false}
             testId="node-panel-input-schema"
           >
@@ -309,7 +319,11 @@ export function NodePanel({
           </PanelSection>
         )}
         {node?.connections && Object.keys(node.connections).length > 0 && (
-          <PanelSection id="connections" title="connections" testId="node-panel-connections">
+          <PanelSection
+            id="connections"
+            title={t("components.nodePanel.sections.connections")}
+            testId="node-panel-connections"
+          >
             <ul className="space-y-0.5 text-[11px]">
               {Object.entries(node.connections).map(([key, target]) => (
                 <li key={key} className="flex items-center gap-1 font-mono">

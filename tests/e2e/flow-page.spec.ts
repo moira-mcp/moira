@@ -71,11 +71,11 @@ test("reads a bundled flow as a process on the map and as nodes on the graph, an
   );
   // The explanation of the view is one toolbar button: the body appears only after the reader
   // asks for it, so the diagram keeps the column.
-  await expect(page.getByTestId("guidance-map-body")).toHaveCount(0);
-  await page.getByTestId("guidance-map-toggle").click();
-  await expect(page.getByTestId("guidance-map-body")).toBeVisible();
-  await page.getByTestId("guidance-map-toggle").click();
-  await expect(page.getByTestId("guidance-map-body")).toHaveCount(0);
+  await expect(page.getByTestId("diagram-guide-body")).toHaveCount(0);
+  await page.getByTestId("diagram-guide-toggle").click();
+  await expect(page.getByTestId("diagram-guide-body")).toBeVisible();
+  await page.getByTestId("diagram-guide-toggle").click();
+  await expect(page.getByTestId("diagram-guide-body")).toHaveCount(0);
   // The block panel opens on the first block and drills into its steps with their evidence.
   await expect(page.getByTestId("block-detail")).toHaveAttribute("data-block-id", "scope");
   await openSteps(page);
@@ -162,16 +162,11 @@ test("reads a bundled flow as a process on the map and as nodes on the graph, an
   await expect(connections).toContainText("check-review-clean");
   await expect(connections).not.toContainText("Decision");
 
-  // The walkthrough lives in the URL and points at the map's own elements.
+  // The walkthrough lives in the URL; `walkthrough.spec.ts` runs every one of its steps through
+  // in both views and checks each anchor resolves.
   await page.goto(`${BASE_URL}/workflows/moira/quick-task?guide=1`);
   await expect(page.getByTestId("walkthrough")).toHaveAttribute("data-guide-step", "process");
   await expect(page.locator('[data-guide-target="process"]')).toBeVisible();
-  await openSteps(page);
-  await page.getByTestId("walkthrough-next").click();
-  await expect(page.getByTestId("walkthrough")).toHaveAttribute("data-guide-step", "agent");
-  await expect(page.locator('[data-guide-target="agent"]')).toBeVisible();
-  await page.getByTestId("walkthrough-next").click();
-  await expect(page.locator('[data-guide-target="evidence"]')).toBeVisible();
 });
 
 /** A ninety-character block name: the map card must clamp it rather than grow or overflow. */
@@ -511,7 +506,7 @@ test("a phone keeps the flow page readable: contents under the diagram, panel un
     () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
   );
   expect(overflow).toBeLessThanOrEqual(0);
-  await expect(page.getByTestId("guidance-map-body")).toHaveCount(0);
+  await expect(page.getByTestId("diagram-guide-body")).toHaveCount(0);
   const picture = (await page.getByTestId("flow-view").boundingBox())!;
   const panel = (await page.getByTestId("flow-panel").boundingBox())!;
   expect(picture.height).toBeGreaterThanOrEqual(900 * 0.4);

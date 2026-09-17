@@ -6,6 +6,7 @@
  */
 
 import React, { createContext, useContext } from "react";
+import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 import { Hint } from "./Hint";
 
@@ -63,6 +64,7 @@ export function VariableRef({
   /** Inside a title: no pill, the surrounding font, colour and a dotted underline only. */
   compact?: boolean;
 }): React.JSX.Element {
+  const { t } = useTranslation();
   const { registry, onSelect, selected } = useVariables();
   const root = rootOf(name);
   const definition = registry[root] ?? registry[name];
@@ -105,19 +107,21 @@ export function VariableRef({
             <>
               <b>{root}</b>
               {definition.type ? `: ${definition.type}` : ""}
-              {definition.required ? " · required" : ""}
+              {definition.required ? ` · ${t("components.diagram.variable.required")}` : ""}
               {definition.enum ? `\nenum ${JSON.stringify(definition.enum)}` : ""}
               {definition.default !== undefined
                 ? `\ndefault ${JSON.stringify(definition.default)}`
                 : ""}
               {definition.description ? `\n${definition.description}` : ""}
-              {name !== root ? `\n${name} — поле ответа ноды ${root}` : ""}
-              {onSelect ? "\n\nклик — к определению" : ""}
+              {name !== root
+                ? `\n${t("components.diagram.variable.answerField", { field: name, node: root })}`
+                : ""}
+              {onSelect ? `\n\n${t("components.diagram.variable.clickToDefinition")}` : ""}
             </>
           ) : (
             <>
               <b>{name}</b>
-              {"\nне объявлена в variableRegistry"}
+              {`\n${t("components.diagram.variable.undeclared")}`}
             </>
           )}
         </>
