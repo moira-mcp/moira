@@ -308,6 +308,8 @@ export async function layoutGraph(
   /** Card heights the browser measured, overriding the estimates (a second pass). */
   measuredHeights?: ReadonlyMap<string, number>,
   spacing: GraphSpacing = graphSpacing("default"),
+  /** The direction the steps run inside a group; by default across the stacking direction. */
+  innerDirectionOverride?: "DOWN" | "RIGHT",
 ): Promise<GraphLayout> {
   const GROUP_GAP = spacing.group;
   const { default: ELK } = await import("elkjs/lib/elk.bundled.js");
@@ -345,7 +347,8 @@ export async function layoutGraph(
   };
   const grouped = model.blocks.length > 0;
   // Inside a group the steps run across the stacking direction; a flat graph runs along it.
-  const innerDirection = grouped ? (direction === "DOWN" ? "RIGHT" : "DOWN") : direction;
+  const innerDirection =
+    innerDirectionOverride ?? (grouped ? (direction === "DOWN" ? "RIGHT" : "DOWN") : direction);
   const layoutOptions = {
     "elk.algorithm": "layered",
     "elk.direction": innerDirection,

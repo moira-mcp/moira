@@ -80,7 +80,9 @@ export function DiagramToolbar({
   const [finderOpen, setFinderOpen] = useState(false);
   return (
     <div
-      className="flex shrink-0 items-center gap-1 overflow-hidden border-b bg-card px-2 py-1"
+      // Wraps when the diagram's column is narrow (both sidebars open): a second short row beats
+      // buttons cut off at the edge.
+      className="flex shrink-0 flex-wrap items-center gap-x-1 gap-y-1 border-b bg-card px-2 py-1"
       data-testid={testId}
       role="toolbar"
     >

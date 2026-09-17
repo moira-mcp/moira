@@ -127,11 +127,15 @@ export function routedPoints(
         [route.side, targetY],
         [targetX, targetY],
       ]
-    : [
+    : // Steps stacked top to bottom with side ports: out of the right port to a short stub, down to
+      // the laid stub row, along the lane, and in beside the target's left edge.
+      [
         [sourceX, sourceY],
-        [sourceX, route.stub],
+        [sourceX + 24, sourceY],
+        [sourceX + 24, route.stub],
         ...route.lane,
-        [targetX, route.side],
+        [targetX - 24, route.side],
+        [targetX - 24, targetY],
         [targetX, targetY],
       ];
 }

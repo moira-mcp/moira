@@ -41,8 +41,8 @@ function MapGuide({ guideKey }: { guideKey: string }): React.JSX.Element {
         type="button"
         onClick={() => setOpen((was) => !was)}
         aria-expanded={open}
-        data-hint={t(`${guideKey}.map.title`)}
-        aria-label={t(`${guideKey}.map.title`)}
+        data-hint={t("pages.runPage.guide.howToRead", { defaultValue: "Как читать эту схему" })}
+        aria-label={t("pages.runPage.guide.howToRead", { defaultValue: "Как читать эту схему" })}
         className={cn(
           "inline-flex h-8 w-8 items-center justify-center rounded-md border border-transparent text-muted-foreground hover:border-border hover:bg-accent hover:text-foreground",
           open && "border-primary/50 bg-primary/10 text-primary",

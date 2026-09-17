@@ -34,7 +34,21 @@ import { useOpeningPlacement } from "../diagram/placement";
 import { DiagramToolbar } from "../diagram/DiagramToolbar";
 import { NodeFinder } from "../run/NodeFinder";
 import { useStoredFlag } from "../diagram/useStoredFlag";
-import { useLayoutPreset } from "../diagram/layoutPreset";
+import { useLayoutPreset, type LayoutPreset } from "../diagram/layoutPreset";
+
+/**
+ * What a layout preset means on the graph: how the block groups are stacked (`outer`) and how the
+ * steps run inside a group (`inner`). Cards keep their ports on the left and right in every case.
+ */
+const GRAPH_PRESET_DIRECTIONS: Record<
+  LayoutPreset,
+  { outer: "DOWN" | "RIGHT"; inner: "DOWN" | "RIGHT" }
+> = {
+  default: { outer: "DOWN", inner: "RIGHT" },
+  compact: { outer: "DOWN", inner: "RIGHT" },
+  flow: { outer: "RIGHT", inner: "RIGHT" },
+  vertical: { outer: "DOWN", inner: "DOWN" },
+};
 
 import { graphModel, definitionBlocks } from "../run/graphModel";
 import { graphSpacing, GRAPH_MARGIN, layoutGraph } from "./graphLayout";
@@ -510,11 +524,16 @@ export const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
   // focused step through the placement key.
   const [preset] = useLayoutPreset();
   useEffect(() => {
-    const direction = graphBlocks.length > 0 ? "TB" : "LR";
+    const direction =
+      graphBlocks.length > 0
+        ? GRAPH_PRESET_DIRECTIONS[preset].outer === "RIGHT"
+          ? "LR"
+          : "TB"
+        : "LR";
     setCurrentLayoutOptions((options) =>
       options.direction === direction ? options : { ...options, direction },
     );
-  }, [graphBlocks]);
+  }, [graphBlocks, preset]);
 
   const model = useMemo(() => graphModel(workflow, graphBlocks), [workflow, graphBlocks]);
 
@@ -532,12 +551,17 @@ export const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
     let cancelled = false;
     const horizontal =
       currentLayoutOptions.direction === "LR" || currentLayoutOptions.direction === "RL";
+    // Whether the steps run left to right inside a group (their edges leave the right port and
+    // arrive at the left one straight) or top to bottom (the edges snake between side ports).
+    const innerHorizontal =
+      graphBlocks.length === 0 ? horizontal : GRAPH_PRESET_DIRECTIONS[preset].inner === "RIGHT";
     setIsLayouting(true);
     void layoutGraph(
       model,
       horizontal ? "RIGHT" : "DOWN",
       measuredHeights ?? undefined,
       graphSpacing(preset),
+      graphBlocks.length > 0 ? GRAPH_PRESET_DIRECTIONS[preset].inner : undefined,
     )
       .then((layout) => {
         if (cancelled) return;
@@ -639,7 +663,7 @@ export const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
             graph,
             current: false,
             error: false,
-            horizontal: true,
+            horizontal: innerHorizontal,
             inputs: inputsOf.get(laid.id) ?? [],
             outputs: outputsOf.get(laid.id) ?? [],
             selfLoops: selfOf.get(laid.id) ?? [],
@@ -678,7 +702,7 @@ export const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
             link,
             route: layout.routes[link.id],
             chipped: Boolean(layout.routes[link.id]),
-            horizontal: true,
+            horizontal: innerHorizontal,
             onGoTo: goTo,
           },
         }));

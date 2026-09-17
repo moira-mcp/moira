@@ -7,7 +7,6 @@
 import React from "react";
 import { useTranslation } from "react-i18next";
 import type { ExecutionRouteEntry } from "@mcp-moira/workflow-engine/progress-visual";
-import { GuidanceHint } from "./Guidance";
 
 export function RunCursor({
   route,
@@ -45,7 +44,7 @@ export function RunCursor({
         max={last}
         value={position}
         onChange={(event) => onSetCursor(Number(event.target.value))}
-        className="h-1.5 w-28 cursor-pointer accent-primary xl:w-40"
+        className="h-1.5 w-20 cursor-pointer accent-primary xl:w-32"
         aria-label={t("pages.runPage.cursor.scrub")}
         data-testid="cursor-range"
       />
@@ -77,9 +76,6 @@ export function RunCursor({
           {t("pages.runPage.cursor.clear")}
         </button>
       )}
-      <GuidanceHint label={t("pages.runPage.cursor.hintLabel")}>
-        {t("pages.runPage.cursor.hint")}
-      </GuidanceHint>
     </div>
   );
 }
