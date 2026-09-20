@@ -11,7 +11,7 @@ describe("nginx configuration", () => {
     expect(source).toContain("map $uri $moira_access_loggable {");
     expect(source).toContain("~^/api/public/executions/materialize/ 0;");
     expect(source).toContain("/api/integrations/github/callback 0;");
-    expect(source).toContain("~^/api/workspaces/transfers/ 0;");
+    expect(source).toContain("~^/api/codespaces/transfers/ 0;");
     expect(source).toContain(
       "access_log /var/log/nginx/access.log combined if=$moira_access_loggable;",
     );
@@ -19,11 +19,11 @@ describe("nginx configuration", () => {
   });
 
   test.each(configs)(
-    "%s streams private workspace downloads from MCP without path logging",
+    "%s streams private codespace downloads from MCP without path logging",
     (config) => {
       const source = readFileSync(resolve(process.cwd(), "config", config), "utf8");
       const location = source.match(
-        /location \^~ \/api\/workspaces\/transfers\/\s*\{([^}]+)\}/,
+        /location \^~ \/api\/codespaces\/transfers\/\s*\{([^}]+)\}/,
       )?.[1];
       expect(location).toBeDefined();
       expect(location).toContain("proxy_pass http://localhost:3000;");

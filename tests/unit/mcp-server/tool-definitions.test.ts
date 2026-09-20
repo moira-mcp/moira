@@ -4,7 +4,10 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import {
+  CODESPACE_TOOL_NAME,
   MCP_TOOLS_REVISION,
   MCP_TOOL_NAMES,
   TOOL_DEFINITIONS,
@@ -19,8 +22,8 @@ import {
   type McpToolName,
 } from "../../../packages/mcp-server/src/tools/tool-definitions.js";
 import {
-  workspaceDownloadRequestSchema,
-  workspaceExecRequestSchema,
+  codespaceDownloadRequestSchema,
+  codespaceExecRequestSchema,
 } from "../../../packages/mcp-server/src/tools/tool-schemas.js";
 import {
   registerTools,
@@ -134,6 +137,17 @@ async function inspectPublishedContract(instructions: string, context?: { agent?
 }
 
 describe("MCP tool definitions", () => {
+  it("keeps the fileless-agent codespace instruction in every system-prompt copy", () => {
+    const canonical = readFileSync(resolve("config/prompts/systemPrompt.md"), "utf8");
+    expect(canonical).toContain(
+      "If you cannot read or write the user's files, do not tell them what to run in a terminal you cannot see. Use a codespace: look for one that already fits the task, and offer to create one when none does.",
+    );
+    expect(readFileSync(resolve("docs/SYSTEM-PROMPT.md"), "utf8")).toBe(canonical);
+    expect(
+      readFileSync(resolve("packages/docs/src/content/docs/docs/SYSTEM-PROMPT.md"), "utf8"),
+    ).toBe(canonical);
+  });
+
   it("owns the exact baseline public catalog in registration order", () => {
     expect(MCP_TOOL_NAMES).toEqual([
       "list",
@@ -150,12 +164,18 @@ describe("MCP tool definitions", () => {
       "playbooks",
       "artifacts",
       "lock",
-      "workspace",
+      "codespace",
     ]);
-    expect(MCP_TOOL_NAMES.filter((name) => name.startsWith("workspace_"))).toEqual([]);
+    expect(MCP_TOOL_NAMES.filter((name) => name.startsWith("codespace_"))).toEqual([]);
+    expect(TOOL_DEFINITIONS.find((tool) => tool.name === CODESPACE_TOOL_NAME)?.name).toBe(
+      CODESPACE_TOOL_NAME,
+    );
+    expect(readFileSync(resolve("packages/mcp-server/src/server.ts"), "utf8")).toContain(
+      "toolName === CODESPACE_TOOL_NAME",
+    );
   });
 
-  it("publishes closed workspace schemas without chat, session, auth, or provider controls", () => {
+  it("publishes closed codespace schemas without chat, session, auth, or provider controls", () => {
     const definition = (name: string) =>
       TOOL_DEFINITIONS.find((candidate) => candidate.name === name)!;
     const forbidden = [
@@ -167,23 +187,23 @@ describe("MCP tool definitions", () => {
       "ssh_key",
       "capability",
     ];
-    const serializedSchema = JSON.stringify(getToolJsonSchema(definition("workspace")));
+    const serializedSchema = JSON.stringify(getToolJsonSchema(definition("codespace")));
     for (const field of forbidden) expect(serializedSchema).not.toContain(`"${field}"`);
 
     // `delete` is refused its own incomplete form at dispatch, not by the published object, which
     // now carries every action's fields; the published object still refuses an action it has never
     // heard of.
     expect(
-      definition("workspace").schema.safeParse({
+      definition("codespace").schema.safeParse({
         action: "delete",
-        workspace_id: "00000000-0000-4000-8000-000000000000",
+        codespace_id: "00000000-0000-4000-8000-000000000000",
         expected_generation: 2,
       }).success,
     ).toBe(true);
-    expect(definition("workspace").schema.safeParse({ action: "teleport" }).success).toBe(false);
+    expect(definition("codespace").schema.safeParse({ action: "teleport" }).success).toBe(false);
     // The published schema is one flat root object: `action` is the only required field, every
     // action's fields are visible, and the strict per-action contract decides the form.
-    const published = getToolJsonSchema(definition("workspace")) as unknown as {
+    const published = getToolJsonSchema(definition("codespace")) as unknown as {
       type: string;
       required: string[];
       properties: Record<string, unknown>;
@@ -195,6 +215,7 @@ describe("MCP tool definitions", () => {
       "argv",
       "background",
       "cancel",
+      "codespace_id",
       "confirm_delete",
       "cwd",
       "env",
@@ -215,6 +236,7 @@ describe("MCP tool definitions", () => {
       "path",
       "query",
       "ref",
+      "refresh",
       "repository_id",
       "script",
       "session",
@@ -225,11 +247,23 @@ describe("MCP tool definitions", () => {
       "stream",
       "text",
       "timeout_seconds",
-      "workspace_id",
     ]);
+    const operationId = published.properties.operation_id as { anyOf?: unknown[] };
+    const maxBytes = published.properties.max_bytes as { anyOf?: unknown[] };
+    expect(operationId.anyOf).toBeUndefined();
+    expect(maxBytes.anyOf).toHaveLength(2);
+    expect(getToolOperations(definition("codespace"))).toEqual(
+      expect.arrayContaining(["list", "setup_help", "create", "get"]),
+    );
+    expect(resolveToolDescription(definition("codespace"))).toContain(
+      "personal instrument for executing a flow",
+    );
+    expect(resolveToolDescription(definition("codespace"))).toContain(
+      "collaboration happens through version-control branches",
+    );
     expect(
-      workspaceExecRequestSchema.safeParse({
-        workspace_id: "00000000-0000-4000-8000-000000000000",
+      codespaceExecRequestSchema.safeParse({
+        codespace_id: "00000000-0000-4000-8000-000000000000",
         argv: ["node", "script.js"],
         timeout_seconds: 30,
         stdin_file: {
@@ -241,8 +275,8 @@ describe("MCP tool definitions", () => {
       }).success,
     ).toBe(true);
     expect(
-      workspaceExecRequestSchema.safeParse({
-        workspace_id: "00000000-0000-4000-8000-000000000000",
+      codespaceExecRequestSchema.safeParse({
+        codespace_id: "00000000-0000-4000-8000-000000000000",
         argv: ["node", "script.js"],
         timeout_seconds: 30,
         stdin_text: "input",
@@ -253,26 +287,26 @@ describe("MCP tool definitions", () => {
       }).success,
     ).toBe(false);
     expect(
-      workspaceExecRequestSchema.safeParse({
-        workspace_id: "00000000-0000-4000-8000-000000000000",
+      codespaceExecRequestSchema.safeParse({
+        codespace_id: "00000000-0000-4000-8000-000000000000",
         operation_id: "00000000-0000-4000-8000-000000000001",
         argv: ["npm", "test"],
         timeout_seconds: 30,
       }).success,
     ).toBe(false);
     expect(
-      definition("workspace").schema.safeParse({
+      definition("codespace").schema.safeParse({
         action: "exec",
-        workspace_id: "00000000-0000-4000-8000-000000000000",
+        codespace_id: "00000000-0000-4000-8000-000000000000",
         chat_id: "c1",
       }).success,
     ).toBe(false);
   });
 
   it("requires bounded output metadata for download recovery and rejects mixing it with a new path", () => {
-    const download = workspaceDownloadRequestSchema;
+    const download = codespaceDownloadRequestSchema;
     const resume = {
-      workspace_id: "00000000-0000-4000-8000-000000000000",
+      codespace_id: "00000000-0000-4000-8000-000000000000",
       operation_id: "00000000-0000-4000-8000-000000000001",
       file_name: "result.bin",
       mime_type: "application/octet-stream",
@@ -283,18 +317,18 @@ describe("MCP tool definitions", () => {
     expect(download.safeParse({ ...resume, file_name: "../result.bin" }).success).toBe(false);
     // The published object requires only `action`; `file_name` and `mime_type` are required of a
     // download by its own contract, which is what refuses this resume without them.
-    const workspaceTool = TOOL_DEFINITIONS.find((definition) => definition.name === "workspace")!;
+    const codespaceTool = TOOL_DEFINITIONS.find((definition) => definition.name === "codespace")!;
     expect(
-      (getToolJsonSchema(workspaceTool) as unknown as { required: string[] }).required,
+      (getToolJsonSchema(codespaceTool) as unknown as { required: string[] }).required,
     ).toEqual(["action"]);
     expect(
-      download.safeParse({ workspace_id: resume.workspace_id, path: "result.bin" }).success,
+      download.safeParse({ codespace_id: resume.codespace_id, path: "result.bin" }).success,
     ).toBe(false);
   });
 
   it("publishes native file metadata and optional file details at the top-level MCP boundary", async () => {
     const published = await inspectPublishedContract("native file handoff");
-    const tool = published.tools.find((candidate) => candidate.name === "workspace")!;
+    const tool = published.tools.find((candidate) => candidate.name === "codespace")!;
     // Both native file parameters belong to the one tool, so both are declared on it.
     expect(tool._meta).toEqual({ "openai/fileParams": ["stdin_file", "file"] });
     for (const field of ["stdin_file", "file"]) {

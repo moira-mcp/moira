@@ -85,7 +85,7 @@ frontend/src/
 │   ├── settings/               # Settings sub-components
 │   │   ├── ProfileSettings.tsx  # Profile info, name editing, handle, email verification
 │   │   ├── SecuritySettings.tsx # Password change with strength indicator
-│   │   ├── GitHubWorkspaceSettings.tsx # Website-only GitHub workspace connection
+│   │   ├── GitHubCodespaceSettings.tsx # Website-only GitHub codespace connection
 │   │   ├── OAuthSettings.tsx    # OAuth consent management
 │   │   ├── SessionsSettings.tsx # Active session management
 │   │   └── ApiTokensSettings.tsx # API token management (create, list, revoke)
@@ -94,7 +94,7 @@ frontend/src/
 │   ├── AdminExecutions.tsx      # Admin executions monitoring (PageShell + DataListView)
 │   ├── AdminExecutionInspectorPage.tsx # Admin execution inspector wrapper
 │   ├── AdminUserDetail.tsx      # Admin user detail and security management
-│   ├── AdminSettingsUnified.tsx # Unified admin settings (Definitions, Values, Maintenance, Workspaces tabs)
+│   ├── AdminSettingsUnified.tsx # Unified admin settings (Definitions, Values, Maintenance, Codespaces tabs)
 │   ├── AuditLog.tsx             # Admin audit log viewer (AuditLogCard grid)
 │   ├── SystemSettings.tsx       # Admin system settings (embedded mode for unified view)
 │   ├── AdminSettings.tsx        # Admin global settings (embedded mode for unified view)
@@ -229,7 +229,7 @@ Application routes:
 /admin/executions (protected)      - Admin executions monitoring (PageShell + DataListView + ExecutionCard)
 /admin/executions/:id (protected)  - Admin run page (same component as /executions/:id)
 /admin/audit-log (protected)       - Audit log viewer (PageShell + AuditLogCard + total-based pagination)
-/admin/settings (protected)        - Unified settings (Definitions, Values, Maintenance, Workspaces tabs)
+/admin/settings (protected)        - Unified settings (Definitions, Values, Maintenance, Codespaces tabs)
 /admin/admin-settings (protected)  - Redirects to /admin/settings
 /admin/analytics (protected)       - Redirects to /admin
 /admin/analytics/operational (protected) - Operational metrics dashboard (OperationalDashboard.tsx)
@@ -292,9 +292,9 @@ Single scrollable page at `/settings` with all sections rendered flat (no tabs).
 
 - Profile (`ProfileSettings.tsx`): Name editing, email display with verification badge, handle management with AlertDialog confirmation
 - Security (`SecuritySettings.tsx`): Password change form with Progress-based strength indicator
-- Integrations (`GitHubWorkspaceSettings.tsx`): website-only GitHub App connect/reconnect, verified account and repository grants, disconnect confirmation, disabled/configuration/revocation states, and explicit external-grant recovery for unreadable credentials or an untracked refresh successor
-- Integrations (`GitHubWorkspaceManagement.tsx`): Cloud workspaces card with instance readiness badge, agent-authority disclosure, create form (approved repository select, ref, active/limit hint), per-workspace cards with repository/ref, provider and machine context, state badge, desired/observed state and generation, Start/Stop/Delete actions disabled while pending, destructive delete via `ConfirmDialog` that returns focus to its trigger; never mentions chats or sessions
-- Admin Settings → Workspaces (`AdminWorkspaceControls.tsx`): readiness facts (configuration, resource creation, connector, reconciliation backlog, active resources/operations and transfer bytes against limits) and the global/provider kill switches with a reason field and confirmed stop/resume
+- Integrations (`GitHubCodespaceSettings.tsx`): website-only GitHub App connect/reconnect, verified account and repository grants, disconnect confirmation, disabled/configuration/revocation states, and explicit external-grant recovery for unreadable credentials or an untracked refresh successor
+- Integrations (`GitHubCodespaceManagement.tsx`): Cloud codespaces card with instance readiness badge, agent-authority disclosure, create form (approved repository select, ref, active/limit hint), saved repositories kept visible with a separate `repositories_stale` warning after provider refresh failure, per-codespace cards with repository/ref, provider and machine context, state badge, desired/observed state and generation, Start/Stop/Delete actions disabled while pending, destructive delete via `ConfirmDialog` that returns focus to its trigger; never mentions chats or sessions
+- Admin Settings → Codespaces (`AdminCodespaceControls.tsx`): readiness facts (configuration, resource creation, connector, reconciliation backlog, active resources/operations and transfer bytes against limits) and the global/provider kill switches with a reason field and confirmed stop/resume
 - OAuth Authorizations (`OAuthSettings.tsx`): DataListView with consent cards, empty state with KeyRound icon, revoke with ConfirmDialog
 - Active Sessions (`SessionsSettings.tsx`): DataListView with session cards, Current Session badge, revoke disabled for current session
 - API Tokens (`ApiTokensSettings.tsx`): DataListView with token cards showing name, prefix (monospace), dates, status badge (Active/Expired/Revoked). Create dialog with name input and expiration select (30d/90d/365d/never). One-time token display dialog with copy button and warning. Revoke with ConfirmDialog (variant="destructive").
@@ -326,7 +326,7 @@ Tokens. Each section has a stable `data-testid="settings-section-{name}"`.
 - `collapsible={true}` (default): Collapsible groups with ChevronDown toggle — used by AdminSettings
 - `collapsible={false}`: Flat Card rendering without Collapsible wrapper — used by Settings page
 
-**Implementation:** Settings.tsx → ProfileSettings.tsx, SecuritySettings.tsx, GitHubWorkspaceSettings.tsx, OAuthSettings.tsx, SessionsSettings.tsx
+**Implementation:** Settings.tsx → ProfileSettings.tsx, SecuritySettings.tsx, GitHubCodespaceSettings.tsx, OAuthSettings.tsx, SessionsSettings.tsx
 
 - Loads user profile via GET /api/user/profile
 - Fetches dynamic settings definitions via GET /api/settings/definitions
@@ -340,8 +340,9 @@ Tokens. Each section has a stable `data-testid="settings-section-{name}"`.
 - OAuth consents via GET/DELETE /api/user/oauth-consents
 - Sessions via GET/DELETE /api/user/sessions
 - Handle change via PATCH /api/user/handle
-- GitHub workspace connection via GET /api/integrations/github, browser navigation to GET /api/integrations/github/start, and DELETE /api/integrations/github
+- GitHub codespace connection via GET /api/integrations/github, browser navigation to GET /api/integrations/github/start, and DELETE /api/integrations/github
 - External GitHub grant recovery via DELETE /api/integrations/github/external-revocation after the user revokes the grant in GitHub; this covers unreadable credentials and an untracked refresh successor
+- Automatic ten-minute repository-grant refresh on Settings load plus an explicit Refresh button backed by `POST /api/integrations/github/refresh`; a provider failure keeps the saved repositories visible with a stale warning
 
 **Password Strength Indicator (Progress component):**
 
@@ -1831,9 +1832,9 @@ export class MoiraApiClient {
     request?: WorkflowValidationRequest,
   ): Promise<WorkflowValidationResponse>;
   async copyWorkflow(id: string): Promise<{ workflowId: string; message: string }>;
-  async getGitHubWorkspaceConnection(): Promise<WorkspaceConnectionView>;
-  async disconnectGitHubWorkspace(): Promise<WorkspaceConnectionView>;
-  async confirmGitHubExternalRevocation(): Promise<WorkspaceConnectionView>;
+  async getGitHubCodespaceConnection(): Promise<CodespaceConnectionView>;
+  async disconnectGitHubCodespace(): Promise<CodespaceConnectionView>;
+  async confirmGitHubExternalRevocation(): Promise<CodespaceConnectionView>;
 }
 
 // Default instance using same-origin (nginx proxies /api/ to backend)

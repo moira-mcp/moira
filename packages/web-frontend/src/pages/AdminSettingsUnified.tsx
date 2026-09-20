@@ -10,7 +10,7 @@ import { useTranslation } from "react-i18next";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { AdminSettings } from "./AdminSettings";
 import { SystemSettings, MaintenanceContent } from "./SystemSettings";
-import { AdminWorkspaceControls } from "./AdminWorkspaceControls";
+import { AdminCodespaceControls } from "./AdminCodespaceControls";
 
 interface AdminSettingsUnifiedProps {
   defaultTab?: string;
@@ -43,8 +43,8 @@ export const AdminSettingsUnified: React.FC<AdminSettingsUnifiedProps> = ({
           <TabsTrigger value="maintenance" data-testid="tab-maintenance">
             {t("admin.settingsUnified.tabs.maintenance")}
           </TabsTrigger>
-          <TabsTrigger value="workspaces" data-testid="tab-workspaces">
-            {t("admin.settingsUnified.tabs.workspaces")}
+          <TabsTrigger value="codespaces" data-testid="tab-codespaces">
+            {t("admin.settingsUnified.tabs.codespaces")}
           </TabsTrigger>
         </TabsList>
         <TabsContent value="definitions" className="mt-6">
@@ -56,8 +56,8 @@ export const AdminSettingsUnified: React.FC<AdminSettingsUnifiedProps> = ({
         <TabsContent value="maintenance" className="mt-6">
           <MaintenanceContent />
         </TabsContent>
-        <TabsContent value="workspaces" className="mt-6">
-          <AdminWorkspaceControls />
+        <TabsContent value="codespaces" className="mt-6">
+          <AdminCodespaceControls />
         </TabsContent>
       </Tabs>
     </div>

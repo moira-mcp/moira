@@ -26,7 +26,7 @@ const MAX_CONTROL_BYTES = 8 * 1024 * 1024;
 const MAX_RESULT_BYTES = 8 * 1024 * 1024;
 // Complete output is retained beside the result, so a range read is bounded like a file read and
 // the retained streams themselves are bounded by what the caller declares, never by the payload.
-// A command runs detached inside the workspace, so its own timer is bounded by the workspace's
+// A command runs detached inside the codespace, so its own timer is bounded by the codespace's
 // usefulness rather than by any request. Job requests remain bounded separately by the connector.
 const MAX_OPERATION_TIMEOUT_MS = 24 * 60 * 60_000;
 const MAX_RETAINED_OUTPUT_BYTES = 4 * 1024 * 1024 * 1024;
@@ -58,14 +58,14 @@ const UNSEARCHABLE_DIRECTORY = ".git";
 const STATE_ROOT = process.env.MOIRA_OPERATION_STATE_DIR
   ? resolve(process.env.MOIRA_OPERATION_STATE_DIR)
   : join(homedir(), ".local", "state", "moira", "operations");
-const WORKSPACES_ROOT = resolve(process.env.MOIRA_WORKSPACES_ROOT || "/workspaces");
+const CODESPACES_ROOT = resolve(process.env.MOIRA_CODESPACES_ROOT || "/workspaces");
 // A session outlives the commands that use it, so it lives beside the operation directories rather
-// than inside one of them, and it is removed with the workspace rather than with an operation.
+// than inside one of them, and it is removed with the codespace rather than with an operation.
 const SESSION_ROOT = join(STATE_ROOT, "sessions");
 const SESSION_NAME = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
 const MAX_SESSION_BYTES = 64 * 1024;
 const MAX_SESSION_VARIABLES = 64;
-const MAX_SESSIONS_PER_WORKSPACE = 16;
+const MAX_SESSIONS_PER_CODESPACE = 16;
 const MAX_SESSION_VALUE_LENGTH = 4096;
 const MAX_SCRIPT_BYTES = 64 * 1024;
 const ENVIRONMENT_NAME = /^[A-Za-z_][A-Za-z0-9_]{0,127}$/;
@@ -166,7 +166,7 @@ function validateExecution(request) {
 }
 
 /**
- * Identifies the workspace's current running environment. It changes when that environment is
+ * Identifies the codespace's current running environment. It changes when that environment is
  * restarted or replaced, which is what binds a session to the life it was opened in. On Linux it is
  * the kernel's boot identity together with the start time of the first process; elsewhere only an
  * explicit override can establish it, which is how the suite exercises two different lives.
@@ -279,7 +279,7 @@ async function resolveSession(request) {
   if (request.sessionStart) {
     const current = await readBoundedJson(path, MAX_SESSION_BYTES).catch(() => null);
     const replacing = current?.environment === identity;
-    if (!replacing && (await countSessions(identity)) >= MAX_SESSIONS_PER_WORKSPACE) {
+    if (!replacing && (await countSessions(identity)) >= MAX_SESSIONS_PER_CODESPACE) {
       return { limit: "sessions" };
     }
   }
@@ -292,7 +292,7 @@ async function resolveSession(request) {
     env: applyContext({}, context),
     /**
      * Stores the context this command ran with, plus whatever a script left behind. A capture keeps
-     * only the difference from the environment the script started with, so the workspace's own
+     * only the difference from the environment the script started with, so the codespace's own
      * environment never enters the file.
      */
     store: async (captured) => {
@@ -316,9 +316,9 @@ async function resolveSession(request) {
 }
 
 async function verifyRepository(request, repositoryName) {
-  const root = join(WORKSPACES_ROOT, repositoryName);
+  const root = join(CODESPACES_ROOT, repositoryName);
   const value = await stat(root);
-  if (!value.isDirectory() || value.uid === 0) fail("invalid workspace repository");
+  if (!value.isDirectory() || value.uid === 0) fail("invalid codespace repository");
   const result = await capture("/usr/bin/git", [
     "-c",
     `safe.directory=${root}`,
@@ -336,7 +336,7 @@ async function verifyRepository(request, repositoryName) {
     .toLowerCase();
   if (normalized !== request.repositoryFullName.toLowerCase()) fail("repository identity mismatch");
   const cwd = resolve(root, request.cwd);
-  if (cwd !== root && !cwd.startsWith(`${root}${sep}`)) fail("working directory escaped workspace");
+  if (cwd !== root && !cwd.startsWith(`${root}${sep}`)) fail("working directory escaped codespace");
   await access(cwd, constants.R_OK | constants.X_OK);
   return cwd;
 }
@@ -353,7 +353,7 @@ function safeRelativePath(value, allowRoot = false) {
     /^[A-Za-z]:/.test(value) ||
     value.split(/[\\/]/).some((part) => !part || part === "." || part === "..")
   ) {
-    fail("invalid workspace path");
+    fail("invalid codespace path");
   }
   return value.replaceAll("\\", "/");
 }
@@ -363,7 +363,7 @@ async function repositoryRootForFile(request) {
   if (!match) fail("invalid repository identity");
   const path = await verifyRepository({ ...request, cwd: "." }, match[1]);
   const value = await lstat(path);
-  if (!value.isDirectory() || value.isSymbolicLink()) fail("workspace root is invalid");
+  if (!value.isDirectory() || value.isSymbolicLink()) fail("codespace root is invalid");
   return { path, dev: value.dev, ino: value.ino };
 }
 
@@ -400,7 +400,7 @@ async function openDirectory(root, relative = ".") {
       openedRoot.ino !== inspectedRoot.ino ||
       (typeof root !== "string" && (openedRoot.dev !== root.dev || openedRoot.ino !== root.ino))
     ) {
-      fail("workspace root changed during validation");
+      fail("codespace root changed during validation");
     }
     if (normalized === ".") return current;
     for (const part of normalized.split("/")) {
@@ -412,7 +412,7 @@ async function openDirectory(root, relative = ".") {
       const value = await child.stat();
       if (!value.isDirectory()) {
         await child.close();
-        fail("workspace parent is not a directory");
+        fail("codespace parent is not a directory");
       }
       if (current !== rootHandle) await current.close();
       current = child;
@@ -444,7 +444,7 @@ async function inspectPath(root, relative, allowDirectory = false) {
     const value = await handle.stat();
     if (!(value.isDirectory() && allowDirectory) && (!value.isFile() || value.nlink !== 1)) {
       await handle.close();
-      fail("workspace path is not an allowed file type");
+      fail("codespace path is not an allowed file type");
     }
     return { handle, stat: value, relative: normalized };
   } finally {
@@ -459,13 +459,13 @@ async function readRegular(root, relative, maximum = MAX_FILE_BYTES, { keepOpen 
   try {
     const current = await handle.stat({ bigint: true });
     if (!current.isFile() || current.nlink !== 1n || current.size > BigInt(maximum)) {
-      fail("workspace file exceeds its bound or has an unsafe type");
+      fail("codespace file exceeds its bound or has an unsafe type");
     }
     const bytes = Buffer.alloc(Number(current.size));
     let offset = 0;
     while (offset < bytes.length) {
       const read = await handle.read(bytes, offset, bytes.length - offset, offset);
-      if (read.bytesRead === 0) fail("workspace file changed during read");
+      if (read.bytesRead === 0) fail("codespace file changed during read");
       offset += read.bytesRead;
     }
     const after = await handle.stat({ bigint: true });
@@ -477,7 +477,7 @@ async function readRegular(root, relative, maximum = MAX_FILE_BYTES, { keepOpen 
       after.ctimeNs !== current.ctimeNs ||
       after.nlink !== 1n
     ) {
-      fail("workspace file changed during read");
+      fail("codespace file changed during read");
     }
     transferred = keepOpen;
     return {
@@ -501,7 +501,7 @@ async function writeAll(handle, bytes) {
   let offset = 0;
   while (offset < bytes.length) {
     const written = await handle.write(bytes, offset, bytes.length - offset, offset);
-    if (written.bytesWritten === 0) fail("workspace write made no progress");
+    if (written.bytesWritten === 0) fail("codespace write made no progress");
     offset += written.bytesWritten;
   }
 }
@@ -562,7 +562,7 @@ function sameFileIdentity(left, right, { afterRename = false } = {}) {
 
 async function directoryIdentity(handle) {
   const value = await handle.stat({ bigint: true });
-  if (!value.isDirectory()) fail("workspace parent is not a directory");
+  if (!value.isDirectory()) fail("codespace parent is not a directory");
   return { dev: value.dev.toString(), ino: value.ino.toString() };
 }
 
@@ -575,7 +575,7 @@ async function verifyParentIdentity(root, relative, expected) {
   try {
     const current = await directoryIdentity(location.handle);
     if (!sameDirectoryIdentity(current, expected)) {
-      fail("workspace parent identity changed during commit");
+      fail("codespace parent identity changed during commit");
     }
   } finally {
     await location.handle.close();
@@ -593,7 +593,7 @@ async function verifyEntryIdentity(parentHandle, name, expected) {
       !current.isFile() ||
       !sameFileIdentity(expected, fileIdentity(current), { afterRename: true })
     ) {
-      fail("workspace target identity changed during commit");
+      fail("codespace target identity changed during commit");
     }
   } finally {
     await handle.close();
@@ -619,7 +619,7 @@ async function currentFile(root, relative, options = {}) {
 
 async function stageReplacement(root, relative, bytes, expected, marker) {
   if (!Buffer.isBuffer(bytes) || bytes.length > MAX_FILE_BYTES)
-    fail("workspace write exceeds its bound");
+    fail("codespace write exceeds its bound");
   const location = await parentDirectory(root, relative);
   let temporaryName = null;
   let current = null;
@@ -746,7 +746,7 @@ async function commitStaged(staged, marker, directory) {
           !sameFileIdentity(item.current.stat.identity, held) ||
           !sameFileIdentity(item.current.stat.identity, current?.stat.identity)
         ) {
-          fail("workspace target identity changed during commit");
+          fail("codespace target identity changed during commit");
         }
       }
       const target = descriptorPath(item.handle, item.name);
@@ -892,7 +892,7 @@ async function recoverFileTransaction(directory, root) {
         await rm(target);
         await syncDirectory(location.handle);
       } else if (digest !== entry.originalSha256) {
-        fail("workspace target changed during recovery");
+        fail("codespace target changed during recovery");
       }
     } catch (error) {
       if (error?.code !== "ENOENT") throw error;
@@ -902,7 +902,7 @@ async function recoverFileTransaction(directory, root) {
         await rename(backup, target);
         await syncDirectory(location.handle);
       } catch (error) {
-        if (error?.code === "ENOENT") fail("workspace backup is missing during recovery");
+        if (error?.code === "ENOENT") fail("codespace backup is missing during recovery");
         throw error;
       }
     } else if (entry.hadOriginal && backup) {
@@ -1430,7 +1430,7 @@ async function fileExecute(request) {
     value = {
       action: intent.request?.action,
       state: "failed",
-      code: "WORKSPACE_FILE_REJECTED",
+      code: "CODESPACE_FILE_REJECTED",
     };
   }
   await writeDurableJson(directory, "result.json", { kind: "file", state, value });
@@ -1514,7 +1514,7 @@ let runnerStartTime=null;if(process.platform==="linux"){runnerStartTime=await st
 await writeFile(input.runnerPidPath,JSON.stringify({pid:process.pid,startTime:runnerStartTime}),{mode:0o600});
 const childEnv={...process.env};
 for(const [name,value] of Object.entries(input.env??{})){if(value===null)delete childEnv[name];else childEnv[name]=value}
-// A script runs under the workspace's own shell, sourced so that its directory changes and exports
+// A script runs under the codespace's own shell, sourced so that its directory changes and exports
 // take effect in that shell, and the shell then reports where it ended and what it ended with. An
 // argv command is spawned exactly as before, with no shell anywhere near it.
 const spawned=input.script
@@ -1595,7 +1595,7 @@ async function execute(request) {
   await mkdir(dirname(directory), { recursive: true, mode: 0o700 });
   await mkdir(directory, { mode: 0o700 });
   // The life of the environment the command runs in, so a later inspection can tell a command whose
-  // workspace restarted underneath it from a supervisor that exited without publishing a result.
+  // codespace restarted underneath it from a supervisor that exited without publishing a result.
   const life = await environmentIdentity();
   if (life) await writeFile(join(directory, "environment"), life, { mode: 0o600 });
   const pidPath = join(directory, "pid");
@@ -1631,7 +1631,7 @@ async function execute(request) {
       capturePath,
       shellOwned: [...SHELL_OWNED_VARIABLES],
       sessionEnd: Boolean(request.sessionEnd),
-      repositoryRoot: join(WORKSPACES_ROOT, repositoryName),
+      repositoryRoot: join(CODESPACES_ROOT, repositoryName),
       session: session.store
         ? {
             path: sessionPath(request.session),
@@ -1749,7 +1749,7 @@ async function readOptionalProcessIdentity(directory, fileName) {
 
 /**
  * Whether this operation belongs to an earlier life of the environment. A command's processes do not
- * survive a workspace restart while its state directory does, so a recorded life that is not the
+ * survive a codespace restart while its state directory does, so a recorded life that is not the
  * current one is what separates a restart from a supervisor that failed inside this life.
  */
 async function lostWithEnvironment(directory) {

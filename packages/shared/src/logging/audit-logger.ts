@@ -23,6 +23,8 @@ export interface AuditContext {
   resourceId?: string;
   metadata?: Record<string, unknown>;
   changes?: AuditChange[];
+  /** Durable idempotency key for events whose retries must collapse at the audit sink. */
+  dedupeKey?: string;
 }
 
 export interface AuditRequestContext {
@@ -62,6 +64,9 @@ export function recordAuditEventMetric(action: string, resource?: string): void 
 export interface AuditLogger {
   logAudit?(entry: Omit<AuditLogEntry, "id" | "createdAt">): Promise<string>;
   log?(entry: Omit<AuditLogEntry, "id" | "createdAt">): Promise<string>;
+  logOnce?(
+    entry: Omit<AuditLogEntry, "id" | "createdAt" | "dedupeKey"> & { dedupeKey: string },
+  ): Promise<{ id: string; inserted: boolean }>;
 }
 
 /**
@@ -101,10 +106,10 @@ export async function logAuditEvent(
  * - DatabaseRepository (has logAudit method) - for MCP/web routes
  * - AuditRepository (has log method) - for Services
  */
-export async function logAuditEventDirect(
+async function writeAuditEventDirect(
   repository: DatabaseRepository | AuditRepository,
   context: AuditContext & { ip?: string; country?: string; userAgent?: string; source?: string },
-): Promise<void> {
+): Promise<boolean> {
   // Get source from global service if not explicitly provided
   const source = context.source || getAuditSource();
 
@@ -122,13 +127,43 @@ export async function logAuditEventDirect(
   };
 
   // Use appropriate method based on repository type
-  if ("logAudit" in repository) {
+  let inserted = true;
+  if (context.dedupeKey !== undefined && "logOnce" in repository) {
+    inserted = (await repository.logOnce({ ...entry, dedupeKey: context.dedupeKey })).inserted;
+  } else if ("logAudit" in repository) {
     await repository.logAudit(entry);
   } else {
     await repository.log(entry);
   }
 
-  recordAuditEventMetric(context.action, context.resource);
+  if (inserted) {
+    recordAuditEventMetric(context.action, context.resource);
+  }
+  return inserted;
+}
+
+export async function logAuditEventDirect(
+  repository: DatabaseRepository | AuditRepository,
+  context: AuditContext & { ip?: string; country?: string; userAgent?: string; source?: string },
+): Promise<void> {
+  await writeAuditEventDirect(repository, context);
+}
+
+/**
+ * Write an audit event with a durable idempotency key and report whether this call inserted it.
+ * This narrower API lets a domain metric follow the same exactly-once boundary as the audit row.
+ */
+export async function logAuditEventDirectOnce(
+  repository: AuditRepository,
+  context: AuditContext & {
+    dedupeKey: string;
+    ip?: string;
+    country?: string;
+    userAgent?: string;
+    source?: string;
+  },
+): Promise<boolean> {
+  return writeAuditEventDirect(repository, context);
 }
 
 /**

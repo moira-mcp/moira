@@ -136,7 +136,7 @@ Two things have repeatedly turned a finished change into a red CI run:
   selects the CI environment explicitly instead of overwriting yours.
 - **CI runs on Linux; your machine probably does not.** A test that reaches the host — `/proc`, file
   modes, path case, a platform-specific branch in the code it drives — can pass locally and fail
-  there. The workspace supervisor's environment identity is the live example: on Linux it comes from
+  there. The codespace supervisor's environment identity is the live example: on Linux it comes from
   the kernel and the `MOIRA_ENVIRONMENT_ID` override is deliberately ignored, so a test that changed
   that variable to simulate a restart passed on macOS and failed in CI. Drive such behaviour through
   state the code reads on every platform, or run the check in a Linux container before pushing.
@@ -303,9 +303,9 @@ interface IGraphStorage {
 ### MCP Tools (short names)
 
 `list`, `start`, `step`, `manage`, `session`, `settings`, `token`, `notes`,
-`artifacts`, `communication`, `lock`, `help`, plus `workspace`, the one cloud-workspace
+`artifacts`, `communication`, `lock`, `help`, plus `codespace`, the one cloud-codespace
 tool parameterized by `action` (lifecycle, exec, files, native upload/download; see
-`docs/WORKSPACES.md`).
+`docs/CODESPACES.md`).
 The HTTP transport is
 `StreamableHTTPServerTransport` (stateless). See `docs/SYSTEM.md` for the full
 tool signatures and request/response shapes, and `packages/mcp-server/src/server.ts`

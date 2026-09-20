@@ -3,18 +3,19 @@
  */
 
 import type {
-  WorkspaceConnectionView,
-  WorkspacePublicReadinessView,
-  WorkspaceReadinessView,
-  WorkspaceSummaryView,
+  CodespaceConnectionView,
+  CodespacePublicReadinessView,
+  CodespaceReadinessView,
+  CodespaceSummaryView,
 } from "@mcp-moira/shared";
 
-/** Website workspace management view returned by GET /api/integrations/github/workspaces. */
-export interface WorkspaceManagementView {
-  readiness: WorkspaceReadinessView;
-  connection: WorkspaceConnectionView;
+/** Website codespace management view returned by GET /api/integrations/github/codespaces. */
+export interface CodespaceManagementView {
+  readiness: CodespaceReadinessView;
+  connection: CodespaceConnectionView;
   repositories: Array<{ repository_id: string; name: string; private: boolean }>;
-  workspaces: WorkspaceSummaryView[];
+  repositories_stale: boolean;
+  codespaces: CodespaceSummaryView[];
 }
 import { WorkflowValidationStatus } from "./react-flow-types";
 import { WorkflowGraph, ValidationResult, WorkflowFileInfo } from "./workflow-types";
@@ -86,9 +87,9 @@ export interface HealthCheckResponse {
     validation: boolean;
     mcpEngine: boolean;
     workflowReconciliation: boolean;
-    workspaces: boolean;
+    codespaces: boolean;
   };
-  workspaces?: WorkspacePublicReadinessView;
+  codespaces?: CodespacePublicReadinessView;
   reconciliation: {
     status: "ok" | "error";
     code: string;
@@ -104,7 +105,7 @@ export interface AdminSystemStatusResponse {
   systemHealth: {
     backendStatus: string;
     databaseSize: number;
-    workspaces?: WorkspaceReadinessView;
+    codespaces?: CodespaceReadinessView;
     workflowReconciliation: {
       status: "ok" | "error";
       code: string;

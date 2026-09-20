@@ -33,8 +33,8 @@ import {
   getWorkflowReconciliationStatusSummary,
 } from "@mcp-moira/shared";
 import * as sharedEmail from "@mcp-moira/shared";
-import { isWorkspaceReadinessDegraded } from "@mcp-moira/shared";
-import { getWorkspaceObservabilityService } from "../services/workspace-services.js";
+import { isCodespaceReadinessDegraded } from "@mcp-moira/shared";
+import { getCodespaceObservabilityService } from "../services/codespace-services.js";
 
 const router = Router();
 const repository = new DatabaseRepository();
@@ -754,17 +754,17 @@ async function getAdminSystemStatus() {
     // A missing database file is reported as zero bytes, matching the existing contract.
   }
 
-  const workspaces = await getWorkspaceObservabilityService().readiness();
-  const workspacesDegraded = isWorkspaceReadinessDegraded(workspaces);
+  const codespaces = await getCodespaceObservabilityService().readiness();
+  const codespacesDegraded = isCodespaceReadinessDegraded(codespaces);
 
   return {
     totalDefinitions: definitions.length,
     systemHealth: {
       backendStatus:
-        workflowReconciliation.status === "ok" && !workspacesDegraded ? "healthy" : "degraded",
+        workflowReconciliation.status === "ok" && !codespacesDegraded ? "healthy" : "degraded",
       databaseSize,
       workflowReconciliation,
-      workspaces,
+      codespaces,
     },
   };
 }

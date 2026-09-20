@@ -50,44 +50,44 @@ services:
       - WORKFLOWS_DIR=./workflows/production
       - METRICS_PORT=9090
       - LOG_LEVEL=${LOG_LEVEL:-info}
-      # GitHub workspace connection is fail-closed unless every value is supplied
+      # GitHub codespace connection is fail-closed unless every value is supplied
       # by the operator's untracked .env or deployment secret manager.
-      - WORKSPACE_GITHUB_APP_CLIENT_ID=${WORKSPACE_GITHUB_APP_CLIENT_ID:-}
-      - WORKSPACE_GITHUB_APP_CLIENT_SECRET=${WORKSPACE_GITHUB_APP_CLIENT_SECRET:-}
-      - WORKSPACE_GITHUB_APP_CALLBACK_URL=${WORKSPACE_GITHUB_APP_CALLBACK_URL:-}
-      - WORKSPACE_GITHUB_APP_INSTALL_URL=${WORKSPACE_GITHUB_APP_INSTALL_URL:-}
-      - WORKSPACE_CREDENTIAL_VAULT_KEY=${WORKSPACE_CREDENTIAL_VAULT_KEY:-}
-      - WORKSPACE_CREDENTIAL_VAULT_KEY_VERSION=${WORKSPACE_CREDENTIAL_VAULT_KEY_VERSION:-v1}
-      - WORKSPACE_CODESPACES_ENABLED=${WORKSPACE_CODESPACES_ENABLED:-false}
-      - WORKSPACE_MAX_CPU_CORES=${WORKSPACE_MAX_CPU_CORES:-4}
-      - WORKSPACE_MAX_MEMORY_GB=${WORKSPACE_MAX_MEMORY_GB:-8}
-      - WORKSPACE_MAX_STORAGE_GB=${WORKSPACE_MAX_STORAGE_GB:-32}
-      - WORKSPACE_MAX_ACTIVE_PER_USER=${WORKSPACE_MAX_ACTIVE_PER_USER:-4}
-      - WORKSPACE_MAX_ACTIVE_GLOBAL=${WORKSPACE_MAX_ACTIVE_GLOBAL:-16}
-      - WORKSPACE_CREATE_THROTTLE_SECONDS=${WORKSPACE_CREATE_THROTTLE_SECONDS:-60}
-      - WORKSPACE_REMOTE_TTL_MINUTES=${WORKSPACE_REMOTE_TTL_MINUTES:-120}
-      - WORKSPACE_PERSISTENT_RETENTION_DAYS=${WORKSPACE_PERSISTENT_RETENTION_DAYS:-30}
-      - WORKSPACE_CREATE_DEADLINE_MINUTES=${WORKSPACE_CREATE_DEADLINE_MINUTES:-15}
-      - WORKSPACE_CLEANUP_DEADLINE_MINUTES=${WORKSPACE_CLEANUP_DEADLINE_MINUTES:-15}
-      - WORKSPACE_CLAIM_LEASE_SECONDS=${WORKSPACE_CLAIM_LEASE_SECONDS:-30}
-      - WORKSPACE_RECONCILE_INTERVAL_SECONDS=${WORKSPACE_RECONCILE_INTERVAL_SECONDS:-30}
-      - WORKSPACE_START_WAIT_SECONDS=${WORKSPACE_START_WAIT_SECONDS:-180}
-      - WORKSPACE_MAX_CONCURRENT_OPERATIONS_PER_USER=${WORKSPACE_MAX_CONCURRENT_OPERATIONS_PER_USER:-8}
-      - WORKSPACE_MAX_CONCURRENT_OPERATIONS_GLOBAL=${WORKSPACE_MAX_CONCURRENT_OPERATIONS_GLOBAL:-32}
-      - WORKSPACE_MAX_OPERATION_INPUT_KB=${WORKSPACE_MAX_OPERATION_INPUT_KB:-1024}
-      - WORKSPACE_MAX_OPERATION_STDOUT_KB=${WORKSPACE_MAX_OPERATION_STDOUT_KB:-1024}
-      - WORKSPACE_MAX_OPERATION_STDERR_KB=${WORKSPACE_MAX_OPERATION_STDERR_KB:-256}
-      - WORKSPACE_MAX_RETAINED_OUTPUT_MB=${WORKSPACE_MAX_RETAINED_OUTPUT_MB:-64}
-      - WORKSPACE_MAX_OPERATION_SECONDS=${WORKSPACE_MAX_OPERATION_SECONDS:-900}
-      - WORKSPACE_MAX_BACKGROUND_OPERATION_HOURS=${WORKSPACE_MAX_BACKGROUND_OPERATION_HOURS:-4}
-      - WORKSPACE_MAX_TRANSFER_FILE_MB=${WORKSPACE_MAX_TRANSFER_FILE_MB:-4}
-      - WORKSPACE_MAX_TRANSFER_TOTAL_MB_PER_USER=${WORKSPACE_MAX_TRANSFER_TOTAL_MB_PER_USER:-100}
-      - WORKSPACE_MAX_TRANSFER_TOTAL_MB_GLOBAL=${WORKSPACE_MAX_TRANSFER_TOTAL_MB_GLOBAL:-1024}
-      - WORKSPACE_MAX_TRANSFER_OBJECTS_PER_USER=${WORKSPACE_MAX_TRANSFER_OBJECTS_PER_USER:-10}
-      - WORKSPACE_MAX_TRANSFER_OBJECTS_GLOBAL=${WORKSPACE_MAX_TRANSFER_OBJECTS_GLOBAL:-1000}
-      - WORKSPACE_MAX_TRANSFER_INFLIGHT_MB_PER_USER=${WORKSPACE_MAX_TRANSFER_INFLIGHT_MB_PER_USER:-40}
-      - WORKSPACE_MAX_TRANSFER_INFLIGHT_MB_GLOBAL=${WORKSPACE_MAX_TRANSFER_INFLIGHT_MB_GLOBAL:-256}
-      - WORKSPACE_TRANSFER_TTL_MINUTES=${WORKSPACE_TRANSFER_TTL_MINUTES:-10}
+      - CODESPACE_GITHUB_APP_CLIENT_ID=${CODESPACE_GITHUB_APP_CLIENT_ID:-}
+      - CODESPACE_GITHUB_APP_CLIENT_SECRET=${CODESPACE_GITHUB_APP_CLIENT_SECRET:-}
+      - CODESPACE_GITHUB_APP_CALLBACK_URL=${CODESPACE_GITHUB_APP_CALLBACK_URL:-}
+      - CODESPACE_GITHUB_APP_INSTALL_URL=${CODESPACE_GITHUB_APP_INSTALL_URL:-}
+      - CODESPACE_CREDENTIAL_VAULT_KEY=${CODESPACE_CREDENTIAL_VAULT_KEY:-}
+      - CODESPACE_CREDENTIAL_VAULT_KEY_VERSION=${CODESPACE_CREDENTIAL_VAULT_KEY_VERSION:-v1}
+      - CODESPACE_CODESPACES_ENABLED=${CODESPACE_CODESPACES_ENABLED:-false}
+      - CODESPACE_MAX_CPU_CORES=${CODESPACE_MAX_CPU_CORES:-4}
+      - CODESPACE_MAX_MEMORY_GB=${CODESPACE_MAX_MEMORY_GB:-8}
+      - CODESPACE_MAX_STORAGE_GB=${CODESPACE_MAX_STORAGE_GB:-32}
+      - CODESPACE_MAX_ACTIVE_PER_USER=${CODESPACE_MAX_ACTIVE_PER_USER:-4}
+      - CODESPACE_MAX_ACTIVE_GLOBAL=${CODESPACE_MAX_ACTIVE_GLOBAL:-16}
+      - CODESPACE_CREATE_THROTTLE_SECONDS=${CODESPACE_CREATE_THROTTLE_SECONDS:-60}
+      - CODESPACE_REMOTE_TTL_MINUTES=${CODESPACE_REMOTE_TTL_MINUTES:-120}
+      - CODESPACE_PERSISTENT_RETENTION_DAYS=${CODESPACE_PERSISTENT_RETENTION_DAYS:-30}
+      - CODESPACE_CREATE_DEADLINE_MINUTES=${CODESPACE_CREATE_DEADLINE_MINUTES:-15}
+      - CODESPACE_CLEANUP_DEADLINE_MINUTES=${CODESPACE_CLEANUP_DEADLINE_MINUTES:-15}
+      - CODESPACE_CLAIM_LEASE_SECONDS=${CODESPACE_CLAIM_LEASE_SECONDS:-30}
+      - CODESPACE_RECONCILE_INTERVAL_SECONDS=${CODESPACE_RECONCILE_INTERVAL_SECONDS:-30}
+      - CODESPACE_START_WAIT_SECONDS=${CODESPACE_START_WAIT_SECONDS:-180}
+      - CODESPACE_MAX_CONCURRENT_OPERATIONS_PER_USER=${CODESPACE_MAX_CONCURRENT_OPERATIONS_PER_USER:-8}
+      - CODESPACE_MAX_CONCURRENT_OPERATIONS_GLOBAL=${CODESPACE_MAX_CONCURRENT_OPERATIONS_GLOBAL:-32}
+      - CODESPACE_MAX_OPERATION_INPUT_KB=${CODESPACE_MAX_OPERATION_INPUT_KB:-1024}
+      - CODESPACE_MAX_OPERATION_STDOUT_KB=${CODESPACE_MAX_OPERATION_STDOUT_KB:-1024}
+      - CODESPACE_MAX_OPERATION_STDERR_KB=${CODESPACE_MAX_OPERATION_STDERR_KB:-256}
+      - CODESPACE_MAX_RETAINED_OUTPUT_MB=${CODESPACE_MAX_RETAINED_OUTPUT_MB:-64}
+      - CODESPACE_MAX_OPERATION_SECONDS=${CODESPACE_MAX_OPERATION_SECONDS:-900}
+      - CODESPACE_MAX_BACKGROUND_OPERATION_HOURS=${CODESPACE_MAX_BACKGROUND_OPERATION_HOURS:-4}
+      - CODESPACE_MAX_TRANSFER_FILE_MB=${CODESPACE_MAX_TRANSFER_FILE_MB:-4}
+      - CODESPACE_MAX_TRANSFER_TOTAL_MB_PER_USER=${CODESPACE_MAX_TRANSFER_TOTAL_MB_PER_USER:-100}
+      - CODESPACE_MAX_TRANSFER_TOTAL_MB_GLOBAL=${CODESPACE_MAX_TRANSFER_TOTAL_MB_GLOBAL:-1024}
+      - CODESPACE_MAX_TRANSFER_OBJECTS_PER_USER=${CODESPACE_MAX_TRANSFER_OBJECTS_PER_USER:-10}
+      - CODESPACE_MAX_TRANSFER_OBJECTS_GLOBAL=${CODESPACE_MAX_TRANSFER_OBJECTS_GLOBAL:-1000}
+      - CODESPACE_MAX_TRANSFER_INFLIGHT_MB_PER_USER=${CODESPACE_MAX_TRANSFER_INFLIGHT_MB_PER_USER:-40}
+      - CODESPACE_MAX_TRANSFER_INFLIGHT_MB_GLOBAL=${CODESPACE_MAX_TRANSFER_INFLIGHT_MB_GLOBAL:-256}
+      - CODESPACE_TRANSFER_TTL_MINUTES=${CODESPACE_TRANSFER_TTL_MINUTES:-10}
       # Empty keeps extensions disabled. When the optional profile is enabled, point this at the
       # runner service over the Compose network.
       - MOIRA_EXTENSION_RUNNER_URL=${MOIRA_EXTENSION_RUNNER_URL:-}
@@ -95,7 +95,7 @@ services:
     # The dependency is optional because the runner profile is off by default. When the profile is
     # selected, wait for its catalog endpoint before Moira performs its one-time registry sync.
     depends_on:
-      moira-workspace-connector:
+      moira-codespace-connector:
         condition: service_healthy
         required: false
       moira-extension-runner:
@@ -110,7 +110,7 @@ services:
     # SQLite database + execution storage persist on the host. Survives rebuilds.
     volumes:
       - ./data:/app/data
-      - workspace_connector_run:/run/moira-workspace-connector
+      - codespace_connector_run:/run/moira-codespace-connector
 
     # Internal metrics/health server (9090) is the source of truth for health.
     healthcheck:
@@ -122,8 +122,8 @@ services:
 
   # Credential-bearing GitHub CLI/SSH work is isolated from the application,
   # database, vault and application network. Only this Unix socket is shared.
-  moira-workspace-connector:
-    profiles: ["workspaces"]
+  moira-codespace-connector:
+    profiles: ["codespaces"]
     image: ${MOIRA_IMAGE:-ghcr.io/moira-mcp/moira:latest}
     # An init process reaps the gh/ssh helpers that jobs leave behind; without it they
     # stay as zombies under the Node server and exhaust the PID and process limits.
@@ -143,21 +143,21 @@ services:
     tmpfs:
       - /tmp:rw,nosuid,nodev,noexec,size=536870912,mode=1777
     volumes:
-      - workspace_connector_run:/run/moira-workspace-connector
-      - workspace_egress_run:/run/moira-workspace-egress
+      - codespace_connector_run:/run/moira-codespace-connector
+      - codespace_egress_run:/run/moira-codespace-egress
     network_mode: none
     environment:
       - HTTPS_PROXY=http://127.0.0.1:18080
       - HTTP_PROXY=http://127.0.0.1:18080
       - NO_PROXY=
     depends_on:
-      moira-workspace-egress:
+      moira-codespace-egress:
         condition: service_healthy
     healthcheck:
       test:
         [
           "CMD-SHELL",
-          'curl --fail --silent --unix-socket /run/moira-workspace-connector/connector.sock http://localhost/health | grep -q ''"state":"available"''',
+          'curl --fail --silent --unix-socket /run/moira-codespace-connector/connector.sock http://localhost/health | grep -q ''"state":"available"''',
         ]
       interval: 10s
       timeout: 3s
@@ -166,8 +166,8 @@ services:
 
   # Credential-free CONNECT proxy. It is the connector's only route to the
   # public network and accepts only reviewed GitHub/Codespaces HTTPS hosts.
-  moira-workspace-egress:
-    profiles: ["workspaces"]
+  moira-codespace-egress:
+    profiles: ["codespaces"]
     image: ${MOIRA_IMAGE:-ghcr.io/moira-mcp/moira:latest}
     entrypoint: ["/usr/local/bin/node", "--experimental-strip-types"]
     command:
@@ -181,11 +181,11 @@ services:
     mem_limit: 128m
     cpus: 0.25
     volumes:
-      - workspace_egress_run:/run/moira-workspace-egress
+      - codespace_egress_run:/run/moira-codespace-egress
     networks:
-      - workspace_connector_public
+      - codespace_connector_public
     healthcheck:
-      test: ["CMD", "test", "-S", "/run/moira-workspace-egress/proxy.sock"]
+      test: ["CMD", "test", "-S", "/run/moira-codespace-egress/proxy.sock"]
       interval: 10s
       timeout: 3s
       start_period: 5s
@@ -216,8 +216,8 @@ services:
       retries: 3
 
 volumes:
-  workspace_connector_run:
-  workspace_egress_run:
+  codespace_connector_run:
+  codespace_egress_run:
 
 networks:
-  workspace_connector_public:
+  codespace_connector_public:

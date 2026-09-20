@@ -20,7 +20,7 @@ Persistent audit trail for:
 
 **2. AuditRepository** (`packages/shared/src/database/repositories/audit-repository.ts`)
 
-- Methods: `log()`, `listAuditLogs()`, `getAuditLog()`
+- Methods: `log()`, `logOnce()`, `listAuditLogs()`, `getAuditLog()`
 - Query by userId, action, date range
 - Pagination support
 
@@ -29,9 +29,9 @@ Persistent audit trail for:
 - `WorkflowService` - workflow CRUD with automatic audit
 - `ExecutionService` - execution lifecycle with automatic audit
 - `SettingsService` - database-backed settings management with automatic audit
-- `WorkspaceConnectionService` - website-owned GitHub connection, refresh and revocation audit
-- `WorkspaceResourceService` - persistent workspace creation, lifecycle and reconciliation audit
-- `WorkspaceOperationService` - direct-operation reservation, reconciliation and terminal audit
+- `CodespaceConnectionService` - website-owned GitHub connection, refresh and revocation audit
+- `CodespaceResourceService` - persistent codespace creation, lifecycle and reconciliation audit
+- `CodespaceOperationService` - direct-operation reservation, reconciliation and terminal audit
 - `DatabaseRepository` - routes manifest-declared extension settings to their separate value store and writes equivalent audit events without recording secret plaintext
 - Services obtain the source from the AsyncLocalStorage context automatically
 
@@ -39,6 +39,7 @@ Persistent audit trail for:
 
 - `logAuditEvent(repository, req, context)` - for Express routes
 - `logAuditEventDirect(repository, context)` - for MCP tools and background tasks
+- `logAuditEventDirectOnce(repository, context)` - for retryable background events with a durable `dedupeKey`; returns whether this call inserted the row
 - `computeChanges(oldObj, newObj, fields?)` - generates diff for the changes field
 
 **5. Better Auth Integration**
@@ -63,6 +64,7 @@ CREATE TABLE auditLog (
   userAgent TEXT,            -- User-Agent of the browser/client
   metadata TEXT,             -- JSON with additional data
   changes TEXT,              -- JSON array of field changes (AuditChange[])
+  dedupeKey TEXT,            -- Optional durable idempotency key
   source TEXT,               -- Request origin: 'mcp' | 'web' | 'api' | 'system'
   createdAt INTEGER NOT NULL,
   FOREIGN KEY (userId) REFERENCES user(id)
@@ -87,6 +89,7 @@ interface AuditChange {
 - `idx_auditLog_userId` - fast lookup by user
 - `idx_auditLog_action` - filtering by action type
 - `idx_auditLog_createdAt` - sorting by time
+- `audit_log_dedupe_key_idx` - unique non-null idempotency keys for retryable events
 
 ### Global Service and Audit Source
 
@@ -166,9 +169,9 @@ Route/Tool → Repository → Database (audit lost!)
 | SettingsService            | `getSettingsService()`            | set, delete, createDefinition, deleteDefinition                    |
 | GlobalSettingsService      | `getGlobalSettingsService()`      | setValue                                                           |
 | WorkflowSharingService     | `getWorkflowSharingService()`     | createInvite, acceptInvite, revokeInvite, revokeAccess             |
-| WorkspaceConnectionService | `getWorkspaceConnectionService()` | start/complete authorization, refresh failure, disconnect/recovery |
-| WorkspaceResourceService   | `getWorkspaceResourceService()`   | create, reconcile, start, stop, delete                             |
-| WorkspaceOperationService  | `getWorkspaceOperationService()`  | execute, reconcile, cancel, finalize                               |
+| CodespaceConnectionService | `getCodespaceConnectionService()` | start/complete authorization, refresh failure, disconnect/recovery |
+| CodespaceResourceService   | `getCodespaceResourceService()`   | create, reconcile, start, stop, delete                             |
+| CodespaceOperationService  | `getCodespaceOperationService()`  | execute, reconcile, cancel, finalize                               |
 
 ### Code Example
 
@@ -219,53 +222,59 @@ await workflowRepo.save(graph, userId, visibility); // Audit NOT logged!
 
 **Logged via:** REST API (`/api/oauth/consent`)
 
-### Workspace Events
+### Codespace Events
 
 Connection actions:
 
-- `WORKSPACE_CONNECTION_START` - website authorization started
-- `WORKSPACE_CONNECTION_COMPLETE` - GitHub identity and installation binding completed
-- `WORKSPACE_CONNECTION_REFRESH_FAILED` - credential refresh failed closed
-- `WORKSPACE_CONNECTION_DISCONNECT` - remote revoke completed, remains pending, or externally revoked unreadable state was confirmed
+- `CODESPACE_CONNECTION_START` - website authorization started
+- `CODESPACE_CONNECTION_COMPLETE` - GitHub identity and installation binding completed
+- `CODESPACE_CONNECTION_REFRESH_FAILED` - credential refresh failed closed
+- `CODESPACE_CONNECTION_DISCONNECT` - remote revoke completed, remains pending, or externally revoked unreadable state was confirmed
 
-**Logged via:** `WorkspaceConnectionService`
+**Logged via:** `CodespaceConnectionService`
 
 Persistent resource actions:
 
-- `WORKSPACE_RESOURCE_CREATE` - exact created resource passed ownership and connector checks
-- `WORKSPACE_RESOURCE_CREATE_PENDING` - submitted create requires exact reconciliation
-- `WORKSPACE_RESOURCE_CREATE_REJECTED` - create or adoption failed closed
-- `WORKSPACE_RESOURCE_CLEANUP` - exact disposable resource was verified absent
-- `WORKSPACE_RESOURCE_START` - persistent resource reached running state, or the provider refused the start
-- `WORKSPACE_RESOURCE_STOP` - persistent resource reached stopped state, or the provider refused the stop
-- `WORKSPACE_RESOURCE_DELETE` - explicit deletion reached exact provider absence, or the provider refused the deletion
+- `CODESPACE_RESOURCE_CREATE` - exact created resource passed ownership and connector checks
+- `CODESPACE_RESOURCE_CREATE_PENDING` - submitted create requires exact reconciliation
+- `CODESPACE_RESOURCE_CREATE_REJECTED` - create or adoption failed closed
+- `CODESPACE_RESOURCE_CLEANUP` - exact disposable resource was verified absent
+- `CODESPACE_RESOURCE_START` - persistent resource reached running state, or the provider refused the start
+- `CODESPACE_RESOURCE_STOP` - persistent resource reached stopped state, or the provider refused the stop
+- `CODESPACE_RESOURCE_DELETE` - explicit deletion reached exact provider absence, or the provider refused the deletion
 
-**Logged via:** `WorkspaceResourceService`
+**Logged via:** `CodespaceResourceService`
 
 Direct-operation actions:
 
-- `WORKSPACE_OPERATION_RESERVE` - operation capacity and byte/time limits were reserved
-- `WORKSPACE_OPERATION_RECONCILE` - an uncertain remote outcome requires inspection
-- `WORKSPACE_OPERATION_TERMINAL` - operation reached a terminal state
+- `CODESPACE_OPERATION_RESERVE` - operation capacity and byte/time limits were reserved
+- `CODESPACE_OPERATION_RECONCILE` - an uncertain remote outcome requires inspection
+- `CODESPACE_OPERATION_TERMINAL` - operation reached a terminal state
 
-**Logged via:** `WorkspaceOperationService`
+**Logged via:** `CodespaceOperationService`
 
 Administrator control actions:
 
-- `WORKSPACE_CONTROL_UPDATE` - a global or provider kill switch was enabled or disabled; metadata holds the scope, flag, reason and the number of persistent workspaces asked to stop
+- `CODESPACE_CONTROL_UPDATE` - a global or provider kill switch was enabled or disabled; metadata holds the scope, flag, reason and the number of persistent codespaces asked to stop
 
-**Logged via:** `WorkspaceResourceService.setControl`
+**Logged via:** `CodespaceResourceService.setControl`
 
 Connection metadata is limited to provider and outcome. Resource metadata adds
 state, selected machine limits and, for a refusal, the refusing HTTP status as its
 outcome together with a bounded reason: the connector's own failure, or the
 provider's own message reduced to one line and dropped whole if anything in it
 looks like a credential. Operation metadata contains only the opaque
-workspace ID, provider, state, input/output byte counts and exit code. Actors and
+codespace ID, provider, state, input/output byte counts and exit code. Actors and
 opaque resource IDs use the ordinary audit fields. OAuth code/state, web-session
 tokens, repositories or source content, argv, cwd, stdin, stdout, stderr,
 provider credentials, SSH configuration, client secrets and vault material are
 forbidden audit payloads.
+
+Repeated identical lifecycle refusals use a stable key derived from the codespace,
+generation, refused action, outcome and bounded provider detail. `AuditRepository.logOnce()`
+commits the first row under the unique key and returns the existing row for concurrent or later
+retries. A changed refusal has a different key and remains visible. Metrics advance only for the
+call that inserted the audit row.
 
 ### Workflow Events
 
@@ -1137,9 +1146,9 @@ Every action type has call sites in the codebase, logged via the source noted be
 | Auth events           | ✅ Via Better Auth hooks                    |
 | User profile          | ✅ Via REST API                             |
 | OAuth consent         | ✅ Via REST API                             |
-| Workspace connection  | ✅ Via WorkspaceConnectionService           |
-| Workspace resources   | ✅ Via WorkspaceResourceService             |
-| Workspace operations  | ✅ Via WorkspaceOperationService            |
+| Codespace connection  | ✅ Via CodespaceConnectionService           |
+| Codespace resources   | ✅ Via CodespaceResourceService             |
+| Codespace operations  | ✅ Via CodespaceOperationService            |
 | Workflow              | ✅ Via WorkflowService                      |
 | Workflow sharing      | ✅ Via WorkflowSharingService               |
 | Execution             | ✅ Via ExecutionService + MCPEngine         |

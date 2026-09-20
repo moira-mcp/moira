@@ -14,10 +14,10 @@ import {
   getNodeEnv,
   getSqliteInstance,
   getWorkflowReconciliationStatusSummary,
-  projectPublicWorkspaceReadiness,
+  projectPublicCodespaceReadiness,
 } from "@mcp-moira/shared";
 import { DatabaseRepository } from "@mcp-moira/workflow-engine";
-import { getWorkspaceObservabilityService } from "../services/workspace-services.js";
+import { getCodespaceObservabilityService } from "../services/codespace-services.js";
 
 const router = Router();
 
@@ -45,11 +45,11 @@ router.get(
     const reconciliation = getWorkflowReconciliationStatusSummary(getSqliteInstance());
     // Public liveness surface: the cached decision with only the readiness state,
     // never operator detail; a stalled connector cannot hang this endpoint.
-    const workspaces = projectPublicWorkspaceReadiness(
-      await getWorkspaceObservabilityService().snapshot(),
+    const codespaces = projectPublicCodespaceReadiness(
+      await getCodespaceObservabilityService().snapshot(),
     );
-    const workspacesOk = !workspaces.degraded;
-    const degraded = allHealthy && (reconciliation.status === "error" || !workspacesOk);
+    const codespacesOk = !codespaces.degraded;
+    const degraded = allHealthy && (reconciliation.status === "error" || !codespacesOk);
 
     const healthResponse: HealthCheckResponse = {
       status: !allHealthy ? "error" : degraded ? "degraded" : "ok",
@@ -58,10 +58,10 @@ router.get(
         validation: validationOk,
         mcpEngine: mcpEngineOk,
         workflowReconciliation: reconciliation.status === "ok",
-        workspaces: workspacesOk,
+        codespaces: codespacesOk,
       },
       reconciliation,
-      workspaces,
+      codespaces,
       uptime: process.uptime(),
       timestamp: new Date().toISOString(),
       version: "0.1.0",

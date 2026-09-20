@@ -48,6 +48,10 @@ Use `robust-task` when retry, recovery, or durable progress tracking is importan
 
 Execute directly only a single answer, read-only lookup, or localized change that can be completed and verified as one step.
 
+## Working without the user's filesystem
+
+If you cannot read or write the user's files, do not tell them what to run in a terminal you cannot see. Use a codespace: look for one that already fits the task, and offer to create one when none does.
+
 ## Step contract
 
 Each Moira response contains:

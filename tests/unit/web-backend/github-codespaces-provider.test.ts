@@ -1,8 +1,11 @@
 import { describe, expect, jest, test } from "@jest/globals";
-import type { WorkspaceGitHubConfigStatus } from "@mcp-moira/shared";
-import { HttpGitHubWorkspaceClient } from "../../../packages/web-backend/src/services/github-workspace-client.js";
+import type { CodespaceGitHubConfigStatus } from "@mcp-moira/shared";
+import {
+  GitHubCodespaceClientError,
+  HttpGitHubCodespaceClient,
+} from "../../../packages/web-backend/src/services/github-codespace-client.js";
 
-const config: Extract<WorkspaceGitHubConfigStatus, { state: "available" }> = {
+const config: Extract<CodespaceGitHubConfigStatus, { state: "available" }> = {
   state: "available",
   clientId: "Iv23abcdefgh1234",
   clientSecret: "github-app-client-secret-value-1234567890",
@@ -36,6 +39,15 @@ function codespace(overrides: Record<string, unknown> = {}) {
 }
 
 describe("GitHub Codespaces provider edge", () => {
+  test("classifies a transport failure as a provider failure", async () => {
+    const fetchImpl = jest.fn<typeof fetch>().mockRejectedValue(new TypeError("network down"));
+    const failure = await new HttpGitHubCodespaceClient(config, fetchImpl)
+      .getUser("ghu_secret")
+      .catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(GitHubCodespaceClientError);
+    expect(failure).toMatchObject({ status: 503 });
+  });
+
   test("discovers machines and follows bounded same-origin user Codespace pagination", async () => {
     const fetchImpl = jest
       .fn<typeof fetch>()
@@ -60,13 +72,17 @@ describe("GitHub Codespaces provider edge", () => {
           headers: { "Content-Type": "application/json" },
         }),
       );
-    const client = new HttpGitHubWorkspaceClient(config, fetchImpl);
+    const client = new HttpGitHubCodespaceClient(config, fetchImpl);
     await expect(
-      client.listMachines("ghu_secret", {
-        id: "301",
-        fullName: "owner/repository",
-        private: true,
-      }),
+      client.listMachines(
+        "ghu_secret",
+        {
+          id: "301",
+          fullName: "owner/repository",
+          private: true,
+        },
+        "refs/heads/feature/a b?x=1",
+      ),
     ).resolves.toEqual([
       {
         name: "basicLinux32gb",
@@ -77,6 +93,9 @@ describe("GitHub Codespaces provider edge", () => {
         storageBytes: 32 * 1024 ** 3,
       },
     ]);
+    expect(String(fetchImpl.mock.calls[0]?.[0])).toBe(
+      "https://api.github.com/repos/owner/repository/codespaces/machines?ref=refs%2Fheads%2Ffeature%2Fa%20b%3Fx%3D1",
+    );
     await expect(client.listOwned("ghu_secret")).resolves.toHaveLength(1);
     expect(fetchImpl).toHaveBeenCalledTimes(3);
   });
@@ -92,7 +111,7 @@ describe("GitHub Codespaces provider edge", () => {
       }),
     );
     await expect(
-      new HttpGitHubWorkspaceClient(config, foreignPagination).listOwned("ghu_secret"),
+      new HttpGitHubCodespaceClient(config, foreignPagination).listOwned("ghu_secret"),
     ).rejects.toThrow(/pagination left/);
 
     const invalidOwner = jest.fn<typeof fetch>().mockResolvedValue(
@@ -102,7 +121,7 @@ describe("GitHub Codespaces provider edge", () => {
       }),
     );
     await expect(
-      new HttpGitHubWorkspaceClient(config, invalidOwner).getExact(
+      new HttpGitHubCodespaceClient(config, invalidOwner).getExact(
         "ghu_secret",
         "silver-space-123",
       ),
@@ -111,7 +130,7 @@ describe("GitHub Codespaces provider edge", () => {
     const failed = jest
       .fn<typeof fetch>()
       .mockResolvedValue(new Response("provider echoed ghu_secret", { status: 500 }));
-    const request = new HttpGitHubWorkspaceClient(config, failed).create("ghu_secret", {
+    const request = new HttpGitHubCodespaceClient(config, failed).create("ghu_secret", {
       repository: {
         id: "301",
         fullName: "owner/repository",
@@ -146,7 +165,7 @@ describe("GitHub Codespaces provider edge", () => {
         }),
     );
     await expect(
-      new HttpGitHubWorkspaceClient(config, endless).listOwned("ghu_secret"),
+      new HttpGitHubCodespaceClient(config, endless).listOwned("ghu_secret"),
     ).rejects.toThrow(/pagination exceeded/);
     expect(endless).toHaveBeenCalledTimes(20);
 
@@ -164,7 +183,7 @@ describe("GitHub Codespaces provider edge", () => {
         }),
       );
       await expect(
-        new HttpGitHubWorkspaceClient(config, fetchImpl).getExact("ghu_secret", "silver-space-123"),
+        new HttpGitHubCodespaceClient(config, fetchImpl).getExact("ghu_secret", "silver-space-123"),
       ).rejects.toBeInstanceOf(Error);
     }
 
@@ -175,7 +194,7 @@ describe("GitHub Codespaces provider edge", () => {
       }),
     );
     await expect(
-      new HttpGitHubWorkspaceClient(config, unknownState).getExact(
+      new HttpGitHubCodespaceClient(config, unknownState).getExact(
         "ghu_secret",
         "silver-space-123",
       ),
@@ -189,7 +208,7 @@ describe("GitHub Codespaces provider edge", () => {
         headers: { "Content-Type": "application/json" },
       }),
     );
-    const client = new HttpGitHubWorkspaceClient(config, fetchImpl);
+    const client = new HttpGitHubCodespaceClient(config, fetchImpl);
     const result = await client.create("ghu_secret", {
       repository: {
         id: "301",
@@ -237,7 +256,7 @@ describe("GitHub Codespaces provider edge", () => {
           status: 422,
         }),
       );
-    const client = new HttpGitHubWorkspaceClient(config, fetchImpl);
+    const client = new HttpGitHubCodespaceClient(config, fetchImpl);
     const input = {
       repository: {
         id: "301",
@@ -276,7 +295,7 @@ describe("GitHub Codespaces provider edge", () => {
       ),
     );
     await expect(
-      new HttpGitHubWorkspaceClient(config, constrained).create("ghu_secret", input),
+      new HttpGitHubCodespaceClient(config, constrained).create("ghu_secret", input),
     ).resolves.toEqual({
       outcome: "rejected",
       reason: "github_status_400",
@@ -292,7 +311,7 @@ describe("GitHub Codespaces provider edge", () => {
       .mockResolvedValueOnce(new Response(null, { status: 200 }))
       .mockResolvedValueOnce(new Response(null, { status: 200 }))
       .mockResolvedValueOnce(new Response(null, { status: 202 }));
-    const client = new HttpGitHubWorkspaceClient(config, fetchImpl);
+    const client = new HttpGitHubCodespaceClient(config, fetchImpl);
     await expect(client.getExact("ghu_secret", "silver-space-123")).resolves.toBeNull();
     await expect(client.startExact("ghu_secret", "silver-space-123")).resolves.toBe("accepted");
     await expect(client.stopExact("ghu_secret", "silver-space-123")).resolves.toBe("accepted");

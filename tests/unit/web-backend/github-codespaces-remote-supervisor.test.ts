@@ -44,8 +44,8 @@ afterEach(() => {
 function fixture() {
   const directory = mkdtempSync(join(tmpdir(), "moira-direct-supervisor-"));
   directories.push(directory);
-  const workspacesRoot = join(directory, "workspaces");
-  const repository = join(workspacesRoot, "repository");
+  const codespacesRoot = join(directory, "codespaces");
+  const repository = join(codespacesRoot, "repository");
   const home = join(directory, "home");
   const stateRoot = join(directory, "state");
   mkdirSync(repository, { recursive: true });
@@ -61,7 +61,7 @@ function fixture() {
     environment: {
       ...process.env,
       HOME: home,
-      MOIRA_WORKSPACES_ROOT: workspacesRoot,
+      MOIRA_CODESPACES_ROOT: codespacesRoot,
       MOIRA_OPERATION_STATE_DIR: stateRoot,
     },
     stateRoot,
@@ -148,6 +148,11 @@ async function inspectUntilTerminal(
 }
 
 describe("direct Codespace operation supervisor", () => {
+  test("defaults to the GitHub Codespaces /workspaces repository mount", () => {
+    const source = readFileSync(supervisorPath, "utf8");
+    expect(source).toContain('process.env.MOIRA_CODESPACES_ROOT || "/workspaces"');
+  });
+
   test("performs bounded stat, search, ranges and atomic binary writes without shell paths", async () => {
     const value = fixture();
     writeFileSync(join(value.repository, "source.txt"), "alpha\nbeta needle\ngamma\n");
@@ -422,7 +427,7 @@ describe("direct Codespace operation supervisor", () => {
         }),
       ).resolves.toMatchObject({
         state: "failed",
-        value: { action: "read", state: "failed", code: "WORKSPACE_FILE_REJECTED" },
+        value: { action: "read", state: "failed", code: "CODESPACE_FILE_REJECTED" },
       });
     }
     await expect(
@@ -440,7 +445,7 @@ describe("direct Codespace operation supervisor", () => {
       }),
     ).resolves.toMatchObject({
       state: "failed",
-      value: { action: "write", state: "failed", code: "WORKSPACE_FILE_REJECTED" },
+      value: { action: "write", state: "failed", code: "CODESPACE_FILE_REJECTED" },
     });
     expect(readFileSync(outside, "utf8")).toBe("outside");
     expect(readFileSync(join(value.repository, "original.txt"), "utf8")).toBe("original");
@@ -487,7 +492,7 @@ if (process.env.MOIRA_TEST_FILE_SUBSTITUTION === "target") {
       ),
     ).resolves.toMatchObject({
       state: "failed",
-      value: { action: "write", state: "failed", code: "WORKSPACE_FILE_REJECTED" },
+      value: { action: "write", state: "failed", code: "CODESPACE_FILE_REJECTED" },
     });
     expect(readFileSync(join(value.repository, "race.txt"), "utf8")).toBe("original");
 
@@ -519,7 +524,7 @@ if (process.env.MOIRA_TEST_FILE_SUBSTITUTION === "target") {
       ),
     ).resolves.toMatchObject({
       state: "failed",
-      value: { action: "write", state: "failed", code: "WORKSPACE_FILE_REJECTED" },
+      value: { action: "write", state: "failed", code: "CODESPACE_FILE_REJECTED" },
     });
     expect(readFileSync(join(outside, "inside.txt"), "utf8")).toBe("outside");
     expect(readFileSync(join(value.repository, "sub-moved", "inside.txt"), "utf8")).toBe("inside");
@@ -544,7 +549,7 @@ if (process.env.MOIRA_TEST_FILE_SUBSTITUTION === "target") {
       ),
     ).resolves.toMatchObject({
       state: "failed",
-      value: { action: "write", state: "failed", code: "WORKSPACE_FILE_REJECTED" },
+      value: { action: "write", state: "failed", code: "CODESPACE_FILE_REJECTED" },
     });
     expect(existsSync(join(value.repository, "empty", "new.txt"))).toBe(false);
     expect(existsSync(join(value.repository, "empty-moved", "new.txt"))).toBe(false);
@@ -711,7 +716,7 @@ if (process.env.MOIRA_TEST_HOLD_FILE_RUNNER === "1") {
       }),
     ).resolves.toMatchObject({
       state: "failed",
-      value: { action: "apply_patch", state: "failed", code: "WORKSPACE_FILE_REJECTED" },
+      value: { action: "apply_patch", state: "failed", code: "CODESPACE_FILE_REJECTED" },
     });
     expect(readFileSync(join(value.repository, "one.txt"), "utf8")).toBe("one");
     expect(readFileSync(join(value.repository, "two.txt"), "utf8")).toBe("two");
@@ -748,7 +753,7 @@ if (process.env.MOIRA_TEST_HOLD_FILE_RUNNER === "1") {
         }),
       ).resolves.toMatchObject({
         state: "failed",
-        value: { action: "apply_patch", state: "failed", code: "WORKSPACE_FILE_REJECTED" },
+        value: { action: "apply_patch", state: "failed", code: "CODESPACE_FILE_REJECTED" },
       });
       expect(readFileSync(join(value.repository, "bounded.txt"), "utf8")).toBe("original");
       expect(readdirSync(value.repository).filter((entry) => entry.startsWith(".moira-"))).toEqual(
@@ -1414,7 +1419,7 @@ if (process.env.MOIRA_TEST_HOLD_FILE_RUNNER === "1") {
     ).toBe("service|/opt/tool|new|gone|/opt/tool/bin");
 
     // The stored context holds only what the script touched: an inherited variable it never named
-    // is absent from the file, which is what keeps the workspace's own environment out of it.
+    // is absent from the file, which is what keeps the codespace's own environment out of it.
     const storedSession = JSON.parse(
       readFileSync(join(value.stateRoot, "sessions", "build.json"), "utf8"),
     ) as { env: Record<string, string | null> };
@@ -1477,7 +1482,7 @@ if (process.env.MOIRA_TEST_HOLD_FILE_RUNNER === "1") {
     });
   });
 
-  test("names a command whose workspace restarted under it, and not one that failed inside this life", async () => {
+  test("names a command whose codespace restarted under it, and not one that failed inside this life", async () => {
     const value = fixture();
     const marker = (character: string) => `moira-op-${character.repeat(32)}`;
     const environment = { ...value.environment, MOIRA_ENVIRONMENT_ID: "life-one" };
@@ -1546,7 +1551,7 @@ if (process.env.MOIRA_TEST_HOLD_FILE_RUNNER === "1") {
         sessionStart: true,
       });
 
-    // Fill the workspace's sessions in one life of the environment.
+    // Fill the codespace's sessions in one life of the environment.
     for (let index = 0; index < 16; index++) {
       await expect(open(environment, `session-${index}`, marker(index))).resolves.toEqual({
         state: "running",
