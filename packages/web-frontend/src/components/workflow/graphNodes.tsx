@@ -27,7 +27,7 @@ import { isFlashed, isLit, useTransitionFocus } from "../run/focus";
 import { DiagramEdge, DiagramMarkers, type DiagramEdgeKind } from "../diagram/DiagramEdge";
 import type { GraphLink, GraphStep } from "../run/graphModel";
 import type { ExecutionBlockStatus } from "../run/model";
-import { GRAPH_CARD_WIDTH, type GraphRoute } from "./graphLayout";
+import { GRAPH_CARD_WIDTH, GRAPH_FLOW_ENTRY_STRIP, type GraphRoute } from "./graphLayout";
 import { roundedPath } from "@mcp-moira/workflow-engine/progress-visual";
 /** The rounded polyline every edge is drawn with — the engine's, shared with the map and the picture. */
 export { roundedPath };
@@ -60,6 +60,8 @@ export type BlockGroupData = {
   index: number;
   name: string;
   status: ExecutionBlockStatus;
+  /** Keep the horizontal-flow edge entry strip free of even a long block title. */
+  reserveFlowEntryStrip?: boolean;
   /** The block the page has selected: the map's selection carried onto the graph. */
   selected?: boolean;
   /** The reader just arrived in this block from the map. */
@@ -275,7 +277,13 @@ export function BlockGroupView({ data }: NodeProps<BlockGroupNode>): React.JSX.E
       data-graph-group=""
       data-selected={data.selected ? "true" : undefined}
     >
-      <p className="text-[11px] font-semibold uppercase tracking-wide">
+      <p
+        className={cn(
+          "text-[11px] font-semibold uppercase tracking-wide",
+          data.reserveFlowEntryStrip && "truncate",
+        )}
+        style={data.reserveFlowEntryStrip ? { paddingRight: GRAPH_FLOW_ENTRY_STRIP } : undefined}
+      >
         <span className="mr-1.5 tabular-nums opacity-70">{data.index + 1}.</span>
         {data.name}
       </p>

@@ -7,6 +7,8 @@
 
 import { describe, expect, test } from "@jest/globals";
 import {
+  GRAPH_FLOW_ENTRY_STRIP,
+  GRAPH_GROUP_HEADER,
   GRAPH_MARGIN,
   GRAPH_PRESET_DIRECTIONS,
   graphSpacing,
@@ -198,15 +200,12 @@ describe("corridors of the bundled flows", () => {
       expect(cards.length).toBeGreaterThan(0);
       const crossings: string[] = [];
       const offCanvas: string[] = [];
-      const linkById = new Map(model.links.map((link) => [link.id, link]));
       for (const [id, route] of Object.entries(layout.routes)) {
         for (const [x, y] of route.lane) if (x < 0 || y < 0) offCanvas.push(id);
         for (let i = 1; i < route.lane.length; i += 1) {
           const [x1, y1] = route.lane[i - 1];
           const [x2, y2] = route.lane[i];
           for (const c of cards) {
-            const link = linkById.get(id);
-            if (c.id === link?.source || c.id === link?.target) continue;
             const horizontal =
               y1 === y2 &&
               y1 > c.y0 &&
@@ -235,9 +234,7 @@ describe("corridors of the bundled flows", () => {
       const tooClose: string[] = [];
       for (const [id, route] of Object.entries(layout.routes)) {
         for (const [x, y] of route.lane) {
-          const link = linkById.get(id);
           for (const c of cards) {
-            if (c.id === link?.source || c.id === link?.target) continue;
             if (Math.abs(clearance(x, y, c)) < 6) tooClose.push(id);
           }
         }
@@ -287,6 +284,7 @@ describe("corridors of the bundled flows", () => {
         }),
       );
       const crossings: string[] = [];
+      const headerCrossings: string[] = [];
       const offCanvas: string[] = [];
       for (const link of model.links) {
         const route = layout.routes[link.id];
@@ -306,7 +304,6 @@ describe("corridors of the bundled flows", () => {
           const [x1, y1] = points[index - 1];
           const [x2, y2] = points[index];
           for (const [cardId, card] of cards) {
-            if (cardId === link.source || cardId === link.target) continue;
             const horizontal =
               y1 === y2 &&
               y1 > card.y0 &&
@@ -321,9 +318,28 @@ describe("corridors of the bundled flows", () => {
               Math.max(y1, y2) > card.y0;
             if (horizontal || vertical) crossings.push(`${link.id}:${cardId}`);
           }
+          if (preset === "flow") {
+            for (const group of layout.groups) {
+              const protectedRight = group.x + group.width - GRAPH_FLOW_ENTRY_STRIP;
+              const horizontal =
+                y1 === y2 &&
+                y1 > group.y &&
+                y1 < group.y + GRAPH_GROUP_HEADER &&
+                Math.min(x1, x2) < protectedRight &&
+                Math.max(x1, x2) > group.x;
+              const vertical =
+                x1 === x2 &&
+                x1 > group.x &&
+                x1 < protectedRight &&
+                Math.min(y1, y2) < group.y + GRAPH_GROUP_HEADER &&
+                Math.max(y1, y2) > group.y;
+              if (horizontal || vertical) headerCrossings.push(`${link.id}:${group.id}`);
+            }
+          }
         }
       }
       expect(crossings).toEqual([]);
+      expect(headerCrossings).toEqual([]);
       expect(offCanvas).toEqual([]);
     },
     30000,

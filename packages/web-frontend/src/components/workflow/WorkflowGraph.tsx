@@ -579,7 +579,13 @@ export const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
             selectable: false,
             focusable: false,
             zIndex: -1,
-            data: { blockId: block.id, index: block.index, name: block.name, status: block.status },
+            data: {
+              blockId: block.id,
+              index: block.index,
+              name: block.name,
+              status: block.status,
+              reserveFlowEntryStrip: preset === "flow",
+            },
           };
         });
         const stepById = new Map(model.steps.map((s) => [s.id, s]));

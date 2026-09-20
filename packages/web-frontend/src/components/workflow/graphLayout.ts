@@ -39,7 +39,7 @@ const APPROACH_STEP = 9;
 export const APPROACH_COLUMNS = 4;
 /** Distance between two return lanes in the margin, which holds one lane per return. */
 const MARGIN_LANE_STEP = 8;
-const GRAPH_GROUP_HEADER = 36;
+export const GRAPH_GROUP_HEADER = 36;
 const BASE_NODE_GAP = 20;
 const BASE_LAYER_GAP = 76;
 const BASE_GROUP_GAP = 56;
@@ -70,6 +70,9 @@ const EDGE_APPROACH = 24;
 const CORRIDOR_INSET = 14;
 /** Space kept between the outermost lane of a corridor and whatever bounds the corridor. */
 const LANE_CLEARANCE = 10;
+/** Title-free strip on the right of a horizontal group, used to enter past its header. */
+export const GRAPH_FLOW_ENTRY_STRIP =
+  EDGE_APPROACH + (APPROACH_COLUMNS - 1) * APPROACH_STEP + 2 * LANE_CLEARANCE;
 
 /**
  * How many lanes every corridor must hold, counted before the groups are placed so that each
@@ -184,109 +187,183 @@ interface RouteObstacle {
   y1: number;
 }
 
-/** A shortest rectilinear path through the clearance grid around a block's cards. */
-function obstaclePath(
-  start: RoutePoint,
-  end: RoutePoint,
+interface QueueItem {
+  key: number;
+  distance: number;
+  score: number;
+}
+
+/** A tiny binary min-heap: sorting the complete A* frontier at every step dominated large graphs. */
+class RouteQueue {
+  private readonly items: QueueItem[] = [];
+
+  get length(): number {
+    return this.items.length;
+  }
+
+  push(item: QueueItem): void {
+    let index = this.items.push(item) - 1;
+    while (index > 0) {
+      const parent = (index - 1) >> 1;
+      if (this.items[parent].score <= item.score) break;
+      this.items[index] = this.items[parent];
+      index = parent;
+    }
+    this.items[index] = item;
+  }
+
+  pop(): QueueItem {
+    const first = this.items[0];
+    const last = this.items.pop()!;
+    if (this.items.length === 0) return first;
+    let index = 0;
+    while (true) {
+      const left = index * 2 + 1;
+      if (left >= this.items.length) break;
+      const right = left + 1;
+      const child =
+        right < this.items.length && this.items[right].score < this.items[left].score
+          ? right
+          : left;
+      if (this.items[child].score >= last.score) break;
+      this.items[index] = this.items[child];
+      index = child;
+    }
+    this.items[index] = last;
+    return first;
+  }
+}
+
+interface ObstacleRouter {
+  path(start: RoutePoint, end: RoutePoint): RoutePoint[];
+}
+
+/**
+ * Build one clearance grid for every card group, then reuse it for all of that group's routes.
+ * The grid contains every route endpoint up front; this changes the old per-edge O(cards²) setup
+ * into one setup per group. Points and segments through rectangle interiors are marked once, so A*
+ * only does constant-time neighbour checks.
+ */
+function createObstacleRouter(
   cards: ReadonlyArray<RouteObstacle>,
-  excluded: ReadonlySet<string>,
-): RoutePoint[] {
-  const obstacles = cards
-    .filter((card) => !excluded.has(card.id))
-    .map((card) => ({
-      ...card,
-      x0: card.x0 - LANE_CLEARANCE,
-      y0: card.y0 - LANE_CLEARANCE,
-      x1: card.x1 + LANE_CLEARANCE,
-      y1: card.y1 + LANE_CLEARANCE,
-    }));
-  const xs = [...new Set([start[0], end[0], ...obstacles.flatMap((o) => [o.x0, o.x1])])].sort(
-    (a, b) => a - b,
-  );
-  const ys = [...new Set([start[1], end[1], ...obstacles.flatMap((o) => [o.y0, o.y1])])].sort(
-    (a, b) => a - b,
-  );
-  const blocked = (x: number, y: number): boolean =>
-    obstacles.some((o) => x > o.x0 && x < o.x1 && y > o.y0 && y < o.y1);
-  const clear = (a: RoutePoint, b: RoutePoint): boolean =>
-    !obstacles.some((o) => {
-      if (a[1] === b[1])
-        return (
-          a[1] > o.y0 && a[1] < o.y1 && Math.min(a[0], b[0]) < o.x1 && Math.max(a[0], b[0]) > o.x0
-        );
-      return (
-        a[0] > o.x0 && a[0] < o.x1 && Math.min(a[1], b[1]) < o.y1 && Math.max(a[1], b[1]) > o.y0
+  endpoints: ReadonlyArray<RoutePoint>,
+): ObstacleRouter {
+  const obstacles = cards.map((card) => ({
+    ...card,
+    x0: card.x0 - LANE_CLEARANCE,
+    y0: card.y0 - LANE_CLEARANCE,
+    x1: card.x1 + LANE_CLEARANCE,
+    y1: card.y1 + LANE_CLEARANCE,
+  }));
+  const xs = [
+    ...new Set([...endpoints.map(([x]) => x), ...obstacles.flatMap((o) => [o.x0, o.x1])]),
+  ].sort((a, b) => a - b);
+  const ys = [
+    ...new Set([...endpoints.map(([, y]) => y), ...obstacles.flatMap((o) => [o.y0, o.y1])]),
+  ].sort((a, b) => a - b);
+  const width = xs.length;
+  const height = ys.length;
+  const xIndex = new Map(xs.map((value, index) => [value, index]));
+  const yIndex = new Map(ys.map((value, index) => [value, index]));
+  const blockedPoint = new Uint8Array(width * height);
+  const blockedHorizontal = new Uint8Array(Math.max(0, width - 1) * height);
+  const blockedVertical = new Uint8Array(width * Math.max(0, height - 1));
+  for (const obstacle of obstacles) {
+    const x0 = xIndex.get(obstacle.x0)!;
+    const x1 = xIndex.get(obstacle.x1)!;
+    const y0 = yIndex.get(obstacle.y0)!;
+    const y1 = yIndex.get(obstacle.y1)!;
+    for (let yi = y0 + 1; yi < y1; yi += 1) {
+      for (let xi = x0 + 1; xi < x1; xi += 1) blockedPoint[yi * width + xi] = 1;
+      for (let xi = x0; xi < x1; xi += 1) blockedHorizontal[yi * (width - 1) + xi] = 1;
+    }
+    for (let xi = x0 + 1; xi < x1; xi += 1) {
+      for (let yi = y0; yi < y1; yi += 1) blockedVertical[yi * width + xi] = 1;
+    }
+  }
+
+  const pointOf = (pointIndex: number): RoutePoint => [
+    xs[pointIndex % width],
+    ys[Math.floor(pointIndex / width)],
+  ];
+  const compact = (path: RoutePoint[]): RoutePoint[] =>
+    path.filter((point, index) => {
+      if (index === 0 || index === path.length - 1) return true;
+      const before = path[index - 1];
+      const after = path[index + 1];
+      return !(
+        (before[0] === point[0] && point[0] === after[0]) ||
+        (before[1] === point[1] && point[1] === after[1])
       );
     });
-  type Direction = "h" | "v" | "start";
-  interface State {
-    xi: number;
-    yi: number;
-    direction: Direction;
-    score: number;
-  }
-  const startXi = xs.indexOf(start[0]);
-  const startYi = ys.indexOf(start[1]);
-  const endXi = xs.indexOf(end[0]);
-  const endYi = ys.indexOf(end[1]);
-  const keyOf = (xi: number, yi: number, direction: Direction) => `${xi}:${yi}:${direction}`;
-  const startKey = keyOf(startXi, startYi, "start");
-  const distance = new Map([[startKey, 0]]);
-  const previous = new Map<string, string>();
-  const states = new Map<string, { xi: number; yi: number; direction: Direction }>([
-    [startKey, { xi: startXi, yi: startYi, direction: "start" }],
-  ]);
-  const open: State[] = [{ xi: startXi, yi: startYi, direction: "start", score: 0 }];
-  let finish: string | null = null;
-  while (open.length > 0) {
-    open.sort((a, b) => a.score - b.score);
-    const current = open.shift()!;
-    const currentKey = keyOf(current.xi, current.yi, current.direction);
-    const currentDistance = distance.get(currentKey);
-    if (currentDistance === undefined) continue;
-    if (current.xi === endXi && current.yi === endYi) {
-      finish = currentKey;
-      break;
-    }
-    const candidates = [
-      [current.xi - 1, current.yi, "h"],
-      [current.xi + 1, current.yi, "h"],
-      [current.xi, current.yi - 1, "v"],
-      [current.xi, current.yi + 1, "v"],
-    ] as const;
-    for (const [xi, yi, direction] of candidates) {
-      if (xi < 0 || yi < 0 || xi >= xs.length || yi >= ys.length) continue;
-      const from: RoutePoint = [xs[current.xi], ys[current.yi]];
-      const to: RoutePoint = [xs[xi], ys[yi]];
-      if (blocked(to[0], to[1]) || !clear(from, to)) continue;
-      const bend = current.direction !== "start" && current.direction !== direction ? EDGE_STUB : 0;
-      const candidate =
-        currentDistance + Math.abs(to[0] - from[0]) + Math.abs(to[1] - from[1]) + bend;
-      const nextKey = keyOf(xi, yi, direction);
-      if (candidate >= (distance.get(nextKey) ?? Number.POSITIVE_INFINITY)) continue;
-      distance.set(nextKey, candidate);
-      previous.set(nextKey, currentKey);
-      states.set(nextKey, { xi, yi, direction });
-      const heuristic = Math.abs(end[0] - to[0]) + Math.abs(end[1] - to[1]);
-      open.push({ xi, yi, direction, score: candidate + heuristic });
-    }
-  }
-  if (!finish) return [start, end];
-  const path: RoutePoint[] = [];
-  for (let key: string | undefined = finish; key; key = previous.get(key)) {
-    const state = states.get(key)!;
-    path.push([xs[state.xi], ys[state.yi]]);
-  }
-  path.reverse();
-  return path.filter((point, index) => {
-    if (index === 0 || index === path.length - 1) return true;
-    const before = path[index - 1];
-    const after = path[index + 1];
-    return !(
-      (before[0] === point[0] && point[0] === after[0]) ||
-      (before[1] === point[1] && point[1] === after[1])
-    );
-  });
+
+  return {
+    path(start, end) {
+      const startXi = xIndex.get(start[0]);
+      const startYi = yIndex.get(start[1]);
+      const endXi = xIndex.get(end[0]);
+      const endYi = yIndex.get(end[1]);
+      if (
+        startXi === undefined ||
+        startYi === undefined ||
+        endXi === undefined ||
+        endYi === undefined
+      ) {
+        throw new Error("Obstacle route endpoint was not included in its reusable grid");
+      }
+      const startPoint = startYi * width + startXi;
+      const endPoint = endYi * width + endXi;
+      const startKey = startPoint * 3 + 2;
+      const distance = new Map<number, number>([[startKey, 0]]);
+      const previous = new Map<number, number>();
+      const open = new RouteQueue();
+      open.push({ key: startKey, distance: 0, score: 0 });
+      let finish: number | null = null;
+      while (open.length > 0) {
+        const current = open.pop();
+        if (current.distance !== distance.get(current.key)) continue;
+        const direction = current.key % 3;
+        const pointIndex = Math.floor(current.key / 3);
+        if (pointIndex === endPoint) {
+          finish = current.key;
+          break;
+        }
+        const xi = pointIndex % width;
+        const yi = Math.floor(pointIndex / width);
+        const candidates: Array<[number, number, 0 | 1, boolean]> = [
+          [xi - 1, yi, 0, xi <= 0 || Boolean(blockedHorizontal[yi * (width - 1) + xi - 1])],
+          [xi + 1, yi, 0, xi >= width - 1 || Boolean(blockedHorizontal[yi * (width - 1) + xi])],
+          [xi, yi - 1, 1, yi <= 0 || Boolean(blockedVertical[(yi - 1) * width + xi])],
+          [xi, yi + 1, 1, yi >= height - 1 || Boolean(blockedVertical[yi * width + xi])],
+        ];
+        for (const [nextXi, nextYi, nextDirection, segmentBlocked] of candidates) {
+          if (segmentBlocked) continue;
+          const nextPoint = nextYi * width + nextXi;
+          if (blockedPoint[nextPoint]) continue;
+          const step =
+            Math.abs(xs[nextXi] - xs[xi]) +
+            Math.abs(ys[nextYi] - ys[yi]) +
+            (direction !== 2 && direction !== nextDirection ? EDGE_STUB : 0);
+          const candidate = current.distance + step;
+          const nextKey = nextPoint * 3 + nextDirection;
+          if (candidate >= (distance.get(nextKey) ?? Number.POSITIVE_INFINITY)) continue;
+          distance.set(nextKey, candidate);
+          previous.set(nextKey, current.key);
+          const heuristic = Math.abs(end[0] - xs[nextXi]) + Math.abs(end[1] - ys[nextYi]);
+          open.push({ key: nextKey, distance: candidate, score: candidate + heuristic });
+        }
+      }
+      if (finish === null) {
+        throw new Error(`No card-safe graph route from ${start.join(",")} to ${end.join(",")}`);
+      }
+      const path: RoutePoint[] = [];
+      for (let key: number | undefined = finish; key !== undefined; key = previous.get(key)) {
+        path.push(pointOf(Math.floor(key / 3)));
+      }
+      path.reverse();
+      return compact(path);
+    },
+  };
 }
 
 function withoutRepeatedPoints(points: RoutePoint[]): RoutePoint[] {
@@ -367,13 +444,30 @@ export function routeLinks(
     const span = (total - 1) * LANE_STEP;
     return from + Math.max(LANE_CLEARANCE, (to - from - span) / 2) + index * LANE_STEP;
   };
-  const routes: Record<string, GraphRoute> = {};
   // Every edge arriving at one card turns up to it in its own column, so several arrivals do not
   // climb the same line and pile their arrowheads on one point. Cards of one column start at
   // different columns, because their approaches share the run from the corridor up to their row.
   const arrivals = new Map<string, number>();
   const cardOffset = new Map<string, number>();
   const columnCards = new Map<string, number>();
+  interface PlannedRoute {
+    link: (typeof routed)[number];
+    s: Box;
+    t: Box;
+    sg?: string;
+    tg?: string;
+    sBox?: Box;
+    tBox?: Box;
+    stub: number;
+    side: number;
+    index: number;
+    laneS?: number;
+    laneT?: number;
+    outer?: number;
+    sourceEntry?: RoutePoint;
+    targetEntry?: RoutePoint;
+  }
+  const plans: PlannedRoute[] = [];
   for (const link of routed) {
     const s = box(steps.get(link.source)!);
     const t = box(steps.get(link.target)!);
@@ -392,24 +486,9 @@ export function routeLinks(
     const side = down ? t.a0 - LANE_CLEARANCE : t.a0 - EDGE_APPROACH - index * APPROACH_STEP;
     const sBox = sg ? groupBox.get(sg) : undefined;
     const tBox = tg ? groupBox.get(tg) : undefined;
+    const plan: PlannedRoute = { link, s, t, sg, tg, sBox, tBox, stub, side, index };
     if (sBox && sg === tg) {
-      if (down) {
-        const path = obstaclePath(
-          point(stub, (s.b0 + s.b1) / 2),
-          point(side, (t.b0 + t.b1) / 2),
-          cardsByGroup.get(sg!) ?? [],
-          new Set([link.source, link.target]),
-        );
-        routes[link.id] = {
-          stub,
-          lane: path,
-          side,
-          sidePorts: true,
-        };
-      } else {
-        const laneB = sBox.b1 - CORRIDOR_INSET - nextLane(bottomLanes, sg!) * LANE_STEP;
-        routes[link.id] = { stub, lane: [point(stub, laneB), point(side, laneB)], side };
-      }
+      if (!down) plan.laneT = sBox.b1 - CORRIDOR_INSET - nextLane(bottomLanes, sg!) * LANE_STEP;
     } else if (sBox && tBox) {
       const laneS = gapLane(sg!, sBox.b1, nextLane(gapLanes, sg!), gapTotal.get(sg!) ?? 1);
       // Every inter-group route stays in the outer margin until it reaches the target group's own
@@ -419,38 +498,91 @@ export function routeLinks(
       const first = Math.max(LANE_CLEARANCE, (margin - span) / 2);
       const outer = first + marginLanes * MARGIN_LANE_STEP;
       marginLanes += 1;
+      const laneT = tBox.b1 - CORRIDOR_INSET - nextLane(bottomLanes, tg!) * LANE_STEP;
+      plan.laneS = laneS;
+      plan.laneT = laneT;
+      plan.outer = outer;
       if (down) {
-        const laneT = tBox.b1 - CORRIDOR_INSET - nextLane(bottomLanes, tg!) * LANE_STEP;
-        const sourceEntry = point(sBox.a0 + LANE_CLEARANCE, laneS);
-        const targetEntry = point(tBox.a0 + LANE_CLEARANCE + index * APPROACH_STEP, laneT);
-        const sourcePath = obstaclePath(
-          point(stub, (s.b0 + s.b1) / 2),
-          sourceEntry,
-          cardsByGroup.get(sg!) ?? [],
-          new Set([link.source]),
-        );
-        const targetPath = obstaclePath(
-          targetEntry,
-          point(side, (t.b0 + t.b1) / 2),
-          cardsByGroup.get(tg!) ?? [],
-          new Set([link.target]),
-        );
+        plan.sourceEntry = point(sBox.a0 + LANE_CLEARANCE, laneS);
+        plan.targetEntry = point(tBox.a0 + LANE_CLEARANCE + index * APPROACH_STEP, laneT);
+      }
+    }
+    plans.push(plan);
+  }
+
+  const endpointsByGroup = new Map<string, RoutePoint[]>();
+  const addEndpoint = (group: string | undefined, endpoint: RoutePoint | undefined): void => {
+    if (!group || !endpoint) return;
+    endpointsByGroup.set(group, [...(endpointsByGroup.get(group) ?? []), endpoint]);
+  };
+  if (down) {
+    for (const plan of plans) {
+      const start = point(plan.stub, (plan.s.b0 + plan.s.b1) / 2);
+      const end = point(plan.side, (plan.t.b0 + plan.t.b1) / 2);
+      if (plan.sBox && plan.sg === plan.tg) {
+        addEndpoint(plan.sg, start);
+        addEndpoint(plan.sg, end);
+      } else if (plan.sBox && plan.tBox) {
+        addEndpoint(plan.sg, start);
+        addEndpoint(plan.sg, plan.sourceEntry);
+        addEndpoint(plan.tg, plan.targetEntry);
+        addEndpoint(plan.tg, end);
+      }
+    }
+  }
+  const routers = new Map<string, ObstacleRouter>();
+  for (const [group, endpoints] of endpointsByGroup) {
+    routers.set(group, createObstacleRouter(cardsByGroup.get(group) ?? [], endpoints));
+  }
+
+  const routes: Record<string, GraphRoute> = {};
+  for (const plan of plans) {
+    const { link, s, t, sg, tg, sBox, tBox, stub, side } = plan;
+    if (sBox && sg === tg) {
+      if (down) {
+        routes[link.id] = {
+          stub,
+          lane: routers
+            .get(sg!)!
+            .path(point(stub, (s.b0 + s.b1) / 2), point(side, (t.b0 + t.b1) / 2)),
+          side,
+          sidePorts: true,
+        };
+      } else {
+        routes[link.id] = {
+          stub,
+          lane: [point(stub, plan.laneT!), point(side, plan.laneT!)],
+          side,
+        };
+      }
+    } else if (sBox && tBox) {
+      if (down) {
+        const sourcePath = routers
+          .get(sg!)!
+          .path(point(stub, (s.b0 + s.b1) / 2), plan.sourceEntry!);
+        const targetPath = routers
+          .get(tg!)!
+          .path(plan.targetEntry!, point(side, (t.b0 + t.b1) / 2));
         routes[link.id] = {
           stub,
           lane: withoutRepeatedPoints([
             ...sourcePath,
-            point(outer, laneS),
-            point(outer, laneT),
+            point(plan.outer!, plan.laneS!),
+            point(plan.outer!, plan.laneT!),
             ...targetPath,
           ]),
           side,
           sidePorts: true,
         };
       } else {
-        const laneT = tBox.b1 - CORRIDOR_INSET - nextLane(bottomLanes, tg!) * LANE_STEP;
         routes[link.id] = {
           stub,
-          lane: [point(stub, laneS), point(outer, laneS), point(outer, laneT), point(side, laneT)],
+          lane: [
+            point(stub, plan.laneS!),
+            point(plan.outer!, plan.laneS!),
+            point(plan.outer!, plan.laneT!),
+            point(side, plan.laneT!),
+          ],
           side,
         };
       }
@@ -550,7 +682,8 @@ function routeSameAxisLinks(
       const laidTargetGroup = groupById.get(targetGroupId);
       if (!laidSourceGroup || !laidTargetGroup) continue;
       const sourceExit = laidSourceGroup.x + laidSourceGroup.width - LANE_CLEARANCE;
-      const targetEntry = laidTargetGroup.x + LANE_CLEARANCE + approach * APPROACH_STEP;
+      const targetEntry =
+        laidTargetGroup.x + laidTargetGroup.width - LANE_CLEARANCE - approach * APPROACH_STEP;
       pending.push({
         id: link.id,
         source: link.source,
@@ -581,6 +714,43 @@ function routeSameAxisLinks(
     }
   }
 
+  const endpointsByGroup = new Map<string, RoutePoint[]>();
+  const addEndpoint = (group: string, point: RoutePoint): void => {
+    endpointsByGroup.set(group, [...(endpointsByGroup.get(group) ?? []), point]);
+  };
+  if (direction === "RIGHT") {
+    for (const route of pending) {
+      const source = steps.get(route.source)!;
+      const target = steps.get(route.target)!;
+      const sourceGroup = groupById.get(route.sourceGroup)!;
+      const targetGroup = groupById.get(route.targetGroup)!;
+      const sourceExit: RoutePoint = [
+        sourceGroup.x + sourceGroup.width - LANE_CLEARANCE,
+        sourceGroup.y - LANE_CLEARANCE,
+      ];
+      const targetEntry: RoutePoint = [route.entry, targetGroup.y - LANE_CLEARANCE];
+      addEndpoint(route.sourceGroup, [route.stub, source.y + source.height / 2]);
+      addEndpoint(route.sourceGroup, sourceExit);
+      addEndpoint(route.targetGroup, targetEntry);
+      addEndpoint(route.targetGroup, [route.side, target.y + target.height / 2]);
+    }
+  }
+  const routers = new Map<string, ObstacleRouter>();
+  for (const [group, endpoints] of endpointsByGroup) {
+    const laidGroup = groupById.get(group)!;
+    const header: RouteObstacle = {
+      id: `${group}:header`,
+      x0: laidGroup.x,
+      y0: laidGroup.y,
+      x1: laidGroup.x + laidGroup.width - GRAPH_FLOW_ENTRY_STRIP,
+      y1: laidGroup.y + GRAPH_GROUP_HEADER,
+    };
+    routers.set(
+      group,
+      createObstacleRouter([...(cardsByGroup.get(group) ?? []), header], endpoints),
+    );
+  }
+
   const routes: Record<string, GraphRoute> = {};
   let right = maxRight;
   for (const route of pending) {
@@ -592,21 +762,15 @@ function routeSameAxisLinks(
       const targetGroup = groupById.get(route.targetGroup)!;
       const sourceExit: RoutePoint = [
         sourceGroup.x + sourceGroup.width - LANE_CLEARANCE,
-        sourceGroup.y + LANE_CLEARANCE,
+        sourceGroup.y - LANE_CLEARANCE,
       ];
-      const targetEntry: RoutePoint = [route.entry, targetGroup.y + LANE_CLEARANCE];
-      const sourcePath = obstaclePath(
-        [route.stub, source.y + source.height / 2],
-        sourceExit,
-        cardsByGroup.get(route.sourceGroup) ?? [],
-        new Set([route.source]),
-      );
-      const targetPath = obstaclePath(
-        targetEntry,
-        [route.side, target.y + target.height / 2],
-        cardsByGroup.get(route.targetGroup) ?? [],
-        new Set([route.target]),
-      );
+      const targetEntry: RoutePoint = [route.entry, targetGroup.y - LANE_CLEARANCE];
+      const sourcePath = routers
+        .get(route.sourceGroup)!
+        .path([route.stub, source.y + source.height / 2], sourceExit);
+      const targetPath = routers
+        .get(route.targetGroup)!
+        .path(targetEntry, [route.side, target.y + target.height / 2]);
       routes[route.id] = {
         stub: route.stub,
         lane: withoutRepeatedPoints([
@@ -834,7 +998,11 @@ export async function layoutGraph(
       const entryLeft = sameAxis || direction === "DOWN" ? entry : GRAPH_GROUP_PADDING;
       const entryTop = !sameAxis && direction === "RIGHT" ? entry : GRAPH_GROUP_PADDING;
       const width =
-        inner.width + entryLeft + GRAPH_GROUP_PADDING + (innerDirection === "DOWN" ? corridor : 0);
+        inner.width +
+        entryLeft +
+        GRAPH_GROUP_PADDING +
+        (innerDirection === "DOWN" ? corridor : 0) +
+        (sameAxis && direction === "RIGHT" ? GRAPH_FLOW_ENTRY_STRIP : 0);
       const height =
         inner.height +
         entryTop +

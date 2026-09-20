@@ -4,6 +4,8 @@
  */
 
 import { describe, test, expect, beforeEach, afterEach } from "@jest/globals";
+import { spawnSync } from "node:child_process";
+import path from "node:path";
 import { WorkflowGraph } from "@mcp-moira/workflow-engine";
 import type { UniversalGraphExecutor, InMemoryRepository } from "@mcp-moira/workflow-engine";
 
@@ -139,73 +141,22 @@ describe("SubgraphNode Performance Validation", () => {
   });
 
   test("should validate memory usage in long-running scenarios", async () => {
-    const childWorkflow: WorkflowGraph = {
-      id: "memory-child",
-      metadata: { name: "Memory Child", version: "1.0.0", description: "Child for memory testing" },
-      nodes: [
-        { type: "start", id: "start", connections: { default: "memory-step" } },
-        {
-          type: "agent-directive",
-          id: "memory-step",
-          directive: "Memory test step {{iteration}}",
-          completionCondition: "Memory step completed",
-          inputSchema: {
-            type: "object",
-            properties: { data: { type: "string" } },
-            required: ["data"],
-          },
-          connections: { success: "end" },
-        },
-        { type: "end", id: "end", finalOutput: ["data"] },
+    // Measure retained memory in an isolated process with explicit GC. Measuring the shared Jest
+    // worker conflates this workload with whichever suites happened to grow V8's heap before it.
+    const benchmark = spawnSync(
+      process.execPath,
+      [
+        "--expose-gc",
+        "--import",
+        "tsx",
+        path.resolve("tests/helpers/subgraph-memory-benchmark.ts"),
       ],
-    };
-
-    const parentWorkflow: WorkflowGraph = {
-      id: "memory-parent",
-      metadata: {
-        name: "Memory Parent",
-        version: "1.0.0",
-        description: "Parent for memory testing",
-      },
-      nodes: [
-        {
-          type: "start",
-          id: "start",
-          initialData: { variables: { iteration: { description: "Iteration number", value: 1 } } },
-          connections: { default: "subgraph" },
-        },
-        {
-          type: "subgraph",
-          id: "subgraph",
-          graphId: "memory-child",
-          inputMapping: { iteration: "iteration" },
-          outputMapping: { data: "result" },
-          connections: { success: "end", error: "error-end" },
-        },
-        { type: "end", id: "end", finalOutput: ["result"] },
-        { type: "end", id: "error-end", finalOutput: ["error"] },
-      ],
-    };
-
-    await repository.saveWorkflow(childWorkflow, "test-user-123", "private");
-    await repository.saveWorkflow(parentWorkflow, "test-user-123", "private");
-
-    // Run multiple iterations to test memory stability
-    const memoryBefore = process.memoryUsage();
-
-    for (let i = 0; i < 10; i++) {
-      const executionId = await executor.startWorkflow(parentWorkflow, undefined, "test-user-123");
-      const step1 = await executor.executeStep(executionId);
-      expect(step1).toContain(`Memory test step ${1}`);
-
-      const step2 = await executor.executeStep(executionId, { data: `iteration ${i}` });
-      expect(step2).toContain("Workflow completed successfully");
-    }
-
-    const memoryAfter = process.memoryUsage();
-    const memoryGrowth = memoryAfter.heapUsed - memoryBefore.heapUsed;
-
-    // Validate memory growth is reasonable (less than 50MB for 10 iterations)
-    expect(memoryGrowth).toBeLessThan(50 * 1024 * 1024);
+      { cwd: process.cwd(), encoding: "utf8", timeout: 30_000 },
+    );
+    expect(benchmark.error).toBeUndefined();
+    expect(benchmark.status).toBe(0);
+    const lastLine = benchmark.stdout.trim().split("\n").at(-1);
+    const { heapGrowth } = JSON.parse(lastLine ?? "") as { heapGrowth: number };
+    expect(heapGrowth).toBeLessThan(50 * 1024 * 1024);
   });
 });
