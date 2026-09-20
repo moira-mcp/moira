@@ -218,7 +218,7 @@
       "confirmDelete": "Delete workflow \"{{name}}\"?"
     },
     "workflowDetail": {
-      "backToWorkflows": "← Back to Workflows",
+      "backToWorkflows": "Back to Workflows",
       "deleteWorkflow": "Delete Workflow",
       "confirmDelete": "Delete this workflow?",
       "toggleVisibility": "Click to toggle workflow visibility",
@@ -543,20 +543,18 @@
       "title": "Run",
       "modeLabel": "View",
       "modes": {
-        "lanes": "Lanes",
-        "canvas": "Canvas",
-        "outline": "Outline",
-        "route": "Route"
+        "map": "Map",
+        "graph": "Graph"
       },
       "tabs": {
         "block": "Block",
-        "variables": "Variables",
-        "graph": "Graph"
+        "variables": "Variables"
       },
       "status": {
         "pending": "not reached",
         "active": "in progress",
         "waiting": "waiting for you",
+        "waitingAgent": "agent on the step",
         "done": "completed",
         "repeated": "repeated",
         "skipped": "skipped"
@@ -564,12 +562,11 @@
       "tabHints": {
         "block": "The selected block: what it does, where it leads, and the steps that implement it",
         "variables": "Declared variables with their values and history, each step's outputs, edits in place where the run allows them; answer the waiting step here",
-        "variablesWaiting": "A step is waiting for your answer",
+        "variablesWaiting": "You can answer the paused step here",
         "errors": "Errors the run recorded, newest first",
         "errorCount_one": "{{count}} error recorded",
         "errorCount_other": "{{count}} errors recorded",
         "steps": "Every step the run took, in order",
-        "graph": "The technical node graph with the current node focused",
         "locks": "Locks placed on this run and their history",
         "lockActive": "A lock is active on this run",
         "degradationCount_one": "{{count}} step ran without referenced text",
@@ -584,59 +581,52 @@
       "guidance": {
         "dismiss": "Dismiss"
       },
-      "lanes": {
-        "youAreHere": "You are here",
-        "phase": "Block {{index}}",
-        "rail": "Process blocks",
-        "endsWhen": "Ends when:",
-        "noContent": {
-          "pending": "The run has not reached this block yet.",
-          "active": "The agent is working in this block now.",
-          "waiting": "The run is waiting here for a person.",
-          "done": "This block completed; it reported no outcome text.",
-          "repeated": "This block completed after several passes; it reported no outcome text.",
-          "skipped": "The run bypassed this block: its routing decided the work was not needed."
+      "timing": {
+        "title": "Time",
+        "pass": "pass {{n}}",
+        "running": "in progress",
+        "total": "total",
+        "current": "current pass",
+        "typical": "typically",
+        "typicalValues": "{{pass}} per pass · {{run}} per run",
+        "noPasses": "The run has not worked in this block yet.",
+        "unit": {
+          "s": "s",
+          "min": "min",
+          "h": "h"
         }
       },
-      "canvas": {
-        "loading": "Laying out the process…"
+      "list": {
+        "title": "Checklist",
+        "progress": "{{done}} of {{total}} done",
+        "current": "in progress",
+        "countersOnly": "The binding counts the items but names none.",
+        "countersOnlyCurrent": "The binding names no items; the run is on \"{{title}}\"."
       },
-      "outline": {
-        "contents": "Contents",
-        "returnsTo": "returns to",
-        "goesTo": "goes to"
-      },
-      "route": {
+      "routeFacts": {
+        "title": "What happened here",
+        "empty": "The run has not visited this block.",
+        "visit": "#{{seq}}",
+        "goTo": "Show the run as it stood at this visit",
         "actor": {
           "user": "person",
           "agent": "agent"
         },
         "adjusted": "runtime adjustment",
-        "teleport": "teleport",
         "waited": "waited for input",
         "loopVisit": "loop",
         "cursor": "you are here",
-        "changed": "set",
-        "noBlock": "outside every block",
-        "entry": "return {{n}}",
-        "segmentSize": "{{visits}} visits, {{working}} doing work",
-        "toggleSegment": "Collapse or expand this stretch",
-        "loopMarker": "returned to {{block}}",
-        "perBlock": "Visits per block",
-        "perBlockLegend": "entries × · visits; click to jump to the first visit",
-        "stat": {
-          "visits": "visits",
-          "segments": "stretches",
-          "loops": "returns",
-          "adjustments": "adjusted"
-        },
-        "runStatus": {
-          "running": "the run continues",
-          "waiting": "the run is waiting for a person",
-          "completed": "the run completed"
-        },
-        "noRouteTitle": "No route was recorded",
-        "noRouteBody": "This execution started before Moira recorded routes, so only its current block is known. Newer runs list every step in order here."
+        "changed": "set"
+      },
+      "typical": {
+        "title": "Typically",
+        "pass": "per pass",
+        "run": "per run",
+        "passes": "passes",
+        "noRuns": "no runs yet",
+        "sample": "over {{runs}} completed runs",
+        "loading": "loading typical durations…",
+        "unavailable": "typical durations unavailable"
       },
       "blockDetail": {
         "emptyTitle": "Pick a block",
@@ -646,7 +636,19 @@
         "stepsHint": "A step is one instruction the agent receives; the fields listed are the evidence it must return. Click a step to see it on the node graph.",
         "focusStep": "Show on the node graph",
         "returns": "returns:",
-        "current": "current"
+        "current": "current",
+        "noContent": {
+          "pending": "The run has not reached this block yet.",
+          "active": "The agent is working in this block now.",
+          "waiting": "The run is waiting here for a person.",
+          "waitingAgent": "The run is waiting here for the agent to finish the step.",
+          "done": "This block completed; it reported no outcome text.",
+          "repeated": "This block completed after several passes; it reported no outcome text.",
+          "skipped": "The run bypassed this block: its routing decided the work was not needed."
+        },
+        "time": "Time",
+        "list": "List",
+        "routeFacts": "What happened here"
       },
       "variables": {
         "guideTitle": "Values as the run goes",
@@ -687,46 +689,64 @@
         "steps": {
           "process": {
             "title": "This is a process",
-            "body": "A Moira workflow is a process: a sequence of named stages a piece of work goes through. We call each stage a block. What you see highlighted is a block: it has a name, a description of what has to happen there, and arrows to the blocks it can lead to."
+            "body": "A Moira workflow is a process: a sequence of named stages a piece of work goes through. We call each stage a block. The contents on the left lists them in order, and the highlighted row is one block: a status icon, a coloured number badge, the name, and how far the block has got. The same badge and name head that block's card on the diagram, in its title band."
           },
           "agent": {
             "title": "An agent runs it, one step at a time",
-            "body": "An AI agent executes the process. Inside every block are steps: one step is one instruction Moira hands the agent, with a condition for when it counts as done. Moira gives out exactly one step at a time; the agent cannot skip ahead. The highlight is the step the agent is on right now in this run."
+            "body": "An AI agent executes the process. Inside every block are steps: one step is one instruction Moira hands the agent, with a condition for when it counts as done. Moira gives out exactly one step at a time; the agent cannot skip ahead. The highlight is the step the agent is on right now, in the Steps section of the block panel — click it and the panel opens the node level for that step, with a breadcrumb back to the block and its directive, completion condition, cases and connections in full."
           },
           "evidence": {
             "title": "It must return evidence",
-            "body": "To finish a step, the agent must return evidence: the fields the step asks for, checked against a schema before Moira lets the run continue. The highlighted list is exactly what this step demands back. No matching evidence, no next step."
+            "body": "To finish a step, the agent must return evidence: the fields the step asks for, checked against a schema before Moira lets the run continue. The highlighted list is exactly what this step demands back; the Returns section of the node level names each field with its type and whether it is required. No matching evidence, no next step."
           },
           "loop": {
             "title": "A failed review sends the work back",
-            "body": "Some steps are reviews. When a review finds problems, the process does not continue: it returns to an earlier block, and the work is done again. That return is a loop. The highlighted chip marks one of this process's loops: hover it to light the return arrow and read what causes it."
+            "body": "Some steps are reviews. When a review finds problems, the process does not continue: it returns to an earlier block, and the work is done again. That return is a loop. The highlight is a return port — the dashed pill marked ↻ on the card the work leaves from. It names the transition and where it goes; hover it to light the return line and read what causes the loop and what ends it, and click it to travel to the other end."
           },
           "route": {
             "title": "Every run leaves a route",
-            "body": "A run is one execution of the process. Moira records its route: every step in order, every loop it went through, and the values the steps produced along the way. This is the route of this run; the variables tab shows its values, and any adjustment a person made is marked."
+            "body": "A run is one execution of the process. Moira records its route: every step in order, every loop it went through, and the values the steps produced along the way. The highlight is this run's route cursor, in the toolbar of whichever view is open: drag it and the whole page — cards, panel and variables — goes back to that visit. The variables tab shows the values as they stood there, and any adjustment a person made is marked."
           },
           "explore": {
             "title": "Explore the same run your way",
-            "body": "The tabs show the same run in different ways: Lanes as a progress rail, Canvas as a map, Outline as a document, Route to follow the run step by step. Every view starts with a note explaining what it is for."
+            "body": "The highlighted toolbar holds everything that changes what you see. The Map / Graph switch picks the view: the Map is the process with the run's state on it, the Graph is every step of the definition. The layout presets beside it re-lay both diagrams — rows, compact, balanced branches, top to bottom — and bring the camera back to the block you were reading. The magnifier finds a step by id or text, and the compass opens the note about the view that is open. Your selection and the camera survive a switch."
           }
         }
       },
       "modeGuide": {
-        "lanes": {
-          "title": "Lanes: how far the run got",
-          "body": "One rail, one card per block in process order. The current block is pinned as \"you are here\"; a number badge counts how many times a block was repeated; struck-through blocks were skipped. Thin arcs under the rail are the loops and thin links above it are transitions that skip a block; each card names its loops and skips in chips, and hovering a chip (or a line) lights that line and shows its label; a selected card keeps its lines lit. Scroll or drag to move along the rail, pinch (or hold Ctrl and scroll) to zoom. Click a card for its details on the right."
+        "map": {
+          "title": "Map: the process as a diagram",
+          "body": "Blocks run left to right in process order. A card opens with a title band — the block's number badge, its name and its status — and carries a column of input ports on the left and output ports on the right; a port names the transition and the block at the other end, and a click on it takes the camera there. A transition that sends the work back is a dashed return port marked ↻, and every transition a block makes to itself shares the double port under the card. Long links travel through the nearest free lane between rows instead of over the whole diagram. The card also carries the run's state: how many times the block ran, how long its passes took and, when it works through a list, how far that list has got — hover a fact chip, a port or a line to light it and read the rest. The contents on the left jumps to any block and its finder answers \"which block is this step in\"; the toolbar's layout presets re-lay the diagram and return the camera to the block you were reading."
         },
-        "canvas": {
-          "title": "Canvas: the process as a map",
-          "body": "Blocks are laid out left to right in process order; thin dashed lines below are loops. Every loop, skip and exit into a shared block is named by a chip in its source block; hover the chip (or the line) to light it and read its label, and select a block to keep its lines lit. The map opens on the block the run is at. Scroll or drag to pan, pinch (or hold Ctrl and scroll) to zoom, click a block to select it."
-        },
-        "outline": {
-          "title": "Outline: the process as a document",
-          "body": "Every block as a numbered section with its description, what the run produced there, its transitions in words (including why loops happen and when they end), and the steps that implement it. Use the contents list to jump; expand a section's steps to see what each demands back."
-        },
-        "route": {
-          "title": "Route: follow the run",
-          "body": "This is the route the run actually took, in the order it happened. Each card is a stretch of the run inside one block; a small count beside the block name says which visit to that block it is; a blue line under a card marks a return to an earlier block. Click any visit to put the cursor there: everything after it fades, and the other tabs show the process as it stood at that moment."
+        "graph": {
+          "title": "Graph: every step of the definition",
+          "body": "The same run, step by step: each block is a tinted group and each step inside it a card with the same title band, ports and fact chips as on the map. The chips carry the step's directive, the fields it must return and its expressions — hover one to read the full text in a tooltip. An output port is named by the case that selects it, `success` and `default` are the outputs taken when no case holds, and `error` and `timeout` are control outputs; return ports and the double port under a card mark the loops. The step the run is on breathes, the steps it has been through are toned as done. The contents on the left moves the camera to a block's group, the finder in the toolbar jumps to a step and opens its panel, and the layout presets re-lay the groups — stacked, compact, in a row, or with the steps turned top to bottom."
+        }
+      },
+      "map": {
+        "loading": "Laying out the process…",
+        "total": "Time spent in this block",
+        "current": "Time on the pass running now",
+        "listProgress": "Items done of the list this block works through",
+        "typical": "How long this block usually takes",
+        "endsWhen": "Ends when:",
+        "contents": "Contents",
+        "findNode": "Find a step by id or text…",
+        "noMatch": "No step matches"
+      },
+      "legend": {
+        "title": "Status legend"
+      },
+      "panel": {
+        "collapse": "Collapse the panel",
+        "expand": "Expand the panel"
+      },
+      "route": {
+        "stat": {
+          "visits": "visits",
+          "working": "working steps",
+          "loops": "loops",
+          "adjustments": "adjustments"
         }
       }
     },
@@ -1220,10 +1240,7 @@
       "noProcess": "This workflow declares no process view (no blocks), so the page shows its node graph. Add a `progress` section with blocks to read it as a process.",
       "diagnostics": "Process diagnostics",
       "modes": {
-        "outline": "Outline",
-        "canvas": "Canvas",
-        "lanes": "Lanes",
-        "split": "Split",
+        "map": "Map",
         "graph": "Graph"
       },
       "tabs": {
@@ -1231,29 +1248,14 @@
         "variables": "Variables"
       },
       "modeGuide": {
-        "split": {
-          "title": "Split: what implements a block",
-          "body": "Pick a block on the left to see, on the right, the steps that implement it in the order they run, with their connections. Blue chips lead to other blocks; the finder above answers \"which block is this step in\"."
+        "map": {
+          "title": "Map: the process as a diagram",
+          "body": "Blocks run left to right in process order. A card opens with a title band — the block's number badge and its name — and carries a column of input ports on the left and output ports on the right; a port names the transition and the block at the other end, and a click on it takes the camera there. A transition that sends the work back is a dashed return port marked ↻, and every transition a block makes to itself shares the double port under the card; hover a port or a line to light it and read the condition, the cause and the exit of a loop. Long links travel through the nearest free lane between rows instead of over the whole diagram. The contents on the left jumps to any block and its finder answers \"which block is this step in\"; the toolbar's layout presets re-lay the diagram, and the panel on the right holds the block's description, its steps and, in edit mode, the authoring controls."
         },
-        "outline": {
-          "title": "Outline: the process as a document",
-          "body": "Every block as a numbered section with its description, its transitions in words (including why loops happen and when they end), and the steps that implement it. Use the contents list to jump; expand a section's steps to see what each demands back."
-        },
-        "canvas": {
-          "title": "Canvas: the process as a map",
-          "body": "Blocks are laid out left to right in process order; thin dashed lines below are loops. Every loop, skip and exit into a shared block is named by a chip in its source block; hover the chip (or the line) to light it and read its label, and select a block to keep its lines lit. Scroll or drag to pan, pinch (or hold Ctrl and scroll) to zoom, click a block to select it."
-        },
-        "lanes": {
-          "title": "Lanes: the process in order",
-          "body": "One rail, one card per block in process order; thin arcs under the rail are the loops and thin links above it are transitions that skip a block. Each card names its loops and skips in chips: hover a chip (or a line) to light that line and read its label and what causes the loop; a selected card keeps its lines lit. Nothing is \"current\" here: this is the definition, not a run. Scroll or drag to move along the rail, pinch (or hold Ctrl and scroll) to zoom. Click a card for its details on the right."
+        "graph": {
+          "title": "Graph: every step of the definition",
+          "body": "The definition step by step: each block is a tinted group and each step inside it a card with the same title band, ports and fact chips as on the map. The chips carry the step's directive, the fields it must return and its expressions — hover one to read the full text in a tooltip. An output port is named by the case that selects it, `success` and `default` are the outputs taken when no case holds, and `error` and `timeout` are control outputs; return ports and the double port under a card mark the loops. Clicking a card opens the node level of the right panel, where the directive, the completion condition, the returned fields, the cases, the connections, the validation and a catalog-drawn node's configuration are read in full. The contents on the left moves the camera to a block's group, the finder in the toolbar jumps to a step, and the layout presets re-lay the groups — stacked, compact, in a row, or with the steps turned top to bottom."
         }
-      },
-      "split": {
-        "blocks": "Blocks",
-        "implementation": "Implementation",
-        "findNode": "Find a step by id or text…",
-        "noMatch": "No step matches",
-        "pickBlock": "Select a block to see the steps that implement it."
       },
       "registry": {
         "guideTitle": "Variables the process declares",
@@ -1276,7 +1278,7 @@
         "hintLabel": "About editing",
         "hint": "Edit mode changes the workflow definition itself — block names and descriptions, transition labels and loop explanations, which block a step belongs to, a step's directive or expressions, and the variable registry. It never touches a run. Edits live on the page until you save them; the save is refused if someone else changed the workflow in the meantime.",
         "guideTitle": "You are editing the process definition",
-        "guideBody": "Change a block's name or description in place; click the pencil next to a transition to change its label or its loop's cause and exit; in Split, move a step to another block or edit its text; in Variables, edit the registry. The views re-derive at once, rule violations appear as diagnostics, \"Export\" lists exactly which flow-file entries would change, and \"Save\" sends the definition to the server against the revision you loaded.",
+        "guideBody": "Change a block's name or description in place; click the pencil next to a transition to change its label or its loop's cause and exit; in the block panel, move a step to another block or edit its text; in Variables, edit the registry. Both views re-derive at once, rule violations appear as diagnostics, \"Export\" lists exactly which flow-file entries would change, and \"Save\" sends the definition to the server against the revision you loaded.",
         "count_one": "{{count}} edit",
         "count_other": "{{count}} edits",
         "reset": "Discard edits",
@@ -1310,29 +1312,33 @@
         "steps": {
           "process": {
             "title": "This is a process",
-            "body": "A Moira workflow is a process: a sequence of named stages a piece of work goes through. We call each stage a block. What you see highlighted is a block: it has a name, a description of what has to happen there, and arrows to the blocks it can lead to."
+            "body": "A Moira workflow is a process: a sequence of named stages a piece of work goes through. We call each stage a block. The contents on the left lists them in order, and the highlighted row is one block: a coloured number badge, the name and how long the block usually takes. The same badge and name head that block's card on the diagram, in its title band."
           },
           "agent": {
             "title": "An agent runs it, one step at a time",
-            "body": "An AI agent executes the process. Inside every block are steps: one step is one instruction Moira hands the agent, with a condition for when it counts as done. Moira gives out exactly one step at a time; the agent cannot skip ahead. The highlight is one step of this block."
+            "body": "An AI agent executes the process. Inside every block are steps: one step is one instruction Moira hands the agent, with a condition for when it counts as done. Moira gives out exactly one step at a time; the agent cannot skip ahead. The highlight is one step of this block, in the Steps section of the block panel — click it and the page goes to that step on the graph and opens the node level of the panel, with its directive, completion condition, cases, connections and validation in full."
           },
           "evidence": {
             "title": "It must return evidence",
-            "body": "To finish a step, the agent must return evidence: the fields the step asks for, checked against a schema before Moira lets the run continue. The highlighted list is exactly what this step demands back. No matching evidence, no next step."
+            "body": "To finish a step, the agent must return evidence: the fields the step asks for, checked against a schema before Moira lets the run continue. The highlighted list is exactly what this step demands back; the Returns section of the node level names each field with its type and whether it is required. No matching evidence, no next step."
           },
           "loop": {
             "title": "A failed review sends the work back",
-            "body": "Some steps are reviews. When a review finds problems, the process does not continue: it returns to an earlier block, and the work is done again. That return is a loop. The highlighted chip marks one of this process's loops: hover it to light the return arrow and read what causes it and what ends it."
+            "body": "Some steps are reviews. When a review finds problems, the process does not continue: it returns to an earlier block, and the work is done again. That return is a loop. The highlight is a return port — the dashed pill marked ↻ on the card the work leaves from. It names the transition and where it goes; hover it to light the return line and read what causes the loop and what ends it, and click it to travel to the other end."
           },
           "edit": {
             "title": "The definition can be edited here",
-            "body": "This page shows the definition, not a run. Its owner can turn on edit mode to change block names and descriptions, transition labels, which block a step belongs to, a step's text and the variable registry; the views update at once and the save is checked by the server. Runs of this workflow are read on the run page."
+            "body": "This page shows the definition, not a run: the header above names the flow, its version, its description and its facts, and carries the page's actions. Its owner can turn on edit mode to change block names and descriptions, transition labels, which block a step belongs to, a step's text and the variable registry; both views update at once and the save is checked by the server. Runs of this workflow are read on the run page."
           },
           "explore": {
             "title": "Explore the same process your way",
-            "body": "The tabs show the same process in different ways: Outline as a document, Canvas as a map, Lanes as a rail, Split for what implements each block, Graph for every node. Every view starts with a note explaining what it is for."
+            "body": "The highlighted toolbar holds everything that changes what you see. The Map / Graph switch picks the view: the Map is the process the workflow declares, the Graph is every step of the definition. The layout presets beside it re-lay both diagrams — rows, compact, balanced branches, top to bottom — and bring the camera back to the block you were reading. The magnifier finds a step by id or text, and the compass opens the note about the view that is open. Your selection and the camera survive a switch."
           }
         }
+      },
+      "panel": {
+        "collapse": "Collapse the panel",
+        "expand": "Expand the panel"
       }
     },
     "playbooks": {
@@ -2382,17 +2388,8 @@
       "helpReport": "Copy error details and report the issue"
     },
     "workflowSidebar": {
-      "description": "Description",
-      "tags": "Tags",
-      "nodes": "Nodes",
       "totalNodes": "total nodes",
-      "philosophy": "Philosophy",
-      "nodeDetails": "Node Details",
-      "workflowInfo": "Workflow Info",
-      "showWorkflowInfo": "← Workflow",
       "nodeId": "Node ID",
-      "from": "From",
-      "to": "To",
       "providedBy": "Provided by extension",
       "configuration": "Configuration",
       "nodeSchema": {
@@ -2428,13 +2425,16 @@
         "message": "Message",
         "condition": "Condition",
         "expressions": "Expressions",
+        "cases": "Cases",
+        "whenCase": "when",
         "subgraphId": "Subgraph ID",
         "validation": "Validation",
         "inputSchema": "Input Schema",
         "connections": "Connections",
         "playbooks": "Playbooks",
         "playbookUnavailable": "not available"
-      }
+      },
+      "variables": "Variables"
     },
     "executionErrors": {
       "title": "Error History",
@@ -2454,6 +2454,89 @@
       },
       "degradationTitle": "Ran without referenced text",
       "degradationHint": "These steps ran, but without a playbook they name. The process continued with a placeholder in place of that text."
+    },
+    "diagram": {
+      "howToRead": "How to read this diagram",
+      "toolbar": {
+        "finder": "Find a step",
+        "zoomIn": "Zoom in",
+        "zoomOut": "Zoom out",
+        "fit": "Fit the whole diagram",
+        "minimap": "Navigator",
+        "minimapHint": "The navigator in the corner of the diagram"
+      },
+      "presets": {
+        "map": {
+          "default": {
+            "label": "Rows",
+            "hint": "The main sequence on one row, branches on rows of their own, long links through the nearest gap"
+          },
+          "compact": {
+            "label": "Compact",
+            "hint": "The same rows with smaller gaps"
+          },
+          "flow": {
+            "label": "Balanced",
+            "hint": "Branches on both sides of the main line: the side follows how full it is, nested forks go further out"
+          },
+          "vertical": {
+            "label": "Top to bottom",
+            "hint": "Blocks in a column, branches in columns to the right; a link leaves the right port and enters the left one"
+          }
+        },
+        "graph": {
+          "default": {
+            "label": "Stacked groups",
+            "hint": "The steps inside each group run left to right"
+          },
+          "compact": {
+            "label": "Compact",
+            "hint": "The same stack with smaller gaps between the groups and the steps"
+          },
+          "flow": {
+            "label": "Groups in a row",
+            "hint": "Block groups in a ribbon from left to right"
+          },
+          "vertical": {
+            "label": "Steps top to bottom",
+            "hint": "Groups in a column, the steps inside them top to bottom, the edges snaking between the side ports"
+          }
+        }
+      },
+      "variable": {
+        "required": "required",
+        "answerField": "{{field}} — a field of the answer of step {{node}}",
+        "clickToDefinition": "click — go to the definition",
+        "undeclared": "not declared in variableRegistry"
+      },
+      "stepFacts": {
+        "directive": "directive",
+        "message": "message",
+        "completion": "completion condition",
+        "returns": "returns",
+        "expressions": "expressions",
+        "required": "required"
+      },
+      "outputTip": {
+        "case": "case",
+        "controlOutput": "control output",
+        "fallback": "taken when no case holds"
+      }
+    },
+    "nodePanel": {
+      "showOnGraph": "Show on the graph",
+      "breadcrumb": "Path to the step",
+      "required": "required",
+      "sections": {
+        "directive": "Directive",
+        "message": "Message",
+        "completion": "Completion condition",
+        "returns": "Returns",
+        "expressions": "Expressions",
+        "cases": "Cases",
+        "connections": "Connections",
+        "materialize": "Materialize"
+      }
     }
   },
   "common": {
@@ -2478,7 +2561,9 @@
       "failedToSave": "Failed to save",
       "failedToDelete": "Failed to delete",
       "actionFailed": "Action failed",
-      "unknownError": "An unknown error occurred"
+      "unknownError": "An unknown error occurred",
+      "failedToCreate": "Failed to create",
+      "failedToUpdate": "Failed to update"
     },
     "units": {
       "mb": "MB",
@@ -2511,7 +2596,8 @@
       "dateTo": "To"
     },
     "edit": "Edit",
-    "close": "Close"
+    "close": "Close",
+    "actions": "Actions"
   },
   "lockedWidget": {
     "title": "{{count}} locked execution(s)",

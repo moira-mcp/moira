@@ -319,12 +319,17 @@ describe("workflow-tool variables command", () => {
           {
             id: "condition-node",
             type: "condition",
-            condition: {
-              operator: "gt",
-              left: { contextPath: "step_count" },
-              right: 0,
-            },
-            connections: { true: "next", false: "other" },
+            cases: [
+              {
+                when: {
+                  operator: "gt",
+                  left: { contextPath: "step_count" },
+                  right: 0,
+                },
+                output: "true",
+              },
+            ],
+            connections: { true: "next", default: "other" },
           },
         ],
       };

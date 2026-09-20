@@ -331,7 +331,7 @@ export function inferGateEnums(flow: Json): Map<string, string[]> {
     if (cond.condition && cond.operator !== "not") walk(cond.condition as Json);
   };
   for (const node of (flow.nodes as Json[]) || []) {
-    if (node.type === "condition") walk(node.condition as Json);
+    for (const routingCase of (node.cases as Json[]) || []) walk(routingCase?.when as Json);
   }
   const result = new Map<string, string[]>();
   for (const [name, set] of observed) {

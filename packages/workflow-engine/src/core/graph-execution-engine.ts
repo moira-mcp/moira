@@ -251,12 +251,15 @@ export class GraphExecutionEngine implements IGraphExecutionEngine {
       // Track visited node
       visitedNodes.push(currentNodeId);
       const variablesBefore = snapshotVariables(updatedContext.variables);
+      const enteredAt = Date.now();
       const recordVisit = (exitKey: string | null, waited: boolean): void => {
         visits.push({
           nodeId: currentNode.id,
           exitKey,
           changes: diffVariables(variablesBefore, updatedContext.variables, nodeIds),
           waited,
+          enteredAt,
+          leftAt: exitKey === null ? undefined : Math.max(enteredAt, Date.now()),
         });
       };
 
@@ -545,6 +548,13 @@ export class GraphExecutionEngine implements IGraphExecutionEngine {
           // Other node types (condition/telegram/note/lock) write their handler-produced
           // bookkeeping data into the node-local scope only (done above); no global contract.
         }
+      }
+
+      // Expressions on a routing node (condition, agent-directive) assign declared globals by
+      // bare name, exactly like a standalone expression node; the handler reports them apart
+      // from the node's own data so the scope rules above do not reject them as undeclared.
+      if (nodeResult.assignments && Object.keys(nodeResult.assignments).length > 0) {
+        Object.assign(updatedContext.variables, nodeResult.assignments);
       }
 
       // Handle node action

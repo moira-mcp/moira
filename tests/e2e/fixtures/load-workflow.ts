@@ -44,6 +44,10 @@ export async function loadWorkflowFixture(
         workflow: {
           metadata: workflow.metadata,
           nodes: workflow.nodes,
+          // A fixture that declares a process view keeps it: the flow page derives its map, its
+          // contents and its right panel from that declaration, so dropping it here would upload
+          // a different workflow from the one the fixture describes.
+          ...(workflow.progress ? { progress: workflow.progress } : {}),
         },
         visibility,
       },

@@ -13,6 +13,7 @@ import {
 } from "../utils/execution-progress-visual.js";
 import { deriveProcess } from "../utils/process-derivation.js";
 import { renderExecutionProgressImage } from "../utils/execution-progress-image.js";
+import { ProgressStatisticsService, statisticsForRun } from "./progress-statistics-service.js";
 import { randomUUID } from "node:crypto";
 
 export interface ProgressImageGrant {
@@ -47,6 +48,10 @@ export class ProgressImageService {
     private readonly tokens: ProgressImageTokenStore = TokenManager.getInstance(),
     private readonly baseUrl: () => string = getBaseUrl,
     private readonly renderer: typeof renderExecutionProgressImage = renderExecutionProgressImage,
+    private readonly statistics: Pick<
+      ProgressStatisticsService,
+      "forVersion"
+    > = new ProgressStatisticsService(repository),
   ) {}
 
   async mint(
@@ -143,7 +148,8 @@ export class ProgressImageService {
     const claimId = randomUUID();
     if (!this.tokens.reserveProgressImageToken(token, claimId)) return null;
     try {
-      const rendered = await this.renderer(graph, execution, options);
+      const statistics = await statisticsForRun(this.statistics, graph, execution);
+      const rendered = await this.renderer(graph, execution, options, statistics);
       if (!rendered) {
         this.tokens.releaseProgressImageToken(token, claimId);
         return null;

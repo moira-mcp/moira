@@ -31,7 +31,7 @@ export function TabBadge({
       )}
       role="status"
       aria-label={label}
-      title={label}
+      data-hint={label}
       data-testid={testId}
       data-tab-badge={warning ? "warning" : "count"}
     >

@@ -8,14 +8,34 @@
 
 import type { WorkflowGraph, WorkflowNode } from "../../types/workflow-types";
 import type {
+  BlockDurationStatistics,
+  ExecutionBlockList,
   ExecutionBlockStatus,
+  ExecutionBlockTiming,
   ExecutionProgress,
   ExecutionProgressContent,
   ExecutionProgressNode,
   ExecutionRouteEntry,
+  WorkflowVersionStatistics,
 } from "@mcp-moira/workflow-engine/progress-visual";
 
 export type { ExecutionBlockStatus, ExecutionProgress };
+/** `done/total` of a bound list, worded once for the card, the contents, the panel and the picture. */
+export { listProgressLabel } from "@mcp-moira/workflow-engine/progress-visual";
+export type { BlockDurationStatistics, WorkflowVersionStatistics };
+
+/** A block's passes with their durations, as the projection carries them. */
+export type RunTiming = ExecutionBlockTiming;
+/** The list a block is bound to, as the projection carries it; null when it binds none. */
+export type RunList = ExecutionBlockList | null;
+
+/**
+ * The projection as the pages receive it: `GET /api/executions/:id/progress` attaches the typical
+ * durations of the version the run started on, which the engine's own projection does not carry.
+ */
+export interface RunProgress extends ExecutionProgress {
+  statistics?: WorkflowVersionStatistics | null;
+}
 
 export interface RunTransition {
   to: string;
@@ -38,24 +58,40 @@ export interface RunBlock {
   visits: number;
   currentNodeId: string | null;
   content: ExecutionProgressContent;
+  /** The block's passes with their durations, live pass included. */
+  timing: RunTiming;
+  /** The list the block is bound to, with its done/total; null when it binds none. */
+  list: RunList;
+  /** Typical durations of this block over earlier runs; absent when no statistics were given. */
+  stats?: BlockDurationStatistics;
 }
 
 const PENDING: Pick<
   ExecutionProgressNode,
-  "status" | "iterations" | "visits" | "currentNodeId" | "content"
+  "status" | "iterations" | "visits" | "currentNodeId" | "content" | "timing" | "list"
 > = {
   status: "pending",
   iterations: 0,
   visits: 0,
   currentNodeId: null,
   content: { summary: null, details: [], outcome: null, next: null },
+  timing: { passes: [], totalMs: null, currentMs: null, recorded: false },
+  list: null,
 };
 
-/** The process blocks in order, each joined with the run's projection of it. */
-export function runBlocks(progress: ExecutionProgress): RunBlock[] {
+/**
+ * The process blocks in order, each joined with the run's projection of it and, when statistics
+ * are given, with the typical durations recorded for it.
+ */
+export function runBlocks(
+  progress: ExecutionProgress,
+  statistics?: WorkflowVersionStatistics | null,
+): RunBlock[] {
   const byId = new Map(progress.nodes.map((node) => [node.id, node]));
+  const statsById = new Map((statistics?.blocks ?? []).map((entry) => [entry.blockId, entry]));
   return progress.process.blocks.map((block, index) => {
     const run = byId.get(block.id) ?? PENDING;
+    const stats = statsById.get(block.id);
     return {
       id: block.id,
       index,
@@ -71,6 +107,9 @@ export function runBlocks(progress: ExecutionProgress): RunBlock[] {
         block.description,
         byId.get(block.id)?.label ?? block.label,
       ]),
+      timing: run.timing,
+      list: run.list,
+      ...(stats ? { stats } : {}),
     };
   });
 }
@@ -133,6 +172,15 @@ export interface StepInfo {
   text: string | null;
   evidence: EvidenceField[];
   routing: boolean;
+  /** The directive's completion condition, when the node has one. */
+  completionCondition: string | null;
+  /** Expressions the node evaluates before it routes. */
+  expressions: string[];
+  /** The node's routing cases, in authored order. */
+  cases: Array<{ when: unknown; output: string }>;
+  /** The authored progress label and content of the node, when given. */
+  progressLabel: string | null;
+  progressContent: string | null;
 }
 
 /** One outgoing connection of a step: inside its block (points at a sibling step) or out of it. */
@@ -253,6 +301,39 @@ function authoredText(node: WorkflowNode): string | null {
 }
 
 /** Describe the steps of a block from the workflow definition, in the block's node order. */
+/**
+ * A block's node ids in the order the process runs them: from the block's entry nodes (the ones
+ * no other node of the block leads to, or the first when every node has a predecessor), along
+ * the connections in authored order, depth first; what the walk never reaches keeps its
+ * definition order at the end.
+ */
+export function orderNodeIds(
+  workflow: WorkflowGraph | undefined,
+  nodeIds: readonly string[],
+): string[] {
+  const inBlock = new Set(nodeIds);
+  const nodes = new Map((workflow?.nodes ?? []).map((node) => [node.id, node]));
+  const targetsOf = (id: string): string[] => {
+    const connections = (nodes.get(id) as { connections?: Record<string, string> } | undefined)
+      ?.connections;
+    return Object.values(connections ?? {}).filter((to) => inBlock.has(to));
+  };
+  const hasPredecessor = new Set<string>();
+  for (const id of nodeIds) for (const to of targetsOf(id)) if (to !== id) hasPredecessor.add(to);
+  const entries = nodeIds.filter((id) => !hasPredecessor.has(id));
+  const order: string[] = [];
+  const seen = new Set<string>();
+  const walk = (id: string) => {
+    if (seen.has(id)) return;
+    seen.add(id);
+    order.push(id);
+    for (const to of targetsOf(id)) walk(to);
+  };
+  for (const id of entries.length > 0 ? entries : nodeIds.slice(0, 1)) walk(id);
+  for (const id of nodeIds) walk(id);
+  return order;
+}
+
 export function stepsOf(
   workflow: WorkflowGraph | undefined,
   nodeIds: readonly string[],
@@ -269,6 +350,11 @@ export function stepsOf(
         text: null,
         evidence: [],
         routing: false,
+        completionCondition: null,
+        expressions: [],
+        cases: [],
+        progressLabel: null,
+        progressContent: null,
       };
     }
     const text = authoredText(node);
@@ -285,8 +371,24 @@ export function stepsOf(
           Record<string, Record<string, unknown>> | undefined,
       ),
       routing,
+      completionCondition: stringField(node, "completionCondition"),
+      expressions: Array.isArray((node as { expressions?: unknown }).expressions)
+        ? ((node as { expressions: unknown[] }).expressions.filter(
+            (e): e is string => typeof e === "string",
+          ) as string[])
+        : [],
+      cases: Array.isArray((node as { cases?: unknown }).cases)
+        ? ((node as { cases: Array<{ when: unknown; output: string }> }).cases ?? [])
+        : [],
+      progressLabel: stringField(node, "progressActiveLabel"),
+      progressContent: stringField(node, "progressActiveContent"),
     };
   });
+}
+
+function stringField(node: object, key: string): string | null {
+  const value = (node as Record<string, unknown>)[key];
+  return typeof value === "string" && value.trim() ? value : null;
 }
 
 /** The node the run waits for, with its expected evidence, or null when nothing waits. */
@@ -317,6 +419,10 @@ export interface RunViewProps {
   /** Route cursor (visit sequence number); null means the whole run. */
   cursor: number | null;
   onSetCursor: (at: number | null) => void;
+  /** Open a step on the technical graph (the page switches views for it). */
+  onFocusNode?: (nodeId: string) => void;
+  /** A list item on a block card was clicked: select the block and show that item in its panel. */
+  onSelectListItem?: (blockId: string, index: number) => void;
 }
 
 /** What a block's visits wrote up to the cursor: the latest value per name, with its visit. */

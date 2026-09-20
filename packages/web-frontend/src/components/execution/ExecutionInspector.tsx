@@ -2,12 +2,15 @@
  * Run page — one execution shown as a process.
  *
  * The page keeps the inspector's contract (props injected by the user and admin wrappers, the
- * compact toolbar, context editing, errors, steps, locks) and puts the run in front: the modes
- * (lanes by default, canvas, outline, route) fill the viewport on the left, a panel on the right
- * carries the selected block's detail, the run's variables with the runtime adjustments, and the
- * inspector's tabs. Everything about the run comes from the server's projection; the page never
- * derives block statuses or the route itself. State is deep-linkable: `view`, `block`, `at`,
- * `guide`. A workflow without a process view falls back to the technical node graph.
+ * compact toolbar, context editing, errors, steps, locks) and puts the run in front: two views —
+ * the map (the process as a diagram with its contents) and the technical node graph — fill the
+ * viewport on the left, a panel on the right carries the selected block's detail, the run's
+ * variables with the runtime adjustments, and the inspector's tabs. Both views stay mounted once
+ * shown and are only hidden, so switching between them keeps the map's selection and the graph's
+ * viewport; the graph's chunk is fetched on mount, before anything asks for it. Everything about
+ * the run comes from the server's projection; the page never derives block statuses or the route
+ * itself. State is deep-linkable: `view`, `block`, `at`, `guide`. A workflow without a process
+ * view shows the technical node graph alone.
  */
 
 import React, { useState, useEffect, useCallback, useMemo, Suspense, useRef } from "react";
@@ -18,11 +21,16 @@ import { TabBadge } from "../run/TabBadge";
 
 /** One tab of the panel strip: content-sized, underline when active, never stretched. */
 const TAB_CLASS = "h-8 flex-none gap-1.5 px-2 text-xs";
+/**
+ * The tab icons are drawn only when the strip is wide enough for the labels and the icons on one
+ * row (a container query on the strip): on the desktop panel the Russian labels alone fill the
+ * row, and a wrapped strip would paint its second row over the content.
+ */
+const TAB_ICON = "hidden size-3.5 @[520px]:inline";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { apiClient } from "../../services/api-client";
 import type { WorkflowGraph as WorkflowGraphType } from "../../types";
-import type { ExecutionProgress } from "@mcp-moira/workflow-engine/progress-visual";
 import {
   ExecutionErrorHistory,
   isRefusalEntry,
@@ -42,7 +50,6 @@ import {
   Unlock,
   Boxes,
   Variable,
-  Workflow,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -58,24 +65,34 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { Card } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
-import { MODES, resolveMode, type RunViewMode } from "../run/modes";
-import { LanesView } from "../run/LanesView";
-import { CanvasView } from "../run/CanvasView";
-import { OutlineView } from "../run/OutlineView";
-import { RouteView } from "../run/RouteView";
+import { MODES, resolveMode } from "../run/modes";
+import { MapView } from "../run/MapView";
+import { ContentsLayout, ContentsToggleProvider, ContentsToggleSlot } from "../run/ContentsSidebar";
+import { PageHeader } from "../diagram/PageHeader";
+import { useNodeTypes } from "../../hooks/useNodeTypes";
+
 import { BlockDetailPanel } from "../run/BlockDetailPanel";
+import { NodePanel } from "../run/NodePanel";
+import { useStoredFlag } from "../diagram/useStoredFlag";
+import { useRequest } from "../diagram/useRequest";
+import { PanelRightClose, PanelRightOpen } from "lucide-react";
+import { RouteSummary } from "../run/RouteSummary";
+import { nodeOwners } from "../run/model";
 import { VariablesPanel } from "../run/VariablesPanel";
 import { RunCursor } from "../run/RunCursor";
 import { StatusLegend } from "../run/status";
 import { Walkthrough, type PanelTab } from "../run/Walkthrough";
-import { currentBlockId, runBlocks, stepsOf, waitingStep, type RunViewProps } from "../run/model";
+import { DiagramGuide } from "../run/DiagramGuide";
+import { currentBlockId, runBlocks, stepsOf, waitingStep } from "../run/model";
 import { StepCard, StepCardList } from "../run/StepCard";
-import type { RunBlock } from "../run/model";
+import type { RunBlock, RunProgress } from "../run/model";
 import { clampCursor } from "../run/route";
 
-// Lazy load the technical graph for better initial page load
+// The technical graph is a large chunk: it is loaded lazily, but requested as soon as the page
+// mounts, so the first switch to the graph view has nothing to wait for.
+const importWorkflowGraph = () => import("../workflow/WorkflowGraph");
 const WorkflowGraph = React.lazy(() =>
-  import("../workflow/WorkflowGraph").then((module) => ({
+  importWorkflowGraph().then((module) => ({
     default: module.WorkflowGraph,
   })),
 );
@@ -84,13 +101,6 @@ const VIEW_PARAM = "view";
 const BLOCK_PARAM = "block";
 const AT_PARAM = "at";
 const GUIDE_PARAM = "guide";
-
-const MODE_COMPONENTS: Record<RunViewMode, React.ComponentType<RunViewProps>> = {
-  lanes: LanesView,
-  canvas: CanvasView,
-  outline: OutlineView,
-  route: RouteView,
-};
 
 // Base execution data - common fields
 export interface ExecutionData {
@@ -158,10 +168,10 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
-  /** The whole run's projection. */
-  const [progress, setProgress] = useState<ExecutionProgress | null>(null);
+  /** The whole run's projection, with the version statistics the API attaches to it. */
+  const [progress, setProgress] = useState<RunProgress | null>(null);
   /** The projection at the route cursor, when one is set. */
-  const [cursorProgress, setCursorProgress] = useState<ExecutionProgress | null>(null);
+  const [cursorProgress, setCursorProgress] = useState<RunProgress | null>(null);
   const [progressError, setProgressError] = useState(false);
   const [progressLoading, setProgressLoading] = useState(false);
   const [editableVariableNames, setEditableVariableNames] = useState<ReadonlySet<string>>(
@@ -197,7 +207,7 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
   const [lockResult, setLockResult] = useState<{ lockId: string; pin: string } | null>(null);
 
   // Technical node graph focus: the node to bring into view once the graph is mounted.
-  const [focusRequest, setFocusRequest] = useState<{ nodeId: string; token: number } | null>(null);
+  const [focusRequest, requestFocus] = useRequest<{ nodeId: string }>();
 
   // Copy to clipboard state
   const [copied, setCopied] = useState(false);
@@ -266,9 +276,20 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
     [editable, executionId, fetchExecution, loadProgress, t],
   );
 
+  // The first load happens once per execution. `loadExecution` is recreated whenever one of its
+  // inputs changes identity (a URL parameter, a callback), and re-running it on every such
+  // change swapped the whole page for a loader — the "blink" on selecting a block.
+  const loadExecutionRef = useRef(loadExecution);
+  loadExecutionRef.current = loadExecution;
   useEffect(() => {
-    loadExecution();
-  }, [loadExecution]);
+    void loadExecutionRef.current();
+  }, [executionId]);
+
+  // Fetch the graph's chunk while the run is loading, so the first switch to the graph view has
+  // nothing to download and shows no skeleton.
+  useEffect(() => {
+    void importWorkflowGraph();
+  }, []);
 
   const handleRefresh = useCallback(() => {
     loadExecution(true);
@@ -276,7 +297,10 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
 
   // --- URL state: mode, selected block, cursor, guide.
   const mode = resolveMode(searchParams.get(VIEW_PARAM));
-  const blocks = useMemo(() => (progress ? runBlocks(progress) : []), [progress]);
+  const blocks = useMemo(
+    () => (progress ? runBlocks(progress, progress.statistics) : []),
+    [progress],
+  );
   const current = useMemo(() => currentBlockId(blocks), [blocks]);
   const blockParam = searchParams.get(BLOCK_PARAM);
   const selectedBlockId = blocks.some((b) => b.id === blockParam) ? blockParam : null;
@@ -286,6 +310,7 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
     [progress, searchParams],
   );
   const guideStep = Number(searchParams.get(GUIDE_PARAM)) || 0;
+  // A view is rendered from the first time it is asked for and never unmounted again.
 
   const update = useCallback(
     (patch: Record<string, string | null>) => {
@@ -324,7 +349,7 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
 
   const shownProgress = cursor !== null && cursorProgress ? cursorProgress : progress;
   const shownBlocks = useMemo(
-    () => (shownProgress ? runBlocks(shownProgress) : []),
+    () => (shownProgress ? runBlocks(shownProgress, shownProgress.statistics) : []),
     [shownProgress],
   );
   const shownBlock = shownBlocks.find((b) => b.id === shownBlockId) ?? null;
@@ -338,6 +363,7 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
     () => new Set((shownProgress?.route ?? []).map((visit) => visit.nodeId)),
     [shownProgress],
   );
+  const visitedNodeList = useMemo(() => [...visitedNodeIds], [visitedNodeIds]);
 
   // Lock history for both admin and user views, kept while a refetch is pending.
   const lockHistory = useResource<LockRecord[]>(
@@ -409,17 +435,75 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
     }
   }, [executionId, lockReason, loadExecution, loadLocks, activeTab]);
 
-  const handleNodeClick = useCallback((_event: React.MouseEvent, _node: { id: string }) => {
-    // Node details are shown via NodeDetailSheet in WorkflowGraph
-  }, []);
+  // A step clicked on the graph opens as the second level of the block panel: its block becomes
+  // the selected block, the panel shows the step with a breadcrumb back to the block.
+  const [panelNodeId, setPanelNodeId] = useState<string | null>(null);
+  const { index: nodeTypeIndex } = useNodeTypes();
+  const [panelCollapsed, togglePanel] = useStoredFlag("moira.run.panelCollapsed");
+  // A variable reference token was clicked: open the variables tab and mark the variable there.
+  const [variableHighlight, requestVariableHighlight] = useRequest<{ name: string }>();
+  // A list item clicked on a block card: the block panel opens its list section at that item.
+  const [listHighlight, requestListHighlight] = useRequest<{ name: string }>();
+  // A panel section the walkthrough asked to unfold so its step has something to point at.
+  const [sectionOpen, requestSection] = useRequest<{ name: string }>();
+  const selectListItem = useCallback(
+    (blockId: string, index: number) => {
+      update({ [BLOCK_PARAM]: blockId });
+      setChosenTab("block");
+      requestListHighlight({ name: String(index) });
+    },
+    [update, requestListHighlight],
+  );
+  const goToVariable = useCallback(
+    (name: string) => {
+      setChosenTab("variables");
+      requestVariableHighlight({ name });
+    },
+    [requestVariableHighlight],
+  );
+  const [legendOpen, setLegendOpen] = useState(false);
+  const handleNodeClick = useCallback(
+    (_event: React.MouseEvent, node: { id: string }) => {
+      const owner = nodeOwners(blocks).get(node.id) ?? null;
+      if (owner) update({ [BLOCK_PARAM]: owner });
+      setPanelNodeId(node.id);
+      setChosenTab("block");
+    },
+    [blocks, update],
+  );
+  // Selecting a block that does not own the shown step (contents, map) leaves the step level.
+  useEffect(() => {
+    setPanelNodeId((current) =>
+      current && nodeOwners(blocks).get(current) !== selectedBlockId ? null : current,
+    );
+  }, [selectedBlockId, blocks]);
 
-  /** Bring a node into view on the technical graph (the graph panel when a process view exists). */
+  // Opening the graph with a block selected brings that block's first step into view, even when
+  // the selection was made while the graph was hidden (a hidden viewport cannot be fitted).
+  useEffect(() => {
+    if (mode !== "graph" || !selectedBlockId) return;
+    const block = blocks.find((b) => b.id === selectedBlockId);
+    const first = block?.nodeIds[0];
+    if (!first) return;
+    // A focus already aimed at a step of this block (a step row, a chip) wins over the block's
+    // first step: that request opened the graph, so it must not be overwritten here.
+    if (focusRequest && block?.nodeIds.includes(focusRequest.nodeId)) return;
+    requestFocus({ nodeId: first });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only the tab change re-focuses
+  }, [mode]);
+
+  /** Bring a node into view on the technical graph: the page switches to the graph view for it. */
   const focusNode = useCallback(
     (nodeId: string) => {
-      if (progress) setChosenTab("graph");
-      setFocusRequest((previous) => ({ nodeId, token: (previous?.token ?? 0) + 1 }));
+      // The step's block becomes the selection, so the panel's node level survives the jump.
+      const owner = nodeOwners(blocks).get(nodeId) ?? null;
+      update({ [VIEW_PARAM]: "graph", ...(owner ? { [BLOCK_PARAM]: owner } : {}) });
+      requestFocus({ nodeId });
+      // The panel follows the jump to its node level.
+      setPanelNodeId(nodeId);
+      setChosenTab("block");
     },
-    [progress],
+    [update, blocks, requestFocus],
   );
 
   const handleCurrentNodeClick = useCallback(() => {
@@ -506,6 +590,9 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
   );
 
   const onPanel = useCallback((tab: PanelTab) => setChosenTab(tab), []);
+  // The walkthrough points inside sections the panel remembers as folded; this unfolds the one
+  // the current step needs, the same way a click on a list item unfolds the list.
+  const onSection = useCallback((id: string) => requestSection({ name: id }), [requestSection]);
 
   const getCurrentNode = () => {
     if (!execution?.currentNodeId || !workflow?.workflow?.nodes) return null;
@@ -546,7 +633,8 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
     }
   };
 
-  if (loading) {
+  // A page-wide loader only while there is nothing to show yet; a refresh keeps the page.
+  if (loading && !execution) {
     return (
       <div className="flex items-center justify-center h-full">
         <div className="text-muted-foreground">{t("pages.executionInspector.loading")}</div>
@@ -573,7 +661,78 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
   const journal = execution.errors ?? [];
   const errorsCount = journal.filter(isRefusalEntry).length;
   const degradationsCount = journal.length - errorsCount;
-  const ModeView = MODE_COMPONENTS[mode];
+  // The run's own controls live in the diagram toolbar with the map's and the graph's, so the
+  // page has one row above the diagram: view tabs and route cursor first, legend and guide last.
+  const runModes = progress ? (
+    <Tabs value={mode} onValueChange={(value) => update({ [VIEW_PARAM]: value })}>
+      <TabsList aria-label={t("pages.runPage.modeLabel")} className="h-8" data-testid="run-modes">
+        {MODES.map((definition) => {
+          const Icon = definition.icon;
+          return (
+            <TabsTrigger
+              key={definition.id}
+              value={definition.id}
+              data-mode={definition.id}
+              className="gap-1 text-xs"
+            >
+              <Icon className="h-3.5 w-3.5" aria-hidden="true" />
+              {t(`pages.runPage.modes.${definition.id}`)}
+            </TabsTrigger>
+          );
+        })}
+      </TabsList>
+    </Tabs>
+  ) : null;
+  const runControls =
+    progress && progress.routeRecorded ? (
+      <div className="hidden shrink-0 lg:block">
+        <RunCursor
+          route={progress.route}
+          cursor={cursor}
+          onSetCursor={(at) => update({ [AT_PARAM]: at === null ? null : String(at) })}
+        />
+      </div>
+    ) : null;
+  const runTrailing = progress ? (
+    <>
+      <div className="relative">
+        <button
+          type="button"
+          onClick={() => setLegendOpen((was) => !was)}
+          aria-expanded={legendOpen}
+          data-hint={t("pages.runPage.legend.title")}
+          aria-label={t("pages.runPage.legend.title")}
+          className={cn(
+            "inline-flex h-8 w-8 items-center justify-center rounded-md border border-transparent text-muted-foreground hover:border-border hover:bg-accent hover:text-foreground",
+            legendOpen && "border-primary/50 bg-primary/10 text-primary",
+          )}
+          data-testid="legend-open"
+        >
+          <ListChecks className="size-4" aria-hidden="true" />
+        </button>
+        {legendOpen && (
+          <div className="absolute right-0 top-full z-20 mt-1 rounded-lg border bg-popover p-3 shadow-md">
+            <StatusLegend
+              waitingFor={shownProgress?.waitingFor ?? null}
+              className="flex-col items-start gap-1"
+            />
+          </div>
+        )}
+      </div>
+      <button
+        type="button"
+        onClick={() => update({ [GUIDE_PARAM]: "1" })}
+        data-hint={t("pages.runPage.guide.open")}
+        aria-label={t("pages.runPage.guide.open")}
+        className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-transparent text-primary hover:border-border hover:bg-primary/10"
+        data-testid="guide-open"
+      >
+        <Compass className="size-4" aria-hidden="true" />
+      </button>
+    </>
+  ) : null;
+
+  const graphContentsToggle = <ContentsToggleSlot />;
   const technicalGraph = (
     <Suspense fallback={<DiagramSkeleton />}>
       <WorkflowGraph
@@ -581,20 +740,41 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
         validation={workflow.validation}
         blocks={blocks}
         currentNodeId={execution.currentNodeId}
+        selectedBlockId={selectedBlockId}
         errorNodeIds={errorNodeIds}
         onNodeClick={handleNodeClick}
         showControls={true}
-        showMinimap={false}
-        showNodeDetails={true}
+        showMinimap
+        showNodeDetails={false}
         focusRequest={focusRequest}
+        selectedNodeId={focusRequest?.nodeId ?? null}
+        visitedNodeIds={visitedNodeList}
+        onVariableSelect={goToVariable}
+        selectedVariable={variableHighlight?.name ?? null}
+        toolbarModes={runModes}
+        toolbarLeading={
+          <>
+            {graphContentsToggle}
+            {runControls}
+          </>
+        }
+        toolbarTrailing={
+          <>
+            <DiagramGuide mode="graph" />
+            {runTrailing}
+          </>
+        }
       />
     </Suspense>
   );
 
   return (
     <div className="h-full flex flex-col" data-testid="run-page">
-      {/* Compact Toolbar - 1 line */}
-      <div className="border-b bg-card px-4 py-2 flex items-center gap-3">
+      {/* The header: what is being looked at, and the page's own actions. */}
+      <PageHeader
+        description={progress?.goal ?? progress?.taskTitle ?? undefined}
+        testId="run-header"
+      >
         <Tooltip>
           <TooltipTrigger asChild>
             <Button variant="ghost" size="sm" onClick={() => navigate(backRoute)}>
@@ -688,9 +868,7 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
                   <Lock className="h-4 w-4" />
                 </Button>
               </TooltipTrigger>
-              <TooltipContent>
-                {t("pages.executionInspector.toolbar.lock", "Lock Execution")}
-              </TooltipContent>
+              <TooltipContent>{t("pages.executionInspector.toolbar.lock")}</TooltipContent>
             </Tooltip>
           )}
 
@@ -713,7 +891,7 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
 
           {errorsCount > 0 && <ErrorCountBadge count={errorsCount} />}
         </div>
-      </div>
+      </PageHeader>
 
       {!progress && progressLoading ? (
         <div
@@ -729,327 +907,360 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
         </div>
       ) : null}
 
-      {/* Main content: the run on the left, the panel on the right (stacked on a phone). */}
-      <div className="flex-1 min-h-0 flex flex-col lg:flex-row overflow-hidden">
+      {/* Main content: the run on the left, the panel on the right. On a phone the two stack into
+          one scrolling column — the view keeps a readable height instead of being squeezed into
+          what the panel leaves — and from `lg` the row fills the page and scrolls nowhere. */}
+      <div className="flex-1 min-h-0 flex flex-col lg:flex-row overflow-y-auto lg:overflow-hidden">
         <section
-          className="flex-1 min-w-0 min-h-0 flex flex-col overflow-hidden"
+          className="flex min-w-0 flex-col lg:flex-1 lg:min-h-0 lg:overflow-hidden"
           data-view={progress ? mode : "graph"}
           {...(progress ? { "data-testid": "execution-progress" } : {})}
           aria-label={t("pages.runPage.title")}
         >
           {progress && shownProgress ? (
             <>
-              <div
-                className="border-b bg-card px-3 py-1.5 flex flex-wrap items-center gap-2"
-                data-testid="run-header"
-              >
-                <Tabs value={mode} onValueChange={(value) => update({ [VIEW_PARAM]: value })}>
-                  <TabsList
-                    aria-label={t("pages.runPage.modeLabel")}
-                    className="h-8"
-                    data-testid="run-modes"
-                  >
-                    {MODES.map((definition) => {
-                      const Icon = definition.icon;
-                      return (
-                        <TabsTrigger
-                          key={definition.id}
-                          value={definition.id}
-                          data-mode={definition.id}
-                          className="gap-1 text-xs"
-                        >
-                          <Icon className="h-3.5 w-3.5" aria-hidden="true" />
-                          {t(`pages.runPage.modes.${definition.id}`)}
-                        </TabsTrigger>
-                      );
-                    })}
-                  </TabsList>
-                </Tabs>
-                {progress.routeRecorded && (
-                  <RunCursor
-                    route={progress.route}
-                    cursor={cursor}
-                    onSetCursor={(at) => update({ [AT_PARAM]: at === null ? null : String(at) })}
-                  />
+              {/* Only the shown view is mounted: the selection lives in the URL and the graph
+                  re-centres on its focus request, so nothing is lost, and one diagram means one
+                  toolbar and one set of markers in the document. */}
+              <div className="lg:flex-1 lg:min-h-0">
+                {mode === "map" && (
+                  <div className="lg:h-full">
+                    <MapView
+                      toolbarModes={runModes}
+                      onFocusNode={focusNode}
+                      onSelectListItem={selectListItem}
+                      toolbarExtra={runControls}
+                      toolbarTrailing={runTrailing}
+                      progress={shownProgress}
+                      blocks={shownBlocks}
+                      route={progress.route}
+                      workflow={workflow.workflow}
+                      selectedBlockId={selectedBlockId}
+                      onSelectBlock={(id) => {
+                        update({ [BLOCK_PARAM]: id });
+                        if (id && chosenTab !== null && chosenTab !== "block")
+                          setChosenTab("block");
+                        // The graph opens on the block's first step when the reader goes there.
+                        const first = blocks.find((b) => b.id === id)?.nodeIds[0];
+                        if (first) requestFocus({ nodeId: first });
+                      }}
+                      cursor={cursor}
+                      onSetCursor={(at) => update({ [AT_PARAM]: at === null ? null : String(at) })}
+                    />
+                  </div>
                 )}
-                <div className="flex-1" />
-                <StatusLegend className="hidden xl:flex" />
-                <button
-                  type="button"
-                  onClick={() => update({ [GUIDE_PARAM]: "1" })}
-                  className="inline-flex items-center gap-1.5 rounded-lg border bg-primary/5 px-2.5 py-1 text-xs font-medium text-primary hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                  data-testid="guide-open"
-                >
-                  <Compass className="size-3.5" aria-hidden="true" />
-                  {t("pages.runPage.guide.open")}
-                </button>
-              </div>
-              <div className="flex-1 min-h-0">
-                <ModeView
-                  progress={shownProgress}
-                  blocks={shownBlocks}
-                  route={progress.route}
-                  workflow={workflow.workflow}
-                  selectedBlockId={selectedBlockId}
-                  onSelectBlock={(id) => {
-                    update({ [BLOCK_PARAM]: id });
-                    if (id && chosenTab !== null && chosenTab !== "block") setChosenTab("block");
-                  }}
-                  cursor={cursor}
-                  onSetCursor={(at) => update({ [AT_PARAM]: at === null ? null : String(at) })}
-                />
+                {mode === "graph" && (
+                  <ContentsLayout
+                    blocks={shownBlocks}
+                    selectedBlockId={selectedBlockId}
+                    onSelect={(id) => {
+                      update({ [BLOCK_PARAM]: id });
+                      if (chosenTab !== null && chosenTab !== "block") setChosenTab("block");
+                    }}
+                    testId="graph-view"
+                  >
+                    {(toggle) => (
+                      <ContentsToggleProvider value={toggle}>
+                        <div className="h-[60vh] lg:h-full">{technicalGraph}</div>
+                      </ContentsToggleProvider>
+                    )}
+                  </ContentsLayout>
+                )}
               </div>
             </>
           ) : (
-            <div className="flex-1 min-h-0">{technicalGraph}</div>
+            <div className="h-[60vh] lg:h-full lg:flex-1 lg:min-h-0">{technicalGraph}</div>
           )}
         </section>
 
         {/* Right panel */}
         <aside
           className={cn(
-            "flex flex-col bg-card overflow-hidden border-t lg:border-t-0 lg:border-l",
-            "max-h-[38vh] lg:max-h-none lg:w-[400px] xl:w-[460px] shrink-0",
+            "relative flex flex-col bg-card overflow-hidden border-t lg:border-t-0 lg:border-l",
+            "max-h-[38vh] lg:max-h-none shrink-0",
+            panelCollapsed ? "h-10 lg:h-auto lg:w-10" : "lg:w-[400px] xl:w-[460px]",
           )}
           data-testid="run-panel"
+          data-collapsed={panelCollapsed ? "true" : undefined}
         >
-          <Tabs
-            value={activeTab}
-            onValueChange={(value) => setChosenTab(value as PanelTab)}
-            className="flex flex-col h-full"
-          >
-            {/* The panel strip: underline tabs that wrap on a narrow panel instead of scrolling;
-                each tab says what it holds, and counters and warnings are one badge. The list's
-                height must follow the wrapped rows (the tabs variant fixes it at one row, hence
-                the important override), so the second row never paints over the content. */}
-            <TabsList
-              variant="line"
-              className="!h-auto w-full flex-wrap justify-start gap-x-0 gap-y-1 rounded-none border-b bg-card px-2 py-1"
-              data-testid="run-panel-tabs"
+          {!panelCollapsed && (
+            <button
+              type="button"
+              onClick={togglePanel}
+              data-hint={t("pages.runPage.panel.collapse")}
+              aria-label={t("pages.runPage.panel.collapse")}
+              className="absolute right-1 top-1 z-10 inline-flex h-8 w-8 items-center justify-center rounded-md border bg-card/90 text-muted-foreground shadow-sm hover:bg-accent hover:text-foreground"
+              data-testid="run-panel-collapse"
             >
-              {progress && (
-                <TabsTrigger
-                  value="block"
-                  className={TAB_CLASS}
-                  title={t("pages.runPage.tabHints.block")}
-                >
-                  <Boxes className="size-3.5" />
-                  {t("pages.runPage.tabs.block")}
-                </TabsTrigger>
-              )}
-              <TabsTrigger
-                value="variables"
-                className={TAB_CLASS}
-                title={t("pages.runPage.tabHints.variables")}
+              <PanelRightClose className="size-4" aria-hidden="true" />
+            </button>
+          )}
+          {panelCollapsed && (
+            <button
+              type="button"
+              onClick={togglePanel}
+              data-hint={t("pages.runPage.panel.expand")}
+              aria-label={t("pages.runPage.panel.expand")}
+              className="flex h-10 w-full items-center justify-center text-muted-foreground hover:bg-accent hover:text-foreground"
+              data-testid="run-panel-expand"
+            >
+              <PanelRightOpen className="size-4" aria-hidden="true" />
+            </button>
+          )}
+          <div className={cn("flex min-h-0 flex-1 flex-col", panelCollapsed && "hidden")}>
+            <Tabs
+              value={activeTab}
+              onValueChange={(value) => setChosenTab(value as PanelTab)}
+              className="flex flex-col h-full"
+            >
+              {/* The panel strip: underline tabs on one row, each saying what it holds, with
+                counters and warnings as one badge; the icons come back only when the strip is
+                wide enough for them (`@container`), so the labels never wrap onto a second row
+                that would paint over the content. The list's height follows its content (the
+                tabs variant fixes it at one row, hence the important override). */}
+              <TabsList
+                variant="line"
+                className="@container !h-auto w-full flex-wrap justify-start gap-x-0 gap-y-1 rounded-none border-b bg-card py-1 pl-2 pr-10"
+                data-testid="run-panel-tabs"
               >
-                <Variable className="size-3.5" />
-                {t("pages.runPage.tabs.variables")}
-                <TabBadge
-                  warning={Boolean(answerable && waiting)}
-                  tone="warning"
-                  label={t("pages.runPage.tabHints.variablesWaiting")}
-                  testId="variables-waiting-badge"
-                />
-              </TabsTrigger>
-              <TabsTrigger
-                value="errors"
-                className={TAB_CLASS}
-                title={t("pages.runPage.tabHints.errors")}
-              >
-                <AlertTriangle className="size-3.5" />
-                {t("pages.executionInspector.tabs.errors")}
-                <TabBadge
-                  count={errorsCount}
-                  tone="danger"
-                  label={t("pages.runPage.tabHints.errorCount", { count: errorsCount })}
-                  testId="errors-count-badge"
-                />
-                {degradationsCount > 0 && (
-                  <TabBadge
-                    count={degradationsCount}
-                    tone="warning"
-                    label={t("pages.runPage.tabHints.degradationCount", {
-                      count: degradationsCount,
-                    })}
-                    testId="degradations-count-badge"
-                  />
+                {progress && (
+                  <TabsTrigger
+                    value="block"
+                    className={TAB_CLASS}
+                    data-hint={t("pages.runPage.tabHints.block")}
+                  >
+                    <Boxes className={TAB_ICON} />
+                    {t("pages.runPage.tabs.block")}
+                  </TabsTrigger>
                 )}
-              </TabsTrigger>
-              <TabsTrigger
-                value="steps"
-                className={TAB_CLASS}
-                title={t("pages.runPage.tabHints.steps")}
-              >
-                <ListChecks className="size-3.5" />
-                {t("pages.executionInspector.tabs.steps")}
-              </TabsTrigger>
-              {progress && (
                 <TabsTrigger
-                  value="graph"
+                  value="variables"
                   className={TAB_CLASS}
-                  title={t("pages.runPage.tabHints.graph")}
+                  data-hint={t("pages.runPage.tabHints.variables")}
                 >
-                  <Workflow className="size-3.5" />
-                  {t("pages.runPage.tabs.graph")}
+                  <Variable className={TAB_ICON} />
+                  {t("pages.runPage.tabs.variables")}
+                  <TabBadge
+                    warning={Boolean(answerable && waiting)}
+                    tone="warning"
+                    label={t("pages.runPage.tabHints.variablesWaiting")}
+                    testId="variables-waiting-badge"
+                  />
                 </TabsTrigger>
-              )}
-              <TabsTrigger
-                value="locks"
-                className={TAB_CLASS}
-                title={t("pages.runPage.tabHints.locks")}
-              >
-                <Lock className="size-3.5" />
-                {t("pages.executionInspector.tabs.locks")}
-                <TabBadge
-                  warning={locks.some((l) => l.status === "active")}
-                  tone="warning"
-                  label={t("pages.runPage.tabHints.lockActive")}
-                  testId="locks-active-badge"
-                />
-              </TabsTrigger>
-            </TabsList>
-
-            {progress && (
-              <TabsContent value="block" className="scrollbar-thin flex-1 overflow-auto m-0">
-                <BlockDetailPanel
-                  block={shownBlock}
-                  blocks={shownBlocks}
-                  workflow={workflow.workflow}
-                  onSelectBlock={(id) => update({ [BLOCK_PARAM]: id })}
-                  onFocusNode={focusNode}
-                />
-              </TabsContent>
-            )}
-
-            <TabsContent value="variables" className="scrollbar-thin flex-1 overflow-auto m-0">
-              <VariablesPanel
-                progress={shownProgress}
-                cursor={cursor}
-                context={execution?.context?.variables}
-                workflow={workflow?.workflow}
-                waiting={waiting}
-                waitingBlockName={waitingBlockName}
-                canAdjust={answerable}
-                editableVariableNames={editableVariableNames}
-                onAnswer={handleAnswer}
-                onSavePath={canEdit ? handleSavePath : undefined}
-                onFullscreen={() => setVariablesFullscreen(true)}
-              />
-            </TabsContent>
-
-            <TabsContent value="errors" className="scrollbar-thin flex-1 overflow-auto m-0 p-4">
-              <ExecutionErrorHistory errors={execution.errors ?? []} />
-            </TabsContent>
-
-            <TabsContent value="steps" className="scrollbar-thin flex-1 overflow-auto m-0 p-4">
-              <StepProgression
-                workflow={workflow.workflow}
-                blocks={shownBlocks}
-                currentNodeId={shownCurrentNodeId}
-                visitedNodeIds={visitedNodeIds}
-                onNodeClick={focusNode}
-              />
-            </TabsContent>
-
-            {progress && (
-              <TabsContent value="graph" className="flex-1 overflow-hidden m-0">
-                <div className="h-full min-h-[320px]">{technicalGraph}</div>
-              </TabsContent>
-            )}
-
-            <TabsContent
-              value="locks"
-              className="scrollbar-thin flex-1 overflow-auto m-0 p-4"
-              data-testid="locks-panel"
-              data-pending={lockHistory.pending ? "true" : undefined}
-            >
-              {lockHistory.error && (
-                <div
-                  className="mb-3 text-xs text-destructive"
-                  role="alert"
-                  data-testid="locks-error"
+                <TabsTrigger
+                  value="errors"
+                  className={TAB_CLASS}
+                  data-hint={t("pages.runPage.tabHints.errors")}
                 >
-                  {lockHistory.error}
-                </div>
+                  <AlertTriangle className={TAB_ICON} />
+                  {t("pages.executionInspector.tabs.errors")}
+                  <TabBadge
+                    count={errorsCount}
+                    tone="danger"
+                    label={t("pages.runPage.tabHints.errorCount", { count: errorsCount })}
+                    testId="errors-count-badge"
+                  />
+                  {degradationsCount > 0 && (
+                    <TabBadge
+                      count={degradationsCount}
+                      tone="warning"
+                      label={t("pages.runPage.tabHints.degradationCount", {
+                        count: degradationsCount,
+                      })}
+                      testId="degradations-count-badge"
+                    />
+                  )}
+                </TabsTrigger>
+                <TabsTrigger
+                  value="steps"
+                  className={TAB_CLASS}
+                  data-hint={t("pages.runPage.tabHints.steps")}
+                >
+                  <ListChecks className={TAB_ICON} />
+                  {t("pages.executionInspector.tabs.steps")}
+                </TabsTrigger>
+                <TabsTrigger
+                  value="locks"
+                  className={TAB_CLASS}
+                  data-hint={t("pages.runPage.tabHints.locks")}
+                >
+                  <Lock className={TAB_ICON} />
+                  {t("pages.executionInspector.tabs.locks")}
+                  <TabBadge
+                    warning={locks.some((l) => l.status === "active")}
+                    tone="warning"
+                    label={t("pages.runPage.tabHints.lockActive")}
+                    testId="locks-active-badge"
+                  />
+                </TabsTrigger>
+              </TabsList>
+
+              {progress && (
+                <TabsContent value="block" className="scrollbar-thin flex-1 overflow-auto m-0">
+                  <RouteSummary
+                    route={progress.route}
+                    workflow={workflow.workflow}
+                    blocks={shownBlocks}
+                  />
+                  {panelNodeId && workflow.workflow ? (
+                    <NodePanel
+                      workflow={workflow.workflow}
+                      blocks={shownBlocks}
+                      nodeId={panelNodeId}
+                      onBack={() => setPanelNodeId(null)}
+                      onFocusNode={focusNode}
+                      onSelectVariable={goToVariable}
+                      validation={workflow.validation ?? null}
+                      nodeTypes={nodeTypeIndex}
+                    />
+                  ) : (
+                    <BlockDetailPanel
+                      block={shownBlock}
+                      blocks={shownBlocks}
+                      workflow={workflow.workflow}
+                      waitingFor={shownProgress?.waitingFor ?? null}
+                      progress={shownProgress ?? undefined}
+                      route={progress.route}
+                      statistics={shownProgress?.statistics}
+                      cursor={cursor}
+                      onSelectBlock={(id) => update({ [BLOCK_PARAM]: id })}
+                      onSetCursor={(at) => update({ [AT_PARAM]: at === null ? null : String(at) })}
+                      onFocusNode={focusNode}
+                      listHighlight={listHighlight}
+                      openSection={sectionOpen}
+                    />
+                  )}
+                </TabsContent>
               )}
-              {locksLoading ? (
-                <div className="flex items-center justify-center py-8" data-testid="locks-loading">
-                  <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-                </div>
-              ) : locks.length === 0 ? (
-                <div className="text-center py-8 text-muted-foreground text-sm">
-                  {t("pages.executionInspector.locks.noHistory")}
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  {locks.map((lock) => (
-                    <Card key={lock.id} className="p-3">
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="flex items-center gap-2 min-w-0">
-                          {lock.status === "active" ? (
-                            <Lock className="h-4 w-4 text-yellow-500 flex-shrink-0" />
-                          ) : (
-                            <Unlock className="h-4 w-4 text-muted-foreground flex-shrink-0" />
-                          )}
-                          <div className="min-w-0">
-                            <div className="text-sm font-medium truncate">{lock.reason}</div>
-                            <div className="text-xs text-muted-foreground">
-                              {t("pages.executionInspector.locks.node")}{" "}
-                              <code className="text-[10px]">{lock.nodeId}</code>
+
+              <TabsContent value="variables" className="scrollbar-thin flex-1 overflow-auto m-0">
+                <VariablesPanel
+                  progress={shownProgress}
+                  cursor={cursor}
+                  context={execution?.context?.variables}
+                  workflow={workflow?.workflow}
+                  waiting={waiting}
+                  waitingBlockName={waitingBlockName}
+                  canAdjust={answerable}
+                  editableVariableNames={editableVariableNames}
+                  onAnswer={handleAnswer}
+                  onSavePath={canEdit ? handleSavePath : undefined}
+                  onFullscreen={() => setVariablesFullscreen(true)}
+                  highlight={variableHighlight}
+                />
+              </TabsContent>
+
+              <TabsContent value="errors" className="scrollbar-thin flex-1 overflow-auto m-0 p-4">
+                <ExecutionErrorHistory errors={execution.errors ?? []} />
+              </TabsContent>
+
+              <TabsContent value="steps" className="scrollbar-thin flex-1 overflow-auto m-0 p-4">
+                <StepProgression
+                  workflow={workflow.workflow}
+                  blocks={shownBlocks}
+                  currentNodeId={shownCurrentNodeId}
+                  visitedNodeIds={visitedNodeIds}
+                  onNodeClick={focusNode}
+                />
+              </TabsContent>
+
+              <TabsContent
+                value="locks"
+                className="scrollbar-thin flex-1 overflow-auto m-0 p-4"
+                data-testid="locks-panel"
+                data-pending={lockHistory.pending ? "true" : undefined}
+              >
+                {lockHistory.error && (
+                  <div
+                    className="mb-3 text-xs text-destructive"
+                    role="alert"
+                    data-testid="locks-error"
+                  >
+                    {lockHistory.error}
+                  </div>
+                )}
+                {locksLoading ? (
+                  <div
+                    className="flex items-center justify-center py-8"
+                    data-testid="locks-loading"
+                  >
+                    <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+                  </div>
+                ) : locks.length === 0 ? (
+                  <div className="text-center py-8 text-muted-foreground text-sm">
+                    {t("pages.executionInspector.locks.noHistory")}
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {locks.map((lock) => (
+                      <Card key={lock.id} className="p-3">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex items-center gap-2 min-w-0">
+                            {lock.status === "active" ? (
+                              <Lock className="h-4 w-4 text-yellow-500 flex-shrink-0" />
+                            ) : (
+                              <Unlock className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                            )}
+                            <div className="min-w-0">
+                              <div className="text-sm font-medium truncate">{lock.reason}</div>
+                              <div className="text-xs text-muted-foreground">
+                                {t("pages.executionInspector.locks.node")}{" "}
+                                <code className="text-[10px]">{lock.nodeId}</code>
+                              </div>
                             </div>
                           </div>
-                        </div>
-                        <div className="flex items-center gap-2 flex-shrink-0">
-                          <Badge
-                            variant={lock.status === "active" ? "default" : "secondary"}
-                            className={
-                              lock.status === "active"
-                                ? "bg-yellow-500/20 text-yellow-600 border-yellow-500/30"
-                                : ""
-                            }
-                          >
-                            {lock.status}
-                          </Badge>
-                          {lock.status === "active" && (
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() =>
-                                showOwnerInfo
-                                  ? handleAdminUnlock(lock.id)
-                                  : handleOwnerUnlock(lock.id)
+                          <div className="flex items-center gap-2 flex-shrink-0">
+                            <Badge
+                              variant={lock.status === "active" ? "default" : "secondary"}
+                              className={
+                                lock.status === "active"
+                                  ? "bg-yellow-500/20 text-yellow-600 border-yellow-500/30"
+                                  : ""
                               }
-                              disabled={unlocking === lock.id}
-                              className="h-7 text-xs"
                             >
-                              {unlocking === lock.id ? (
-                                <Loader2 className="h-3 w-3 mr-1 animate-spin" />
-                              ) : (
-                                <Unlock className="h-3 w-3 mr-1" />
-                              )}
-                              {t("pages.executionInspector.locks.unlock")}
-                            </Button>
+                              {lock.status}
+                            </Badge>
+                            {lock.status === "active" && (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() =>
+                                  showOwnerInfo
+                                    ? handleAdminUnlock(lock.id)
+                                    : handleOwnerUnlock(lock.id)
+                                }
+                                disabled={unlocking === lock.id}
+                                className="h-7 text-xs"
+                              >
+                                {unlocking === lock.id ? (
+                                  <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                                ) : (
+                                  <Unlock className="h-3 w-3 mr-1" />
+                                )}
+                                {t("pages.executionInspector.locks.unlock")}
+                              </Button>
+                            )}
+                          </div>
+                        </div>
+                        <div className="mt-2 flex gap-4 text-[10px] text-muted-foreground">
+                          <span>
+                            {t("pages.executionInspector.locks.created")}{" "}
+                            {new Date(lock.createdAt).toLocaleString()}
+                          </span>
+                          {lock.unlockedAt && (
+                            <span>
+                              {t("pages.executionInspector.locks.unlocked")}{" "}
+                              {new Date(lock.unlockedAt).toLocaleString()}
+                            </span>
                           )}
                         </div>
-                      </div>
-                      <div className="mt-2 flex gap-4 text-[10px] text-muted-foreground">
-                        <span>
-                          {t("pages.executionInspector.locks.created")}{" "}
-                          {new Date(lock.createdAt).toLocaleString()}
-                        </span>
-                        {lock.unlockedAt && (
-                          <span>
-                            {t("pages.executionInspector.locks.unlocked")}{" "}
-                            {new Date(lock.unlockedAt).toLocaleString()}
-                          </span>
-                        )}
-                      </div>
-                    </Card>
-                  ))}
-                </div>
-              )}
-            </TabsContent>
-          </Tabs>
+                      </Card>
+                    ))}
+                  </div>
+                )}
+              </TabsContent>
+            </Tabs>
+          </div>
         </aside>
       </div>
 
@@ -1102,18 +1313,15 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
             <DialogTitle className="flex items-center gap-2">
               <Lock className="h-5 w-5 text-yellow-600" />
               {lockResult
-                ? t("pages.executionInspector.lockDialog.success", "Execution Locked")
-                : t("pages.executionInspector.lockDialog.title", "Lock Execution")}
+                ? t("pages.executionInspector.lockDialog.success")
+                : t("pages.executionInspector.lockDialog.title")}
             </DialogTitle>
           </DialogHeader>
 
           {lockResult ? (
             <div className="space-y-4 py-2">
               <p className="text-sm text-muted-foreground">
-                {t(
-                  "pages.executionInspector.lockDialog.successMessage",
-                  "Execution has been locked. Share the PIN with the agent to unlock.",
-                )}
+                {t("pages.executionInspector.lockDialog.successMessage")}
               </p>
               <div className="p-3 bg-muted rounded-md text-center">
                 <div className="text-xs text-muted-foreground mb-1">PIN</div>
@@ -1126,23 +1334,17 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
                     setLockResult(null);
                   }}
                 >
-                  {t("common.close", "Close")}
+                  {t("common.close")}
                 </Button>
               </DialogFooter>
             </div>
           ) : (
             <div className="space-y-4 py-2">
               <p className="text-sm text-muted-foreground">
-                {t(
-                  "pages.executionInspector.lockDialog.description",
-                  "Locking will pause the execution. Provide a reason for locking.",
-                )}
+                {t("pages.executionInspector.lockDialog.description")}
               </p>
               <Input
-                placeholder={t(
-                  "pages.executionInspector.lockDialog.reasonPlaceholder",
-                  "Reason for locking...",
-                )}
+                placeholder={t("pages.executionInspector.lockDialog.reasonPlaceholder")}
                 value={lockReason}
                 onChange={(e) => setLockReason(e.target.value)}
                 onKeyDown={(e) => {
@@ -1154,7 +1356,7 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
               />
               <DialogFooter>
                 <Button variant="outline" onClick={() => setLockDialogOpen(false)}>
-                  {t("common.cancel", "Cancel")}
+                  {t("common.cancel")}
                 </Button>
                 <Button
                   onClick={handleCreateLock}
@@ -1163,7 +1365,7 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
                 >
                   {locking && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
                   <Lock className="h-4 w-4 mr-2" />
-                  {t("pages.executionInspector.lockDialog.confirm", "Lock")}
+                  {t("pages.executionInspector.lockDialog.confirm")}
                 </Button>
               </DialogFooter>
             </div>
@@ -1179,6 +1381,7 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
           routeRecorded={progress.routeRecorded}
           onNavigate={update}
           onPanel={onPanel}
+          onSection={onSection}
         />
       )}
     </div>
@@ -1238,7 +1441,7 @@ const StepProgression: React.FC<StepProgressionProps> = ({
                 <span
                   className="inline-flex items-center gap-1 text-[11px] font-medium text-success"
                   data-step-done=""
-                  title={t("pages.runPage.status.done")}
+                  data-hint={t("pages.runPage.status.done")}
                 >
                   <Check className="size-3.5" aria-hidden="true" />
                   {t("pages.runPage.status.done")}

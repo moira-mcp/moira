@@ -20,8 +20,8 @@ description: Обработка сбоев с вмешательством по�
 flowchart LR
     F[fix] --> V[validate]
     V --> C{count < max?}
-    C -->|true| F
-    C -->|false| A[ask-user-limit]
+    C -->|under-limit| F
+    C -->|default| A[ask-user-limit]
     A --> D{decision}
     D -->|continue| N[next phase]
     D -->|reset| R[reset counter = 0]
@@ -53,14 +53,19 @@ flowchart LR
 {
   "type": "condition",
   "id": "route-limit-decision",
-  "condition": {
-    "operator": "eq",
-    "left": { "contextPath": "decision" },
-    "right": "reset"
-  },
+  "cases": [
+    {
+      "when": {
+        "operator": "eq",
+        "left": { "contextPath": "decision" },
+        "right": "reset"
+      },
+      "output": "reset"
+    }
+  ],
   "connections": {
-    "true": "reset-validation-counter",
-    "false": "next-phase"
+    "reset": "reset-validation-counter",
+    "default": "next-phase"
   }
 }
 ```
@@ -95,14 +100,19 @@ flowchart LR
 {
   "type": "condition",
   "id": "check-retry-limit",
-  "condition": {
-    "operator": "lt",
-    "left": { "contextPath": "current_iteration" },
-    "right": 3
-  },
+  "cases": [
+    {
+      "when": {
+        "operator": "lt",
+        "left": { "contextPath": "current_iteration" },
+        "right": 3
+      },
+      "output": "under-limit"
+    }
+  ],
   "connections": {
-    "true": "fix-and-retry",
-    "false": "escalate-to-user"
+    "under-limit": "fix-and-retry",
+    "default": "escalate-to-user"
   }
 }
 ```
@@ -113,11 +123,11 @@ flowchart LR
 {
   "type": "agent-directive",
   "id": "escalate-to-user",
-  "directive": "Automated resolution failed after {{current_iteration}} attempts.\n\nProblem: {{last_error}}\nAttempted fixes: {{attempted_fixes}}\n\nAsk user how to proceed:\n- Provide manual fix instructions?\n- Skip this step?\n- Abort workflow?",
+  "directive": "Automated resolution failed after {{current_iteration}} attempts.\n\nProblem: {{last_error}}\nAttempted fixes: {{attempted_fixes}}\n\nAsk user how to proceed:\n- Continue with current result as-is?\n- Reset counter and try fixing again?\n- Provide manual fix instructions?\n- Skip this step?\n- Abort workflow?",
   "inputSchema": {
     "type": "object",
     "properties": {
-      "user_decision": { "type": "string", "enum": ["fix", "skip", "abort"] },
+      "user_decision": { "type": "string", "enum": ["continue", "reset", "fix", "skip", "abort"] },
       "user_instructions": { "type": "string" }
     },
     "required": ["user_decision"]
@@ -133,35 +143,63 @@ flowchart LR
 
 ### Маршрутизация решения пользователя
 
+Один узел condition обслуживает все решения, допускаемые enum: каждый case называет output для
+одного ответа, а оставшийся ответ (`fix`) уходит в `default`. Два ответа могут делить один output,
+как здесь `continue` и `skip`.
+
 ```json
 {
   "type": "condition",
-  "id": "check-abort",
-  "condition": {
-    "operator": "eq",
-    "left": { "contextPath": "user_decision" },
-    "right": "abort"
-  },
+  "id": "route-user-decision",
+  "cases": [
+    {
+      "when": {
+        "operator": "eq",
+        "left": { "contextPath": "user_decision" },
+        "right": "reset"
+      },
+      "output": "reset"
+    },
+    {
+      "when": {
+        "operator": "eq",
+        "left": { "contextPath": "user_decision" },
+        "right": "continue"
+      },
+      "output": "proceed"
+    },
+    {
+      "when": {
+        "operator": "eq",
+        "left": { "contextPath": "user_decision" },
+        "right": "skip"
+      },
+      "output": "proceed"
+    },
+    {
+      "when": {
+        "operator": "eq",
+        "left": { "contextPath": "user_decision" },
+        "right": "abort"
+      },
+      "output": "abort"
+    }
+  ],
   "connections": {
-    "true": "workflow-aborted",
-    "false": "check-skip"
+    "reset": "reset-counter",
+    "proceed": "proceed-to-next",
+    "abort": "workflow-aborted",
+    "default": "apply-user-fix"
   }
 }
 ```
 
 ```json
 {
-  "type": "condition",
-  "id": "check-skip",
-  "condition": {
-    "operator": "eq",
-    "left": { "contextPath": "user_decision" },
-    "right": "skip"
-  },
-  "connections": {
-    "true": "proceed-to-next",
-    "false": "apply-user-fix"
-  }
+  "type": "expression",
+  "id": "reset-counter",
+  "expressions": ["current_iteration = 0"],
+  "connections": { "default": "fix-and-retry" }
 }
 ```
 

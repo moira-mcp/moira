@@ -117,6 +117,55 @@ to prevent premature completion.
 }
 ```
 
+### Route on the Answer
+
+An enum answer usually decides where the run goes next. Put the `cases` on the same node, so the
+step that has the evidence is the step that decides:
+
+```json
+{
+  "id": "review",
+  "type": "agent-directive",
+  "directive": "Review the change against the acceptance criteria.",
+  "completionCondition": "Verdict recorded with the findings that support it",
+  "inputSchema": {
+    "type": "object",
+    "globalInputs": ["review_verdict"],
+    "properties": {
+      "findings": { "type": "string" }
+    },
+    "required": ["review_verdict"]
+  },
+  "expressions": ["review_round = review_round + 1"],
+  "cases": [
+    {
+      "when": { "operator": "gte", "left": { "contextPath": "review_round" }, "right": 3 },
+      "output": "exhausted"
+    },
+    {
+      "when": {
+        "operator": "eq",
+        "left": { "contextPath": "review_verdict" },
+        "right": "blocked"
+      },
+      "output": "blocked"
+    }
+  ],
+  "connections": {
+    "success": "merge",
+    "blocked": "fix-issues",
+    "exhausted": "escalate",
+    "error": "handle-error"
+  }
+}
+```
+
+`review_verdict` and `review_round` are declared in the workflow `variableRegistry`, so both are
+readable by bare name; a node-local output is read as `review.findings`. The expressions run after
+the answer is validated and before the cases, so a case can read what they computed. Cases are tried
+in order and `success` is the fallback — a passing verdict inside the round budget goes to `merge`.
+`error` and `timeout` are reserved for control flow: no case may name them, and they need none.
+
 ### Collect Structured Data
 
 ```json
@@ -219,6 +268,26 @@ Give the order only where the order is a real dependency, and say what makes it 
 
 ```
 "Fix error in {{file_path}}:\n\nError message: {{last_error}}\nIteration: {{current_iteration}}"
+```
+
+### Avoidable Routing Scaffolding
+
+A `condition` or `expression` node whose only job is to route or count what the preceding directive
+already knows is avoidable routing scaffolding: it adds a hop the reader must follow and a second
+place the decision can drift from its evidence. Fold it into the directive as `cases` or an
+`expressions` entry — and keep a standalone node where the decision is genuinely shared, reads state
+no single node produced, or earns a named place in the route.
+
+❌ Problem:
+
+```
+[validate] → [route-validation] → [fix] / [next]
+```
+
+✅ Solution:
+
+```
+[validate, cases on issues_count] → [fix] / [next]
 ```
 
 ### No Success Criteria

@@ -8,7 +8,9 @@ import {
   AgentDirectiveNode,
   ExecutionContext,
   isAgentDirectiveNode,
+  type VariableRegistry,
 } from "../types/index.js";
+import { routeNode } from "../services/node-routing.js";
 import { NodeExecutionResult, NodeResultBuilder } from "../types/node-execution.js";
 import { AgentMessageQueue } from "../services/agent-message-queue.js";
 import { INodeHandler } from "../interfaces/core-interfaces.js";
@@ -45,6 +47,7 @@ export class AgentDirectiveHandler implements INodeHandler {
     repository: IDataRepository,
     engine: IGraphExecutionEngine,
     input?: unknown,
+    variableRegistry?: VariableRegistry,
   ): Promise<NodeExecutionResult> {
     if (!isAgentDirectiveNode(node)) {
       throw new InternalError("AgentDirectiveHandler can only execute agent-directive nodes", {
@@ -113,17 +116,50 @@ export class AgentDirectiveHandler implements INodeHandler {
       workflowId: context.workflowId,
     });
 
-    // Success - continue to next node
+    // Route on the validated answer: expressions first, then cases, else `success`. The node
+    // decides on a view of the context that already contains its answer, both by bare name and
+    // under its own id, so a case can read `review_outcome` or `review-plan.review_outcome`.
+    const answer =
+      input !== null && typeof input === "object" && !Array.isArray(input)
+        ? (input as Record<string, unknown>)
+        : {};
+    const localBefore = (context.variables[agentNode.id] as Record<string, unknown>) ?? {};
+    const routing = routeNode(
+      agentNode,
+      "success",
+      {
+        ...context,
+        variables: {
+          ...context.variables,
+          ...answer,
+          [agentNode.id]: { ...localBefore, ...answer },
+        },
+      },
+      variableRegistry,
+      `agent-directive node '${agentNode.id}'`,
+    );
+    if (routing.failure) {
+      throw new ValidationError(
+        `Expression evaluation failed at index ${routing.failure.index}: ${routing.failure.message}`,
+        { nodeId: agentNode.id, expressionIndex: routing.failure.index },
+      );
+    }
+
     this.logger.info("Agent response processed successfully - continuing workflow", {
       nodeId: agentNode.id,
       executionTime: timer.elapsed(),
       responseKeys: Object.keys(input as object),
-      nextPath: "success",
+      nextPath: routing.output,
+      matchedCase: routing.matchedCase,
       inputData: input,
     });
 
-    // Return continue with success path and input data
-    return NodeResultBuilder.continue(agentNode.id, "success", input as Record<string, unknown>);
+    return NodeResultBuilder.continue(
+      agentNode.id,
+      routing.output,
+      input as Record<string, unknown>,
+      routing.assignments,
+    );
   }
 
   /**

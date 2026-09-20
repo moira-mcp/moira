@@ -108,7 +108,7 @@ describe("test-planning", () => {
     expect(validation.issues.filter((issue) => issue.severity === "error")).toEqual([]);
     expect(node(workflow, "review-gate").connections).toEqual({
       true: "present",
-      false: "repair",
+      default: "repair",
     });
     expect(node(workflow, "repair").connections).toEqual({ success: "review" });
     expect(node(workflow, "end").finalOutput).toEqual(["workspace_path", "result_summary"]);

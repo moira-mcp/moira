@@ -10,7 +10,10 @@ import {
   TelegramErrorType,
   UserCommunicationService,
   UserNotificationHandler,
+  buildExecutionProgressVisualModel,
   builtinNodeTypeDescriptors,
+  projectExecutionRun,
+  renderProgressVisualSvg,
   getActiveCommunicationChannelRegistry,
   getActiveUserCommunicationService,
   resetClientFactory,
@@ -860,12 +863,25 @@ describe("UserNotificationHandler", () => {
         { channelId: "mail", status: "failed" as const },
       ],
     }));
-    const renderedFor: Array<{ currentNodeId: string | null; lastVisitNode?: string }> = [];
+    const renderedFor: Array<{
+      currentNodeId: string | null;
+      waitingOn: string | null;
+      lastVisitNode?: string;
+    }> = [];
+    const pictures: string[] = [];
+    const statisticsReceived: unknown[] = [];
     const handler = new UserNotificationHandler(
       { deliver } as unknown as UserCommunicationService,
-      async (_workflow, execution) => {
+      async (workflow, execution, _options, statistics) => {
+        statisticsReceived.push(statistics ?? null);
+        pictures.push(
+          renderProgressVisualSvg(
+            await buildExecutionProgressVisualModel(projectExecutionRun(workflow, execution)!),
+          ),
+        );
         renderedFor.push({
           currentNodeId: execution.currentNodeId,
+          waitingOn: execution.waitingForInputNodeId ?? null,
           lastVisitNode: execution.visits?.at(-1)?.nodeId,
         });
         return {
@@ -895,7 +911,10 @@ describe("UserNotificationHandler", () => {
       getWorkflowGraph: async () => graph,
       getExecution: async () => ({
         revision: 1,
+        status: "running",
         currentNodeId: "previous-wait",
+        waitingForInputNodeId: null,
+        globalContext: { variables: {}, nodeStates: {} },
         visits: [{ seq: 0, nodeId: "previous-wait", exitKey: null, changes: {}, waited: true }],
       }),
       getWorkflow: async () => ({ metadata: graph.metadata }),
@@ -930,7 +949,443 @@ describe("UserNotificationHandler", () => {
       repo,
     );
     // The image is rendered as of this node, not of the wait the persisted route still ends on.
-    expect(renderedFor).toEqual([{ currentNodeId: "notify", lastVisitNode: "notify" }]);
+    // The graph has no successor node for `notify`, so nothing is waited on.
+    expect(renderedFor).toEqual([
+      { currentNodeId: "notify", waitingOn: null, lastVisitNode: "notify" },
+    ]);
+    // An unstamped run's picture is drawn without statistics.
+    expect(statisticsReceived).toEqual([null]);
+
+    // A version-stamped run's picture carries the statistics of that version over the owner's
+    // completed runs, so the cards show their typical durations.
+    statisticsReceived.length = 0;
+    const stamped = {
+      ...repo,
+      getExecution: async () => ({
+        ...(await repo.getExecution("12345678-rest")),
+        executionId: "12345678-rest",
+        workflowId: "workflow-id",
+        userId: "user-1",
+        workflowVersion: "1.0.0",
+      }),
+      summarizeExecutionsByWorkflowVersion: async () => ({
+        count: 0,
+        lastCompletedAt: null,
+        unstamped: 0,
+      }),
+      listExecutionsByWorkflowVersion: async () => [],
+    } as unknown as IDataRepository;
+    await handler.execute(
+      node,
+      {
+        variables: { status: "success" },
+        nodeStates: {},
+        executionId: "12345678-rest",
+        workflowId: "workflow-id",
+        userId: "user-1",
+      },
+      new AgentMessageQueue(),
+      stamped,
+      {} as IGraphExecutionEngine,
+    );
+    expect(statisticsReceived).toEqual([
+      expect.objectContaining({
+        workflowId: "workflow-id",
+        workflowVersion: "1.0.0",
+        sampledRuns: 0,
+      }),
+    ]);
+
+    // A notification that leads to a lock gate renders its image from the same copy the footer
+    // describes: the run waiting on the gate.
+    renderedFor.length = 0;
+    const gated = {
+      ...graph,
+      nodes: [
+        {
+          id: "notify",
+          type: "user-notification",
+          progressNodeId: "p",
+          message: "Done",
+          connections: { default: "pin-gate" },
+        },
+        {
+          id: "pin-gate",
+          type: "lock",
+          progressNodeId: "p",
+          reason: "Approve",
+          connections: { unlocked: "end" },
+        },
+        { id: "end", type: "end", progressNodeId: "p" },
+      ],
+    };
+    await handler.execute(
+      { ...node, connections: { default: "pin-gate", error: "failed" } },
+      {
+        variables: { status: "ok" },
+        nodeStates: {},
+        executionId: "12345678-rest",
+        workflowId: "workflow-id",
+        userId: "user-1",
+      },
+      new AgentMessageQueue(),
+      { ...repo, getWorkflowGraph: async () => gated } as unknown as IDataRepository,
+      {} as IGraphExecutionEngine,
+    );
+    expect(renderedFor).toEqual([
+      { currentNodeId: "pin-gate", waitingOn: "pin-gate", lastVisitNode: "pin-gate" },
+    ]);
+    const gatedText = (deliver.mock.calls as unknown as Array<[{ text: string }]>).at(-1)![0].text;
+    expect(gatedText).toContain("🙋 waiting for you: Progress");
+    // The picture attached to that message says the same: the gate's block waits for the reader.
+    expect(pictures.at(-1)).toContain("waiting for you");
+    expect(pictures.at(-1)).not.toContain("agent on the step");
+  });
+
+  test("the footer names done/total and the current item of the bound list nearest the run", async () => {
+    const deliver = jest.fn(async () => ({
+      status: "delivered" as const,
+      configuredChannels: 1,
+      deliveredChannels: 1,
+      channels: [{ channelId: "telegram", status: "delivered" as const }],
+    }));
+    const handler = new UserNotificationHandler({ deliver } as unknown as UserCommunicationService);
+    const node: UserNotificationNode = {
+      type: "user-notification",
+      id: "notify",
+      message: "Checkpoint",
+      connections: { default: "end" },
+    };
+    const graph = {
+      metadata: { name: "Example", version: "1.0.0", description: "x" },
+      variableRegistry: {
+        tasks: { type: "array", description: "tasks" },
+        current_task: { type: "number", description: "cursor" },
+      },
+      progress: {
+        nodes: [
+          {
+            id: "work",
+            label: "Work",
+            list: { items: "tasks", title: "action", current: "current_task" },
+          },
+          { id: "report", label: "Report" },
+        ],
+      },
+      nodes: [
+        { id: "start", type: "start", progressNodeId: "work", connections: { default: "task" } },
+        {
+          id: "task",
+          type: "agent-directive",
+          progressNodeId: "work",
+          directive: "Do",
+          completionCondition: "Done",
+          connections: { success: "notify" },
+          connectionLabels: { success: "done" },
+        },
+        {
+          id: "notify",
+          type: "user-notification",
+          progressNodeId: "report",
+          message: "Checkpoint",
+          connections: { default: "end" },
+        },
+        { id: "end", type: "end", progressNodeId: "report" },
+      ],
+    };
+    const tasks = [{ action: "Write it" }, { action: "Ship it" }];
+    const repo = {
+      getWorkflowGraph: async () => graph,
+      getExecution: async () => ({
+        revision: 1,
+        status: "running",
+        currentNodeId: "task",
+        globalContext: { variables: { tasks, current_task: 2 }, nodeStates: {} },
+        visits: [
+          { seq: 0, nodeId: "start", exitKey: "default", changes: { tasks, current_task: 1 } },
+          {
+            seq: 1,
+            nodeId: "task",
+            exitKey: "success",
+            changes: { current_task: 2 },
+            waited: true,
+          },
+        ],
+      }),
+      getWorkflow: async () => ({ metadata: graph.metadata }),
+    } as unknown as IDataRepository;
+    await handler.execute(
+      node,
+      {
+        variables: { tasks, current_task: 2 },
+        nodeStates: {},
+        executionId: "12345678-rest",
+        workflowId: "workflow-id",
+        userId: "user-1",
+      },
+      new AgentMessageQueue(),
+      repo,
+      {} as IGraphExecutionEngine,
+    );
+    const text = (deliver.mock.calls as unknown as Array<[{ text: string }]>)[0][0].text;
+    // The notification's own block binds nothing; the line comes from the checklist block the
+    // route just left, and an unbound block adds no count of its own.
+    expect(text).toContain("📝 1/2: Ship it");
+    expect(text.match(/📝/gu)).toHaveLength(1);
+    // The run is moving through this node, not paused on it: no actor line.
+    expect(text).not.toMatch(/agent on the step|waiting for you/u);
+  });
+
+  test("the footer names the agent on the step before the list line while the projected run is paused, and never says it waits for the reader", async () => {
+    const deliver = jest.fn(async () => ({
+      status: "delivered" as const,
+      configuredChannels: 1,
+      deliveredChannels: 1,
+      channels: [{ channelId: "telegram", status: "delivered" as const }],
+    }));
+    const handler = new UserNotificationHandler({ deliver } as unknown as UserCommunicationService);
+    const node: UserNotificationNode = {
+      type: "user-notification",
+      id: "notify",
+      message: "Checkpoint",
+      connections: { default: "end" },
+    };
+    const graph = {
+      metadata: { name: "Example", version: "1.0.0", description: "x" },
+      variableRegistry: {
+        tasks: { type: "array", description: "tasks" },
+        current_task: { type: "number", description: "cursor" },
+      },
+      progress: {
+        nodes: [
+          {
+            id: "work",
+            label: "Work",
+            list: { items: "tasks", title: "action", current: "current_task" },
+          },
+          { id: "report", label: "Report the checkpoint" },
+        ],
+      },
+      nodes: [
+        { id: "start", type: "start", progressNodeId: "work", connections: { default: "task" } },
+        {
+          id: "task",
+          type: "agent-directive",
+          progressNodeId: "work",
+          directive: "Do",
+          completionCondition: "Done",
+          connections: { success: "notify" },
+          connectionLabels: { success: "done" },
+        },
+        {
+          id: "notify",
+          type: "user-notification",
+          progressNodeId: "report",
+          message: "Checkpoint",
+          connections: { default: "end" },
+        },
+        { id: "end", type: "end", progressNodeId: "report" },
+      ],
+    };
+    const tasks = [{ action: "Write it" }, { action: "Ship it" }];
+    // A notification node never waits itself; the footer names the actor of the node the run
+    // pauses on right after it — here the directive `next`, so the agent — with that node's block.
+    const paused = {
+      ...graph,
+      nodes: graph.nodes.map((n: any) =>
+        n.id === "notify" ? { ...n, connections: { default: "next" } } : n,
+      ),
+    };
+    paused.nodes.push({
+      id: "next",
+      type: "agent-directive",
+      progressNodeId: "report",
+      directive: "Report",
+      completionCondition: "Reported",
+      connections: { success: "end" },
+    });
+    const repo = {
+      getWorkflowGraph: async () => paused,
+      getExecution: async () => ({
+        revision: 1,
+        status: "running",
+        currentNodeId: "notify",
+        waitingForInputNodeId: null,
+        globalContext: { variables: { tasks, current_task: 2 }, nodeStates: {} },
+        visits: [
+          { seq: 0, nodeId: "start", exitKey: "default", changes: { tasks, current_task: 1 } },
+          {
+            seq: 1,
+            nodeId: "task",
+            exitKey: "success",
+            changes: { current_task: 2 },
+            waited: true,
+          },
+        ],
+      }),
+      getWorkflow: async () => ({ metadata: graph.metadata }),
+    } as unknown as IDataRepository;
+    await handler.execute(
+      node,
+      {
+        variables: { tasks, current_task: 2 },
+        nodeStates: {},
+        executionId: "12345678-rest",
+        workflowId: "workflow-id",
+        userId: "user-1",
+      },
+      new AgentMessageQueue(),
+      repo,
+      {} as IGraphExecutionEngine,
+    );
+    const text = (deliver.mock.calls as unknown as Array<[{ text: string }]>)[0][0].text;
+    expect(text).toContain(
+      "🔄 Workflow: Example\n⏳ agent on the step: Report the checkpoint\n📝 1/2: Ship it\n🤖 via MCP Moira",
+    );
+    expect(text).not.toContain("waiting for you");
+    expect(text).not.toContain("ждёт вас");
+  });
+
+  test("a notification followed by a lock gate tells the reader the run waits for them", async () => {
+    const deliver = jest.fn(async () => ({
+      status: "delivered" as const,
+      deliveredChannels: 1,
+      channels: [{ channelId: "telegram", status: "delivered" as const }],
+    }));
+    const handler = new UserNotificationHandler({ deliver } as unknown as UserCommunicationService);
+    const node: UserNotificationNode = {
+      type: "user-notification",
+      id: "notify",
+      message: "Approve",
+      connections: { default: "pin-gate" },
+    };
+    const graph = {
+      metadata: { name: "Example", version: "1.0.0", description: "x" },
+      variableRegistry: {},
+      progress: {
+        nodes: [
+          { id: "work", label: "Work" },
+          { id: "approval", label: "Approval gate" },
+        ],
+      },
+      nodes: [
+        { id: "start", type: "start", progressNodeId: "work", connections: { default: "task" } },
+        {
+          id: "task",
+          type: "agent-directive",
+          progressNodeId: "work",
+          directive: "Do",
+          completionCondition: "Done",
+          connections: { success: "notify" },
+          connectionLabels: { success: "done" },
+        },
+        {
+          id: "notify",
+          type: "user-notification",
+          progressNodeId: "approval",
+          message: "Approve",
+          connections: { default: "pin-gate" },
+        },
+        {
+          id: "pin-gate",
+          type: "lock",
+          progressNodeId: "approval",
+          reason: "A person approves",
+          connections: { unlocked: "end" },
+        },
+        { id: "end", type: "end", progressNodeId: "approval" },
+      ],
+    };
+    const repo = {
+      getWorkflowGraph: async () => graph,
+      getExecution: async () => ({
+        revision: 1,
+        status: "running",
+        currentNodeId: "notify",
+        waitingForInputNodeId: null,
+        globalContext: { variables: {}, nodeStates: {} },
+        visits: [
+          { seq: 0, nodeId: "start", exitKey: "default", changes: {} },
+          { seq: 1, nodeId: "task", exitKey: "success", changes: {}, waited: true },
+        ],
+      }),
+      getWorkflow: async () => ({ metadata: graph.metadata }),
+    } as unknown as IDataRepository;
+    await handler.execute(
+      node,
+      {
+        variables: {},
+        nodeStates: {},
+        executionId: "12345678-rest",
+        workflowId: "workflow-id",
+        userId: "user-1",
+      },
+      new AgentMessageQueue(),
+      repo,
+      {} as IGraphExecutionEngine,
+    );
+    const text = (deliver.mock.calls as unknown as Array<[{ text: string }]>)[0][0].text;
+    expect(text).toContain(
+      "🔄 Workflow: Example\n🙋 waiting for you: Approval gate\n🤖 via MCP Moira",
+    );
+    expect(text).not.toContain("agent on the step");
+  });
+
+  test("a run whose blocks bind no list gets no count in the footer", async () => {
+    const deliver = jest.fn(async () => ({
+      status: "delivered" as const,
+      configuredChannels: 1,
+      deliveredChannels: 1,
+      channels: [{ channelId: "telegram", status: "delivered" as const }],
+    }));
+    const handler = new UserNotificationHandler({ deliver } as unknown as UserCommunicationService);
+    const graph = {
+      metadata: { name: "Example", version: "1.0.0", description: "x" },
+      progress: { nodes: [{ id: "work", label: "Work" }] },
+      nodes: [
+        { id: "start", type: "start", progressNodeId: "work", connections: { default: "notify" } },
+        {
+          id: "notify",
+          type: "user-notification",
+          progressNodeId: "work",
+          message: "Checkpoint",
+          connections: { default: "end" },
+        },
+        { id: "end", type: "end", progressNodeId: "work" },
+      ],
+    };
+    const repo = {
+      getWorkflowGraph: async () => graph,
+      getExecution: async () => ({
+        revision: 1,
+        status: "running",
+        currentNodeId: "start",
+        globalContext: { variables: {}, nodeStates: {} },
+        visits: [{ seq: 0, nodeId: "start", exitKey: "default", changes: {} }],
+      }),
+      getWorkflow: async () => ({ metadata: graph.metadata }),
+    } as unknown as IDataRepository;
+    await handler.execute(
+      {
+        type: "user-notification",
+        id: "notify",
+        message: "Checkpoint",
+        connections: { default: "end" },
+      },
+      {
+        variables: {},
+        nodeStates: {},
+        executionId: "12345678-rest",
+        workflowId: "workflow-id",
+        userId: "user-1",
+      },
+      new AgentMessageQueue(),
+      repo,
+      {} as IGraphExecutionEngine,
+    );
+    const text = (deliver.mock.calls as unknown as Array<[{ text: string }]>)[0][0].text;
+    expect(text).toContain("🔄 Workflow: Example\n🤖 via MCP Moira");
+    expect(text).not.toContain("📝");
   });
 
   test("never substitutes a system identity when the execution has no user", async () => {

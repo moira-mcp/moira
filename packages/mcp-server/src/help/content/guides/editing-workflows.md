@@ -58,6 +58,33 @@ moira-workflow ./workflow.json set-tags research,verification
 moira-workflow ./workflow.json set-variable-schema result --file ./result-schema.json
 ```
 
+Routing is edited through the same `update` command. `--cases` replaces the ordered cases of a
+`condition` or `agent-directive` node, `--expressions` replaces the expressions it evaluates before
+them, and connections are edited by key:
+
+```bash
+moira-workflow ./workflow.json update review \
+  --cases '[{"when":{"operator":"eq","left":{"contextPath":"verdict"},"right":"blocked"},"output":"blocked"}]'
+moira-workflow ./workflow.json update review --expressions '["attempts = attempts + 1"]'
+moira-workflow ./workflow.json update review --add-connection blocked fix-issues
+```
+
+All three target the directive node that produced the verdict: its cases, the counter it keeps, and
+the connection a case names.
+
+The read-only commands show the result: `schema` prints one `CASE <output> WHEN <condition>` line
+per case plus an `EDGE` line per connection, `structure --detailed` lists each case as
+`Case: <output> when …`, and `diff` names `cases` among a node's changed fields — so a routing
+change is reviewable without reading the raw JSON.
+
+To bring a file up to the current definition schema, run `migrate`. It rewrites the file in place,
+creating a backup first like every write, and reports «Already at schema version 1; nothing to
+migrate» when there is nothing to do:
+
+```bash
+moira-workflow ./workflow.json migrate
+```
+
 The process view uses the same file-backed authoring surface. Set the complete block list from
 JSON with `set-progress` (or grow it with `add-block` / `edit-block`), then give every node its
 block with `set-block` — routing nodes included, since the derivation refuses an unowned node. Progress attachment is available on
@@ -72,17 +99,23 @@ moira-workflow ./workflow.json update notify --progress-node-id review --attach-
 ```
 
 The block contract has its own commands: own a node by a block, add or edit a block with its
-description, label a connection that leaves a block, and explain a return with the cause of the
-loop and the condition that ends it. Each write reports how many block-contract diagnostics
+description, bind a block to the list its steps work through, label a connection that leaves a
+block, and explain a return with the cause of the loop and the condition that ends it. Each write
+reports how many block-contract diagnostics
 remain, so a flow is annotated iteratively until `derive` shows none; `--no-version-bump` keeps
-the version while iterating.
+the version while iterating. `--list`, accepted by `add-block` and `edit-block`, takes the binding
+as JSON (`items`, `title`, `current`, `done`, `total`, `indexBase`) and `--list none` removes it;
+an unknown field, an empty path, an `indexBase` other than `0` or `1` and a binding naming none of
+`items`, `current` or `total` are refused on write.
 
 ```bash
-moira-workflow ./workflow.json set-block route-plan-approval plan
+moira-workflow ./workflow.json set-block present-plan plan
 moira-workflow ./workflow.json add-block deliver "Deliver" "Hand the result over" --after execute
 moira-workflow ./workflow.json edit-block deliver --summary "Present the result"
-moira-workflow ./workflow.json set-label check-plan-approved true "plan approved"
-moira-workflow ./workflow.json set-label route-review false "review found defects" \
+moira-workflow ./workflow.json edit-block work \
+  --list '{"items":"tasks","title":"action","current":"current_task","total":"total_tasks"}'
+moira-workflow ./workflow.json set-label present-plan approved "plan approved"
+moira-workflow ./workflow.json set-label review success "review found defects" \
   --cause "The independent review reported blocking findings." --exit "The review passes."
 moira-workflow ./workflow.json derive
 ```
@@ -331,7 +364,11 @@ declared previous identity exists, rather than guessing or creating a duplicate.
 }
 ```
 
-### Condition Node Connections
+### Routing
+
+Both routing node types — `condition` and `agent-directive` — decide through ordered `cases`, and
+both accept `expressions` that run before them. A node's outcomes are its `cases` and the
+`connections` keys they name, so change the two together and every case still names an existing key:
 
 ```typescript
 {
@@ -339,15 +376,62 @@ declared previous identity exists, rather than guessing or creating a duplicate.
     {
       nodeId: "condition-node",
       changes: {
+        cases: [
+          {
+            when: { operator: "eq", left: { contextPath: "status" }, right: "success" },
+            output: "passed",
+          },
+        ],
         connections: {
-          true: "when-true-node",
-          false: "when-false-node",
+          passed: "success-node",
+          default: "retry-node",
         },
       },
     },
   ];
 }
 ```
+
+On an agent-directive node the same three fields are edited the same way. Its default output is
+`success` rather than `default`, its cases read the context after the node's own validated answer
+has been merged, and `error`/`timeout` stay reserved for control flow — no case may name them:
+
+```typescript
+{
+  updateNodes: [
+    {
+      nodeId: "review",
+      changes: {
+        expressions: ["review_round = review_round + 1"],
+        cases: [
+          {
+            when: { operator: "eq", left: { contextPath: "review_verdict" }, right: "blocked" },
+            output: "blocked",
+          },
+        ],
+        connections: {
+          success: "merge",
+          blocked: "fix-issues",
+        },
+      },
+    },
+  ];
+}
+```
+
+**Decide on the node that has the evidence.** When a step's own answer decides where the run goes,
+move the cases onto that step and let `success` carry the remaining outcome; a single-purpose
+counter or derived total becomes an `expressions` entry on the node that already runs there. Every
+extra node is a hop the reader must follow and another place the decision and the evidence can drift
+apart. Keep a separate `condition` or `expression` node when it reads better alone — several
+producers share the decision, it reads state no single node produced, a named decision point helps
+the reader of the process view, or the computation deserves its own place in the route. A node whose
+only job is to route or count what the preceding node already knows is avoidable routing
+scaffolding; folding it is an edit that removes the node and moves its `cases` and `connections`
+onto its predecessor.
+
+The same fields are edited file-side with `update --cases` and `update --expressions`, described
+under «Via the Workflow CLI» above.
 
 ## Version Control
 

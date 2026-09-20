@@ -29,6 +29,7 @@ moira-workflow flow.json structure [--graph] [--detailed]
 moira-workflow flow.json schema
 moira-workflow flow.json search <text>
 moira-workflow flow.json validate
+moira-workflow flow.json migrate            # upgrade the definition to the current schema version in place
 
 # Variables
 moira-workflow flow.json list-variables
@@ -84,7 +85,8 @@ byte-for-byte unchanged.
 --directive-file <path>         # Directive from file
 --completion-condition "text"   # Update completionCondition
 --input-schema '{"type":"..."}'  # Update inputSchema
---condition "expr"              # Update condition
+--cases '[{"when":{...},"output":"key"}]' # Replace routing cases (condition / agent-directive)
+--expressions '["a = a + 1"]'   # Replace node expressions
 --message "text"                # Update message
 --progress-node-id <id|none>    # Set or clear the node's progress block
 --progress-active-label <text|none> # Set or clear its active-only block label

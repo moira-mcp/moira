@@ -7,6 +7,7 @@ import React, { Suspense, lazy } from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider } from "./auth/AuthProvider";
 import { ThemeProvider } from "./hooks/useTheme";
+import { HintLayer } from "./components/diagram/Hint";
 import { FeaturesProvider } from "./hooks/useFeatures";
 import { ProtectedRoute } from "./components/ProtectedRoute";
 import { MainAppLayout } from "./components/layout/MainAppLayout";
@@ -96,6 +97,7 @@ const App: React.FC = () => {
     <Suspense fallback={<RouteSkeleton />}>
       <BrowserRouter>
         <ThemeProvider>
+          <HintLayer />
           <FeaturesProvider>
             <AuthProvider>
               <Routes>

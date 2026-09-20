@@ -1,21 +1,22 @@
 /**
- * The technical graph's edge routing: a link that runs forward inside a block is drawn straight;
- * a return inside a block runs through the block's bottom corridor (below every card of the
- * block) and enters its target from before it; a link into a later block runs in the gap after
- * its source's block; a return to an earlier block climbs the margin before the groups and comes
- * in through the target block's corridor; lanes sharing a corridor do not coincide; the routed
- * polyline starts at the source handle and ends at the target handle; a row of blocks transposes
- * the same geometry.
+ * The technical graph's edge routing: simple forward links stay direct; routed links use reserved
+ * inter-group corridors and shortest rectilinear paths around cards inside their source and target
+ * groups. The tests cover local loops, both legacy direction fallbacks and every selectable preset,
+ * and inspect the complete polyline from one card handle to the other.
  */
 
 import { describe, expect, test } from "@jest/globals";
 import {
-  APPROACH_COLUMNS,
+  GRAPH_FLOW_ENTRY_STRIP,
+  GRAPH_GROUP_HEADER,
   GRAPH_MARGIN,
+  GRAPH_PRESET_DIRECTIONS,
+  graphSpacing,
   layoutGraph,
   routeLinks,
   type LaidGroup,
 } from "../../../packages/web-frontend/src/components/workflow/graphLayout";
+import { LAYOUT_PRESETS } from "../../../packages/web-frontend/src/components/diagram/layoutPreset";
 import {
   definitionBlocks,
   graphModel,
@@ -27,9 +28,8 @@ import {
 import { catalogGraph } from "../../helpers/catalog-graphs.js";
 import type { WorkflowGraph as FrontendWorkflowGraph } from "../../../packages/web-frontend/src/types/workflow-types.js";
 
-// Two blocks stacked top to bottom, cards running left to right (100 wide, 60 high); block a's
-// box holds a three-lane corridor under its cards (two returns of its own and one into it) and,
-// like the layout, an entry side wide enough for the approach columns of the edges arriving.
+// Two blocks stacked top to bottom, cards running left to right (100 wide, 60 high), with enough
+// internal and inter-block room for the local obstacle router and the shared outer lanes.
 const ENTRY = 61;
 const groups: LaidGroup[] = [
   { id: "a", x: GRAPH_MARGIN, y: 24, width: 345, height: 164 },
@@ -72,42 +72,34 @@ describe("routeLinks", () => {
     expect(routes["a1.next"]).toBeUndefined();
   });
 
-  test("a return inside a block runs below the block's cards and enters before its target", () => {
+  test("a return inside a block gets an obstacle-aware side-port path", () => {
     const route = routes["a2.again"];
-    const cardsBottom = 76 + 60;
-    const [, laneY] = route.lane[0];
-    expect(laneY).toBeGreaterThan(cardsBottom);
-    expect(laneY).toBeLessThan(groups[0].y + groups[0].height);
-    expect(route.stub).toBeGreaterThan(GRAPH_MARGIN + ENTRY + 148 + 100);
-    expect(route.side).toBeLessThan(GRAPH_MARGIN + ENTRY);
-    expect(route.side).toBeGreaterThanOrEqual(groups[0].x);
+    expect(route.sidePorts).toBe(true);
+    expect(route.lane.length).toBeGreaterThan(1);
+    expect(route.stub).toBeGreaterThan(steps.get("a2")!.x + steps.get("a2")!.width);
+    expect(route.side).toBeLessThan(steps.get("a1")!.x);
   });
 
-  test("two returns sharing a corridor take different lanes", () => {
-    expect(routes["a2.again"].lane[0][1]).not.toBe(routes["a2.self"].lane[0][1]);
+  test("a self-loop stays local and does not consume a corridor lane", () => {
+    expect(routes["a2.self"]).toBeUndefined();
   });
 
   test("a link into a later block runs in the gap after its source's block", () => {
-    const [, laneY] = routes["a2.done"].lane[0];
-    expect(laneY).toBeGreaterThan(groups[0].y + groups[0].height);
-    expect(laneY).toBeLessThan(groups[1].y);
+    const route = routes["a2.done"];
+    expect(route.lane.some(([, y]) => y > groups[0].y + groups[0].height && y < groups[1].y)).toBe(
+      true,
+    );
+    expect(route.lane.some(([x]) => x < GRAPH_MARGIN)).toBe(true);
   });
 
-  test("a return to an earlier block climbs the margin and enters through the target's corridor", () => {
+  test("a return to an earlier block stays in the margin until the target's approach row", () => {
     const route = routes["b2.back"];
-    expect(route.lane).toHaveLength(4);
-    const [[, laneS], [outerX], , [, laneT]] = route.lane;
-    expect(laneS).toBeGreaterThan(groups[1].y + groups[1].height);
-    expect(outerX).toBeLessThan(GRAPH_MARGIN);
-    expect(outerX).toBeGreaterThanOrEqual(0);
-    expect(laneT).toBeGreaterThan(76 + 60);
-    expect(laneT).toBeLessThan(groups[0].y + groups[0].height);
-    // The corridor of block a now holds three lanes, none coinciding.
-    const lanesInA = [routes["a2.again"].lane[0][1], routes["a2.self"].lane[0][1], laneT];
-    expect(new Set(lanesInA).size).toBe(3);
+    expect(route.lane.some(([, y]) => y > groups[1].y + groups[1].height)).toBe(true);
+    expect(route.lane.some(([x]) => x >= 0 && x < GRAPH_MARGIN)).toBe(true);
+    expect(route.sidePorts).toBe(true);
   });
 
-  test("a row of blocks transposes the geometry", () => {
+  test("the transposed fallback also produces on-canvas routes", () => {
     const rowGroups = groups.map((g) => ({
       ...g,
       x: g.y,
@@ -119,8 +111,8 @@ describe("routeLinks", () => {
       [...steps].map(([id, s]) => [id, { x: s.y, y: s.x, width: s.height, height: s.width }]),
     );
     const row = routeLinks(links, rowSteps, rowGroups, groupOf, "DOWN");
-    expect(row["a2.again"].lane[0][0]).toBe(routes["a2.again"].lane[0][1]);
-    expect(row["a2.again"].lane[0][1]).toBe(routes["a2.again"].lane[0][0]);
+    expect(row["a2.again"].lane.length).toBeGreaterThan(0);
+    expect(row["a2.again"].lane.every(([x, y]) => x >= 0 && y >= 0)).toBe(true);
   });
 });
 
@@ -140,6 +132,35 @@ describe("routedPoints and roundedPath", () => {
     expect(path.startsWith("M 280 100")).toBe(true);
     expect(path.endsWith("L 64 100")).toBe(true);
     expect((path.match(/Q /g) ?? []).length).toBe(points.length - 2);
+  });
+
+  test("an obstacle route drops repeated source and target waypoints", () => {
+    const points = routedPoints(
+      {
+        stub: 120,
+        lane: [
+          [120, 50],
+          [120, 80],
+          [180, 80],
+          [180, 100],
+        ],
+        side: 180,
+        sidePorts: true,
+      },
+      true,
+      100,
+      50,
+      200,
+      100,
+    );
+    expect(points).toEqual([
+      [100, 50],
+      [120, 50],
+      [120, 80],
+      [180, 80],
+      [180, 100],
+      [200, 100],
+    ]);
   });
 });
 
@@ -169,6 +190,7 @@ describe("corridors of the bundled flows", () => {
       const cards = layout.steps.map((s) => {
         const g = s.parentId ? groupById.get(s.parentId) : undefined;
         return {
+          id: s.id,
           x0: s.x + (g?.x ?? 0),
           y0: s.y + (g?.y ?? 0),
           x1: s.x + (g?.x ?? 0) + s.width,
@@ -202,11 +224,8 @@ describe("corridors of the bundled flows", () => {
       }
       expect(crossings).toEqual([]);
       expect(offCanvas).toEqual([]);
-      // A lane keeps clear of the cards and of the blocks' borders: a line that runs flush
-      // against either reads as touching it instead of passing by.
-      const borders = layout.groups.flatMap((g) => [
-        { x0: g.x, y0: g.y, x1: g.x + g.width, y1: g.y + g.height },
-      ]);
+      // A lane keeps clear of every unrelated card. Crossing a group border is intentional: an
+      // inter-group path moves from the outer margin into the target group's local router.
       const clearance = (
         x: number,
         y: number,
@@ -215,8 +234,9 @@ describe("corridors of the bundled flows", () => {
       const tooClose: string[] = [];
       for (const [id, route] of Object.entries(layout.routes)) {
         for (const [x, y] of route.lane) {
-          for (const c of cards) if (Math.abs(clearance(x, y, c)) < 6) tooClose.push(id);
-          for (const b of borders) if (Math.abs(clearance(x, y, b)) < 4) tooClose.push(id);
+          for (const c of cards) {
+            if (Math.abs(clearance(x, y, c)) < 6) tooClose.push(id);
+          }
         }
       }
       expect(tooClose).toEqual([]);
@@ -224,22 +244,104 @@ describe("corridors of the bundled flows", () => {
     30000,
   );
 
-  test("edges arriving at one card take their own approach columns", async () => {
+  test("edges arriving at one card keep distinct complete routes", async () => {
     const graph = frontendGraph("software-development-flow");
     const model = graphModel(graph, definitionBlocks(graph));
     const layout = await layoutGraph(model, "DOWN");
-    const sides = new Map<string, number[]>();
+    const paths = new Map<string, string[]>();
     for (const link of model.links) {
       const route = layout.routes[link.id];
-      if (route) sides.set(link.target, [...(sides.get(link.target) ?? []), route.side]);
+      if (route)
+        paths.set(link.target, [...(paths.get(link.target) ?? []), JSON.stringify(route.lane)]);
     }
-    const busiest = [...sides.values()].sort((a, b) => b.length - a.length).slice(0, 4);
+    const busiest = [...paths.values()].sort((a, b) => b.length - a.length).slice(0, 4);
     expect(busiest[0].length).toBeGreaterThan(3);
-    for (const columns of busiest) {
-      const distinct = new Set(columns.map((s) => Math.round(s)));
-      // Every arrival has its own column, or they fill the columns the entry side holds.
-      expect(distinct.size).toBe(Math.min(columns.length, APPROACH_COLUMNS));
-      expect(Math.max(...columns) - Math.min(...columns)).toBeGreaterThan(0);
+    for (const routes of busiest) {
+      expect(new Set(routes).size).toBe(routes.length);
     }
   }, 30000);
+
+  test.each(flows.flatMap((slug) => LAYOUT_PRESETS.map((preset) => [slug, preset] as const)))(
+    "%s in the %s preset keeps every complete routed path off other cards",
+    async (slug, preset) => {
+      const graph = frontendGraph(slug);
+      const model = graphModel(graph, definitionBlocks(graph));
+      const directions = GRAPH_PRESET_DIRECTIONS[preset];
+      const layout = await layoutGraph(
+        model,
+        directions.outer,
+        undefined,
+        graphSpacing(preset),
+        directions.inner,
+      );
+      const groupById = new Map(layout.groups.map((group) => [group.id, group]));
+      const cards = new Map(
+        layout.steps.map((step) => {
+          const group = step.parentId ? groupById.get(step.parentId) : undefined;
+          const x = step.x + (group?.x ?? 0);
+          const y = step.y + (group?.y ?? 0);
+          return [step.id, { x0: x, y0: y, x1: x + step.width, y1: y + step.height }];
+        }),
+      );
+      const crossings: string[] = [];
+      const headerCrossings: string[] = [];
+      const offCanvas: string[] = [];
+      for (const link of model.links) {
+        const route = layout.routes[link.id];
+        const source = cards.get(link.source);
+        const target = cards.get(link.target);
+        if (!route || !source || !target) continue;
+        const points = routedPoints(
+          route,
+          directions.inner === "RIGHT",
+          source.x1,
+          (source.y0 + source.y1) / 2,
+          target.x0,
+          (target.y0 + target.y1) / 2,
+        );
+        for (const [x, y] of points) if (x < 0 || y < 0) offCanvas.push(link.id);
+        for (let index = 1; index < points.length; index += 1) {
+          const [x1, y1] = points[index - 1];
+          const [x2, y2] = points[index];
+          for (const [cardId, card] of cards) {
+            const horizontal =
+              y1 === y2 &&
+              y1 > card.y0 &&
+              y1 < card.y1 &&
+              Math.min(x1, x2) < card.x1 &&
+              Math.max(x1, x2) > card.x0;
+            const vertical =
+              x1 === x2 &&
+              x1 > card.x0 &&
+              x1 < card.x1 &&
+              Math.min(y1, y2) < card.y1 &&
+              Math.max(y1, y2) > card.y0;
+            if (horizontal || vertical) crossings.push(`${link.id}:${cardId}`);
+          }
+          if (preset === "flow") {
+            for (const group of layout.groups) {
+              const protectedRight = group.x + group.width - GRAPH_FLOW_ENTRY_STRIP;
+              const horizontal =
+                y1 === y2 &&
+                y1 > group.y &&
+                y1 < group.y + GRAPH_GROUP_HEADER &&
+                Math.min(x1, x2) < protectedRight &&
+                Math.max(x1, x2) > group.x;
+              const vertical =
+                x1 === x2 &&
+                x1 > group.x &&
+                x1 < protectedRight &&
+                Math.min(y1, y2) < group.y + GRAPH_GROUP_HEADER &&
+                Math.max(y1, y2) > group.y;
+              if (horizontal || vertical) headerCrossings.push(`${link.id}:${group.id}`);
+            }
+          }
+        }
+      }
+      expect(crossings).toEqual([]);
+      expect(headerCrossings).toEqual([]);
+      expect(offCanvas).toEqual([]);
+    },
+    30000,
+  );
 });

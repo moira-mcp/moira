@@ -158,6 +158,7 @@ export class UniversalGraphExecutor implements IGraphExecutor {
       note: note || null,
       parentExecutionId: parentExecutionId || null,
       revision: 0,
+      workflowVersion: graph.metadata.version,
       reminders: [],
       createdAt: now,
       updatedAt: now,

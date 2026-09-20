@@ -416,6 +416,38 @@ describe("execution run projection", () => {
     });
   });
 
+  test("names who the run waits for: the agent on a paused step, a person at a lock, nobody when done", () => {
+    // The fixture waits on an agent-directive: the agent is on the step.
+    expect(projectExecutionRun(graph(), atReviewTwo())!.waitingFor).toBe("agent");
+    // A run paused on a lock node waits for the person who holds the PIN.
+    const gated = graph();
+    gated.nodes.push({
+      id: "gate",
+      type: "lock",
+      progressNodeId: "review",
+      reason: "Approve",
+      connections: { unlocked: "end" },
+    } as unknown as WorkflowGraph["nodes"][number]);
+    const atGate = execution("gate", "running");
+    atGate.visits = [
+      visit(0, "start", "default", { unit: 2, total: 5 }),
+      visit(1, "implement", "success", {}, { waited: true }),
+      visit(2, "gate", null, {}, { waited: true }),
+    ];
+    expect(projectExecutionRun(gated, atGate)!.waitingFor).toBe("user");
+    // A finished run waits for nobody; neither does a run whose current node is not waiting.
+    const done = execution(null, "completed");
+    done.visits = [
+      visit(0, "start", "default", {}),
+      visit(1, "implement", "success", {}, { waited: true }),
+    ];
+    expect(projectExecutionRun(graph(), done)!.waitingFor).toBeNull();
+    const busy = execution("implement", "running");
+    busy.waitingForInputNodeId = null;
+    busy.visits = [visit(0, "start", "default", {})];
+    expect(projectExecutionRun(graph(), busy)!.waitingFor).toBeNull();
+  });
+
   test("a completed run reports every visited block done and nothing unvisited done", () => {
     const run = execution(null, "completed");
     run.waitingForInputNodeId = "review-two";
@@ -587,8 +619,10 @@ describe("execution run projection", () => {
           id: "gate",
           type: "condition",
           progressNodeId: "g",
-          condition: { operator: "eq", left: { contextPath: "go" }, right: true },
-          connections: { true: "do-b", false: "do-g" },
+          cases: [
+            { when: { operator: "eq", left: { contextPath: "go" }, right: true }, output: "true" },
+          ],
+          connections: { true: "do-b", default: "do-g" },
           connectionLabels: { true: "go" },
         },
         {

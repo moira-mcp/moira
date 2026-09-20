@@ -1,21 +1,28 @@
 /**
- * The technical graph as the detailed layer of the process view: on the flow page's graph mode
- * every workflow node is a step card inside a block group, the groups follow process order, a
- * derived cycle edge is not drawn at rest but named by a connection chip in its source card and
- * an arrival chip in its target, appears dashed with its label while either chip is hovered and
- * brings the far card into view when the arrival chip is clicked, the layout controls and the
- * sidebar keep working, and the run page's Graph tab groups by the run's blocks with the current
- * node marked.
+ * The technical graph as the detailed layer of the process view.
+ *
+ * On the flow page's graph mode every workflow node is a step card inside a block group, the
+ * groups follow process order, and every connection is drawn at rest as an edge of a named kind —
+ * forward inside a block, external across blocks, a dashed return where the process loops back.
+ * Nothing is labelled on the line any more: the transition is named by the ports on the two cards
+ * it joins, one port per connection, so a dense corridor stays readable. Hovering a port lights
+ * that one connection and dims the rest, which is how a reader follows a line through a crossing.
+ *
+ * The graph lays its cards out from the heights the browser measures, so a summary that wraps
+ * further than estimated does not put a card on its neighbour — asserted on the Software
+ * Development Flow, the densest bundled flow. On a run the same graph groups by the run's blocks
+ * and marks the step the run is on.
  */
 
 import { test, expect } from "./fixtures.js";
 import { getTestBaseUrl } from "../utils/test-config.js";
 import { createAuthenticatedMCPClient, startWorkflowExecutionState } from "../utils/mcp-auth.js";
 import { loginAsAdmin } from "./helpers/auth-helper.js";
+import { GRAPH, settledCamera } from "./helpers/diagram.js";
 
 const BASE_URL = getTestBaseUrl();
 
-test("the flow page's graph mode draws step cards in block groups with on-demand return labels", async ({
+test("the flow page's graph draws every node as a card in its block's group, with ported edges", async ({
   page,
 }) => {
   await loginAsAdmin(page);
@@ -44,19 +51,17 @@ test("the flow page's graph mode draws step cards in block groups with on-demand
   expect(cycleEdges.size).toBeGreaterThan(0);
 
   await page.goto(`${BASE_URL}/workflows/moira/quick-task?view=graph`);
-  await expect(page.locator(".react-flow")).toBeVisible({ timeout: 15000 });
-  // Every node is a step card; every block is a group in process order.
-  await expect(page.locator(".react-flow__node [data-step-card]")).toHaveCount(
-    workflow.nodes.length,
-  );
+  await expect(page.locator("[data-graph-node]").first()).toBeVisible({ timeout: 20000 });
+  // Every node is a step card; every block is a group in process order, stacked top to bottom.
+  await expect(page.locator("[data-graph-node]")).toHaveCount(workflow.nodes.length);
   const groups = page.locator("[data-graph-group]");
   await expect(groups).toHaveCount(process.blocks.length);
-  const groupIds = await groups.evaluateAll((els) =>
-    els.map((el) => el.getAttribute("data-block-id")),
-  );
-  expect(groupIds).toEqual(process.blocks.map((b) => b.id));
+  expect(
+    await groups.evaluateAll((els) => els.map((el) => el.getAttribute("data-block-id"))),
+  ).toEqual(process.blocks.map((b) => b.id));
   const tops = await groups.evaluateAll((els) => els.map((el) => el.getBoundingClientRect().top));
   for (let i = 1; i < tops.length; i += 1) expect(tops[i]).toBeGreaterThan(tops[i - 1]);
+
   // The definition opens readable on its first block, not on the whole-graph overview: the zoom
   // is at least the opening zoom and the first group's header is inside the graph's box.
   const zoomOf = () =>
@@ -66,12 +71,15 @@ test("the flow page's graph mode draws step cards in block groups with on-demand
   await expect.poll(zoomOf, { timeout: 5000 }).toBeGreaterThanOrEqual(0.7);
   const graphBox = (await page.locator(".react-flow").boundingBox())!;
   const firstHeader = (await groups.first().locator("p").boundingBox())!;
+  // The header starts inside the box; a group wider than the viewport runs off to the right,
+  // which is what panning is for.
   expect(firstHeader.x).toBeGreaterThanOrEqual(graphBox.x);
   expect(firstHeader.y).toBeGreaterThanOrEqual(graphBox.y);
-  expect(firstHeader.x + firstHeader.width).toBeLessThanOrEqual(graphBox.x + graphBox.width);
-  // Edges paint above the group surfaces and below the cards.
-  // The stacking level of an element is that of its nearest ancestor with a z-index inside the
-  // viewport (edges are grouped in an svg per level).
+  expect(firstHeader.x).toBeLessThanOrEqual(graphBox.x + graphBox.width);
+  expect(firstHeader.y).toBeLessThanOrEqual(graphBox.y + graphBox.height);
+
+  // Edges paint above the group surfaces and below the cards. The stacking level of an element is
+  // that of its nearest ancestor with a z-index inside the viewport (edges are grouped per level).
   const zIndexOf = (selector: string) =>
     page
       .locator(selector)
@@ -90,67 +98,40 @@ test("the flow page's graph mode draws step cards in block groups with on-demand
   expect(groupZ).toBeLessThan(edgeZ);
   // At the cards' level the edge layer paints first, so equal is below.
   expect(edgeZ).toBeLessThanOrEqual(cardZ);
-  // A return is not drawn at rest: a long line through a corridor cannot be told from its
-  // neighbours, so it is named in both cards instead — a connection chip in its source and an
-  // arrival chip in its target — and drawn only while one of them is hovered.
-  await expect(page.locator('.react-flow__edge [data-edge-kind="return"]')).toHaveCount(0);
-  await expect(page.locator('[data-edge-label="return"]')).toHaveCount(0);
-  const [first] = [...cycleEdges];
-  const [sourceId, ...labelParts] = first.split(".");
+
+  // Every connection is drawn at rest and named by the ports of the two cards it joins — no
+  // label floats on the line, and a return is a dashed edge rather than a pair of chips.
+  await expect(page.locator("[data-edge-label]")).toHaveCount(0);
+  const [returnLink] = [...cycleEdges];
+  const [sourceId, ...labelParts] = returnLink.split(".");
   const label = labelParts.join(".");
   const targetId = (
     workflow.nodes.find((n) => n.id === sourceId)!.connections as Record<string, string>
   )[label];
   await expect(
-    page.locator(`[data-graph-node="${sourceId}"] [data-connection="${label}"]`),
+    page.locator(`[data-edge-kind="return"][data-transition="${returnLink}"]`),
   ).toHaveCount(1);
+  const sourcePort = page.locator(
+    `[data-graph-node="${sourceId}"] [data-port="out"][data-transition="${returnLink}"]`,
+  );
+  await expect(sourcePort).toHaveCount(1);
+  await expect(sourcePort).toHaveAttribute("data-peer", targetId);
   await expect(
-    page.locator(`[data-graph-node="${targetId}"] [data-arrival="${first}"]`),
+    page.locator(
+      `[data-graph-node="${targetId}"] [data-port="in"][data-transition="${returnLink}"]`,
+    ),
   ).toHaveCount(1);
-  // The definition opens on its first block; the fit-view control gives the overview back, and
-  // hovering either chip draws the return with its label and lights it.
-  await page.getByTestId("graph-fit-view").click();
-  const chip = page.locator(`[data-graph-node="${sourceId}"] [data-connection="${label}"]`);
-  await chip.hover();
-  await expect(page.locator(`[data-edge-label="return"][data-transition="${first}"]`)).toHaveCount(
+
+  // Hovering a port lights that connection and dims the others, so one line can be followed
+  // through the corridor it shares with its neighbours.
+  await sourcePort.hover();
+  await expect(page.locator(`[data-transition="${returnLink}"][data-focused="true"]`)).toHaveCount(
     1,
   );
-  await expect(page.locator(`[data-transition="${first}"][data-focused="true"]`)).toHaveCount(1);
+  await expect(page.locator('[data-edge-kind][data-dimmed="true"]').first()).toBeVisible();
   await page.mouse.move(0, 0);
-  await expect(page.locator('[data-edge-label="return"]')).toHaveCount(0);
-  await expect(page.locator('.react-flow__edge [data-edge-kind="return"]')).toHaveCount(0);
-  // The arrival chip in the target card draws the same return.
-  await page.locator(`[data-graph-node="${targetId}"] [data-arrival="${first}"]`).hover();
-  await expect(page.locator(`[data-transition="${first}"][data-focused="true"]`)).toHaveCount(1);
-  await page.mouse.move(0, 0);
-  // Clicking that chip takes the view to the card at the other end: the reader follows the
-  // connection without a line to trace. The overview is the starting point, where every card is
-  // already inside the box, so what the click must change is the view itself — it closes on that
-  // one card, which shows as a zoom no overview has and as that card at the centre.
-  const offCentre = async (id: string) => {
-    const box = (await page.locator(".react-flow").boundingBox())!;
-    const card = await page.locator(`[data-graph-node="${id}"]`).boundingBox();
-    if (!card) return Number.POSITIVE_INFINITY;
-    return Math.hypot(
-      card.x + card.width / 2 - (box.x + box.width / 2),
-      card.y + card.height / 2 - (box.y + box.height / 2),
-    );
-  };
-  await page.getByTestId("graph-fit-view").click();
-  await expect.poll(zoomOf, { timeout: 5000 }).toBeLessThan(0.9);
-  const centredBefore = await offCentre(sourceId);
-  await page.locator(`[data-graph-node="${targetId}"] [data-arrival="${first}"]`).click();
-  await expect.poll(zoomOf, { timeout: 5000 }).toBeGreaterThan(0.9);
-  expect(await offCentre(sourceId)).toBeLessThan(Math.min(centredBefore / 2, 80));
-  // Forward edges inside a block keep their label.
-  await expect(page.locator('[data-edge-label="forward"]').first()).toBeVisible();
-  // Controls and the sidebar keep working.
-  await page.getByTestId("graph-layout-horizontal").click();
-  await expect(page.locator(".react-flow__node [data-step-card]").first()).toBeVisible();
-  await page.getByTestId("graph-layout-vertical").click();
-  await page.getByTestId("graph-fit-view").click();
-  await page.locator(`[data-graph-node="${sourceId}"]`).click();
-  await expect(page.getByTestId("workflow-sidebar")).toContainText(sourceId);
+  await expect(page.locator('[data-edge-kind][data-dimmed="true"]')).toHaveCount(0);
+  await expect(page.locator('[data-edge-kind][data-focused="true"]')).toHaveCount(0);
 });
 
 test("the graph lays cards out from their measured heights: no two cards overlap on the SDF", async ({
@@ -164,8 +145,8 @@ test("the graph lays cards out from their measured heights: no two cards overlap
     ).json()) as { data: { workflow: { nodes: unknown[] } } }
   ).data.workflow.nodes.length;
   await page.goto(`${BASE_URL}/workflows/moira/software-development-flow?view=graph`);
-  await expect(page.locator(".react-flow")).toBeVisible({ timeout: 15000 });
-  const cards = page.locator(".react-flow__node [data-step-card]");
+  await expect(page.locator("[data-graph-node]").first()).toBeVisible({ timeout: 20000 });
+  const cards = page.locator("[data-graph-node]");
   await expect(cards).toHaveCount(nodeCount);
   // The layout estimates card heights, then runs again with the measured ones; a card whose
   // summary or chips wrap more than estimated would otherwise sit on its lower neighbour.
@@ -184,17 +165,17 @@ test("the graph lays cards out from their measured heights: no two cards overlap
             b.top < a.bottom - 1
           ) {
             pairs.push(
-              `${els[i].closest("[data-graph-node]")?.getAttribute("data-graph-node")}/${els[j].closest("[data-graph-node]")?.getAttribute("data-graph-node")}`,
+              `${els[i].getAttribute("data-graph-node")}/${els[j].getAttribute("data-graph-node")}`,
             );
           }
         }
       }
       return pairs;
     });
-  await expect.poll(overlaps, { timeout: 10000 }).toEqual([]);
+  await expect.poll(overlaps, { timeout: 15000 }).toEqual([]);
 });
 
-test("the run page's Graph tab groups by the run's blocks and marks the current node", async ({
+test("the run page's graph view groups by the run's blocks and marks the current node", async ({
   page,
 }) => {
   const authenticated = await createAuthenticatedMCPClient();
@@ -204,19 +185,26 @@ test("the run page's Graph tab groups by the run's blocks and marks the current 
   try {
     await loginAsAdmin(page);
     await page.setViewportSize({ width: 1440, height: 900 });
-    await page.goto(`${BASE_URL}/executions/${run.processId}`);
-    await expect(page.getByTestId("execution-progress")).toBeVisible();
-    await page.getByRole("tab", { name: /Graph|Граф/ }).click();
-    const panel = page.getByTestId("run-panel");
-    await expect(panel.locator(".react-flow")).toBeVisible({ timeout: 15000 });
-    await expect(panel.locator("[data-graph-group]").first()).toBeVisible();
-    // The block the run is at carries the active status surface; the current step is marked.
-    await expect(panel.locator('[data-graph-group][data-block-id="scope"]')).toHaveClass(
+    // The graph is a view of the run page, deep-linkable like the map.
+    await page.goto(`${BASE_URL}/executions/${run.processId}?view=graph`);
+    const section = page.getByTestId("execution-progress");
+    await expect(section).toHaveAttribute("data-view", "graph");
+    // Opened on the graph, the graph is the only diagram on the page: the map is not mounted
+    // behind it, so the document holds one React Flow instance.
+    await expect(page.locator(".react-flow")).toHaveCount(1);
+    await expect(page.locator("[data-graph-node]").first()).toBeVisible({ timeout: 20000 });
+    await settledCamera(page, GRAPH);
+    await expect(page.locator("[data-graph-group]").first()).toBeVisible();
+    // The block the run is at carries the active status surface; the current step is marked, and
+    // it is the only one.
+    await expect(page.locator('[data-graph-group][data-block-id="scope"]')).toHaveClass(
       /ring-primary|border-primary|border-warning/,
     );
-    await expect(
-      panel.locator('.react-flow__node [data-step-card][aria-current="step"]'),
-    ).toHaveCount(1);
+    await expect(page.locator('[data-graph-node][data-current="true"]')).toHaveCount(1);
+    await expect(page.locator('[data-graph-node="get-task"]')).toHaveAttribute(
+      "data-current",
+      "true",
+    );
   } finally {
     await authenticated.cleanup();
   }

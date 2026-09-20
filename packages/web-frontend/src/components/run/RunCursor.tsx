@@ -7,7 +7,6 @@
 import React from "react";
 import { useTranslation } from "react-i18next";
 import type { ExecutionRouteEntry } from "@mcp-moira/workflow-engine/progress-visual";
-import { GuidanceHint } from "./Guidance";
 
 export function RunCursor({
   route,
@@ -26,7 +25,7 @@ export function RunCursor({
   const node = route.find((v) => v.seq === position)?.nodeId ?? "";
   return (
     <div
-      className="flex min-w-0 flex-wrap items-center gap-2 rounded-lg border bg-card px-2 py-1"
+      className="flex min-w-0 flex-nowrap items-center gap-1.5 px-1 py-0.5"
       data-testid="run-cursor"
     >
       <button
@@ -45,7 +44,7 @@ export function RunCursor({
         max={last}
         value={position}
         onChange={(event) => onSetCursor(Number(event.target.value))}
-        className="h-1.5 w-32 cursor-pointer accent-primary sm:w-48"
+        className="h-1.5 w-20 cursor-pointer accent-primary xl:w-32"
         aria-label={t("pages.runPage.cursor.scrub")}
         data-testid="cursor-range"
       />
@@ -59,7 +58,10 @@ export function RunCursor({
       >
         ›
       </button>
-      <span className="text-xs tabular-nums text-muted-foreground" data-testid="cursor-position">
+      <span
+        className="hidden whitespace-nowrap text-xs tabular-nums text-muted-foreground 2xl:inline"
+        data-testid="cursor-position"
+      >
         {cursor === null
           ? t("pages.runPage.cursor.wholeRun", { count: route.length })
           : t("pages.runPage.cursor.position", { at: cursor, total: last, node })}
@@ -74,9 +76,6 @@ export function RunCursor({
           {t("pages.runPage.cursor.clear")}
         </button>
       )}
-      <GuidanceHint label={t("pages.runPage.cursor.hintLabel")}>
-        {t("pages.runPage.cursor.hint")}
-      </GuidanceHint>
     </div>
   );
 }

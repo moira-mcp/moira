@@ -46,8 +46,10 @@ import {
   publishWorkflowReconciliationBundle,
   workflowReconciliationAgentInstructions,
   applyWorkflowReconciliationBundle,
+  upgradeStoredWorkflowDefinitions,
   type CatalogEntry,
 } from "@mcp-moira/shared";
+import { migrateWorkflowGraph } from "@mcp-moira/workflow-engine/migration";
 
 const OWNER_A = "catalog-loader-owner-a";
 const OWNER_B = "catalog-loader-owner-b";
@@ -215,6 +217,75 @@ describe("Workflow Catalog Loader Integration", () => {
     expect(result.updated).toBe(0);
     expect(result.adopted).toBe(1);
     expect(result.outcomes[0].outcome).toBe("adopted");
+  });
+
+  test("a database seeded with pre-migration definitions and baselines reconciles without conflicts or rewrites", async () => {
+    const slug = `loader-schema-upgrade-${Date.now()}`;
+    const catalogEntry = entry(OWNER_A, slug, "1.0.0");
+    // Bundled entries arrive migrated (the catalog reader upgrades them); build the exact stored
+    // pre-migration shape by hand: a version-0 condition node, no schemaVersion stamp.
+    const legacyGraph = {
+      ...catalogEntry.graph,
+      metadata: { ...catalogEntry.graph.metadata, schemaVersion: undefined },
+      nodes: [
+        { id: "start", type: "start", connections: { default: "gate" } },
+        {
+          id: "gate",
+          type: "condition",
+          condition: { operator: "exists", value: { contextPath: "gate.flag" } },
+          connections: { true: "step", false: "end" },
+        },
+        ...catalogEntry.graph.nodes.filter((node) => node.id !== "start"),
+      ],
+    } as unknown as WorkflowGraph;
+    delete (legacyGraph.metadata as { schemaVersion?: number }).schemaVersion;
+    const migratedGraph = migrateWorkflowGraph(
+      legacyGraph as unknown as Record<string, unknown>,
+    ).graph;
+    const migratedEntry: CatalogEntry = { ...catalogEntry, graph: migratedGraph };
+
+    // Install the migrated content once, then rewrite the stored row and its baseline back to the
+    // pre-migration bytes — the state a database has after an upgrade of the server code.
+    const first = await installCatalogEntries([migratedEntry], deps);
+    expect(first.installed).toBe(1);
+    const id = (await deps.workflowRepo.resolveSlug(slug, OWNER_A))!;
+    const sqlite = getSqliteInstance();
+    sqlite
+      .prepare("UPDATE workflow SET graph = ? WHERE id = ?")
+      .run(JSON.stringify(legacyGraph), id);
+    sqlite
+      .prepare("UPDATE managedWorkflowBaseline SET state = ? WHERE ownerId = ? AND slug = ?")
+      .run(
+        JSON.stringify({
+          lifecycle: "present",
+          content: { graph: legacyGraph, visibility: "public" },
+        }),
+        OWNER_A,
+        slug,
+      );
+    const revisionBefore = (await deps.workflowRepo.getFullInfo(id, OWNER_A))!.revision;
+
+    // The startup upgrade rewrites both sides once; the loader then sees migrated vs migrated.
+    const upgraded = upgradeStoredWorkflowDefinitions(sqlite);
+    expect(upgraded.workflows).toBeGreaterThanOrEqual(1);
+    expect(upgraded.baselines).toBeGreaterThanOrEqual(1);
+    expect(upgradeStoredWorkflowDefinitions(sqlite)).toEqual({
+      workflows: 0,
+      baselines: 0,
+      conflicts: 0,
+    });
+    const revisionAfterUpgrade = (await deps.workflowRepo.getFullInfo(id, OWNER_A))!.revision;
+    expect(revisionAfterUpgrade).toBe(revisionBefore + 1);
+
+    const second = await installCatalogEntries([migratedEntry], deps);
+    expect(second.outcomes[0].outcome).toBe("skipped-unchanged");
+    expect(second.updated).toBe(0);
+    expect(new WorkflowReconciliationRepository(sqlite).findConflict(OWNER_A, slug)).toBeNull();
+    // Nothing was rewritten by the reconciliation itself.
+    expect((await deps.workflowRepo.getFullInfo(id, OWNER_A))!.revision).toBe(revisionAfterUpgrade);
+    const stored = (await deps.workflowRepo.get(id, OWNER_A))!;
+    const gate = stored.nodes.find((node) => node.id === "gate");
+    expect(gate?.type === "condition" ? gate.cases.length : 0).toBe(1);
   });
 
   test("skips and reports a flow whose owner does not exist, never reassigning to a system owner", async () => {

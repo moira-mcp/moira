@@ -101,7 +101,7 @@ export const WorkflowCard: React.FC<WorkflowCardProps> = ({
               }}
               className="opacity-0 group-hover:opacity-100 transition-opacity h-6 w-6 text-destructive hover:text-destructive hover:bg-destructive/10 flex-shrink-0"
               aria-label={t("components.workflowCard.deleteWorkflow")}
-              title={t("components.workflowCard.deleteWorkflow")}
+              data-hint={t("components.workflowCard.deleteWorkflow")}
             >
               <Trash2 className="w-3.5 h-3.5" />
             </Button>
@@ -243,7 +243,7 @@ export const WorkflowCard: React.FC<WorkflowCardProps> = ({
               }}
               className="opacity-0 group-hover:opacity-100 transition-opacity ml-1 h-6 w-6 text-destructive hover:text-destructive hover:bg-destructive/10"
               aria-label={t("components.workflowCard.deleteWorkflow")}
-              title={t("components.workflowCard.deleteWorkflow")}
+              data-hint={t("components.workflowCard.deleteWorkflow")}
             >
               <Trash2 className="w-3.5 h-3.5" />
             </Button>

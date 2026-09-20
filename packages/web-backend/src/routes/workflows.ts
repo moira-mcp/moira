@@ -27,7 +27,12 @@ import {
 } from "../middleware/error-middleware.js";
 import { WorkflowValidationService } from "../services/validation-service.js";
 import { buildWorkflowProcessResponse } from "../services/workflow-process.js";
-import { DatabaseRepository, WorkflowGraph, GraphNode } from "@mcp-moira/workflow-engine";
+import {
+  DatabaseRepository,
+  WorkflowGraph,
+  GraphNode,
+  ProgressStatisticsService,
+} from "@mcp-moira/workflow-engine";
 import {
   ConflictError,
   getWorkflowService,
@@ -36,6 +41,32 @@ import {
 } from "@mcp-moira/shared";
 
 const router = Router();
+
+/**
+ * GET /api/workflows/:id/statistics?version=<semver> — typical block durations over the caller's
+ * completed runs that started on that definition version (the current version when none is given).
+ */
+router.get(
+  "/:id/statistics",
+  asyncHandler(async (req: Request, res: Response) => {
+    const userId = (req as AuthenticatedRequest).userId;
+    const repository = new DatabaseRepository();
+    const resolved = await repository.resolveWorkflow(req.params.id, userId);
+    const info = resolved ? await repository.getWorkflow(resolved.workflowId, userId) : null;
+    if (!info) throw createApiError.notFound("Workflow not found");
+    const version =
+      typeof req.query.version === "string" && req.query.version.trim()
+        ? req.query.version.trim()
+        : info.workflow.metadata.version;
+    const statistics = await new ProgressStatisticsService(repository).forVersion(
+      resolved!.workflowId,
+      info.workflow,
+      version,
+      { userId },
+    );
+    res.json({ success: true, data: statistics, timestamp: new Date().toISOString() });
+  }),
+);
 
 /**
  * GET /api/workflows/:id/process — the derived block view of the saved workflow (blocks,

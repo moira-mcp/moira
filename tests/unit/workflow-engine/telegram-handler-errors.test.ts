@@ -12,6 +12,9 @@ import { describe, test, expect, beforeEach, afterEach, jest } from "@jest/globa
 import {
   TelegramNotificationHandler,
   AgentMessageQueue,
+  buildExecutionProgressVisualModel,
+  projectExecutionRun,
+  renderProgressVisualSvg,
   TelegramErrorType,
   setTestClientFactory,
   resetClientFactory,
@@ -126,10 +129,23 @@ describe("TelegramNotificationHandler Error Handling", () => {
   test("renders and sends attached workflow progress through photo transport", async () => {
     const sent: Array<{ photo: Uint8Array; caption?: string }> = [];
     const distinctive = Buffer.from("wrapper-image");
-    const renderedFor: Array<{ currentNodeId: string | null; lastVisitNode?: string }> = [];
-    handler = new TelegramNotificationHandler(async (_workflow, execution) => {
+    const renderedFor: Array<{
+      currentNodeId: string | null;
+      waitingOn: string | null;
+      lastVisitNode?: string;
+    }> = [];
+    const pictures: string[] = [];
+    const statisticsReceived: unknown[] = [];
+    handler = new TelegramNotificationHandler(async (workflow, execution, _options, statistics) => {
+      statisticsReceived.push(statistics ?? null);
+      pictures.push(
+        renderProgressVisualSvg(
+          await buildExecutionProgressVisualModel(projectExecutionRun(workflow, execution)!),
+        ),
+      );
       renderedFor.push({
         currentNodeId: execution.currentNodeId,
+        waitingOn: execution.waitingForInputNodeId ?? null,
         lastVisitNode: execution.visits?.at(-1)?.nodeId,
       });
       return {
@@ -186,10 +202,90 @@ describe("TelegramNotificationHandler Error Handling", () => {
     expect(sent).toHaveLength(1);
     expect(Buffer.from(sent[0].photo).equals(distinctive)).toBe(true);
     expect(sent[0].caption).toContain("Test notification: completed");
-    // Rendered as of the notification node inside the current cycle, not of the persisted wait.
+    // Rendered as of the notification node inside the current cycle, not of the persisted wait;
+    // the successor is an end, so nothing is waited on.
     expect(renderedFor).toEqual([
-      { currentNodeId: "test-telegram-node", lastVisitNode: "test-telegram-node" },
+      { currentNodeId: "test-telegram-node", waitingOn: null, lastVisitNode: "test-telegram-node" },
     ]);
+    // An unstamped run's picture is drawn without statistics; a version-stamped run's carries the
+    // statistics of that version over the owner's completed runs.
+    expect(statisticsReceived).toEqual([null]);
+    statisticsReceived.length = 0;
+    mockRepository.getExecution = jest.fn(async () => ({ ...execution, workflowVersion: "1.0.0" }));
+    (mockRepository as any).summarizeExecutionsByWorkflowVersion = jest.fn(async () => ({
+      count: 0,
+      lastCompletedAt: null,
+      unstamped: 0,
+    }));
+    (mockRepository as any).listExecutionsByWorkflowVersion = jest.fn(async () => []);
+    await handler.execute(
+      createTelegramNode({ progressNodeId: "notify", attachProgressImage: true }),
+      createContext(),
+      messageQueue,
+      mockRepository,
+      mockEngine,
+    );
+    expect(statisticsReceived).toEqual([
+      expect.objectContaining({
+        workflowId: "test-workflow",
+        workflowVersion: "1.0.0",
+        sampledRuns: 0,
+      }),
+    ]);
+    mockRepository.getExecution = jest.fn(async () => execution);
+
+    // A notification that leads to a lock gate renders the image from the same copy the footer
+    // describes: the run waiting on the gate, so the picture says «waiting for you» too.
+    renderedFor.length = 0;
+    sent.length = 0;
+    const gated = {
+      ...graph,
+      nodes: [
+        { id: "start", type: "start", connections: { default: "test-telegram-node" } },
+        createTelegramNode({
+          progressNodeId: "notify",
+          attachProgressImage: true,
+          connections: { default: "pin-gate" },
+        }),
+        {
+          id: "pin-gate",
+          type: "lock",
+          progressNodeId: "notify",
+          reason: "Approve",
+          connections: { unlocked: "end" },
+        },
+        { id: "end", type: "end", progressNodeId: "notify" },
+      ],
+    };
+    mockRepository.getWorkflowGraph = jest.fn(async () => gated);
+    setTestClientFactory(
+      () =>
+        ({
+          getDefaultChatId: () => "12345",
+          sendPhoto: async (params: { photo: Uint8Array; caption?: string }) => {
+            sent.push(params);
+            return { ok: true };
+          },
+        }) as any,
+    );
+    await handler.execute(
+      createTelegramNode({
+        progressNodeId: "notify",
+        attachProgressImage: true,
+        connections: { default: "pin-gate" },
+      }),
+      createContext(),
+      messageQueue,
+      mockRepository,
+      mockEngine,
+    );
+    expect(renderedFor).toEqual([
+      { currentNodeId: "pin-gate", waitingOn: "pin-gate", lastVisitNode: "pin-gate" },
+    ]);
+    expect(sent[0].caption).toContain("🙋 waiting for you: Notify");
+    // The photo says the same as its caption: the gate's block waits for the reader.
+    expect(pictures.at(-1)).toContain("waiting for you");
+    expect(pictures.at(-1)).not.toContain("agent on the step");
 
     setTestClientFactory(
       () =>
@@ -215,6 +311,187 @@ describe("TelegramNotificationHandler Error Handling", () => {
       errorType: TelegramErrorType.INVALID_CHAT_ID,
     });
     expect(failureQueue.flush("test-process").messages).toHaveLength(1);
+  });
+
+  /** A checklist block followed by the notification's own block, as the footer tests share it. */
+  function checklistGraph() {
+    return {
+      metadata: { name: "Example", version: "1.0.0", description: "x" },
+      variableRegistry: {
+        tasks: { type: "array", description: "tasks" },
+        current_task: { type: "number", description: "cursor" },
+      },
+      progress: {
+        nodes: [
+          {
+            id: "work",
+            label: "Work",
+            list: { items: "tasks", title: "action", current: "current_task" },
+          },
+          { id: "report", label: "Report the checkpoint" },
+        ],
+      },
+      nodes: [
+        { id: "start", type: "start", progressNodeId: "work", connections: { default: "task" } },
+        {
+          id: "task",
+          type: "agent-directive",
+          progressNodeId: "work",
+          directive: "Do",
+          completionCondition: "Done",
+          connections: { success: "test-telegram-node" },
+          connectionLabels: { success: "done" },
+        },
+        createTelegramNode({ progressNodeId: "report", connections: { default: "end" } }),
+        { id: "end", type: "end", progressNodeId: "report" },
+      ],
+    } as any;
+  }
+  const checklist = [{ action: "Write it" }, { action: "Ship it" }];
+
+  async function footerOf(graph: any, execution: any): Promise<string> {
+    const sent: string[] = [];
+    setTestClientFactory(
+      () =>
+        ({
+          getDefaultChatId: () => "12345",
+          sendMessage: async ({ text }: { text: string }) => {
+            sent.push(text);
+            return { ok: true };
+          },
+        }) as any,
+    );
+    mockRepository.getWorkflowGraph = jest.fn(async () => graph);
+    mockRepository.getExecution = jest.fn(async () => execution);
+    mockRepository.getWorkflow = jest.fn(async () => ({ metadata: graph.metadata }) as any);
+    const result = await handler.execute(
+      createTelegramNode(),
+      createContext({ variables: execution.globalContext.variables }),
+      messageQueue,
+      mockRepository,
+      mockEngine,
+    );
+    expect(result.data?.telegramNotificationSent).toBe(true);
+    expect(sent).toHaveLength(1);
+    return sent[0];
+  }
+
+  test("the footer names done/total and the current item of the bound list the route just left, with no actor line while the run moves", async () => {
+    const text = await footerOf(checklistGraph(), {
+      revision: 1,
+      status: "running",
+      currentNodeId: "task",
+      globalContext: { variables: { tasks: checklist, current_task: 2 }, nodeStates: {} },
+      visits: [
+        {
+          seq: 0,
+          nodeId: "start",
+          exitKey: "default",
+          changes: { tasks: checklist, current_task: 1 },
+        },
+        { seq: 1, nodeId: "task", exitKey: "success", changes: { current_task: 2 }, waited: true },
+      ],
+    });
+    expect(text).toContain("🔄 Workflow: Example\n📝 1/2: Ship it\n🤖 via MCP Moira");
+    expect(text).not.toMatch(/agent on the step|waiting for you/u);
+  });
+
+  test("the footer names the agent on the step before the list line when the notification leads to a directive, never that it waits for the reader", async () => {
+    // A notification node never waits itself; the actor is the one of the node the run pauses on
+    // right after it — the directive `next` here, in the notification's block.
+    const graph = checklistGraph();
+    graph.nodes = graph.nodes.map((n: any) =>
+      n.id === "test-telegram-node" ? { ...n, connections: { default: "next" } } : n,
+    );
+    graph.nodes.push({
+      id: "next",
+      type: "agent-directive",
+      progressNodeId: "report",
+      directive: "Report",
+      completionCondition: "Reported",
+      connections: { success: "end" },
+    });
+    const text = await footerOf(graph, {
+      revision: 1,
+      status: "running",
+      currentNodeId: "test-telegram-node",
+      waitingForInputNodeId: null,
+      globalContext: { variables: { tasks: checklist, current_task: 2 }, nodeStates: {} },
+      visits: [
+        {
+          seq: 0,
+          nodeId: "start",
+          exitKey: "default",
+          changes: { tasks: checklist, current_task: 1 },
+        },
+        { seq: 1, nodeId: "task", exitKey: "success", changes: { current_task: 2 }, waited: true },
+      ],
+    });
+    expect(text).toContain(
+      "🔄 Workflow: Example\n⏳ agent on the step: Report the checkpoint\n📝 1/2: Ship it\n🤖 via MCP Moira",
+    );
+    expect(text).not.toContain("waiting for you");
+    expect(text).not.toContain("ждёт вас");
+  });
+
+  test("a notification followed by a lock gate tells the reader the run waits for them", async () => {
+    const graph = checklistGraph();
+    graph.nodes = graph.nodes.map((n: any) =>
+      n.id === "test-telegram-node" ? { ...n, connections: { default: "pin-gate" } } : n,
+    );
+    graph.nodes.push({
+      id: "pin-gate",
+      type: "lock",
+      progressNodeId: "report",
+      reason: "A person approves",
+      connections: { unlocked: "end" },
+    });
+    const text = await footerOf(graph, {
+      revision: 1,
+      status: "running",
+      currentNodeId: "test-telegram-node",
+      waitingForInputNodeId: null,
+      globalContext: { variables: { tasks: checklist, current_task: 2 }, nodeStates: {} },
+      visits: [
+        {
+          seq: 0,
+          nodeId: "start",
+          exitKey: "default",
+          changes: { tasks: checklist, current_task: 1 },
+        },
+        { seq: 1, nodeId: "task", exitKey: "success", changes: { current_task: 2 }, waited: true },
+      ],
+    });
+    expect(text).toContain(
+      "🔄 Workflow: Example\n🙋 waiting for you: Report the checkpoint\n📝 1/2: Ship it\n🤖 via MCP Moira",
+    );
+    expect(text).not.toContain("agent on the step");
+  });
+
+  test("a run whose blocks bind no list gets no count in the footer", async () => {
+    const graph = {
+      metadata: { name: "Example", version: "1.0.0", description: "x" },
+      progress: { nodes: [{ id: "work", label: "Work" }] },
+      nodes: [
+        {
+          id: "start",
+          type: "start",
+          progressNodeId: "work",
+          connections: { default: "test-telegram-node" },
+        },
+        createTelegramNode({ progressNodeId: "work", connections: { default: "end" } }),
+        { id: "end", type: "end", progressNodeId: "work" },
+      ],
+    } as any;
+    const text = await footerOf(graph, {
+      revision: 1,
+      status: "running",
+      currentNodeId: "start",
+      globalContext: { variables: { status: "completed" }, nodeStates: {} },
+      visits: [{ seq: 0, nodeId: "start", exitKey: "default", changes: {} }],
+    });
+    expect(text).toContain("🔄 Workflow: Example\n🤖 via MCP Moira");
+    expect(text).not.toContain("📝");
   });
 
   test("keeps an explicit legacy chatId as the Telegram recipient", async () => {

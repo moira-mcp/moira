@@ -50,8 +50,13 @@ describe("moira-workflow schema command", () => {
         {
           id: "route",
           type: "condition",
-          condition: { operator: "eq", left: { contextPath: "answer" }, right: true },
-          connections: { true: "end", false: "end" },
+          cases: [
+            {
+              when: { operator: "eq", left: { contextPath: "answer" }, right: true },
+              output: "true",
+            },
+          ],
+          connections: { true: "end", default: "end" },
         },
         { id: "end", type: "end" },
       ],
@@ -87,8 +92,10 @@ describe("moira-workflow schema command", () => {
         {
           id: "route",
           type: "condition",
-          condition: { operator: "exists", value: { contextPath: "answer" } },
-          connections: { true: "end", false: "end" },
+          cases: [
+            { when: { operator: "exists", value: { contextPath: "answer" } }, output: "true" },
+          ],
+          connections: { true: "end", default: "end" },
         },
         { id: "end", type: "end" },
       ],
@@ -100,8 +107,10 @@ describe("moira-workflow schema command", () => {
         {
           id: "route",
           type: "condition",
-          condition: { value: { contextPath: "answer" }, operator: "exists" },
-          connections: { false: "end", true: "end" },
+          cases: [
+            { when: { value: { contextPath: "answer" }, operator: "exists" }, output: "true" },
+          ],
+          connections: { default: "end", true: "end" },
         },
         { id: "end", type: "end" },
       ],
@@ -130,6 +139,43 @@ describe("moira-workflow schema command", () => {
 
     expect(result.status).toBe(1);
     expect(result.stderr).toContain("Duplicate node IDs prevent an unambiguous schema: same");
+  });
+
+  test("migrate upgrades a pre-routing file in place and reports nothing to do the second time", () => {
+    const file = temporaryWorkflow({
+      metadata: { name: "Legacy", version: "1.0.0", description: "pre-routing" },
+      variableRegistry: { go: { type: "boolean", description: "gate" } },
+      nodes: [
+        { id: "start", type: "start", connections: { default: "gate" } },
+        {
+          id: "gate",
+          type: "condition",
+          condition: { operator: "eq", left: { contextPath: "go" }, right: true },
+          connections: { true: "yes", false: "no" },
+        },
+        { id: "yes", type: "end" },
+        { id: "no", type: "end" },
+      ],
+    });
+
+    const first = spawnSync(process.execPath, ["--import", "tsx", CLI, file, "migrate"], {
+      encoding: "utf8",
+    });
+    expect(first.status).toBe(0);
+    expect(first.stdout).toContain("Migrated from schema version 0 to 1");
+    const migrated = JSON.parse(fs.readFileSync(file, "utf8")) as WorkflowGraph;
+    expect(migrated.metadata.schemaVersion).toBe(1);
+    const gate = migrated.nodes.find((node) => node.id === "gate");
+    expect(gate?.type === "condition" ? gate.cases : []).toEqual([
+      { when: { operator: "eq", left: { contextPath: "go" }, right: true }, output: "true" },
+    ]);
+    expect(gate?.connections).toEqual({ true: "yes", default: "no" });
+
+    const second = spawnSync(process.execPath, ["--import", "tsx", CLI, file, "migrate"], {
+      encoding: "utf8",
+    });
+    expect(second.status).toBe(0);
+    expect(second.stdout).toContain("nothing to migrate");
   });
 
   test("should escape terminal controls decoded from workflow JSON", () => {

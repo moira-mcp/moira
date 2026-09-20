@@ -25,8 +25,8 @@ description: Пошаговое руководство по созданию wor
   },
   "nodes": [
     // start узел (ровно один)
-    // action узлы
-    // condition узлы (для ветвления)
+    // action узлы — узел, у которого есть свидетельство, несёт case, маршрутизирующие его
+    // condition узлы — для решения, общего нескольким узлам, или решения, стоящего отдельно
     // end узел (минимум один)
   ]
 }
@@ -36,15 +36,15 @@ description: Пошаговое руководство по созданию wor
 
 ### Цикл валидации
 
-Используйте когда нужно проверить результат и повторить при ошибке:
+Используйте когда нужно проверить результат и повторить при ошибке. Узел, который произвёл
+результат, сам сообщает, годится ли он, и маршрутизирует по этому ответу; узел исправления
+считает попытку по дороге назад:
 
 ```mermaid
 flowchart LR
-    A[action] --> B[check]
-    B -->|success| C[next]
-    B -->|failure| D[fix]
-    D --> E[increment-iteration]
-    E --> A
+    A[do-work] -->|valid| B[next-step]
+    A -->|success| C[fix-issues]
+    C -->|iteration + 1| A
 ```
 
 ```json
@@ -60,108 +60,150 @@ flowchart LR
     },
     "required": ["result_valid"]
   },
-  "connections": { "success": "check-result" }
-},
-{
-  "id": "check-result",
-  "type": "condition",
-  "condition": {
-    "operator": "eq",
-    "left": { "contextPath": "result_valid" },
-    "right": "yes"
-  },
+  "cases": [
+    {
+      "when": {
+        "operator": "eq",
+        "left": { "contextPath": "do-work.result_valid" },
+        "right": "yes"
+      },
+      "output": "valid"
+    }
+  ],
   "connections": {
-    "true": "next-step",
-    "false": "fix-issues"
+    "success": "fix-issues",
+    "valid": "next-step"
   }
 },
 {
   "id": "fix-issues",
   "type": "agent-directive",
   "directive": "Исправь найденные проблемы",
-  "connections": { "success": "increment-iteration" }
-},
-{
-  "id": "increment-iteration",
-  "type": "agent-directive",
-  "directive": "Увеличь счетчик итераций",
-  "inputSchema": {
-    "type": "object",
-    "properties": {
-      "iteration": { "type": "number" }
-    },
-    "required": ["iteration"]
-  },
+  "completionCondition": "Все проблемы прошлой попытки исправлены",
+  "expressions": ["iteration = iteration + 1"],
   "connections": { "success": "do-work" }
 }
 ```
 
+`iteration` объявлена в `variableRegistry` workflow: выражение может присваивать только объявленную
+глобальную переменную. Больше для счёта попыток ничего не нужно: узел, вся работа которого —
+`iteration + 1`, это лишний переход для читателя и лишнее место, где можно забыть.
+
 :::tip
-Разделяйте ответственность: action узлы ВЫПОЛНЯЮТ работу, check узлы ТОЛЬКО проверяют, fix узлы
-ТОЛЬКО исправляют. Используйте счетчики итераций для предотвращения бесконечных циклов.
+Разделяйте ответственность: action узлы ВЫПОЛНЯЮТ работу и сами сообщают свой вердикт, fix узлы
+ТОЛЬКО исправляют. Держите счётчик итераций на узле, через который цикл и так проходит, и
+маршрутизируйте по нему, чтобы предотвратить бесконечные циклы.
 :::
 
 ### Ветвление по типу действия
 
-Используйте когда workflow имеет разные пути для разных сценариев:
+Используйте когда workflow имеет разные пути для разных сценариев. Ветку выбирает тот самый ответ,
+который шаг только что произвёл, поэтому case принадлежит самому шагу:
 
 ```json
 {
   "id": "get-action",
   "type": "agent-directive",
   "directive": "Спроси пользователя: создать новый или редактировать существующий?",
+  "completionCondition": "Пользователь назвал create или edit",
   "inputSchema": {
+    "type": "object",
     "properties": {
       "action": { "type": "string", "enum": ["create", "edit"] }
     },
     "required": ["action"]
   },
-  "connections": { "success": "route-action" }
-},
-{
-  "id": "route-action",
-  "type": "condition",
-  "condition": {
-    "operator": "eq",
-    "left": { "contextPath": "action" },
-    "right": "create"
-  },
+  "cases": [
+    {
+      "when": {
+        "operator": "eq",
+        "left": { "contextPath": "get-action.action" },
+        "right": "create"
+      },
+      "output": "create"
+    }
+  ],
   "connections": {
-    "true": "create-branch",
-    "false": "edit-branch"
+    "success": "edit-branch",
+    "create": "create-branch"
   }
 }
 ```
 
+Case вычисляются по контексту, в который уже влит ответ ноды, поэтому ответ читается по простому
+имени, если это объявленная глобальная переменная (`{{action}}`), и как `<node-id>.field`, если это
+локальный выход ноды (`get-action.action`). `success` — запасной выход: прогон, ответ которого не
+совпал ни с одним case, уходит в ветку редактирования.
+
+**Решай на той ноде, у которой есть свидетельство.** Каждая лишняя нода — это переход, который
+читателю приходится проследить, и ещё одно место, где решение расходится со свидетельством; граф,
+который решает там, где знает, короче читается и не может маршрутизировать по устаревшей копии. То
+же верно для одиночного арифметического шага: счётчик или производная сумма — это запись в
+`expressions` уже работающей там ноды, а не отдельная нода.
+
+Оставьте отдельную ноду `condition` или `expression`, когда так читается лучше: когда одно решение
+общее для нескольких производителей, когда условие читает состояние, которого не произвела ни одна
+отдельная нода, когда именованная точка решения помогает читателю вида процесса или когда вычисление
+заслуживает собственного места в маршруте. В такой записи та же ветка — две ноды: у `get-action`
+остаётся только `"connections": { "success": "route-action" }`, а решение переезжает в свою ноду.
+
+```json
+{
+  "id": "route-action",
+  "type": "condition",
+  "cases": [
+    {
+      "when": {
+        "operator": "eq",
+        "left": { "contextPath": "get-action.action" },
+        "right": "create"
+      },
+      "output": "create"
+    }
+  ],
+  "connections": {
+    "create": "create-branch",
+    "default": "edit-branch"
+  }
+}
+```
+
+Нода `condition` или `expression`, единственная работа которой — маршрутизировать или считать то,
+что предыдущая нода уже знает, — это избыточная маршрутизирующая обвязка; сложите её в ту ноду.
+
 ### Gate подтверждения
 
-Используйте для критических действий требующих подтверждения:
+Используйте для критических действий требующих подтверждения. Ответ есть у того узла, который
+спрашивает, поэтому он же по нему и маршрутизирует, а неподтверждённый прогон проваливается через
+`success` в доработку:
 
 ```json
 {
   "id": "show-plan",
   "type": "agent-directive",
   "directive": "Представь план пользователю и спроси подтверждение",
+  "completionCondition": "Пользователь ответил yes или no",
   "inputSchema": {
+    "type": "object",
     "properties": {
       "approved": { "type": "string", "enum": ["yes", "no"] },
       "feedback": { "type": "string" }
     },
     "required": ["approved"]
   },
-  "connections": { "success": "check-approval" }
-},
-{
-  "id": "check-approval",
-  "type": "condition",
-  "condition": {
-    "operator": "eq",
-    "left": { "contextPath": "approved" },
-    "right": "yes"
-  },
+  "cases": [
+    {
+      "when": {
+        "operator": "eq",
+        "left": { "contextPath": "show-plan.approved" },
+        "right": "yes"
+      },
+      "output": "approved"
+    }
+  ],
   "connections": {
-    "true": "proceed",
-    "false": "revise-plan"
+    "success": "revise-plan",
+    "approved": "proceed"
   }
 }
 ```
@@ -253,37 +295,52 @@ flowchart LR
 
 ## Операторы условий
 
-| Оператор  | Описание              | Пример                |
-| --------- | --------------------- | --------------------- |
-| `eq`      | Равно                 | `"right": "value"`    |
-| `neq`     | Не равно              | `"right": "value"`    |
-| `lt`      | Меньше                | `"right": 10`         |
-| `gt`      | Больше                | `"right": 0`          |
-| `lte`     | Меньше или равно      | `"right": 100`        |
-| `gte`     | Больше или равно      | `"right": 1`          |
-| `and`     | Логическое И          | `"conditions": [...]` |
-| `or`      | Логическое ИЛИ        | `"conditions": [...]` |
-| `exists`  | Переменная существует | —                     |
-| `isEmpty` | Массив/строка пусты   | —                     |
+Каждый case узла condition связывает один из таких объектов условия с ключом соединения, который он
+выбирает.
+
+| Оператор   | Описание                      | Пример                         |
+| ---------- | ----------------------------- | ------------------------------ |
+| `eq`       | Равно                         | `"right": "value"`             |
+| `neq`      | Не равно                      | `"right": "value"`             |
+| `lt`       | Меньше                        | `"right": 10`                  |
+| `gt`       | Больше                        | `"right": 0`                   |
+| `lte`      | Меньше или равно              | `"right": 100`                 |
+| `gte`      | Больше или равно              | `"right": 1`                   |
+| `contains` | Вхождение в строку или массив | `"right": "urgent"`            |
+| `and`      | Логическое И                  | `"conditions": [...]`          |
+| `or`       | Логическое ИЛИ                | `"conditions": [...]`          |
+| `not`      | Отрицание                     | `"condition": {...}`           |
+| `exists`   | Переменная существует         | `"value": { "contextPath": …}` |
 
 ### Пример сложного условия
 
 ```json
 {
-  "condition": {
-    "operator": "and",
-    "conditions": [
-      {
-        "operator": "eq",
-        "left": { "contextPath": "status" },
-        "right": "ready"
+  "id": "check-ready",
+  "type": "condition",
+  "cases": [
+    {
+      "when": {
+        "operator": "and",
+        "conditions": [
+          {
+            "operator": "eq",
+            "left": { "contextPath": "status" },
+            "right": "ready"
+          },
+          {
+            "operator": "gt",
+            "left": { "contextPath": "count" },
+            "right": 0
+          }
+        ]
       },
-      {
-        "operator": "gt",
-        "left": { "contextPath": "count" },
-        "right": 0
-      }
-    ]
+      "output": "ready"
+    }
+  ],
+  "connections": {
+    "ready": "process-items",
+    "default": "wait"
   }
 }
 ```
@@ -339,12 +396,20 @@ flowchart LR
 3. **Определения узлов**
    - `directive` не пустой
    - `completionCondition` определен
-   - `connections.success` указан
+   - `connections.success` указан — это выход, который директива берёт, когда не сработал ни один
+     case
    - `inputSchema` — валидный JSON Schema
+   - `cases` и `expressions` директивы подчиняются тем же правилам, что ниже: каждый case называет
+     ключ соединения, отличный от `success`, `error` и `timeout`, а каждое выражение присваивает
+     объявленную глобальную переменную
 
-4. **Условия**
-   - `true` и `false` connections определены
+4. **Маршрутизация**
+   - У ноды `condition` есть хотя бы один case и `connections.default`
+   - Каждый case называет ключ из `connections` и никогда — `error` или `timeout`
+   - Каждый авторский выход назван каким-нибудь case; выходу по умолчанию и управляющим выходам
+     `error`/`timeout` case не нужен
    - Оператор валиден
+   - Каждое выражение присваивает переменную, объявленную в `variableRegistry`
 
 ## Сохранение Workflows
 
@@ -415,18 +480,29 @@ const { uploadUrl } = await mcp__moira__token({ action: "upload" });
 
 ### Условное ветвление
 
+Маршрутизация по возможностям — как раз случай отдельной ноды. К одному и тому же решению приходят
+несколько шагов: каждая ветка, которой нужен файл или URL, задаёт один и тот же вопрос. Поэтому одна
+именованная нода `route-by-capabilities` держит это решение в одном месте, вместо того чтобы
+повторять один и тот же case на каждой приходящей туда ноде, а читатель вида процесса видит, где
+поток расходится:
+
 ```json
 {
   "id": "route-by-capabilities",
   "type": "condition",
-  "condition": {
-    "operator": "eq",
-    "left": { "contextPath": "has_file_access" },
-    "right": true
-  },
+  "cases": [
+    {
+      "when": {
+        "operator": "eq",
+        "left": { "contextPath": "detect-capabilities.has_file_access" },
+        "right": true
+      },
+      "output": "file-access"
+    }
+  ],
   "connections": {
-    "true": "file-based-flow",
-    "false": "mcp-only-flow"
+    "file-access": "file-based-flow",
+    "default": "mcp-only-flow"
   }
 }
 ```
@@ -455,9 +531,8 @@ Workflow часто требуют этапа планирования, но:
 flowchart LR
     A[understand_task] --> B[decompose_into_steps]
     B --> C[present_plan]
-    C --> D{user_approval}
-    D -->|approved| E[execute_steps]
-    D -->|rejected| F[revise_plan]
+    C -->|approved| E[execute_steps]
+    C -->|success| F[revise_plan]
     F --> C
     E -->|during_execution| G[update_plan]
     G --> H[reinitialize]
@@ -467,7 +542,8 @@ flowchart LR
 
 1. **variableRegistry.plan_writing_requirements** — правила написания планов (агент видит при создании)
 2. **decompose_into_steps** — директива с `{{plan_writing_requirements}}` для создания плана
-3. **user_approval_branch** — approved → execute, rejected → revise_plan → present_plan
+3. **user_approval_branch** — `present_plan` маршрутизирует по собранному им ответу: approved →
+   execute, иначе revise_plan → present_plan
 4. **update_during_execution** — возможность адаптировать план по ходу выполнения
 
 ### Требования к написанию плана
@@ -563,30 +639,56 @@ Self-Review](/ru/docs/patterns/self-review/) проверяет каждое т�
         },
         "required": ["plan_approved"]
       },
-      "connections": { "success": "check-plan-approval" }
-    },
-    {
-      "id": "check-plan-approval",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": { "contextPath": "plan_approved" },
-        "right": "да"
-      },
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": { "contextPath": "present-plan.plan_approved" },
+            "right": "да"
+          },
+          "output": "approved"
+        }
+      ],
       "connections": {
-        "true": "execute-steps",
-        "false": "revise-plan"
+        "success": "revise-plan",
+        "approved": "execute-steps"
       }
     },
     {
       "id": "revise-plan",
       "type": "agent-directive",
-      "directive": "Пользователь не одобрил план. Фидбек: {{user_feedback}}\n\nДоработай план на основе фидбека.\nСледуй: {{plan_writing_requirements}}",
+      "directive": "Пользователь не одобрил план. Фидбек: {{present-plan.user_feedback}}\n\nДоработай план на основе фидбека.\nСледуй: {{plan_writing_requirements}}",
       "connections": { "success": "present-plan" }
     }
   ]
 }
 ```
+
+### Показ плана как прогресса
+
+План или чеклист, лежащий в переменных, не виден тому, кто наблюдает за прогоном, пока виду процесса
+не сказано, где он лежит. Привяжите список к блоку, шаги которого его проходят: `list` называет пути
+до массива (`items`), заголовка внутри одного элемента (`title`), индекса текущего элемента
+(`current`, отсчитываемого от `indexBase`), числа завершённых (`done`) и общего числа (`total`) — и
+прогон начинает показывать done/total и элемент, над которым идёт работа.
+
+```json
+{
+  "id": "execute",
+  "label": "Execute",
+  "content": { "summary": "Проходим утверждённый план по одному пункту" },
+  "list": {
+    "items": "decompose-into-steps.steps",
+    "title": "action",
+    "current": "current_step_index",
+    "total": "total_steps"
+  }
+}
+```
+
+Обязателен хотя бы один из `items`, `current` и `total`; `total` по умолчанию равен длине `items`, а
+`done` — `current − indexBase`. Полный справочник полей — в разделе
+[Workflows](/ru/docs/concepts/workflows/).
 
 ### Обновление плана по ходу выполнения
 
@@ -629,12 +731,11 @@ Self-Review](/ru/docs/patterns/self-review/) проверяет каждое т�
 
 ```mermaid
 flowchart TD
-    A[action] --> B[validate]
-    B -->|fail| C[increment_retry]
-    C --> D{check_retry_limit}
-    D -->|retry < max| A
-    D -->|retry >= max| E[ESCALATION]
-    E --> F[revise_plan / ask_user / skip]
+    A[action] --> B[validate, считает попытку]
+    B -->|clean| C[next_step]
+    B -->|success: проблемы остались| A
+    B -->|exhausted| D[ESCALATION]
+    D --> E[revise_plan / ask_user / skip]
 ```
 
 ### Когда применять
@@ -653,31 +754,42 @@ flowchart TD
 
 ### Пример реализации
 
+Всё решение принадлежит шагу, который проверяет результат: он считает попытку в `expressions`, а его
+case отправляют чистый результат дальше, исчерпанный бюджет — на эскалацию, а всё остальное через
+`success` — на новую попытку.
+
 ```json
 {
-  "id": "increment-retry",
+  "id": "validate-step",
   "type": "agent-directive",
-  "directive": "Увеличь счётчик повторов. Текущий: {{step_retry}}",
+  "directive": "ТОЛЬКО ПРОВЕРЬ результат шага. Подсчитай найденные проблемы. Попытка {{step_retry}}.",
+  "completionCondition": "Количество проблем сообщено",
   "inputSchema": {
     "type": "object",
     "properties": {
-      "step_retry": { "type": "number", "minimum": 1 }
+      "issues_count": { "type": "number", "minimum": 0 }
     },
-    "required": ["step_retry"]
+    "required": ["issues_count"]
   },
-  "connections": { "success": "check-retry-limit" }
-},
-{
-  "id": "check-retry-limit",
-  "type": "condition",
-  "condition": {
-    "operator": "gte",
-    "left": { "contextPath": "step_retry" },
-    "right": 3
-  },
+  "expressions": ["step_retry = step_retry + 1"],
+  "cases": [
+    {
+      "when": {
+        "operator": "eq",
+        "left": { "contextPath": "validate-step.issues_count" },
+        "right": 0
+      },
+      "output": "clean"
+    },
+    {
+      "when": { "operator": "gte", "left": { "contextPath": "step_retry" }, "right": 3 },
+      "output": "exhausted"
+    }
+  ],
   "connections": {
-    "true": "notify-escalation",
-    "false": "retry-action"
+    "success": "retry-action",
+    "clean": "next-step",
+    "exhausted": "notify-escalation"
   }
 },
 {
@@ -691,6 +803,7 @@ flowchart TD
   "id": "ask-escalation-decision",
   "type": "agent-directive",
   "directive": "Шаг не удался после {{step_retry}} попыток.\n\nСпроси пользователя:\n1. **revise_plan** — вернуться к планированию и пересмотреть подход\n2. **ask_user** — запросить помощь человека с конкретной проблемой\n3. **skip** — пропустить этот шаг и продолжить\n\n`decision` записывает собственный выбор пользователя: каждый из трёх вариантов ведёт в своё место, поэтому предположенный ответ выбирает маршрут за него.",
+  "completionCondition": "Пользователь выбрал один из трёх вариантов",
   "inputSchema": {
     "type": "object",
     "properties": {
@@ -702,35 +815,34 @@ flowchart TD
     },
     "required": ["escalation_decision"]
   },
-  "connections": { "success": "route-escalation" }
-},
-{
-  "id": "route-escalation",
-  "type": "condition",
-  "condition": {
-    "operator": "eq",
-    "left": { "contextPath": "escalation_decision" },
-    "right": "revise_plan"
-  },
+  "cases": [
+    {
+      "when": {
+        "operator": "eq",
+        "left": { "contextPath": "ask-escalation-decision.escalation_decision" },
+        "right": "revise_plan"
+      },
+      "output": "revise"
+    },
+    {
+      "when": {
+        "operator": "eq",
+        "left": { "contextPath": "ask-escalation-decision.escalation_decision" },
+        "right": "skip"
+      },
+      "output": "skip"
+    }
+  ],
   "connections": {
-    "true": "revise-plan",
-    "false": "route-escalation-skip"
-  }
-},
-{
-  "id": "route-escalation-skip",
-  "type": "condition",
-  "condition": {
-    "operator": "eq",
-    "left": { "contextPath": "escalation_decision" },
-    "right": "skip"
-  },
-  "connections": {
-    "true": "mark-step-skipped",
-    "false": "handle-user-help"
+    "success": "handle-user-help",
+    "revise": "revise-plan",
+    "skip": "mark-step-skipped"
   }
 }
 ```
+
+Три исхода тоже не требуют отдельного узла: два case называют ветки, уходящие с обычного пути, а
+третий несёт `success`. Enum гарантирует, что четвёртого не будет.
 
 ### Комбинация с паттерном планирования
 
@@ -739,9 +851,9 @@ flowchart TD
 ```mermaid
 flowchart LR
     A[plan] --> B[execute]
-    B --> C[validate]
-    C -->|fail| D[retry]
-    D -->|max_retries| E[escalate]
+    B --> C[validate, считает попытку]
+    C -->|проблемы остались| B
+    C -->|exhausted| E[escalate]
     E -->|revise_plan| A
     E -->|skip| F[next_step]
     E -->|ask_user| G[wait_for_input]
@@ -760,25 +872,40 @@ flowchart LR
 
 ### Express/Full Mode ветвление
 
-Маршрутизация в упрощённый или полный flow в зависимости от сложности:
+Маршрутизация в упрощённый или полный flow в зависимости от сложности. Режим устанавливает тот шаг,
+который по нему и маршрутизирует:
 
 ```
-[get-requirements] → [check-mode] → express=true → [express-flow]
-                                  → express=false → [full-flow]
+[get-requirements] → express → [express-flow]
+                   → success → [full-flow]
 ```
 
 ```json
 {
-  "id": "check-development-mode",
-  "type": "condition",
-  "condition": {
-    "operator": "eq",
-    "left": { "contextPath": "development_mode" },
-    "right": "express"
+  "id": "get-requirements",
+  "type": "agent-directive",
+  "directive": "Собери требования и реши, подходит ли задаче режим express.",
+  "completionCondition": "Требования собраны, режим выбран",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "development_mode": { "type": "string", "enum": ["express", "full"] }
+    },
+    "required": ["development_mode"]
   },
+  "cases": [
+    {
+      "when": {
+        "operator": "eq",
+        "left": { "contextPath": "get-requirements.development_mode" },
+        "right": "express"
+      },
+      "output": "express"
+    }
+  ],
   "connections": {
-    "true": "express-implementation",
-    "false": "analyze-and-plan"
+    "success": "analyze-and-plan",
+    "express": "express-implementation"
   }
 }
 ```
@@ -788,8 +915,8 @@ flowchart LR
 Представить план → получить фидбек → уточнить → подтвердить:
 
 ```
-[present-plan] → [check-approval] → approved → [continue]
-                                  → rejected → [refine] → [confirm] → [continue]
+[present-plan] → approved → [continue]
+               → success  → [refine] → [confirm] → [continue]
 ```
 
 ### Паттерн числовой валидации (рекомендуемый)
@@ -806,6 +933,7 @@ flowchart LR
   "id": "validate-result",
   "type": "agent-directive",
   "directive": "ТОЛЬКО ПРОВЕРЬ результат. Подсчитай найденные проблемы.",
+  "completionCondition": "Количество проблем сообщено",
   "inputSchema": {
     "type": "object",
     "properties": {
@@ -822,19 +950,19 @@ flowchart LR
     },
     "required": ["issues_count"]
   },
-  "connections": { "success": "route-validation" }
-},
-{
-  "id": "route-validation",
-  "type": "condition",
-  "condition": {
-    "operator": "eq",
-    "left": { "contextPath": "issues_count" },
-    "right": 0
-  },
+  "cases": [
+    {
+      "when": {
+        "operator": "eq",
+        "left": { "contextPath": "validate-result.issues_count" },
+        "right": 0
+      },
+      "output": "clean"
+    }
+  ],
   "connections": {
-    "true": "next-step",
-    "false": "fix-issues"
+    "success": "fix-issues",
+    "clean": "next-step"
   }
 }
 ```
@@ -842,7 +970,8 @@ flowchart LR
 **Почему это работает:**
 
 - Агент не может соврать про число (количество объективно)
-- Условие `issues_count == 0` проверяется механически движком
+- Case `issues_count == 0` проверяется механически движком — на том узле, который это число и
+  произвёл
 - Нет места для "почти готово" или "незначительные проблемы"
 
 **Когда использовать:** ВСЕ validation loops должны использовать этот паттерн. Замените существующие `is_valid: enum["да","нет"]` на `issues_count: number`.
@@ -856,6 +985,7 @@ flowchart LR
   "id": "run-tests",
   "type": "agent-directive",
   "directive": "Запусти тесты и сообщи результаты",
+  "completionCondition": "Числа пройденных и упавших тестов получены реальным прогоном",
   "inputSchema": {
     "type": "object",
     "properties": {
@@ -864,19 +994,19 @@ flowchart LR
     },
     "required": ["tests_passed", "tests_failed"]
   },
-  "connections": { "success": "check-tests" }
-},
-{
-  "id": "check-tests",
-  "type": "condition",
-  "condition": {
-    "operator": "eq",
-    "left": { "contextPath": "tests_failed" },
-    "right": 0
-  },
+  "cases": [
+    {
+      "when": {
+        "operator": "eq",
+        "left": { "contextPath": "run-tests.tests_failed" },
+        "right": 0
+      },
+      "output": "all-passed"
+    }
+  ],
   "connections": {
-    "true": "continue",
-    "false": "fix-tests"
+    "success": "fix-tests",
+    "all-passed": "continue"
   }
 }
 ```
@@ -1131,10 +1261,10 @@ flowchart LR
 Для критичных подтверждений разделите на отдельные ноды:
 
 ```
-[show-information] → [get-user-confirmation] → [route-decision]
+[show-information] → [get-user-confirmation, маршрутизирует по ответу]
 ```
 
-Первая нода только показывает, вторая только получает ответ:
+Первая нода только показывает, вторая получает ответ и по нему маршрутизирует:
 
 ```json
 {
@@ -1151,11 +1281,26 @@ flowchart LR
   "id": "get-plan-approval",
   "directive": "План показан выше. Спроси, утверждён ли он. `approved` записывает собственный ответ пользователя; предположенный ответ уводит прогон в ветку, которую он не выбирал.",
   "inputSchema": {
+    "type": "object",
     "properties": {
       "approved": { "type": "string", "enum": ["да", "нет"] }
-    }
+    },
+    "required": ["approved"]
   },
-  "connections": { "success": "route-approval" }
+  "cases": [
+    {
+      "when": {
+        "operator": "eq",
+        "left": { "contextPath": "get-plan-approval.approved" },
+        "right": "да"
+      },
+      "output": "approved"
+    }
+  ],
+  "connections": {
+    "success": "revise-plan",
+    "approved": "proceed"
+  }
 }
 ```
 
@@ -1167,14 +1312,16 @@ flowchart LR
 ## Лучшие практики
 
 1. **Один узел = одна ответственность** — не смешивайте проверку и исправление
-2. **Ясные директивы** — начинайте с глагола: Создай, Проверь, Исправь
-3. **Явные отрицания** — "НЕ исправляй, ТОЛЬКО проверь"
-4. **Используйте inputSchema** — всегда определяйте ожидаемую структуру ответа
-5. **Числовая валидация** — используйте счётчики вместо да/нет для точных проверок
-6. **Счетчики итераций** — предотвращайте бесконечные циклы
-7. **Gate подтверждения** — для критических действий
-8. **Самодокументирование** — объявляйте знания как значения по умолчанию в variableRegistry
-9. **Graceful уведомления** — ошибки каналов связи не должны блокировать workflow
+2. **Решайте там, где свидетельство** — узел, который произвёл ответ, несёт `cases`,
+   маршрутизирующие по нему; отдельный `condition` — для общего или именованного решения
+3. **Ясные директивы** — начинайте с глагола: Создай, Проверь, Исправь
+4. **Явные отрицания** — "НЕ исправляй, ТОЛЬКО проверь"
+5. **Используйте inputSchema** — всегда определяйте ожидаемую структуру ответа
+6. **Числовая валидация** — используйте счётчики вместо да/нет для точных проверок
+7. **Счетчики итераций** — предотвращайте бесконечные циклы
+8. **Gate подтверждения** — для критических действий
+9. **Самодокументирование** — объявляйте знания как значения по умолчанию в variableRegistry
+10. **Graceful уведомления** — ошибки каналов связи не должны блокировать workflow
 
 ## Связанное
 

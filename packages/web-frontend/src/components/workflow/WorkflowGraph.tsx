@@ -26,29 +26,34 @@ import {
   Node,
   Edge,
   ConnectionMode,
-  ControlButton,
   SelectionMode,
   type ReactFlowInstance as XyflowInstance,
 } from "@xyflow/react";
-import { ZoomIn, ArrowUpDown, ArrowLeftRight } from "lucide-react";
 import { DiagramViewport } from "../diagram/DiagramViewport";
 import { useOpeningPlacement } from "../diagram/placement";
+import { DiagramToolbar } from "../diagram/DiagramToolbar";
+import { NodeFinder } from "../run/NodeFinder";
+import { useStoredFlag } from "../diagram/useStoredFlag";
+import { useLayoutPreset } from "../diagram/layoutPreset";
 
 import { graphModel, definitionBlocks } from "../run/graphModel";
-import { GRAPH_MARGIN, layoutGraph } from "./graphLayout";
-import type { StepArrival } from "../run/model";
+import { graphSpacing, GRAPH_MARGIN, GRAPH_PRESET_DIRECTIONS, layoutGraph } from "./graphLayout";
 import {
   BlockGroupView,
   GraphDefs,
   GraphMeasuredHeights,
   GraphEdgeView,
   StepNodeView,
+  type BlockGroupData,
   type BlockGroupNode,
   type GraphEdge,
   type StepNode,
   type StepNodeData,
 } from "./graphNodes";
-import { TransitionFocusProvider } from "../run/focus";
+import { FocusBridge, TransitionFocusProvider, type TransitionFocusHandle } from "../run/focus";
+import { VariableProvider, type VariableDefinition } from "../diagram/VariableText";
+import { outputTip } from "./graphNodes";
+import type { PortInfo } from "../diagram/PortedCard";
 import type { RunBlock } from "../run/model";
 import { NodeDetailSheet } from "./NodeDetailSheet";
 
@@ -93,6 +98,7 @@ const edgeTypes = { graph: GraphEdgeView };
 
 // Empty array constant to avoid creating new array on each render
 const EMPTY_ERROR_NODE_IDS: string[] = [];
+const noopEdgeClick = (): void => {};
 /** A grouped graph opens at least this readable, on its first block. */
 const GRAPH_OPENING_ZOOM = 0.7;
 const GRAPH_OPENING_EDGE = 16;
@@ -111,6 +117,8 @@ export interface WorkflowGraphProps {
   validation?: WorkflowValidationStatus;
   /** Current node ID for execution highlighting */
   currentNodeId?: string | null;
+  /** The block the page has selected on the map: its frame is highlighted on the graph. */
+  selectedBlockId?: string | null;
   /** Node IDs that have runtime errors (for error highlighting) */
   errorNodeIds?: string[];
   /**
@@ -147,6 +155,18 @@ export interface WorkflowGraphProps {
    * makes the same node focusable twice. It takes over the opening placement while set.
    */
   focusRequest?: { nodeId: string; token: number } | null;
+  /** Jump to a variable's definition when a reference token is clicked. */
+  onVariableSelect?: (name: string) => void;
+  /** The variable whose references are emphasised. */
+  selectedVariable?: string | null;
+  /** The step the page has selected (the map's step, the finder's pick): ringed on the graph. */
+  selectedNodeId?: string | null;
+  /** Steps a run has been through: drawn as visited. */
+  visitedNodeIds?: readonly string[];
+  /** What the page puts into the toolbar around the shared controls. */
+  toolbarModes?: React.ReactNode;
+  toolbarLeading?: React.ReactNode;
+  toolbarTrailing?: React.ReactNode;
 }
 
 /**
@@ -174,6 +194,7 @@ export const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
   workflow,
   validation,
   currentNodeId,
+  selectedBlockId = null,
   errorNodeIds = EMPTY_ERROR_NODE_IDS,
   blocks,
   layoutOptions = DEFAULT_LAYOUT_OPTIONS,
@@ -186,8 +207,36 @@ export const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
   onNodeSelect,
   onInit,
   focusRequest = null,
+  onVariableSelect,
+  selectedVariable = null,
+  selectedNodeId = null,
+  visitedNodeIds = EMPTY_ERROR_NODE_IDS,
+  toolbarModes,
+  toolbarLeading,
+  toolbarTrailing,
 }) => {
-  const { t } = useTranslation();
+  // Folded by default: unfolded, the navigator covers the graph's bottom-right corner and the
+  // cards under it; the reader opens it from the toolbar.
+  const [minimapOn, toggleMinimap] = useStoredFlag("moira.diagram.minimap", false);
+  // A connection chip names its other end the way the map does: the authored display name, else
+  // the node id. The technical graph's `data.label` falls back to the node type ("Agent Task"),
+  // which names nothing when three chips lead to three different agent nodes.
+  const nodeName = useCallback(
+    (nodeId: string): string =>
+      workflow.nodes.find((n) => n.id === nodeId)?.metadata?.displayName || nodeId,
+    [workflow.nodes],
+  );
+  const { t, i18n } = useTranslation();
+  // A stable translator for the layout effect. react-i18next hands out a fresh `t` on every
+  // render, so depending on it there lays the graph out again forever and detaches the cards
+  // mid-interaction; the effect watches the language instead and reads the current `t` through
+  // this ref, so a language switch does rebuild the port tooltips.
+  const translateRef = useRef(t);
+  translateRef.current = t;
+  const translate = useCallback(
+    (key: string, options?: Record<string, unknown>): string => translateRef.current(key, options),
+    [],
+  );
   const mobile = useIsMobile();
   const { actualTheme } = useTheme();
   // The React Flow instance arrives through the viewport's init callback; the layout effects and
@@ -223,7 +272,15 @@ export const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
     window.requestAnimationFrame(() => {
       if (key.startsWith("node:")) {
         const nodeId = key.slice(key.indexOf(":", 5) + 1);
-        void instance.fitView({ nodes: [{ id: nodeId }], padding: 0.5, maxZoom: 1, duration: 0 });
+        // The node itself, not its block: a tight fit at readable zoom, animated after the
+        // first placement so the reader sees where the jump landed.
+        void instance.fitView({
+          nodes: [{ id: nodeId }],
+          padding: 0.25,
+          maxZoom: 1,
+          minZoom: 0.6,
+          duration: 350,
+        });
         return;
       }
       const first = groupsRef.current[0];
@@ -244,8 +301,64 @@ export const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
   >(placeViewport, placementKey);
   /** Brings a step into view: what an arrival chip does when the reader clicks the far end. */
   const focusStep = useCallback((id: string) => {
-    void instanceRef.current?.fitView({ nodes: [{ id }], padding: 0.5, maxZoom: 1, duration: 400 });
+    void instanceRef.current?.fitView({
+      nodes: [{ id }],
+      padding: 0.25,
+      maxZoom: 1,
+      minZoom: 0.6,
+      duration: 400,
+    });
   }, []);
+  // The focus store lives inside the provider mounted below; a bridge hands it up for `goTo`.
+  const focusRef = useRef<TransitionFocusHandle | null>(null);
+  // The step (and its block) the reader just arrived at pulses for a moment, so the move from
+  // the map or the finder answers "where did that land" instead of asking it.
+  const [arrival, setArrival] = useState<{ nodeId: string | null; blockId: string | null } | null>(
+    null,
+  );
+  const blockOfNode = useMemo(
+    () => new Map((blocks ?? []).flatMap((b) => b.nodeIds.map((id) => [id, b.id] as const))),
+    [blocks],
+  );
+  const announceArrival = useCallback(
+    (nodeId: string) => setArrival({ nodeId, blockId: blockOfNode.get(nodeId) ?? null }),
+    [blockOfNode],
+  );
+  useEffect(() => {
+    if (!focusRequest) return;
+    announceArrival(focusRequest.nodeId);
+  }, [focusRequest, announceArrival]);
+  // The contents picked a block: the camera moves to its group and the group pulses. Skipped on
+  // the first render (the opening placement owns it) and when a step focus arrives with it.
+  const lastBlock = useRef<string | null>(selectedBlockId);
+  useEffect(() => {
+    if (selectedBlockId === lastBlock.current) return;
+    lastBlock.current = selectedBlockId;
+    if (!selectedBlockId || !instanceRef.current) return;
+    if (!instanceRef.current.getNode(`block:${selectedBlockId}`)) return;
+    void instanceRef.current.fitView({
+      nodes: [{ id: `block:${selectedBlockId}` }],
+      padding: 0.15,
+      maxZoom: 0.9,
+      duration: 450,
+    });
+    setArrival({ nodeId: null, blockId: selectedBlockId });
+  }, [selectedBlockId]);
+  /** Travel along a link from a port or the edge itself: the far step comes into view and pulses. */
+  const goTo = useCallback(
+    (stepId: string, linkId: string) => {
+      focusStep(stepId);
+      announceArrival(stepId);
+      focusRef.current?.flash([linkId]);
+    },
+    [focusStep, announceArrival],
+  );
+  useEffect(() => {
+    if (!arrival) return;
+    const timer = setTimeout(() => setArrival(null), 1800);
+    return () => clearTimeout(timer);
+  }, [arrival]);
+  const [finderStep, setFinderStep] = useState<string | null>(null);
   const handleMeasured = useCallback((heights: Map<string, number>) => {
     // Cards taller or shorter than laid out: lay out again with what the browser measured.
     let differs = false;
@@ -277,14 +390,25 @@ export const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
   // the instance a caller receives on init is the one that holds the graph.
   const [isLayouting, setIsLayouting] = useState(true);
 
-  // What changes without a relayout — the current node, the error nodes and the navigation
-  // callback — is merged into the laid-out nodes here, so a page re-render or a run advancing
-  // never lays the graph out again (and never refits it under the reader).
+  // What changes without a relayout — the current node, the selected block, the error nodes and
+  // the navigation callback — is merged into the laid-out nodes here, so a page re-render or a
+  // run advancing never lays the graph out again (and never refits it under the reader).
   const nodes = useMemo<Node[]>(() => {
     const errorNodeIdSet = new Set(errorNodeIds);
+    const visitedSet = new Set(visitedNodeIds);
     return laidNodes.map((node) =>
       node.type === "block-group"
-        ? node
+        ? {
+            ...node,
+            data: {
+              ...node.data,
+              selected: (node.data as BlockGroupData).blockId === selectedBlockId,
+              // The group pulses only when the jump was to the block itself (the contents).
+              arrived:
+                arrival?.nodeId === null &&
+                arrival?.blockId === (node.data as BlockGroupData).blockId,
+            },
+          }
         : {
             ...node,
             data: {
@@ -292,13 +416,25 @@ export const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
               onWorkflowNavigate,
               current: node.id === currentNodeId,
               error: errorNodeIdSet.has(node.id),
+              arrived: arrival?.nodeId === node.id,
+              visited: visitedSet.has(node.id) && node.id !== currentNodeId,
             },
-            selected: node.id === currentNodeId,
+            selected:
+              node.id === currentNodeId || node.id === selectedNodeId || node.id === finderStep,
           },
     );
-  }, [laidNodes, currentNodeId, errorNodeIds, onWorkflowNavigate]);
+  }, [
+    laidNodes,
+    currentNodeId,
+    selectedBlockId,
+    selectedNodeId,
+    finderStep,
+    arrival,
+    errorNodeIds,
+    visitedNodeIds,
+    onWorkflowNavigate,
+  ]);
   const [currentLayoutOptions, setCurrentLayoutOptions] = useState(layoutOptions);
-
   // Node detail sheet state
   const [detailSheetOpen, setDetailSheetOpen] = useState(false);
   const [selectedNodeData, setSelectedNodeData] = useState<Node | null>(null);
@@ -306,45 +442,35 @@ export const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
   // Performance optimization: delayed MiniMap render
   const [showMiniMapDelayed, setShowMiniMapDelayed] = useState(false);
 
-  // Throttle ref for layout changes
-  const layoutThrottleRef = useRef<NodeJS.Timeout | null>(null);
-  const LAYOUT_THROTTLE_MS = 100;
-
   // Calculate incoming and outgoing nodes for the selected node
   const { incomingNodes, outgoingNodes } = useMemo(() => {
-    if (!selectedNodeData || edges.length === 0 || nodes.length === 0) {
+    if (!selectedNodeData || edges.length === 0) {
       return { incomingNodes: [], outgoingNodes: [] };
     }
 
     const nodeId = selectedNodeData.id;
-    const nodeMap = new Map(nodes.map((n) => [n.id, n]));
 
     // Find edges where this node is the target (incoming)
     const incoming = edges
       .filter((e) => e.target === nodeId)
       .map((e) => {
-        const sourceNode = nodeMap.get(e.source);
-        return {
-          id: e.source,
-          label: (sourceNode?.data?.label as string) || e.source,
-        };
+        return { id: e.source, label: nodeName(e.source) };
       });
 
     // Find edges where this node is the source (outgoing)
     const outgoing = edges
       .filter((e) => e.source === nodeId)
       .map((e) => {
-        const targetNode = nodeMap.get(e.target);
         const edgeData = e.data as { link?: { label: string } } | undefined;
         return {
           id: e.target,
-          label: (targetNode?.data?.label as string) || e.target,
+          label: nodeName(e.target),
           connectionType: edgeData?.link?.label ?? "default",
         };
       });
 
     return { incomingNodes: incoming, outgoingNodes: outgoing };
-  }, [selectedNodeData, edges, nodes]);
+  }, [selectedNodeData, edges, nodeName]);
 
   // Theme colors
   const backgroundColor = actualTheme === "dark" ? "#1a1a1a" : "#FAFBFC";
@@ -390,6 +516,23 @@ export const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
   // The process the graph is grouped by: the caller's blocks (a run's, with status) or the
   // definition's own derivation.
   const graphBlocks = useMemo(() => blocks ?? definitionBlocks(workflow), [blocks, workflow]);
+  // Cards always carry their ports on the left and right: a grouped graph stacks its blocks top
+  // to bottom (steps run left to right inside), a flat graph runs left to right. The shared
+  // preset scales the gaps (compact, airy) and re-lays the graph; the camera then returns to the
+  // focused step through the placement key.
+  const [preset] = useLayoutPreset();
+  useEffect(() => {
+    const direction =
+      graphBlocks.length > 0
+        ? GRAPH_PRESET_DIRECTIONS[preset].outer === "RIGHT"
+          ? "LR"
+          : "TB"
+        : "LR";
+    setCurrentLayoutOptions((options) =>
+      options.direction === direction ? options : { ...options, direction },
+    );
+  }, [graphBlocks, preset]);
+
   const model = useMemo(() => graphModel(workflow, graphBlocks), [workflow, graphBlocks]);
 
   /**
@@ -406,8 +549,18 @@ export const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
     let cancelled = false;
     const horizontal =
       currentLayoutOptions.direction === "LR" || currentLayoutOptions.direction === "RL";
+    // Whether the steps run left to right inside a group (their edges leave the right port and
+    // arrive at the left one straight) or top to bottom (the edges snake between side ports).
+    const innerHorizontal =
+      graphBlocks.length === 0 ? horizontal : GRAPH_PRESET_DIRECTIONS[preset].inner === "RIGHT";
     setIsLayouting(true);
-    void layoutGraph(model, horizontal ? "RIGHT" : "DOWN", measuredHeights ?? undefined)
+    void layoutGraph(
+      model,
+      horizontal ? "RIGHT" : "DOWN",
+      measuredHeights ?? undefined,
+      graphSpacing(preset),
+      graphBlocks.length > 0 ? GRAPH_PRESET_DIRECTIONS[preset].inner : undefined,
+    )
       .then((layout) => {
         if (cancelled) return;
         laidHeightsRef.current = new Map(layout.steps.map((step) => [step.id, step.height]));
@@ -420,48 +573,89 @@ export const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
             id: `block:${group.id}`,
             type: "block-group",
             position: { x: group.x, y: group.y },
-            style: { width: group.width, height: group.height },
+            // The frame is not interactive and must not sit between the pointer and the edges.
+            style: { width: group.width, height: group.height, pointerEvents: "none" },
             draggable: false,
             selectable: false,
             focusable: false,
             zIndex: -1,
-            data: { blockId: block.id, index: block.index, name: block.name, status: block.status },
+            data: {
+              blockId: block.id,
+              index: block.index,
+              name: block.name,
+              status: block.status,
+              reserveFlowEntryStrip: preset === "flow",
+            },
           };
         });
         const stepById = new Map(model.steps.map((s) => [s.id, s]));
-        // One handle per connection on each side of a card: every edge leaves and arrives at its
-        // own point, so two edges between the same pair of cards never lie on top of each other.
-        const outSlots = new Map<string, string[]>();
-        const inSlots = new Map<string, string[]>();
-        for (const link of model.links) {
-          outSlots.set(link.source, [...(outSlots.get(link.source) ?? []), link.id]);
-          inSlots.set(link.target, [...(inSlots.get(link.target) ?? []), link.id]);
-        }
-        // An edge that needs a corridor is not drawn at rest: it is named by a chip in its source
-        // card (its connection) and by one in its target card (its arrival), and appears as a line
-        // while either chip or either card is hovered.
+        // One port per edge on each side of a card: an input port names where the edge comes
+        // from and its transition, an output port names the output and its target; an edge from
+        // a card to itself takes the bottom double port.
         const blockNameOf = new Map(graphBlocks.map((b) => [b.id, b.name]));
         const blockOfStep = new Map(
           graphBlocks.flatMap((b) => b.nodeIds.map((id) => [id, b.id] as const)),
         );
-        const arrivalsOf = new Map<string, StepArrival[]>();
+        const nameOfStep = (id: string) => {
+          const step = stepById.get(id)?.step;
+          return step?.progressLabel ?? step?.displayName ?? id;
+        };
+        const inputsOf = new Map<string, PortInfo[]>();
+        const outputsOf = new Map<string, PortInfo[]>();
+        const selfOf = new Map<string, PortInfo[]>();
         for (const link of model.links) {
-          if (!layout.routes[link.id]) continue;
+          const source = stepById.get(link.source);
           const sourceBlock = blockOfStep.get(link.source);
           const targetBlock = blockOfStep.get(link.target);
-          const step = stepById.get(link.source);
-          arrivalsOf.set(link.target, [
-            ...(arrivalsOf.get(link.target) ?? []),
+          const crosses = sourceBlock !== targetBlock;
+          const targetName = nameOfStep(link.target);
+          const outKind: PortInfo["kind"] =
+            link.kind === "return"
+              ? "return"
+              : link.label === "error" || link.label === "timeout"
+                ? "error"
+                : link.label === "success" || link.label === "default"
+                  ? "default"
+                  : crosses
+                    ? "external"
+                    : "forward";
+          if (link.source === link.target) {
+            selfOf.set(link.source, [
+              ...(selfOf.get(link.source) ?? []),
+              {
+                id: link.id,
+                label: link.label,
+                kind: "return",
+                tip: source ? outputTip(source, link.label, targetName, translate) : link.label,
+                peer: link.target,
+              },
+            ]);
+            continue;
+          }
+          outputsOf.set(link.source, [
+            ...(outputsOf.get(link.source) ?? []),
             {
-              linkId: link.id,
-              sourceId: link.source,
-              sourceName: step?.step.displayName ?? link.source,
-              sourceBlockName:
-                sourceBlock && sourceBlock !== targetBlock
-                  ? (blockNameOf.get(sourceBlock) ?? null)
-                  : null,
+              id: link.id,
               label: link.label,
-              isReturn: link.kind === "return",
+              detail: crosses
+                ? `${blockNameOf.get(targetBlock ?? "") ?? ""} › ${targetName}`
+                : targetName,
+              kind: outKind,
+              tip: source ? outputTip(source, link.label, targetName, translate) : link.label,
+              peer: link.target,
+            },
+          ]);
+          inputsOf.set(link.target, [
+            ...(inputsOf.get(link.target) ?? []),
+            {
+              id: link.id,
+              label: nameOfStep(link.source),
+              detail: link.label,
+              kind: link.kind === "return" ? "return" : crosses ? "external" : "forward",
+              tip: `${nameOfStep(link.source)}${
+                crosses && sourceBlock ? ` (${blockNameOf.get(sourceBlock) ?? ""})` : ""
+              } → ${link.label}`,
+              peer: link.source,
             },
           ]);
         }
@@ -473,12 +667,12 @@ export const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
             graph,
             current: false,
             error: false,
-            // Steps run across the stacking direction inside a group (see graphLayout).
-            horizontal: graphBlocks.length > 0 ? !horizontal : horizontal,
-            outSlots: outSlots.get(laid.id) ?? [],
-            inSlots: inSlots.get(laid.id) ?? [],
-            arrivals: arrivalsOf.get(laid.id) ?? [],
+            horizontal: innerHorizontal,
+            inputs: inputsOf.get(laid.id) ?? [],
+            outputs: outputsOf.get(laid.id) ?? [],
+            selfLoops: selfOf.get(laid.id) ?? [],
             onFocusStep: focusStep,
+            onGoTo: goTo,
           };
           return {
             id: laid.id,
@@ -512,7 +706,8 @@ export const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
             link,
             route: layout.routes[link.id],
             chipped: Boolean(layout.routes[link.id]),
-            horizontal: graphBlocks.length > 0 ? !horizontal : horizontal,
+            horizontal: innerHorizontal,
+            onGoTo: goTo,
           },
         }));
         marginRef.current = layout.margin;
@@ -546,6 +741,11 @@ export const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
     currentLayoutOptions.direction,
     measuredHeights,
     focusStep,
+    goTo,
+    preset,
+    translate,
+    // The port tooltips are written in the reader's language; a language change rebuilds them.
+    i18n.language,
   ]);
 
   /**
@@ -561,23 +761,18 @@ export const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
       if (onNodeSelect) {
         // External sidebar mode — compute connections and notify parent
         const nodeId = node.id;
-        const nodeMap = new Map(nodes.map((n) => [n.id, n]));
 
         const incoming = edges
           .filter((e) => e.target === nodeId)
-          .map((e) => {
-            const sourceNode = nodeMap.get(e.source);
-            return { id: e.source, label: (sourceNode?.data?.label as string) || e.source };
-          });
+          .map((e) => ({ id: e.source, label: nodeName(e.source) }));
 
         const outgoing = edges
           .filter((e) => e.source === nodeId)
           .map((e) => {
-            const targetNode = nodeMap.get(e.target);
             const edgeData = e.data as { link?: { label: string } } | undefined;
             return {
               id: e.target,
-              label: (targetNode?.data?.label as string) || e.target,
+              label: nodeName(e.target),
               connectionType: edgeData?.link?.label ?? "default",
             };
           });
@@ -590,7 +785,7 @@ export const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
         setDetailSheetOpen(true);
       }
     },
-    [onNodeClick, onNodeSelect, showNodeDetails, nodes, edges],
+    [onNodeClick, onNodeSelect, showNodeDetails, edges, nodeName],
   );
 
   /**
@@ -598,17 +793,6 @@ export const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
    */
   const handleFitView = useCallback(() => {
     instanceRef.current?.fitView({ padding: 0.2, duration: 300 });
-  }, []);
-
-  /**
-   * Change layout direction (throttled to prevent rapid re-layouts); the layout effect re-runs.
-   */
-  const changeLayout = useCallback((newLayoutOptions: LayoutOptions) => {
-    if (layoutThrottleRef.current) return;
-    layoutThrottleRef.current = setTimeout(() => {
-      layoutThrottleRef.current = null;
-    }, LAYOUT_THROTTLE_MS);
-    setCurrentLayoutOptions(newLayoutOptions);
   }, []);
 
   if ((isLayouting && nodes.length === 0) || nodeTypesLoading) {
@@ -620,78 +804,92 @@ export const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
   }
 
   return (
-    <div className={`h-full relative ${className}`}>
-      <TransitionFocusProvider pinnedBlock={null}>
-        <DiagramViewport
-          kind="graph"
-          controlsPosition="top-right"
-          nodes={nodes}
-          edges={edges}
-          // Disable change handlers for read-only view - major performance win
-          onNodesChange={undefined}
-          onEdgesChange={undefined}
-          onNodeClick={handleNodeClick}
-          onInit={handleInit}
-          onReady={placementReady}
-          controlButtons={
-            showControls ? (
-              <div className="contents" data-testid="graph-layout-controls">
-                <ControlButton
-                  onClick={handleFitView}
-                  title={t("components.workflowGraph.controls.fitViewTitle")}
-                  aria-label={t("components.workflowGraph.controls.fitView")}
-                  data-testid="graph-fit-view"
-                >
-                  <ZoomIn />
-                </ControlButton>
-                <ControlButton
-                  onClick={() => changeLayout({ ...currentLayoutOptions, direction: "TB" })}
-                  title={t("components.workflowGraph.controls.verticalTitle")}
-                  aria-label={t("components.workflowGraph.controls.vertical")}
-                  data-testid="graph-layout-vertical"
-                >
-                  <ArrowUpDown />
-                </ControlButton>
-                <ControlButton
-                  onClick={() => changeLayout({ ...currentLayoutOptions, direction: "LR" })}
-                  title={t("components.workflowGraph.controls.horizontalTitle")}
-                  aria-label={t("components.workflowGraph.controls.horizontal")}
-                  data-testid="graph-layout-horizontal"
-                >
-                  <ArrowLeftRight />
-                </ControlButton>
-              </div>
-            ) : undefined
-          }
-          nodeTypes={nodeTypes}
-          edgeTypes={edgeTypes}
-          connectionMode={ConnectionMode.Strict}
-          selectionMode={SelectionMode.Partial}
-          deleteKeyCode={null}
-          multiSelectionKeyCode={null}
-          colorMode={actualTheme}
-          style={{ backgroundColor }}
-        >
-          <GraphDefs />
-          <GraphMeasuredHeights onMeasured={handleMeasured} />
-          <Background gap={20} size={1} color={backgroundPatternColor} />
-
-          {/* MiniMap with delayed render for better initial load performance */}
-          {showMinimap && showMiniMapDelayed && !mobile && (
-            <MiniMap
-              position="bottom-right"
-              nodeColor={(node) => {
-                const nodeData = node.data as { color?: string };
-                return nodeData?.color || "#3B82F6";
+    <div className={`h-full relative flex flex-col ${className}`}>
+      {showControls && (
+        <DiagramToolbar
+          surface="graph"
+          modes={toolbarModes}
+          leading={toolbarLeading}
+          trailing={toolbarTrailing}
+          finder={(close) => (
+            <NodeFinder
+              blocks={graphBlocks}
+              steps={model.steps.map((s) => s.step)}
+              onPick={() => {}}
+              onPickStep={(stepId) => {
+                setFinderStep(stepId);
+                focusStep(stepId);
+                announceArrival(stepId);
               }}
-              maskColor="rgba(255, 255, 255, 0.2)"
-              nodeStrokeWidth={2}
-              zoomable={true}
-              pannable={true}
+              testId="graph-node-finder"
+              autoFocus
+              onClose={close}
             />
           )}
-        </DiagramViewport>
-      </TransitionFocusProvider>
+          onZoomIn={() => void instanceRef.current?.zoomIn({ duration: 200 })}
+          onZoomOut={() => void instanceRef.current?.zoomOut({ duration: 200 })}
+          onFit={handleFitView}
+          minimap={{ on: minimapOn, toggle: toggleMinimap }}
+          testId="graph-toolbar"
+        />
+      )}
+      <div className="relative min-h-0 flex-1">
+        <TransitionFocusProvider pinnedBlock={null}>
+          <FocusBridge handle={focusRef} />
+          <VariableProvider
+            value={{
+              registry: (workflow.variableRegistry ?? {}) as Record<string, VariableDefinition>,
+              onSelect: onVariableSelect,
+              selected: selectedVariable,
+            }}
+          >
+            <DiagramViewport
+              kind="graph"
+              controlsPosition="top-right"
+              nodes={nodes}
+              edges={edges}
+              // Disable change handlers for read-only view - major performance win
+              onNodesChange={undefined}
+              onEdgesChange={undefined}
+              onNodeClick={handleNodeClick}
+              // Without a click handler React Flow marks an unselectable edge `inactive` and takes
+              // its pointer events away, so it could never be hovered; the handler does nothing.
+              onEdgeClick={noopEdgeClick}
+              onInit={handleInit}
+              onReady={placementReady}
+              showControls={false}
+              nodeTypes={nodeTypes}
+              edgeTypes={edgeTypes}
+              connectionMode={ConnectionMode.Strict}
+              selectionMode={SelectionMode.Partial}
+              deleteKeyCode={null}
+              multiSelectionKeyCode={null}
+              colorMode={actualTheme}
+              style={{ backgroundColor }}
+            >
+              <GraphDefs />
+              <GraphMeasuredHeights onMeasured={handleMeasured} />
+              <Background gap={20} size={1} color={backgroundPatternColor} />
+
+              {/* MiniMap with delayed render for better initial load performance */}
+              {showMinimap && minimapOn && showMiniMapDelayed && !mobile && (
+                <MiniMap
+                  position="bottom-right"
+                  nodeColor={(node) => {
+                    const nodeData = node.data as { color?: string };
+                    return nodeData?.color || "#3B82F6";
+                  }}
+                  maskColor="color-mix(in oklch, var(--background) 60%, transparent)"
+                  className="!bg-card !border !border-border !rounded-lg"
+                  nodeStrokeWidth={2}
+                  zoomable={true}
+                  pannable={true}
+                />
+              )}
+            </DiagramViewport>
+          </VariableProvider>
+        </TransitionFocusProvider>
+      </div>
 
       {/* Legacy Node Detail Sheet — only when no external sidebar */}
       {showNodeDetails && !onNodeSelect && (

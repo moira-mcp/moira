@@ -167,7 +167,7 @@ export const WorkflowVariablesPanel: React.FC<WorkflowVariablesPanelProps> = ({
         {isOpen && (
           <>
             <span className="text-sm font-medium flex-1 text-left">
-              {t("components.workflowGraph.variables", "Variables")}
+              {t("components.workflowGraph.variables")}
             </span>
             <Badge variant="secondary" className="text-xs">
               {variableList.length}

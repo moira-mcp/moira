@@ -9,7 +9,7 @@
 
 import type { PanOnScrollMode } from "@xyflow/react";
 
-export type DiagramKind = "canvas" | "lanes" | "graph";
+export type DiagramKind = "canvas" | "graph";
 
 export interface DiagramInteractionProps {
   panOnScroll: true;
@@ -35,11 +35,9 @@ const RANGE: Record<
 > = {
   // Block cards are large: the user may shrink a canvas to a fifth, but the opening fit stops at
   // three quarters so a dense flow opens readable and is panned, not squinted at.
-  canvas: { minZoom: 0.2, maxZoom: 1.5, padding: 0.1, fitMinZoom: 0.75, fitMaxZoom: 1 },
-  // The rail is one row of fixed-size cards: it opens at full size and pans sideways.
-  lanes: { minZoom: 0.2, maxZoom: 1.5, padding: 0.1, fitMinZoom: 1, fitMaxZoom: 1 },
+  canvas: { minZoom: 0.08, maxZoom: 1.5, padding: 0.1, fitMinZoom: 0.75, fitMaxZoom: 1 },
   // The technical graph has many small nodes: it must shrink further to fit a dense flow.
-  graph: { minZoom: 0.1, maxZoom: 2, padding: 0.2, fitMinZoom: 0.1, fitMaxZoom: 1 },
+  graph: { minZoom: 0.05, maxZoom: 2, padding: 0.2, fitMinZoom: 0.05, fitMaxZoom: 1 },
 };
 
 export function diagramInteractionProps(kind: DiagramKind): DiagramInteractionProps {

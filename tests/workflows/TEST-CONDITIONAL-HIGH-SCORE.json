@@ -3,7 +3,8 @@
   "metadata": {
     "name": "TEST-CONDITIONAL-HIGH-SCORE",
     "version": "1.0.0",
-    "description": "Test conditional then branch - migrated from old test"
+    "description": "Test conditional then branch - migrated from old test",
+    "schemaVersion": 1
   },
   "nodes": [
     {
@@ -36,16 +37,21 @@
     {
       "type": "condition",
       "id": "score-check",
-      "condition": {
-        "operator": "gt",
-        "left": {
-          "contextPath": "score"
-        },
-        "right": 70
-      },
+      "cases": [
+        {
+          "when": {
+            "operator": "gt",
+            "left": {
+              "contextPath": "score"
+            },
+            "right": 70
+          },
+          "output": "true"
+        }
+      ],
       "connections": {
         "true": "congratulate",
-        "false": "encourage"
+        "default": "encourage"
       }
     },
     {

@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import type Database from "better-sqlite3";
+import { migrateWorkflowGraph } from "@mcp-moira/workflow-engine/migration";
 import type { ManagedResourceState } from "../../services/managed-resource-reconciler.js";
 import { AuditAction } from "../../audit/actions.js";
 
@@ -166,7 +167,14 @@ export function parseManagedWorkflowState(value: unknown, context: string): Mana
     ) {
       throw new Error("invalid state shape");
     }
-    return parsed;
+    if (parsed.lifecycle === "absent") return parsed;
+    return {
+      ...parsed,
+      content: {
+        ...parsed.content,
+        graph: migrateWorkflowGraph(parsed.content.graph as Record<string, unknown>).graph,
+      },
+    };
   } catch (error) {
     throw new Error(
       `Malformed ${context}: ${error instanceof Error ? error.message : String(error)}`,
@@ -371,7 +379,7 @@ export class WorkflowReconciliationRepository {
       id: row.id,
       owner: row.userId,
       slug: row.slug,
-      graph: JSON.parse(row.graph) as Record<string, unknown>,
+      graph: migrateWorkflowGraph(JSON.parse(row.graph) as Record<string, unknown>).graph,
       visibility: row.visibility === "public" ? "public" : "private",
       deleted: Boolean(row.deleted),
     };
@@ -693,7 +701,8 @@ export class WorkflowReconciliationRepository {
         ? {
             lifecycle: row.deleted ? "deleted" : "present",
             content: {
-              graph: JSON.parse(row.graph) as Record<string, unknown>,
+              // Compared in the current schema shape, like every other read of a stored graph.
+              graph: migrateWorkflowGraph(JSON.parse(row.graph) as Record<string, unknown>).graph,
               visibility: row.visibility === "public" ? "public" : "private",
             },
           }

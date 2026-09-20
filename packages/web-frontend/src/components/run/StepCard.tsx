@@ -14,6 +14,7 @@ import { useTranslation } from "react-i18next";
 import { ArrowDownRight, ArrowUpRight, CornerLeftDown, RotateCcw } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { NodeTypeTag } from "./nodeTypeStyle";
+import { TemplateText } from "../diagram/VariableText";
 import type { StepArrival, StepConnection, StepInfo } from "./model";
 
 export function StepCardList({
@@ -105,7 +106,7 @@ export function StepCard({
           onSelect &&
             "rounded-lg hover:bg-accent/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
         )}
-        title={selectTitle}
+        data-hint={selectTitle}
       >
         {position !== undefined && (
           <span className="pt-0.5 text-right text-[11px] leading-5 tabular-nums text-muted-foreground">
@@ -131,7 +132,7 @@ export function StepCard({
           {beforeSummary}
           {step.summary && (
             <p className="mt-0.5 break-words text-xs leading-5 text-muted-foreground [overflow-wrap:anywhere]">
-              {step.summary}
+              <TemplateText text={step.summary} />
             </p>
           )}
           {step.evidence.length > 0 && (
@@ -147,7 +148,7 @@ export function StepCard({
                     "rounded border bg-background px-1 font-mono leading-4",
                     field.required && "border-foreground/40",
                   )}
-                  title={field.description ?? undefined}
+                  data-hint={field.description ?? undefined}
                 >
                   {field.name}
                   {field.type && <span className="text-muted-foreground">: {field.type}</span>}
@@ -162,7 +163,7 @@ export function StepCard({
                   key={arrival.linkId}
                   type="button"
                   data-arrival={arrival.linkId}
-                  title={`${arrival.sourceName} · ${arrival.label}`}
+                  data-hint={`${arrival.sourceName} · ${arrival.label}`}
                   onClick={(event) => {
                     event.stopPropagation();
                     onArrival?.(arrival);
@@ -207,7 +208,7 @@ export function StepCard({
                       : {})}
                     data-edge-kind={connection.internal ? "internal" : "external"}
                     data-connection={connection.label}
-                    title={connection.targetName}
+                    data-hint={connection.targetName}
                     onMouseEnter={
                       onConnectionHover ? () => onConnectionHover(connection) : undefined
                     }

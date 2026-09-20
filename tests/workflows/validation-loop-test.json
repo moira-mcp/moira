@@ -3,7 +3,8 @@
   "metadata": {
     "name": "Validation Loop Test",
     "version": "1.0.0",
-    "description": "Creator-validator improvement cycle pattern"
+    "description": "Creator-validator improvement cycle pattern",
+    "schemaVersion": 1
   },
   "variableRegistry": {
     "score": {
@@ -76,16 +77,21 @@
     {
       "type": "condition",
       "id": "score-check",
-      "condition": {
-        "operator": "gte",
-        "left": {
-          "contextPath": "score"
-        },
-        "right": 8
-      },
+      "cases": [
+        {
+          "when": {
+            "operator": "gte",
+            "left": {
+              "contextPath": "score"
+            },
+            "right": 8
+          },
+          "output": "true"
+        }
+      ],
       "connections": {
         "true": "end",
-        "false": "creator-improve"
+        "default": "creator-improve"
       }
     },
     {

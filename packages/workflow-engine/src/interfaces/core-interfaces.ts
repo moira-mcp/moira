@@ -18,11 +18,34 @@ import type { IGraphExecutionEngine } from "./graph-execution-engine.js";
 export type { GraphNode } from "../types/graph-nodes.js";
 import { GraphValidationResult } from "../validation/graph-validator.js";
 
+/**
+ * A progress block's binding to the list the run works through — any array a flow already keeps
+ * in its variables, or just its counters. Paths are variable paths (`tasks`, `plan.units`,
+ * `node-id.field`); `title` is resolved inside one item. `done` defaults to `current − indexBase`,
+ * `total` to the items' length. Nothing here names a plan or a checklist: the block says what it
+ * counts, the run supplies the values.
+ */
+export interface ProgressListBinding {
+  /** Path of the array of items. */
+  items?: string;
+  /** Path inside one item giving its title; a string item is its own title. */
+  title?: string;
+  /** Path of the index of the item in progress, counted from `indexBase`. */
+  current?: string;
+  /** Path of the count of finished items. */
+  done?: string;
+  /** Path of the total count. */
+  total?: string;
+  /** Base of `current`: 1 (default) or 0. */
+  indexBase?: 0 | 1;
+}
+
 export interface WorkflowProgressNode {
   id: string;
   label: string;
   connections?: { default?: string };
   content?: ProgressContentTemplate;
+  list?: ProgressListBinding;
 }
 
 export interface WorkflowProgressFact {
@@ -56,6 +79,8 @@ export interface WorkflowGraph {
     description: string;
     author?: string;
     tags?: string[];
+    /** Definition schema version stamped by the migration; absent means the pre-routing shape (0). */
+    schemaVersion?: number;
   };
   nodes: GraphNode[];
   // No startNodeId/endNodeIds - engine finds by node types automatically

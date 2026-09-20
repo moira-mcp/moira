@@ -160,10 +160,15 @@ describe("Node Handlers", () => {
       const conditionNode: ConditionNode = {
         type: "condition",
         id: "score-check",
-        condition: ConditionBuilder.greaterThan(ConditionBuilder.contextPath("score"), 70),
+        cases: [
+          {
+            when: ConditionBuilder.greaterThan(ConditionBuilder.contextPath("score"), 70),
+            output: "true",
+          },
+        ],
         connections: {
           true: "high-score",
-          false: "low-score",
+          default: "low-score",
         },
       };
 
@@ -181,7 +186,8 @@ describe("Node Handlers", () => {
       expect(result.action).toBe("continue");
       expect(result.outputPath).toBe("true");
       expect(result.data).toMatchObject({
-        conditionResult: true,
+        matchedCase: 0,
+        output: "true",
       });
     });
 
@@ -192,10 +198,15 @@ describe("Node Handlers", () => {
       const conditionNode: ConditionNode = {
         type: "condition",
         id: "score-check",
-        condition: ConditionBuilder.greaterThan(ConditionBuilder.contextPath("score"), 70),
+        cases: [
+          {
+            when: ConditionBuilder.greaterThan(ConditionBuilder.contextPath("score"), 70),
+            output: "true",
+          },
+        ],
         connections: {
           true: "high-score",
-          false: "low-score",
+          default: "low-score",
         },
       };
 
@@ -209,9 +220,10 @@ describe("Node Handlers", () => {
         mockEngine,
       );
 
-      expect(result.outputPath).toBe("false");
+      expect(result.outputPath).toBe("default");
       expect(result.data).toMatchObject({
-        conditionResult: false,
+        matchedCase: -1,
+        output: "default",
       });
     });
 
@@ -224,14 +236,19 @@ describe("Node Handlers", () => {
       const conditionNode: ConditionNode = {
         type: "condition",
         id: "execution-id-check",
-        condition: {
-          operator: "eq",
-          left: { contextPath: "submittedExecutionId" },
-          right: { contextPath: "executionId" },
-        },
+        cases: [
+          {
+            when: {
+              operator: "eq",
+              left: { contextPath: "submittedExecutionId" },
+              right: { contextPath: "executionId" },
+            },
+            output: "true",
+          },
+        ],
         connections: {
           true: "matching-execution",
-          false: "wrong-execution",
+          default: "wrong-execution",
         },
       };
 
@@ -247,7 +264,8 @@ describe("Node Handlers", () => {
 
       expect(result.outputPath).toBe("true");
       expect(result.data).toMatchObject({
-        conditionResult: true,
+        matchedCase: 0,
+        output: "true",
         evaluatedValues: {
           submittedExecutionId: "test-execution-id",
           executionId: "test-execution-id",
@@ -262,24 +280,29 @@ describe("Node Handlers", () => {
       const conditionNode: ConditionNode = {
         type: "condition",
         id: "and-check",
-        condition: {
-          operator: "and",
-          conditions: [
-            {
-              operator: "gte",
-              left: { contextPath: "score" },
-              right: 7,
-            },
-            {
-              operator: "eq",
-              left: { contextPath: "status" },
-              right: "approved",
-            },
-          ],
-        } as any,
+        cases: [
+          {
+            when: {
+              operator: "and",
+              conditions: [
+                {
+                  operator: "gte",
+                  left: { contextPath: "score" },
+                  right: 7,
+                },
+                {
+                  operator: "eq",
+                  left: { contextPath: "status" },
+                  right: "approved",
+                },
+              ],
+            } as any,
+            output: "true",
+          },
+        ],
         connections: {
           true: "success",
-          false: "failure",
+          default: "failure",
         },
       };
 
@@ -295,7 +318,8 @@ describe("Node Handlers", () => {
 
       expect(result.outputPath).toBe("true");
       expect(result.data).toMatchObject({
-        conditionResult: true,
+        matchedCase: 0,
+        output: "true",
       });
     });
 
@@ -306,24 +330,29 @@ describe("Node Handlers", () => {
       const conditionNode: ConditionNode = {
         type: "condition",
         id: "or-check",
-        condition: {
-          operator: "or",
-          conditions: [
-            {
-              operator: "eq",
-              left: { contextPath: "priority" },
-              right: "high",
-            },
-            {
-              operator: "eq",
-              left: { contextPath: "urgent" },
-              right: true,
-            },
-          ],
-        } as any,
+        cases: [
+          {
+            when: {
+              operator: "or",
+              conditions: [
+                {
+                  operator: "eq",
+                  left: { contextPath: "priority" },
+                  right: "high",
+                },
+                {
+                  operator: "eq",
+                  left: { contextPath: "urgent" },
+                  right: true,
+                },
+              ],
+            } as any,
+            output: "true",
+          },
+        ],
         connections: {
           true: "success",
-          false: "failure",
+          default: "failure",
         },
       };
 
@@ -339,7 +368,8 @@ describe("Node Handlers", () => {
 
       expect(result.outputPath).toBe("true"); // priority is 'high'
       expect(result.data).toMatchObject({
-        conditionResult: true,
+        matchedCase: 0,
+        output: "true",
       });
     });
 
@@ -350,17 +380,22 @@ describe("Node Handlers", () => {
       const conditionNode: ConditionNode = {
         type: "condition",
         id: "not-check",
-        condition: {
-          operator: "not",
-          condition: {
-            operator: "eq",
-            left: { contextPath: "status" },
-            right: "disabled",
+        cases: [
+          {
+            when: {
+              operator: "not",
+              condition: {
+                operator: "eq",
+                left: { contextPath: "status" },
+                right: "disabled",
+              },
+            } as any,
+            output: "true",
           },
-        } as any,
+        ],
         connections: {
           true: "success",
-          false: "failure",
+          default: "failure",
         },
       };
 
@@ -376,7 +411,8 @@ describe("Node Handlers", () => {
 
       expect(result.outputPath).toBe("true"); // NOT (status == 'disabled') = true
       expect(result.data).toMatchObject({
-        conditionResult: true,
+        matchedCase: 0,
+        output: "true",
       });
     });
   });

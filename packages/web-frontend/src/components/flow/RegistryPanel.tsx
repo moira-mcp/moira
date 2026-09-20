@@ -7,8 +7,9 @@
  * definition.
  */
 
-import React, { useState } from "react";
+import React, { useState, useRef } from "react";
 import { useTranslation } from "react-i18next";
+import { useHighlightTarget, type HighlightRequest } from "../diagram/useHighlightTarget";
 import { Plus, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
@@ -135,7 +136,7 @@ function Entry({ name, entry }: { name: string; entry: RegistryVariable }): Reac
   ) : (
     <span className="flex min-w-0 flex-1 items-center gap-1.5">
       {type}
-      <code className="min-w-0 truncate font-mono text-xs" title={formatDefault(entry.default)}>
+      <code className="min-w-0 truncate font-mono text-xs" data-hint={formatDefault(entry.default)}>
         {entry.default === undefined ? (
           <span className="text-muted-foreground">{t("pages.flowPage.registry.noDefault")}</span>
         ) : (
@@ -223,17 +224,22 @@ function Entry({ name, entry }: { name: string; entry: RegistryVariable }): Reac
 
 export function RegistryPanel({
   registry,
+  highlight = null,
 }: {
   /** The registry as currently edited. */
   registry: Record<string, RegistryVariable> | undefined;
+  /** A variable to bring into view and mark (a reference token was clicked). */
+  highlight?: HighlightRequest | null;
 }): React.JSX.Element {
   const { t } = useTranslation();
+  const panelRef = useRef<HTMLDivElement>(null);
+  useHighlightTarget(panelRef, highlight, (name) => `[data-registry-name="${name}"]`);
   const { enabled, setRegistry } = useEditing();
   const [newName, setNewName] = useState("");
   const names = Object.keys(registry ?? {});
   const validName = /^[A-Za-z_][A-Za-z0-9_]*$/.test(newName) && !names.includes(newName);
   return (
-    <div className="space-y-3 p-3" data-testid="registry-panel">
+    <div className="space-y-3 p-3" data-testid="registry-panel" ref={panelRef}>
       <GuidanceCallout title={t("pages.flowPage.registry.guideTitle")} testId="guidance-registry">
         {t("pages.flowPage.registry.guideBody")}
       </GuidanceCallout>

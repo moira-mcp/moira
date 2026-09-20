@@ -61,6 +61,8 @@ export function definitionBlocks(workflow: WorkflowGraph): RunBlock[] {
     visits: 0,
     currentNodeId: null,
     content: { summary: null, details: [], outcome: null, next: null },
+    timing: { passes: [], totalMs: null, currentMs: null, recorded: false },
+    list: null,
   }));
 }
 

@@ -1,8 +1,8 @@
 /**
  * E2E Tests: the run page keeps the inspector's toolbar, panel tabs, context editing, technical
  * graph and admin variant. Opens the first execution in the list, whatever its workflow: with a
- * process view the run occupies the page and the technical graph sits in the Graph tab; without
- * one the graph fills the page as before.
+ * process view the page has two views and the technical graph is the second of them; without one
+ * the graph fills the page as before.
  */
 
 import { test, expect, type Page } from "./fixtures.js";
@@ -23,18 +23,19 @@ async function openFirstExecution(page: Page, listUrl = `${BASE_URL}/executions`
   await expect(page.getByTestId("run-panel").locator('[role="tablist"]')).toBeVisible();
 }
 
-/** Bring the technical node graph on screen: the Graph tab when the run has a process view. */
 /**
- * The technical node graph: in the panel's graph tab when the run has a process view (the lanes
- * rail beside it is a React Flow instance of its own), else in the main section.
+ * The technical node graph: the page's `graph` view when the run has a process view, else the
+ * only diagram in the main section. Only the view being read is mounted, so once the graph is
+ * shown it is the page's single React Flow instance.
  */
 async function showTechnicalGraph(page: Page) {
-  const graphTab = page.getByRole("tab", { name: /Graph|Граф/ });
-  const inPanel = (await graphTab.count()) > 0;
-  if (inPanel) await graphTab.click();
-  const graph = inPanel
-    ? page.getByTestId("run-panel").locator(".react-flow")
-    : page.locator(".react-flow");
+  const graphTab = page.getByTestId("run-modes").locator('[data-mode="graph"]');
+  const hasProcess = (await graphTab.count()) > 0;
+  if (hasProcess) {
+    await graphTab.click();
+    await expect(page.getByTestId("execution-progress")).toHaveAttribute("data-view", "graph");
+  }
+  const graph = page.locator(".react-flow").last();
   await expect(graph).toBeVisible({ timeout: 15000 });
   return graph;
 }
@@ -95,7 +96,7 @@ test.describe("Run page toolbar and panel", () => {
     await expect(dialog).not.toBeVisible();
   });
 
-  test("tabs switch between variables, errors, steps and locks", async ({ page }) => {
+  test("panel tabs switch between block, variables, errors, steps and locks", async ({ page }) => {
     await openFirstExecution(page);
     for (const name of [
       /Variables|Переменные/,
@@ -143,7 +144,7 @@ test.describe("Run page toolbar and panel", () => {
     const inView = async () => {
       const box = await graph.boundingBox();
       const card = await graph
-        .locator('[data-graph-node] [data-step-card][aria-current="step"]')
+        .locator('[data-graph-node][data-current="true"]')
         .first()
         .boundingBox();
       return (
@@ -157,8 +158,9 @@ test.describe("Run page toolbar and panel", () => {
     };
     await expect.poll(inView, { timeout: 5000 }).toBe(true);
     const onCurrent = await transformOf();
-    // The fit-view control gives the overview back; the toolbar's current-node button returns.
-    await graph.locator(".react-flow__controls-fitview").click();
+    // The fit control in the diagram's toolbar gives the overview back; the header's
+    // current-node button returns.
+    await page.getByTestId("graph-toolbar").getByTestId("toolbar-fit").click();
     await expect.poll(transformOf, { timeout: 5000 }).not.toBe(onCurrent);
     const toolbar = page.locator(".border-b.bg-card").first();
     await toolbar.locator("button:has(svg.lucide-play)").click();
@@ -176,11 +178,16 @@ test.describe("Run page toolbar and panel", () => {
     const phone = await panel.boundingBox();
     const phonePage = await page.getByTestId("run-page").boundingBox();
     expect(Math.round(phone!.width)).toBe(Math.round(phonePage!.width));
-    // On a phone neither the run canvas nor the technical graph draws a minimap over the blocks.
-    await page.getByTestId("run-modes").locator('[data-mode="canvas"]').click();
+    // On a phone the technical graph draws no navigator over its cards, and the map's navigator
+    // is the reader's own choice in the toolbar rather than something fixed to the diagram: it
+    // opens folded and appears only once switched on.
     await expect(page.getByTestId("canvas-view").locator(".react-flow")).toBeVisible({
       timeout: 15000,
     });
+    await expect(page.getByTestId("canvas-view").locator(".react-flow__minimap")).toHaveCount(0);
+    await page.getByTestId("map-toolbar").getByTestId("toolbar-minimap").click();
+    await expect(page.getByTestId("canvas-view").locator(".react-flow__minimap")).toHaveCount(1);
+    await page.getByTestId("map-toolbar").getByTestId("toolbar-minimap").click();
     await expect(page.getByTestId("canvas-view").locator(".react-flow__minimap")).toHaveCount(0);
     const graph = await showTechnicalGraph(page);
     await expect(graph.locator(".react-flow__minimap")).toHaveCount(0);
@@ -225,7 +232,9 @@ test.describe("Admin run page", () => {
     await expect(toolbar).toBeVisible();
     await expect(toolbar.locator(".text-muted-foreground.truncate").first()).toBeVisible();
     await expect(page.getByTestId("execution-progress")).toBeVisible();
-    await expect(page.getByTestId("progress-node-scope")).toHaveAttribute("data-status", "waiting");
+    await expect(
+      page.locator('[data-testid="canvas-view"] [data-block-id="scope"]'),
+    ).toHaveAttribute("data-status", "waiting");
   });
 
   test("admin view is read-only in the variables panel but may answer the waiting step", async ({

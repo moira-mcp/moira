@@ -61,20 +61,25 @@ picks a route deliberately.
 {
   "id": "route-test-adequacy-reach",
   "type": "condition",
-  "condition": {
-    "operator": "eq",
-    "left": { "contextPath": "repair-test-adequacy.repair_reach" },
-    "right": "contained"
-  },
+  "cases": [
+    {
+      "when": {
+        "operator": "eq",
+        "left": { "contextPath": "repair-test-adequacy.repair_reach" },
+        "right": "contained"
+      },
+      "output": "contained"
+    }
+  ],
   "connections": {
-    "true": "review-test-adequacy",
-    "false": "advance-evidence-iteration"
+    "contained": "review-test-adequacy",
+    "default": "advance-evidence-iteration"
   }
 }
 ```
 
-Write the condition so the full chain is the branch anything other than `contained` takes. The
-conservative direction is then the default direction.
+Write the single case so it names `contained`; the full chain is then what `default` takes, which is
+every answer other than `contained`. The conservative direction is the default output.
 
 The spreading branch does not enter the chain directly: it goes through the expression node that
 opens the next round, and the chain follows from there.

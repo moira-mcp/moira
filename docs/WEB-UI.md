@@ -43,23 +43,36 @@ frontend/src/
 │   ├── execution/              # Execution display components
 │   │   ├── ExecutionInspector.tsx    # Run page with DI (fetchExecution prop, editable/canAnswer flags)
 │   │   └── ExecutionErrorHistory.tsx # Error log with collapsible entries, error badges
-│   ├── flow/                    # Flow page: the definition as a process, edited in place
-│   │   ├── editing.tsx / model.ts / modes.ts        # Edit set (apply, export diff), run-less projection, modes
-│   │   ├── SplitView.tsx / RegistryPanel.tsx        # Blocks against their steps; the variable registry
+│   ├── diagram/                 # The diagram design system shared by the map, the graph and the panels
+│   │   ├── PortedCard.tsx / DiagramEdge.tsx                                # The card with side ports; the one edge plus its marker set
+│   │   ├── Hint.tsx                                                        # `Hint` around a trigger and the delegated `HintLayer` for `data-hint`
+│   │   ├── PageHeader.tsx / DiagramToolbar.tsx / LayoutPresetButtons.tsx   # Page text; diagram functions; the layout presets
+│   │   ├── PanelSection.tsx / IndexBadge.tsx / ListMarker.tsx              # Panel section rhythm; the ordinal badge; the list-item marker
+│   │   ├── VariableText.tsx                                                # `{{name}}`, expression and condition tokens with the registry tooltip
+│   │   ├── DiagramViewport.tsx / interaction.ts / placement.ts             # React Flow wrapper, gesture policy, opening placement
+│   │   ├── reveal.ts                                                       # `requestReveal`: bring an element inside a diagram into the camera
+│   │   └── layoutPreset.ts / interactive.ts / useHighlightTarget.ts / useStoredFlag.ts / useRequest.ts
+│   ├── flow/                    # Flow page: the definition as a process, edited in place (`guideSteps.ts`: its walkthrough)
+│   │   ├── editing.tsx / model.ts / modes.ts        # Edit set (apply, export diff), run-less projection, the two views
+│   │   ├── RegistryPanel.tsx                        # The variable registry (panel tab)
 │   │   └── EditControls.tsx                         # In-place editors (block text, transitions, owner, node text)
 │   ├── run/                     # Run page: the execution as a process
-│   │   ├── LanesView.tsx / CanvasView.tsx / OutlineView.tsx / RouteView.tsx  # The four modes
-│   │   ├── BlockDetailPanel.tsx / VariablesPanel.tsx / StepList.tsx        # Panel tabs
+│   │   ├── MapView.tsx / CanvasView.tsx                                     # The map view (contents beside the diagram); its ported-card diagram
+│   │   ├── ContentsSidebar.tsx                                              # Contents rows, their fold state, `ContentsLayout` beside either diagram
+│   │   ├── BlockDetailPanel.tsx / NodePanel.tsx / VariablesPanel.tsx / StepList.tsx  # The panel's block and node levels; panel tabs
+│   │   ├── BlockTimings.tsx / BlockListCard.tsx / BlockRouteFacts.tsx / RouteSummary.tsx  # Block panel sections and the route facts line (run page)
+│   │   ├── TypicalDurations.tsx                                            # Block panel: the version's typical durations (flow page)
+│   │   ├── NodeFinder.tsx                                                   # Step search, mounted in both diagram toolbars
 │   │   ├── variableRows.ts / variableTree.tsx                              # Variables grouping model; shared rows, groups, tree, leaf editor
-│   │   ├── StepCard.tsx / TabBadge.tsx                                      # One step card for every list; the panel badge
-│   │   ├── RunCursor.tsx / Walkthrough.tsx / Guidance.tsx / status.tsx      # Cursor, guide, notes, status vocabulary
-│   │   ├── model.ts / route.ts / arcs.ts / layout.ts                        # Pure view helpers; ELK layout
+│   │   ├── StepCard.tsx / TabBadge.tsx                                      # One step card for every panel list; the panel badge
+│   │   ├── RunCursor.tsx / Walkthrough.tsx / DiagramGuide.tsx / Guidance.tsx / status.tsx  # Cursor, walkthrough, the compass note per view, callouts, status vocabulary and the card tone per status
+│   │   ├── model.ts / route.ts / layout.ts / focus.tsx                      # Pure view helpers; the map's door to the engine's layout, geometry and presets; the lit-connector store
+│   │   ├── duration.ts / waiting.ts                                         # The engine's duration split worded in the interface language, clock formatting; who-is-waited-for wording
 │   │   └── modes.ts / nodeTypeStyle.tsx
 │   └── workflow/                # Workflow management
 │       ├── WorkflowExplorer.tsx # Workflow list with FilterBar + DataListView + useDebounce
-│       ├── WorkflowGraph.tsx    # React Flow visualization with layout controls
+│       ├── WorkflowGraph.tsx    # React Flow visualization with its diagram toolbar
 │       ├── WorkflowCard.tsx     # Compact single-row workflow card (icon + name left, owner center, badges right)
-│       ├── WorkflowSidebar.tsx  # Persistent sidebar (workflow info / node details)
 │       ├── NodeDetailSheet.tsx  # Node detail panel (legacy, used in execution views)
 │       ├── WorkflowHeader.tsx   # Workflow metadata display
 │       ├── WorkflowVariablesPanel.tsx # Collapsible variables sidebar
@@ -150,6 +163,16 @@ Self-hosted Inter Variable font via `@fontsource-variable/inter`. Registered as 
 shadcn/ui primitives in `src/components/ui/`: alert-dialog, alert, avatar, badge, button, card, checkbox, collapsible, command, dialog, dropdown-menu, form, input, label, popover, progress, scroll-area, select, separator, sheet, sidebar, skeleton, switch, table, tabs, textarea, tooltip.
 
 Additional: NumberTicker (Magic UI, animated counter using motion/react).
+
+Tooltips are one surface across the application: `ui/tooltip.tsx`'s `TooltipContent` and the
+diagram system's `Hint` both draw on the popover colours with a hairline border and a soft shadow,
+so no bubble inverts against the theme. `HintLayer` is mounted once in `App.tsx` and gives that same
+surface to any element carrying `data-hint`, which is what components use instead of the browser's
+native `title` (screen readers are served by `aria-label`); an element asking for
+`data-hint-at="pointer"` — a diagram edge, whose box is nowhere near the pointer — is anchored at
+the pointer, and the layer's surface never takes the pointer itself. No component under the process
+pages sets a native `title` or an SVG `<title>`; `tests/unit/web-frontend/native-title-guard.test.ts`
+refuses one and `diagram-interaction.spec.ts` sweeps both pages' DOM for them.
 
 ### Shared Components
 
@@ -410,44 +433,65 @@ workflow (a move to another workflow through breadcrumbs or a subgraph link is a
 shows nothing of the previous one), and a failed refetch keeps the content and reports once
 through a toast. While the page holds unsaved edits it re-derives the process in
 the browser with the engine's `deriveProcess` (the `@mcp-moira/workflow-engine/process` subpath),
-so the diagnostics it shows are the ones the server's validation would raise. The modes render a
+so the diagnostics it shows are the ones the server's validation would raise. The map renders a
 run-less projection (`components/flow/model.ts`: every block pending, no route, no cursor, no run
-title) through the run page's mode components; the page's context (`EditingProvider` with
+title) through the run page's `MapView`; the page's context (`EditingProvider` with
 `definition`) makes the shared status chips and icons, the run's no-content sentences and the run
-mode notes disappear, and the modes read their notes from `pages.flowPage.modeGuide`. Derivation
+notes disappear, and the map reads its guidance from `pages.flowPage.modeGuide`. Derivation
 diagnostics are also shown on the offending block or step (`DiagnosticBadge`), and the registry
 panel edits a whole declaration as JSON Schema besides its type, description and default.
 
-**URL state:** `view` (`outline | canvas | lanes | split | graph`, default outline; `graph` is the
-only mode of a workflow without `progress`), `block`, `guide` (walkthrough step), `edit` (`1` turns
-on edit mode; ignored for non-owners).
+**URL state:** `view` (`map | graph`, default map, registry `components/flow/modes.ts`; any other
+value resolves to `map`; `graph` is the only view of a workflow without `progress`), `block`,
+`guide` (walkthrough step), `edit` (`1` turns on edit mode; ignored for non-owners).
 
-**Layout:** the toolbar (back, name and version, edit toggle with its hint for owners, the owner
-actions: copy for public flows, visibility, share, delete); a header row with the mode tabs and
-"Explain this page"; the edit panel while editing (the edit count, which is the export diff's
-entry count so a value typed back to what is stored is not an edit; discard, which clears every
-recorded edit; save; the loaded revision; the export diff as flow-file path / before / after;
-the server's refusal message); the process diagnostics inline; the mode filling the main area; a
-panel beside it (under it on a phone) with the **Block** tab (`BlockDetailPanel`, a step click opens the graph mode on that node) and the
-**Variables** tab (`RegistryPanel`: the registry on the shared variable rows — name, type badge
-and default in the row, description and the whole declaration as JSON Schema in the opened row;
-in edit mode the type select, default input, description and schema editors sit in the same
-places, a row's control removes the entry and a form below declares one). The graph mode mounts `WorkflowGraph` (its `focusRequest`
-prop brings a chosen node into view) with its controls beside `WorkflowSidebar`, as the former
-workflow detail page did.
+**Layout:** the `PageHeader` (`flow-header`) carries the page's text and its own actions — back,
+the workflow name (`flow-title`), `v<version>` as the meta, the description as the header line,
+and as header facts the workflow's tags (`flow-tag`) and its node count (`flow-node-count`) —
+with the edit toggle and its hint for owners and the owner actions (copy for public flows,
+visibility, share, delete) on the right, folded into a dropdown below `md`. Everything that acts
+on the diagram lives in the `DiagramToolbar` beneath it, which the active view mounts: the view
+tabs (`flow-modes`) as the toolbar's `modes` slot, the contents fold button, the folded step
+finder, the layout presets, zoom/fit, the minimap switch, and trailing the refresh indicator and
+"Explain this page" (`guide-open`).
+
+Then, in order: the edit panel while editing (the edit count, which is the export diff's entry
+count so a value typed back to what is stored is not an edit; discard, which clears every recorded
+edit; save; the loaded revision; the export diff as flow-file path / before / after; the server's
+refusal message); the process diagnostics inline; the active view filling the main area; and the
+panel beside it (under it on a phone, foldable through `flow-panel-collapse` / `flow-panel-expand`)
+with the **Block** tab and the **Variables** tab (`RegistryPanel`: the registry on the shared
+variable rows — name, type badge and default in the row, description and the whole declaration as
+JSON Schema in the opened row; in edit mode the type select, default input, description and schema
+editors sit in the same places, a row's control removes the entry and a form below declares one).
+
+The **Block** tab has two levels: `BlockDetailPanel` for the selected block, and `NodePanel` for a
+selected step, which is where a node's details live — including the validation, playbooks and
+catalog configuration sections. The panel is therefore mounted for the graph view and for a
+workflow without `progress` as well; its block level then shows the empty-state callout.
+
+Only the view the tab names is mounted (`flow-view`, `data-view`): the map is `MapView`, and the
+graph is `WorkflowGraph` inside a `ContentsLayout`, so the contents sidebar sits beside both — a
+workflow without `progress` has no blocks to list and shows the graph alone. The
+graph receives `focusRequest` (a chosen node brought into view), `selectedBlockId` (the block's
+group is ringed and pulses on arrival) and the page's toolbar slots, and it takes its contents
+fold button through `ContentsToggleProvider` / `ContentsToggleSlot`. Selection lives in the URL and
+the graph re-centres on its focus request, so a switch loses nothing; the graph's lazy chunk is
+fetched when its view is first shown, behind `DiagramSkeleton`.
 
 **Editing** (`components/flow/editing.tsx`): the edit set covers block label and summary,
 connection labels with a loop's cause and exit, node ownership, node text (directive, completion
 condition, message, expressions) and registry entries; `applyEdits` yields the edited definition,
-`exportDiff` the changed flow-file entries. Editors: `BlockNameEditor` / `BlockSummaryEditor`
-(outline and split), `TransitionEditor` (outline), `OwnerSelect` and `NodeTextEditor` (split),
-`RegistryPanel` (variables tab; a default and a whole declaration are parsed as JSON before they
+`exportDiff` the changed flow-file entries. Editors (`components/flow/EditControls.tsx`), all in
+the block panel: `BlockNameEditor` / `BlockSummaryEditor` on the block header, `TransitionEditor`
+on each transition, `OwnerSelect` and `NodeTextEditor` on each step card; `RegistryPanel`
+(variables tab; a default and a whole declaration are parsed as JSON before they
 are applied). The save calls
 `apiClient.updateWorkflow(id, edited, fileInfo.revision)` (`PUT /api/workflows/:id`); a 409 shows
 the conflict text and a 400 the server's message, both keeping the edits; a success clears them and
 reloads the detail and then the process for the new revision, the previous picture staying mounted
-through both. The walkthrough (`Walkthrough`, generic over the page's modes) explains block,
-step, evidence, loop, editing and the modes.
+through both. The walkthrough (`Walkthrough`, generic over the page's views) explains block,
+step, evidence, loop, editing and the views.
 
 ### Run page (ExecutionInspector component)
 
@@ -484,16 +528,17 @@ block panel, editable variable list for the Variables panel) and the run project
 `apiClient.getExecutionProgress(id, at?)`. Every run fact — block statuses, pass counts, the
 route, the variables — comes from the projection; the page derives none of it. When a route cursor
 is set the page keeps the whole-run projection (for the scrubber) and fetches the projection at
-the cursor for the modes.
+the cursor for the views.
 
-**URL state:** `view` (`lanes | canvas | outline | route`, default lanes), `block` (selected
-block), `at` (route cursor, a visit sequence number), `guide` (walkthrough step). Unknown values
-fall back to defaults; navigation compares against the live URL so a duplicate change pushes no
-history entry.
+**URL state:** `view` (`map | graph`, default map, registry `components/run/modes.ts`; any other
+value resolves to `map`), `block` (selected block), `at` (route cursor, a visit sequence number),
+`guide` (walkthrough step). Unknown values fall back to defaults; navigation compares against the
+live URL so a duplicate change pushes no history entry.
 
 **Layout:**
 
-- Compact toolbar (single line): back button, execution ID (copy), workflow name, status badge,
+- `PageHeader` (`run-header`), the page's text and its own actions on one row, with the run's goal
+  (or task title) as the header line: back button, execution ID (copy), workflow name, status badge,
   current node (focuses the node graph), owner info (admin), lock button (user view, running
   executions), refresh (spins, `data-pending="true"`, while an
   execution or progress request is in flight), error badge. A refresh that fails keeps the run on
@@ -501,124 +546,205 @@ history entry.
   screen (the "unavailable" banner is a first-load state only). The Locks tab holds its history in a
   `useResource` store: opening it again refreshes behind the list (`locks-panel` with
   `data-pending`), the spinner (`locks-loading`) shows only before the first list.
-- With a process view: a header row with the mode tabs, the route cursor (when a route is
-  recorded), the status legend and the "Explain this page" button; the mode fills the remaining
-  width and height. Without one (a workflow without `progress`): the technical node graph fills
-  the main area.
+- With a process view: the active view fills the remaining width and height and brings the shared
+  `DiagramToolbar` with it — the view tabs (**Map** and **Graph**, `run-modes`) in the `modes` slot,
+  then the contents fold button and the route cursor (`RunCursor`, when a route is recorded), the
+  folded step finder, the layout presets, zoom/fit, the minimap switch, and trailing the status
+  legend (`legend-open`, a disclosure over `StatusLegend` worded for the run's `waitingFor`) and
+  "Explain this page" (`guide-open`). Only the view the tab names is mounted, so the document holds
+  one diagram, one toolbar and one marker set; selection and cursor live in the URL and the graph
+  re-centres on its focus request, so a switch loses nothing. The header's current-node button and a
+  step's "focus" click switch to the graph view and focus the node. Without a process view (a
+  workflow without `progress`): the technical node graph fills the main area.
 - Panel (beside the run on `lg` and wider, stacked under it below, capped at 38 vh on a phone) with
   tabs: **Block** (default when a process view exists), **Variables**, **Errors**,
-  **Steps**, **Graph** (the technical node graph, present only with a process view) and **Locks**.
+  **Steps** and **Locks**. The tab strip is a container (`run-panel-tabs`): the tab icons appear only
+  from a 520 px strip, so the labels keep one row in either language at the desktop panel width.
 
-**Modes** (`components/run/`):
+**Views** (`components/run/`):
 
-- `LanesView` — task header (title, goal, facts), the rail of blocks in process order with the
-  current block pinned ("you are here"), pass counts as secondary text, struck-through skipped blocks, return
-  arcs beneath the rail nested by span (`arcs.ts`), and the selected block's run content. Every
-  connector away from the rail — returns, forward links that skip a block — is thin and muted with
-  no label at rest; the source lane names each one in a chip (`chips.ts`: `laneChipsOf` =
-  `returnsOf` + `skipsOf`, `canvasChipsOf` adds `hubExitsOf`). Transitions of one kind into one
-  target fold into one chip carrying every label and every connector key (`keys`; a hub bundle has
-  one key, the source's first transition into the hub); `TransitionChipView` in `focus.tsx` renders
-  `↩ n name` (`×k` when it folds k transitions) / `↗ n name` with the labels, and a single return's
-  cause and exit, as the tooltip; `data-connector-count` is the number of connectors the chip
-  lights, which equals `k` except for a hub bundle (k labels, one bundled edge). Hovering a chip lights every connector it folds; hovering a
-  connector lights that one. Pills of connectors lit together take one row each beyond the
-  outermost of them (`pillRows` in `arcs.ts`, `PILL_ROW`), so a folded chip or a selected lane
-  never stacks pills, and the arc and link bands reserve a row for every pill the source with the
-  most connectors can light (`arcsHeight`, `linksHeight`), so the column stays inside the rail; on the canvas every parallel forward transition and every self-loop of a
-  block has its own line and label row (`PARALLEL_STEP`). Chips stack in a column inside the
-  lane card and every card is as tall as the block with the most chips (`laneCardHeight`,
-  `LANE_CHIP_ROW`), so no chip spills out.
-  `TransitionFocusProvider` holds the lit transition: hovering a chip or a connector lights it
-  (`data-focused="true"`) and renders its label pill (`data-arc-label`, `data-link-label`); the
-  block the reader selected (`selectedBlockId`) keeps all of its connectors lit while nothing is
-  hovered. The
-  horizontal rail is a React Flow instance on the shared `DiagramViewport` (`LanesRail`): lane cards
-  are fixed nodes in one row (`laneLayout.ts`: positions, the link band above, the arc band below,
-  the viewport height), return arcs and forward links are custom edges over the same geometry, and
-  the rail opens at full size on the first lane (definition) or centred on the current lane (run)
-  and pans and zooms instead of scrolling the page; on a phone (the `useIsMobile` hook) it becomes
-  a vertical stepper with the same chips. Forward transitions that skip a block are thin muted
-  links above the rail (`buildLinks`, `linkGeometry`); hubs receive them like any block. The arc
-  and link bands are one line per nesting depth (`ARC_STEP`, `LINK_STEP`, with `ARC_TAIL` and
-  `LINK_TAIL` for the arrowhead and a lit pill).
-- `runBlocks` (`run/model.ts`) joins the process blocks with the run's projection; a rendered
+- `MapView` — one component for both pages: the layered diagram (`CanvasDiagram` from
+  `CanvasView.tsx`) inside a `ContentsLayout`, with the compass note (`DiagramGuide`, mounted in
+  the toolbar of both diagrams: `diagram-guide` with `diagram-guide-toggle` / `diagram-guide-body`,
+  closed by default, its state remembered per page and view in `localStorage` under
+  `moira.diagram.guide:<page key>.<mode>`, its text under `pages.<page>.modeGuide.<mode>`) and the step finder
+  (`map-node-finder`, which answers "which block is this step in" and selects that block) folded
+  into the toolbar's search button. The map holds no block narrative and no page text: the
+  `PageHeader` names the run or the flow, and the page's panel carries the block's story.
+- `ContentsSidebar` (`components/run/ContentsSidebar.tsx`, `map-contents`) — the process's table of
+  contents, mounted beside the map **and** beside the graph. One `ContentsRow` per block in process
+  order (`map-contents-<blockId>`) with its status icon, `IndexBadge`, name, pass count (`×n`),
+  bound-list `done/total` (`data-contents-list`) and the typical run duration whenever the version's
+  statistics carry one for the block (`data-contents-typical`). Picking a row selects the block and
+  moves that view's camera to it with an arrival pulse. The sidebar sits left of the diagram from
+  `lg` and stacks under it on a phone, where the diagram keeps a fixed readable height; its fold
+  state is kept per browser (`moira.map.sidebarCollapsed`) and its fold button
+  (`map-sidebar-toggle`) is handed to whichever diagram owns the toolbar — directly by `MapView`,
+  through `ContentsToggleProvider` / `ContentsToggleSlot` for the graph.
+- `runBlocks(progress, statistics?)` (`run/model.ts`) joins the process blocks with the run's
+  projection — each block's `timing`, its bound `list` and, when the version's statistics are
+  given, its `stats` — and `RunProgress` is the projection with an optional `statistics`; a rendered
   summary that equals the block's description or its name (an untemplated `content.summary`, or
   one that renders to the label) is dropped so the views show it once, under the title.
-- `CanvasView` — React Flow over an ELK layered layout (`layout.ts`, `elkjs` loaded on first use):
-  forward edges between blocks adjacent in process order as elbows with label pills (several
-  transitions between one pair take their own line and label row, `PARALLEL_STEP`; from
-  `PARALLEL_CHIP_MIN` transitions the pills give way to one "forward" chip in the source block,
-  `parallelForwardsOf` in `chips.ts`, that names the target and the count and lights the bundle
-  on hover; the gap between ranks is at least `MIN_RANK_SEP` and grows to the widest label pill
-  drawn at rest plus clearance, `rankSeparation`, with the pill capped at `LABEL_MAX_WIDTH` by the
-  layout metric and the renderer alike, so no pill runs under the next card), forward edges
-  that skip a block above and cycles as dashed lanes below, both thin and muted with no pill at
-  rest; a transition into a hub block (many
-  sources) is a muted bundled edge (`kind: "hub"`, one per source and hub, routed through the
-  inter-rank gaps and a channel per hub into one port on the hub's left edge, `hubPort`). Every
-  cycle, skip and hub exit is a chip in its source block (the shared `chips.ts` model and
-  `TransitionChipView`), and the same `TransitionFocusProvider` lights the edge (`data-focused`)
-  and renders its pill (`data-edge-label`) on hover or for the selected block; the block height
-  estimate (`estimateBlockHeight`) reserves a row per two chips, counted with `canvasChipsOf`. Mounts through `DiagramViewport` and opens at the fitted zoom
-  (never below three quarters) on the first block with the block row in the upper third, or
-  centred on the current block on a run.
-- `OutlineView` — numbered sections with status, description, run content, block writes at the
-  cursor, transitions in words with cycle cause and exit, and expandable steps (`StepList`).
-- `RouteView` — the whole route grouped into stretches per block (`route.ts`), return markers,
-  per-block visit counts at the cursor, exit labels from transitions, adjustment visits with their
-  actor; clicking a visit sets the cursor; visits after the cursor are dimmed.
+- `CanvasDiagram` (`CanvasView.tsx`) — React Flow over an ELK layered layout (`layoutBlocks` in the
+  engine's `progress-visual` entry — `process-layout.ts`, re-exported by `run/layout.ts` together
+  with the port geometry of `process-geometry.ts`, so the progress picture lays the same process
+  out the same way; `elkjs` loaded on first use) whose columns come from ELK and whose rows are derived (`blockRows`, a
+  pure function of the blocks, the hubs and the drawn columns): the main sequence — the longest
+  forward chain from the start block, ties toward the higher process index — on one row; each
+  side branch (a maximal chain of off-sequence blocks linked by forward transitions) on a row of
+  its own, placed in order of its entry column, sharing a row with an earlier branch only when
+  their column spans are disjoint; an off-sequence hub and a block reached only by loops each on a
+  row of its own; every block of a row takes the row's top edge and ELK's vertical placement is
+  discarded. Every block of an ELK layer is left-aligned (`elk.alignment: LEFT`) so the drawn
+  columns equal the layers. A skip's or return's vertical moves into the gap beside its column when
+  it would pass through a block on an intermediate row (`crossesBlock`, `SKIP_GAP_INSET` /
+  `RETURN_GAP_INSET`), and adjacent forward elbows turn in the gap after the source's column; the
+  gap between ranks is at least `MIN_RANK_SEP` and widens with the longest adjacent transition
+  label, capped at `LABEL_MAX_WIDTH` (`rankSeparation`, `labelPillWidth`).
+- Each block is a `PortedCard`: a title band with the block's `IndexBadge`, its name, its status
+  chip and its pass count; a column of input ports on the left, one per transition arriving (named
+  by its source block, with the transition label as the detail) and a column of output ports on the
+  right, one per transition leaving (named by its label, with the target block as the detail);
+  transitions back to the block itself share the bottom double port. The centre carries the
+  description, the fact chips — step count (its tooltip is the block's steps as rows, each opening
+  that step on the graph), `×n` passes with their durations, the block's time, the bound list's
+  `done/total` — and, when the list binding resolved its items, the first of them with their
+  `ListMarker`, each a button that opens the block panel's list section at that item. The
+  card's height estimate follows its longer port column (`estimatePortedBlockHeight`).
+- Every line is a `DiagramEdge` with one marker set: `forward` for an elbow between adjacent
+  blocks, `skip` for a forward edge over a block, `return` for a cycle (dashed, in the primary
+  colour), `self` for a transition into the same block, `hub` for a bundled edge into a hub block
+  (one per source and hub, routed through the inter-rank gaps and a channel per hub). No line
+  carries a label at rest: the ports at both ends name the transition and their tooltips carry its
+  condition and a return's cause and exit. `portRanks` gives every lane edge its own vertical
+  column beside a card, so two verticals never share a line. `TransitionFocusProvider` lights an
+  edge on hover (dimming the rest) and lights every connector of the selected block
+  (`selectedBlockId`) while nothing is hovered; clicking a port or an edge travels to its far end
+  (`fitView` on that block), flashes the edge and pulses the card on arrival.
+- The layout preset comes from the shared store: `default` (process rows with the lanes in their
+  gaps), `compact` (the same rows, tighter gaps), `flow` (`blockRows(…, "balanced")` — a branch
+  goes to the side carrying less span, a nested fork one row further out on its parent's side) and
+  `vertical` (the default layout transposed: blocks stacked top to bottom, branches in columns to
+  the right, the ports still on the cards' left and right edges, edges routed by `stackedPoints`).
+  `useBlockLayout` lays out again only when the process's shape, the hubs or the preset change, so
+  a projection refresh returns the same layout object and never blanks the map.
+- Mounts through `DiagramViewport` with its own `DiagramToolbar` (`map-toolbar`) and an optional
+  minimap (`map-minimap`, switched from the toolbar, kept per browser under
+  `moira.diagram.minimap`; it opens folded so no card lies under it until the reader switches it
+  on). It opens at the fitted zoom (never below three quarters) on the first
+  block with the block row in the upper third, or centred on the current block on a run; a preset
+  change or a block selected elsewhere moves the camera there, animated, and pulses the card. The
+  fit-to-view control (`onFit`) fits the whole process at a readable zoom when it fits the viewport
+  and otherwise returns to that first-block overview at the readable floor.
 
-**Diagram substrate** (`components/diagram/`): `DiagramViewport` wraps `ReactFlowProvider` +
+**Diagram substrate** (`components/diagram/`): the primitives, tokens, states and interaction rules
+the map, the graph and the panels share are documented as one system in
+`docs/DESIGN-SYSTEM.md` → _Diagram design system_. Every request one surface makes of another —
+focus this node, highlight that variable, unfold this section, mark that card as arrived — is a
+`useRequest` value (`useRequest.ts`: a payload plus a token, so the same request twice is two
+requests and `send(null)` withdraws it). `DiagramViewport` wraps `ReactFlowProvider` +
 `ReactFlow` with the one interaction policy every diagram shares (`interaction.ts`,
-`diagramInteractionProps(kind)`: a plain wheel pans freely, `zoomOnScroll` off, pinch zooms, drag
-pans, nodes fixed, page scroll prevented under the pointer, an opening fit clamped to a readable
-zoom per kind — canvas three quarters to full size, lanes full size, graph down to its floor), one
-zoom/fit control cluster, and an `onReady` callback that fires after an explicit fit so a diagram
-can place its opening viewport; `placement.ts` (`useOpeningPlacement`) places once on ready and
-again only when the followed block or lane changes, never on a plain refetch. The canvas, the
-lanes rail and the technical `WorkflowGraph` all mount through it. Block cards carry no shadow
-(border, fill and ring carry state); floating surfaces keep theirs. Scroll containers of the
-process pages use the `scrollbar-thin` utility (`styles/globals.css`), a thin theme-coloured
-scrollbar in both themes.
+`diagramInteractionProps(kind)`, `DiagramKind` = `canvas | graph`: a plain wheel pans freely,
+`zoomOnScroll` off, pinch zooms, drag pans, nodes fixed, page scroll prevented under the pointer,
+an opening fit clamped to a readable zoom per kind — canvas three quarters to full size, graph
+down to its floor), an `onReady` callback that fires after an explicit fit so a diagram can place
+its opening viewport, and React Flow's own zoom/fit cluster behind `showControls` — off for both
+process diagrams, which carry those actions in their `DiagramToolbar` instead; `placement.ts`
+(`useOpeningPlacement`) places once on ready and again only when the followed block changes,
+never on a plain refetch. The map's diagram and the technical `WorkflowGraph` both mount through
+it. Scroll containers of the process pages use the `scrollbar-thin` utility
+(`styles/globals.css`), a thin theme-coloured scrollbar in both themes.
 
 The panel's tab strip (`run-panel-tabs`) is the shadcn tabs' `line` variant with `flex-wrap`:
-content-sized triggers with a `title` from `pages.runPage.tabHints.*`, wrapping to a second row on
+content-sized triggers with a `data-hint` from `pages.runPage.tabHints.*`, wrapping to a second row on
 a narrow panel instead of scrolling; counters and warnings are `TabBadge` (`components/run/TabBadge.tsx`:
 a count or a `!`, `role="status"` with an accessible label; `errors-count-badge`,
 `variables-waiting-badge`, `locks-active-badge`).
 
-**Step cards:** every list of steps — the block panel and the outline (`StepList`), the flow
-page's split view — renders `StepCard` (`components/run/StepCard.tsx`): a card on one grid with an
+**Step cards:** every list of steps — the block panel's `StepList` on a run, its editable step
+list on the flow page, the Steps tab — renders `StepCard`
+(`components/run/StepCard.tsx`; the technical graph draws its steps as `PortedCard`s instead): a card on one grid with an
 optional position column, a type badge of one width and height (`NodeTypeTag` with `fixed`,
 `data-step-badge`), and a body whose title (`data-step-title`) and first line start at the same
 point in every card; evidence chips and connection chips (`stepConnections` in `model.ts`:
 internal → the sibling step, external → the owning block's name, `data-edge-kind`) wrap inside the
-body; slots take the split view's owner select, diagnostics and editor and the run page's
+body; slots take the flow page's owner select, diagnostics and node text editor and the run page's
 "current" marker. Pass counts are secondary text everywhere (`PassCount` in `status.tsx`: `×n` in
-muted small type on the lane card's phase line, the canvas card's footer, the outline's contents
-list, the block panel's facts line `block-detail-facts` and the route mode's segment headers
-`segment-entry`); the status chip carries none, and the route mode's figures are one muted summary
-line (`route-summary`).
+muted small type on the map card's facts line, the map's contents list and the block panel's facts
+line `block-detail-facts`); the status chip carries none.
 
-**Panels:** `BlockDetailPanel` (status, description, run content, a facts line with the step count,
-pass count and visits, transitions, steps as cards with the
-evidence fields each schema demands — declared `globalInputs` merged from the variable registry —
-and a click that focuses the node graph); `VariablesPanel` (the one variables surface, see
+**Waiting wording** (`components/run/waiting.ts`): a block is `waiting` whenever the run pauses on
+one of its nodes, and the projection's `waitingFor` says who is waited for. `waitingSuffix`
+maps `user` to the `waiting` key and anything else to `waitingAgent`; `waitingLabel` and
+`blockStatusLabel` word the state, so the status chip, the legend and the block texts read
+"waiting for you" only for a person's gate (a `lock` node's PIN) and "agent on the step" otherwise.
+Durations (`components/run/duration.ts`): `formatDuration` renders `12 s`, `1 min 20 s`,
+`2 h 05 min` and "—" for `null` (never "0 s"); `formatClock` renders an epoch stamp as wall-clock
+time in the interface locale, "—" when absent.
+
+**Panels:** the Block tab has two levels. The **block level** is `BlockDetailPanel`: a header with
+the block's `IndexBadge`, name, status chip worded for `waitingFor`, description, run content and a
+facts line with the step count, pass count and visits; below it every further group is a
+`PanelSection` (a header with a right-hand summary and a chevron, its fold state kept per section
+under `moira.panel.folded:<id>`, and an `openToken` that unfolds it when a "go to" lands inside).
+The sections are time, list, wrote, the transitions in words with a cycle's cause and exit, the
+route facts, and the steps as cards with the evidence fields each schema demands — declared
+`globalInputs` merged from the variable registry — and a click that opens the step's node level.
+On the run page `RouteSummary` (`route-summary`) precedes the panel with one line of route facts:
+visits, working visits, loops and adjustments. The run page's sections carry `BlockTimings`
+(`block-timings`: one row per pass with its duration, the live pass
+measured to `projectedAt`, the block's total and, when the statistics carry a sampled entry for
+the block, the typical pass;
+"—" for a pass without timestamps), `BlockListCard` (`block-list`: the bound list's `done/total`,
+its items with their durations or a counters-only note, the current item; a `listHighlight` request
+from a click on a map card opens this section and pulses the item) and
+`BlockRouteFacts` (`block-route-facts`: the block's visits in route order with the exit each took,
+the names it changed, the actor of an adjustment and the re-entries; a visit click sets the
+cursor, the cursor's visit is marked, later visits are dimmed). On the flow page it adds
+`TypicalDurations` (`typical-durations`: the version's median pass, median run time in the block
+and median pass count from `apiClient.getWorkflowStatistics`, `GET
+/api/workflows/:id/statistics?version=`; "loading typical durations…" while the first fetch is
+pending, "typical durations unavailable" with the message as the title when it failed —
+`statisticsPending`/`statisticsError` from the page's `useResource` — and "no runs yet" while the
+version has no sample).
+
+The **node level** is `NodePanel` (`node-panel`), the only home of a step's details on both pages:
+a breadcrumb naming the owning block with a back button to the block level (`node-panel-back`), a
+header with the type badge, the step's progress label or display name, the exact type string for a
+catalog-drawn node (`node-panel-type`) and a "show on graph" button (`node-panel-focus`), then one
+`PanelSection` each for validation (the node's own errors and warnings), the directive or message,
+the completion condition, the returned fields, the expressions, the routing cases with the target
+each output leads to, the playbooks the node's texts name (`NodePlaybookReferences`), the
+configuration of a catalog-drawn node read against the schema its type declares
+(`NodeSchemaReadout`, summarised with the providing extension), the subgraph id, a materialize
+declaration, the raw input schema (folded by default) and the connections, each opening its target.
+Every authored text is rendered through `VariableText`, so `{{name}}`, an expression's identifiers
+and a condition's `contextPath` are tokens that explain the variable from the registry and jump to
+its definition.
+
+The other tabs: `VariablesPanel` (the one variables surface, see
 below, with the **answer form** for the waiting step: fields from the step's input schema with
 enum selects, booleans, numbers, JSON textareas, submit gated on required fields, the server's
-refusal shown inline); `ExecutionErrorHistory`; `StepProgression`; the lazily loaded
-`WorkflowGraph` with a stable init callback and a focus request that fits the view to a node.
+refusal shown inline); `ExecutionErrorHistory`; `StepProgression`. The lazily loaded
+`WorkflowGraph` is the page's graph view: a focus request that fits the view to a node,
+`selectedBlockId` ringing the block's group, and the page's own toolbar slots.
 
 **Answering the waiting step:** `apiClient.answerExecutionStep(id, input, expectedRevision)` calls
 `POST /api/executions/:id/answer`; the page reloads the execution and the projection afterwards
 whether the answer was accepted or refused, because a rejected answer is still an engine step that
 advances the revision.
 
-**Walkthrough** (`Walkthrough.tsx`): six anchored steps (process, agent, evidence, loop, route,
-explore), each with a selector per mode and a fallback mode, the current block and panel tab it
-needs; the highlight is a ring on the target element. **Guidance** callouts introduce every mode
-and panel; on a phone they fold to their title.
+**Walkthrough** (`Walkthrough.tsx`; the flow page's steps in `components/flow/guideSteps.ts`): six
+anchored steps (process, agent, evidence, loop, route, explore), each with a selector for both
+views — the contents row, the step and its evidence in the block panel, a return port
+(`[data-port-kind="return"]`), the route cursor and the open view's toolbar — plus the current
+block, the panel tab and the panel section (`section`, unfolded through `BlockDetailPanel`'s
+`openSection` request) it needs, so a step never switches the reader's view. The highlight is a
+ring on the target element, applied once the element has come to rest; the element is scrolled
+into view and, when it sits inside a diagram, `requestReveal` (`diagram/reveal.ts`) asks the
+mounted `DiagramViewport` to move its camera to the node containing it. **Guidance** callouts
+introduce the panels (on a phone they fold to their title); the compass note is described above.
 
 **Lock Dialog:**
 
@@ -916,7 +1042,7 @@ Playbooks at `/playbooks`: named, reusable behaviour text a workflow node refere
   `edit|history|delete-playbook-<name>`, `playbook-visibility-<name>`, `playbook-*-input`,
   `save-playbook-button`
 
-Flow page node details (`WorkflowSidebar`, and `NodeDetailSheet` where it is used) list the
+The node level of the process pages' panel (`NodePanel`, and `NodeDetailSheet` where it is used) lists the
 playbooks a node names (`NodePlaybookReferences`, collected with the shared reference module so an
 escaped reference is not offered) with a link to `/playbooks?name=…&owner=…`; a playbook the viewer
 cannot read is marked "not available" (`playbook-reference-unavailable-<name>`). The Playbooks page
@@ -1309,21 +1435,26 @@ interface WorkflowViewerProps {
 The graph is the process view's detailed layer, not a separate rendering:
 
 - **Model** (`components/run/graphModel.ts`): `graphModel(workflow, blocks)` builds one `GraphStep`
-  per workflow node (the same `StepInfo` and `stepConnections` the split view uses, owned by the
+  per workflow node (the same `StepInfo` and `stepConnections` the block panel uses, owned by the
   block the derivation names) and one `GraphLink` per connection, classified `forward` (inside a
   block), `external` (into a later block) or `return` (a derived cycle transition's edge, or into
   an earlier block). `definitionBlocks(workflow)` derives run-less blocks in the browser when a
   caller passes none; both pages pass their own `blocks` so a run's groups carry status.
-- **Layout** (`components/workflow/graphLayout.ts`): `layoutGraph(model, direction, measuredHeights?)`
+- **Layout** (`components/workflow/graphLayout.ts`):
+  `layoutGraph(model, direction, measuredHeights?, spacing?, innerDirectionOverride?)`
   lays each block's steps out with ELK layered (model order, in-block forward edges only) and stacks
-  the block groups in process order — top to bottom, or left to right for Horizontal — with the
-  steps no block owns in one flat set after the groups. Card heights are estimated
-  (`estimateStepHeight`, which turns the evidence and the chips a card carries — its connections
-  plus, generously, every edge arriving at it — into rows) for the first pass; `GraphMeasuredHeights` (mounted inside the viewport,
-  reading React Flow's store) reports the measured heights, and a second pass with them runs when
-  any differs from its estimate, so cards never overlap. A block's box grows by a corridor under
-  its cards (to their right in a row) holding one lane per routed edge, and by an entry side wide
-  enough for the approach columns of the edges arriving at it.
+  the block groups in process order, with the steps no block owns in one flat set after the groups.
+  The reader's layout preset selects both directions (`GRAPH_PRESET_DIRECTIONS`) and the gaps
+  (`graphSpacing`): `default` stacks the groups downward with the steps running left to right inside
+  them, `compact` is the same with the gaps scaled down, `flow` puts the groups in a row with the
+  gaps scaled up, and `vertical` runs the steps top to bottom inside downward-stacked groups. Card
+  heights are estimated (`estimateStepHeight`, which follows the card's longer port column) for the
+  first pass; `GraphMeasuredHeights` (mounted inside the viewport, reading React Flow's store)
+  reports the measured heights, and a second pass with them runs when any differs from its estimate,
+  so cards never overlap — measurements taken while the document is hidden, or below a plausible
+  floor, are ignored, because a background tab measures cards at wrong sizes. A block's box grows by
+  a corridor under its cards (to their right in a row) holding one lane per routed edge, and by an
+  entry side wide enough for the approach columns of the edges arriving at it.
 - **Routing** (`routeLinks`, pure): a forward link inside a block is drawn straight (smooth step).
   Everything else is a `GraphRoute` (stub, lane waypoints, side): a return inside a block leaves its
   source, runs along the block's bottom corridor and enters its target from before it; a link into
@@ -1334,41 +1465,57 @@ The graph is the process view's detailed layer, not a separate rendering:
   a block's entry side holds the approach columns of its arrivals. Lanes sharing a corridor are offset by
   `LANE_STEP` (`MARGIN_LANE_STEP` in the margin, which holds one lane per return) and centred in
   the room reserved for them. `GraphEdgeView` draws a routed
-  edge as a rounded polyline (`routedPoints`, `roundedPath`); its label is shown while it is lit,
-  on the first lane run.
+  edge as a rounded polyline (`routedPoints`, `roundedPath`).
 - **Rendering** (`components/workflow/graphNodes.tsx`): every node type is registered to
-  `StepNodeView` (the shared `StepCard` with hidden handles; the per-type registration keeps React
+  `StepNodeView` (the shared `PortedCard`; the per-type registration keeps React
   Flow's `react-flow__node-<type>` classes), `block-group` to `BlockGroupView` (the shared status
-  surface, `data-graph-group`, `data-block-id`), and one `graph` edge type. Groups sit at z-index
+  surface, `data-graph-group`, `data-block-id`, numbered and named like the process views), and one
+  `graph` edge type. Groups sit at z-index
   −1 and cards at 2; edges carry 0, which React Flow adds to their nodes' level, so the edge layer
-  shares the cards' level and paints first — above the groups, below the cards. A line is drawn at
-  rest only where it runs straight from card to card, and it keeps its label pill. Every edge that
-  needs a corridor — a return, a link into another block, a link ELK laid backwards — is not drawn
-  at rest: it is named in both cards, by the connection chip in its source and by an arrival chip
-  (`data-arrival`, dashed, with the source's block when it is another block) in its target, and it
-  is drawn with its label while either chip, either card or the edge itself is hovered, everything
-  else dimming meanwhile. A drawn line carries a halo in the page colour, so a crossing reads as
+  shares the cards' level and paints first — above the groups, below the cards. A step card carries
+  a title band (type badge, the progress label or display name, the node id as the subtitle), the
+  step's text as the description with the full text as its tooltip, its fact chips, an input port
+  per arriving connection (named by its source step), an output port per connection leaving (named
+  by the output, with the case that selects it or "taken when no case holds" as the tooltip,
+  `outputTip`) and a bottom double port for its self-loops. Every connection is a `DiagramEdge`
+  drawn at rest — `forward` inside a block, `external` into another block, `return` for a cycle,
+  `self` for a loop into the same step — with no label on the line: the ports at both ends name it.
+  A line carries a halo in the page colour, so a crossing reads as
   one line passing over another, and every arrowhead keeps one size (`markerUnits="userSpaceOnUse"`)
-  whatever the line's width. Every edge that is drawn leaves and arrives at its own handle, and an
+  whatever the line's width. Every edge leaves and arrives at its own handle, and an
   arrival turns up to its card in an approach column of its own: a column of cards holds
   `APPROACH_COLUMNS` of them, each card's arrivals take different ones and the cards of a column
   start at different ones, so lines merge only where a card receives more arrivals than there are
-  columns, and even then they still arrive at their own handles. Clicking an arrival chip brings the card at the other end into view.
-  Hovering a card lights every connection it takes part in and rings the cards at their far end.
-- **Viewport**: the graph mounts through `DiagramViewport` (`kind="graph"`). The opening placement
-  uses `useOpeningPlacement`: a `focusRequest` (node id + token) or a run's `currentNodeId` fits
-  the view to that node; a definition opens readable on its first block at `GRAPH_OPENING_ZOOM`.
-  The placement key includes the layout generation, so it is applied again after the measured
-  second pass. A direction change refits to the whole graph. The layout controls (Fit View,
-  Vertical, Horizontal; `data-testid="graph-layout-controls"`) are `ControlButton`s inside the
-  zoom cluster (`DiagramViewport`'s `controlButtons` slot), so the cluster is one column and covers
-  no card; the minimap renders after an idle callback and not on a phone (`useIsMobile`), where
-  it would cover the graph. The run canvas hides its minimap the same way.
+  columns, and even then they still arrive at their own handles. Hovering a card lights every
+  connection it takes part in and rings the cards at their far end, everything else dimming
+  meanwhile; clicking a port or the edge itself brings the step at the far end into view, flashes
+  the edge and pulses the card on arrival.
+- **Viewport and controls**: the graph mounts through `DiagramViewport` (`kind="graph"`) with React
+  Flow's own control cluster off and its `DiagramToolbar` (`graph-toolbar`) above it: the page's
+  view tabs, the contents fold button taken through `ContentsToggleSlot`, the page's leading
+  controls, the folded step finder (`graph-node-finder`, whose pick brings the step into view), the
+  layout presets, zoom/fit, the minimap switch and the page's trailing controls. The opening
+  placement uses `useOpeningPlacement`: a `focusRequest` (node id + token) or a run's
+  `currentNodeId` fits the view to that node; a definition opens readable on its first block at
+  `GRAPH_OPENING_ZOOM`. The placement key includes the layout generation, so it is applied again
+  after the measured second pass. The minimap (`showMinimap`, passed by both process pages) renders
+  after an idle callback, only while the toolbar's switch is on (`moira.diagram.minimap`, off by
+  default, so a card in the corner stays clickable) and not on
+  a phone (`useIsMobile`), where it would cover the graph. The block selected in the contents or on
+  the map (`selectedBlockId`) is the ringed group (`data-selected` on `BlockGroupView`), brought
+  into view and pulsed on arrival.
 
 ### Node Selection System
 
-- **Persistent Sidebar**: `WorkflowSidebar` component (side-by-side with graph). Shows workflow info when no node selected, node details on selection. Used in the flow page's graph mode.
-- **Legacy Sheet**: `NodeDetailSheet` (Sheet overlay). Used in execution views (`ExecutionInspector`, `WorkflowVisualizationPage`) where `onNodeSelect` is not provided.
+- **Panel node level**: `NodePanel` on the run and flow pages, opened by a node click through
+  `onNodeSelect` or by any "go to this step" in the interface. It is the only surface that shows a
+  node's validation, playbooks and catalog configuration.
+- **Legacy Sheet**: `NodeDetailSheet` (Sheet overlay). Used in execution views (`WorkflowVisualizationPage`) where `onNodeSelect` is not provided.
+- **Connections of the selected node**: both surfaces name the incoming and outgoing nodes by
+  display name or node id (`nodeName` in `WorkflowGraph`), and list each outgoing connection as
+  `output → target` with the summary of the routing case that selects that output
+  (`OutgoingConnectionChips` in `components/workflow/OutgoingConnections.tsx`, `data-output`), so
+  several outputs into one target stay distinguishable.
 - **WorkflowGraph** accepts optional `onNodeSelect` callback. When provided, Sheet is disabled and node clicks route to external sidebar.
 
 ## Error Handling
@@ -1566,6 +1713,11 @@ i18n
     },
   });
 ```
+
+The diagram, run and flow components carry no translation fallbacks — no `defaultValue`, no
+second-argument default — so a key missing from one language surfaces in the parity test rather
+than as silent English; the layout presets are worded per surface under
+`components.diagram.presets.<map|graph>.<id>` and resolved where they render (`LayoutPresetButtons`).
 
 ### Adding New Language
 
@@ -1886,7 +2038,7 @@ Page-level wrapper animations are **not used** on `AnimatedPage` (a `h-full` wra
 - CSS classes: `animate-in fade-in slide-in-from-bottom-3 duration-300 fill-mode-both`
 - Fade from transparent + slide up 12px over 300ms
 - Applied to: Dashboard, Settings, AdminDashboard, AdminAnalytics, AdminSettings, AdminUserDetail, UserManagement, DeletedWorkflows, OperationalDashboard
-- **Not applied to the flow page's graph mode** — React Flow requires immediate full opacity to measure container dimensions
+- **Not applied to the flow page's graph view** — React Flow requires immediate full opacity to measure container dimensions
 
 Usage: replace outermost `<div>` with `<FadeIn className="...">` in page content return (after loading guard).
 
@@ -1902,6 +2054,14 @@ Interactive cards use `transition-all duration-200 hover:shadow-md hover:-transl
 `EmptyState` component uses `motion/react` with `LazyMotion` for bundle splitting:
 
 - `opacity: 0 → 1`, `y: 8 → 0`, duration 250ms
+
+### Diagram Animations
+
+The process diagrams add their own keyframes in `styles/globals.css` — `card-breathe`,
+`card-breathe-slow`, `card-arrive`, `marker-pulse`, `edge-flash` — exposed as Tailwind utilities of
+the same names and listed with their meaning in `docs/DESIGN-SYSTEM.md` → _Diagram design system_.
+A single `prefers-reduced-motion: reduce` block turns all five off, so a reader who asked for less
+motion still gets every state through colour, ring and fill.
 
 ### Duration Guidelines
 

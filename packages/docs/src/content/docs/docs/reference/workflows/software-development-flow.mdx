@@ -48,6 +48,10 @@ user channels: it completes; it ends early on the user's explicit confirmation; 
 development work while local finalization stays blocked, which is reported as such rather than as a
 complete run.
 
+## Execution progress
+
+The run's progress map is derived from the executable graph: every node belongs to one stage, every stage-leaving edge is labelled, and every return explains its cause and exit. The implementation stage binds the plan's counters — `current_step_index` as the unit in progress and `total_steps` as the unit count — so the run's progress data (`session progress` and the execution progress API) reports how many plan units are done out of how many and how long each pass through the stage took.
+
 ## When to use it
 
 Use Software Development Flow for repository implementation of any size: its plan and conditional checks scale to the actual change while preserving one complete software lifecycle. Security or privacy boundaries, persistent data or migrations, breaking public contracts, multiple vertical units, unresolved architecture, and complex rollout or recovery require correspondingly stronger units and evidence inside the same flow. Quick Task and Robust Task do not replace a software lifecycle.

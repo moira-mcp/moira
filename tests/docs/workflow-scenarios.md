@@ -199,11 +199,17 @@ Condition nodes use `contextPath` to read values:
 ```json
 {
   "type": "condition",
-  "condition": {
-    "operator": "eq",
-    "left": { "contextPath": "approve-problem.approved" },
-    "right": "yes"
-  }
+  "cases": [
+    {
+      "when": {
+        "operator": "eq",
+        "left": { "contextPath": "approve-problem.approved" },
+        "right": "yes"
+      },
+      "output": "approved"
+    }
+  ],
+  "connections": { "approved": "next-step", "default": "revise" }
 }
 ```
 

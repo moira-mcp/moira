@@ -79,8 +79,8 @@ describe("detectCycles", () => {
         {
           type: "condition",
           id: "loop",
-          condition: { operator: "eq", left: 1, right: 1 },
-          connections: { true: "loop", false: "end" }, // Self-loop on true
+          cases: [{ when: { operator: "eq", left: 1, right: 1 }, output: "true" }],
+          connections: { true: "loop", default: "end" }, // Self-loop on true
         },
         { type: "end", id: "end" },
       ],
@@ -101,8 +101,8 @@ describe("detectCycles", () => {
         {
           type: "condition",
           id: "branch",
-          condition: { operator: "eq", left: 1, right: 1 },
-          connections: { true: "a", false: "c" },
+          cases: [{ when: { operator: "eq", left: 1, right: 1 }, output: "true" }],
+          connections: { true: "a", default: "c" },
         },
         // First cycle: a -> b -> a
         {
@@ -153,8 +153,8 @@ describe("detectCycles", () => {
         {
           type: "condition",
           id: "decision",
-          condition: { operator: "eq", left: 1, right: 1 },
-          connections: { true: "path-a", false: "path-b" },
+          cases: [{ when: { operator: "eq", left: 1, right: 1 }, output: "true" }],
+          connections: { true: "path-a", default: "path-b" },
         },
         {
           type: "agent-directive",

@@ -14,11 +14,13 @@
     "./extensions": "./src/extensions/index.ts",
     "./extensions/contract": "./src/extensions/extension-contract.ts",
     "./progress-visual": "./src/utils/execution-progress-visual.ts",
-    "./process": "./src/utils/process-derivation.ts"
+    "./process": "./src/utils/process-derivation.ts",
+    "./migration": "./src/migration/index.ts"
   },
   "scripts": {},
   "dependencies": {
     "@mcp-moira/shared": "*",
+    "elkjs": "^0.12.0",
     "sharp": "^0.35.3",
     "tar-stream": "^3.2.1"
   },

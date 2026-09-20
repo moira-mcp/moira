@@ -117,6 +117,56 @@ description: Лучшие практики написания ясных и эф
 }
 ```
 
+### Маршрутизация по ответу
+
+Ответ-enum обычно и решает, куда пойдёт прогон дальше. Ставьте `cases` на ту же ноду, чтобы решал
+шаг, у которого есть свидетельство:
+
+```json
+{
+  "id": "review",
+  "type": "agent-directive",
+  "directive": "Review the change against the acceptance criteria.",
+  "completionCondition": "Verdict recorded with the findings that support it",
+  "inputSchema": {
+    "type": "object",
+    "globalInputs": ["review_verdict"],
+    "properties": {
+      "findings": { "type": "string" }
+    },
+    "required": ["review_verdict"]
+  },
+  "expressions": ["review_round = review_round + 1"],
+  "cases": [
+    {
+      "when": { "operator": "gte", "left": { "contextPath": "review_round" }, "right": 3 },
+      "output": "exhausted"
+    },
+    {
+      "when": {
+        "operator": "eq",
+        "left": { "contextPath": "review_verdict" },
+        "right": "blocked"
+      },
+      "output": "blocked"
+    }
+  ],
+  "connections": {
+    "success": "merge",
+    "blocked": "fix-issues",
+    "exhausted": "escalate",
+    "error": "handle-error"
+  }
+}
+```
+
+`review_verdict` и `review_round` объявлены в `variableRegistry` workflow, поэтому обе читаются по
+простому имени; локальный выход ноды читается как `review.findings`. Выражения выполняются после
+валидации ответа и до case, поэтому case может прочитать вычисленное ими. Case перебираются по
+порядку, а `success` — запасной выход: успешный вердикт в пределах бюджета кругов уходит в `merge`.
+`error` и `timeout` зарезервированы под управление потоком: их не может назвать ни один case, и case
+им не нужен.
+
 ### Сбор структурированных данных
 
 ```json
@@ -222,6 +272,27 @@ description: Лучшие практики написания ясных и эф
 
 ```
 "Fix error in {{file_path}}:\n\nError message: {{last_error}}\nIteration: {{current_iteration}}"
+```
+
+### Избыточная маршрутизирующая обвязка
+
+Нода `condition` или `expression`, единственная работа которой — маршрутизировать или считать то,
+что предыдущая директива уже знает, — это избыточная маршрутизирующая обвязка: она добавляет
+переход, который читателю приходится проследить, и второе место, где решение расходится со
+свидетельством. Сложите её в директиву как `cases` или запись в `expressions` — и оставьте отдельную
+ноду там, где решение действительно общее, читает состояние, которого не произвела ни одна отдельная
+нода, или заслуживает именованного места в маршруте.
+
+❌ Проблема:
+
+```
+[validate] → [route-validation] → [fix] / [next]
+```
+
+✅ Решение:
+
+```
+[validate, cases по issues_count] → [fix] / [next]
 ```
 
 ### Нет критериев успеха

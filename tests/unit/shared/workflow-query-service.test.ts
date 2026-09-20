@@ -506,7 +506,7 @@ describe("WorkflowQueryService", () => {
           {
             id: "condition",
             type: "condition",
-            connections: { true: "branch-a", false: "branch-b" },
+            connections: { true: "branch-a", default: "branch-b" },
           },
           { id: "branch-a", type: "agent-directive", connections: { default: "end" } },
           { id: "branch-b", type: "agent-directive", connections: { default: "end" } },
@@ -526,7 +526,7 @@ describe("WorkflowQueryService", () => {
         nodes: [
           { id: "start", type: "start", connections: { default: "loop" } },
           { id: "loop", type: "agent-directive", connections: { default: "check" } },
-          { id: "check", type: "condition", connections: { true: "end", false: "loop" } },
+          { id: "check", type: "condition", connections: { true: "end", default: "loop" } },
           { id: "end", type: "end" },
         ] as GraphNode[],
       });
@@ -726,8 +726,10 @@ describe("WorkflowQueryService", () => {
           {
             id: "decision",
             type: "condition",
-            condition: `${"noise.".repeat(20_000)} review.outcome === "pass"`,
-            connections: { true: "end", false: "end" },
+            cases: [
+              { when: `${"noise.".repeat(20_000)} review.outcome === "pass"`, output: "true" },
+            ],
+            connections: { true: "end", default: "end" },
           },
           { id: "end", type: "end" },
         ] as GraphNode[],

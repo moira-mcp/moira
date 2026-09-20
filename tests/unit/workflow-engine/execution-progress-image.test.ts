@@ -1,14 +1,36 @@
+/**
+ * The progress picture drawn on the map's model: every block a ported card (index badge, title,
+ * status chip, pass count, ports named by the transition labels, facts, typical durations), the
+ * transitions as the map's edge kinds, laid out by the shared `layoutBlocks` — the same
+ * projection through the map's own call gives the same rows and lanes — in both views and both
+ * themes, honouring `hide` and `collapse`, byte-deterministic and within the PNG bound.
+ */
+
 import { describe, expect, test } from "@jest/globals";
 import sharp from "sharp";
 import {
   applyProgressVisibility,
   buildExecutionProgressVisualModel,
+  crossesBlock,
+  formatProgressDuration,
+  layoutBlocks,
+  listProgressLabel,
+  overlappingBlocks,
+  progressFactsCandidates,
+  progressLayoutBlocks,
+  progressTextWidth,
+  progressTypicalCandidates,
+  progressTypicalText,
   projectExecutionRun,
   renderExecutionProgressPng,
   renderProgressVisualSvg,
   resolveProgressBlockIds,
+  splitDuration,
+  type BlockLayout,
   type ExecutionProgress,
+  type ProgressVisualModel,
   type WorkflowExecution,
+  type WorkflowVersionStatistics,
 } from "@mcp-moira/workflow-engine";
 import { systemCatalogGraph } from "../../helpers/catalog-graphs.js";
 
@@ -48,6 +70,9 @@ function progress(active = 1): ExecutionProgress {
     ],
     activeNodeId: `n${active}`,
     workflowVersion: "1.0.0",
+    executionWorkflowVersion: "1.0.0",
+    projectedAt: 0,
+    waitingFor: null,
     executionRevision: 3,
     executionStatus: "running",
     diagnostics: [],
@@ -68,6 +93,8 @@ function progress(active = 1): ExecutionProgress {
       connections: { default: index === 2 ? "n0" : `n${index + 1}` },
       primaryNodeIds: [`p${index}`],
       focusNodeId: `p${index}`,
+      timing: { passes: [], totalMs: null, currentMs: null, recorded: false },
+      list: null,
       content: {
         summary:
           index === 0
@@ -130,7 +157,276 @@ function withProcess(base: ExecutionProgress = progress()): ExecutionProgress {
   };
 }
 
-describe("progress image visibility and the process view", () => {
+const FLOWS = [
+  "quick-task",
+  "todo-list",
+  "robust-task",
+  "software-development-flow",
+  "workflow-management-flow",
+  "user-onboarding",
+];
+const VIEWS = ["cards", "process"] as const;
+const THEMES = ["light", "dark"] as const;
+
+/** Every text of the SVG, tags stripped. */
+const visibleText = (svg: string) => svg.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
+
+/** The `edge crosses block` facts of a layout's lane edges: a segment passing through a third block. */
+function laneCrossings(layout: BlockLayout): string[] {
+  const found: string[] = [];
+  for (const edge of layout.edges.filter((e) => e.kind !== "forward")) {
+    const points = [...edge.path.matchAll(/[ML] (-?[\d.]+) (-?[\d.]+)/g)].map((m) => [
+      Number(m[1]),
+      Number(m[2]),
+    ]);
+    for (let i = 1; i < points.length; i++) {
+      for (const b of layout.blocks) {
+        if (b.id === edge.from || b.id === edge.to) continue;
+        if (crossesBlock([b], [], points[i - 1][0], points[i - 1][1], points[i][0], points[i][1]))
+          found.push(`${edge.id} crosses ${b.id}`);
+      }
+    }
+  }
+  return found;
+}
+
+/** The layout's blocks in the space the lanes were laid in (the stacked preset is transposed). */
+function laidSpace(layout: BlockLayout): BlockLayout {
+  return layout.transposed
+    ? {
+        ...layout,
+        blocks: layout.blocks.map((b) => ({
+          ...b,
+          x: b.y,
+          y: b.x,
+          width: b.height,
+          height: b.width,
+        })),
+      }
+    : layout;
+}
+
+/** The look each edge kind is drawn with: the map's `EDGE_LOOK`, stated here so the test judges the renderer's table rather than reading it. */
+const EDGE_KIND_LOOK: Record<
+  string,
+  { width: number; dash: string | null; marker: "plain" | "return" }
+> = {
+  forward: { width: 2, dash: null, marker: "plain" },
+  skip: { width: 1.5, dash: "2 4", marker: "plain" },
+  hub: { width: 1.25, dash: null, marker: "plain" },
+  return: { width: 1.5, dash: "6 5", marker: "return" },
+  self: { width: 1.5, dash: "6 5", marker: "return" },
+};
+
+describe("the picture's cards and edges on the bundled flows", () => {
+  test.each(
+    FLOWS.flatMap((slug) =>
+      VIEWS.flatMap((view) => THEMES.map((theme) => [slug, view, theme] as const)),
+    ),
+  )(
+    "%s in the %s view, %s theme: ported cards, named ports, the map's edge kinds, no overlaps",
+    async (slug, view, theme) => {
+      const progress = bundledProgress(slug);
+      const model = await buildExecutionProgressVisualModel(progress, {
+        viewportWidth: 1280,
+        view,
+        theme,
+      });
+      const svg = renderProgressVisualSvg(model);
+      expect(model.nodes.map((n) => n.id)).toEqual(progress.process.blocks.map((b) => b.id));
+      // Every card: a title band with its index and status chip, the title text, no card without
+      // its ports when it takes part in a transition.
+      for (const [i, node] of model.nodes.entries()) {
+        expect(node.indexBadge.text).toBe(String(i + 1));
+        expect(node.index).toBe(i + 1);
+        expect(node.statusLine).toBe("pending");
+        expect(svg).toContain(`data-block-id="${node.id}"`);
+        expect(node.bandHeight).toBeGreaterThan(0);
+        expect(node.titleY - model.type.title).toBeGreaterThanOrEqual(node.y);
+        expect(node.chip.x + node.chip.width).toBeLessThanOrEqual(node.x + node.width);
+        // A pending block that never ran carries no time (no "—" noise); a bound one its count.
+        const run = progress.nodes.find((n) => n.id === node.id)!;
+        expect(node.factsLine).toBe(listProgressLabel(run.list) ?? "");
+        expect(node.typicalLine).toBeNull();
+        if (view === "process") expect(node.lines).toEqual([]);
+      }
+      // Ports named by the transition labels: every transition of the process is an output port of
+      // its source (label) and an input port of its target (naming the source, detail the label).
+      const byId = new Map(model.nodes.map((n) => [n.id, n]));
+      for (const block of progress.process.blocks) {
+        for (const transition of block.transitions) {
+          const source = byId.get(block.id)!;
+          const target = byId.get(transition.to)!;
+          const out = [...source.outputs, ...source.selfPorts].find(
+            (p) => p.label === transition.label,
+          );
+          expect(out).toBeDefined();
+          expect(out!.kind).toBe(
+            transition.cycle
+              ? "return"
+              : progress.process.hubs.includes(transition.to)
+                ? "external"
+                : "forward",
+          );
+          if (transition.to !== block.id) {
+            const into = target.inputs.find(
+              (p) => p.detail === transition.label && p.label.startsWith(`${source.index}. `),
+            );
+            expect(into).toBeDefined();
+          }
+        }
+      }
+      // Every laid edge is drawn with the map's kind and attaches to a handle on both borders.
+      expect(model.edges).toHaveLength(model.layout.edges.length);
+      for (const edge of model.edges) {
+        expect(["forward", "skip", "hub", "return", "self"]).toContain(edge.kind);
+        expect(svg).toContain(`data-edge-kind="${edge.kind}"`);
+      }
+      // Every edge is drawn with its own kind's look — the map's `EDGE_LOOK` dash and weight —
+      // inside the group that names the kind, so a kind drawn with another kind's look fails
+      // whichever flows the catalog happens to bundle.
+      for (const edge of model.edges) {
+        const group = svg.match(
+          new RegExp(
+            `<g data-edge-kind="${edge.kind}" data-transition="[^"]*"><title>[^<]*</title>.*?</g>`,
+          ),
+        );
+        expect(group).not.toBeNull();
+        const drawn = group![0];
+        const look = EDGE_KIND_LOOK[edge.kind];
+        expect(drawn).toContain(`stroke-width="${look.width}"`);
+        if (look.dash) expect(drawn).toContain(`stroke-dasharray="${look.dash}"`);
+        else expect(drawn).not.toContain("stroke-dasharray");
+        expect(drawn).toContain(`marker-end="url(#arrow-${look.marker})"`);
+      }
+      // No card overlaps another and no lane runs through a card.
+      expect(overlappingBlocks(model.layout)).toEqual([]);
+      expect(laneCrossings(laidSpace(model.layout))).toEqual([]);
+      // Every port pill lies inside its card and every text line fits the width it was wrapped for.
+      for (const node of model.nodes) {
+        for (const port of [...node.inputs, ...node.outputs, ...node.selfPorts]) {
+          expect(port.x).toBeGreaterThanOrEqual(node.x);
+          expect(port.x + port.width).toBeLessThanOrEqual(node.x + node.width);
+          expect(port.y + port.height).toBeLessThanOrEqual(node.y + node.height);
+          expect(progressTextWidth(port.text, model.type.label, "semibold")).toBeLessThanOrEqual(
+            port.width,
+          );
+        }
+        for (const line of node.labelLines)
+          expect(progressTextWidth(line, model.type.title, "bold")).toBeLessThanOrEqual(
+            node.chip.x - node.titleX,
+          );
+        for (const line of node.descriptionLines)
+          expect(progressTextWidth(line, model.type.content)).toBeLessThanOrEqual(
+            node.textRight - node.contentX,
+          );
+      }
+      // The diagram is scaled as one piece only when wider than the image, and never up.
+      expect(model.diagram.scale).toBeLessThanOrEqual(1);
+      expect(model.diagram.scale).toBeGreaterThan(0);
+      expect(model.width).toBe(1280);
+      expect(model.height).toBeGreaterThanOrEqual(
+        model.stagesTop + Math.round(model.diagram.height * model.diagram.scale),
+      );
+    },
+  );
+
+  test.each(FLOWS)(
+    "%s: the picture and the map lay the same projection out identically",
+    async (slug) => {
+      const progress = bundledProgress(slug);
+      const model = await buildExecutionProgressVisualModel(progress, {
+        viewportWidth: 1280,
+        view: "process",
+      });
+      // The map's own call with the picture's sizes and preset: the same rows, ranks and lanes.
+      const visible = applyProgressVisibility(progress, [], []);
+      const sizes = new Map(model.nodes.map((n) => [n.id, { width: n.width, height: n.height }]));
+      const map = await layoutBlocks(
+        progressLayoutBlocks(progress, visible),
+        progress.process.hubs,
+        {
+          preset: model.diagram.preset,
+          sizes,
+        },
+      );
+      expect(model.layout).toEqual(map);
+      for (const laid of map.blocks) {
+        const card = model.nodes.find((n) => n.id === laid.id)!;
+        expect([card.id, card.x, card.y, card.row, card.rank]).toEqual([
+          laid.id,
+          laid.x,
+          laid.y,
+          laid.row,
+          laid.rank,
+        ]);
+      }
+      // Without the picture's sizes the map would place the blocks differently — the identity is
+      // not a tautology of the layout ignoring its sizes.
+      const estimated = await layoutBlocks(
+        progressLayoutBlocks(progress, visible),
+        progress.process.hubs,
+        {
+          preset: model.diagram.preset,
+        },
+      );
+      expect(estimated.blocks.map((b) => b.height)).not.toEqual(map.blocks.map((b) => b.height));
+    },
+  );
+
+  test("the rows preset is drawn when the image holds it, the stacked one below the phone width or when it does not", async () => {
+    const wide = await buildExecutionProgressVisualModel(bundledProgress("todo-list"), {
+      viewportWidth: 4096,
+    });
+    expect(wide.diagram.preset).toBe("default");
+    expect(wide.layout.transposed).toBeUndefined();
+    expect(wide.diagram.scale).toBe(1);
+    const narrow = await buildExecutionProgressVisualModel(bundledProgress("todo-list"), {
+      viewportWidth: 1280,
+    });
+    expect(narrow.diagram.preset).toBe("vertical");
+    expect(narrow.layout.transposed).toBe(true);
+    const phone = await buildExecutionProgressVisualModel(bundledProgress("todo-list"), {
+      viewportWidth: 480,
+    });
+    expect(phone.diagram.preset).toBe("vertical");
+    expect(phone.diagram.scale).toBeLessThan(1);
+    // The stacked column: later blocks strictly lower, ports still on the sides.
+    for (const a of narrow.nodes)
+      for (const b of narrow.nodes)
+        if (a.rank < b.rank)
+          expect([a.id, b.id, a.y + a.height <= b.y]).toEqual([a.id, b.id, true]);
+    const [first] = narrow.nodes;
+    for (const port of first.outputs) expect(port.handleX).toBe(first.x + first.width);
+  });
+
+  test.each([
+    ["software-development-flow", 4096],
+    ["software-development-flow", 1280],
+    ["workflow-management-flow", 4096],
+  ])(
+    "the PNG of %s at %i px stays within the image bound in both views and themes",
+    async (slug, width) => {
+      const progress = bundledProgress(slug);
+      for (const view of VIEWS)
+        for (const theme of THEMES) {
+          const { png, model } = await renderExecutionProgressPng(progress, {
+            viewportWidth: width,
+            view,
+            theme,
+          });
+          expect(png.length).toBeLessThanOrEqual(5 * 1024 * 1024);
+          expect(await sharp(png).metadata()).toMatchObject({
+            format: "png",
+            width,
+            height: model.height,
+          });
+        }
+    },
+  );
+});
+
+describe("progress image visibility on the ported cards", () => {
   test("resolves block and node ids to blocks in process order and names unknown ids", () => {
     const { process } = withProcess();
     expect(resolveProgressBlockIds(process, ["p2", "n0", "p0b", "nope"])).toEqual({
@@ -139,122 +435,91 @@ describe("progress image visibility and the process view", () => {
     });
   });
 
-  test("hiding a block removes it and collapses its transitions onto where it led", () => {
+  test("hiding a block removes it and collapses its transitions onto where it led", async () => {
     const visible = applyProgressVisibility(withProcess(), ["p1"]);
     expect(visible.nodes.map((node) => node.id)).toEqual(["n0", "n2"]);
-    // The display chain skips the hidden block.
     expect(visible.nodes[0].connections).toEqual({ default: "n2" });
-    // n0's only transition led into the hidden review; it now reaches Stage 2 with the joined
-    // label, and the review's return to n0 becomes n0's own labelled loop.
     expect(visible.transitions.get("n0")).toEqual([
       { to: "n2", label: "plan written → review clean", cycle: false },
       { to: "n0", label: "plan written → review found issues", cycle: true },
     ]);
     expect(visible.transitions.get("n2")).toEqual([]);
+    // Drawn: two cards, the joined label on the port, the return as a self loop under n0.
+    const model = await buildExecutionProgressVisualModel(withProcess(), {
+      viewportWidth: 1000,
+      hide: ["p1"],
+    });
+    expect(model.nodes.map((n) => n.id)).toEqual(["n0", "n2"]);
+    expect(model.nodes[0].outputs.map((p) => p.label)).toEqual(["plan written → review clean"]);
+    expect(model.nodes[0].selfPorts.map((p) => [p.label, p.kind])).toEqual([
+      ["plan written → review found issues", "return"],
+    ]);
+    expect(model.edges.map((e) => [e.source, e.target, e.kind])).toEqual([
+      ["n0", "n2", "forward"],
+      ["n0", "n0", "self"],
+    ]);
+    expect(renderProgressVisualSvg(model)).not.toContain("Review");
   });
 
-  test("the process view draws labelled transitions and a dashed loop with its cause; cards view does not", () => {
-    const cards = buildExecutionProgressVisualModel(withProcess(), { viewportWidth: 1000 });
-    expect(cards.view).toBe("cards");
-    expect(cards.edges.every((edge) => edge.label === null)).toBe(true);
-    expect(cards.nodes.every((node) => node.lines.length > 0)).toBe(true);
+  test("a collapsed block is its title band alone and its edges meet the band's borders", async () => {
+    const model = await buildExecutionProgressVisualModel(withProcess(), {
+      viewportWidth: 1000,
+      view: "process",
+      collapse: ["p0"],
+    });
+    const [chip, review] = model.nodes;
+    expect(chip.collapsed).toBe(true);
+    expect(chip.height).toBe(chip.bandHeight);
+    expect(chip.inputs).toEqual([]);
+    expect(chip.outputs).toEqual([]);
+    expect(chip.height).toBeLessThan(review.height);
+    expect(chip.width).toBeLessThan(review.width);
+    const svg = renderProgressVisualSvg(model);
+    expect(svg).toContain('data-collapsed="true"');
+    // The edge out of the collapsed card leaves the middle of its border, not a port.
+    const out = model.edges.find((e) => e.source === "n0" && e.target === "n1")!;
+    expect(out.path.startsWith(`M ${chip.x + chip.width} ${chip.y + chip.height / 2}`)).toBe(true);
+    // The return into it arrives at the middle of its left border.
+    const back = model.edges.find((e) => e.source === "n1" && e.target === "n0")!;
+    expect(back.kind).toBe("return");
+    expect(back.path.endsWith(`L ${chip.x} ${chip.y + chip.height / 2}`)).toBe(true);
+  });
 
-    const model = buildExecutionProgressVisualModel(withProcess(), {
+  test("the process view keeps the cards' content out and the cards view keeps it in; both draw the same ports and edges", async () => {
+    const cards = await buildExecutionProgressVisualModel(withProcess(), { viewportWidth: 1000 });
+    const process = await buildExecutionProgressVisualModel(withProcess(), {
       viewportWidth: 1000,
       view: "process",
     });
-    expect(model.view).toBe("process");
-    expect(model.nodes.every((node) => node.lines.length === 0)).toBe(true);
-    expect(
-      model.edges.map(({ source, target, label, cycle, direction }) => ({
-        source,
-        target,
-        label,
-        cycle,
-        direction,
-      })),
-    ).toEqual([
-      { source: "n0", target: "n1", label: "plan written", cycle: false, direction: "forward" },
-      { source: "n1", target: "n2", label: "review clean", cycle: false, direction: "forward" },
-      {
-        source: "n1",
-        target: "n0",
-        label: "review found issues",
-        cycle: true,
-        direction: "backward",
-      },
+    expect(cards.view).toBe("cards");
+    expect(cards.nodes.every((node) => node.lines.length > 0)).toBe(true);
+    expect(process.nodes.every((node) => node.lines.length === 0)).toBe(true);
+    expect(cards.nodes[0].height).toBeGreaterThan(process.nodes[0].height);
+    const ports = (model: ProgressVisualModel) =>
+      model.nodes.map((n) => [n.inputs.map((p) => p.text), n.outputs.map((p) => p.text)]);
+    expect(ports(cards)).toEqual(ports(process));
+    expect(cards.edges.map((e) => [e.source, e.target, e.kind, e.label])).toEqual([
+      ["n0", "n1", "forward", "plan written"],
+      ["n1", "n2", "forward", "review clean"],
+      ["n1", "n0", "return", "review found issues"],
     ]);
-    const svg = renderProgressVisualSvg(model);
-    expect(svg).toContain("review found issues");
-    expect(svg).toContain('stroke-dasharray="7 6"');
-    expect(svg).toContain("plan written");
-    // The loop lane extends the image below the row.
-    expect(model.height).toBeGreaterThan(cards.height - 200);
+    const svg = renderProgressVisualSvg(process);
+    // The return is dashed in the primary colour with the return arrowhead; the forward lines are not.
+    expect(svg).toContain('data-edge-kind="return"');
+    expect(svg).toMatch(
+      /data-edge-kind="return".*stroke-dasharray="6 5"[^>]*marker-end="url\(#arrow-return\)"/,
+    );
+    expect(svg).toMatch(/data-edge-kind="forward".*marker-end="url\(#arrow-plain\)"/);
+    // The return port names the transition with the return glyph, on both cards.
+    expect(process.nodes[1].outputs.find((p) => p.kind === "return")!.text).toMatch(
+      /^↩ review found/,
+    );
+    expect(process.nodes[0].inputs.find((p) => p.kind === "return")!.text).toMatch(/^↩ 2\. Review/);
   });
 
-  test("a collapsed block is a label-only chip and a hidden one is absent from the SVG", () => {
-    const model = buildExecutionProgressVisualModel(withProcess(), {
-      viewportWidth: 1000,
-      hide: ["n2"],
-      collapse: ["p0"],
-    });
-    expect(model.nodes.map((node) => [node.id, node.collapsed, node.lines.length])).toEqual([
-      ["n0", true, 0],
-      ["n1", false, 3],
-    ]);
-    expect(model.nodes[0].height).toBeLessThan(model.nodes[1].height);
-    const svg = renderProgressVisualSvg(model);
-    expect(svg).toContain('data-collapsed="true"');
-    expect(svg).not.toContain("Stage 2");
-    expect(svg).toContain("Review");
-  });
-
-  test("overlapping returns take nested lanes and a hub transition is a connector labelled inside its source", () => {
+  test("several sources into one hub share one bundled lane and one port on the hub", async () => {
     const base = withProcess();
-    // n2 also returns to n0 (a span enclosing n1 → n0) and n0 leads to the hub n2 directly.
-    base.process.blocks[2].transitions = [
-      {
-        to: "n0",
-        label: "start over",
-        cycle: { cause: "Everything failed", exit: "A clean pass" },
-        edges: ["p2.retry"],
-      },
-    ];
-    base.process.blocks[0].transitions.push({ to: "n2", label: "skip review", edges: ["p0.skip"] });
-    base.process.hubs = ["n2"];
-    const model = buildExecutionProgressVisualModel(base, { viewportWidth: 1000, view: "process" });
-    const returns = model.edges.filter((edge) => edge.cycle);
-    expect(returns.map((edge) => edge.source)).toEqual(["n1", "n2"]);
-    // Distinct lanes: the enclosing arc's vertical segment sits further out than the inner one.
-    const laneX = (path: string) => Number(path.split(" ")[4]);
-    expect(laneX(returns[1].path)).toBeLessThan(laneX(returns[0].path));
-    // The hub transition is a drawn connector in the right gutter whose label stays inside the
-    // source block, so the gutter carries no text for it.
-    const hubEdge = model.edges.find((edge) => edge.source === "n0" && edge.target === "n2")!;
-    expect(hubEdge).toMatchObject({ direction: "forward", cycle: false, label: "skip review" });
-    expect(hubEdge.labelLines).toEqual([]);
-    const hub = model.nodes[2];
-    expect(laneX(hubEdge.path)).toBeGreaterThan(hub.x + hub.width);
-    expect(hubEdge.path.endsWith(`L ${hub.x + hub.width} ${hub.y + hub.height / 2}`)).toBe(true);
-    expect(model.nodes[0].lines.map((line) => line.text)).toEqual(["skip review → Stage 2"]);
-    // Gutter labels sit beyond the outermost lane of their side, never across a lane line.
-    const laneXs = returns.map((edge) => laneX(edge.path));
-    for (const edge of returns) expect(edge.labelX).toBeLessThan(Math.min(...laneXs));
-    expect(
-      model.edges
-        .filter((edge) => edge !== hubEdge)
-        .every((edge) => edge.labelLines.length > 0 && edge.labelX > 0),
-    ).toBe(true);
-  });
-
-  test("several sources into one hub share one bundled lane and one port on the hub", () => {
-    const base = withProcess();
-    base.nodes.push({
-      ...base.nodes[2],
-      id: "n3",
-      label: "Stage 3",
-      connections: {},
-    });
+    base.nodes.push({ ...base.nodes[2], id: "n3", label: "Stage 3", connections: {} });
     base.nodes[2] = { ...base.nodes[2], connections: { default: "n3" } };
     base.process.blocks.push({
       id: "n3",
@@ -268,46 +533,27 @@ describe("progress image visibility and the process view", () => {
     base.process.blocks[1].transitions.push({ to: "n3", label: "also hub", edges: ["p1.hub"] });
     base.process.blocks[2].transitions.push({ to: "n3", label: "next", edges: ["p2.ok"] });
     base.process.hubs = ["n3"];
-    const model = buildExecutionProgressVisualModel(base, { viewportWidth: 1000, view: "process" });
-    const laneX = (path: string) => Number(path.split(" ")[4]);
-    const intoHub = model.edges.filter((edge) => edge.target === "n3");
-    expect(intoHub.map((edge) => edge.source)).toEqual(["n0", "n1", "n2"]);
-    const [fromN0, fromN1] = intoHub;
-    expect(laneX(fromN0.path)).toBe(laneX(fromN1.path));
-    expect(fromN0.path.split(" L ").at(-1)).toBe(fromN1.path.split(" L ").at(-1));
-    expect(model.nodes[0].lines.map((line) => line.text)).toEqual(["to hub → Stage 3"]);
-    expect(model.nodes[1].lines.map((line) => line.text)).toEqual(["also hub → Stage 3"]);
+    const model = await buildExecutionProgressVisualModel(base, {
+      viewportWidth: 4096,
+      view: "process",
+    });
+    expect(model.diagram.preset).toBe("default");
+    const intoHub = model.layout.edges.filter((edge) => edge.to === "n3");
+    expect(intoHub.map((edge) => [edge.from, edge.kind])).toEqual([
+      ["n0", "hub"],
+      ["n1", "hub"],
+      ["n2", "forward"],
+    ]);
+    expect(intoHub[0].laneY).toBe(intoHub[1].laneY);
+    // The hub's input ports name each source; the sources' ports to the hub are `external`.
+    const hub = model.nodes[3];
+    expect(hub.inputs.map((p) => p.label)).toEqual(["1. Stage 0", "2. Review", "3. Stage 2"]);
+    expect(model.nodes[0].outputs.find((p) => p.label === "to hub")!.kind).toBe("external");
+    const svg = renderProgressVisualSvg(model);
+    expect(svg.match(/data-edge-kind="hub"/g)).toHaveLength(2);
   });
 
-  test.each([
-    ["quick-task", 0],
-    ["todo-list", 0],
-    ["robust-task", 2],
-    ["software-development-flow", 4],
-    ["workflow-management-flow", 0],
-    ["user-onboarding", 0],
-  ])(
-    "the process view of %s draws every derived transition into its %i hubs as an edge",
-    (slug, hubCount) => {
-      const progress = bundledProgress(slug);
-      const model = buildExecutionProgressVisualModel(progress, {
-        viewportWidth: 1280,
-        view: "process",
-      });
-      const hubs = new Set(progress.process.hubs);
-      expect(hubs.size).toBe(hubCount);
-      const expected = progress.process.blocks.flatMap((block) =>
-        block.transitions
-          .filter((transition) => hubs.has(transition.to))
-          .map((transition) => `${block.id}→${transition.to}`),
-      );
-      expect(expected.length).toBeGreaterThanOrEqual(hubCount * 3);
-      const drawn = new Set(model.edges.map((edge) => `${edge.source}→${edge.target}`));
-      expect(expected.filter((pair) => !drawn.has(pair))).toEqual([]);
-    },
-  );
-
-  test("a collapsed chip is a pill of its own height and a self-return is a visible bracket", () => {
+  test("a self return leaves the left dot of the double port and re-enters the right one beneath the card", async () => {
     const base = withProcess();
     base.process.blocks[0].transitions.push({
       to: "n0",
@@ -315,24 +561,25 @@ describe("progress image visibility and the process view", () => {
       cycle: { cause: "Not done", exit: "Done" },
       edges: ["p0.retry"],
     });
-    const model = buildExecutionProgressVisualModel(base, {
+    const model = await buildExecutionProgressVisualModel(base, {
       viewportWidth: 1000,
       view: "process",
-      collapse: ["n2"],
     });
-    const chip = model.nodes.find((node) => node.id === "n2")!;
-    const svg = renderProgressVisualSvg(model);
-    expect(chip.collapsed).toBe(true);
-    expect(svg).toContain(`rx="${chip.height / 2}"`);
-    expect(svg).not.toContain('rx="999"');
-    const self = model.edges.find((edge) => edge.source === "n0" && edge.target === "n0")!;
+    const card = model.nodes[0];
+    expect(card.selfBandY).not.toBeNull();
+    expect(card.selfPorts.map((p) => [p.label, p.kind])).toEqual([["try again", "return"]]);
+    const self = model.edges.find((edge) => edge.kind === "self")!;
     const points = self.path.match(/-?\d+(\.\d+)?/g)!.map(Number);
-    // M x y L laneX y L laneX y2 L x y2: the loop leaves and re-enters at different heights.
-    expect(points[1]).not.toBe(points[5]);
-    expect(Math.abs(points[5] - points[1])).toBeGreaterThan(8);
+    const [sx, sy] = points;
+    expect(sy).toBe(card.y + card.height);
+    expect(sx).toBe(card.x + card.width / 2 - 9);
+    // The path ends 18 px to the right, on the same bottom edge, having dipped below the card.
+    expect(points.at(-2)).toBe(sx + 18);
+    expect(points.at(-1)).toBe(sy);
+    expect(Math.max(...points.filter((_, i) => i % 2 === 1))).toBeGreaterThan(sy);
   });
 
-  test("the process view is byte-deterministic and differs from the cards view", async () => {
+  test("the picture is byte-deterministic and the views and themes differ", async () => {
     const options = { theme: "light" as const, viewportWidth: 720, view: "process" as const };
     const first = await renderExecutionProgressPng(withProcess(), options);
     const again = await renderExecutionProgressPng(withProcess(), options);
@@ -340,133 +587,66 @@ describe("progress image visibility and the process view", () => {
       theme: "light",
       viewportWidth: 720,
     });
+    const dark = await renderExecutionProgressPng(withProcess(), { ...options, theme: "dark" });
     expect(first.png.equals(again.png)).toBe(true);
     expect(first.png.equals(cards.png)).toBe(false);
+    expect(first.png.equals(dark.png)).toBe(false);
+    expect(first.png.subarray(0, 8).toString("hex")).toBe("89504e470d0a1a0a");
     expect(await sharp(first.png).metadata()).toMatchObject({
       width: 720,
       height: first.model.height,
     });
+    expect(first.model).toEqual(await buildExecutionProgressVisualModel(withProcess(), options));
   });
 });
 
-describe("execution progress visual model and PNG", () => {
-  test("wraps complete whitespace text and long Unicode tokens without truncation", () => {
+describe("the words on the cards", () => {
+  test("wraps whitespace text keeping every word and ellipsises a token wider than the line", async () => {
     const sentence = "Полная задача сохраняет каждое слово и финальный результат";
-    const sentenceProgress = progress();
+    const sentenceProgress = withProcess();
     sentenceProgress.taskTitle = sentence;
     expect(
-      buildExecutionProgressVisualModel(sentenceProgress, {
-        viewportWidth: 480,
-      }).taskTitleLines.join(" "),
+      (
+        await buildExecutionProgressVisualModel(sentenceProgress, { viewportWidth: 480 })
+      ).taskTitleLines.join(" "),
     ).toBe(sentence);
-    const token = "ОченьДлинныйТокен🚀БезПробеловИОбрезки";
-    const tokenProgress = progress();
+    const token = "ОченьДлинныйТокен🚀БезПробеловИОбрезкиИПереносовВнутриСлова";
+    const tokenProgress = withProcess();
     tokenProgress.taskTitle = token;
+    const model = await buildExecutionProgressVisualModel(tokenProgress, { viewportWidth: 480 });
+    expect(model.taskTitleLines).toHaveLength(1);
+    const [line] = model.taskTitleLines;
+    expect(line.endsWith("…")).toBe(true);
+    expect(progressTextWidth(line, model.type.header.task, "bold")).toBeLessThanOrEqual(
+      model.headerWidth,
+    );
+    // The same rule in a title band: an unbreakable name is cut, never drawn past the chip.
+    const blockProgress = withProcess();
+    blockProgress.nodes[1] = { ...blockProgress.nodes[1], label: token };
+    const card = (await buildExecutionProgressVisualModel(blockProgress, { viewportWidth: 1000 }))
+      .nodes[1];
+    expect(card.labelLines).toHaveLength(1);
+    expect(card.labelLines[0].endsWith("…")).toBe(true);
+    expect(progressTextWidth(card.labelLines[0], card.width, "bold")).toBeGreaterThan(0);
     expect(
-      buildExecutionProgressVisualModel(tokenProgress, { viewportWidth: 480 }).taskTitleLines.join(
-        "",
-      ),
-    ).toBe(token);
+      renderProgressVisualSvg(await buildExecutionProgressVisualModel(blockProgress)),
+    ).toContain("…");
   });
 
-  test("lays out ordered nodes with card-free cross-row gutters", () => {
-    const model = buildExecutionProgressVisualModel(progress(), { viewportWidth: 600 });
-    expect(model.nodes.map(({ id, state, row }) => ({ id, state, row }))).toEqual([
-      { id: "n0", state: "completed", row: 0 },
-      { id: "n1", state: "current", row: 0 },
-      { id: "n2", state: "pending", row: 1 },
-    ]);
-    expect(model.edges.map(({ direction }) => direction)).toEqual([
-      "forward",
-      "cross-row",
-      "cross-row",
-    ]);
-    expect(model.edges[2].path).toContain("L");
-    expect(model.height).toBeGreaterThan(500);
-    expect(model.taskTitleLines.join(" ")).toContain("complete execution progress");
-    expect(model.nodes[0].lines.map((line) => line.text)).toContain("Core projection");
-    expect(model.nodes[0].y - model.stagesTop).toBe(0);
-    expect(model.stagesHeight).toBe(model.height - model.stagesTop);
-    const crossRow = model.edges.find((edge) => edge.direction === "cross-row");
-    expect(crossRow?.path).toMatch(/ L .* L .* L /);
-    const coordinates = crossRow!.path.match(/-?\d+(?:\.\d+)?/g)!.map(Number);
-    const firstRowBottom = Math.max(
-      ...model.nodes.filter((node) => node.row === 0).map((node) => node.y + node.height),
-    );
-    const secondRowTop = Math.min(
-      ...model.nodes.filter((node) => node.row === 1).map((node) => node.y),
-    );
-    expect(coordinates[1]).toBeLessThan(firstRowBottom);
-    expect(coordinates[3]).toBe(firstRowBottom);
-    expect(coordinates[4]).toBe(20);
-    expect(coordinates[6]).toBe(20);
-    expect(coordinates[7]).toBe(secondRowTop);
-
-    const skipped = progress();
-    skipped.nodes = Array.from({ length: 5 }, (_, index) => ({
-      id: `s${index}`,
-      label: `Stage ${index}`,
-      state: index === 4 ? "current" : "completed",
-      status: index === 4 ? "active" : "done",
-      iterations: 1,
-      visits: 1,
-      currentNodeId: index === 4 ? `p${index}` : null,
-      connections: { default: index === 4 ? "s0" : `s${index + 1}` },
-      primaryNodeIds: [`p${index}`],
-      focusNodeId: `p${index}`,
-      content: {
-        summary: index === 0 ? "Tall ".repeat(30) : "Short",
-        details: [],
-        outcome: null,
-        next: null,
-      },
-    }));
-    const skippedModel = buildExecutionProgressVisualModel(skipped, { viewportWidth: 600 });
-    const backward = skippedModel.edges.find((edge) => edge.source === "s4")!;
-    const backwardCoordinates = backward.path.match(/-?\d+(?:\.\d+)?/g)!.map(Number);
-    expect(backward.direction).toBe("cross-row");
-    expect(backwardCoordinates[4]).toBe(20);
-    expect(backwardCoordinates[6]).toBe(20);
-  });
-
-  test("supports a container-width UI model below the PNG API minimum", () => {
-    const model = buildExecutionProgressVisualModel(progress(), {
+  test("supports a container-width UI model below the PNG API minimum", async () => {
+    const model = await buildExecutionProgressVisualModel(withProcess(), {
       viewportWidth: 360,
       minWidth: 320,
     });
     expect(model.width).toBe(360);
-    expect(model.nodes.map((node) => node.row)).toEqual([0, 1, 2]);
-    expect(model.nodes.every((node) => node.x + node.width <= model.width - 40)).toBe(true);
+    expect(model.diagram.preset).toBe("vertical");
+    expect(
+      model.diagram.x + Math.round(model.diagram.width * model.diagram.scale),
+    ).toBeLessThanOrEqual(360 - 40);
   });
 
-  test("renders byte-deterministic bounded PNGs that differ by state and theme", async () => {
-    const first = await renderExecutionProgressPng(progress(), {
-      theme: "light",
-      viewportWidth: 720,
-    });
-    const repeated = await renderExecutionProgressPng(progress(), {
-      theme: "light",
-      viewportWidth: 720,
-    });
-    const dark = await renderExecutionProgressPng(progress(2), {
-      theme: "dark",
-      viewportWidth: 720,
-    });
-    expect(first.png.equals(repeated.png)).toBe(true);
-    expect(first.png.equals(dark.png)).toBe(false);
-    expect(first.png.subarray(0, 8).toString("hex")).toBe("89504e470d0a1a0a");
-    expect(await sharp(first.png).metadata()).toMatchObject({
-      format: "png",
-      width: 720,
-      height: first.model.height,
-    });
-    expect(first.model).toEqual(
-      buildExecutionProgressVisualModel(progress(), { theme: "light", viewportWidth: 720 }),
-    );
-  });
-
-  test("renders the block status vocabulary: pass counts for repeated, marks for skipped and waiting", () => {
-    const statuses = progress();
+  test("renders the block status vocabulary: pass count, skipped struck through, the agent on the active step", async () => {
+    const statuses = withProcess();
     statuses.nodes[0] = { ...statuses.nodes[0], status: "repeated", iterations: 3 };
     statuses.nodes[1] = {
       ...statuses.nodes[1],
@@ -474,41 +654,260 @@ describe("execution progress visual model and PNG", () => {
       state: "pending",
       iterations: 0,
     };
-    statuses.nodes[2] = {
-      ...statuses.nodes[2],
-      status: "waiting",
-      state: "current",
-      iterations: 1,
-    };
-    const model = buildExecutionProgressVisualModel(statuses);
+    const model = await buildExecutionProgressVisualModel(statuses);
     const svg = renderProgressVisualSvg(model);
-    expect(svg).toContain("Repeated ×3: Stage 0");
-    // The count is a badge beside the mark, not part of it; the title starts after the badge.
     const repeated = model.nodes[0];
-    expect(repeated.mark).toBe("✓");
+    expect(repeated.tone).toBe("done");
+    expect(repeated.statusLine).toBe("repeated ×3");
+    expect(repeated.chip.text).toBe("repeated");
+    // The pass count sits before the chip, clear of the title.
     expect(repeated.badge).toMatchObject({ text: "×3" });
-    expect(repeated.titleX).toBeGreaterThan(repeated.badge!.x + repeated.badge!.width);
-    expect(svg).toContain(">×3</text>");
-    expect(svg).not.toContain("✓×3");
-    expect(svg).toContain("Skipped: Review");
-    expect(svg).toContain("Waiting: Stage 2");
-    expect(svg).toContain("◐");
+    expect(repeated.badge!.x + repeated.badge!.width).toBeLessThan(repeated.chip.x);
+    expect(svg).toContain('data-pass-count="3"');
+    expect(svg).toContain("<title>1. Stage 0 — repeated ×3</title>");
+    expect(model.nodes[1].tone).toBe("neutral");
+    expect(svg).toContain('text-decoration="line-through"');
+    expect(svg).toContain('data-status="skipped"');
+    expect(model.nodes[2].statusLine).toBe("pending");
+    const active = await buildExecutionProgressVisualModel(withProcess(progress(2)));
+    expect(active.nodes[2]).toMatchObject({ statusLine: "agent on the step", tone: "active" });
+    expect(renderProgressVisualSvg(active)).toContain('data-tone="active"');
   });
 
-  test("escapes authored title and label data in the SVG adapter", () => {
-    const model = buildExecutionProgressVisualModel(progress());
+  test.each([
+    ["agent", "agent on the step", "waiting for you"],
+    ["user", "waiting for you", "agent on the step"],
+  ] as const)(
+    "a run waiting for the %s words its waiting block '%s' and never '%s'",
+    async (waitingFor, expected, absent) => {
+      const paused = progress();
+      paused.waitingFor = waitingFor;
+      paused.nodes[1] = { ...paused.nodes[1], status: "waiting", state: "current" };
+      for (const view of VIEWS) {
+        const model = await buildExecutionProgressVisualModel(withProcess(paused), { view });
+        const svg = renderProgressVisualSvg(model);
+        expect(svg).toContain(`<title>2. Review — ${expected}</title>`);
+        expect(svg).not.toContain(absent);
+        expect(model.nodes.map((node) => node.statusLine)).toEqual([
+          "completed",
+          expected,
+          "pending",
+        ]);
+        expect(model.nodes[1].tone).toBe("waiting");
+      }
+    },
+  );
+
+  test("the facts line carries the time spent and, for a bound block only, done/total with the current item", async () => {
+    const run = progress();
+    run.nodes[0] = {
+      ...run.nodes[0],
+      timing: { passes: [], totalMs: 7_505_000, currentMs: null, recorded: true },
+      list: { items: null, done: 2, total: 5, current: 2, currentTitle: "Facts line" },
+    };
+    run.nodes[1] = {
+      ...run.nodes[1],
+      timing: { passes: [], totalMs: 80_000, currentMs: 12_000, recorded: true },
+      list: null,
+    };
+    run.nodes[2] = {
+      ...run.nodes[2],
+      list: { items: null, done: 0, total: 3, current: null, currentTitle: null },
+    };
+    for (const view of VIEWS) {
+      const model = await buildExecutionProgressVisualModel(withProcess(run), {
+        view,
+        viewportWidth: 1280,
+      });
+      expect(model.nodes.map((node) => node.factsLine)).toEqual([
+        "2 h 05 min · 2/5: Facts line",
+        "1 min 20 s · this pass 12 s",
+        "0/3",
+      ]);
+    }
+    const svg = renderProgressVisualSvg(await buildExecutionProgressVisualModel(withProcess(run)));
+    expect(svg).toContain(">2 h 05 min · 2/5: Facts line</text>");
+    expect(svg).toContain(">1 min 20 s · this pass 12 s</text>");
+    // A bound block never measured carries its count alone — no dash, never a zero time.
+    expect(svg).toContain(">0/3</text>");
+    expect(svg).not.toContain(">0 s");
+    expect(svg).not.toContain('data-facts="">—');
+  });
+
+  test("a facts line is shortened by priority: the open pass goes first, the item's title is cut, the count survives", async () => {
+    const run = progress();
+    const bound = {
+      ...run.nodes[0],
+      timing: { passes: [], totalMs: 7_500_000, currentMs: 132_000, recorded: true },
+      list: {
+        items: null,
+        done: 1,
+        total: 5,
+        current: 1,
+        currentTitle: "Readable progress images in the map's style",
+      },
+    };
+    expect(progressFactsCandidates(bound)).toEqual([
+      "2 h 05 min · this pass 2 min 12 s · 1/5: Readable progress images in the map's style",
+      "2 h 05 min · 1/5: Readable progress images in the map's style",
+      "2 h 05 min · 1/5",
+      "1/5",
+    ]);
+    run.nodes[0] = bound;
+    const narrow = await buildExecutionProgressVisualModel(withProcess(run), {
+      view: "process",
+      viewportWidth: 480,
+    });
+    const line = narrow.nodes[0].factsLine;
+    expect(line.startsWith("2 h 05 min · 1/5")).toBe(true);
+    expect(line).not.toContain("this pass");
+    expect(line).not.toMatch(/1\/…|1\/$/u);
+    // A counter the binding did not resolve reads `—`, the map's glyph, never `?`.
+    const unknown = { ...bound, list: { ...bound.list, done: null } };
+    expect(progressFactsCandidates(unknown)[3]).toBe("—/5");
+    expect(listProgressLabel({ done: 1, total: null })).toBe("1/—");
+    expect(listProgressLabel({ done: null, total: null })).toBeNull();
+    expect(progressFactsCandidates(unknown).join(" ")).not.toContain("?");
+    // Nothing measured and nothing bound: no facts at all.
+    expect(progressFactsCandidates(progress().nodes[2])).toEqual([]);
+  });
+
+  test("typical durations from the version's statistics are drawn beside the run's facts; absent statistics draw nothing", async () => {
+    const stats: WorkflowVersionStatistics = {
+      workflowId: "w",
+      workflowVersion: "1.0.0",
+      sampledRuns: 4,
+      versionNotRecorded: 0,
+      computedAt: 0,
+      blocks: [
+        {
+          blockId: "n0",
+          pass: {
+            sampleCount: 4,
+            medianMs: 60_000,
+            p25Ms: 50_000,
+            p75Ms: 70_000,
+            minMs: 40_000,
+            maxMs: 80_000,
+          },
+          run: {
+            sampleCount: 4,
+            medianMs: 125_000,
+            p25Ms: 100_000,
+            p75Ms: 150_000,
+            minMs: 90_000,
+            maxMs: 160_000,
+          },
+          typicalPasses: 2,
+          items: [],
+        },
+        {
+          blockId: "n1",
+          pass: {
+            sampleCount: 4,
+            medianMs: 30_000,
+            p25Ms: null,
+            p75Ms: null,
+            minMs: null,
+            maxMs: null,
+          },
+          run: {
+            sampleCount: 4,
+            medianMs: 30_000,
+            p25Ms: null,
+            p75Ms: null,
+            minMs: null,
+            maxMs: null,
+          },
+          typicalPasses: 1,
+          items: [],
+        },
+        {
+          blockId: "n2",
+          pass: {
+            sampleCount: 0,
+            medianMs: null,
+            p25Ms: null,
+            p75Ms: null,
+            minMs: null,
+            maxMs: null,
+          },
+          run: {
+            sampleCount: 0,
+            medianMs: null,
+            p25Ms: null,
+            p75Ms: null,
+            minMs: null,
+            maxMs: null,
+          },
+          typicalPasses: null,
+          items: [],
+        },
+      ],
+    };
+    expect(progressTypicalText(stats.blocks[0])).toBe("typically 2 min 5 s · pass 1 min · ×2");
+    expect(progressTypicalCandidates(stats.blocks[0])).toEqual([
+      "typically 2 min 5 s · pass 1 min · ×2",
+      "typically 2 min 5 s · ×2",
+      "typically 2 min 5 s",
+    ]);
+    expect(progressTypicalText(stats.blocks[1])).toBe("typically 30 s");
+    expect(progressTypicalText(stats.blocks[2])).toBeNull();
+    expect(progressTypicalText(undefined)).toBeNull();
+    for (const view of VIEWS) {
+      const withStats = await buildExecutionProgressVisualModel(withProcess(), { view }, stats);
+      // The card's centre holds the run median and the pass count; the pass median is the part
+      // dropped first, never an ellipsis inside the count.
+      expect(withStats.nodes.map((n) => n.typicalLine)).toEqual([
+        "typically 2 min 5 s · ×2",
+        "typically 30 s",
+        null,
+      ]);
+      const svg = renderProgressVisualSvg(withStats);
+      expect(svg).toContain('data-typical="">typically 2 min 5 s · ×2</text>');
+      const without = await buildExecutionProgressVisualModel(withProcess(), { view });
+      expect(without.nodes.map((n) => n.typicalLine)).toEqual([null, null, null]);
+      expect(renderProgressVisualSvg(without)).not.toContain("typically");
+      // The typical line takes a row of the card: the card with it is taller than without.
+      expect(withStats.nodes[0].height).toBeGreaterThan(without.nodes[0].height);
+      expect(withStats.nodes[2].height).toBe(without.nodes[2].height);
+    }
+  });
+
+  test.each([
+    [null, "—"],
+    [0, "0 s"],
+    [12_400, "12 s"],
+    [80_000, "1 min 20 s"],
+    [180_000, "3 min"],
+    [7_505_000, "2 h 05 min"],
+  ])("formats a duration of %s ms as '%s' from the shared split", (ms, expected) => {
+    expect(formatProgressDuration(ms)).toBe(expected);
+    if (ms !== null)
+      expect(splitDuration(ms)).toEqual({
+        hours: Math.floor(ms / 3_600_000),
+        minutes: Math.floor((Math.round(ms / 1000) % 3600) / 60),
+        seconds: Math.round(ms / 1000) % 60,
+      });
+    else expect(splitDuration(ms)).toBeNull();
+  });
+
+  test("escapes authored title and label data in the SVG adapter", async () => {
+    const model = await buildExecutionProgressVisualModel(withProcess());
     model.nodes[0].labelLines = ['<script data-x="1">bad</script>'];
+    model.nodes[0].outputs[0].text = "<b>plan</b>";
     const svg = renderProgressVisualSvg(model);
-    const visibleText = svg.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
+    const text = visibleText(svg);
     expect(svg).toContain("&lt;script");
+    expect(svg).toContain("&lt;b&gt;plan");
     expect(svg).toContain("Development &lt;safe&gt;");
-    expect(visibleText).toContain("✓ Architecture and evidence agreed");
-    expect(visibleText).toContain(
+    expect(text).toContain("✓ Architecture and evidence agreed");
+    expect(text).toContain(
       "Show the task, plan, current work, outcomes, and next action without hover",
     );
-    expect(visibleText).toContain("Autonomous");
-    expect(visibleText).toContain("Web UI and PNG");
-    expect(visibleText).toContain("Run focused validation");
+    expect(text).toContain("Autonomous");
+    expect(text).toContain("Web UI and PNG");
+    expect(text).toContain("Run focused validation");
     expect(svg).toContain('font-family="DejaVu Sans, sans-serif"');
     expect(svg).not.toContain("<script");
   });

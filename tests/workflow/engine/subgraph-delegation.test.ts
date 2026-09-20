@@ -30,7 +30,7 @@ describe("SubgraphNode Step Delegation", () => {
     subgraphHandler = new SubgraphNodeHandler();
 
     // Load real simple-linear-test workflow
-    const simpleLinearTest = {
+    const simpleLinearTest: WorkflowGraph = {
       id: "simple-linear-test",
       metadata: {
         name: "simple-linear-test",

@@ -263,14 +263,19 @@ Kebab-case поддерживается в первом сегменте ссы�
 
 ### Условное ветвление
 
-Ветвление через узел `condition`, читающий значение через `contextPath`:
+Ветвление через узел `condition`, case которого читает значение через `contextPath`:
 
 ```json
 {
   "id": "check-tests",
   "type": "condition",
-  "condition": { "operator": "eq", "left": { "contextPath": "testsPassed" }, "right": true },
-  "connections": { "true": "deploy", "false": "fix-and-retry" }
+  "cases": [
+    {
+      "when": { "operator": "eq", "left": { "contextPath": "testsPassed" }, "right": true },
+      "output": "passed"
+    }
+  ],
+  "connections": { "passed": "deploy", "default": "fix-and-retry" }
 }
 ```
 
@@ -291,8 +296,13 @@ Kebab-case поддерживается в первом сегменте ссы�
 {
   "id": "check-limit",
   "type": "condition",
-  "condition": { "operator": "lt", "left": { "contextPath": "iterationCount" }, "right": 5 },
-  "connections": { "true": "improve", "false": "done" }
+  "cases": [
+    {
+      "when": { "operator": "lt", "left": { "contextPath": "iterationCount" }, "right": 5 },
+      "output": "under-limit"
+    }
+  ],
+  "connections": { "under-limit": "improve", "default": "done" }
 }
 ```
 

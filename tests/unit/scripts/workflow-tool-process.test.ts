@@ -53,8 +53,13 @@ function fixture(): string {
         {
           id: "verify",
           type: "condition",
-          condition: { operator: "eq", left: { contextPath: "do.ok" }, right: true },
-          connections: { true: "end", false: "do" },
+          cases: [
+            {
+              when: { operator: "eq", left: { contextPath: "do.ok" }, right: true },
+              output: "true",
+            },
+          ],
+          connections: { true: "end", default: "do" },
         },
         { id: "end", type: "end", progressNodeId: "check" },
       ],
@@ -86,7 +91,7 @@ describe("workflow-tool process block authoring", () => {
       file,
       "set-label",
       "verify",
-      "false",
+      "default",
       "check failed",
       "--cause",
       "The check found a problem",
@@ -95,7 +100,7 @@ describe("workflow-tool process block authoring", () => {
       "--no-version-bump",
     ]);
     expect(read(file).nodes[2].connectionLabels).toEqual({
-      false: {
+      default: {
         label: "check failed",
         cycle: { cause: "The check found a problem", exit: "The check passes" },
       },
@@ -119,6 +124,45 @@ describe("workflow-tool process block authoring", () => {
     run([file, "clear-label", "do", "success", "--force"]);
     expect(read(file).metadata.version).toBe("1.2.4");
     expect(read(file).nodes[1]).not.toHaveProperty("connectionLabels");
+  });
+
+  test("binds a block to a list, rejects a malformed binding, and removes it with none", () => {
+    run([
+      file,
+      "edit-block",
+      "work",
+      "--list",
+      '{"current":"progress_work_outcome","total":"progress_work_outcome"}',
+      "--no-version-bump",
+    ]);
+    expect(read(file).progress.nodes[0].list).toEqual({
+      current: "progress_work_outcome",
+      total: "progress_work_outcome",
+    });
+    expect(() =>
+      run([file, "edit-block", "work", "--list", '{"title":"name"}', "--no-version-bump"]),
+    ).toThrow(/at least one of items, current or total/u);
+    expect(read(file).progress.nodes[0].list).toBeDefined();
+    run([
+      file,
+      "add-block",
+      "deliver",
+      "Deliver",
+      "Hand over",
+      "--list",
+      '{"items":"progress_work_outcome","indexBase":0}',
+      "--no-version-bump",
+    ]);
+    expect(read(file).progress.nodes[2].list).toEqual({
+      items: "progress_work_outcome",
+      indexBase: 0,
+    });
+    // The deterministic schema names the binding on its block.
+    expect(run([file, "schema"])).toMatch(
+      /PROGRESS_NODE deliver[^\n]*\n(?:[^\n]*\n)*? {4}LIST \{"indexBase":0,"items":"progress_work_outcome"\}/u,
+    );
+    run([file, "edit-block", "work", "--list", "none", "--no-version-bump"]);
+    expect(read(file).progress.nodes[0].list).toBeUndefined();
   });
 
   test("adds a block after another and edits its description and outcome", () => {
@@ -168,7 +212,7 @@ describe("workflow-tool process block authoring", () => {
   test.each([
     ["an unknown node", ["set-label", "ghost", "success", "x"]],
     ["an unknown connection key", ["set-label", "do", "failure", "x"]],
-    ["a return with only a cause", ["set-label", "verify", "false", "x", "--cause", "c"]],
+    ["a return with only a cause", ["set-label", "verify", "default", "x", "--cause", "c"]],
     ["moving a node to an unknown block", ["set-block", "do", "ghost"]],
     ["a duplicate block id", ["add-block", "work", "Work", "Again"]],
     ["editing an unknown block", ["edit-block", "ghost", "--summary", "x"]],

@@ -9,8 +9,9 @@
  * is this same panel in a dialog.
  */
 
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useState, useRef } from "react";
 import { useTranslation } from "react-i18next";
+import { useHighlightTarget, type HighlightRequest } from "../diagram/useHighlightTarget";
 import { History, Loader2, Maximize2, Search, Send } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
@@ -258,6 +259,8 @@ function HistoryList({ row }: { row: DeclaredRow }): React.JSX.Element {
 }
 
 export interface VariablesPanelProps {
+  /** A variable to bring into view and mark (a reference token was clicked). */
+  highlight?: HighlightRequest | null;
   /** The projection shown (at the cursor while one is set); null without a process view. */
   progress: ExecutionProgress | null;
   cursor: number | null;
@@ -288,8 +291,11 @@ export function VariablesPanel({
   onAnswer,
   onSavePath,
   onFullscreen,
+  highlight = null,
 }: VariablesPanelProps): React.JSX.Element {
   const { t } = useTranslation();
+  const panelRef = useRef<HTMLDivElement>(null);
+  useHighlightTarget(panelRef, highlight, (name) => `[data-variable="${name}"]`);
   const [query, setQuery] = useState("");
   const [filterField, setFilterField] = useState<VariableFilterField>("both");
   const [openHistory, setOpenHistory] = useState<string | null>(null);
@@ -316,7 +322,7 @@ export function VariablesPanel({
   const fields: VariableFilterField[] = ["both", "key", "value"];
 
   return (
-    <div className="space-y-3 p-3" data-testid="variables-panel">
+    <div className="space-y-3 p-3" data-testid="variables-panel" ref={panelRef}>
       {onFullscreen && (
         <GuidanceCallout
           title={t("pages.runPage.variables.guideTitle")}
@@ -371,7 +377,7 @@ export function VariablesPanel({
             size="sm"
             className="h-8 w-8 shrink-0 p-0"
             onClick={onFullscreen}
-            title={t("pages.runPage.variables.fullscreen")}
+            data-hint={t("pages.runPage.variables.fullscreen")}
             aria-label={t("pages.runPage.variables.fullscreen")}
             data-testid="context-fullscreen-button"
           >
@@ -428,7 +434,7 @@ export function VariablesPanel({
                           onClick={() => setOpenHistory(openHistory === row.name ? null : row.name)}
                           data-testid={`variable-history-${row.name}`}
                           aria-expanded={openHistory === row.name}
-                          title={t("pages.runPage.variables.changes")}
+                          data-hint={t("pages.runPage.variables.changes")}
                         >
                           <History className="size-3" aria-hidden="true" />
                           {row.history.length}

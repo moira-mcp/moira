@@ -3,17 +3,34 @@ title: Операторы условий
 description: Справочник по всем операторам условий в узлах workflows
 ---
 
+Структурированное условие — это объект, который решает, срабатывает ли case маршрутизации. Он
+находится в поле `when` у case узла `condition` или `agent-directive`:
+
+```json
+{
+  "id": "check-status",
+  "type": "condition",
+  "cases": [
+    {
+      "when": { "operator": "eq", "left": { "contextPath": "status" }, "right": "ready" },
+      "output": "ready"
+    }
+  ],
+  "connections": { "ready": "next-step", "default": "wait" }
+}
+```
+
+Во всех примерах ниже показан сам объект условия — то, что помещается в `when` у case.
+
 ## Операторы сравнения
 
 ### Равно (`eq`)
 
 ```json
 {
-  "condition": {
-    "operator": "eq",
-    "left": { "contextPath": "status" },
-    "right": "ready"
-  }
+  "operator": "eq",
+  "left": { "contextPath": "status" },
+  "right": "ready"
 }
 ```
 
@@ -23,11 +40,9 @@ description: Справочник по всем операторам услов�
 
 ```json
 {
-  "condition": {
-    "operator": "neq",
-    "left": { "contextPath": "error_count" },
-    "right": 0
-  }
+  "operator": "neq",
+  "left": { "contextPath": "error_count" },
+  "right": 0
 }
 ```
 
@@ -35,11 +50,9 @@ description: Справочник по всем операторам услов�
 
 ```json
 {
-  "condition": {
-    "operator": "gt",
-    "left": { "contextPath": "score" },
-    "right": 80
-  }
+  "operator": "gt",
+  "left": { "contextPath": "score" },
+  "right": 80
 }
 ```
 
@@ -47,11 +60,9 @@ description: Справочник по всем операторам услов�
 
 ```json
 {
-  "condition": {
-    "operator": "gte",
-    "left": { "contextPath": "items_count" },
-    "right": 1
-  }
+  "operator": "gte",
+  "left": { "contextPath": "items_count" },
+  "right": 1
 }
 ```
 
@@ -59,11 +70,9 @@ description: Справочник по всем операторам услов�
 
 ```json
 {
-  "condition": {
-    "operator": "lt",
-    "left": { "contextPath": "retry_count" },
-    "right": 3
-  }
+  "operator": "lt",
+  "left": { "contextPath": "retry_count" },
+  "right": 3
 }
 ```
 
@@ -71,11 +80,9 @@ description: Справочник по всем операторам услов�
 
 ```json
 {
-  "condition": {
-    "operator": "lte",
-    "left": { "contextPath": "error_rate" },
-    "right": 0.05
-  }
+  "operator": "lte",
+  "left": { "contextPath": "error_rate" },
+  "right": 0.05
 }
 ```
 
@@ -85,11 +92,9 @@ description: Справочник по всем операторам услов�
 
 ```json
 {
-  "condition": {
-    "operator": "contains",
-    "left": { "contextPath": "message" },
-    "right": "error"
-  }
+  "operator": "contains",
+  "left": { "contextPath": "message" },
+  "right": "error"
 }
 ```
 
@@ -97,11 +102,9 @@ description: Справочник по всем операторам услов�
 
 ```json
 {
-  "condition": {
-    "operator": "contains",
-    "left": { "contextPath": "tags" },
-    "right": "urgent"
-  }
+  "operator": "contains",
+  "left": { "contextPath": "tags" },
+  "right": "urgent"
 }
 ```
 
@@ -111,31 +114,12 @@ description: Справочник по всем операторам услов�
 
 ```json
 {
-  "condition": {
-    "operator": "exists",
-    "operand": { "contextPath": "optional_field" }
-  }
+  "operator": "exists",
+  "value": { "contextPath": "optional_field" }
 }
 ```
 
 Возвращает true, если переменная существует и не равна null/undefined.
-
-### Пусто (`isEmpty`)
-
-```json
-{
-  "condition": {
-    "operator": "isEmpty",
-    "operand": { "contextPath": "items" }
-  }
-}
-```
-
-Возвращает true для:
-
-- Пустой строки `""`
-- Пустого массива `[]`
-- Null/undefined
 
 ## Логические операторы
 
@@ -145,21 +129,19 @@ description: Справочник по всем операторам услов�
 
 ```json
 {
-  "condition": {
-    "operator": "and",
-    "conditions": [
-      {
-        "operator": "eq",
-        "left": { "contextPath": "status" },
-        "right": "complete"
-      },
-      {
-        "operator": "gt",
-        "left": { "contextPath": "score" },
-        "right": 80
-      }
-    ]
-  }
+  "operator": "and",
+  "conditions": [
+    {
+      "operator": "eq",
+      "left": { "contextPath": "status" },
+      "right": "complete"
+    },
+    {
+      "operator": "gt",
+      "left": { "contextPath": "score" },
+      "right": 80
+    }
+  ]
 }
 ```
 
@@ -169,21 +151,19 @@ description: Справочник по всем операторам услов�
 
 ```json
 {
-  "condition": {
-    "operator": "or",
-    "conditions": [
-      {
-        "operator": "eq",
-        "left": { "contextPath": "priority" },
-        "right": "high"
-      },
-      {
-        "operator": "eq",
-        "left": { "contextPath": "priority" },
-        "right": "critical"
-      }
-    ]
-  }
+  "operator": "or",
+  "conditions": [
+    {
+      "operator": "eq",
+      "left": { "contextPath": "priority" },
+      "right": "high"
+    },
+    {
+      "operator": "eq",
+      "left": { "contextPath": "priority" },
+      "right": "critical"
+    }
+  ]
 }
 ```
 
@@ -193,13 +173,11 @@ description: Справочник по всем операторам услов�
 
 ```json
 {
+  "operator": "not",
   "condition": {
-    "operator": "not",
-    "condition": {
-      "operator": "eq",
-      "left": { "contextPath": "status" },
-      "right": "blocked"
-    }
+    "operator": "eq",
+    "left": { "contextPath": "status" },
+    "right": "blocked"
   }
 }
 ```
@@ -269,11 +247,9 @@ description: Справочник по всем операторам услов�
 
 ```json
 {
-  "condition": {
-    "operator": "eq",
-    "left": { "contextPath": "has_tests" },
-    "right": "yes"
-  }
+  "operator": "eq",
+  "left": { "contextPath": "has_tests" },
+  "right": "yes"
 }
 ```
 
@@ -281,33 +257,35 @@ description: Справочник по всем операторам услов�
 
 ```json
 {
-  "condition": {
-    "operator": "lt",
-    "left": { "contextPath": "current_iteration" },
-    "right": 5
-  }
+  "operator": "lt",
+  "left": { "contextPath": "current_iteration" },
+  "right": 5
 }
 ```
 
-### Проверка непустого результата
+### Маршрутизация трёх исходов
+
+По одному case на каждый авторский выход; побеждает первый сработавший case, а `default` покрывает
+остальные:
 
 ```json
 {
-  "condition": {
-    "operator": "and",
-    "conditions": [
-      {
-        "operator": "exists",
-        "operand": { "contextPath": "result" }
-      },
-      {
-        "operator": "not",
-        "condition": {
-          "operator": "isEmpty",
-          "operand": { "contextPath": "result" }
-        }
-      }
-    ]
+  "id": "route-verdict",
+  "type": "condition",
+  "cases": [
+    {
+      "when": { "operator": "eq", "left": { "contextPath": "verdict" }, "right": "blocked" },
+      "output": "blocked"
+    },
+    {
+      "when": { "operator": "eq", "left": { "contextPath": "verdict" }, "right": "minor" },
+      "output": "minor"
+    }
+  ],
+  "connections": {
+    "blocked": "escalate",
+    "minor": "fix-issues",
+    "default": "proceed"
   }
 }
 ```

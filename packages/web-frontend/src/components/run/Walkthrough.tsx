@@ -12,9 +12,10 @@ import React, { useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { ChevronLeft, ChevronRight, Compass, X } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { requestReveal } from "../diagram/reveal";
 import type { RunViewMode } from "./modes";
 
-export type PanelTab = "block" | "variables" | "errors" | "steps" | "graph" | "locks";
+export type PanelTab = "block" | "variables" | "errors" | "steps" | "locks";
 
 /** One anchored step of a walkthrough; `M` is the page's mode id type. */
 export interface GuideStep<M extends string = RunViewMode, P extends string = PanelTab> {
@@ -28,64 +29,73 @@ export interface GuideStep<M extends string = RunViewMode, P extends string = Pa
   needsCurrentBlock?: boolean;
   /** The panel tab the step opens. */
   panel?: P;
+  /**
+   * A section of the block panel the step needs unfolded, by its id. The panel remembers folds
+   * per reader, so a step anchored inside a folded section would otherwise point at nothing.
+   */
+  section?: string;
 }
 
 const ANY_MODE = (selector: string): Partial<Record<RunViewMode, string>> => ({
-  lanes: selector,
-  canvas: selector,
-  outline: selector,
-  route: selector,
+  map: selector,
+  graph: selector,
 });
 
-/** The run page's steps: block, step, evidence, loop, route, explore. */
+/**
+ * The run page's steps: block, step, evidence, loop, route, explore.
+ *
+ * Every anchor names an element the redesign draws in both views — the contents sidebar and the
+ * route cursor sit beside the graph as well as the map, return ports are drawn by the same card
+ * on both — so a step never drags the reader into a view they did not choose.
+ */
 export const GUIDE_STEPS: GuideStep[] = [
   {
+    // A row of the contents: status icon, the block's index badge, its name and its counts.
     id: "process",
-    targets: {
-      lanes: "[data-lane-index]",
-      canvas: "[data-block-id]",
-      outline: "section[data-block-id]",
-      route: '[data-testid="route-block-summary"]',
-    },
-    fallbackView: "lanes",
+    targets: ANY_MODE('[data-testid="map-contents-list"] [data-block-id]'),
+    fallbackView: "map",
   },
   {
     id: "agent",
+    // The block panel is beside both views, so the step points at it whichever view is open.
     targets: ANY_MODE('[data-testid="block-detail"] [data-node-id][aria-current="step"]'),
-    fallbackView: "lanes",
+    fallbackView: "map",
     needsCurrentBlock: true,
     panel: "block",
+    section: "steps",
   },
   {
     id: "evidence",
     targets: ANY_MODE(
       '[data-testid="block-detail"] [data-node-id][aria-current="step"] [data-node-inputs]',
     ),
-    fallbackView: "lanes",
+    fallbackView: "map",
     needsCurrentBlock: true,
     panel: "block",
+    section: "steps",
   },
   {
+    // A return port: the dashed pill a card carries for every transition that goes back.
     id: "loop",
-    targets: {
-      canvas: "[data-return-chip]",
-      lanes: "[data-return-chip]",
-      outline: '[data-transition-kind="cycle"]',
-      route: "[data-loop-marker]",
-    },
-    fallbackView: "lanes",
+    targets: ANY_MODE('[data-port-kind="return"]'),
+    fallbackView: "map",
   },
   {
+    // The run's own route: the scrubber that moves the whole page back through it. It is in the
+    // toolbar of both diagrams.
     id: "route",
-    targets: { route: '[data-testid="route-list"]' },
-    fallbackView: "route",
+    targets: ANY_MODE('[data-testid="run-cursor"]'),
+    fallbackView: "map",
     needsRoute: true,
     panel: "variables",
   },
   {
+    // The toolbar itself: it carries both facts the step names — the view switch and the layout
+    // presets — and one ring around the row reads better than two. Each diagram mounts its own,
+    // so the two views name different elements here.
     id: "explore",
-    targets: ANY_MODE('[data-testid="run-modes"]'),
-    fallbackView: "lanes",
+    targets: { map: '[data-testid="map-toolbar"]', graph: '[data-testid="graph-toolbar"]' },
+    fallbackView: "map",
   },
 ];
 
@@ -99,6 +109,7 @@ export function Walkthrough<M extends string = RunViewMode, P extends string = P
   routeRecorded,
   onNavigate,
   onPanel,
+  onSection,
   steps = GUIDE_STEPS as unknown as GuideStep<M, P>[],
   textKey = "pages.runPage.guide",
 }: {
@@ -109,6 +120,8 @@ export function Walkthrough<M extends string = RunViewMode, P extends string = P
   routeRecorded: boolean;
   onNavigate: (patch: Record<string, string | null>) => void;
   onPanel: (tab: P) => void;
+  /** Unfold a section of the block panel (by its id) so the step's anchor is rendered. */
+  onSection?: (id: string) => void;
   /** The page's steps; the run page's by default. */
   steps?: GuideStep<M, P>[];
   /** i18n prefix holding `title`, `open`, `back`, `next`, `finish`, `close` and `steps.<id>`. */
@@ -130,26 +143,43 @@ export function Walkthrough<M extends string = RunViewMode, P extends string = P
     if (current.needsCurrentBlock && currentBlockId) patch.block = currentBlockId;
     if (Object.keys(patch).length) onNavigate(patch);
     if (current.panel) onPanel(current.panel);
-  }, [current, mode, routeRecorded, currentBlockId, onNavigate, onPanel]);
+    if (current.section) onSection?.(current.section);
+  }, [current, mode, routeRecorded, currentBlockId, onNavigate, onPanel, onSection]);
 
-  // Highlight the target once the page has rendered it.
+  // Highlight the target once the page has rendered it and it has come to rest. A diagram card
+  // exists in the DOM before its layout and the opening camera placement have run; bringing it
+  // into view before that is undone by them. So the ring waits until the element's box has
+  // stopped moving between two ticks (bounded, so a card that never rests is still ringed).
   useEffect(() => {
     if (!current) return;
     const selector = current.targets[mode];
     if (!selector) return;
     let element: HTMLElement | null = null;
     let tries = 0;
+    let settling = 0;
+    let lastBox = "";
     const timer = window.setInterval(() => {
-      element = document.querySelector<HTMLElement>(selector);
+      const found = document.querySelector<HTMLElement>(selector);
       tries += 1;
-      if (element || tries > 30) {
-        window.clearInterval(timer);
-        if (!element) return;
-        element.dataset.guideTarget = current.id;
-        element.style.boxShadow = HIGHLIGHT_STYLE;
-        element.style.borderRadius = element.style.borderRadius || "8px";
-        element.scrollIntoView({ block: "center", behavior: "smooth" });
+      if (!found) {
+        if (tries > 30) window.clearInterval(timer);
+        return;
       }
+      const rect = found.getBoundingClientRect();
+      const box = [rect.x, rect.y, rect.width, rect.height].map(Math.round).join(",");
+      settling += 1;
+      if (box !== lastBox && settling < 20) {
+        lastBox = box;
+        return;
+      }
+      window.clearInterval(timer);
+      element = found;
+      element.dataset.guideTarget = current.id;
+      element.style.boxShadow = HIGHLIGHT_STYLE;
+      element.style.borderRadius = element.style.borderRadius || "8px";
+      element.scrollIntoView({ block: "center", behavior: "smooth" });
+      // A diagram card lives in a transformed viewport that `scrollIntoView` cannot reach.
+      requestReveal(element);
     }, 100);
     return () => {
       window.clearInterval(timer);

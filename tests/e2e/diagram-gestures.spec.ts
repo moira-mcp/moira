@@ -1,9 +1,9 @@
 /**
- * Diagram gestures on a freshly loaded flow page (Quick Task), canvas, lanes and graph modes:
- * the view opens fitted (a transform is set), a plain wheel over the diagram pans it — the
- * translation changes while the scale stays what fit-to-view set — a ctrl-wheel (what a trackpad
- * pinch produces in Chromium) zooms it, and a wheel over the side panel leaves the diagram
- * untouched. The phone lanes stepper is not a diagram and is covered by the phone specs.
+ * Diagram gestures on a freshly loaded flow page (Quick Task), in both of its views — the map and
+ * the technical graph: the view opens fitted (a transform is set), a plain wheel over the diagram
+ * pans it — the translation changes while the scale stays what fit-to-view set — a ctrl-wheel
+ * (what a trackpad pinch produces in Chromium) zooms it, and a wheel over the side panel leaves
+ * the diagram untouched.
  */
 
 import { test, expect, type Page } from "./fixtures.js";
@@ -40,28 +40,23 @@ async function pointInside(page: Page, selector: string): Promise<{ x: number; y
   return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
 }
 
-// `minScale` is the readable floor the opening fit must respect (the canvas never opens below three
-// quarters, the rail opens at full size; the technical graph may shrink to fit); `first` is the card
-// of the first block, which must be inside the diagram's box at rest.
+// `minScale` is the readable floor the opening fit must respect (the map never opens below three
+// quarters; the technical graph may shrink to fit); `first` is the card of the first block, which
+// must be inside the diagram's box at rest.
 const MODES = [
   {
-    mode: "canvas",
+    mode: "map",
     diagram: '[data-testid="canvas-view"]',
     panel: '[data-testid="flow-panel"]',
     minScale: 0.75,
     first: '.react-flow__node[data-id="scope"]',
   },
   {
-    mode: "lanes",
-    diagram: '[data-testid="lanes-rail"]',
-    panel: '[data-testid="flow-panel"]',
-    minScale: 1,
-    first: '.react-flow__node[data-id="scope"]',
-  },
-  {
     mode: "graph",
     diagram: ".react-flow",
-    panel: '[data-testid="workflow-sidebar"]',
+    // The graph no longer carries a node sidebar of its own: the page's right panel stands
+    // beside it, and a wheel over that panel must leave the diagram alone just the same.
+    panel: '[data-testid="flow-panel"]',
     minScale: 0.1,
     first: null,
   },

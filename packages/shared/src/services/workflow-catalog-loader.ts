@@ -3,6 +3,7 @@
 import type Database from "better-sqlite3";
 import { createHash } from "node:crypto";
 import type { WorkflowGraph } from "@mcp-moira/workflow-engine";
+import { migrateWorkflowGraph } from "@mcp-moira/workflow-engine/migration";
 import type { CatalogEntry } from "./workflow-catalog.js";
 import { ownerSlugKey } from "./workflow-catalog.js";
 import { compareSemver, isValidSemver } from "../utils/version-utils.js";
@@ -187,9 +188,14 @@ function workflowStatesEqual(left: ManagedWorkflowState, right: ManagedWorkflowS
 }
 
 function incomingState(entry: CatalogEntry): ManagedWorkflowState {
+  // The catalog reader already migrates bundled files; entries built elsewhere (tests, staged
+  // artifacts) are migrated here so every comparison and digest sees the current schema shape.
   return {
     lifecycle: "present",
-    content: { graph: entry.graph, visibility: entry.visibility },
+    content: {
+      graph: migrateWorkflowGraph(entry.graph as Record<string, unknown>).graph,
+      visibility: entry.visibility,
+    },
   };
 }
 

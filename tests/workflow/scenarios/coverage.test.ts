@@ -42,8 +42,10 @@ const branchingWorkflow: WorkflowGraph = {
     {
       type: "condition",
       id: "check",
-      condition: { operator: "eq", left: { contextPath: "value" }, right: "yes" },
-      connections: { true: "yes-end", false: "no-end" },
+      cases: [
+        { when: { operator: "eq", left: { contextPath: "value" }, right: "yes" }, output: "true" },
+      ],
+      connections: { true: "yes-end", default: "no-end" },
     },
     { type: "end", id: "yes-end" },
     { type: "end", id: "no-end" },
@@ -99,12 +101,12 @@ describe("Coverage Calculator", () => {
     expect(coverage.visitedNodes).toContain("yes-end");
     expect(coverage.unvisitedNodes).toContain("no-end");
 
-    // 3 of 4 branches covered (check:false not taken)
+    // 3 of 4 branches covered (check:default not taken)
     expect(coverage.coveredBranches.some((b) => b.nodeId === "check" && b.branch === "true")).toBe(
       true,
     );
     expect(
-      coverage.uncoveredBranches.some((b) => b.nodeId === "check" && b.branch === "false"),
+      coverage.uncoveredBranches.some((b) => b.nodeId === "check" && b.branch === "default"),
     ).toBe(true);
   });
 
@@ -173,18 +175,18 @@ describe("Coverage Calculator", () => {
     expect(coverage.gapAnalysis!.byNodeType).toBeDefined();
     expect(coverage.gapAnalysis!.hints.length).toBeGreaterThan(0);
 
-    // Check that hints include the uncovered false branch
+    // Check that hints include the uncovered default branch
     const falseBranchHint = coverage.gapAnalysis!.hints.find(
-      (h) => h.nodeId === "check" && h.branch === "false",
+      (h) => h.nodeId === "check" && h.branch === "default",
     );
     expect(falseBranchHint).toBeDefined();
     expect(falseBranchHint!.nodeType).toBe("condition");
-    expect(falseBranchHint!.mockInputHint).toContain("false");
+    expect(falseBranchHint!.mockInputHint).toContain("no case");
   });
 
   test("generateGapAnalysis groups by node type", () => {
     const uncoveredBranches = [
-      { nodeId: "check", branch: "false" },
+      { nodeId: "check", branch: "default" },
       { nodeId: "input", branch: "success" },
     ];
 

@@ -323,14 +323,38 @@ version, execution revision, execution status and diagnostics, plus:
   (completed passes through the block's working steps), `visits`, `currentNodeId` (for the active
   or waiting block) and the coarse `state` (`completed | current | pending`) derived from
   `status` for older clients;
+- per block: `timing` — `passes` (each `seq`, `nodeId`, `enteredAt`, `leftAt`, `durationMs`,
+  `open`, `itemIndex`), `totalMs`, `currentMs` and `recorded`. A pass is a visit of a block's
+  working step (routing and end nodes are passes only when the block consists of them
+  alone, and an adjustment visit is never a pass); the open pass is
+  the one the run is on and is measured to `projectedAt`. `totalMs` sums every measured pass, the
+  open one included, `currentMs` is the open pass so far, and `recorded` is false for a run whose
+  visits carry no timestamps — such durations are `null`, never `0`;
+- per block: `list` — the bound list resolved from the run's variables at the cursor:
+  `items` (each `index`, `title`, `done`, `current`, `durationMs`) or `null`, plus `done`,
+  `total`, `current` and `currentTitle`. The whole field is `null` when the block declares no
+  binding or the binding resolved to nothing (the projection then carries a diagnostic), and
+  `items` is `null` for a counters-only
+  binding; a pass counts toward the item its `current` path pointed at when the pass began;
 - `process`: the derived process (blocks, transitions with labels and cycles, hubs, diagnostics),
   the same object `GET /api/workflows/:id/process` returns;
 - `route`: the recorded visits in order — `seq`, `nodeId`, `blockId`, `exitKey`, the names of
-  what the visit `changed`, `waited`, `adjusted` with its `actor`, and `loop` on a repeated node
-  or a re-entered block;
+  what the visit `changed`, `waited`, `adjusted` with its `actor`, `loop` on a repeated node
+  or a re-entered block, and `enteredAt`/`leftAt` (epoch ms; `leftAt` absent while the visit is
+  open, both absent on visits recorded without timestamps);
 - `variables`: every global variable and node-local output (`nodeId.field`) with its current
   value, its history (`seq`, `nodeId`, `value`, `adjusted`) and whether the current value came
   from an adjustment;
+- `executionWorkflowVersion`: the `metadata.version` stamped on the execution when it started
+  (`null` for a run recorded without the stamp), beside `workflowVersion` — the version of the
+  definition the projection used;
+- `projectedAt`: epoch ms the projection was made at, the moment open passes are measured to;
+- `waitingFor`: who the run waits for while it pauses — `"user"` when the paused node is a `lock`
+  (a gate a person clears with the PIN), `"agent"` on any other paused node (a directive,
+  teleport or materialize wait), `null` when the run is not waiting;
+- `statistics`: the typical durations of `executionWorkflowVersion` over the run owner's completed
+  runs, the run itself excluded — the same object `GET /api/workflows/:id/statistics` returns for
+  that owner — or `null` when the run carries no version stamp;
 - `routeRecorded`, `cursor` and `source: "trace"`.
 
 Statuses are projected from the route the engine recorded, never inferred from block order: a
@@ -359,18 +383,19 @@ of being silently truncated.
 grant with `downloadUrl`, `expiresAt`, `mimeType`, `executionRevision` and the normalised
 `options`. The optional body accepts `theme: "light"|"dark"`, `viewportWidth` from 480 through
 4096, `view: "cards"|"process"`, `hide` and `collapse` (arrays of up to 100 block ids or authored
-node ids). `cards` (the default) is the content grid: every block as a card with its summary,
-details, outcome and next text, chained in display order. `process` is the aggregated block view:
-one compact block per row in process order with its status mark and, for a repeated block, a
-small `×N` badge, the process's transitions as labelled connectors, forward skips as arcs on the
-right, returns as dashed arcs on the left carrying the transition label (nested by span, labels
-stacked without overlap; the cause and exit of a loop are not drawn — the run page and `session
-progress` carry them), and transitions into hub blocks as bundled connectors in the right gutter
-(one lane and one port per hub) labelled inside the source block. At a width that cannot hold the
-lanes, the column and the label areas, the skips' labels and then the returns' labels move inside
-their source blocks. A block named in `hide` (a node id names the block that owns it) is left
-out and every transition into it is re-targeted to where it led, labels joined with "→"; a block
-in `collapse` is drawn as a label-only chip. An id that names no block or node of the workflow's
+node ids). Both views draw the run page's map: every block as a ported card (index badge, name, pass count
+and status chip in the title band, toned by status; input ports naming the source block, output
+ports named by the transition label, dashed return ports and a double self port; a facts line
+with the time spent, the open pass and, for a bound block, `done/total: current item` — no
+time for a block that never ran, `—` for a counter the binding did not resolve; a `typically …` line from the version's statistics
+over the owner's other completed runs), with the process's transitions as the map's forward,
+skip, hub, return and self edges. `cards` (the default) keeps the block's summary, details,
+outcome and next text inside the card; `process` is the compact card alone. The rows layout is
+used when it fits the image, the stacked one otherwise and at a viewport of 720 px or less, where
+the phone type scale applies; a wider drawing is scaled down as one piece. A block named in
+`hide` (a node id names the block that owns it) is left out and every transition into it is
+re-targeted to where it led, labels joined with "→"; a block in `collapse` is drawn as its title
+band alone. An id that names no block or node of the workflow's
 process is refused at mint (400), as is an invalid `view`; the stored options are the resolved
 block ids, so a grant is always honourable. `GET
 /api/public/execution-progress-image/:token` uses the token as authorization and returns the exact
@@ -419,6 +444,25 @@ description, outcome template, owned node ids, transitions with label, optional 
 `{ cause, exit }` and the authored edges behind them), hub block ids, node-level back-edges and the
 block-contract diagnostics, or `null` for a workflow without `progress`. It carries nothing about
 any execution; the CLI `derive` command prints the same derivation.
+
+`GET /api/workflows/:id/statistics?version=<semver>` (id or slug) returns how long each block
+typically takes over the runs that started on one definition version — the current
+`metadata.version` when `version` is omitted or blank. It carries `workflowId`,
+`workflowVersion`, `sampledRuns`, `versionNotRecorded`, `computedAt` and `blocks`: per block
+`blockId`, the duration samples `pass` and `run`, `typicalPasses`, and `items` — one entry per
+list position with its `index`, `title` and the same sample fields. A duration sample is
+`sampleCount`, `medianMs`, `p25Ms`, `p75Ms`, `minMs` and `maxMs`. `pass` samples single measured
+passes, `run` sums a run's measured passes through the block, and `run` together with
+`typicalPasses` (the median number of passes)
+counts each run once. The sample is the caller's own **completed** runs stamped with that version
+(a public workflow is run by many users; one user's runs — their list item titles among them —
+are never another's statistics; a run still stepping is not sampled), projected onto the current
+process and joined by block id; a completed run without a version stamp is counted in
+`versionNotRecorded` and never sampled. `items` holds one entry per bound-list position a pass
+was attributed to, and is empty for a block with no such pass. The aggregate is cached per user
+and version and recomputed when the count or the latest completion of those runs changes.
+
+Authentication: Required
 
 The local definition CLI authors policy with
 `moira-workflow <file> set-variable-write-policy <name> <node-ids|all|none>` and discovers it with

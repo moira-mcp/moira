@@ -60,6 +60,50 @@ describe("execution route log persistence", () => {
     sqlite.close();
   });
 
+  it("persists visit timestamps and the definition version the run started on", async () => {
+    const executionId = randomUUID();
+    const execution = buildExecution(executionId, workflowId);
+    execution.workflowVersion = "4.2.0";
+    execution.status = "completed";
+    execution.completedAt = Date.now();
+    execution.visits = [
+      { seq: 0, nodeId: "start", exitKey: "default", changes: {}, enteredAt: 1_000, leftAt: 1_005 },
+      { seq: 1, nodeId: "task", exitKey: null, changes: {}, waited: true, enteredAt: 1_010 },
+    ];
+    await repository.save(execution);
+    const loaded = (await repository.get(executionId))!;
+    expect(loaded.workflowVersion).toBe("4.2.0");
+    expect(loaded.visits).toEqual(execution.visits);
+    expect(await repository.listByWorkflowVersion(workflowId, "4.2.0", TEST_USER_ID)).toHaveLength(
+      1,
+    );
+    expect(await repository.listByWorkflowVersion(workflowId, "4.1.0", TEST_USER_ID)).toHaveLength(
+      0,
+    );
+    // The sample is the owner's: another user's id sees nothing of this run.
+    expect(
+      await repository.listByWorkflowVersion(workflowId, "4.2.0", "someone-else"),
+    ).toHaveLength(0);
+    const unstamped = buildExecution(randomUUID(), workflowId);
+    unstamped.status = "completed";
+    unstamped.completedAt = Date.now();
+    await repository.save(unstamped);
+    expect((await repository.get(unstamped.executionId))!.workflowVersion).toBeNull();
+    // A run still running is neither listed nor counted.
+    await repository.save({
+      ...buildExecution(randomUUID(), workflowId),
+      workflowVersion: "4.2.0",
+    });
+    expect(await repository.listByWorkflowVersion(workflowId, "4.2.0", TEST_USER_ID)).toHaveLength(
+      1,
+    );
+    expect(await repository.summarizeByWorkflowVersion(workflowId, "4.2.0", TEST_USER_ID)).toEqual({
+      count: 1,
+      lastCompletedAt: expect.any(Number),
+      unstamped: 1,
+    });
+  });
+
   it("round-trips the log through save and get, and grows it on the next save", async () => {
     const executionId = randomUUID();
     const execution = buildExecution(executionId, workflowId);

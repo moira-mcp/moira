@@ -231,6 +231,28 @@ export interface IDataRepository {
   listExecutionsWithFilters(filter: ExecutionFilter): Promise<ExecutionListResult>;
 
   /**
+   * The completed executions of one user's runs of a workflow that started on the given
+   * definition version — the sample duration statistics are computed from. Scoped to the owner:
+   * a public workflow is run by many users and one user's runs are not another's statistics.
+   */
+  listExecutionsByWorkflowVersion(
+    workflowId: string,
+    workflowVersion: string,
+    userId: string,
+  ): Promise<WorkflowExecution[]>;
+
+  /**
+   * Cheap summary of that sample for cache validation: how many completed runs it holds, when the
+   * latest of them completed, and how many of the user's completed runs of the workflow carry no
+   * version stamp at all.
+   */
+  summarizeExecutionsByWorkflowVersion(
+    workflowId: string,
+    workflowVersion: string,
+    userId: string,
+  ): Promise<{ count: number; lastCompletedAt: number | null; unstamped: number }>;
+
+  /**
    * Delete execution
    */
   deleteExecution(executionId: string): Promise<void>;

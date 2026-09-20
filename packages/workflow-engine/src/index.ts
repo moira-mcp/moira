@@ -52,6 +52,15 @@ export type { ConvertResult } from "./templates/registry-converter.js";
 // Expression engine
 export * from "./expression/index.js";
 
+// Workflow definition migration
+export * from "./migration/index.js";
+export {
+  evaluateStructuredCondition,
+  runNodeExpressions,
+  selectOutput,
+  routeNode,
+} from "./services/node-routing.js";
+
 // Storage implementation
 export * from "./storage/index.js";
 
@@ -72,26 +81,48 @@ export * from "./utils/registry-value-validator.js";
 export * from "./utils/execution-variable-policy.js";
 export * from "./utils/execution-run-projection.js";
 export * from "./utils/execution-visits.js";
+export * from "./utils/execution-progress-lists.js";
+export * from "./utils/execution-statistics.js";
+export {
+  ProgressStatisticsService,
+  statisticsForRun,
+} from "./services/progress-statistics-service.js";
 export * from "./utils/process-derivation.js";
 export {
   applyProgressVisibility,
   buildExecutionProgressVisualModel,
   normalizeProgressVisualOptions,
+  progressCardTone,
+  progressFactsCandidates,
+  progressFactsText,
+  progressLayoutBlocks,
+  progressStatusText,
+  progressTypicalCandidates,
+  progressTypicalText,
   resolveProgressBlockIds,
   PROGRESS_IMAGE_MAX_WIDTH,
   PROGRESS_IMAGE_MIN_WIDTH,
+  PROGRESS_PHONE_MAX_WIDTH,
 } from "./utils/execution-progress-visual.js";
 export type {
+  ProgressCardTone,
+  ProgressEdgeKind,
+  ProgressPortKind,
   ProgressTheme,
   ProgressView,
+  ProgressVisualDiagram,
   ProgressVisualOptions,
   VisibleTransition,
   ProgressVisualNode,
   ProgressVisualEdge,
   ProgressVisualModel,
+  ProgressVisualPort,
   ProgressVisualBox,
   ProgressVisualBadge,
 } from "./utils/execution-progress-visual.js";
+export * from "./utils/progress-facts.js";
+export * from "./utils/process-layout.js";
+export * from "./utils/process-geometry.js";
 export * from "./utils/execution-progress-renderer.js";
 export * from "./utils/execution-progress-text.js";
 export * from "./utils/execution-progress-image.js";

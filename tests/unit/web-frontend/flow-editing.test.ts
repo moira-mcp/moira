@@ -15,8 +15,10 @@ import {
   exportDiff,
   type FlowEdits,
 } from "../../../packages/web-frontend/src/components/flow/editing.js";
-import { definitionProgress } from "../../../packages/web-frontend/src/components/flow/model.js";
-import { orderedNodeIds } from "../../../packages/web-frontend/src/components/flow/SplitView.js";
+import {
+  definitionProgress,
+  orderedNodeIds,
+} from "../../../packages/web-frontend/src/components/flow/model.js";
 import { runBlocks } from "../../../packages/web-frontend/src/components/run/model.js";
 import type { WorkflowGraph } from "../../../packages/web-frontend/src/types/workflow-types.js";
 import { catalogGraph } from "../../helpers/catalog-graphs.js";
@@ -138,7 +140,7 @@ describe("flow edit model", () => {
     const blocks = runBlocks(progress);
     expect(blocks.map((b) => b.id)).toEqual(process.blocks.map((b) => b.id));
     expect(blocks.every((b) => b.status === "pending" && b.currentNodeId === null)).toBe(true);
-    // The split mode orders a block's steps from its entry node along in-block edges.
+    // The block panel orders a block's steps from its entry node along in-block edges.
     const first = blocks[0];
     const order = orderedNodeIds(graph, first);
     expect(new Set(order)).toEqual(new Set(first.nodeIds));

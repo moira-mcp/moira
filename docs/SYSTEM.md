@@ -850,17 +850,31 @@ interface AgentDirectiveNode {
   // JSON Schema of the node's local outputs. May carry `globalInputs?: string[]` — names of the
   // registry globals this node writes (inlined into the agent-facing schema, routed to global scope).
   inputSchema?: JSONSchema;
-  // Compatibility-only authoring fields; accepted by the definition schema but ignored at runtime.
-  maxRetries?: number;
-  retryMessage?: string;
-  connections: { success: string; error?: string; timeout?: string; maxRetriesExceeded?: string };
+  // Run after the answer is validated and before the cases; assignments write declared globals
+  // and are published only when the node succeeds.
+  expressions?: string[];
+  // Routing on the node's own validated answer; `success` is taken when no case holds.
+  cases?: RoutingCase[];
+  // `success` is the default output; `error`/`timeout` are reserved control outputs; every other
+  // key is an authored output named by a case.
+  connections: { success: string; error?: string; timeout?: string } & Record<string, string>;
+}
+
+interface RoutingCase {
+  when: StructuredCondition;
+  // Names a key of the node's `connections`, other than its default or a control output.
+  output: string;
 }
 
 interface ConditionNode {
   type: "condition";
   id: string;
-  condition: StructuredCondition;
-  connections: { true: string; false: string };
+  // Evaluated before the cases; see AgentDirectiveNode.expressions.
+  expressions?: string[];
+  // At least one case; the first whose `when` holds selects its output.
+  cases: RoutingCase[];
+  // `default` is taken when no case holds; `error` when an expression fails.
+  connections: { default: string; error?: string } & Record<string, string>;
 }
 
 interface UserNotificationNode {
@@ -1021,7 +1035,8 @@ interface UnifiedValidationResult {
 
 Per-node-type checks that AJV schema cannot perform:
 
-- **ConditionNode** — operator must be in allowed list (eq, neq, gt, gte, lt, lte, contains, exists, and, or, not). Binary operators require `left` + `right`. `exists` requires `value`. Logical operators require non-empty `conditions` array. `not` requires `condition` field. Connections restricted to `true`/`false` only (`additionalProperties: false`). Nested conditions validated recursively.
+- **Routing cases (ConditionNode / AgentDirectiveNode)** — each case's `when` is validated as a structured condition: the operator must be in the allowed list (eq, neq, gt, gte, lt, lte, contains, exists, and, or, not), binary operators require `left` + `right`, `exists` requires `value`, logical operators require a non-empty `conditions` array, `not` requires a `condition` field, and nested conditions are validated recursively. A case whose `output` is not a key of the node's `connections` is a blocking error (`unknown-case-output`), as is a case naming a reserved control output (`error`, `timeout`). A case that selects the node's own default output (`default` on a condition node, `success` on an agent-directive node) is a warning: such a case is redundant. An authored output that no case names is the warning `unreachable-output` — the definition stays valid, since a connection is often added before the case that selects it; the default output and the control outputs need no case. That a condition node has at least one case and a `connections.default` is enforced earlier, by the AJV schema.
+- **Expressions on routing nodes (ConditionNode / AgentDirectiveNode)** — the `expressions` array gets the same parse and declared-assignment checks as the standalone expression node.
 - **AgentDirectiveNode** — `inputSchema` (if present) must be compilable JSON Schema (validated via AJV compile).
 - **Output-scope declaration (AgentDirectiveNode / TeleportNode)** — Blocking errors. Every name in `inputSchema.globalInputs` must exist in the workflow `variableRegistry` (`declares global write '<name>' which is not in the workflow variableRegistry`); a name must not be both a declared global write and a node-local output, i.e. a `globalInputs` name cannot also appear in `inputSchema.properties` (`local output '<name>' shadows the declared global write of the same name`). Non-string `globalInputs` entries are rejected.
 - **ExpressionNode** — each expression is parsed before execution; targets must be safe bare names, and member reads support own-property paths plus bounded fixed or variable array indexes.
@@ -1124,21 +1139,26 @@ interface ValidationError {
 - **Template processing** - processes directive and completionCondition
 - **Validation failure** - logs the rejection, returns sanitized schema feedback without the
   rejected payload, and pauses again at the same node
-- **Legacy retry fields** - `maxRetries`, `retryMessage`, and `maxRetriesExceeded` are accepted for
-  stored-definition compatibility but are not read by the handler or execution engine
+- **Routing on the answer** - after validation, the node's `expressions` run, then its `cases` are
+  evaluated against the context with the answer merged (readable by bare name and under the node's
+  own id); the first holding case selects its output, otherwise `success`
+- **Expression failure** - routes to `connections.error` when the node declares one, otherwise
+  fails the node; nothing the expressions assigned is published
 
 ### ConditionHandler
 
-- **Auto-execution** - immediately evaluates and continues
-- **Output paths** - 'true' or 'false' based on condition result
-- **Context access** - resolves contextPath references
+- **Auto-execution** - immediately routes and continues
+- **Output paths** - `expressions` first, then `cases` in authored order; the first case whose
+  condition holds selects its output, otherwise `default`
+- **Context access** - resolves contextPath references; assignments made by the expressions are
+  published as declared globals when the node succeeds
 
 ### TelegramNotificationHandler
 
 - **Auto-execution** - sends message and continues
 - **Template processing** - processes message templates
 - **Inline keyboard support** - passes `replyMarkup` (InlineKeyboardMarkup) to Telegram API as `reply_markup`
-- **System footer** - appends process ID, resolved workflow name, and branding to each notification
+- **System footer** - appends process ID, resolved workflow name, and branding to each notification; when the workflow has a process view, also the progress lines of the run projected as of the node (`withInFlightPause`): `⏳ agent on the step: <block>` or `🙋 waiting for you: <block>` when the node's successor pauses the run, then `📝 done/total: current item` for the bound list nearest the run
 - **Workflow name resolution** - resolves workflowId UUID to human-readable name via repository with fallback
 - **Graceful degradation** - continues workflow on send failures
 - **Actionable error messages** - pushes classified error guidance to messageQueue (invalid token, chat not found, rate limit, etc.)
@@ -1147,6 +1167,13 @@ interface ValidationError {
 ### UserNotificationHandler
 
 - **Auto-execution** - renders the portable message and invokes the shared user communication service
+- **System footer** - appends the short process ID, the resolved workflow name, and branding; when
+  the workflow has a process view, also the progress lines of the run projected as of the node
+  (`withInFlightPause`, the same copy the attached image renders): `⏳ agent on the step: <block>` or
+  `🙋 waiting for you: <block>` when the node's single forward connection leads to a node the run
+  pauses on (`lock` → a person; `agent-directive`, `teleport`, `materialize`, `subgraph` → the agent), then one
+  `📝 done/total: current item` line for the bound list nearest the run (the active block's, else
+  the most recently passed bound block's); no count for an unbound run
 - **Channel selection** - fans out only to enabled configured adapters for the execution user
 - **Results** - stores sanitized full, partial, no-channel, or total-failure outcomes under the node ID
 - **Routing** - total attempted failure uses `connections.error` when present; other outcomes continue through `default`
@@ -1179,12 +1206,12 @@ Public endpoint `POST /api/telegram/webhook` handles inline keyboard button pres
 All workflow cycles require explicit bounds using expression + condition node pairs:
 
 ```
-expression node: ["counter = counter + 1"]  →  condition node: counter < max_counter
-                                                  true → continue loop
-                                                  false → ask-user-limit-reached
+expression node: ["counter = counter + 1"]  →  condition node
+                                                  case counter < max_counter → "continue" → loop
+                                                  default → ask-user-limit-reached
 ```
 
-**CRITICAL: When limit exceeded (false branch), the workflow MUST ask the user** what to do via an agent-directive node with options:
+**CRITICAL: When the limit is exceeded (the default output), the workflow MUST ask the user** what to do via an agent-directive node with options:
 
 - `continue` — accept current result as-is despite unresolved issues
 - `reset` — reset iteration counter to 0 and retry the fix loop
@@ -1192,7 +1219,7 @@ expression node: ["counter = counter + 1"]  →  condition node: counter < max_c
 
 The `reset` option routes to an expression node that resets the counter, then loops back to the fix step. The `continue`/`accept` options route to the next phase (the original escape target).
 
-**Anti-pattern:** Routing the false branch directly to the next phase (silently skipping the fix loop) — this removes user control and hides unresolved issues.
+**Anti-pattern:** Routing the default output directly to the next phase (silently skipping the fix loop) — this removes user control and hides unresolved issues.
 
 - Counters use `expressions` array (not `expression` string)
 - Condition nodes use `contextPath` (not `variablePath`)

@@ -1,7 +1,11 @@
 /**
- * E2E Tests for Note Node Types Rendering
- * Verifies that workflows with read-note, write-note, upsert-note nodes render correctly
- * Related issue: #467
+ * Note node types on the technical graph: a workflow whose steps write and upsert notes opens
+ * without crashing, each note step is drawn as a card carrying its own type, and clicking one
+ * opens its details in the page's node panel. Related issue: #467.
+ *
+ * The fixture declares no process view: the right panel is the only home of a node's details and
+ * stands beside the graph whether or not a workflow declares a process, which is what this spec
+ * reads. The graph itself is asked for explicitly through the `view` parameter.
  */
 
 import { test, expect } from "./fixtures.js";
@@ -45,7 +49,7 @@ test.describe("Note Nodes Rendering", () => {
   });
 
   test("workflow with note nodes opens without crash", async ({ page }) => {
-    await page.goto(`${BASE_URL}/workflows/${NOTE_WORKFLOW_OWNER}/${noteWorkflowSlug}`);
+    await page.goto(`${BASE_URL}/workflows/${NOTE_WORKFLOW_OWNER}/${noteWorkflowSlug}?view=graph`);
     await page.waitForLoadState("domcontentloaded");
 
     // Wait for ReactFlow canvas to render - this is the key check
@@ -62,34 +66,27 @@ test.describe("Note Nodes Rendering", () => {
   });
 
   test("note nodes display with correct labels", async ({ page }) => {
-    await page.goto(`${BASE_URL}/workflows/${NOTE_WORKFLOW_OWNER}/${noteWorkflowSlug}`);
+    await page.goto(`${BASE_URL}/workflows/${NOTE_WORKFLOW_OWNER}/${noteWorkflowSlug}?view=graph`);
     await page.waitForLoadState("domcontentloaded");
+    await expect(page.locator("[data-graph-node]").first()).toBeVisible({ timeout: 20000 });
 
-    // Wait for canvas
-    await expect(page.locator(".react-flow")).toBeVisible({ timeout: 15000 });
-
-    // This workflow has write-note and upsert-note nodes
-    // They should render with labels "WRITE" and "UPSERT"
-    const writeLabel = page.locator('.react-flow__node:has-text("WRITE")');
-    const upsertLabel = page.locator('.react-flow__node:has-text("UPSERT")');
-
-    await expect(writeLabel).toHaveCount(1);
-    await expect(upsertLabel).toHaveCount(1);
+    // This workflow has one write-note and one upsert-note step; each card names its own type in
+    // its title band. The card is addressed by its node id, since a neighbouring card's ports
+    // name these steps too.
+    await expect(page.locator('[data-graph-node="write-note"]')).toContainText("WRITE");
+    await expect(page.locator('[data-graph-node="upsert-note"]')).toContainText("UPSERT");
   });
 
   test("note nodes are clickable and show details", async ({ page }) => {
-    await page.goto(`${BASE_URL}/workflows/${NOTE_WORKFLOW_OWNER}/${noteWorkflowSlug}`);
+    await page.goto(`${BASE_URL}/workflows/${NOTE_WORKFLOW_OWNER}/${noteWorkflowSlug}?view=graph`);
     await page.waitForLoadState("domcontentloaded");
+    await expect(page.locator('[data-graph-node="write-note"]')).toBeVisible({ timeout: 20000 });
 
-    // Wait for canvas
-    await expect(page.locator(".react-flow")).toBeVisible({ timeout: 15000 });
+    await page.locator('[data-graph-node="write-note"]').click();
 
-    const noteNode = page.locator('.react-flow__node:has-text("WRITE")').first();
-    await expect(noteNode).toBeVisible();
-    await noteNode.click();
-
-    const sidebar = page.locator('[data-testid="workflow-sidebar"]');
-    const detailSheet = page.locator('[role="dialog"], [data-state="open"]').first();
-    await expect(sidebar.or(detailSheet).first()).toBeVisible({ timeout: 5000 });
+    // The node level of the page's right panel is where a step's details are read.
+    const panel = page.getByTestId("node-panel");
+    await expect(panel).toHaveAttribute("data-node-id", "write-note");
+    await expect(panel).toContainText("write-note");
   });
 });
