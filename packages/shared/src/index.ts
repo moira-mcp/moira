@@ -46,6 +46,7 @@ export type { RequestLoggerOptions, RequestContextOptions } from "./logging/expr
 export {
   logAuditEvent,
   logAuditEventDirect,
+  logAuditEventDirectOnce,
   computeChanges,
   getAuditRequestContext,
   recordAuditEventMetric,
@@ -97,24 +98,24 @@ export * from "./errors/domain-errors.js";
 // Types
 export * from "./types/index.js";
 
-// Workspace provider connection primitives
-export * from "./workspaces/types.js";
-export * from "./workspaces/github-app-config.js";
-export * from "./workspaces/credential-vault.js";
-export * from "./workspaces/connection-service.js";
-export * from "./workspaces/resource-types.js";
-export * from "./workspaces/provider-registry.js";
-export * from "./workspaces/resource-repository.js";
-export * from "./workspaces/resource-service.js";
-export * from "./workspaces/resource-policy.js";
-export * from "./workspaces/operation-repository.js";
-export * from "./workspaces/operation-service.js";
-export * from "./workspaces/start-on-use.js";
-export * from "./workspaces/settle-after-dispatch.js";
-export * from "./workspaces/transfer-repository.js";
-export * from "./workspaces/transfer-service.js";
-export * from "./workspaces/file-service.js";
-export * from "./workspaces/views.js";
-export * from "./workspaces/observability.js";
+// Codespace provider connection primitives
+export * from "./codespaces/types.js";
+export * from "./codespaces/github-app-config.js";
+export * from "./codespaces/credential-vault.js";
+export * from "./codespaces/connection-service.js";
+export * from "./codespaces/resource-types.js";
+export * from "./codespaces/provider-registry.js";
+export * from "./codespaces/resource-repository.js";
+export * from "./codespaces/resource-service.js";
+export * from "./codespaces/resource-policy.js";
+export * from "./codespaces/operation-repository.js";
+export * from "./codespaces/operation-service.js";
+export * from "./codespaces/start-on-use.js";
+export * from "./codespaces/settle-after-dispatch.js";
+export * from "./codespaces/transfer-repository.js";
+export * from "./codespaces/transfer-service.js";
+export * from "./codespaces/file-service.js";
+export * from "./codespaces/views.js";
+export * from "./codespaces/observability.js";
 
 export * from "./authorization/index.js";

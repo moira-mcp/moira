@@ -189,9 +189,9 @@ docker compose logs | grep -A3 "ADMIN LOGIN"
 
 Sign in with `ADMIN_EMAIL` (default `admin@moira.local`) and the printed password.
 
-### Enable the GitHub workspace connection
+### Enable the GitHub codespace connection
 
-The GitHub workspace connection is separate from GitHub social login. It stays disabled unless
+The GitHub codespace connection is separate from GitHub social login. It stays disabled unless
 all GitHub App and credential-vault values are present and valid. Create a GitHub App with expiring
 user authorization tokens and "Request user authorization (OAuth) during installation" enabled,
 grant it the repository permissions Codespaces (write), Codespaces lifecycle admin (write),
@@ -199,12 +199,12 @@ Codespaces metadata (read), Contents (read) and Metadata (read), then configure 
 to the exact Moira API path and its installation URL to the app's GitHub slug:
 
 ```bash
-WORKSPACE_GITHUB_APP_CLIENT_ID=<github-app-client-id>
-WORKSPACE_GITHUB_APP_CLIENT_SECRET=<github-app-client-secret>
-WORKSPACE_GITHUB_APP_CALLBACK_URL=https://moira.example.com/api/integrations/github/callback
-WORKSPACE_GITHUB_APP_INSTALL_URL=https://github.com/apps/<github-app-slug>/installations/new
-WORKSPACE_CREDENTIAL_VAULT_KEY=<64-hex-random-key>
-WORKSPACE_CREDENTIAL_VAULT_KEY_VERSION=v1
+CODESPACE_GITHUB_APP_CLIENT_ID=<github-app-client-id>
+CODESPACE_GITHUB_APP_CLIENT_SECRET=<github-app-client-secret>
+CODESPACE_GITHUB_APP_CALLBACK_URL=https://moira.example.com/api/integrations/github/callback
+CODESPACE_GITHUB_APP_INSTALL_URL=https://github.com/apps/<github-app-slug>/installations/new
+CODESPACE_CREDENTIAL_VAULT_KEY=<64-hex-random-key>
+CODESPACE_CREDENTIAL_VAULT_KEY_VERSION=v1
 ```
 
 Generate the dedicated vault key outside the repository and put its output in the untracked
@@ -237,43 +237,46 @@ After the container is healthy, each user opens **Settings → Integrations → 
 personal repositories. Authorization never happens through an MCP tool or agent. When setup is
 missing or a credential must be renewed, the user returns to this website.
 
-Workspace creation and agent operations additionally require `WORKSPACE_CODESPACES_ENABLED=true`
+Codespace creation and agent operations additionally require `CODESPACE_CODESPACES_ENABLED=true`
 and the connector pair from the disabled-by-default Compose profile:
 
 ```bash
-docker compose --profile workspaces up -d
+docker compose --profile codespaces up -d
 ```
 
-With the connection and connector in place, an authenticated MCP client uses the one `workspace`
+With the connection and connector in place, an authenticated MCP client uses the one `codespace`
 tool, choosing the operation with `action`: `list` shows approved repositories and existing
-workspaces, `create` provisions a persistent personal-billed Codespace for an approved repository,
+codespaces and refreshes stale grants, `setup_help` returns the current user-owned setup step and
+the provider's exact links, `create` provisions a persistent personal-billed Codespace for an approved repository,
 and `exec`, `stat`, `search`, `read`, `write`, `apply_patch`, `upload` and `download` work inside it
-by `workspace_id`. `stop` keeps the repository data; `delete` removes the
+by `codespace_id`. `stop` keeps the repository data; `delete` removes the
 Codespace and requires explicit confirmation. Different chats and clients may reuse the same
-workspace; nothing is deleted when a command finishes or a client disconnects.
+codespace; nothing is deleted when a command finishes or a client disconnects.
 
-An agent working in a workspace acts as the ordinary Codespace user: it can read the repository,
+An agent working in a codespace acts as the ordinary Codespace user: it can read the repository,
 use the network and read any secrets configured for that Codespace. Moira's isolation protects the
-Moira server and other users, not the workspace from the agent its owner authorized. When setup is
-incomplete, the tools return a safe error with a link to this Settings page instead of starting any
-authorization flow.
+Moira server and other users, not the codespace from the agent its owner authorized. When setup is
+incomplete, actionable refusals carry the same applicable Settings, repository-creation and
+provider-console links as `setup_help`, plus App installation when its URL is configured, instead of
+starting any authorization flow. A codespace is
+personal rather than shared; collaboration happens through version-control branches.
 
-Users manage the same workspaces from **Settings → Integrations → Cloud workspaces**: create one for
+Users manage the same codespaces from **Settings → Integrations → Cloud codespaces**: create one for
 an approved repository, start or stop it (stop keeps the repository data) and delete it after an
-explicit confirmation. Administrators open **Admin → Settings → Workspaces** to see the instance
-readiness (configuration, connector, reconciliation backlog, active workspaces and operations against
+explicit confirmation. Administrators open **Admin → Settings → Codespaces** to see the instance
+readiness (configuration, connector, reconciliation backlog, active codespaces and operations against
 their limits) and to pause work with the global or provider kill switch; pausing refuses new
-workspaces, starts and agent operations and stops running workspaces without deleting anything.
+codespaces, starts and agent operations and stops running codespaces without deleting anything.
 
 For monitoring, `GET /api/health` and the MCP `/health` endpoint report the readiness state
 (`disabled`, `misconfigured`, `control_disabled`, `connector_unavailable` or `ready`); a disabled
 feature is healthy, while invalid configuration or an unreachable connector marks the instance
 degraded. Health answers from a cached decision refreshed on the reconciliation interval, and the
-connector probe is bounded to two seconds, so a stalled connector cannot hang the health check. The internal metrics port exposes `moira_workspace_*` gauges and counters. Alert when
-`moira_workspace_ready` stays at 0 with `WORKSPACE_CODESPACES_ENABLED=true`, when
-`moira_workspace_connector_available` is 0, when
-`moira_workspace_reconciliation_oldest_due_age_seconds` exceeds several reconcile intervals, or when
-`moira_workspace_rejections_total` grows for quota or busy codes.
+connector probe is bounded to two seconds, so a stalled connector cannot hang the health check. The internal metrics port exposes `moira_codespace_*` gauges and counters. Alert when
+`moira_codespace_ready` stays at 0 with `CODESPACE_CODESPACES_ENABLED=true`, when
+`moira_codespace_connector_available` is 0, when
+`moira_codespace_reconciliation_oldest_due_age_seconds` exceeds several reconcile intervals, or when
+`moira_codespace_rejections_total` grows for quota or busy codes.
 
 Disconnect disables local use before GitHub revocation. If GitHub is temporarily unavailable, the
 page shows a revocation-pending state and **Disconnect** retries the exact encrypted capability;

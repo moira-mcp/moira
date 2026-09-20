@@ -88,7 +88,7 @@ jest.unstable_mockModule("@mcp-moira/shared", () => ({
   isEmailConfigured: jest.fn(),
   isRateLimitDisabled: () => true,
   isTestEnvironment: () => true,
-  isWorkspaceReadinessDegraded: (view: { state: string }) =>
+  isCodespaceReadinessDegraded: (view: { state: string }) =>
     view.state === "misconfigured" || view.state === "connector_unavailable",
   logAuditEvent: jest.fn(),
 }));
@@ -124,12 +124,12 @@ jest.unstable_mockModule("../../../packages/web-backend/src/auth.js", () => ({
   auth: { api: {} },
 }));
 
-// Admin system status composes the shared workspace readiness decision; this test only
+// Admin system status composes the shared codespace readiness decision; this test only
 // exercises approval gating, so the disabled (healthy) readiness view is enough.
 jest.unstable_mockModule(
-  "../../../packages/web-backend/src/services/workspace-services.js",
+  "../../../packages/web-backend/src/services/codespace-services.js",
   () => ({
-    getWorkspaceObservabilityService: () => ({
+    getCodespaceObservabilityService: () => ({
       readiness: async () => ({
         state: "disabled",
         reason: "NOT_CONFIGURED",
@@ -272,7 +272,7 @@ describe("account approval route capability", () => {
         backendStatus: "degraded",
         databaseSize: 0,
         workflowReconciliation: reconciliationState,
-        workspaces: expect.objectContaining({ state: "disabled" }),
+        codespaces: expect.objectContaining({ state: "disabled" }),
       },
     });
     expect(JSON.stringify(response.body.data.systemHealth.workflowReconciliation)).not.toContain(
@@ -318,7 +318,7 @@ describe("account approval route capability", () => {
         backendStatus: "healthy",
         databaseSize: 0,
         workflowReconciliation: reconciliationState,
-        workspaces: expect.objectContaining({ state: "disabled" }),
+        codespaces: expect.objectContaining({ state: "disabled" }),
       },
       activeExecutions: 1,
       recentActivity: [

@@ -12,14 +12,14 @@ import {
   validGitHubUserCredential,
 } from "./github-codespaces-connector-protocol.mjs";
 
-const SOCKET_PATH = "/run/moira-workspace-connector/connector.sock";
+const SOCKET_PATH = "/run/moira-codespace-connector/connector.sock";
 const WORKER_PATH = "/app/packages/web-backend/src/services/github-codespaces-connector-worker.ts";
 const SUPERVISOR_PATH =
   "/app/packages/web-backend/src/services/github-codespaces-remote-supervisor.mjs";
 const WORKER_UID = 1000;
 const WORKER_GID = 1000;
 const RESOURCE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
-const EGRESS_SOCKET_PATH = "/run/moira-workspace-egress/proxy.sock";
+const EGRESS_SOCKET_PATH = "/run/moira-codespace-egress/proxy.sock";
 const LOCAL_PROXY_PORT = 18080;
 let ready = false;
 
@@ -287,7 +287,7 @@ async function main(): Promise<void> {
     process.setuid(WORKER_UID);
     ready = await connectorHealth();
     if (!ready) throw new Error("connector health failed");
-    process.stdout.write("workspace-connector-ready\n");
+    process.stdout.write("codespace-connector-ready\n");
   });
 }
 

@@ -18,8 +18,14 @@ import {
   stepSchema,
   tokenSchema,
   communicationSchema,
-  workspaceSchema,
+  codespaceSchema,
 } from "./tool-schemas.js";
+
+/**
+ * The one definition of the published name of this tool. The catalogue entry and the server's
+ * log-context selector both read it, so neither can be renamed without the other.
+ */
+export const CODESPACE_TOOL_NAME = "codespace" as const;
 
 export type ToolResponsePolicy = "json" | "text" | "json-or-text" | "formatted-text";
 
@@ -355,52 +361,53 @@ export const TOOL_DEFINITIONS = [
     },
   }),
   defineTool({
-    name: "workspace",
+    name: CODESPACE_TOOL_NAME,
     // Both native file parameters belong to the same tool now, so the host is told about both.
     _meta: { "openai/fileParams": ["stdin_file", "file"] },
-    schema: workspaceSchema,
+    schema: codespaceSchema,
     responsePolicy: "json",
     examples: [
       { action: "list" },
+      { action: "setup_help" },
       { action: "create", repository_id: "123456", ref: "main" },
-      { action: "get", workspace_id: "00000000-0000-4000-8000-000000000000" },
+      { action: "get", codespace_id: "00000000-0000-4000-8000-000000000000" },
       {
         action: "exec",
-        workspace_id: "00000000-0000-4000-8000-000000000000",
+        codespace_id: "00000000-0000-4000-8000-000000000000",
         argv: ["git", "status", "--short"],
         cwd: ".",
         timeout_seconds: 60,
       },
       {
         action: "read",
-        workspace_id: "00000000-0000-4000-8000-000000000000",
+        codespace_id: "00000000-0000-4000-8000-000000000000",
         path: "src/index.ts",
         offset: 0,
         length: 65536,
       },
       {
         action: "delete",
-        workspace_id: "00000000-0000-4000-8000-000000000000",
+        codespace_id: "00000000-0000-4000-8000-000000000000",
         expected_generation: 3,
         confirm_delete: true,
       },
       {
         action: "search",
-        workspace_id: "00000000-0000-4000-8000-000000000000",
+        codespace_id: "00000000-0000-4000-8000-000000000000",
         path: ".",
         query: "TODO",
         mode: "literal",
       },
       {
         action: "write",
-        workspace_id: "00000000-0000-4000-8000-000000000000",
+        codespace_id: "00000000-0000-4000-8000-000000000000",
         path: "notes.txt",
         text: "done\n",
         expected: { exists: false },
       },
       {
         action: "download",
-        workspace_id: "00000000-0000-4000-8000-000000000000",
+        codespace_id: "00000000-0000-4000-8000-000000000000",
         path: "result.pdf",
         max_bytes: 4194304,
         file_name: "result.pdf",
@@ -409,7 +416,7 @@ export const TOOL_DEFINITIONS = [
       {
         // Resuming a pending download: the identity and the output metadata, without `path`.
         action: "download",
-        workspace_id: "00000000-0000-4000-8000-000000000000",
+        codespace_id: "00000000-0000-4000-8000-000000000000",
         operation_id: "11111111-1111-4111-8111-111111111111",
         file_name: "result.pdf",
         mime_type: "application/pdf",
@@ -417,15 +424,15 @@ export const TOOL_DEFINITIONS = [
     ],
     documentation: {
       en: {
-        summary: "Work in a persistent cloud workspace: lifecycle, commands and files, by action.",
+        summary: "Work in a persistent cloud codespace: lifecycle, commands and files, by action.",
         result:
-          "The result the requested action produces, sanitized: workspace state, durable operation state with bounded output, file versions, or a one-use native download link.",
+          "The result the requested action produces, sanitized: codespace state, durable operation state with bounded output, file versions, or a one-use native download link.",
       },
       ru: {
         summary:
-          "Работа в постоянном облачном workspace: жизненный цикл, команды и файлы, по action.",
+          "Работа в постоянном облачном codespace: жизненный цикл, команды и файлы, по action.",
         result:
-          "Безопасный результат запрошенного действия: состояние workspace, состояние операции с ограниченным выводом, версии файлов или одноразовая нативная ссылка на скачивание.",
+          "Безопасный результат запрошенного действия: состояние codespace, состояние операции с ограниченным выводом, версии файлов или одноразовая нативная ссылка на скачивание.",
       },
     },
   }),

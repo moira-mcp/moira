@@ -1,15 +1,15 @@
 import { request as httpRequest, type RequestOptions } from "node:http";
 import type {
-  WorkspaceExecRequest,
-  WorkspaceFileRequest,
-  WorkspaceFileResult,
-  WorkspaceFileTransport,
-  WorkspaceOperationOutputRequest,
-  WorkspaceOperationOutputResult,
-  WorkspaceOperationRecord,
-  WorkspaceOperationResult,
-  WorkspaceOperationTransport,
-  WorkspaceResourceRecord,
+  CodespaceExecRequest,
+  CodespaceFileRequest,
+  CodespaceFileResult,
+  CodespaceFileTransport,
+  CodespaceOperationOutputRequest,
+  CodespaceOperationOutputResult,
+  CodespaceOperationRecord,
+  CodespaceOperationResult,
+  CodespaceOperationTransport,
+  CodespaceResourceRecord,
 } from "@mcp-moira/shared";
 import {
   CONNECTOR_MAX_RESPONSE_BYTES,
@@ -18,7 +18,7 @@ import {
   validGitHubUserCredential,
 } from "./github-codespaces-connector-protocol.mjs";
 
-const SOCKET_PATH = "/run/moira-workspace-connector/connector.sock";
+const SOCKET_PATH = "/run/moira-codespace-connector/connector.sock";
 const RESOURCE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
 const TERMINAL_OPERATION_STATES = new Set(["succeeded", "failed", "cancelled", "timed_out"]);
 const FILE_RESULT_ACTIONS = new Set([
@@ -86,7 +86,7 @@ type RequestFunction = (
 ) => import("node:http").ClientRequest;
 
 export class GitHubCodespacesConnector
-  implements WorkspaceOperationTransport, WorkspaceFileTransport
+  implements CodespaceOperationTransport, CodespaceFileTransport
 {
   constructor(
     private readonly requestImpl: RequestFunction = httpRequest,
@@ -165,11 +165,11 @@ export class GitHubCodespacesConnector
 
   async execute(
     credential: string,
-    workspace: WorkspaceResourceRecord,
-    operation: WorkspaceOperationRecord,
-    request: WorkspaceExecRequest,
+    codespace: CodespaceResourceRecord,
+    operation: CodespaceOperationRecord,
+    request: CodespaceExecRequest,
   ): Promise<
-    | WorkspaceOperationResult
+    | CodespaceOperationResult
     | { state: "running" }
     | { state: "session_unavailable" }
     | { state: "session_limit"; limit: "context" | "sessions" }
@@ -177,11 +177,11 @@ export class GitHubCodespacesConnector
     if (request.stdin.kind !== "inline") {
       throw new Error("Referenced operation input is not materialized by this transport version");
     }
-    const result = await this.operationJob(credential, workspace, operation, {
+    const result = await this.operationJob(credential, codespace, operation, {
       action: "execute",
       version: 1,
       remoteMarker: operation.remoteMarker,
-      repositoryFullName: workspace.repositoryFullName,
+      repositoryFullName: codespace.repositoryFullName,
       ...(request.argv !== undefined ? { argv: request.argv } : {}),
       ...(request.cwd !== undefined ? { cwd: request.cwd } : {}),
       ...(request.session !== undefined ? { session: request.session } : {}),
@@ -203,14 +203,14 @@ export class GitHubCodespacesConnector
 
   async inspect(
     credential: string,
-    workspace: WorkspaceResourceRecord,
-    operation: WorkspaceOperationRecord,
+    codespace: CodespaceResourceRecord,
+    operation: CodespaceOperationRecord,
   ): Promise<
-    WorkspaceOperationResult | { state: "running" } | { state: "absent" } | { state: "interrupted" }
+    CodespaceOperationResult | { state: "running" } | { state: "absent" } | { state: "interrupted" }
   > {
     // Only a dispatch can be refused for its session; an inspection of an existing operation
     // cannot, so that answer is not part of this contract.
-    const result = await this.operationJob(credential, workspace, operation, {
+    const result = await this.operationJob(credential, codespace, operation, {
       action: "inspect",
       version: 1,
       remoteMarker: operation.remoteMarker,
@@ -223,12 +223,12 @@ export class GitHubCodespacesConnector
 
   async cancel(
     credential: string,
-    workspace: WorkspaceResourceRecord,
-    operation: WorkspaceOperationRecord,
+    codespace: CodespaceResourceRecord,
+    operation: CodespaceOperationRecord,
   ): Promise<
-    WorkspaceOperationResult | { state: "running" } | { state: "absent" } | { state: "interrupted" }
+    CodespaceOperationResult | { state: "running" } | { state: "absent" } | { state: "interrupted" }
   > {
-    const result = await this.operationJob(credential, workspace, operation, {
+    const result = await this.operationJob(credential, codespace, operation, {
       action: "cancel",
       version: 1,
       remoteMarker: operation.remoteMarker,
@@ -241,10 +241,10 @@ export class GitHubCodespacesConnector
 
   async finalize(
     credential: string,
-    workspace: WorkspaceResourceRecord,
-    operation: WorkspaceOperationRecord,
+    codespace: CodespaceResourceRecord,
+    operation: CodespaceOperationRecord,
   ): Promise<void> {
-    const result = await this.operationJob(credential, workspace, operation, {
+    const result = await this.operationJob(credential, codespace, operation, {
       action: "finalize",
       version: 1,
       remoteMarker: operation.remoteMarker,
@@ -254,11 +254,11 @@ export class GitHubCodespacesConnector
 
   async readOutput(
     credential: string,
-    workspace: WorkspaceResourceRecord,
-    operation: WorkspaceOperationRecord,
-    request: WorkspaceOperationOutputRequest,
-  ): Promise<WorkspaceOperationOutputResult | { state: "absent" }> {
-    const value = await this.submitOperationJob(credential, workspace, operation, {
+    codespace: CodespaceResourceRecord,
+    operation: CodespaceOperationRecord,
+    request: CodespaceOperationOutputRequest,
+  ): Promise<CodespaceOperationOutputResult | { state: "absent" }> {
+    const value = await this.submitOperationJob(credential, codespace, operation, {
       action: "output",
       version: 1,
       remoteMarker: operation.remoteMarker,
@@ -291,15 +291,15 @@ export class GitHubCodespacesConnector
 
   async executeFile(
     credential: string,
-    workspace: WorkspaceResourceRecord,
-    operation: WorkspaceOperationRecord,
-    request: WorkspaceFileRequest,
-  ): Promise<WorkspaceFileResult | { state: "running" }> {
-    const result = await this.fileJob(credential, workspace, operation, {
+    codespace: CodespaceResourceRecord,
+    operation: CodespaceOperationRecord,
+    request: CodespaceFileRequest,
+  ): Promise<CodespaceFileResult | { state: "running" }> {
+    const result = await this.fileJob(credential, codespace, operation, {
       action: "file-execute",
       version: 1,
       remoteMarker: operation.remoteMarker,
-      repositoryFullName: workspace.repositoryFullName,
+      repositoryFullName: codespace.repositoryFullName,
       request: this.encodeFileRequest(request),
     });
     if ("state" in result) {
@@ -311,10 +311,10 @@ export class GitHubCodespacesConnector
 
   inspectFile(
     credential: string,
-    workspace: WorkspaceResourceRecord,
-    operation: WorkspaceOperationRecord,
-  ): Promise<WorkspaceFileResult | { state: "running" } | { state: "absent" }> {
-    return this.fileJob(credential, workspace, operation, {
+    codespace: CodespaceResourceRecord,
+    operation: CodespaceOperationRecord,
+  ): Promise<CodespaceFileResult | { state: "running" } | { state: "absent" }> {
+    return this.fileJob(credential, codespace, operation, {
       action: "file-inspect",
       version: 1,
       remoteMarker: operation.remoteMarker,
@@ -323,20 +323,20 @@ export class GitHubCodespacesConnector
 
   private async fileJob(
     credential: string,
-    workspace: WorkspaceResourceRecord,
-    operation: WorkspaceOperationRecord,
+    codespace: CodespaceResourceRecord,
+    operation: CodespaceOperationRecord,
     job: Record<string, unknown>,
-  ): Promise<WorkspaceFileResult | { state: "running" } | { state: "absent" }> {
-    if (!workspace.providerResourceName || workspace.id !== operation.resourceId) {
-      throw new Error("Invalid workspace file operation identity");
+  ): Promise<CodespaceFileResult | { state: "running" } | { state: "absent" }> {
+    if (!codespace.providerResourceName || codespace.id !== operation.resourceId) {
+      throw new Error("Invalid codespace file operation identity");
     }
-    this.validateCredentialAndResource(credential, workspace.providerResourceName);
+    this.validateCredentialAndResource(credential, codespace.providerResourceName);
     const response = (await this.call(
       "/job",
       {
         action: "operation",
         token: credential,
-        resourceName: workspace.providerResourceName,
+        resourceName: codespace.providerResourceName,
         job,
       },
       this.requestTimeoutMs + 120_000,
@@ -372,7 +372,7 @@ export class GitHubCodespacesConnector
     return result;
   }
 
-  private encodeFileRequest(request: WorkspaceFileRequest): Record<string, unknown> {
+  private encodeFileRequest(request: CodespaceFileRequest): Record<string, unknown> {
     if (request.action === "write" || request.action === "upload") {
       return {
         ...request,
@@ -400,7 +400,7 @@ export class GitHubCodespacesConnector
   private decodeFileResult(
     value: Record<string, unknown>,
     outputLimitBytes: number,
-  ): WorkspaceFileResult {
+  ): CodespaceFileResult {
     const encoded = JSON.stringify(value);
     if (Buffer.byteLength(encoded, "utf8") > 1024 * 1024 || encoded.includes("ghu_")) {
       throw new Error("Codespace file transport returned an invalid result");
@@ -442,11 +442,14 @@ export class GitHubCodespacesConnector
     if (value.state === "failed") {
       if (
         !hasExactKeys(value, ["action", "state", "code"]) ||
-        value.code !== "WORKSPACE_FILE_REJECTED"
+        !["CODESPACE_FILE_REJECTED", "WORKSPACE_FILE_REJECTED"].includes(String(value.code))
       ) {
         throw new Error("Codespace file transport returned an invalid failure");
       }
-      return value as WorkspaceFileResult;
+      // A failed file operation can remain collectible in the remote supervisor after a server
+      // upgrade. Accept its version-1 stored code at this private transport boundary, but expose
+      // only the renamed code to the service and published MCP contract.
+      return { ...value, code: "CODESPACE_FILE_REJECTED" } as CodespaceFileResult;
     }
     if (value.action === "stat") {
       const stat = value.stat as Record<string, unknown> | undefined;
@@ -499,7 +502,7 @@ export class GitHubCodespacesConnector
       ) {
         throw new Error("Codespace file transport returned invalid search metadata");
       }
-      return value as WorkspaceFileResult;
+      return value as CodespaceFileResult;
     } else if (value.action === "apply_patch") {
       if (
         !hasExactKeys(value, ["action", "files", "summary"]) ||
@@ -512,7 +515,7 @@ export class GitHubCodespacesConnector
       ) {
         throw new Error("Codespace file transport returned invalid patch metadata");
       }
-      return value as WorkspaceFileResult;
+      return value as CodespaceFileResult;
     } else if (value.action === "write" || value.action === "upload") {
       const previous = value.previous === null ? null : decodeFileVersion(value.previous);
       const current = decodeFileVersion(value.current);
@@ -615,20 +618,20 @@ export class GitHubCodespacesConnector
    */
   private async submitOperationJob(
     credential: string,
-    workspace: WorkspaceResourceRecord,
-    operation: WorkspaceOperationRecord,
+    codespace: CodespaceResourceRecord,
+    operation: CodespaceOperationRecord,
     job: Record<string, unknown>,
   ): Promise<Record<string, unknown>> {
-    if (!workspace.providerResourceName || workspace.id !== operation.resourceId) {
-      throw new Error("Invalid workspace operation identity");
+    if (!codespace.providerResourceName || codespace.id !== operation.resourceId) {
+      throw new Error("Invalid codespace operation identity");
     }
-    this.validateCredentialAndResource(credential, workspace.providerResourceName);
+    this.validateCredentialAndResource(credential, codespace.providerResourceName);
     const result = (await this.call(
       "/job",
       {
         action: "operation",
         token: credential,
-        resourceName: workspace.providerResourceName,
+        resourceName: codespace.providerResourceName,
         job,
       },
       // A dispatch returns as soon as the remote runner is proven alive, so the budget covers the
@@ -643,18 +646,18 @@ export class GitHubCodespacesConnector
 
   private async operationJob(
     credential: string,
-    workspace: WorkspaceResourceRecord,
-    operation: WorkspaceOperationRecord,
+    codespace: CodespaceResourceRecord,
+    operation: CodespaceOperationRecord,
     job: Record<string, unknown>,
   ): Promise<
-    | WorkspaceOperationResult
+    | CodespaceOperationResult
     | { state: "running" }
     | { state: "absent" }
     | { state: "interrupted" }
     | { state: "session_unavailable" }
     | { state: "session_limit"; limit: "context" | "sessions" }
   > {
-    const value = await this.submitOperationJob(credential, workspace, operation, job);
+    const value = await this.submitOperationJob(credential, codespace, operation, job);
     if (
       value.state === "running" ||
       value.state === "absent" ||
@@ -709,7 +712,7 @@ export class GitHubCodespacesConnector
       throw new Error("Codespace operation transport exceeded its result contract");
     }
     return {
-      state: value.state as WorkspaceOperationResult["state"],
+      state: value.state as CodespaceOperationResult["state"],
       stdout: stdout.toString("utf8"),
       stderr: stderr.toString("utf8"),
       exitCode: value.exitCode as number | null,

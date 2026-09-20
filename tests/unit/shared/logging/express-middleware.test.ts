@@ -14,9 +14,9 @@ describe("sanitizeRequestUrl", () => {
     expect(sanitizeRequestUrl("/api/workflows/example")).toBe("/api/workflows/example");
   });
 
-  test("redacts private workspace transfer capabilities", () => {
-    expect(sanitizeRequestUrl("/api/workspaces/transfers/private-capability?download=true")).toBe(
-      "/api/workspaces/transfers/[REDACTED]?download=true",
+  test("redacts private codespace transfer capabilities", () => {
+    expect(sanitizeRequestUrl("/api/codespaces/transfers/private-capability?download=true")).toBe(
+      "/api/codespaces/transfers/[REDACTED]?download=true",
     );
   });
 

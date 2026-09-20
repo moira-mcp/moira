@@ -22,19 +22,19 @@ export { GlobalSettingsRepository } from "./repositories/global-settings-reposit
 export { UserRepository } from "./repositories/user-repository.js";
 export { AccountApprovalRepository } from "./repositories/account-approval-repository.js";
 export {
-  WorkspaceConnectionRepository,
-  digestWorkspaceAuthorizationValue,
-  type ConnectedWorkspaceInput,
-  type StoredWorkspaceCredential,
-  type StoredWorkspaceRevocation,
-} from "../workspaces/connection-repository.js";
+  CodespaceConnectionRepository,
+  digestCodespaceAuthorizationValue,
+  type ConnectedCodespaceInput,
+  type StoredCodespaceCredential,
+  type StoredCodespaceRevocation,
+} from "../codespaces/connection-repository.js";
 export {
-  WorkspaceResourceRepository,
-  digestWorkspaceCapability,
-  type ReserveWorkspaceResult,
-} from "../workspaces/resource-repository.js";
-export { WorkspaceOperationRepository } from "../workspaces/operation-repository.js";
-export { WorkspaceTransferRepository } from "../workspaces/transfer-repository.js";
+  CodespaceResourceRepository,
+  digestCodespaceCapability,
+  type ReserveCodespaceResult,
+} from "../codespaces/resource-repository.js";
+export { CodespaceOperationRepository } from "../codespaces/operation-repository.js";
+export { CodespaceTransferRepository } from "../codespaces/transfer-repository.js";
 export type { AccountApprovalTransitionResult } from "./repositories/account-approval-repository.js";
 export {
   WorkflowReconciliationRepository,

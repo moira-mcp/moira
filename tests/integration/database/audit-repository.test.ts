@@ -4,6 +4,7 @@
  */
 
 import { describe, test, expect, beforeEach, afterEach } from "@jest/globals";
+import { randomUUID } from "node:crypto";
 import { AuditRepository, getDatabase, closeDatabase } from "@mcp-moira/shared";
 import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
 // The database is typed by the schema module, not by the package entry point: the entry also
@@ -64,6 +65,30 @@ describe("AuditRepository", () => {
     expect(retrieved?.action).toBe("test:minimal");
     expect(retrieved?.userId).toBeUndefined();
     expect(retrieved?.resource).toBeUndefined();
+  });
+
+  test("logOnce() durably collapses the same event across repository instances", async () => {
+    const otherProcessRepository = new AuditRepository(db);
+    const dedupeKey = `test-audit-${randomUUID()}`;
+    const event = {
+      action: "codespace:start",
+      resource: "codespace_resource",
+      resourceId: "codespace-1",
+      dedupeKey,
+    };
+
+    const [first, retried] = await Promise.all([
+      repository.logOnce(event),
+      otherProcessRepository.logOnce(event),
+    ]);
+
+    expect([first.inserted, retried.inserted].sort()).toEqual([false, true]);
+    expect(first.id).toBe(retried.id);
+    expect(
+      (await repository.list({ resourceId: "codespace-1" })).filter(
+        (entry) => entry.dedupeKey === dedupeKey,
+      ),
+    ).toHaveLength(1);
   });
 
   test("list() returns all entries", async () => {

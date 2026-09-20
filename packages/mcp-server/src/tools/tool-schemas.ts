@@ -594,14 +594,14 @@ export const communicationSchema = z
   })
   .strict();
 
-const workspaceIdSchema = z.string().uuid().describe("Persistent workspace ID");
-const workspacePathSchema = z.string().min(1).max(4096).describe("Repository-relative path");
-const workspaceSha256Schema = z.string().regex(/^[a-f0-9]{64}$/);
-const workspaceMimeTypeSchema = z
+const codespaceIdSchema = z.string().uuid().describe("Persistent codespace ID");
+const codespacePathSchema = z.string().min(1).max(4096).describe("Repository-relative path");
+const codespaceSha256Schema = z.string().regex(/^[a-f0-9]{64}$/);
+const codespaceMimeTypeSchema = z
   .string()
   .max(127)
   .regex(/^[a-z0-9][a-z0-9!#$&^_.+-]*\/[a-z0-9][a-z0-9!#$&^_.+-]*$/i);
-const workspaceFileNameSchema = z
+const codespaceFileNameSchema = z
   .string()
   .min(1)
   .max(255)
@@ -616,23 +616,23 @@ const workspaceFileNameSchema = z
     "Filename must not contain paths or control characters",
   );
 
-export const workspaceExpectedSchema = z
+export const codespaceExpectedSchema = z
   .object({
     exists: z.boolean().describe("Whether the target must already exist"),
     size_bytes: z.number().int().min(0).optional(),
-    sha256: workspaceSha256Schema.optional(),
+    sha256: codespaceSha256Schema.optional(),
   })
   .strict();
 
-export const workspaceNativeFileSchema = z
+export const codespaceNativeFileSchema = z
   .object({
     file_id: z
       .string()
       .max(512)
       .regex(/^(?:sediment:\/\/)?file_[A-Za-z0-9]+$/),
     download_url: z.string().url(),
-    file_name: workspaceFileNameSchema.optional(),
-    mime_type: workspaceMimeTypeSchema.optional(),
+    file_name: codespaceFileNameSchema.optional(),
+    mime_type: codespaceMimeTypeSchema.optional(),
     size_bytes: z
       .number()
       .int()
@@ -643,37 +643,55 @@ export const workspaceNativeFileSchema = z
   .strict()
   .describe("Native ChatGPT file reference; pass the attachment reference without base64");
 
-export const workspaceListSchema = z.object({}).strict();
+export const codespaceListSchema = z
+  .object({
+    refresh: z
+      .boolean()
+      .optional()
+      .describe("Re-read the approved repositories from the provider before answering"),
+  })
+  .strict();
 
-export const workspaceCreateSchema = z
+export const codespaceSetupHelpSchema = z
+  .object({
+    repository_id: z
+      .string()
+      .min(1)
+      .max(255)
+      .optional()
+      .describe("Repository provider ID to diagnose, when the task already names one"),
+  })
+  .strict();
+
+export const codespaceCreateSchema = z
   .object({
     repository_id: z.string().min(1).max(255),
     ref: z.string().min(1).max(255),
   })
   .strict();
 
-export const workspaceGetSchema = z.object({ workspace_id: workspaceIdSchema }).strict();
-export const workspaceStartSchema = workspaceGetSchema;
-export const workspaceStopSchema = workspaceGetSchema;
+export const codespaceGetSchema = z.object({ codespace_id: codespaceIdSchema }).strict();
+export const codespaceStartSchema = codespaceGetSchema;
+export const codespaceStopSchema = codespaceGetSchema;
 
-export const workspaceDeleteSchema = z
+export const codespaceDeleteSchema = z
   .object({
-    workspace_id: workspaceIdSchema,
+    codespace_id: codespaceIdSchema,
     expected_generation: z.number().int().min(1),
     confirm_delete: z.literal(true).describe("Required explicit destructive confirmation"),
   })
   .strict();
 
-const workspaceOperationResumeSchema = z
+const codespaceOperationResumeSchema = z
   .object({
-    workspace_id: workspaceIdSchema,
+    codespace_id: codespaceIdSchema,
     operation_id: z.string().uuid().describe("Pending operation ID returned by this tool"),
   })
   .strict();
 
-const workspaceExecStartSchema = z
+const codespaceExecStartSchema = z
   .object({
-    workspace_id: workspaceIdSchema,
+    codespace_id: codespaceIdSchema,
     argv: z
       .array(
         z
@@ -737,24 +755,24 @@ const workspaceExecStartSchema = z
   })
   .strict();
 
-export const workspaceExecRequestSchema = z.union([
-  workspaceExecStartSchema.extend({ stdin_text: z.string().optional() }),
-  workspaceExecStartSchema.extend({ stdin_file: workspaceNativeFileSchema }),
+export const codespaceExecRequestSchema = z.union([
+  codespaceExecStartSchema.extend({ stdin_text: z.string().optional() }),
+  codespaceExecStartSchema.extend({ stdin_file: codespaceNativeFileSchema }),
   // Resuming a command also stops one: the same operation identity, asked to end instead of to
   // report. A background command is stopped this way.
-  workspaceOperationResumeSchema.extend({ cancel: z.boolean().default(false) }),
+  codespaceOperationResumeSchema.extend({ cancel: z.boolean().default(false) }),
 ]);
 
-export const workspaceStatRequestSchema = z.union([
-  z.object({ workspace_id: workspaceIdSchema, path: workspacePathSchema }).strict(),
-  workspaceOperationResumeSchema,
+export const codespaceStatRequestSchema = z.union([
+  z.object({ codespace_id: codespaceIdSchema, path: codespacePathSchema }).strict(),
+  codespaceOperationResumeSchema,
 ]);
 
-export const workspaceSearchRequestSchema = z.union([
+export const codespaceSearchRequestSchema = z.union([
   z
     .object({
-      workspace_id: workspaceIdSchema,
-      path: workspacePathSchema,
+      codespace_id: codespaceIdSchema,
+      path: codespacePathSchema,
       query: z.string().min(1).max(4096),
       mode: z.enum(["literal", "regex"]).default("literal"),
       max_matches: z.number().int().min(1).max(1000).default(100),
@@ -766,10 +784,10 @@ export const workspaceSearchRequestSchema = z.union([
         .default(64 * 1024),
     })
     .strict(),
-  workspaceOperationResumeSchema,
+  codespaceOperationResumeSchema,
 ]);
 
-const workspaceReadRangeSchema = z.object({
+const codespaceReadRangeSchema = z.object({
   offset: z.number().int().min(0).default(0),
   length: z
     .number()
@@ -779,44 +797,44 @@ const workspaceReadRangeSchema = z.object({
     .default(64 * 1024),
 });
 
-export const workspaceReadRequestSchema = z.union([
-  workspaceReadRangeSchema
-    .extend({ workspace_id: workspaceIdSchema, path: workspacePathSchema })
+export const codespaceReadRequestSchema = z.union([
+  codespaceReadRangeSchema
+    .extend({ codespace_id: codespaceIdSchema, path: codespacePathSchema })
     .strict(),
   // Retained command output: the same range read addressed to a command instead of a file. It is
   // matched before the resume form, which carries no stream.
-  workspaceReadRangeSchema
+  codespaceReadRangeSchema
     .extend({
-      workspace_id: workspaceIdSchema,
+      codespace_id: codespaceIdSchema,
       operation_id: z.string().uuid().describe("Command operation whose retained output is read"),
       stream: z.enum(["stdout", "stderr"]),
     })
     .strict(),
-  workspaceOperationResumeSchema,
+  codespaceOperationResumeSchema,
 ]);
 
-export const workspaceWriteRequestSchema = z.union([
+export const codespaceWriteRequestSchema = z.union([
   z
     .object({
-      workspace_id: workspaceIdSchema,
-      path: workspacePathSchema,
+      codespace_id: codespaceIdSchema,
+      path: codespacePathSchema,
       text: z.string(),
-      expected: workspaceExpectedSchema,
+      expected: codespaceExpectedSchema,
     })
     .strict(),
-  workspaceOperationResumeSchema,
+  codespaceOperationResumeSchema,
 ]);
 
-export const workspaceApplyPatchRequestSchema = z.union([
+export const codespaceApplyPatchRequestSchema = z.union([
   z
     .object({
-      workspace_id: workspaceIdSchema,
+      codespace_id: codespaceIdSchema,
       files: z
         .array(
           z
             .object({
-              path: workspacePathSchema,
-              expected: workspaceExpectedSchema,
+              path: codespacePathSchema,
+              expected: codespaceExpectedSchema,
               edits: z
                 .array(
                   z
@@ -836,71 +854,72 @@ export const workspaceApplyPatchRequestSchema = z.union([
         .max(64),
     })
     .strict(),
-  workspaceOperationResumeSchema,
+  codespaceOperationResumeSchema,
 ]);
 
-export const workspaceUploadRequestSchema = z.union([
+export const codespaceUploadRequestSchema = z.union([
   z
     .object({
-      workspace_id: workspaceIdSchema,
-      path: workspacePathSchema,
-      file: workspaceNativeFileSchema,
-      expected: workspaceExpectedSchema,
+      codespace_id: codespaceIdSchema,
+      path: codespacePathSchema,
+      file: codespaceNativeFileSchema,
+      expected: codespaceExpectedSchema,
     })
     .strict(),
-  workspaceOperationResumeSchema,
+  codespaceOperationResumeSchema,
 ]);
 
-const workspaceDownloadStartSchema = z
+const codespaceDownloadStartSchema = z
   .object({
-    workspace_id: workspaceIdSchema,
-    path: workspacePathSchema,
+    codespace_id: codespaceIdSchema,
+    path: codespacePathSchema,
     max_bytes: z
       .number()
       .int()
       .min(1)
       .max(4 * 1024 * 1024)
       .default(4 * 1024 * 1024),
-    file_name: workspaceFileNameSchema,
-    mime_type: workspaceMimeTypeSchema,
+    file_name: codespaceFileNameSchema,
+    mime_type: codespaceMimeTypeSchema,
   })
   .strict();
 
-export const workspaceDownloadRequestSchema = z.union([
-  workspaceDownloadStartSchema,
-  workspaceOperationResumeSchema.extend({
-    file_name: workspaceFileNameSchema,
-    mime_type: workspaceMimeTypeSchema,
+export const codespaceDownloadRequestSchema = z.union([
+  codespaceDownloadStartSchema,
+  codespaceOperationResumeSchema.extend({
+    file_name: codespaceFileNameSchema,
+    mime_type: codespaceMimeTypeSchema,
   }),
 ]);
 
-export const WORKSPACE_ACTION_REQUEST_SCHEMAS = {
-  list: workspaceListSchema,
-  create: workspaceCreateSchema,
-  get: workspaceGetSchema,
-  start: workspaceStartSchema,
-  stop: workspaceStopSchema,
-  delete: workspaceDeleteSchema,
-  exec: workspaceExecRequestSchema,
-  stat: workspaceStatRequestSchema,
-  search: workspaceSearchRequestSchema,
-  read: workspaceReadRequestSchema,
-  write: workspaceWriteRequestSchema,
-  apply_patch: workspaceApplyPatchRequestSchema,
-  upload: workspaceUploadRequestSchema,
-  download: workspaceDownloadRequestSchema,
+export const CODESPACE_ACTION_REQUEST_SCHEMAS = {
+  list: codespaceListSchema,
+  setup_help: codespaceSetupHelpSchema,
+  create: codespaceCreateSchema,
+  get: codespaceGetSchema,
+  start: codespaceStartSchema,
+  stop: codespaceStopSchema,
+  delete: codespaceDeleteSchema,
+  exec: codespaceExecRequestSchema,
+  stat: codespaceStatRequestSchema,
+  search: codespaceSearchRequestSchema,
+  read: codespaceReadRequestSchema,
+  write: codespaceWriteRequestSchema,
+  apply_patch: codespaceApplyPatchRequestSchema,
+  upload: codespaceUploadRequestSchema,
+  download: codespaceDownloadRequestSchema,
 } as const;
 
-export const WORKSPACE_ACTIONS = Object.keys(WORKSPACE_ACTION_REQUEST_SCHEMAS) as [
-  WorkspaceAction,
-  ...WorkspaceAction[],
+export const CODESPACE_ACTIONS = Object.keys(CODESPACE_ACTION_REQUEST_SCHEMAS) as [
+  CodespaceAction,
+  ...CodespaceAction[],
 ];
 
-export type WorkspaceAction = keyof typeof WORKSPACE_ACTION_REQUEST_SCHEMAS;
+export type CodespaceAction = keyof typeof CODESPACE_ACTION_REQUEST_SCHEMAS;
 
 /**
- * The published contract of the one `workspace` tool: `action` plus every field any action accepts,
- * each optional because no field belongs to all fourteen. The object stays strict, so a field
+ * The published contract of the one `codespace` tool: `action` plus every field any action accepts,
+ * each optional because no field belongs to every action. The object stays strict, so a field
  * belonging to no action at all is still refused here; a field belonging to another action is
  * refused at dispatch, where the action's own strict contract is applied.
  */
@@ -910,14 +929,30 @@ export type WorkspaceAction = keyof typeof WORKSPACE_ACTION_REQUEST_SCHEMAS;
  * can observe.
  */
 function sameShape(left: z.ZodTypeAny, right: z.ZodTypeAny): boolean {
-  const serialize = (field: z.ZodTypeAny) =>
-    JSON.stringify(zodToJsonSchema(field, { $refStrategy: "none" }));
+  // Compared on what constrains the values, not on prose: two actions may describe the same field
+  // differently, and publishing those as alternatives shows the agent two identical-looking branches
+  // it cannot act on. A real difference in what is accepted still separates them.
+  const serialize = (field: z.ZodTypeAny) => {
+    const schema = zodToJsonSchema(field, { $refStrategy: "none" }) as Record<string, unknown>;
+    const withoutProse = (value: unknown): unknown => {
+      if (Array.isArray(value)) return value.map(withoutProse);
+      if (value && typeof value === "object") {
+        return Object.fromEntries(
+          Object.entries(value as Record<string, unknown>)
+            .filter(([key]) => key !== "description")
+            .map(([key, nested]) => [key, withoutProse(nested)]),
+        );
+      }
+      return value;
+    };
+    return JSON.stringify(withoutProse(schema));
+  };
   return serialize(left) === serialize(right);
 }
 
-export const workspaceSchema = (() => {
+export const codespaceSchema = (() => {
   const declarations = new Map<string, z.ZodTypeAny[]>();
-  const forms = Object.values(WORKSPACE_ACTION_REQUEST_SCHEMAS).flatMap((request) =>
+  const forms = Object.values(CODESPACE_ACTION_REQUEST_SCHEMAS).flatMap((request) =>
     request instanceof z.ZodUnion
       ? (request.options as z.AnyZodObject[])
       : [request as z.AnyZodObject],
@@ -944,7 +979,7 @@ export const workspaceSchema = (() => {
     }
   }
   const shape: Record<string, z.ZodTypeAny> = {
-    action: z.enum(WORKSPACE_ACTIONS).describe("Workspace operation to perform"),
+    action: z.enum(CODESPACE_ACTIONS).describe("Codespace operation to perform"),
   };
   for (const [key, fields] of declarations) {
     const published =

@@ -80,7 +80,7 @@ export const TOOL_BINDINGS = {
   artifacts: async (params) => (await import("./manage-artifacts.js")).manageArtifacts(params),
   lock: async (params) => (await import("./manage-locks.js")).manageLocks(params),
 
-  workspace: async (params) => (await import("./manage-workspaces.js")).manageWorkspaceTool(params),
+  codespace: async (params) => (await import("./manage-codespaces.js")).manageCodespaceTool(params),
 } satisfies ToolBindings;
 
 export async function invokeToolDefinition(

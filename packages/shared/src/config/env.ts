@@ -14,8 +14,8 @@ import { validateHostFormat } from "./urls.js";
 import { loadPersistedSecrets } from "./secrets-bootstrap.js";
 import dotenv from "dotenv";
 import path from "path";
-import type { WorkspaceResourcePolicy } from "../workspaces/resource-types.js";
-import { evaluateWorkspaceResourcePolicy } from "../workspaces/resource-policy.js";
+import type { CodespaceResourcePolicy } from "../codespaces/resource-types.js";
+import { evaluateCodespaceResourcePolicy } from "../codespaces/resource-policy.js";
 
 const logger = createLogger({ component: "config" });
 
@@ -169,39 +169,39 @@ class ConfigSingleton {
     return process.env.GITHUB_CLIENT_SECRET;
   }
 
-  getWorkspaceGitHubAppClientId(): string | undefined {
+  getCodespaceGitHubAppClientId(): string | undefined {
     this.ensureInitialized();
-    return process.env.WORKSPACE_GITHUB_APP_CLIENT_ID;
+    return process.env.CODESPACE_GITHUB_APP_CLIENT_ID;
   }
 
-  getWorkspaceGitHubAppClientSecret(): string | undefined {
+  getCodespaceGitHubAppClientSecret(): string | undefined {
     this.ensureInitialized();
-    return process.env.WORKSPACE_GITHUB_APP_CLIENT_SECRET;
+    return process.env.CODESPACE_GITHUB_APP_CLIENT_SECRET;
   }
 
-  getWorkspaceGitHubAppCallbackUrl(): string | undefined {
+  getCodespaceGitHubAppCallbackUrl(): string | undefined {
     this.ensureInitialized();
-    return process.env.WORKSPACE_GITHUB_APP_CALLBACK_URL;
+    return process.env.CODESPACE_GITHUB_APP_CALLBACK_URL;
   }
 
-  getWorkspaceGitHubAppInstallUrl(): string | undefined {
+  getCodespaceGitHubAppInstallUrl(): string | undefined {
     this.ensureInitialized();
-    return process.env.WORKSPACE_GITHUB_APP_INSTALL_URL;
+    return process.env.CODESPACE_GITHUB_APP_INSTALL_URL;
   }
 
-  getWorkspaceCredentialVaultKey(): string | undefined {
+  getCodespaceCredentialVaultKey(): string | undefined {
     this.ensureInitialized();
-    return process.env.WORKSPACE_CREDENTIAL_VAULT_KEY;
+    return process.env.CODESPACE_CREDENTIAL_VAULT_KEY;
   }
 
-  getWorkspaceCredentialVaultKeyVersion(): string {
+  getCodespaceCredentialVaultKeyVersion(): string {
     this.ensureInitialized();
-    return process.env.WORKSPACE_CREDENTIAL_VAULT_KEY_VERSION?.trim() || "v1";
+    return process.env.CODESPACE_CREDENTIAL_VAULT_KEY_VERSION?.trim() || "v1";
   }
 
-  getWorkspaceResourcePolicy(): WorkspaceResourcePolicy {
+  getCodespaceResourcePolicy(): CodespaceResourcePolicy {
     this.ensureInitialized();
-    return evaluateWorkspaceResourcePolicy((name) => process.env[name]);
+    return evaluateCodespaceResourcePolicy((name) => process.env[name]);
   }
 
   getGoogleClientId(): string | undefined {
@@ -665,7 +665,7 @@ class ConfigSingleton {
       mcpPort: this.getMcpPort(),
       emailDelivery: this.getEmailDeliveryStatus(),
       githubOAuthConfigured: !!this.getGitHubClientId(),
-      workspaceGitHubAppConfigured: !!this.getWorkspaceGitHubAppClientId(),
+      codespaceGitHubAppConfigured: !!this.getCodespaceGitHubAppClientId(),
       telegramEncryptionConfigured: !!this.getTelegramEncryptionKey(),
     });
   }
@@ -693,26 +693,26 @@ export function getGitHubClientId(): string | undefined {
 export function getGitHubClientSecret(): string | undefined {
   return config.getGitHubClientSecret();
 }
-export function getWorkspaceGitHubAppClientId(): string | undefined {
-  return config.getWorkspaceGitHubAppClientId();
+export function getCodespaceGitHubAppClientId(): string | undefined {
+  return config.getCodespaceGitHubAppClientId();
 }
-export function getWorkspaceGitHubAppClientSecret(): string | undefined {
-  return config.getWorkspaceGitHubAppClientSecret();
+export function getCodespaceGitHubAppClientSecret(): string | undefined {
+  return config.getCodespaceGitHubAppClientSecret();
 }
-export function getWorkspaceGitHubAppCallbackUrl(): string | undefined {
-  return config.getWorkspaceGitHubAppCallbackUrl();
+export function getCodespaceGitHubAppCallbackUrl(): string | undefined {
+  return config.getCodespaceGitHubAppCallbackUrl();
 }
-export function getWorkspaceGitHubAppInstallUrl(): string | undefined {
-  return config.getWorkspaceGitHubAppInstallUrl();
+export function getCodespaceGitHubAppInstallUrl(): string | undefined {
+  return config.getCodespaceGitHubAppInstallUrl();
 }
-export function getWorkspaceCredentialVaultKey(): string | undefined {
-  return config.getWorkspaceCredentialVaultKey();
+export function getCodespaceCredentialVaultKey(): string | undefined {
+  return config.getCodespaceCredentialVaultKey();
 }
-export function getWorkspaceCredentialVaultKeyVersion(): string {
-  return config.getWorkspaceCredentialVaultKeyVersion();
+export function getCodespaceCredentialVaultKeyVersion(): string {
+  return config.getCodespaceCredentialVaultKeyVersion();
 }
-export function getWorkspaceResourcePolicy(): WorkspaceResourcePolicy {
-  return config.getWorkspaceResourcePolicy();
+export function getCodespaceResourcePolicy(): CodespaceResourcePolicy {
+  return config.getCodespaceResourcePolicy();
 }
 export function getGoogleClientId(): string | undefined {
   return config.getGoogleClientId();

@@ -557,7 +557,7 @@ delivery without returning secrets or destinations. An unknown or removed channe
 
 Authentication: Required
 
-## Workspace Connection API
+## Codespace Connection API
 
 Website-only GitHub App authorization and connection management. These routes
 are mounted under `/api/integrations` behind `requireAuth`; they are separate
@@ -567,7 +567,7 @@ from Better Auth social login and are not MCP operations. Every response uses
 The sanitized connection view has this shape:
 
 ```typescript
-interface WorkspaceConnectionView {
+interface CodespaceConnectionView {
   state:
     | "disabled"
     | "configuration_error"
@@ -591,6 +591,7 @@ interface WorkspaceConnectionView {
     fullName: string;
     private: boolean;
   }>;
+  repositoriesStale?: boolean;
   canConnect: boolean;
   canDisconnect: boolean;
 }
@@ -601,9 +602,19 @@ connection IDs or revocation IDs.
 
 ### GET /api/integrations/github
 
-Returns `{ success: true, data: WorkspaceConnectionView }` for the authenticated
-user. Missing complete server configuration is represented as `disabled` or
+Refreshes an expired installation/repository snapshot and returns
+`{ success: true, data: CodespaceConnectionView }` for the authenticated user.
+If provider enumeration fails, saved grants remain and `repositoriesStale` is `true`.
+Missing complete server configuration is represented as `disabled` or
 `configuration_error`; it does not contact GitHub.
+
+Authentication: Required
+
+### POST /api/integrations/github/refresh
+
+Forces installation and repository enumeration, bypassing the ten-minute snapshot
+TTL. It returns the same sanitized view as `GET`; provider failure retains the
+saved snapshot and reports `repositoriesStale: true`.
 
 Authentication: Required
 
@@ -612,7 +623,7 @@ Authentication: Required
 Creates one ten-minute, single-use state bound to the current user and web
 session, then returns a `303` redirect to GitHub. A newer start invalidates that
 user's older unconsumed state. Missing/invalid server configuration returns
-`503` with `WORKSPACE_NOT_CONFIGURED`. Unreadable stored credentials and an
+`503` with `CODESPACE_NOT_CONFIGURED`. Unreadable stored credentials and an
 untracked refresh successor return their typed safe recovery errors and cannot
 start authorization.
 
@@ -657,7 +668,7 @@ predecessor exactly.
 
 Authentication: Required
 
-See `docs/WORKSPACES.md` for configuration, encryption, refresh and recovery
+See `docs/CODESPACES.md` for configuration, encryption, refresh and recovery
 contracts.
 
 ## Notes API
@@ -1250,71 +1261,79 @@ Errors:
 
 Authentication: Via token (no session required)
 
-## Workspace Management API
+## Codespace Management API
 
-Website management of the user's persistent cloud workspaces. These routes are
-mounted under `/api/integrations/github/workspaces` behind `requireAuth`, use the same
-domain services as the MCP `workspace` tool, and return `Cache-Control: no-store`
-and `Referrer-Policy: no-referrer`. Responses contain the sanitized workspace summary
-(opaque `workspace_id`, provider, repository, ref, machine, state, retention policy,
+Website management of the user's persistent cloud codespaces. These routes are
+mounted under `/api/integrations/github/codespaces` behind `requireAuth`, use the same
+domain services as the MCP `codespace` tool, and return `Cache-Control: no-store`
+and `Referrer-Policy: no-referrer`. Responses contain the sanitized codespace summary
+(opaque `codespace_id`, provider, repository, ref, machine, state, retention policy,
 desired/observed state, generation, timestamps) and never provider resource names,
 markers, claims, capabilities or credentials.
 
-### GET /api/integrations/github/workspaces
+### GET /api/integrations/github/codespaces
 
 Returns the instance readiness view, the connection view, approved repositories and
-the user's workspaces.
+the user's codespaces.
 
 ```typescript
 {
   success: true;
   data: {
-    readiness: WorkspaceReadinessView;
-    connection: WorkspaceConnectionView;
+    readiness: CodespaceReadinessView;
+    connection: CodespaceConnectionView;
     repositories: Array<{ repository_id: string; name: string; private: boolean }>;
-    workspaces: WorkspaceSummaryView[];
+    repositories_stale: boolean;
+    codespaces: CodespaceSummaryView[];
   }
 }
 ```
 
-### POST /api/integrations/github/workspaces
+The route refreshes grants behind the normal TTL. If the provider cannot be reached,
+it keeps the saved repositories and returns `repositories_stale: true`.
+
+### POST /api/integrations/github/codespaces
 
 Body: `{ "repository_id": string, "ref": string }`. Returns `201` with the sanitized
-workspace, which may still be pending. `400` for malformed input; `503`
-`WORKSPACE_NOT_CONFIGURED` with `settings_url` when the feature is not configured.
+codespace, which may still be pending. The route refreshes grants behind the normal TTL
+before it checks repository authorization and creates the codespace. `400` for malformed input; `503`
+`CODESPACE_NOT_CONFIGURED` with `settings_url` when the feature is not configured.
 
-### GET /api/integrations/github/workspaces/:workspaceId
+### GET /api/integrations/github/codespaces/:codespaceId
 
-Returns one owned workspace and up to twenty recent metadata-only operations
+Returns one owned codespace and up to twenty recent metadata-only operations
 (`operation_id`, kind, state, byte counts, exit code, deadline, result expiry,
-timestamps). Unknown, malformed and foreign IDs return `404 WORKSPACE_NOT_FOUND`.
+timestamps). Unknown, malformed and foreign IDs return `404 CODESPACE_NOT_FOUND`.
 
-### POST /api/integrations/github/workspaces/:workspaceId/start | /stop
+### POST /api/integrations/github/codespaces/:codespaceId/start | /stop
 
-Records the desired running or stopped state and returns the workspace with
+Records the desired running or stopped state and returns the codespace with
 `data_preserved: true`. Stop keeps the repository data.
 
-### DELETE /api/integrations/github/workspaces/:workspaceId
+### DELETE /api/integrations/github/codespaces/:codespaceId
 
 Body: `{ "confirm_delete": true, "expected_generation": number }`. Without both the
-route returns `400 WORKSPACE_DELETE_CONFIRMATION_REQUIRED` and calls no service. A
-stale generation returns `409 WORKSPACE_GENERATION_CONFLICT`. Success returns the
-workspace in its delete-pending state with `data_preserved: false`.
+route returns `400 CODESPACE_DELETE_CONFIRMATION_REQUIRED` and calls no service. A
+stale generation returns `409 CODESPACE_GENERATION_CONFLICT`. Success returns the
+codespace in its delete-pending state with `data_preserved: false`.
 
-Error mapping for every route: `WORKSPACE_GENERATION_CONFLICT`,
-`WORKSPACE_NOT_RUNNING`, `WORKSPACE_CREATE_PENDING` and
-`WORKSPACE_AUTHORIZATION_REQUIRED` → 409; `WORKSPACE_POLICY_LIMIT` and
-`WORKSPACE_OPERATION_BUSY` → 429; `WORKSPACE_PROVIDER_DISABLED` and
-`WORKSPACE_PROVIDER_UNAVAILABLE` → 503; `WORKSPACE_RESOURCE_INVALID` → 400. A message
+Domain errors handled by these routes map as follows: `CODESPACE_NOT_FOUND` → 404;
+`CODESPACE_GENERATION_CONFLICT`, `CODESPACE_NOT_RUNNING`,
+`CODESPACE_CREATE_PENDING`, `CODESPACE_AUTHORIZATION_REQUIRED` and
+`CODESPACE_SESSION_UNAVAILABLE` → 409; `CODESPACE_RESULT_EXPIRED` → 410;
+`CODESPACE_CREATE_REJECTED` → 422; `CODESPACE_POLICY_LIMIT` and
+`CODESPACE_OPERATION_BUSY` → 429; `CODESPACE_PROVIDER_DISABLED` and
+`CODESPACE_PROVIDER_UNAVAILABLE` → 503; `CODESPACE_START_TIMEOUT` → 504; and
+`CODESPACE_RESOURCE_INVALID` → 400. A message
 is the code's fixed safe text, followed by the error's bounded detail when it carries
 one. That detail may be the provider's own refusal reason, reduced to one line, capped
 and dropped whole when anything credential-shaped appears in it, under the rules
-`WORKSPACES.md` states once; no other provider output, argv, path or credential
+`CODESPACES.md` states once; no other provider output, argv, path or credential
 reaches the response.
 
 Authentication: Required
 
-### GET /api/admin/workspaces
+### GET /api/admin/codespaces
 
 Administrator readiness and kill switches. Mounted behind the admin namespace guard.
 
@@ -1322,7 +1341,7 @@ Administrator readiness and kill switches. Mounted behind the admin namespace gu
 {
   success: true;
   data: {
-    readiness: WorkspaceReadinessView;
+    readiness: CodespaceReadinessView;
     controls: Array<{
       scope: "global" | `provider:${string}`;
       disabled: boolean;
@@ -1333,23 +1352,23 @@ Administrator readiness and kill switches. Mounted behind the admin namespace gu
 }
 ```
 
-### PUT /api/admin/workspaces/controls/:scope
+### PUT /api/admin/codespaces/controls/:scope
 
 Body: `{ "disabled": boolean, "reason"?: string }` (reason at most 500 characters).
-Scope is `global` or `provider:github-codespaces`. Disabling refuses new workspace
-creation, start and agent operations and requests stop for persistent workspaces; it
+Scope is `global` or `provider:github-codespaces`. Disabling refuses new codespace
+creation, start and agent operations and requests stop for persistent codespaces; it
 never deletes data. Returns the updated readiness and controls. `400` for an invalid
-body or a scope the provider does not manage; `503 WORKSPACE_NOT_CONFIGURED` while
+body or a scope the provider does not manage; `503 CODESPACE_NOT_CONFIGURED` while
 the feature is not configured. Every change is audited as
-`WORKSPACE_CONTROL_UPDATE`.
+`CODESPACE_CONTROL_UPDATE`.
 
 Authentication: Required (administrator)
 
-## Workspace Transfer Download API
+## Codespace Transfer Download API
 
-### GET /api/workspaces/transfers/:token
+### GET /api/codespaces/transfers/:token
 
-Deliver one private workspace file published by the MCP `workspace` tool's `download` action. The tool
+Deliver one private codespace file published by the MCP `codespace` tool's `download` action. The tool
 returns this URL to the agent as an MCP `resource_link`; the token in the path is the only
 authorization, so the URL must not be logged or shared.
 
@@ -1365,11 +1384,11 @@ Referrer-Policy: no-referrer
 
 The capability is consumed after complete or interrupted delivery, so a second request, an
 expired capability, a malformed token and an unknown token all return
-`404 { "error": "workspace_transfer_not_found" }`. Objects expire after
-`WORKSPACE_TRANSFER_TTL_MINUTES` and are limited by the transfer quotas described in
-`docs/WORKSPACES.md`.
+`404 { "error": "codespace_transfer_not_found" }`. Objects expire after
+`CODESPACE_TRANSFER_TTL_MINUTES` and are limited by the transfer quotas described in
+`docs/CODESPACES.md`.
 
-The route runs in the MCP process; both nginx variants proxy the `/api/workspaces/transfers/`
+The route runs in the MCP process; both nginx variants proxy the `/api/codespaces/transfers/`
 prefix directly to it without buffering or temporary files and with access/error logging
 disabled. The route is rate-limited.
 
@@ -2615,7 +2634,7 @@ Response:
     systemHealth: {
       backendStatus: "healthy" | "degraded";
       databaseSize: number;
-      workspaces: WorkspaceReadinessView; // shared cloud-workspace readiness decision
+      codespaces: CodespaceReadinessView; // shared cloud-codespace readiness decision
       workflowReconciliation: {
         status: "ok" | "error";
         code: string;
@@ -2658,7 +2677,7 @@ Response:
     systemHealth: {
       backendStatus: "healthy" | "degraded";
       databaseSize: number;
-      workspaces: WorkspaceReadinessView; // shared cloud-workspace readiness decision
+      codespaces: CodespaceReadinessView; // shared cloud-codespace readiness decision
       workflowReconciliation: {
         status: "ok" | "error";
         code: string;

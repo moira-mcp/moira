@@ -133,14 +133,14 @@ export const oauthConsent = sqliteTable("oauthConsent", {
   consentGiven: integer("consentGiven", { mode: "boolean" }).default(false),
 });
 
-// ===== Workspace Provider Connections =====
+// ===== Codespace Provider Connections =====
 
 /**
  * Provider-neutral connection metadata. Provider credentials deliberately live
- * in workspaceCredentialVault rather than Better Auth accounts or settings.
+ * in codespaceCredentialVault rather than Better Auth accounts or settings.
  */
-export const workspaceConnection = sqliteTable(
-  "workspaceConnection",
+export const codespaceConnection = sqliteTable(
+  "codespaceConnection",
   {
     id: text("id").primaryKey(),
     userId: text("userId")
@@ -150,6 +150,10 @@ export const workspaceConnection = sqliteTable(
     externalAccountId: text("externalAccountId").notNull(),
     externalLogin: text("externalLogin").notNull(),
     status: text("status").notNull(),
+    // When the installation and repository grants were last read from the provider.
+    grantsRefreshedAt: integer("grantsRefreshedAt", { mode: "timestamp_ms" }),
+    // Monotonic compare-and-swap version for the complete installation/repository snapshot.
+    grantsVersion: integer("grantsVersion").notNull().default(0),
     credentialGeneration: integer("credentialGeneration").notNull().default(1),
     refreshLeaseId: text("refreshLeaseId"),
     refreshLeaseExpiresAt: integer("refreshLeaseExpiresAt", { mode: "timestamp_ms" }),
@@ -158,19 +162,19 @@ export const workspaceConnection = sqliteTable(
     updatedAt: integer("updatedAt", { mode: "timestamp_ms" }).notNull(),
   },
   (table) => ({
-    userProviderIdx: uniqueIndex("workspace_connection_user_provider_idx").on(
+    userProviderIdx: uniqueIndex("codespace_connection_user_provider_idx").on(
       table.userId,
       table.provider,
     ),
-    userIdx: index("workspace_connection_user_idx").on(table.userId),
+    userIdx: index("codespace_connection_user_idx").on(table.userId),
   }),
 );
 
 /** Versioned authenticated ciphertext for one provider connection. */
-export const workspaceCredentialVault = sqliteTable("workspaceCredentialVault", {
+export const codespaceCredentialVault = sqliteTable("codespaceCredentialVault", {
   connectionId: text("connectionId")
     .primaryKey()
-    .references(() => workspaceConnection.id, { onDelete: "cascade" }),
+    .references(() => codespaceConnection.id, { onDelete: "cascade" }),
   envelopeVersion: integer("envelopeVersion").notNull(),
   keyVersion: text("keyVersion").notNull(),
   iv: text("iv").notNull(),
@@ -185,8 +189,8 @@ export const workspaceCredentialVault = sqliteTable("workspaceCredentialVault", 
  * pending. A separate row prevents credential replacement from destroying the
  * capability needed to retry a failed remote revoke.
  */
-export const workspaceCredentialRevocation = sqliteTable(
-  "workspaceCredentialRevocation",
+export const codespaceCredentialRevocation = sqliteTable(
+  "codespaceCredentialRevocation",
   {
     id: text("id").primaryKey(),
     userId: text("userId")
@@ -203,7 +207,7 @@ export const workspaceCredentialRevocation = sqliteTable(
     updatedAt: integer("updatedAt", { mode: "timestamp_ms" }).notNull(),
   },
   (table) => ({
-    userProviderIdx: index("workspace_credential_revocation_user_provider_idx").on(
+    userProviderIdx: index("codespace_credential_revocation_user_provider_idx").on(
       table.userId,
       table.provider,
     ),
@@ -211,8 +215,8 @@ export const workspaceCredentialRevocation = sqliteTable(
 );
 
 /** Browser-only, single-use GitHub authorization state stored as a digest. */
-export const workspaceAuthorizationState = sqliteTable(
-  "workspaceAuthorizationState",
+export const codespaceAuthorizationState = sqliteTable(
+  "codespaceAuthorizationState",
   {
     stateHash: text("stateHash").primaryKey(),
     userId: text("userId")
@@ -226,7 +230,7 @@ export const workspaceAuthorizationState = sqliteTable(
     createdAt: integer("createdAt", { mode: "timestamp_ms" }).notNull(),
   },
   (table) => ({
-    userExpiresIdx: index("workspace_authorization_state_user_expires_idx").on(
+    userExpiresIdx: index("codespace_authorization_state_user_expires_idx").on(
       table.userId,
       table.expiresAt,
     ),
@@ -234,12 +238,12 @@ export const workspaceAuthorizationState = sqliteTable(
 );
 
 /** GitHub App installation selected for a connection. */
-export const workspaceConnectionInstallation = sqliteTable(
-  "workspaceConnectionInstallation",
+export const codespaceConnectionInstallation = sqliteTable(
+  "codespaceConnectionInstallation",
   {
     connectionId: text("connectionId")
       .notNull()
-      .references(() => workspaceConnection.id, { onDelete: "cascade" }),
+      .references(() => codespaceConnection.id, { onDelete: "cascade" }),
     externalInstallationId: text("externalInstallationId").notNull(),
     repositorySelection: text("repositorySelection").notNull(),
     createdAt: integer("createdAt", { mode: "timestamp_ms" }).notNull(),
@@ -250,12 +254,12 @@ export const workspaceConnectionInstallation = sqliteTable(
 );
 
 /** Repository grants observed through the selected GitHub App installation. */
-export const workspaceConnectionRepository = sqliteTable(
-  "workspaceConnectionRepository",
+export const codespaceConnectionRepository = sqliteTable(
+  "codespaceConnectionRepository",
   {
     connectionId: text("connectionId")
       .notNull()
-      .references(() => workspaceConnection.id, { onDelete: "cascade" }),
+      .references(() => codespaceConnection.id, { onDelete: "cascade" }),
     externalInstallationId: text("externalInstallationId").notNull(),
     externalRepositoryId: text("externalRepositoryId").notNull(),
     fullName: text("fullName").notNull(),
@@ -264,13 +268,13 @@ export const workspaceConnectionRepository = sqliteTable(
   },
   (table) => ({
     pk: primaryKey({ columns: [table.connectionId, table.externalRepositoryId] }),
-    connectionIdx: index("workspace_connection_repository_connection_idx").on(table.connectionId),
+    connectionIdx: index("codespace_connection_repository_connection_idx").on(table.connectionId),
   }),
 );
 
-/** Durable intent and exact ownership record for one disposable workspace. */
-export const workspaceResource = sqliteTable(
-  "workspaceResource",
+/** Durable intent and exact ownership record for one disposable codespace. */
+export const codespaceResource = sqliteTable(
+  "codespaceResource",
   {
     id: text("id").primaryKey(),
     userId: text("userId")
@@ -278,7 +282,7 @@ export const workspaceResource = sqliteTable(
       .references(() => user.id),
     connectionId: text("connectionId")
       .notNull()
-      .references(() => workspaceConnection.id),
+      .references(() => codespaceConnection.id),
     authorizationGeneration: integer("authorizationGeneration").notNull().default(1),
     provider: text("provider").notNull(),
     repositoryId: text("repositoryId").notNull(),
@@ -309,13 +313,13 @@ export const workspaceResource = sqliteTable(
     updatedAt: integer("updatedAt", { mode: "timestamp_ms" }).notNull(),
   },
   (table) => ({
-    markerIdx: uniqueIndex("workspace_resource_operation_marker_idx").on(table.operationMarker),
-    providerNameIdx: uniqueIndex("workspace_resource_provider_name_idx").on(
+    markerIdx: uniqueIndex("codespace_resource_operation_marker_idx").on(table.operationMarker),
+    providerNameIdx: uniqueIndex("codespace_resource_provider_name_idx").on(
       table.provider,
       table.providerResourceName,
     ),
-    userStateIdx: index("workspace_resource_user_state_idx").on(table.userId, table.state),
-    reconcileIdx: index("workspace_resource_reconcile_idx").on(
+    userStateIdx: index("codespace_resource_user_state_idx").on(table.userId, table.state),
+    reconcileIdx: index("codespace_resource_reconcile_idx").on(
       table.state,
       table.claimExpiresAt,
       table.remoteExpiresAt,
@@ -324,10 +328,10 @@ export const workspaceResource = sqliteTable(
 );
 
 /** Non-transferable lifecycle authority; only its digest is persisted. */
-export const workspaceLifecycleCapability = sqliteTable("workspaceLifecycleCapability", {
+export const codespaceLifecycleCapability = sqliteTable("codespaceLifecycleCapability", {
   resourceId: text("resourceId")
     .primaryKey()
-    .references(() => workspaceResource.id, {
+    .references(() => codespaceResource.id, {
       onDelete: "cascade",
     }),
   userId: text("userId")
@@ -338,8 +342,8 @@ export const workspaceLifecycleCapability = sqliteTable("workspaceLifecycleCapab
 });
 
 /** Required provider cleanups are counted once per UTC day for operator accounting. */
-export const workspacePolicyUsage = sqliteTable(
-  "workspacePolicyUsage",
+export const codespacePolicyUsage = sqliteTable(
+  "codespacePolicyUsage",
   {
     userId: text("userId")
       .notNull()
@@ -355,13 +359,13 @@ export const workspacePolicyUsage = sqliteTable(
 );
 
 /** One durable record per external provider mutation attempt. */
-export const workspaceProviderMutation = sqliteTable(
-  "workspaceProviderMutation",
+export const codespaceProviderMutation = sqliteTable(
+  "codespaceProviderMutation",
   {
     id: text("id").primaryKey(),
     resourceId: text("resourceId")
       .notNull()
-      .references(() => workspaceResource.id),
+      .references(() => codespaceResource.id),
     userId: text("userId")
       .notNull()
       .references(() => user.id),
@@ -372,13 +376,13 @@ export const workspaceProviderMutation = sqliteTable(
     createdAt: integer("createdAt", { mode: "timestamp_ms" }).notNull(),
   },
   (table) => ({
-    attemptIdx: uniqueIndex("workspace_provider_mutation_attempt_idx").on(
+    attemptIdx: uniqueIndex("codespace_provider_mutation_attempt_idx").on(
       table.resourceId,
       table.generation,
       table.kind,
       table.attempt,
     ),
-    userDayIdx: index("workspace_provider_mutation_user_created_idx").on(
+    userDayIdx: index("codespace_provider_mutation_user_created_idx").on(
       table.userId,
       table.createdAt,
     ),
@@ -386,7 +390,7 @@ export const workspaceProviderMutation = sqliteTable(
 );
 
 /** Durable global/provider emergency controls owned by core. */
-export const workspaceProviderControl = sqliteTable("workspaceProviderControl", {
+export const codespaceProviderControl = sqliteTable("codespaceProviderControl", {
   scope: text("scope").primaryKey(),
   disabled: integer("disabled", { mode: "boolean" }).notNull().default(false),
   reason: text("reason"),
@@ -394,9 +398,9 @@ export const workspaceProviderControl = sqliteTable("workspaceProviderControl", 
   updatedBy: text("updatedBy").references(() => user.id),
 });
 
-/** Durable metadata for an exact operation in a user-owned workspace. */
-export const workspaceOperation = sqliteTable(
-  "workspaceOperation",
+/** Durable metadata for an exact operation in a user-owned codespace. */
+export const codespaceOperation = sqliteTable(
+  "codespaceOperation",
   {
     id: text("id").primaryKey(),
     userId: text("userId")
@@ -404,7 +408,7 @@ export const workspaceOperation = sqliteTable(
       .references(() => user.id),
     resourceId: text("resourceId")
       .notNull()
-      .references(() => workspaceResource.id),
+      .references(() => codespaceResource.id),
     resourceGeneration: integer("resourceGeneration").notNull(),
     authorizationGeneration: integer("authorizationGeneration").notNull(),
     provider: text("provider").notNull(),
@@ -427,14 +431,14 @@ export const workspaceOperation = sqliteTable(
     updatedAt: integer("updatedAt", { mode: "timestamp_ms" }).notNull(),
   },
   (table) => ({
-    ownerIdx: index("workspace_operation_owner_idx").on(table.userId, table.resourceId),
-    reconcileIdx: index("workspace_operation_reconcile_idx").on(table.state, table.claimExpiresAt),
+    ownerIdx: index("codespace_operation_owner_idx").on(table.userId, table.resourceId),
+    reconcileIdx: index("codespace_operation_reconcile_idx").on(table.state, table.claimExpiresAt),
   }),
 );
 
-/** Metadata-only authority for private, expiring workspace byte transfers. */
-export const workspaceTransfer = sqliteTable(
-  "workspaceTransfer",
+/** Metadata-only authority for private, expiring codespace byte transfers. */
+export const codespaceTransfer = sqliteTable(
+  "codespaceTransfer",
   {
     id: text("id").primaryKey(),
     tokenDigest: text("tokenDigest").notNull().unique(),
@@ -458,12 +462,12 @@ export const workspaceTransfer = sqliteTable(
     updatedAt: integer("updatedAt", { mode: "timestamp_ms" }).notNull(),
   },
   (table) => ({
-    ownerStateExpiryIdx: index("workspace_transfer_owner_state_expiry_idx").on(
+    ownerStateExpiryIdx: index("codespace_transfer_owner_state_expiry_idx").on(
       table.userId,
       table.state,
       table.expiresAt,
     ),
-    stateExpiryIdx: index("workspace_transfer_state_expiry_idx").on(table.state, table.expiresAt),
+    stateExpiryIdx: index("codespace_transfer_state_expiry_idx").on(table.state, table.expiresAt),
   }),
 );
 
@@ -706,20 +710,28 @@ export const emailLog = sqliteTable("emailLog", {
 
 // ===== Audit Log Table =====
 
-export const auditLog = sqliteTable("auditLog", {
-  id: text("id").primaryKey(),
-  userId: text("userId").references(() => user.id, { onDelete: "cascade" }),
-  action: text("action").notNull(), // 'auth:login', 'workflow:create', 'execution:start', etc
-  resource: text("resource"), // 'workflow', 'execution', 'user', etc
-  resourceId: text("resourceId"), // ID of the affected resource
-  source: text("source"), // 'mcp' | 'web' | 'api' | 'system' - where the action originated
-  ip: text("ip"),
-  country: text("country"),
-  userAgent: text("userAgent"),
-  metadata: text("metadata"), // JSON for additional context
-  changes: text("changes"), // JSON array: [{field, oldValue, newValue}]
-  createdAt: integer("createdAt", { mode: "timestamp_ms" }).notNull(),
-});
+export const auditLog = sqliteTable(
+  "auditLog",
+  {
+    id: text("id").primaryKey(),
+    userId: text("userId").references(() => user.id, { onDelete: "cascade" }),
+    action: text("action").notNull(), // 'auth:login', 'workflow:create', 'execution:start', etc
+    resource: text("resource"), // 'workflow', 'execution', 'user', etc
+    resourceId: text("resourceId"), // ID of the affected resource
+    source: text("source"), // 'mcp' | 'web' | 'api' | 'system' - where the action originated
+    ip: text("ip"),
+    country: text("country"),
+    userAgent: text("userAgent"),
+    metadata: text("metadata"), // JSON for additional context
+    changes: text("changes"), // JSON array: [{field, oldValue, newValue}]
+    // Optional durable idempotency key. Null keeps ordinary audit events append-only.
+    dedupeKey: text("dedupeKey"),
+    createdAt: integer("createdAt", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => ({
+    dedupeKeyIdx: uniqueIndex("audit_log_dedupe_key_idx").on(table.dedupeKey),
+  }),
+);
 
 // ===== Workflow File Tokens =====
 // Temporary tokens for file upload/download

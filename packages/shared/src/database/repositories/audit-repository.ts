@@ -42,6 +42,7 @@ export interface AuditLogEntry {
   userAgent?: string;
   metadata?: string;
   changes?: string; // JSON array of AuditChange
+  dedupeKey?: string;
   createdAt: number;
 }
 
@@ -80,6 +81,7 @@ export class AuditRepository {
       userAgent: entry.userAgent || null,
       metadata: entry.metadata || null,
       changes: entry.changes || null,
+      dedupeKey: entry.dedupeKey || null,
       createdAt: now,
     });
 
@@ -90,6 +92,56 @@ export class AuditRepository {
       source: entry.source,
     });
     return id;
+  }
+
+  /**
+   * Atomically append an idempotent audit event. The unique audit-log key is the commit boundary:
+   * a retry after a concurrent writer or a process crash observes the existing row and does not
+   * create a second event.
+   */
+  async logOnce(
+    entry: Omit<AuditLogEntry, "id" | "createdAt" | "dedupeKey"> & { dedupeKey: string },
+  ): Promise<{ id: string; inserted: boolean }> {
+    const id = randomUUID();
+    const inserted = await this.db
+      .insert(auditLog)
+      .values({
+        id,
+        userId: entry.userId || null,
+        action: entry.action,
+        resource: entry.resource || null,
+        resourceId: entry.resourceId || null,
+        source: entry.source || null,
+        ip: entry.ip || null,
+        country: entry.country || null,
+        userAgent: entry.userAgent || null,
+        metadata: entry.metadata || null,
+        changes: entry.changes || null,
+        dedupeKey: entry.dedupeKey,
+        createdAt: new Date(),
+      })
+      .onConflictDoNothing({ target: auditLog.dedupeKey })
+      .returning({ id: auditLog.id });
+
+    if (inserted.length === 0) {
+      const [existing] = await this.db
+        .select({ id: auditLog.id })
+        .from(auditLog)
+        .where(eq(auditLog.dedupeKey, entry.dedupeKey))
+        .limit(1);
+      if (!existing) {
+        throw new Error("Audit idempotency conflict did not retain an audit row");
+      }
+      return { id: existing.id, inserted: false };
+    }
+
+    this.logger.info("Idempotent audit log entry created", {
+      id,
+      action: entry.action,
+      userId: entry.userId,
+      source: entry.source,
+    });
+    return { id, inserted: true };
   }
 
   private buildConditions(filter: AuditLogFilter) {
@@ -123,6 +175,7 @@ export class AuditRepository {
       userAgent: row.userAgent || undefined,
       metadata: row.metadata || undefined,
       changes: row.changes || undefined,
+      dedupeKey: row.dedupeKey || undefined,
       createdAt: (row.createdAt as Date).getTime(),
     };
   }

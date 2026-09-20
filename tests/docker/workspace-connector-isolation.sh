@@ -1,13 +1,13 @@
 #!/bin/sh
 set -eu
 
-IMAGE_NAME=moira-workspace-connector-isolation-test
-CONNECTOR_NAME=moira-workspace-connector-isolation-test
-EGRESS_NAME=moira-workspace-egress-isolation-test
-CONTROL_VOLUME=moira-workspace-connector-control-test
-EGRESS_VOLUME=moira-workspace-connector-egress-test
-TENANT_VOLUME=moira-workspace-other-tenant-test
-PUBLIC_NETWORK=moira-workspace-connector-public-test
+IMAGE_NAME=moira-codespace-connector-isolation-test
+CONNECTOR_NAME=moira-codespace-connector-isolation-test
+EGRESS_NAME=moira-codespace-egress-isolation-test
+CONTROL_VOLUME=moira-codespace-connector-control-test
+EGRESS_VOLUME=moira-codespace-connector-egress-test
+TENANT_VOLUME=moira-codespace-other-tenant-test
+PUBLIC_NETWORK=moira-codespace-connector-public-test
 
 cleanup() {
   docker rm -f "$CONNECTOR_NAME" "$EGRESS_NAME" >/dev/null 2>&1 || true
@@ -43,7 +43,7 @@ docker run -d --name "$EGRESS_NAME" \
   --pids-limit 128 \
   --memory 128m \
   --cpus 0.25 \
-  -v "$EGRESS_VOLUME:/run/moira-workspace-egress" \
+  -v "$EGRESS_VOLUME:/run/moira-codespace-egress" \
   --entrypoint /usr/local/bin/node \
   "$IMAGE_NAME" \
   --experimental-strip-types \
@@ -61,8 +61,8 @@ docker run -d --name "$CONNECTOR_NAME" \
   --memory 640m \
   --cpus 1 \
   --tmpfs /tmp:rw,nosuid,nodev,noexec,size=536870912,mode=1777 \
-  -v "$CONTROL_VOLUME:/run/moira-workspace-connector" \
-  -v "$EGRESS_VOLUME:/run/moira-workspace-egress" \
+  -v "$CONTROL_VOLUME:/run/moira-codespace-connector" \
+  -v "$EGRESS_VOLUME:/run/moira-codespace-egress" \
   -e HTTPS_PROXY=http://127.0.0.1:18080 \
   -e HTTP_PROXY=http://127.0.0.1:18080 \
   -e NO_PROXY= \
@@ -74,7 +74,7 @@ docker run -d --name "$CONNECTOR_NAME" \
 attempt=0
 while [ "$attempt" -lt 30 ]; do
   if docker exec "$CONNECTOR_NAME" \
-    curl --fail --silent --unix-socket /run/moira-workspace-connector/connector.sock \
+    curl --fail --silent --unix-socket /run/moira-codespace-connector/connector.sock \
     http://localhost/health | grep -q '"state":"available"'; then
     break
   fi
@@ -83,7 +83,7 @@ while [ "$attempt" -lt 30 ]; do
 done
 test "$attempt" -lt 30
 
-# The credential-bearing connector has only loopback and two narrow Unix sockets.
+# The credential-bearing Codespace connector has only loopback and two narrow Unix sockets.
 test "$(docker inspect "$CONNECTOR_NAME" --format '{{.HostConfig.NetworkMode}}')" = "none"
 test "$(docker inspect "$CONNECTOR_NAME" --format '{{.HostConfig.ReadonlyRootfs}}')" = "true"
 test "$(docker inspect "$CONNECTOR_NAME" --format '{{.HostConfig.PidsLimit}}')" = "384"
@@ -109,4 +109,4 @@ docker exec "$CONNECTOR_NAME" test ! -S /var/run/docker.sock
 docker exec "$CONNECTOR_NAME" curl --fail --silent --max-time 20 https://api.github.com/meta >/dev/null
 ! docker exec "$CONNECTOR_NAME" curl --fail --silent --max-time 5 https://example.com/
 
-echo workspace-connector-isolation-ok
+echo codespace-connector-isolation-ok

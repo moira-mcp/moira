@@ -19,7 +19,7 @@ export function sanitizeRequestUrl(url: string): string {
     .replace(/(\/api\/integrations\/github\/callback)(?:\?[^#]*)?/g, "$1?[REDACTED]")
     .replace(/(\/api\/public\/executions\/materialize\/)[^/?#]+/g, "$1[REDACTED]")
     .replace(/(\/api\/public\/execution-progress-image\/)[^/?#]+/g, "$1[REDACTED]")
-    .replace(/(\/api\/workspaces\/transfers\/)[^/?#]+/g, "$1[REDACTED]");
+    .replace(/(\/api\/codespaces\/transfers\/)[^/?#]+/g, "$1[REDACTED]");
 }
 
 /**

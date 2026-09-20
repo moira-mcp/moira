@@ -91,16 +91,21 @@ describe("Migrating a database created before the extension value store", () => 
       const schemaAfter = Object.fromEntries(
         Object.keys(schemaBefore).map((name) => [name, allSchemasAfter[name]]),
       );
-      // The execution table gained only the later route-log column and the workflow table only the
-      // later revision column; every other table is byte-for-byte the definition it had before.
+      // The execution table gained the later route-log column, the workflow table gained its
+      // revision, and the audit log gained the durable idempotency key. Account for these explicit
+      // later migrations before comparing every table that the extension migration itself owned.
       expect(schemaBefore.workflowExecution).not.toContain("`visits`");
       expect(schemaAfter.workflowExecution).toContain("`visits` text DEFAULT '[]' NOT NULL");
       expect(schemaBefore.workflow).not.toContain("`revision`");
       expect(schemaAfter.workflow).toContain("`revision` integer DEFAULT 0 NOT NULL");
+      expect(schemaBefore.auditLog).not.toContain("`dedupeKey`");
+      expect(schemaAfter.auditLog).toContain("`dedupeKey` text");
       delete schemaBefore.workflowExecution;
       delete schemaAfter.workflowExecution;
       delete schemaBefore.workflow;
       delete schemaAfter.workflow;
+      delete schemaBefore.auditLog;
+      delete schemaAfter.auditLog;
       // Two tables are superseded rather than kept: note history moved into the shared revision
       // store and workflow sharing into the general access grants, each carrying its rows over.
       for (const [superseded, successor] of SUPERSEDED_TABLES) {

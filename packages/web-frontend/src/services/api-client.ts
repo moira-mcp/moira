@@ -10,10 +10,10 @@ import axios, { AxiosInstance, AxiosResponse, AxiosError } from "axios";
 import type { ExecutionProgress } from "@mcp-moira/workflow-engine/progress-visual";
 import type { ProcessProjection } from "@mcp-moira/workflow-engine/process";
 import type {
-  WorkspaceConnectionView,
-  WorkspaceControlView,
-  WorkspaceReadinessView,
-  WorkspaceSummaryView,
+  CodespaceConnectionView,
+  CodespaceControlView,
+  CodespaceReadinessView,
+  CodespaceSummaryView,
 } from "@mcp-moira/shared";
 
 export interface WorkflowProcessResponse {
@@ -48,7 +48,7 @@ import {
   AdminStatsResponse,
   AdminSystemStatusResponse,
   NodeTypeCatalog,
-  WorkspaceManagementView,
+  CodespaceManagementView,
 } from "../types";
 
 /**
@@ -583,87 +583,94 @@ export class MoiraApiClient {
     }
   }
 
-  async getGitHubWorkspaceConnection(): Promise<WorkspaceConnectionView> {
+  async getGitHubCodespaceConnection(): Promise<CodespaceConnectionView> {
     const response =
-      await this.client.get<ApiResponse<WorkspaceConnectionView>>("/integrations/github");
+      await this.client.get<ApiResponse<CodespaceConnectionView>>("/integrations/github");
     return response.data.data!;
   }
 
-  async disconnectGitHubWorkspace(): Promise<WorkspaceConnectionView> {
-    const response =
-      await this.client.delete<ApiResponse<WorkspaceConnectionView>>("/integrations/github");
+  async refreshGitHubCodespaceRepositories(): Promise<CodespaceConnectionView> {
+    const response = await this.client.post<ApiResponse<CodespaceConnectionView>>(
+      "/integrations/github/refresh",
+    );
     return response.data.data!;
   }
 
-  async confirmGitHubExternalRevocation(): Promise<WorkspaceConnectionView> {
-    const response = await this.client.delete<ApiResponse<WorkspaceConnectionView>>(
+  async disconnectGitHubCodespace(): Promise<CodespaceConnectionView> {
+    const response =
+      await this.client.delete<ApiResponse<CodespaceConnectionView>>("/integrations/github");
+    return response.data.data!;
+  }
+
+  async confirmGitHubExternalRevocation(): Promise<CodespaceConnectionView> {
+    const response = await this.client.delete<ApiResponse<CodespaceConnectionView>>(
       "/integrations/github/external-revocation",
       { data: { confirmed: true } },
     );
     return response.data.data!;
   }
 
-  async getGitHubWorkspaces(): Promise<WorkspaceManagementView> {
-    const response = await this.client.get<ApiResponse<WorkspaceManagementView>>(
-      "/integrations/github/workspaces",
+  async getGitHubCodespaces(): Promise<CodespaceManagementView> {
+    const response = await this.client.get<ApiResponse<CodespaceManagementView>>(
+      "/integrations/github/codespaces",
     );
     return response.data.data!;
   }
 
-  async createGitHubWorkspace(input: {
+  async createGitHubCodespace(input: {
     repository_id: string;
     ref: string;
-  }): Promise<WorkspaceSummaryView> {
-    const response = await this.client.post<ApiResponse<{ workspace: WorkspaceSummaryView }>>(
-      "/integrations/github/workspaces",
+  }): Promise<CodespaceSummaryView> {
+    const response = await this.client.post<ApiResponse<{ codespace: CodespaceSummaryView }>>(
+      "/integrations/github/codespaces",
       input,
     );
-    return response.data.data!.workspace;
+    return response.data.data!.codespace;
   }
 
-  async startGitHubWorkspace(workspaceId: string): Promise<WorkspaceSummaryView> {
-    const response = await this.client.post<ApiResponse<{ workspace: WorkspaceSummaryView }>>(
-      `/integrations/github/workspaces/${encodeURIComponent(workspaceId)}/start`,
+  async startGitHubCodespace(codespaceId: string): Promise<CodespaceSummaryView> {
+    const response = await this.client.post<ApiResponse<{ codespace: CodespaceSummaryView }>>(
+      `/integrations/github/codespaces/${encodeURIComponent(codespaceId)}/start`,
     );
-    return response.data.data!.workspace;
+    return response.data.data!.codespace;
   }
 
-  async stopGitHubWorkspace(workspaceId: string): Promise<WorkspaceSummaryView> {
-    const response = await this.client.post<ApiResponse<{ workspace: WorkspaceSummaryView }>>(
-      `/integrations/github/workspaces/${encodeURIComponent(workspaceId)}/stop`,
+  async stopGitHubCodespace(codespaceId: string): Promise<CodespaceSummaryView> {
+    const response = await this.client.post<ApiResponse<{ codespace: CodespaceSummaryView }>>(
+      `/integrations/github/codespaces/${encodeURIComponent(codespaceId)}/stop`,
     );
-    return response.data.data!.workspace;
+    return response.data.data!.codespace;
   }
 
-  async deleteGitHubWorkspace(
-    workspaceId: string,
+  async deleteGitHubCodespace(
+    codespaceId: string,
     expectedGeneration: number,
-  ): Promise<WorkspaceSummaryView> {
-    const response = await this.client.delete<ApiResponse<{ workspace: WorkspaceSummaryView }>>(
-      `/integrations/github/workspaces/${encodeURIComponent(workspaceId)}`,
+  ): Promise<CodespaceSummaryView> {
+    const response = await this.client.delete<ApiResponse<{ codespace: CodespaceSummaryView }>>(
+      `/integrations/github/codespaces/${encodeURIComponent(codespaceId)}`,
       { data: { confirm_delete: true, expected_generation: expectedGeneration } },
     );
-    return response.data.data!.workspace;
+    return response.data.data!.codespace;
   }
 
-  async getAdminWorkspaces(): Promise<{
-    readiness: WorkspaceReadinessView;
-    controls: WorkspaceControlView[];
+  async getAdminCodespaces(): Promise<{
+    readiness: CodespaceReadinessView;
+    controls: CodespaceControlView[];
   }> {
     const response =
       await this.client.get<
-        ApiResponse<{ readiness: WorkspaceReadinessView; controls: WorkspaceControlView[] }>
-      >("/admin/workspaces");
+        ApiResponse<{ readiness: CodespaceReadinessView; controls: CodespaceControlView[] }>
+      >("/admin/codespaces");
     return response.data.data!;
   }
 
-  async setAdminWorkspaceControl(
+  async setAdminCodespaceControl(
     scope: string,
     input: { disabled: boolean; reason: string | null },
-  ): Promise<{ readiness: WorkspaceReadinessView; controls: WorkspaceControlView[] }> {
+  ): Promise<{ readiness: CodespaceReadinessView; controls: CodespaceControlView[] }> {
     const response = await this.client.put<
-      ApiResponse<{ readiness: WorkspaceReadinessView; controls: WorkspaceControlView[] }>
-    >(`/admin/workspaces/controls/${encodeURIComponent(scope)}`, input);
+      ApiResponse<{ readiness: CodespaceReadinessView; controls: CodespaceControlView[] }>
+    >(`/admin/codespaces/controls/${encodeURIComponent(scope)}`, input);
     return response.data.data!;
   }
 

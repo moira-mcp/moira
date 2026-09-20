@@ -42,13 +42,13 @@ import {
   getWorkflowReconciliationStatusSummary,
   formatWorkflowReconciliationNotice,
   CommunicationAttachmentGrantService,
-  getWorkspaceResourcePolicy,
-  projectPublicWorkspaceReadiness,
+  getCodespaceResourcePolicy,
+  projectPublicCodespaceReadiness,
   logAuditEvent,
 } from "@mcp-moira/shared";
 import {
-  getWorkspaceObservabilityService,
-  getWorkspaceTransferService,
+  getCodespaceObservabilityService,
+  getCodespaceTransferService,
 } from "@mcp-moira/web-backend/services";
 
 // Get monorepo version from root package.json (#196)
@@ -71,16 +71,20 @@ import { mcpLimiter } from "./middleware/rate-limit-middleware.js";
 
 import { buildReconciliationAwareInstructions } from "./reconciliation-aware-server.js";
 import { registerTools } from "./tools/register-tools.js";
-import { workspaceToolLogContext } from "./tools/manage-workspaces.js";
+import { codespaceToolLogContext } from "./tools/manage-codespaces.js";
 import {
   getCatalogInitializeRequest,
   requireRevisionStampBeforeInitializeResult,
 } from "./auth/mcp-catalog-lifecycle.js";
 import { evaluateMcpToolsRevision } from "./auth/mcp-tools-revision.js";
-import { MCP_TOOLS_REVISION, TOOL_DEFINITIONS } from "./tools/tool-definitions.js";
+import {
+  MCP_TOOLS_REVISION,
+  TOOL_DEFINITIONS,
+  CODESPACE_TOOL_NAME,
+} from "./tools/tool-definitions.js";
 import { CommunicationAttachmentInflightLimiter } from "./communication-attachment-inflight.js";
 import { createCommunicationAttachmentHandler } from "./communication-attachment-route.js";
-import { createWorkspaceTransferDownloadHandler } from "./workspace-transfer-route.js";
+import { createCodespaceTransferDownloadHandler } from "./codespace-transfer-route.js";
 
 // Initialize logger
 const logger = createLogger({ component: "MCPServer" });
@@ -440,7 +444,9 @@ async function handleAuthenticatedMcpRequest(
   await runWithMCPContext(userContext, async () => {
     if (toolName && toolArgs) {
       const { inputData, resourceIds } =
-        toolName === "workspace" ? workspaceToolLogContext(toolArgs) : sanitizeInput(toolArgs);
+        toolName === CODESPACE_TOOL_NAME
+          ? codespaceToolLogContext(toolArgs)
+          : sanitizeInput(toolArgs);
       updateContext({ operation: `mcp:${toolName}`, inputData, resourceIds });
     }
     await transport.handleRequest(req, res, req.body);
@@ -460,7 +466,7 @@ const app = express();
 
 const attachmentGrantService = new CommunicationAttachmentGrantService();
 const attachmentInflight = new CommunicationAttachmentInflightLimiter();
-const workspaceTransferService = getWorkspaceTransferService();
+const codespaceTransferService = getCodespaceTransferService();
 
 // Prometheus metrics middleware FIRST
 app.use(metricsMiddleware());
@@ -491,9 +497,9 @@ app.post(
   }),
 );
 app.get(
-  "/api/workspaces/transfers/:token",
+  "/api/codespaces/transfers/:token",
   mcpLimiter,
-  createWorkspaceTransferDownloadHandler(workspaceTransferService),
+  createCodespaceTransferDownloadHandler(codespaceTransferService),
 );
 
 app.use(express.json({ limit: "10mb" }));
@@ -554,16 +560,16 @@ app.get("/health", async (req: Request, res: Response) => {
   const reconciliation = getWorkflowReconciliationStatusSummary(getSqliteInstance());
   // Public liveness surface: the cached decision with only the readiness state,
   // never operator detail; a stalled connector cannot hang this endpoint.
-  const workspaces = projectPublicWorkspaceReadiness(
-    await getWorkspaceObservabilityService().snapshot(),
+  const codespaces = projectPublicCodespaceReadiness(
+    await getCodespaceObservabilityService().snapshot(),
   );
   res.json({
-    status: reconciliation.status === "ok" && !workspaces.degraded ? "healthy" : "degraded",
+    status: reconciliation.status === "ok" && !codespaces.degraded ? "healthy" : "degraded",
     timestamp: new Date().toISOString(),
     mode: "stateless",
     version: MCP_SERVER_VERSION,
     reconciliation,
-    workspaces,
+    codespaces,
   });
 });
 
@@ -576,7 +582,7 @@ async function main() {
       new DatabaseRepository(),
     ).start();
     // Keep this process's readiness decision and gauges current between requests.
-    getWorkspaceObservabilityService().start(getWorkspaceResourcePolicy().reconcileIntervalMs);
+    getCodespaceObservabilityService().start(getCodespaceResourcePolicy().reconcileIntervalMs);
 
     // The MCP and API servers are separate processes, so each owns a registry and runner client.
     // This process is the single writer of the snapshot consumed by tools outside the container.
@@ -628,7 +634,7 @@ async function main() {
     process.on("SIGINT", () => {
       logger.info("Received SIGINT, shutting down HTTP server");
       stopAttemptMaintenance();
-      getWorkspaceObservabilityService().stop();
+      getCodespaceObservabilityService().stop();
       httpServer.close(() => {
         try {
           closeDatabase();
@@ -645,7 +651,7 @@ async function main() {
     process.on("SIGTERM", () => {
       logger.info("Received SIGTERM, shutting down HTTP server");
       stopAttemptMaintenance();
-      getWorkspaceObservabilityService().stop();
+      getCodespaceObservabilityService().stop();
       httpServer.close(() => {
         try {
           closeDatabase();

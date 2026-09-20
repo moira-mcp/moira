@@ -11,7 +11,7 @@ import {
   encodeConnectorResponse,
   validateCodespaceSshConfig,
 } from "../../../packages/web-backend/src/services/github-codespaces-connector-protocol.mjs";
-import type { WorkspaceOperationRecord, WorkspaceResourceRecord } from "@mcp-moira/shared";
+import type { CodespaceOperationRecord, CodespaceResourceRecord } from "@mcp-moira/shared";
 
 function requestHarness(responder: (body: unknown, options: RequestOptions) => unknown) {
   const calls: Array<{ options: RequestOptions; body: string; timeoutMs: number | null }> = [];
@@ -46,24 +46,24 @@ function requestHarness(responder: (body: unknown, options: RequestOptions) => u
   return { calls, requestImpl };
 }
 
-const workspace = {
-  id: "workspace-1",
+const codespace = {
+  id: "codespace-1",
   userId: "user-1",
   provider: "github-codespaces",
   providerResourceName: "silver-space-123",
   repositoryFullName: "owner/repository",
-} as WorkspaceResourceRecord;
+} as CodespaceResourceRecord;
 const operation = {
   id: "operation-1",
   userId: "user-1",
-  resourceId: "workspace-1",
+  resourceId: "codespace-1",
   remoteMarker: "moira-op-0123456789abcdef0123456789abcdef",
   stdoutLimitBytes: 4096,
   stderrLimitBytes: 4096,
-} as WorkspaceOperationRecord;
+} as CodespaceOperationRecord;
 const version = { size: 3, sha256: "a".repeat(64), modifiedAt: 1 };
 
-function fileOperation(kind: WorkspaceOperationRecord["kind"]): WorkspaceOperationRecord {
+function fileOperation(kind: CodespaceOperationRecord["kind"]): CodespaceOperationRecord {
   return { ...operation, kind };
 }
 
@@ -92,7 +92,7 @@ describe("GitHub Codespaces connector boundary", () => {
     expect(JSON.stringify(harness.calls[0].options)).not.toContain("ghu_topsecret");
   });
 
-  test("reports sidecar health without contacting a workspace", async () => {
+  test("reports sidecar health without contacting a codespace", async () => {
     const harness = requestHarness(() => ({ state: "available", reason: null }));
     const connector = new GitHubCodespacesConnector(harness.requestImpl);
     await expect(connector.health()).resolves.toEqual({ ok: true, reason: null });
@@ -114,7 +114,7 @@ describe("GitHub Codespaces connector boundary", () => {
     }));
     const connector = new GitHubCodespacesConnector(harness.requestImpl);
     await expect(
-      connector.execute("ghu_topsecret", workspace, operation, {
+      connector.execute("ghu_topsecret", codespace, operation, {
         argv: ["printf", "%s", "a value;$(false)"],
         cwd: ".",
         stdin: { kind: "inline", bytes: new TextEncoder().encode("input") },
@@ -143,7 +143,7 @@ describe("GitHub Codespaces connector boundary", () => {
   test("carries contract-max stdin and independent output streams inside wire envelopes", async () => {
     const harness = requestHarness(() => ({ value: JSON.stringify({ state: "running" }) }));
     const connector = new GitHubCodespacesConnector(harness.requestImpl);
-    await connector.execute("ghu_topsecret", workspace, operation, {
+    await connector.execute("ghu_topsecret", codespace, operation, {
       argv: ["true"],
       cwd: ".",
       stdin: { kind: "inline", bytes: Buffer.alloc(4 * 1024 * 1024, "a") },
@@ -179,7 +179,7 @@ describe("GitHub Codespaces connector boundary", () => {
     const harness = requestHarness(() => ({ value: JSON.stringify({ state: "absent" }) }));
     const connector = new GitHubCodespacesConnector(harness.requestImpl);
     await expect(
-      connector.finalize("ghu_topsecret", workspace, operation),
+      connector.finalize("ghu_topsecret", codespace, operation),
     ).resolves.toBeUndefined();
     expect(JSON.parse(harness.calls[0].body).job).toMatchObject({
       action: "finalize",
@@ -204,7 +204,7 @@ describe("GitHub Codespaces connector boundary", () => {
     }));
     const connector = new GitHubCodespacesConnector(harness.requestImpl);
     await expect(
-      connector.executeFile("ghu_topsecret", workspace, fileOperation("read"), {
+      connector.executeFile("ghu_topsecret", codespace, fileOperation("read"), {
         action: "read",
         path: "src/a value;$(false).bin",
         offset: 0,
@@ -232,7 +232,7 @@ describe("GitHub Codespaces connector boundary", () => {
     const harness = requestHarness(() => ({ value: JSON.stringify({ state: "running" }) }));
     const connector = new GitHubCodespacesConnector(harness.requestImpl);
     await expect(
-      connector.executeFile("ghu_topsecret", workspace, fileOperation("apply_patch"), {
+      connector.executeFile("ghu_topsecret", codespace, fileOperation("apply_patch"), {
         action: "apply_patch",
         files: [
           {
@@ -401,7 +401,7 @@ describe("GitHub Codespaces connector boundary", () => {
       "write",
       {
         state: "succeeded",
-        value: { action: "write", state: "failed", code: "WORKSPACE_FILE_REJECTED" },
+        value: { action: "write", state: "failed", code: "CODESPACE_FILE_REJECTED" },
       },
     ],
     [
@@ -432,8 +432,26 @@ describe("GitHub Codespaces connector boundary", () => {
     const harness = requestHarness(() => ({ value: JSON.stringify(envelope) }));
     const connector = new GitHubCodespacesConnector(harness.requestImpl);
     await expect(
-      connector.inspectFile("ghu_topsecret", workspace, fileOperation(kind)),
+      connector.inspectFile("ghu_topsecret", codespace, fileOperation(kind)),
     ).rejects.toThrow(/invalid|inconsistent/);
+  });
+
+  test("normalizes a persisted version-1 file rejection to the codespace contract", async () => {
+    const harness = requestHarness(() => ({
+      value: JSON.stringify({
+        state: "failed",
+        value: { action: "write", state: "failed", code: "WORKSPACE_FILE_REJECTED" },
+      }),
+    }));
+    const connector = new GitHubCodespacesConnector(harness.requestImpl);
+
+    await expect(
+      connector.inspectFile("ghu_topsecret", codespace, fileOperation("write")),
+    ).resolves.toEqual({
+      action: "write",
+      state: "failed",
+      code: "CODESPACE_FILE_REJECTED",
+    });
   });
 
   test("accepts a complete bounded patch result from the remote trust boundary", async () => {
@@ -454,7 +472,7 @@ describe("GitHub Codespaces connector boundary", () => {
     }));
     const connector = new GitHubCodespacesConnector(harness.requestImpl);
     await expect(
-      connector.inspectFile("ghu_topsecret", workspace, fileOperation("apply_patch")),
+      connector.inspectFile("ghu_topsecret", codespace, fileOperation("apply_patch")),
     ).resolves.toEqual(patchResult);
   });
 
@@ -479,7 +497,7 @@ describe("GitHub Codespaces connector boundary", () => {
     }));
     const connector = new GitHubCodespacesConnector(harness.requestImpl);
     await expect(
-      connector.inspectFile("ghu_topsecret", workspace, fileOperation("apply_patch")),
+      connector.inspectFile("ghu_topsecret", codespace, fileOperation("apply_patch")),
     ).resolves.toEqual(patchResult);
   });
 
@@ -493,7 +511,7 @@ describe("GitHub Codespaces connector boundary", () => {
     }));
     const connector = new GitHubCodespacesConnector(harness.requestImpl);
     await expect(
-      connector.inspectFile("ghu_topsecret", workspace, fileOperation("stat")),
+      connector.inspectFile("ghu_topsecret", codespace, fileOperation("stat")),
     ).resolves.toEqual(statResult);
   });
 
@@ -521,7 +539,7 @@ describe("GitHub Codespaces connector boundary", () => {
     }));
     const connector = new GitHubCodespacesConnector(harness.requestImpl);
     await expect(
-      connector.readOutput("ghu_topsecret", workspace, operation, {
+      connector.readOutput("ghu_topsecret", codespace, operation, {
         stream: "stdout",
         offset: 128,
         length: 64,
@@ -540,7 +558,7 @@ describe("GitHub Codespaces connector boundary", () => {
     });
     // Every operation job is framed alike, so the caller waits at least as long as the sidecar,
     // which must still open a session into the Codespace before it can answer.
-    await connector.inspect("ghu_topsecret", workspace, operation);
+    await connector.inspect("ghu_topsecret", codespace, operation);
     expect(harness.calls[0].timeoutMs).toBe(harness.calls[1].timeoutMs);
     expect(harness.calls[0].timeoutMs).toBeGreaterThanOrEqual(120_000);
     expect(JSON.stringify(harness.calls[0].options)).not.toContain("ghu_topsecret");
@@ -558,7 +576,7 @@ describe("GitHub Codespaces connector boundary", () => {
       })).requestImpl,
     );
     await expect(
-      pastEnd.readOutput("ghu_topsecret", workspace, operation, {
+      pastEnd.readOutput("ghu_topsecret", codespace, operation, {
         stream: "stdout",
         offset: 9_000,
         length: 64,
@@ -577,7 +595,7 @@ describe("GitHub Codespaces connector boundary", () => {
       })).requestImpl,
     );
     await expect(
-      mismatched.readOutput("ghu_topsecret", workspace, operation, {
+      mismatched.readOutput("ghu_topsecret", codespace, operation, {
         stream: "stdout",
         offset: 128,
         length: 64,
@@ -611,7 +629,7 @@ describe("GitHub Codespaces connector boundary", () => {
         requestHarness(() => ({ value: JSON.stringify(remote) })).requestImpl,
       );
       await expect(
-        connector.execute("ghu_topsecret", workspace, operation, {
+        connector.execute("ghu_topsecret", codespace, operation, {
           argv: ["true"],
           cwd: ".",
           stdin: { kind: "inline", bytes: new Uint8Array() },
@@ -630,18 +648,18 @@ describe("GitHub Codespaces connector boundary", () => {
       requestHarness(() => ({ value: JSON.stringify({ state: "interrupted" }) })).requestImpl,
     );
 
-    // An inspection may legitimately learn that the workspace restarted under the command.
-    await expect(connector.inspect("ghu_topsecret", workspace, operation)).resolves.toEqual({
+    // An inspection may legitimately learn that the codespace restarted under the command.
+    await expect(connector.inspect("ghu_topsecret", codespace, operation)).resolves.toEqual({
       state: "interrupted",
     });
-    await expect(connector.cancel("ghu_topsecret", workspace, operation)).resolves.toEqual({
+    await expect(connector.cancel("ghu_topsecret", codespace, operation)).resolves.toEqual({
       state: "interrupted",
     });
 
     // A dispatch cannot: an operation that was just created cannot belong to an earlier life, so
     // that answer is a broken remote side rather than a state the caller should see.
     await expect(
-      connector.execute("ghu_topsecret", workspace, operation, {
+      connector.execute("ghu_topsecret", codespace, operation, {
         argv: ["true"],
         cwd: ".",
         stdin: { kind: "inline", bytes: new Uint8Array() },
@@ -668,7 +686,7 @@ describe("GitHub Codespaces connector boundary", () => {
     }));
     const connector = new GitHubCodespacesConnector(harness.requestImpl);
     await expect(
-      connector.execute("ghu_topsecret", workspace, operation, {
+      connector.execute("ghu_topsecret", codespace, operation, {
         argv: ["true"],
         cwd: ".",
         stdin: { kind: "inline", bytes: new Uint8Array() },

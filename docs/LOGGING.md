@@ -46,7 +46,7 @@ Logs all HTTP requests via morgan:
 ```
 
 The request logger sanitizes tokenized public paths and replaces the complete
-GitHub workspace callback query with `[REDACTED]`. The generic HTTP error
+GitHub codespace callback query with `[REDACTED]`. The generic HTTP error
 projection also omits query/params and sanitizes the path for these sensitive
 URLs, so callback code/state and temporary grants do not reappear in response
 diagnostics.
@@ -127,7 +127,7 @@ They cover, by area:
 - **Tokens** — `TOKEN_CREATE`, `TOKEN_REVOKE`
 - **Locks** — `LOCK_CREATE`, `LOCK_UNLOCK`, `LOCK_ATTEMPT_FAIL`
 - **OAuth consent** — `OAUTH_CONSENT_GRANT`, `OAUTH_CONSENT_UPDATE`
-- **Workspaces** — connection start/completion/refresh/disconnect, resource create/pending/rejected/cleanup/start/stop/delete, and direct-operation reserve/reconcile/terminal outcomes; metadata is limited to opaque resource IDs, provider, outcome/state, selected machine limits, byte counts and exit code
+- **Codespaces** — connection start/completion/refresh/disconnect, resource create/pending/rejected/cleanup/start/stop/delete, and direct-operation reserve/reconcile/terminal outcomes; metadata is limited to opaque resource IDs, provider, outcome/state, selected machine limits, byte counts and exit code
 - **Workflow sharing** — invite create/accept/revoke, access revoke
 - **MCP read operations** — workflow list, session info, settings read, token create, help request, notes list
 - **Admin** — user management, security actions (force reset, session/OAuth revocation), execution-context updates, database operations (vacuum/backup), settings and global-settings management, artifact moderation (takedown, list reported), and system-wide operations

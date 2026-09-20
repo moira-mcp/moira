@@ -7,7 +7,7 @@ import { pathToFileURL } from "node:url";
 import { chmod, mkdir, unlink } from "node:fs/promises";
 import { dirname } from "node:path";
 
-const SOCKET_PATH = "/run/moira-workspace-egress/proxy.sock";
+const SOCKET_PATH = "/run/moira-codespace-egress/proxy.sock";
 const ALLOWED_HOSTS = [
   "github.com",
   ".github.com",
@@ -127,6 +127,6 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     // World-connectable mode lets the deliberately unprivileged, networkless
     // connector bridge use a volume created by a separate container.
     await chmod(SOCKET_PATH, 0o666);
-    process.stdout.write("workspace-egress-proxy-ready\n");
+    process.stdout.write("codespace-egress-proxy-ready\n");
   });
 }

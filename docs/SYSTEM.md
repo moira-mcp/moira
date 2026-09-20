@@ -306,10 +306,10 @@ publishes `tools/list` from the same typed projection. Every published tool sche
 which keeps the complete catalog discoverable in MCP clients that do not support a root
 `anyOf`/`oneOf`. A handler may apply a narrower action-specific schema after SDK validation; `start`
 uses a flat public object schema and then validates the exact `prepare` or `execute` branch with its
-strict discriminated request schema, and the `workspace` tool publishes one flat object carrying
+strict discriminated request schema, and the `codespace` tool publishes one flat object carrying
 `action` plus every action's fields (only `action` required), then applies that action's own strict
 request contract at dispatch, so a mixed stdin form, a partial resume call or a field belonging to
-another action is rejected there as `WORKSPACE_REQUEST_INVALID`. A default declared by an action is
+another action is rejected there as `CODESPACE_REQUEST_INVALID`. A default declared by an action is
 applied by that contract and is deliberately absent from the published object, which would otherwise
 inject every action's defaults into every request. Where two actions declare the same field name with
 different bounds — `search` and `download` both take `max_bytes` — the published object carries both
@@ -363,24 +363,24 @@ tool name, classified as the project classifies failures at a boundary, and only
 the sanitized agent-facing message, so a suppressed message is never the only trace of a failure.
 The `reconciliation` tool answers its own failures and records them the same way.
 
-The `workspace` tool follows the same registry path. `manage-workspaces.ts` is a presentation
+The `codespace` tool follows the same registry path. `manage-codespaces.ts` is a presentation
 adapter over the exported `@mcp-moira/web-backend/services` composition (never the web server or
 routes): the tenant comes from the request context, results are projected field by field, known
 domain failures become bounded tool errors, and unexpected failures are logged with the tool name
 and opaque IDs only. Both native file references are declared on that one tool through registry
 `_meta["openai/fileParams"]`,
 which participates in `MCP_TOOLS_REVISION`. The MCP process and the tools share one
-`WorkspaceTransferService` from that composition; `GET /api/workspaces/transfers/:token` delivers a
-published download once, and both nginx variants proxy `location ^~ /api/workspaces/transfers/` to
+`CodespaceTransferService` from that composition; `GET /api/codespaces/transfers/:token` delivers a
+published download once, and both nginx variants proxy `location ^~ /api/codespaces/transfers/` to
 the MCP process unbuffered with access and error logging disabled because the path carries the
 capability. Request-context logging for this tool records only the requested action and UUID-validated
-workspace/operation IDs; an absent or malformed action reads as `unknown`, because the record is
-written before the action is validated. The shared `WorkspaceObservabilityService` computes one readiness
-decision for the website, administration, backend health, MCP health and the `workspace` tool's
+codespace/operation IDs; an absent or malformed action reads as `unknown`, because the record is
+written before the action is validated. The shared `CodespaceObservabilityService` computes one readiness
+decision for the website, administration, backend health, MCP health and the `codespace` tool's
 `list` action;
 the unauthenticated `/api/health` and MCP `/health` surfaces carry only its public projection
 (`state`, `provider`, `degraded`) from a cached snapshot with a two-second bound on the connector
-probe, and both processes refresh their workspace gauges on the reconciliation interval. See `docs/WORKSPACES.md` for the contract.
+probe, and both processes refresh their codespace gauges on the reconciliation interval. See `docs/CODESPACES.md` for the contract.
 
 Each communication adapter also supplies provider-safe presentation metadata through the same
 registry: title, origin, exact setting keys, optional enable key/help link, extension identity and
@@ -1346,18 +1346,18 @@ export const mcpToolCallsTotal: Counter; // moira_mcp_tool_calls_total{tool, sta
 // Audit metrics
 export const auditActionsTotal: Counter; // moira_audit_actions_total{action, resource}
 
-// Cloud workspaces (closed labels only; never user/workspace/operation IDs)
-export const workspaceConnectionEventsTotal: Counter; // moira_workspace_connection_events_total{provider, action}
-export const workspaceLifecycleEventsTotal: Counter; // moira_workspace_lifecycle_events_total{provider, action, state}
-export const workspaceOperationEventsTotal: Counter; // moira_workspace_operation_events_total{provider, kind, action, state}
-export const workspaceOperationDurationSeconds: Histogram; // moira_workspace_operation_duration_seconds{kind, state}
-export const workspaceRejectionsTotal: Counter; // moira_workspace_rejections_total{code}
-export const workspaceReconciliationDueGauge: Gauge; // moira_workspace_reconciliation_due{kind}
-export const workspaceReconciliationOldestDueAgeSeconds: Gauge; // moira_workspace_reconciliation_oldest_due_age_seconds{kind}
-export const workspaceActiveGauge: Gauge; // moira_workspace_active{kind}
-export const workspaceTransferLiveBytesGauge: Gauge; // moira_workspace_transfer_live_bytes
-export const workspaceConnectorAvailableGauge: Gauge; // moira_workspace_connector_available{provider}
-export const workspaceReadyGauge: Gauge; // moira_workspace_ready{provider}
+// Cloud codespaces (closed labels only; never user/codespace/operation IDs)
+export const codespaceConnectionEventsTotal: Counter; // moira_codespace_connection_events_total{provider, action}
+export const codespaceLifecycleEventsTotal: Counter; // moira_codespace_lifecycle_events_total{provider, action, state}
+export const codespaceOperationEventsTotal: Counter; // moira_codespace_operation_events_total{provider, kind, action, state}
+export const codespaceOperationDurationSeconds: Histogram; // moira_codespace_operation_duration_seconds{kind, state}
+export const codespaceRejectionsTotal: Counter; // moira_codespace_rejections_total{code}
+export const codespaceReconciliationDueGauge: Gauge; // moira_codespace_reconciliation_due{kind}
+export const codespaceReconciliationOldestDueAgeSeconds: Gauge; // moira_codespace_reconciliation_oldest_due_age_seconds{kind}
+export const codespaceActiveGauge: Gauge; // moira_codespace_active{kind}
+export const codespaceTransferLiveBytesGauge: Gauge; // moira_codespace_transfer_live_bytes
+export const codespaceConnectorAvailableGauge: Gauge; // moira_codespace_connector_available{provider}
+export const codespaceReadyGauge: Gauge; // moira_codespace_ready{provider}
 ```
 
 Integration points:
