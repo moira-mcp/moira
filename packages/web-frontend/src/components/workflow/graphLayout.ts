@@ -1,10 +1,10 @@
 /**
  * Layout of the technical graph: one tinted group per process block, the groups stacked in process
- * order (top to bottom, or left to right for "Horizontal"), the steps inside a group laid out by
- * ELK layered across the stacking direction (left to right inside a stacked group, top to bottom
- * inside a group in a row), so a block reads like a lane of its steps. Node sizes are the step
- * cards' estimated sizes; positions come back relative to the group for React Flow's `parentId`.
- * Without a process view the steps are laid out flat along the stacking direction.
+ * order (top to bottom, or left to right for "Horizontal"). ELK lays out branching steps for the
+ * horizontal-card presets; the vertical preset uses one stable card column so every side port can
+ * reach its shared corridor. Routed edges combine reserved inter-group lanes with a rectilinear
+ * shortest path around the cards inside each group. Positions come back relative to the group for
+ * React Flow's `parentId`; without a process view the steps are laid out as one flat set.
  */
 
 import type { GraphModel } from "../run/graphModel";
@@ -25,7 +25,7 @@ export const GRAPH_PRESET_DIRECTIONS: Record<
 };
 
 export const GRAPH_CARD_WIDTH = 660;
-/** Least room before the first group along the card axis, where cross-block return lanes run. */
+/** Least room before the groups, where inter-group lanes run. */
 export const GRAPH_MARGIN = 48;
 const GRAPH_GROUP_PADDING = 16;
 /**
@@ -74,8 +74,8 @@ const LANE_CLEARANCE = 10;
 /**
  * How many lanes every corridor must hold, counted before the groups are placed so that each
  * corridor is given the room its lanes need: a block's own corridor (its backward links inside
- * the block and the returns arriving into it), the gap after a block (every link leaving it for
- * another block) and the margin before the first block (every return to an earlier block).
+ * the block and inter-group links arriving into it), the gap after a block (every link leaving it
+ * for another block) and the margin before the first block (every inter-group link).
  */
 export interface LaneCounts {
   bottom: Map<string, number>;
@@ -88,7 +88,6 @@ export interface LaneCounts {
 export function laneCounts(
   links: ReadonlyArray<{ source: string; target: string; kind: string }>,
   groupOf: ReadonlyMap<string, string>,
-  groupIndex: ReadonlyMap<string, number>,
   backwardInside: (link: { source: string; target: string }) => boolean,
 ): LaneCounts {
   const bottom = new Map<string, number>();
@@ -97,6 +96,7 @@ export function laneCounts(
   let margin = 0;
   const bump = (map: Map<string, number>, key: string) => map.set(key, (map.get(key) ?? 0) + 1);
   for (const link of links) {
+    if (link.source === link.target) continue;
     const sg = groupOf.get(link.source);
     const tg = groupOf.get(link.target);
     if (!sg || !tg) continue;
@@ -105,9 +105,6 @@ export function laneCounts(
         bump(bottom, sg);
         bump(arrivals, link.target);
       }
-    } else if (groupIndex.get(tg)! > groupIndex.get(sg)!) {
-      bump(gap, sg);
-      bump(arrivals, link.target);
     } else {
       bump(gap, sg);
       bump(bottom, tg);
@@ -148,16 +145,16 @@ export interface LaidStep {
 
 /**
  * The way an edge that cannot run straight to its target is drawn: from the source's output it
- * leaves along the card axis to `stub`, turns onto the first lane, follows the `lane` waypoints
- * (absolute), turns at `side` (a card-axis coordinate before the target) and enters the target's
- * input. Edges inside a block run in the block's bottom corridor (right corridor when the blocks
- * are in a row); edges into another block run in the gap after their source's block; a return
- * to an earlier block climbs along the margin before the groups.
+ * leaves to `stub`, follows the absolute `lane` waypoints and enters from `side`. A route can mix
+ * shared inter-group corridors with obstacle-aware local paths around the cards in its source and
+ * target groups.
  */
 export interface GraphRoute {
   stub: number;
   lane: Array<[number, number]>;
   side: number;
+  /** This route always leaves and enters through the cards' side ports. */
+  sidePorts?: boolean;
 }
 
 export interface GraphLayout {
@@ -165,7 +162,7 @@ export interface GraphLayout {
   steps: LaidStep[];
   /** Routes by link id for the links that are not drawn straight. */
   routes: Record<string, GraphRoute>;
-  /** The room actually left before the first group, which the return lanes run in. */
+  /** The room actually left before the groups, which the inter-group lanes run in. */
   margin: number;
 }
 
@@ -178,12 +175,132 @@ interface Box {
   b1: number;
 }
 
+type RoutePoint = [number, number];
+interface RouteObstacle {
+  id: string;
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+}
+
+/** A shortest rectilinear path through the clearance grid around a block's cards. */
+function obstaclePath(
+  start: RoutePoint,
+  end: RoutePoint,
+  cards: ReadonlyArray<RouteObstacle>,
+  excluded: ReadonlySet<string>,
+): RoutePoint[] {
+  const obstacles = cards
+    .filter((card) => !excluded.has(card.id))
+    .map((card) => ({
+      ...card,
+      x0: card.x0 - LANE_CLEARANCE,
+      y0: card.y0 - LANE_CLEARANCE,
+      x1: card.x1 + LANE_CLEARANCE,
+      y1: card.y1 + LANE_CLEARANCE,
+    }));
+  const xs = [...new Set([start[0], end[0], ...obstacles.flatMap((o) => [o.x0, o.x1])])].sort(
+    (a, b) => a - b,
+  );
+  const ys = [...new Set([start[1], end[1], ...obstacles.flatMap((o) => [o.y0, o.y1])])].sort(
+    (a, b) => a - b,
+  );
+  const blocked = (x: number, y: number): boolean =>
+    obstacles.some((o) => x > o.x0 && x < o.x1 && y > o.y0 && y < o.y1);
+  const clear = (a: RoutePoint, b: RoutePoint): boolean =>
+    !obstacles.some((o) => {
+      if (a[1] === b[1])
+        return (
+          a[1] > o.y0 && a[1] < o.y1 && Math.min(a[0], b[0]) < o.x1 && Math.max(a[0], b[0]) > o.x0
+        );
+      return (
+        a[0] > o.x0 && a[0] < o.x1 && Math.min(a[1], b[1]) < o.y1 && Math.max(a[1], b[1]) > o.y0
+      );
+    });
+  type Direction = "h" | "v" | "start";
+  interface State {
+    xi: number;
+    yi: number;
+    direction: Direction;
+    score: number;
+  }
+  const startXi = xs.indexOf(start[0]);
+  const startYi = ys.indexOf(start[1]);
+  const endXi = xs.indexOf(end[0]);
+  const endYi = ys.indexOf(end[1]);
+  const keyOf = (xi: number, yi: number, direction: Direction) => `${xi}:${yi}:${direction}`;
+  const startKey = keyOf(startXi, startYi, "start");
+  const distance = new Map([[startKey, 0]]);
+  const previous = new Map<string, string>();
+  const states = new Map<string, { xi: number; yi: number; direction: Direction }>([
+    [startKey, { xi: startXi, yi: startYi, direction: "start" }],
+  ]);
+  const open: State[] = [{ xi: startXi, yi: startYi, direction: "start", score: 0 }];
+  let finish: string | null = null;
+  while (open.length > 0) {
+    open.sort((a, b) => a.score - b.score);
+    const current = open.shift()!;
+    const currentKey = keyOf(current.xi, current.yi, current.direction);
+    const currentDistance = distance.get(currentKey);
+    if (currentDistance === undefined) continue;
+    if (current.xi === endXi && current.yi === endYi) {
+      finish = currentKey;
+      break;
+    }
+    const candidates = [
+      [current.xi - 1, current.yi, "h"],
+      [current.xi + 1, current.yi, "h"],
+      [current.xi, current.yi - 1, "v"],
+      [current.xi, current.yi + 1, "v"],
+    ] as const;
+    for (const [xi, yi, direction] of candidates) {
+      if (xi < 0 || yi < 0 || xi >= xs.length || yi >= ys.length) continue;
+      const from: RoutePoint = [xs[current.xi], ys[current.yi]];
+      const to: RoutePoint = [xs[xi], ys[yi]];
+      if (blocked(to[0], to[1]) || !clear(from, to)) continue;
+      const bend = current.direction !== "start" && current.direction !== direction ? EDGE_STUB : 0;
+      const candidate =
+        currentDistance + Math.abs(to[0] - from[0]) + Math.abs(to[1] - from[1]) + bend;
+      const nextKey = keyOf(xi, yi, direction);
+      if (candidate >= (distance.get(nextKey) ?? Number.POSITIVE_INFINITY)) continue;
+      distance.set(nextKey, candidate);
+      previous.set(nextKey, currentKey);
+      states.set(nextKey, { xi, yi, direction });
+      const heuristic = Math.abs(end[0] - to[0]) + Math.abs(end[1] - to[1]);
+      open.push({ xi, yi, direction, score: candidate + heuristic });
+    }
+  }
+  if (!finish) return [start, end];
+  const path: RoutePoint[] = [];
+  for (let key: string | undefined = finish; key; key = previous.get(key)) {
+    const state = states.get(key)!;
+    path.push([xs[state.xi], ys[state.yi]]);
+  }
+  path.reverse();
+  return path.filter((point, index) => {
+    if (index === 0 || index === path.length - 1) return true;
+    const before = path[index - 1];
+    const after = path[index + 1];
+    return !(
+      (before[0] === point[0] && point[0] === after[0]) ||
+      (before[1] === point[1] && point[1] === after[1])
+    );
+  });
+}
+
+function withoutRepeatedPoints(points: RoutePoint[]): RoutePoint[] {
+  return points.filter(
+    (point, index) =>
+      index === 0 || point[0] !== points[index - 1][0] || point[1] !== points[index - 1][1],
+  );
+}
+
 /**
  * Route the links that cannot run straight (a return, a link into another block, a link ELK laid
  * backwards) around the cards. Pure: positions in, routes out; `groupOf` names the group of a
- * step, `groups` are in process order. Coordinates are absolute; `cardDirection` is the direction
- * the cards run in (the handles sit on their left and right for `RIGHT`, top and bottom for
- * `DOWN`).
+ * step and `groups` are in process order. Coordinates are absolute; `cardDirection` is the
+ * direction in which cards advance inside a group. Cards keep side ports in every preset.
  */
 export function routeLinks(
   links: ReadonlyArray<{ id: string; source: string; target: string; kind: string }>,
@@ -191,7 +308,7 @@ export function routeLinks(
   groups: ReadonlyArray<LaidGroup>,
   groupOf: ReadonlyMap<string, string>,
   cardDirection: "DOWN" | "RIGHT",
-  /** The room left before the first group, which the return lanes share. */
+  /** The room left before the first group, which inter-group lanes share. */
   margin: number = GRAPH_MARGIN,
 ): Record<string, GraphRoute> {
   const down = cardDirection === "RIGHT";
@@ -202,7 +319,17 @@ export function routeLinks(
   const point = (a: number, b: number): [number, number] => (down ? [a, b] : [b, a]);
   const groupIndex = new Map(groups.map((g, i) => [g.id, i]));
   const groupBox = new Map(groups.map((g) => [g.id, box(g)]));
+  const cardsByGroup = new Map<string, RouteObstacle[]>();
+  for (const [id, step] of steps) {
+    const group = groupOf.get(id);
+    if (!group) continue;
+    cardsByGroup.set(group, [
+      ...(cardsByGroup.get(group) ?? []),
+      { id, x0: step.x, y0: step.y, x1: step.x + step.width, y1: step.y + step.height },
+    ]);
+  }
   const routed = links.filter((link) => {
+    if (link.source === link.target) return false;
     const s = steps.get(link.source);
     const t = steps.get(link.target);
     if (!s || !t) return false;
@@ -211,9 +338,9 @@ export function routeLinks(
     if (link.kind === "return" || sg !== tg) return true;
     return box(t).a0 <= box(s).a0;
   });
-  // Lanes are handed out per corridor in link order: a block's bottom corridor serves its own
-  // routed links and the returns that come back into it; the gap after a block serves the links
-  // that leave it; the margin serves every return to an earlier block.
+  // Lanes are handed out per corridor in link order: a block's bottom corridor serves local and
+  // arriving routes, the gap after a block serves links that leave it, and the outer margin keeps
+  // every inter-group path away from intermediate groups.
   const bottomLanes = new Map<string, number>();
   const gapLanes = new Map<string, number>();
   let marginLanes = 0;
@@ -231,7 +358,7 @@ export function routeLinks(
     const tg = groupOf.get(link.target);
     if (!sg || !tg || sg === tg) continue;
     gapTotal.set(sg, (gapTotal.get(sg) ?? 0) + 1);
-    if (groupIndex.get(tg)! < groupIndex.get(sg)!) marginTotal += 1;
+    marginTotal += 1;
   }
   /** The b coordinate of lane `index` of `total`, centred in the gap after group `id`. */
   const gapLane = (id: string, from: number, index: number, total: number): number => {
@@ -252,7 +379,7 @@ export function routeLinks(
     const t = box(steps.get(link.target)!);
     const sg = groupOf.get(link.source);
     const tg = groupOf.get(link.target);
-    const stub = s.a1 + EDGE_STUB;
+    const stub = s.a1 + (down ? LANE_CLEARANCE : EDGE_STUB);
     // The column is chosen from the arrival's index within its own card, so a card's arrivals
     // never share one, and from an offset given to the card inside its column of cards, so two
     // cards of one column do not start at the same line.
@@ -262,35 +389,257 @@ export function routeLinks(
     }
     const index =
       (nextLane(arrivals, link.target) + cardOffset.get(link.target)!) % APPROACH_COLUMNS;
-    const side = t.a0 - EDGE_APPROACH - index * APPROACH_STEP;
+    const side = down ? t.a0 - LANE_CLEARANCE : t.a0 - EDGE_APPROACH - index * APPROACH_STEP;
     const sBox = sg ? groupBox.get(sg) : undefined;
     const tBox = tg ? groupBox.get(tg) : undefined;
     if (sBox && sg === tg) {
-      const laneB = sBox.b1 - CORRIDOR_INSET - nextLane(bottomLanes, sg!) * LANE_STEP;
-      routes[link.id] = { stub, lane: [point(stub, laneB), point(side, laneB)], side };
-    } else if (sBox && tBox && groupIndex.get(tg!)! > groupIndex.get(sg!)!) {
-      const laneB = gapLane(sg!, sBox.b1, nextLane(gapLanes, sg!), gapTotal.get(sg!) ?? 1);
-      routes[link.id] = { stub, lane: [point(stub, laneB), point(side, laneB)], side };
+      if (down) {
+        const path = obstaclePath(
+          point(stub, (s.b0 + s.b1) / 2),
+          point(side, (t.b0 + t.b1) / 2),
+          cardsByGroup.get(sg!) ?? [],
+          new Set([link.source, link.target]),
+        );
+        routes[link.id] = {
+          stub,
+          lane: path,
+          side,
+          sidePorts: true,
+        };
+      } else {
+        const laneB = sBox.b1 - CORRIDOR_INSET - nextLane(bottomLanes, sg!) * LANE_STEP;
+        routes[link.id] = { stub, lane: [point(stub, laneB), point(side, laneB)], side };
+      }
     } else if (sBox && tBox) {
       const laneS = gapLane(sg!, sBox.b1, nextLane(gapLanes, sg!), gapTotal.get(sg!) ?? 1);
-      // Return lanes share the margin before the first group, spread inside it rather than
-      // marching off the canvas once there are more returns than the margin was sized for.
+      // Every inter-group route stays in the outer margin until it reaches the target group's own
+      // corridor. Turning onto the target's approach beside the source group would cross every
+      // intermediate group when the target is far away.
       const span = (marginTotal - 1) * MARGIN_LANE_STEP;
       const first = Math.max(LANE_CLEARANCE, (margin - span) / 2);
       const outer = first + marginLanes * MARGIN_LANE_STEP;
       marginLanes += 1;
-      const laneT = tBox.b1 - CORRIDOR_INSET - nextLane(bottomLanes, tg!) * LANE_STEP;
-      routes[link.id] = {
-        stub,
-        lane: [point(stub, laneS), point(outer, laneS), point(outer, laneT), point(side, laneT)],
-        side,
-      };
+      if (down) {
+        const laneT = tBox.b1 - CORRIDOR_INSET - nextLane(bottomLanes, tg!) * LANE_STEP;
+        const sourceEntry = point(sBox.a0 + LANE_CLEARANCE, laneS);
+        const targetEntry = point(tBox.a0 + LANE_CLEARANCE + index * APPROACH_STEP, laneT);
+        const sourcePath = obstaclePath(
+          point(stub, (s.b0 + s.b1) / 2),
+          sourceEntry,
+          cardsByGroup.get(sg!) ?? [],
+          new Set([link.source]),
+        );
+        const targetPath = obstaclePath(
+          targetEntry,
+          point(side, (t.b0 + t.b1) / 2),
+          cardsByGroup.get(tg!) ?? [],
+          new Set([link.target]),
+        );
+        routes[link.id] = {
+          stub,
+          lane: withoutRepeatedPoints([
+            ...sourcePath,
+            point(outer, laneS),
+            point(outer, laneT),
+            ...targetPath,
+          ]),
+          side,
+          sidePorts: true,
+        };
+      } else {
+        const laneT = tBox.b1 - CORRIDOR_INSET - nextLane(bottomLanes, tg!) * LANE_STEP;
+        routes[link.id] = {
+          stub,
+          lane: [point(stub, laneS), point(outer, laneS), point(outer, laneT), point(side, laneT)],
+          side,
+        };
+      }
     } else {
       const laneB = Math.max(s.b1, t.b1) + NODE_GAP;
       routes[link.id] = { stub, lane: [point(stub, laneB), point(side, laneB)], side };
     }
   }
   return routes;
+}
+
+interface SameAxisRoutes {
+  routes: Record<string, GraphRoute>;
+  /** Space before a horizontal row of groups for the shared top lanes. */
+  margin: number;
+  /** Furthest x coordinate used by the shared right lanes of a vertical stack. */
+  right: number;
+}
+
+/**
+ * Same-axis presets need a different topology from the perpendicular corridor router above.
+ * Groups in a row share lanes above every group. Groups in a column share lanes to the right of
+ * every group; the vertical preset deliberately lays each block's cards in one column, so a card
+ * can reach that corridor without crossing a sibling card.
+ */
+function routeSameAxisLinks(
+  links: ReadonlyArray<{ id: string; source: string; target: string; kind: string }>,
+  steps: ReadonlyMap<string, { x: number; y: number; width: number; height: number }>,
+  groups: ReadonlyArray<LaidGroup>,
+  groupOf: ReadonlyMap<string, string>,
+  direction: "DOWN" | "RIGHT",
+): SameAxisRoutes {
+  const arrivals = new Map<string, number>();
+  const laneIntervals: Array<Array<[number, number]>> = [];
+  const nextApproach = (target: string): number => {
+    const index = arrivals.get(target) ?? 0;
+    arrivals.set(target, index + 1);
+    return index % APPROACH_COLUMNS;
+  };
+  const nextLane = (from: number, to: number): number => {
+    const interval: [number, number] = [Math.min(from, to), Math.max(from, to)];
+    let lane = laneIntervals.findIndex((occupied) =>
+      occupied.every(
+        ([a, b]) => interval[1] < a - LANE_CLEARANCE || interval[0] > b + LANE_CLEARANCE,
+      ),
+    );
+    if (lane < 0) {
+      lane = laneIntervals.length;
+      laneIntervals.push([]);
+    }
+    laneIntervals[lane].push(interval);
+    return lane;
+  };
+  const pending: Array<{
+    id: string;
+    source: string;
+    target: string;
+    sourceGroup: string;
+    targetGroup: string;
+    stub: number;
+    side: number;
+    entry: number;
+    turn: number;
+    lane: number;
+  }> = [];
+  const maxRight = Math.max(0, ...groups.map((group) => group.x + group.width));
+  const groupById = new Map(groups.map((group) => [group.id, group]));
+  const cardsByGroup = new Map<string, RouteObstacle[]>();
+  for (const [id, step] of steps) {
+    const group = groupOf.get(id);
+    if (!group) continue;
+    cardsByGroup.set(group, [
+      ...(cardsByGroup.get(group) ?? []),
+      { id, x0: step.x, y0: step.y, x1: step.x + step.width, y1: step.y + step.height },
+    ]);
+  }
+
+  for (const link of links) {
+    if (link.source === link.target) continue;
+    const source = steps.get(link.source);
+    const target = steps.get(link.target);
+    if (!source || !target) continue;
+    const sourceGroup = groupOf.get(link.source);
+    const targetGroupId = groupOf.get(link.target);
+    if (!sourceGroup || !targetGroupId) continue;
+    const sameGroup = sourceGroup === targetGroupId;
+    if (direction === "RIGHT" && sameGroup && link.kind !== "return" && target.x > source.x)
+      continue;
+
+    const approach = nextApproach(link.target);
+    const side =
+      target.x -
+      (direction === "RIGHT" ? LANE_CLEARANCE : EDGE_APPROACH + approach * APPROACH_STEP);
+    if (direction === "RIGHT") {
+      const stub = source.x + source.width + LANE_CLEARANCE;
+      const laidSourceGroup = groupById.get(sourceGroup);
+      const laidTargetGroup = groupById.get(targetGroupId);
+      if (!laidSourceGroup || !laidTargetGroup) continue;
+      const sourceExit = laidSourceGroup.x + laidSourceGroup.width - LANE_CLEARANCE;
+      const targetEntry = laidTargetGroup.x + LANE_CLEARANCE + approach * APPROACH_STEP;
+      pending.push({
+        id: link.id,
+        source: link.source,
+        target: link.target,
+        sourceGroup,
+        targetGroup: targetGroupId,
+        stub,
+        side,
+        entry: targetEntry,
+        turn: target.y - EDGE_STUB,
+        lane: nextLane(sourceExit, targetEntry),
+      });
+    } else {
+      const sourceY = source.y + source.height / 2;
+      const turn = target.y - EDGE_STUB;
+      pending.push({
+        id: link.id,
+        source: link.source,
+        target: link.target,
+        sourceGroup,
+        targetGroup: targetGroupId,
+        stub: 0,
+        side,
+        entry: 0,
+        turn,
+        lane: nextLane(sourceY, turn),
+      });
+    }
+  }
+
+  const routes: Record<string, GraphRoute> = {};
+  let right = maxRight;
+  for (const route of pending) {
+    if (direction === "RIGHT") {
+      const laneY = LANE_CLEARANCE + route.lane * MARGIN_LANE_STEP;
+      const source = steps.get(route.source)!;
+      const target = steps.get(route.target)!;
+      const sourceGroup = groupById.get(route.sourceGroup)!;
+      const targetGroup = groupById.get(route.targetGroup)!;
+      const sourceExit: RoutePoint = [
+        sourceGroup.x + sourceGroup.width - LANE_CLEARANCE,
+        sourceGroup.y + LANE_CLEARANCE,
+      ];
+      const targetEntry: RoutePoint = [route.entry, targetGroup.y + LANE_CLEARANCE];
+      const sourcePath = obstaclePath(
+        [route.stub, source.y + source.height / 2],
+        sourceExit,
+        cardsByGroup.get(route.sourceGroup) ?? [],
+        new Set([route.source]),
+      );
+      const targetPath = obstaclePath(
+        targetEntry,
+        [route.side, target.y + target.height / 2],
+        cardsByGroup.get(route.targetGroup) ?? [],
+        new Set([route.target]),
+      );
+      routes[route.id] = {
+        stub: route.stub,
+        lane: withoutRepeatedPoints([
+          ...sourcePath,
+          [sourceExit[0], laneY],
+          [targetEntry[0], laneY],
+          ...targetPath,
+        ]),
+        side: route.side,
+        sidePorts: true,
+      };
+    } else {
+      const laneX = maxRight + EDGE_STUB + route.lane * LANE_STEP;
+      right = Math.max(right, laneX + LANE_CLEARANCE);
+      routes[route.id] = {
+        stub: laneX,
+        lane: [
+          [laneX, route.turn],
+          [route.side, route.turn],
+        ],
+        side: route.side,
+        sidePorts: true,
+      };
+    }
+  }
+  return {
+    routes,
+    margin:
+      direction === "RIGHT"
+        ? Math.max(GRAPH_MARGIN, laneIntervals.length * MARGIN_LANE_STEP + 2 * LANE_CLEARANCE)
+        : GRAPH_MARGIN,
+    right,
+  };
 }
 
 /**
@@ -389,6 +738,23 @@ export async function layoutGraph(
   async function layoutSet(
     ids: string[],
   ): Promise<{ width: number; height: number; steps: LaidStep[] }> {
+    // With groups and cards both running down, one stable card column leaves an unobstructed
+    // corridor on either side. ELK's normal layered layout puts siblings beside one another;
+    // their side ports would then have to draw through a sibling to reach the shared corridor.
+    if (grouped && direction === "DOWN" && innerDirection === "DOWN") {
+      let y = 0;
+      const steps = ids.map((id) => {
+        const size = sizeOf(id);
+        const step: LaidStep = { id, x: 0, y, ...size, parentId: null };
+        y += size.height + spacing.layer;
+        return step;
+      });
+      return {
+        width: Math.max(0, ...steps.map((step) => step.width)),
+        height: Math.max(0, y - spacing.layer),
+        steps,
+      };
+    }
     const members = new Set(ids);
     const laid = await elk.layout({
       id: "set",
@@ -430,20 +796,20 @@ export async function layoutGraph(
   sets.forEach((set) => {
     if (set.blockId) set.ids.forEach((id) => groupOf.set(id, set.blockId!));
   });
-  const groupIndex = new Map(model.blocks.map((b, i) => [b.id, i]));
   const relative = new Map<string, LaidStep>();
   inners.forEach((inner) => inner.steps.forEach((step) => relative.set(step.id, step)));
-  const plan = laneCounts(model.links, groupOf, groupIndex, (link) => {
+  const plan = laneCounts(model.links, groupOf, (link) => {
     const s = relative.get(link.source);
     const t = relative.get(link.target);
     if (!s || !t) return false;
     return innerDirection === "RIGHT" ? t.x <= s.x : t.y <= s.y;
   });
   const lanes = plan.bottom;
+  const sameAxis = grouped && direction === innerDirection;
   // Every corridor is given the room its lanes need before anything is placed: the margin before
   // the first group holds the returns, the gap after a group holds the links leaving it.
-  const margin =
-    plan.margin > 0
+  let margin =
+    !sameAxis && plan.margin > 0
       ? Math.max(GRAPH_MARGIN, (plan.margin - 1) * MARGIN_LANE_STEP + 2 * LANE_CLEARANCE)
       : GRAPH_MARGIN;
   // A block that receives routed edges holds their approach columns on its entry side; a block
@@ -458,23 +824,23 @@ export async function layoutGraph(
   sets.forEach((set, index) => {
     const inner = inners[index];
     if (set.blockId) {
-      const laneCount = lanes.get(set.blockId) ?? 0;
+      const laneCount = sameAxis ? 0 : (lanes.get(set.blockId) ?? 0);
       const corridor = laneCount
         ? laneCount * LANE_STEP + CORRIDOR_INSET - GRAPH_GROUP_PADDING / 2
         : 0;
       // Edges arrive along the card axis: from the left when the cards run right, from the top
       // when they run down. That side gets the entry padding.
       const entry = entryOf(set.blockId);
-      const entryLeft = direction === "DOWN" ? entry : GRAPH_GROUP_PADDING;
-      const entryTop = direction === "DOWN" ? GRAPH_GROUP_PADDING : entry;
+      const entryLeft = sameAxis || direction === "DOWN" ? entry : GRAPH_GROUP_PADDING;
+      const entryTop = !sameAxis && direction === "RIGHT" ? entry : GRAPH_GROUP_PADDING;
       const width =
-        inner.width + entryLeft + GRAPH_GROUP_PADDING + (direction === "RIGHT" ? corridor : 0);
+        inner.width + entryLeft + GRAPH_GROUP_PADDING + (innerDirection === "DOWN" ? corridor : 0);
       const height =
         inner.height +
         entryTop +
         GRAPH_GROUP_PADDING +
         GRAPH_GROUP_HEADER +
-        (direction === "DOWN" ? corridor : 0);
+        (innerDirection === "RIGHT" ? corridor : 0);
       const x = direction === "DOWN" ? margin : cursor;
       const y = direction === "DOWN" ? cursor : margin;
       groups.push({ id: set.blockId, x, y, width, height });
@@ -496,25 +862,49 @@ export async function layoutGraph(
       cursor += (direction === "DOWN" ? inner.height : inner.width) + GROUP_GAP;
     }
   });
-  const groupPos = new Map(groups.map((g) => [g.id, g]));
-  const absolute = new Map(
-    steps.map((step) => {
-      const g = step.parentId ? groupPos.get(step.parentId) : undefined;
-      return [
-        step.id,
-        {
-          x: step.x + (g?.x ?? 0),
-          y: step.y + (g?.y ?? 0),
-          width: step.width,
-          height: step.height,
-        },
-      ];
-    }),
-  );
+  const absoluteSteps = () => {
+    const groupPos = new Map(groups.map((group) => [group.id, group]));
+    return new Map(
+      steps.map((step) => {
+        const group = step.parentId ? groupPos.get(step.parentId) : undefined;
+        return [
+          step.id,
+          {
+            x: step.x + (group?.x ?? 0),
+            y: step.y + (group?.y ?? 0),
+            width: step.width,
+            height: step.height,
+          },
+        ];
+      }),
+    );
+  };
+  let absolute = absoluteSteps();
+  let routes: Record<string, GraphRoute>;
+  if (sameAxis) {
+    let sameAxisLayout = routeSameAxisLinks(model.links, absolute, groups, groupOf, direction);
+    if (direction === "RIGHT" && sameAxisLayout.margin > margin) {
+      const shift = sameAxisLayout.margin - margin;
+      margin = sameAxisLayout.margin;
+      groups.forEach((group) => {
+        group.y += shift;
+      });
+      absolute = absoluteSteps();
+      sameAxisLayout = routeSameAxisLinks(model.links, absolute, groups, groupOf, direction);
+    }
+    if (direction === "DOWN") {
+      groups.forEach((group) => {
+        group.width = Math.max(group.width, sameAxisLayout.right - group.x + LANE_CLEARANCE);
+      });
+    }
+    routes = sameAxisLayout.routes;
+  } else {
+    routes = routeLinks(model.links, absolute, groups, groupOf, innerDirection, margin);
+  }
   return {
     groups,
     steps,
-    routes: routeLinks(model.links, absolute, groups, groupOf, innerDirection, margin),
+    routes,
     margin,
   };
 }

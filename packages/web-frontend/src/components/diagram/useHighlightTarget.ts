@@ -26,10 +26,14 @@ export function useHighlightTarget(
     target.scrollIntoView({ block: "center", behavior: "smooth" });
     target.classList.add(...HIGHLIGHT_CLASSES);
     target.setAttribute("data-highlighted", "true");
-    const timer = setTimeout(() => {
+    const clearHighlight = () => {
       target.classList.remove(...HIGHLIGHT_CLASSES);
       target.removeAttribute("data-highlighted");
-    }, durationMs);
-    return () => clearTimeout(timer);
+    };
+    const timer = setTimeout(clearHighlight, durationMs);
+    return () => {
+      clearTimeout(timer);
+      clearHighlight();
+    };
   }, [request, container, selectorFor, durationMs]);
 }

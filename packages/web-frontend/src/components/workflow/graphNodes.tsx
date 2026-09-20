@@ -93,6 +93,19 @@ export function routedPoints(
   targetX: number,
   targetY: number,
 ): Array<[number, number]> {
+  if (route.sidePorts) {
+    const points: Array<[number, number]> = [
+      [sourceX, sourceY],
+      [route.stub, sourceY],
+      ...route.lane,
+      [route.side, targetY],
+      [targetX, targetY],
+    ];
+    return points.filter(
+      (point, index) =>
+        index === 0 || point[0] !== points[index - 1][0] || point[1] !== points[index - 1][1],
+    );
+  }
   return horizontal
     ? [
         [sourceX, sourceY],
