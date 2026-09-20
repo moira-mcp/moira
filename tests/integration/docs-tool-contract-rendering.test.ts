@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { cpSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -39,7 +39,15 @@ describe("public MCP tool contract rendering", () => {
           "--outDir",
           outputRoot,
         ],
-        { stdio: "pipe" },
+        {
+          cwd: docsRoot,
+          env: {
+            ...process.env,
+            MOIRA_HOST: "localhost:3030",
+            STATIC_ARTIFACTS_DOMAIN: "static.localhost",
+          },
+          stdio: "pipe",
+        },
       );
 
       for (const [locale, relativePath] of [
@@ -63,6 +71,51 @@ describe("public MCP tool contract rendering", () => {
     } finally {
       rmSync(outputRoot, { recursive: true, force: true });
       rmSync(path.join(docsRoot, ".astro"), { recursive: true, force: true });
+    }
+  }, 30_000);
+
+  test("production Markdown processor preserves all custom transformations", () => {
+    const fixtureSourceRoot = path.resolve("tests/fixtures/docs-markdown-plugins");
+    let fixtureRoot: string | undefined;
+    let outputRoot: string | undefined;
+
+    try {
+      fixtureRoot = mkdtempSync(
+        path.join(path.dirname(fixtureSourceRoot), ".docs-markdown-plugins-"),
+      );
+      outputRoot = mkdtempSync(path.join(tmpdir(), "moira-markdown-plugins-"));
+      cpSync(fixtureSourceRoot, fixtureRoot, { recursive: true });
+      execFileSync(
+        process.execPath,
+        [
+          path.resolve("node_modules/.bin/astro"),
+          "build",
+          "--root",
+          fixtureRoot,
+          "--outDir",
+          outputRoot,
+        ],
+        {
+          cwd: fixtureRoot,
+          env: {
+            ...process.env,
+            MOIRA_ASTRO_TEST_CACHE_DIR: path.join(outputRoot, "cache"),
+            MOIRA_HOST: "localhost:3030",
+            STATIC_ARTIFACTS_DOMAIN: "static.localhost",
+          },
+          stdio: "pipe",
+        },
+      );
+
+      const html = readFileSync(path.join(outputRoot, "index.html"), "utf8");
+      expect(html).toContain('data-reading-time="1"');
+      expect(html).toContain("https://static.localhost");
+      expect(html).not.toContain("{STATIC_DOMAIN}");
+      expect(html).toMatch(/<div style="overflow:auto">\s*<table>/);
+      expect(html).toMatch(/<img[^>]*loading="lazy"/);
+    } finally {
+      if (outputRoot) rmSync(outputRoot, { recursive: true, force: true });
+      if (fixtureRoot) rmSync(fixtureRoot, { recursive: true, force: true });
     }
   }, 30_000);
 });

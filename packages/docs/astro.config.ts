@@ -6,6 +6,7 @@ import tailwindcss from "@tailwindcss/vite";
 
 import sitemap from "@astrojs/sitemap";
 import mdx from "@astrojs/mdx";
+import { unified } from "@astrojs/markdown-remark";
 import icon from "astro-icon";
 import starlight from "@astrojs/starlight";
 import mermaid from "astro-mermaid";
@@ -380,8 +381,10 @@ export default defineConfig({
   ],
 
   markdown: {
-    remarkPlugins: [readingTimeRemarkPlugin, portableHelpRemarkPlugin],
-    rehypePlugins: [responsiveTablesRehypePlugin, lazyImagesRehypePlugin],
+    processor: unified({
+      remarkPlugins: [readingTimeRemarkPlugin, portableHelpRemarkPlugin],
+      rehypePlugins: [responsiveTablesRehypePlugin, lazyImagesRehypePlugin],
+    }),
   },
 
   vite: {

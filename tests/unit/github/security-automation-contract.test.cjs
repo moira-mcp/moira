@@ -207,7 +207,7 @@ describe("security automation contract", () => {
     });
     expect(job.steps[4]).toEqual({
       name: "Require immutable external Actions",
-      uses: "zgosalvez/github-actions-ensure-sha-pinned-actions@c5fc58bd0be7a4b94b73ce40250322d5b838a108",
+      uses: "zgosalvez/github-actions-ensure-sha-pinned-actions@62574f011e0d1967d555a862bd28a7abba8684fe",
     });
     const raw = readFileSync(".github/workflows/security.yml", "utf8");
     expect(raw).not.toContain("secrets.");

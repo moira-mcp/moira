@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { cpSync, mkdtempSync, readFileSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -14,10 +14,16 @@ import {
 
 describe("client registry presentation propagation", () => {
   test("one registry addition reaches public Astro and portable runtime presentations", () => {
-    const fixtureRoot = path.resolve("tests/fixtures/docs-client-registry");
+    const fixtureSourceRoot = path.resolve("tests/fixtures/docs-client-registry");
+    const fixtureRoot = mkdtempSync(
+      path.join(path.dirname(fixtureSourceRoot), ".docs-client-registry-"),
+    );
     const outputRoot = mkdtempSync(path.join(tmpdir(), "moira-client-registry-"));
+    const fixtureNodeModules = path.join(fixtureRoot, "node_modules");
 
     try {
+      cpSync(fixtureSourceRoot, fixtureRoot, { recursive: true });
+      symlinkSync(path.resolve("node_modules"), fixtureNodeModules, "junction");
       execFileSync(
         process.execPath,
         [
@@ -29,6 +35,7 @@ describe("client registry presentation propagation", () => {
           outputRoot,
         ],
         {
+          cwd: fixtureRoot,
           env: { ...process.env, MOIRA_ASTRO_TEST_CACHE_DIR: path.join(outputRoot, "cache") },
           stdio: "pipe",
         },
@@ -52,8 +59,7 @@ describe("client registry presentation propagation", () => {
       expect(portableMarkdown).not.toContain("{{MCP_DEEPLINK:");
     } finally {
       rmSync(outputRoot, { recursive: true, force: true });
-      rmSync(path.join(fixtureRoot, ".astro"), { recursive: true, force: true });
-      rmSync(path.join(fixtureRoot, "node_modules"), { recursive: true, force: true });
+      rmSync(fixtureRoot, { recursive: true, force: true });
     }
   }, 30_000);
 });
