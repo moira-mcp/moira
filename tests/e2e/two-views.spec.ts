@@ -116,20 +116,19 @@ test("the run page switches block, step, tab and view without remounting anythin
       "data-selected",
       "true",
     );
-    const inGraphBox = async (selector: string) => {
-      const frame = (await page.getByTestId("graph-view").boundingBox())!;
+    const inGraphPane = async (selector: string) => {
+      const frame = await page.locator('[data-testid="graph-view"] .react-flow').boundingBox();
       const card = await page.locator(selector).boundingBox();
-      if (!card) return false;
-      const middle = { x: card.x + card.width / 2, y: card.y + card.height / 2 };
+      if (!frame || !card) return false;
       return (
-        middle.x >= frame.x &&
-        middle.y >= frame.y &&
-        middle.x <= frame.x + frame.width &&
-        middle.y <= frame.y + frame.height
+        card.x >= frame.x &&
+        card.y >= frame.y &&
+        card.x + card.width <= frame.x + frame.width &&
+        card.y + card.height <= frame.y + frame.height
       );
     };
     await expect
-      .poll(() => inGraphBox('[data-graph-node="create-plan"]'), { timeout: 10000 })
+      .poll(() => inGraphPane('[data-graph-node="create-plan"]'), { timeout: 10000 })
       .toBe(true);
     await expectNoLoaders(page);
     expect(await sameElement(page, "run-page", shell)).toBe(true);

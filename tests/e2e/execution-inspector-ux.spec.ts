@@ -132,6 +132,8 @@ test.describe("Run page toolbar and panel", () => {
   test("the technical node graph is one click away and the current node focuses it", async ({
     page,
   }) => {
+    // Keep the graph pane narrow enough that a fixed readable zoom would clip the card.
+    await page.setViewportSize({ width: 1280, height: 720 });
     await page.goto(`${BASE_URL}/executions/${runningExecutionId}`);
     await expect(page.getByTestId("run-page")).toBeVisible({ timeout: 15000 });
     const graph = await showTechnicalGraph(page);

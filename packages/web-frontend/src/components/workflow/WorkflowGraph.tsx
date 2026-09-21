@@ -272,13 +272,12 @@ export const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
     window.requestAnimationFrame(() => {
       if (key.startsWith("node:")) {
         const nodeId = key.slice(key.indexOf(":", 5) + 1);
-        // The node itself, not its block: a tight fit at readable zoom, animated after the
-        // first placement so the reader sees where the jump landed.
+        // The node itself, not its block: fit the whole card even in a narrow run pane,
+        // animated after the first placement so the reader sees where the jump landed.
         void instance.fitView({
           nodes: [{ id: nodeId }],
           padding: 0.25,
           maxZoom: 1,
-          minZoom: 0.6,
           duration: 350,
         });
         return;
@@ -305,7 +304,6 @@ export const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
       nodes: [{ id }],
       padding: 0.25,
       maxZoom: 1,
-      minZoom: 0.6,
       duration: 400,
     });
   }, []);
