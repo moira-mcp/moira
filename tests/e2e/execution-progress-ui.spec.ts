@@ -234,13 +234,13 @@ test("the route cursor moves the whole page back through the run; both views are
         data: { workflow: { nodes: Array<{ id: string; connections?: Record<string, string> }> } };
       }
     ).data.workflow;
-    const decision = definition.nodes.find((node) => node.id === "check-plan-review-clean")!;
+    const decision = definition.nodes.find((node) => node.id === "plan-review")!;
     const expectedHandles = Object.keys(decision.connections ?? {})
-      .map((output) => `out:check-plan-review-clean.${output}`)
+      .map((output) => `out:plan-review.${output}`)
       .sort();
     expect(expectedHandles.length).toBeGreaterThan(1);
     const outputs = await page
-      .locator('[data-graph-node="check-plan-review-clean"] [data-handleid^="out:"]')
+      .locator('[data-graph-node="plan-review"] [data-handleid^="out:"]')
       .evaluateAll((els) => els.map((el) => el.getAttribute("data-handleid")).sort());
     expect(outputs).toEqual(expectedHandles);
 

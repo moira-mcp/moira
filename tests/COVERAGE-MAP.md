@@ -1101,6 +1101,7 @@ level headings classify the tracked test paths listed beneath them.
 
 **workflow**
 
+- `tests/workflow/scenarios/agentic-screencast-video.test.ts` — protected versus public capture, fact/story/material/voice/final review and owner-specific repair routes, cost and delivery authority gates, blocked prerequisites and synthesis, guarded process revision, and complete executable node and branch coverage
 - `tests/workflow/scenarios/architecture-design-flow.test.ts` — new/existing architecture execution; source and delivery authority; completion-before deterministic and independent semantic gates; cause-owned repair cones; corrected-contract review, process revision, interactive completion rework, complete/limited/blocked/abort/materialization outcomes, and authorized project delivery
 - `tests/workflow/scenarios/artifacts-demo-dashboard-builder.test.ts`
 - `tests/workflow/scenarios/artifacts-demo-report-publisher.test.ts`

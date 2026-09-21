@@ -363,7 +363,7 @@ const scenarios: TestScenario[] = [
       ],
       "approve-plan": [approvedPlan, approvedPlan],
     },
-    ["route-implementation-preparation", "approve-current-unit-closure", "review-plan", "end"],
+    ["prepare-plan-unit-implementation", "approve-current-unit-closure", "review-plan", "end"],
   ),
   flow(
     "producer completion can replan before cheap validation",
@@ -371,7 +371,7 @@ const scenarios: TestScenario[] = [
       "complete-plan-unit": [{ completion_outcome: "replan" }, { completion_outcome: "ready" }],
       "approve-plan": [approvedPlan, approvedPlan],
     },
-    ["route-plan-unit-completion", "approve-current-unit-closure", "review-plan", "end"],
+    ["complete-plan-unit", "approve-current-unit-closure", "review-plan", "end"],
   ),
   flow("producer completion creates a correction opportunity before cheap validation", {}, [
     "implement-plan-unit",
@@ -401,7 +401,7 @@ const scenarios: TestScenario[] = [
   flow(
     "repository baseline failure enters approved planning without pre-plan repair",
     { "assess-project-health": { health_outcome: "repository_failure" } },
-    ["route-health-external", "create-plan", "end"],
+    ["assess-project-health", "create-plan", "end"],
   ),
   flow(
     "external baseline blocker retries only after a decision",
@@ -438,14 +438,7 @@ const scenarios: TestScenario[] = [
       "review-architecture": [{ review_outcome: "repair" }, { review_outcome: "pass" }],
       "repair-architecture": { repair_outcome: "changed", mutation_scope: "product" },
     },
-    [
-      "repair-cheap-validation",
-      "repair-test-adequacy",
-      "route-test-adequacy-reach",
-      "repair-architecture",
-      "route-architecture-reach",
-      "end",
-    ],
+    ["repair-cheap-validation", "repair-test-adequacy", "repair-architecture", "end"],
   ),
   flow(
     "a contained test repair goes back to the gate that raised it",
@@ -457,7 +450,7 @@ const scenarios: TestScenario[] = [
       ],
       "repair-test-adequacy": { repair_outcome: "changed", mutation_scope: "verification_only" },
     },
-    ["repair-test-adequacy", "route-test-adequacy-reach", "review-test-adequacy", "end"],
+    ["repair-test-adequacy", "review-test-adequacy", "end"],
   ),
   flow(
     "a contained architecture repair goes back to the architecture gate",
@@ -465,7 +458,7 @@ const scenarios: TestScenario[] = [
       "review-architecture": [{ review_outcome: "repair" }, { review_outcome: "pass" }],
       "repair-architecture": { repair_outcome: "changed", mutation_scope: "gate_local" },
     },
-    ["repair-architecture", "route-architecture-reach", "review-architecture", "end"],
+    ["repair-architecture", "review-architecture", "end"],
   ),
   flow(
     "a contained completeness repair goes back to the same reviewer",
@@ -555,7 +548,7 @@ const scenarios: TestScenario[] = [
       ],
       "repair-user-feedback": { resolution: "in_plan" },
     },
-    ["repair-user-feedback", "route-user-feedback-resolution", "end"],
+    ["repair-user-feedback", "advance-evidence-iteration", "end"],
   ),
   flow(
     "material per-unit feedback creates a reviewed plan revision",
@@ -570,7 +563,7 @@ const scenarios: TestScenario[] = [
         { ...activatedPlan, current_step_index: 2, total_steps: 2 },
       ],
     },
-    ["route-user-feedback-resolution", "review-plan", "end"],
+    ["repair-user-feedback", "advance-plan-revision-for-replan", "review-plan", "end"],
   ),
   flow(
     "multiple approved units advance without a report-only turn",
@@ -587,12 +580,7 @@ const scenarios: TestScenario[] = [
         { documentation_outcome: "ready" },
       ],
     },
-    [
-      "route-unit-documentation-product-repair",
-      "advance-evidence-iteration",
-      "validate-cheap",
-      "end",
-    ],
+    ["update-unit-documentation", "advance-evidence-iteration", "validate-cheap", "end"],
   ),
   flow(
     "documentation discovery of an invalid plan returns through approved replanning",
@@ -604,7 +592,7 @@ const scenarios: TestScenario[] = [
       "approve-plan": [approvedPlan, approvedPlan],
     },
     [
-      "route-unit-documentation-replan",
+      "update-unit-documentation",
       "approve-current-unit-closure",
       "advance-plan-revision-for-replan",
       "revise-plan-for-replan",
@@ -675,7 +663,7 @@ const scenarios: TestScenario[] = [
       "finalize-feature": { finalization_outcome: "external_blocker" },
       "resolve-finalization-blocker": { blocker_decision: "finish_without_finalization" },
     },
-    ["resolve-finalization-blocker", "route-finalization-skip", "end"],
+    ["resolve-finalization-blocker", "notify-workflow-finished-without-finalization", "end"],
   ),
   flow(
     "authorized finalization external blocker retries after changed state",
@@ -687,7 +675,7 @@ const scenarios: TestScenario[] = [
       ],
       "resolve-finalization-blocker": { blocker_decision: "retry" },
     },
-    ["route-finalization-retry", "finalize-feature", "end"],
+    ["resolve-finalization-blocker", "finalize-feature", "end"],
   ),
   flow(
     "authorized finalization external blocker can end the workflow",
@@ -696,7 +684,7 @@ const scenarios: TestScenario[] = [
       "finalize-feature": { finalization_outcome: "external_blocker" },
       "resolve-finalization-blocker": { blocker_decision: "end_workflow" },
     },
-    ["route-finalization-skip", "end-aborted"],
+    ["resolve-finalization-blocker", "end-aborted"],
     ["end"],
   ),
   flow(
@@ -723,12 +711,7 @@ const scenarios: TestScenario[] = [
       ],
       "repair-finalization-repository": { repair_outcome: "gate_local" },
     },
-    [
-      "repair-finalization-repository",
-      "route-finalization-repair-replan",
-      "finalize-feature",
-      "end",
-    ],
+    ["repair-finalization-repository", "finalize-feature", "end"],
     ["advance-evidence-iteration"],
   ),
   flow(
@@ -757,9 +740,9 @@ const scenarios: TestScenario[] = [
       },
     },
     [
-      "route-feature-repair-replan",
+      "repair-feature-validation",
       "validate-feature-wide",
-      "route-final-repair-replan",
+      "repair-final-semantics",
       "review-final-semantics",
       "end",
     ],
@@ -771,7 +754,7 @@ const scenarios: TestScenario[] = [
       "review-plan": [{ review_outcome: "replan" }, { review_outcome: "pass" }],
       "approve-plan": [approvedPlan, approvedPlan],
     },
-    ["route-plan-review-replan", "advance-plan-revision-for-replan", "end"],
+    ["review-plan", "advance-plan-revision-for-replan", "end"],
   ),
   flow(
     "plan repair can discover that replanning is required",
@@ -780,7 +763,7 @@ const scenarios: TestScenario[] = [
       "repair-plan": { repair_outcome: "replan" },
       "approve-plan": [approvedPlan, approvedPlan],
     },
-    ["route-plan-repair-outcome", "advance-plan-revision-for-replan", "end"],
+    ["repair-plan", "advance-plan-revision-for-replan", "end"],
   ),
   flow(
     "cheap verification-only repair restarts verification without a new product iteration",
@@ -791,7 +774,7 @@ const scenarios: TestScenario[] = [
         mutation_scope: "verification_only",
       },
     },
-    ["route-cheap-repair-scope", "mark-verification-only-iteration", "review-architecture", "end"],
+    ["repair-cheap-validation", "mark-verification-only-iteration", "review-architecture", "end"],
   ),
   flow(
     "cheap repair can require replanning",
@@ -800,7 +783,7 @@ const scenarios: TestScenario[] = [
       "repair-cheap-validation": { repair_outcome: "replan" },
       "approve-plan": [approvedPlan, approvedPlan],
     },
-    ["route-cheap-repair-replan", "approve-current-unit-closure", "end"],
+    ["repair-cheap-validation", "approve-current-unit-closure", "end"],
   ),
   flow(
     "test reviewer can reject an undecidable criterion",
@@ -808,7 +791,7 @@ const scenarios: TestScenario[] = [
       "review-test-adequacy": [{ review_outcome: "replan" }, { review_outcome: "pass" }],
       "approve-plan": [approvedPlan, approvedPlan],
     },
-    ["route-test-adequacy-replan", "approve-current-unit-closure", "end"],
+    ["review-test-adequacy", "approve-current-unit-closure", "end"],
   ),
   flow(
     "test repair can require replanning instead of adding a meta-validator",
@@ -817,7 +800,7 @@ const scenarios: TestScenario[] = [
       "repair-test-adequacy": { repair_outcome: "replan" },
       "approve-plan": [approvedPlan, approvedPlan],
     },
-    ["route-test-repair-outcome", "approve-current-unit-closure", "end"],
+    ["repair-test-adequacy", "approve-current-unit-closure", "end"],
   ),
   flow(
     "architecture repair can require replanning",
@@ -826,7 +809,7 @@ const scenarios: TestScenario[] = [
       "repair-architecture": { repair_outcome: "replan" },
       "approve-plan": [approvedPlan, approvedPlan],
     },
-    ["route-architecture-repair-outcome", "approve-current-unit-closure", "end"],
+    ["repair-architecture", "approve-current-unit-closure", "end"],
   ),
   flow(
     "runtime verification-only repair reruns downstream gates without architecture",
@@ -838,7 +821,7 @@ const scenarios: TestScenario[] = [
       ],
       "repair-runtime": { repair_outcome: "changed", mutation_scope: "verification_only" },
     },
-    ["route-runtime-repair-scope", "mark-verification-only-iteration", "validate-expensive", "end"],
+    ["repair-runtime", "mark-verification-only-iteration", "validate-expensive", "end"],
   ),
   flow(
     "runtime repair can require replanning",
@@ -850,7 +833,7 @@ const scenarios: TestScenario[] = [
       "repair-runtime": { repair_outcome: "replan" },
       "approve-plan": [approvedPlan, approvedPlan],
     },
-    ["route-runtime-repair-replan", "approve-current-unit-closure", "end"],
+    ["repair-runtime", "approve-current-unit-closure", "end"],
   ),
   flow(
     "expensive verification-only repair reruns runtime and expensive validation",
@@ -862,7 +845,7 @@ const scenarios: TestScenario[] = [
       ],
       "repair-expensive": { repair_outcome: "changed", mutation_scope: "verification_only" },
     },
-    ["route-expensive-repair-scope", "mark-verification-only-iteration", "validate-runtime", "end"],
+    ["repair-expensive", "mark-verification-only-iteration", "validate-runtime", "end"],
   ),
   flow(
     "expensive repair can require replanning",
@@ -874,7 +857,7 @@ const scenarios: TestScenario[] = [
       "repair-expensive": { repair_outcome: "replan" },
       "approve-plan": [approvedPlan, approvedPlan],
     },
-    ["route-expensive-repair-replan", "approve-current-unit-closure", "end"],
+    ["repair-expensive", "approve-current-unit-closure", "end"],
   ),
   flow(
     "completeness reviewer can require replanning",
@@ -882,7 +865,7 @@ const scenarios: TestScenario[] = [
       "review-unit-completeness": [{ review_outcome: "replan" }, { review_outcome: "pass" }],
       "approve-plan": [approvedPlan, approvedPlan],
     },
-    ["route-completeness-review-replan", "approve-current-unit-closure", "end"],
+    ["review-unit-completeness", "approve-current-unit-closure", "end"],
   ),
   flow(
     "completeness verification repair reruns the validation chain",
@@ -897,12 +880,7 @@ const scenarios: TestScenario[] = [
         mutation_scope: "verification_only",
       },
     },
-    [
-      "route-unit-completeness-reach",
-      "mark-verification-only-iteration",
-      "validate-runtime",
-      "end",
-    ],
+    ["repair-unit-completeness", "mark-verification-only-iteration", "validate-runtime", "end"],
   ),
   flow(
     "completeness repair can require replanning",
@@ -911,7 +889,7 @@ const scenarios: TestScenario[] = [
       "repair-unit-completeness": { repair_outcome: "replan" },
       "approve-plan": [approvedPlan, approvedPlan],
     },
-    ["route-completeness-repair-outcome", "approve-current-unit-closure", "end"],
+    ["repair-unit-completeness", "approve-current-unit-closure", "end"],
   ),
   flow(
     "final semantic reviewer can require replanning",
@@ -930,7 +908,7 @@ const scenarios: TestScenario[] = [
       ],
       "approve-plan": [approvedPlan, approvedPlan],
     },
-    ["route-final-review-replan", "advance-plan-revision-for-replan", "end"],
+    ["review-final-semantics", "advance-plan-revision-for-replan", "end"],
   ),
   flow(
     "finalization repair can require replanning",
@@ -945,7 +923,7 @@ const scenarios: TestScenario[] = [
       ],
       "repair-finalization-repository": { repair_outcome: "replan" },
     },
-    ["route-finalization-repair-replan", "advance-plan-revision-for-replan", "end"],
+    ["repair-finalization-repository", "advance-plan-revision-for-replan", "end"],
   ),
 ];
 
@@ -1219,9 +1197,22 @@ describe("software-development-flow", () => {
       true: "finalize-feature",
       default: "notify-workflow-complete",
     });
-    expect(
-      workflow.nodes.find((node) => node.id === "route-plan-unit-user-review")?.connections,
-    ).toEqual({ true: "repair-user-feedback", default: "route-checkpoint-authority" });
+    expect(presentingNode(workflow, "review-plan-unit-with-user")).toMatchObject({
+      connections: {
+        success: "route-checkpoint-authority",
+        "repair-user-feedback": "repair-user-feedback",
+      },
+      cases: [
+        {
+          when: {
+            operator: "eq",
+            left: { contextPath: "review-plan-unit-with-user.acceptance_decision" },
+            right: "rejected",
+          },
+          output: "repair-user-feedback",
+        },
+      ],
+    });
     expect(
       workflow.nodes.find((node) => node.id === "route-unit-html-report")?.connections,
     ).toEqual({
@@ -1237,34 +1228,75 @@ describe("software-development-flow", () => {
       true: "checkpoint-plan-unit",
       default: "route-plan-complete",
     });
-    expect(
-      workflow.nodes.find((node) => node.id === "route-expensive-repository")?.connections,
-    ).toEqual({
-      true: "repair-expensive",
-      default: "update-unit-documentation",
+    expect(presentingNode(workflow, "validate-expensive")).toMatchObject({
+      connections: {
+        success: "update-unit-documentation",
+        "wait-for-expensive-state-change": "wait-for-expensive-state-change",
+        "repair-expensive": "repair-expensive",
+      },
+      cases: [
+        {
+          when: {
+            operator: "eq",
+            left: { contextPath: "validate-expensive.validation_outcome" },
+            right: "external_blocker",
+          },
+          output: "wait-for-expensive-state-change",
+        },
+        {
+          when: {
+            operator: "eq",
+            left: { contextPath: "validate-expensive.validation_outcome" },
+            right: "repository_failure",
+          },
+          output: "repair-expensive",
+        },
+      ],
     });
-    expect(
-      workflow.nodes.find((node) => node.id === "route-unit-documentation-replan")?.connections,
-    ).toEqual({
-      true: "approve-current-unit-closure",
-      default: "route-unit-documentation-product-repair",
-    });
-    expect(
-      workflow.nodes.find((node) => node.id === "route-unit-documentation-product-repair")
-        ?.connections,
-    ).toEqual({
-      true: "advance-evidence-iteration",
-      default: "review-unit-completeness",
+    expect(presentingNode(workflow, "update-unit-documentation")).toMatchObject({
+      connections: {
+        success: "review-unit-completeness",
+        "approve-current-unit-closure": "approve-current-unit-closure",
+        "advance-evidence-iteration": "advance-evidence-iteration",
+      },
+      cases: [
+        {
+          when: {
+            operator: "eq",
+            left: { contextPath: "update-unit-documentation.documentation_outcome" },
+            right: "replan",
+          },
+          output: "approve-current-unit-closure",
+        },
+        {
+          when: {
+            operator: "eq",
+            left: { contextPath: "update-unit-documentation.documentation_outcome" },
+            right: "product_repair",
+          },
+          output: "advance-evidence-iteration",
+        },
+      ],
     });
     expect(workflow.nodes.find((node) => node.id === "route-plan-complete")?.connections).toEqual({
       true: "validate-feature-wide",
       default: "advance-plan-unit",
     });
-    expect(
-      workflow.nodes.find((node) => node.id === "route-feature-acceptance")?.connections,
-    ).toEqual({
-      true: "route-vcs-authority",
-      default: "advance-plan-revision-after-feedback",
+    expect(presentingNode(workflow, "report-and-accept-feature")).toMatchObject({
+      connections: {
+        success: "advance-plan-revision-after-feedback",
+        "route-vcs-authority": "route-vcs-authority",
+      },
+      cases: [
+        {
+          when: {
+            operator: "eq",
+            left: { contextPath: "report-and-accept-feature.feature_decision" },
+            right: "accepted",
+          },
+          output: "route-vcs-authority",
+        },
+      ],
     });
     expect(
       (workflow.nodes.find((node) => node.id === "end") as { finalOutput?: string[] }).finalOutput,
@@ -1327,17 +1359,46 @@ describe("software-development-flow", () => {
       "result_file",
       "progress_finalize_outcome",
     ]);
-    expect(
-      workflow.nodes.find((node) => node.id === "route-final-semantic-review")?.connections,
-    ).toEqual({
-      true: "repair-final-semantics",
-      default: "create-final-report",
+    expect(finalSemanticReview).toMatchObject({
+      connections: {
+        success: "create-final-report",
+        "advance-plan-revision-for-replan": "advance-plan-revision-for-replan",
+        "repair-final-semantics": "repair-final-semantics",
+      },
+      cases: [
+        {
+          when: {
+            operator: "eq",
+            left: { contextPath: "review-final-semantics.review_outcome" },
+            right: "replan",
+          },
+          output: "advance-plan-revision-for-replan",
+        },
+        {
+          when: {
+            operator: "eq",
+            left: { contextPath: "review-final-semantics.review_outcome" },
+            right: "repair",
+          },
+          output: "repair-final-semantics",
+        },
+      ],
     });
-    expect(
-      workflow.nodes.find((node) => node.id === "route-final-repair-replan")?.connections,
-    ).toEqual({
-      true: "advance-plan-revision-for-replan",
-      default: "validate-feature-wide",
+    expect(finalSemanticRepair).toMatchObject({
+      connections: {
+        success: "validate-feature-wide",
+        "advance-plan-revision-for-replan": "advance-plan-revision-for-replan",
+      },
+      cases: [
+        {
+          when: {
+            operator: "eq",
+            left: { contextPath: "repair-final-semantics.repair_outcome" },
+            right: "replan",
+          },
+          output: "advance-plan-revision-for-replan",
+        },
+      ],
     });
     const finalReport = presentingNode(workflow, "create-final-report");
     expect(finalReport.directive).toContain("the exact numeric final review");
@@ -1664,7 +1725,7 @@ describe("software-development-flow", () => {
     );
     expect(result.status).toBe("failed");
     expect(result.error).toContain("Input validation failed for node 'review-final-semantics'");
-    expect(result.visitedNodes).not.toContain("route-final-review-replan");
+    expect(result.visitedNodes).not.toContain("advance-plan-revision-for-replan");
   });
 
   test("a verification-only repair after architecture reruns downstream gates but skips architecture", async () => {
@@ -1887,110 +1948,53 @@ describe("software-development-flow", () => {
     const verificationTailWithArchitecture = [
       "mark-verification-only-iteration",
       "validate-cheap",
-      "route-cheap-validation",
       "review-test-adequacy",
-      "route-test-adequacy-replan",
-      "route-test-adequacy",
       "route-current-verification-only",
       "review-architecture",
-      "route-architecture-replan",
-      "route-architecture-review",
       "mark-product-review-current",
       "validate-runtime",
-      "route-runtime-external",
-      "route-runtime-repository",
       "validate-expensive",
-      "route-expensive-external",
-      "route-expensive-repository",
       "update-unit-documentation",
-      "route-unit-documentation-replan",
-      "route-unit-documentation-product-repair",
       "review-unit-completeness",
     ] as const;
     const verificationTailWithoutArchitecture = [
       "mark-verification-only-iteration",
       "validate-cheap",
-      "route-cheap-validation",
       "review-test-adequacy",
-      "route-test-adequacy-replan",
-      "route-test-adequacy",
       "route-current-verification-only",
       "validate-runtime",
-      "route-runtime-external",
-      "route-runtime-repository",
       "validate-expensive",
-      "route-expensive-external",
-      "route-expensive-repository",
       "update-unit-documentation",
-      "route-unit-documentation-replan",
-      "route-unit-documentation-product-repair",
       "review-unit-completeness",
     ] as const;
     const boundedRepairSegments = [
       [
         "a contained test repair goes back to the gate that raised it",
-        [
-          "repair-test-adequacy",
-          "route-test-repair-outcome",
-          "route-test-adequacy-reach",
-          ...verificationTailWithArchitecture,
-        ],
+        ["repair-test-adequacy", ...verificationTailWithArchitecture],
       ],
       [
         "a contained architecture repair goes back to the architecture gate",
-        [
-          "repair-architecture",
-          "route-architecture-repair-outcome",
-          "route-architecture-reach",
-          "review-architecture",
-        ],
+        ["repair-architecture", "review-architecture"],
       ],
       [
         "a contained completeness repair goes back to the same reviewer",
-        [
-          "repair-unit-completeness",
-          "route-completeness-repair-outcome",
-          "route-completeness-repair-gate-local",
-          "mark-current-evidence-iteration",
-          "review-unit-completeness",
-        ],
+        ["repair-unit-completeness", "mark-current-evidence-iteration", "review-unit-completeness"],
       ],
       [
         "cheap verification-only repair restarts verification without a new product iteration",
-        [
-          "repair-cheap-validation",
-          "route-cheap-repair-replan",
-          "route-cheap-repair-scope",
-          ...verificationTailWithArchitecture,
-        ],
+        ["repair-cheap-validation", ...verificationTailWithArchitecture],
       ],
       [
         "runtime verification-only repair reruns downstream gates without architecture",
-        [
-          "repair-runtime",
-          "route-runtime-repair-replan",
-          "route-runtime-repair-scope",
-          ...verificationTailWithoutArchitecture,
-        ],
+        ["repair-runtime", ...verificationTailWithoutArchitecture],
       ],
       [
         "expensive verification-only repair reruns runtime and expensive validation",
-        [
-          "repair-expensive",
-          "route-expensive-repair-replan",
-          "route-expensive-repair-scope",
-          ...verificationTailWithoutArchitecture,
-        ],
+        ["repair-expensive", ...verificationTailWithoutArchitecture],
       ],
       [
         "completeness verification repair reruns the validation chain",
-        [
-          "repair-unit-completeness",
-          "route-completeness-repair-outcome",
-          "route-completeness-repair-gate-local",
-          "route-unit-completeness-reach",
-          ...verificationTailWithoutArchitecture,
-        ],
+        ["repair-unit-completeness", ...verificationTailWithoutArchitecture],
       ],
     ] as const;
     for (const [scenarioName, expectedCone] of boundedRepairSegments) {

@@ -2,13 +2,14 @@
   "id": "91b11263-a180-4a08-9399-55f406f82c69",
   "metadata": {
     "name": "Software Development Flow",
-    "version": "15.8.0",
+    "version": "16.0.0",
     "description": "Implements one complete repository change through source-grounded requirements, independently reviewed planning, vertical units, staged validation, post-validation permanent-documentation updates, independent unit completeness, and one numeric final semantic/requirements review. Reports stay semantic and diff-first; HTML reports prefer agentic-report@latest and preserve Artifact/user-communication delivery. Authorized unit checkpoints are commit-or-no-op without receipt files or automatic repair branches. A fifteen-block process view derived from the graph, cause-aware replan, user gates, external-blocker recovery, local VCS authority, and caller-owned delivery boundaries remain intact.",
     "author": "mcp-moira-team",
     "tags": [
       "development",
       "validation"
-    ]
+    ],
+    "schemaVersion": 1
   },
   "nodes": [
     {
@@ -146,7 +147,8 @@
         ]
       },
       "connections": {
-        "success": "route-requirements-approval"
+        "success": "revise-requirements",
+        "assess-project-health": "assess-project-health"
       },
       "progressNodeId": "intake",
       "progressActiveContent": {
@@ -154,25 +156,21 @@
         "outcome": "Current responsibility in progress",
         "next": "Assess project health after approval, or revise requirements"
       },
-      "progressActiveLabel": "Confirm requirements"
-    },
-    {
-      "id": "route-requirements-approval",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "confirm-requirements.requirements_approval"
-        },
-        "right": "yes"
-      },
-      "connections": {
-        "true": "assess-project-health",
-        "false": "revise-requirements"
-      },
-      "progressNodeId": "intake",
+      "progressActiveLabel": "Confirm requirements",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "confirm-requirements.requirements_approval"
+            },
+            "right": "yes"
+          },
+          "output": "assess-project-health"
+        }
+      ],
       "connectionLabels": {
-        "true": "requirements confirmed, or autonomous"
+        "assess-project-health": "requirements confirmed, or autonomous"
       }
     },
     {
@@ -238,7 +236,8 @@
         ]
       },
       "connections": {
-        "success": "route-health-external"
+        "success": "create-plan",
+        "wait-for-health-state-change": "wait-for-health-state-change"
       },
       "progressNodeId": "health",
       "progressActiveContent": {
@@ -246,25 +245,21 @@
         "outcome": "Current responsibility in progress",
         "next": "Create the plan or resolve the concrete blocker"
       },
-      "progressActiveLabel": "Assess project health"
-    },
-    {
-      "id": "route-health-external",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "assess-project-health.health_outcome"
-        },
-        "right": "external_blocker"
-      },
-      "connections": {
-        "true": "wait-for-health-state-change",
-        "false": "create-plan"
-      },
-      "progressNodeId": "health",
+      "progressActiveLabel": "Assess project health",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "assess-project-health.health_outcome"
+            },
+            "right": "external_blocker"
+          },
+          "output": "wait-for-health-state-change"
+        }
+      ],
       "connectionLabels": {
-        "false": "baseline established"
+        "success": "baseline established"
       }
     },
     {
@@ -292,7 +287,8 @@
         ]
       },
       "connections": {
-        "success": "route-health-retry"
+        "success": "notify-workflow-stopped",
+        "assess-project-health": "assess-project-health"
       },
       "progressNodeId": "health",
       "progressActiveContent": {
@@ -300,32 +296,28 @@
         "outcome": "Current responsibility in progress",
         "next": "Retry only after changed state; otherwise obtain explicit user authority to end the whole workflow or remain waiting"
       },
-      "progressActiveLabel": "Resolve project-health blocker"
-    },
-    {
-      "id": "route-health-retry",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "wait-for-health-state-change.blocker_decision"
-        },
-        "right": "retry"
-      },
-      "connections": {
-        "true": "assess-project-health",
-        "false": "notify-workflow-stopped"
-      },
-      "progressNodeId": "health",
+      "progressActiveLabel": "Resolve project-health blocker",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "wait-for-health-state-change.blocker_decision"
+            },
+            "right": "retry"
+          },
+          "output": "assess-project-health"
+        }
+      ],
       "connectionLabels": {
-        "true": {
+        "assess-project-health": {
           "label": "external blocker cleared",
           "cycle": {
             "cause": "The baseline failed on something outside the repository; the run waited for it to change.",
             "exit": "The external state changed and the check is re-run, or the run stops."
           }
         },
-        "false": "blocker did not clear"
+        "success": "blocker did not clear"
       }
     },
     {
@@ -381,7 +373,9 @@
         ]
       },
       "connections": {
-        "success": "route-plan-review-replan"
+        "success": "route-plan-activation-mode",
+        "replan": "advance-plan-revision-for-replan",
+        "repair": "repair-plan"
       },
       "progressNodeId": "plan",
       "progressActiveLabel": "Review plan r{{plan_revision}}",
@@ -389,25 +383,32 @@
         "summary": "Review plan r{{plan_revision}}",
         "outcome": "Current responsibility in progress",
         "next": "Continue to unit preparation, repeat plan review, revise the plan, or stop as the current route requires"
-      }
-    },
-    {
-      "id": "route-plan-review",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "review-plan.review_outcome"
+      },
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "review-plan.review_outcome"
+            },
+            "right": "replan"
+          },
+          "output": "replan"
         },
-        "right": "repair"
-      },
-      "connections": {
-        "true": "repair-plan",
-        "false": "route-plan-activation-mode"
-      },
-      "progressNodeId": "plan",
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "review-plan.review_outcome"
+            },
+            "right": "repair"
+          },
+          "output": "repair"
+        }
+      ],
       "connectionLabels": {
-        "false": "review clean"
+        "success": "review clean",
+        "replan": "plan itself is wrong"
       }
     },
     {
@@ -436,7 +437,8 @@
         ]
       },
       "connections": {
-        "success": "route-plan-repair-outcome"
+        "success": "review-plan",
+        "advance-plan-revision-for-replan": "advance-plan-revision-for-replan"
       },
       "progressNodeId": "plan",
       "progressActiveLabel": "Repair plan r{{plan_revision}}",
@@ -444,6 +446,28 @@
         "summary": "Repair plan r{{plan_revision}}",
         "outcome": "Current responsibility in progress",
         "next": "Continue to unit preparation, repeat plan review, revise the plan, or stop as the current route requires"
+      },
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "repair-plan.repair_outcome"
+            },
+            "right": "replan"
+          },
+          "output": "advance-plan-revision-for-replan"
+        }
+      ],
+      "connectionLabels": {
+        "advance-plan-revision-for-replan": "plan itself is wrong",
+        "success": {
+          "label": "review found issues",
+          "cycle": {
+            "cause": "The independent reviewer recorded blocking findings, so the plan is repaired and reviewed again.",
+            "exit": "A review with zero blocking findings."
+          }
+        }
       }
     },
     {
@@ -496,7 +520,8 @@
         ]
       },
       "connections": {
-        "success": "route-plan-approval"
+        "success": "advance-plan-revision-after-rejection",
+        "approved": "activate-reviewed-plan"
       },
       "progressNodeId": "plan-approval",
       "progressActiveLabel": "Approve plan r{{plan_revision}}",
@@ -504,23 +529,19 @@
         "summary": "Ask whether the reviewed development plan is accepted",
         "outcome": "Current responsibility in progress",
         "next": "Activate after approval, or create and re-review a new revision"
-      }
-    },
-    {
-      "id": "route-plan-approval",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "approve-plan.plan_approval"
-        },
-        "right": "yes"
       },
-      "connections": {
-        "true": "activate-reviewed-plan",
-        "false": "advance-plan-revision-after-rejection"
-      },
-      "progressNodeId": "plan-approval"
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "approve-plan.plan_approval"
+            },
+            "right": "yes"
+          },
+          "output": "approved"
+        }
+      ]
     },
     {
       "id": "revise-plan-after-rejection",
@@ -556,19 +577,6 @@
           }
         }
       }
-    },
-    {
-      "id": "initialize-implementation-iteration",
-      "type": "expression",
-      "expressions": [
-        "current_iteration = 1",
-        "previous_iteration = 0",
-        "product_review_iteration = 0"
-      ],
-      "connections": {
-        "default": "prepare-plan-unit-implementation"
-      },
-      "progressNodeId": "implement"
     },
     {
       "id": "implement-plan-unit",
@@ -618,7 +626,8 @@
         ]
       },
       "connections": {
-        "success": "route-cheap-validation"
+        "success": "review-test-adequacy",
+        "repair-cheap-validation": "repair-cheap-validation"
       },
       "progressNodeId": "unit-validation",
       "progressActiveLabel": "{{current_step_index}}/{{total_steps}} i{{current_iteration}} · Checks",
@@ -626,23 +635,19 @@
         "summary": "{{current_step_index}}/{{total_steps}} i{{current_iteration}} · Checks",
         "outcome": "Current responsibility in progress",
         "next": "Continue to architecture review, repair the verified defect, or replan an invalid criterion"
-      }
-    },
-    {
-      "id": "route-cheap-validation",
-      "type": "condition",
-      "condition": {
-        "operator": "gt",
-        "left": {
-          "contextPath": "validate-cheap.issues_count"
-        },
-        "right": 0
       },
-      "connections": {
-        "true": "repair-cheap-validation",
-        "false": "review-test-adequacy"
-      },
-      "progressNodeId": "unit-validation"
+      "cases": [
+        {
+          "when": {
+            "operator": "gt",
+            "left": {
+              "contextPath": "validate-cheap.issues_count"
+            },
+            "right": 0
+          },
+          "output": "repair-cheap-validation"
+        }
+      ]
     },
     {
       "id": "repair-cheap-validation",
@@ -696,7 +701,9 @@
         ]
       },
       "connections": {
-        "success": "route-cheap-repair-replan"
+        "success": "advance-evidence-iteration",
+        "approve-current-unit-closure": "approve-current-unit-closure",
+        "mark-verification-only-iteration": "mark-verification-only-iteration"
       },
       "progressNodeId": "unit-validation",
       "progressActiveLabel": "Repair validation · {{current_step_index}}/{{total_steps}} · i{{current_iteration}}",
@@ -704,6 +711,45 @@
         "summary": "Repair validation · {{current_step_index}}/{{total_steps}} · i{{current_iteration}}",
         "outcome": "Current responsibility in progress",
         "next": "Continue to architecture review, repair the verified defect, or replan an invalid criterion"
+      },
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "repair-cheap-validation.repair_outcome"
+            },
+            "right": "replan"
+          },
+          "output": "approve-current-unit-closure"
+        },
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "repair-cheap-validation.mutation_scope"
+            },
+            "right": "verification_only"
+          },
+          "output": "mark-verification-only-iteration"
+        }
+      ],
+      "connectionLabels": {
+        "approve-current-unit-closure": "upstream cause",
+        "mark-verification-only-iteration": {
+          "label": "verification-only repair",
+          "cycle": {
+            "cause": "Cheap validation found a defect whose repair changed only verification evidence while product behavior remained unchanged, so validation repeats on the unchanged product.",
+            "exit": "Every affected validation gate passes on the unchanged product."
+          }
+        },
+        "success": {
+          "label": "product repair",
+          "cycle": {
+            "cause": "A gate found a defect whose repair reaches product code, so the unit is re-implemented and re-validated.",
+            "exit": "Every gate passes without a product change."
+          }
+        }
       }
     },
     {
@@ -733,7 +779,9 @@
         ]
       },
       "connections": {
-        "success": "route-test-adequacy-replan"
+        "success": "route-current-verification-only",
+        "approve-current-unit-closure": "approve-current-unit-closure",
+        "repair-test-adequacy": "repair-test-adequacy"
       },
       "progressNodeId": "unit-validation",
       "progressActiveLabel": "Review tests · {{current_step_index}}/{{total_steps}} · i{{current_iteration}}",
@@ -741,23 +789,32 @@
         "summary": "Review tests · {{current_step_index}}/{{total_steps}} · i{{current_iteration}}",
         "outcome": "Current responsibility in progress",
         "next": "Continue to architecture review, repair the verified defect, or replan an invalid criterion"
-      }
-    },
-    {
-      "id": "route-test-adequacy",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "review-test-adequacy.review_outcome"
+      },
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "review-test-adequacy.review_outcome"
+            },
+            "right": "replan"
+          },
+          "output": "approve-current-unit-closure"
         },
-        "right": "repair"
-      },
-      "connections": {
-        "true": "repair-test-adequacy",
-        "false": "route-current-verification-only"
-      },
-      "progressNodeId": "unit-validation"
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "review-test-adequacy.review_outcome"
+            },
+            "right": "repair"
+          },
+          "output": "repair-test-adequacy"
+        }
+      ],
+      "connectionLabels": {
+        "approve-current-unit-closure": "upstream cause"
+      }
     },
     {
       "id": "repair-test-adequacy",
@@ -811,7 +868,9 @@
         ]
       },
       "connections": {
-        "success": "route-test-repair-outcome"
+        "success": "advance-evidence-iteration",
+        "approve-current-unit-closure": "approve-current-unit-closure",
+        "mark-verification-only-iteration": "mark-verification-only-iteration"
       },
       "progressNodeId": "unit-validation",
       "progressActiveLabel": "Repair tests · {{current_step_index}}/{{total_steps}} · i{{current_iteration}}",
@@ -819,6 +878,45 @@
         "summary": "Repair tests · {{current_step_index}}/{{total_steps}} · i{{current_iteration}}",
         "outcome": "Current responsibility in progress",
         "next": "Continue to architecture review, repair the verified defect, or replan an invalid criterion"
+      },
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "repair-test-adequacy.repair_outcome"
+            },
+            "right": "replan"
+          },
+          "output": "approve-current-unit-closure"
+        },
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "repair-test-adequacy.mutation_scope"
+            },
+            "right": "verification_only"
+          },
+          "output": "mark-verification-only-iteration"
+        }
+      ],
+      "connectionLabels": {
+        "approve-current-unit-closure": "upstream cause",
+        "mark-verification-only-iteration": {
+          "label": "verification-only repair",
+          "cycle": {
+            "cause": "Test-adequacy repair changed only verification evidence while product behavior remained unchanged, so validation repeats on the unchanged product.",
+            "exit": "Every affected validation gate passes on the unchanged product."
+          }
+        },
+        "success": {
+          "label": "product repair",
+          "cycle": {
+            "cause": "A gate found a defect whose repair reaches product code, so the unit is re-implemented and re-validated.",
+            "exit": "Every gate passes without a product change."
+          }
+        }
       }
     },
     {
@@ -848,7 +946,9 @@
         ]
       },
       "connections": {
-        "success": "route-architecture-replan"
+        "success": "mark-product-review-current",
+        "approve-current-unit-closure": "approve-current-unit-closure",
+        "repair-architecture": "repair-architecture"
       },
       "progressNodeId": "unit-validation",
       "progressActiveLabel": "{{current_step_index}}/{{total_steps}} i{{current_iteration}} · Arch review",
@@ -856,42 +956,32 @@
         "summary": "{{current_step_index}}/{{total_steps}} i{{current_iteration}} · Arch review",
         "outcome": "Current responsibility in progress",
         "next": "Continue through remaining review, repair, checkpoint policy, or final reconciliation"
-      }
-    },
-    {
-      "id": "route-architecture-replan",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "review-architecture.review_outcome"
+      },
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "review-architecture.review_outcome"
+            },
+            "right": "replan"
+          },
+          "output": "approve-current-unit-closure"
         },
-        "right": "replan"
-      },
-      "connections": {
-        "true": "approve-current-unit-closure",
-        "false": "route-architecture-review"
-      },
-      "progressNodeId": "unit-validation",
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "review-architecture.review_outcome"
+            },
+            "right": "repair"
+          },
+          "output": "repair-architecture"
+        }
+      ],
       "connectionLabels": {
-        "true": "upstream cause"
+        "approve-current-unit-closure": "upstream cause"
       }
-    },
-    {
-      "id": "route-architecture-review",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "review-architecture.review_outcome"
-        },
-        "right": "repair"
-      },
-      "connections": {
-        "true": "repair-architecture",
-        "false": "mark-product-review-current"
-      },
-      "progressNodeId": "unit-validation"
     },
     {
       "id": "repair-architecture",
@@ -945,7 +1035,9 @@
         ]
       },
       "connections": {
-        "success": "route-architecture-repair-outcome"
+        "success": "advance-evidence-iteration",
+        "approve-current-unit-closure": "approve-current-unit-closure",
+        "review-architecture": "review-architecture"
       },
       "progressNodeId": "unit-validation",
       "progressActiveLabel": "Repair architecture · {{current_step_index}}/{{total_steps}} · i{{current_iteration}}",
@@ -953,6 +1045,45 @@
         "summary": "Repair architecture · {{current_step_index}}/{{total_steps}} · i{{current_iteration}}",
         "outcome": "Current responsibility in progress",
         "next": "Continue through remaining review, repair, checkpoint policy, or final reconciliation"
+      },
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "repair-architecture.repair_outcome"
+            },
+            "right": "replan"
+          },
+          "output": "approve-current-unit-closure"
+        },
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "repair-architecture.mutation_scope"
+            },
+            "right": "gate_local"
+          },
+          "output": "review-architecture"
+        }
+      ],
+      "connectionLabels": {
+        "approve-current-unit-closure": "upstream cause",
+        "review-architecture": {
+          "label": "architecture review again",
+          "cycle": {
+            "cause": "The architecture repair stayed within the gate's reach, so the review is repeated.",
+            "exit": "The architecture review passes."
+          }
+        },
+        "success": {
+          "label": "product repair",
+          "cycle": {
+            "cause": "A gate found a defect whose repair reaches product code, so the unit is re-implemented and re-validated.",
+            "exit": "Every gate passes without a product change."
+          }
+        }
       }
     },
     {
@@ -980,7 +1111,8 @@
         ]
       },
       "connections": {
-        "success": "route-current-unit-closure"
+        "success": "notify-workflow-stopped",
+        "advance-plan-revision-for-replan": "advance-plan-revision-for-replan"
       },
       "progressNodeId": "replan",
       "progressActiveLabel": "Replan decision · r{{plan_revision}}",
@@ -988,25 +1120,21 @@
         "summary": "Decide whether the current unit may close for a material replan",
         "outcome": "Current responsibility in progress",
         "next": "Advance a valid plan revision; otherwise obtain explicit user authority to end the whole workflow or remain waiting"
-      }
-    },
-    {
-      "id": "route-current-unit-closure",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "approve-current-unit-closure.closure_decision"
-        },
-        "right": "approved"
       },
-      "connections": {
-        "true": "advance-plan-revision-for-replan",
-        "false": "notify-workflow-stopped"
-      },
-      "progressNodeId": "replan",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "approve-current-unit-closure.closure_decision"
+            },
+            "right": "approved"
+          },
+          "output": "advance-plan-revision-for-replan"
+        }
+      ],
       "connectionLabels": {
-        "false": "closure not approved"
+        "success": "closure not approved"
       }
     },
     {
@@ -1071,7 +1199,9 @@
         ]
       },
       "connections": {
-        "success": "route-runtime-external"
+        "success": "validate-expensive",
+        "wait-for-runtime-state-change": "wait-for-runtime-state-change",
+        "repair-runtime": "repair-runtime"
       },
       "progressNodeId": "unit-validation",
       "progressActiveLabel": "Runtime validation · {{current_step_index}}/{{total_steps}} · i{{current_iteration}}",
@@ -1079,41 +1209,31 @@
         "summary": "Runtime validation · {{current_step_index}}/{{total_steps}} · i{{current_iteration}}",
         "outcome": "Current responsibility in progress",
         "next": "Continue through remaining review, repair, checkpoint policy, or final reconciliation"
-      }
-    },
-    {
-      "id": "route-runtime-external",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "validate-runtime.validation_outcome"
+      },
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "validate-runtime.validation_outcome"
+            },
+            "right": "external_blocker"
+          },
+          "output": "wait-for-runtime-state-change"
         },
-        "right": "external_blocker"
-      },
-      "connections": {
-        "true": "wait-for-runtime-state-change",
-        "false": "route-runtime-repository"
-      },
-      "progressNodeId": "unit-validation"
-    },
-    {
-      "id": "route-runtime-repository",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "validate-runtime.validation_outcome"
-        },
-        "right": "repository_failure"
-      },
-      "connections": {
-        "true": "repair-runtime",
-        "false": "validate-expensive"
-      },
-      "progressNodeId": "unit-validation",
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "validate-runtime.validation_outcome"
+            },
+            "right": "repository_failure"
+          },
+          "output": "repair-runtime"
+        }
+      ],
       "connectionLabels": {
-        "false": "all gates green"
+        "success": "all gates green"
       }
     },
     {
@@ -1168,7 +1288,9 @@
         ]
       },
       "connections": {
-        "success": "route-runtime-repair-replan"
+        "success": "advance-evidence-iteration",
+        "approve-current-unit-closure": "approve-current-unit-closure",
+        "mark-verification-only-iteration": "mark-verification-only-iteration"
       },
       "progressNodeId": "unit-validation",
       "progressActiveLabel": "Repair runtime · {{current_step_index}}/{{total_steps}} · i{{current_iteration}}",
@@ -1176,6 +1298,45 @@
         "summary": "Repair runtime · {{current_step_index}}/{{total_steps}} · i{{current_iteration}}",
         "outcome": "Current responsibility in progress",
         "next": "Continue through remaining review, repair, checkpoint policy, or final reconciliation"
+      },
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "repair-runtime.repair_outcome"
+            },
+            "right": "replan"
+          },
+          "output": "approve-current-unit-closure"
+        },
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "repair-runtime.mutation_scope"
+            },
+            "right": "verification_only"
+          },
+          "output": "mark-verification-only-iteration"
+        }
+      ],
+      "connectionLabels": {
+        "approve-current-unit-closure": "upstream cause",
+        "mark-verification-only-iteration": {
+          "label": "verification-only repair",
+          "cycle": {
+            "cause": "Runtime repair changed only verification evidence while product behavior remained unchanged, so validation repeats on the unchanged product.",
+            "exit": "Every affected validation gate passes on the unchanged product."
+          }
+        },
+        "success": {
+          "label": "product repair",
+          "cycle": {
+            "cause": "A gate found a defect whose repair reaches product code, so the unit is re-implemented and re-validated.",
+            "exit": "Every gate passes without a product change."
+          }
+        }
       }
     },
     {
@@ -1203,7 +1364,8 @@
         ]
       },
       "connections": {
-        "success": "route-runtime-retry"
+        "success": "notify-workflow-stopped",
+        "validate-runtime": "validate-runtime"
       },
       "progressNodeId": "unit-validation",
       "progressActiveLabel": "Runtime blocker · {{current_step_index}}/{{total_steps}}",
@@ -1211,32 +1373,28 @@
         "summary": "Resolve the runtime-validation external blocker",
         "outcome": "Current responsibility in progress",
         "next": "Retry only after changed state; otherwise obtain explicit user authority to end the whole workflow or remain waiting"
-      }
-    },
-    {
-      "id": "route-runtime-retry",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "wait-for-runtime-state-change.blocker_decision"
-        },
-        "right": "retry"
       },
-      "connections": {
-        "true": "validate-runtime",
-        "false": "notify-workflow-stopped"
-      },
-      "progressNodeId": "unit-validation",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "wait-for-runtime-state-change.blocker_decision"
+            },
+            "right": "retry"
+          },
+          "output": "validate-runtime"
+        }
+      ],
       "connectionLabels": {
-        "true": {
+        "validate-runtime": {
           "label": "retry runtime validation",
           "cycle": {
-            "cause": "Runtime validation failed on something the repair can fix inside the gate.",
-            "exit": "Runtime validation passes, or the repair escalates."
+            "cause": "The external state that blocked runtime validation changed, so runtime validation can be retried.",
+            "exit": "Runtime validation passes, exposes a repository-owned cause, or the workflow is explicitly stopped."
           }
         },
-        "false": "external blocker did not clear"
+        "success": "external blocker did not clear"
       }
     },
     {
@@ -1266,7 +1424,9 @@
         ]
       },
       "connections": {
-        "success": "route-expensive-external"
+        "success": "update-unit-documentation",
+        "wait-for-expensive-state-change": "wait-for-expensive-state-change",
+        "repair-expensive": "repair-expensive"
       },
       "progressNodeId": "broad-validation",
       "progressActiveLabel": "Broad validation · {{current_step_index}}/{{total_steps}} · i{{current_iteration}}",
@@ -1274,39 +1434,29 @@
         "summary": "Broad validation · {{current_step_index}}/{{total_steps}} · i{{current_iteration}}",
         "outcome": "Current responsibility in progress",
         "next": "Continue through remaining review, repair, checkpoint policy, or final reconciliation"
-      }
-    },
-    {
-      "id": "route-expensive-external",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "validate-expensive.validation_outcome"
+      },
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "validate-expensive.validation_outcome"
+            },
+            "right": "external_blocker"
+          },
+          "output": "wait-for-expensive-state-change"
         },
-        "right": "external_blocker"
-      },
-      "connections": {
-        "true": "wait-for-expensive-state-change",
-        "false": "route-expensive-repository"
-      },
-      "progressNodeId": "broad-validation"
-    },
-    {
-      "id": "route-expensive-repository",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "validate-expensive.validation_outcome"
-        },
-        "right": "repository_failure"
-      },
-      "connections": {
-        "true": "repair-expensive",
-        "false": "update-unit-documentation"
-      },
-      "progressNodeId": "broad-validation"
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "validate-expensive.validation_outcome"
+            },
+            "right": "repository_failure"
+          },
+          "output": "repair-expensive"
+        }
+      ]
     },
     {
       "id": "update-unit-documentation",
@@ -1335,7 +1485,9 @@
         ]
       },
       "connections": {
-        "success": "route-unit-documentation-replan"
+        "success": "review-unit-completeness",
+        "approve-current-unit-closure": "approve-current-unit-closure",
+        "advance-evidence-iteration": "advance-evidence-iteration"
       },
       "progressNodeId": "broad-validation",
       "progressActiveLabel": "Documentation · {{current_step_index}}/{{total_steps}} · i{{current_iteration}}",
@@ -1343,51 +1495,39 @@
         "summary": "Update permanent documentation after validation convergence",
         "outcome": "Current responsibility in progress",
         "next": "Continue to completeness review, refresh product evidence, or replan"
-      }
-    },
-    {
-      "id": "route-unit-documentation-replan",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "update-unit-documentation.documentation_outcome"
+      },
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "update-unit-documentation.documentation_outcome"
+            },
+            "right": "replan"
+          },
+          "output": "approve-current-unit-closure"
         },
-        "right": "replan"
-      },
-      "connections": {
-        "true": "approve-current-unit-closure",
-        "false": "route-unit-documentation-product-repair"
-      },
-      "progressNodeId": "broad-validation",
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "update-unit-documentation.documentation_outcome"
+            },
+            "right": "product_repair"
+          },
+          "output": "advance-evidence-iteration"
+        }
+      ],
       "connectionLabels": {
-        "true": "upstream cause"
-      }
-    },
-    {
-      "id": "route-unit-documentation-product-repair",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "update-unit-documentation.documentation_outcome"
-        },
-        "right": "product_repair"
-      },
-      "connections": {
-        "true": "advance-evidence-iteration",
-        "false": "review-unit-completeness"
-      },
-      "progressNodeId": "broad-validation",
-      "connectionLabels": {
-        "true": {
+        "approve-current-unit-closure": "upstream cause",
+        "advance-evidence-iteration": {
           "label": "documentation exposed a product defect",
           "cycle": {
             "cause": "Writing the documentation revealed behavior that must change before the docs can be true.",
             "exit": "Documentation describes the current behavior truthfully."
           }
         },
-        "false": "evidence and docs current"
+        "success": "evidence and docs current"
       }
     },
     {
@@ -1442,7 +1582,9 @@
         ]
       },
       "connections": {
-        "success": "route-expensive-repair-replan"
+        "success": "advance-evidence-iteration",
+        "approve-current-unit-closure": "approve-current-unit-closure",
+        "mark-verification-only-iteration": "mark-verification-only-iteration"
       },
       "progressNodeId": "broad-validation",
       "progressActiveLabel": "Repair broad checks · {{current_step_index}}/{{total_steps}} · i{{current_iteration}}",
@@ -1450,6 +1592,45 @@
         "summary": "Repair broad checks · {{current_step_index}}/{{total_steps}} · i{{current_iteration}}",
         "outcome": "Current responsibility in progress",
         "next": "Continue through remaining review, repair, checkpoint policy, or final reconciliation"
+      },
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "repair-expensive.repair_outcome"
+            },
+            "right": "replan"
+          },
+          "output": "approve-current-unit-closure"
+        },
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "repair-expensive.mutation_scope"
+            },
+            "right": "verification_only"
+          },
+          "output": "mark-verification-only-iteration"
+        }
+      ],
+      "connectionLabels": {
+        "approve-current-unit-closure": "upstream cause",
+        "mark-verification-only-iteration": {
+          "label": "verification-only repair",
+          "cycle": {
+            "cause": "Broad-validation repair changed only verification evidence while product behavior remained unchanged, so validation repeats on the unchanged product.",
+            "exit": "Every affected validation gate passes on the unchanged product."
+          }
+        },
+        "success": {
+          "label": "product repair",
+          "cycle": {
+            "cause": "Broad validation found a defect whose repair reaches product behavior, so the unit is completed and validated again.",
+            "exit": "Every affected gate passes on the repaired product."
+          }
+        }
       }
     },
     {
@@ -1477,7 +1658,8 @@
         ]
       },
       "connections": {
-        "success": "route-expensive-retry"
+        "success": "notify-workflow-stopped",
+        "validate-expensive": "validate-expensive"
       },
       "progressNodeId": "broad-validation",
       "progressActiveLabel": "Validation blocker · {{current_step_index}}/{{total_steps}}",
@@ -1485,32 +1667,28 @@
         "summary": "Resolve the broad-validation external blocker",
         "outcome": "Current responsibility in progress",
         "next": "Retry only after changed state; otherwise obtain explicit user authority to end the whole workflow or remain waiting"
-      }
-    },
-    {
-      "id": "route-expensive-retry",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "wait-for-expensive-state-change.blocker_decision"
-        },
-        "right": "retry"
       },
-      "connections": {
-        "true": "validate-expensive",
-        "false": "notify-workflow-stopped"
-      },
-      "progressNodeId": "broad-validation",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "wait-for-expensive-state-change.blocker_decision"
+            },
+            "right": "retry"
+          },
+          "output": "validate-expensive"
+        }
+      ],
       "connectionLabels": {
-        "true": {
+        "validate-expensive": {
           "label": "retry expensive validation",
           "cycle": {
-            "cause": "Expensive validation failed and the repair stayed local to the gate.",
-            "exit": "Expensive validation passes."
+            "cause": "The external state that blocked expensive validation changed, so expensive validation can be retried.",
+            "exit": "Expensive validation passes, exposes a repository-owned cause, or the workflow is explicitly stopped."
           }
         },
-        "false": "external blocker did not clear"
+        "success": "external blocker did not clear"
       }
     },
     {
@@ -1562,7 +1740,8 @@
         ]
       },
       "connections": {
-        "success": "route-plan-unit-user-review"
+        "success": "route-checkpoint-authority",
+        "repair-user-feedback": "repair-user-feedback"
       },
       "progressNodeId": "user-review",
       "progressActiveLabel": "Unit review · {{current_step_index}}/{{total_steps}}",
@@ -1570,25 +1749,21 @@
         "summary": "Obtain the unit acceptance required by the reviewed plan",
         "outcome": "Current responsibility in progress",
         "next": "Checkpoint or continue after acceptance, otherwise repair or replan"
-      }
-    },
-    {
-      "id": "route-plan-unit-user-review",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "review-plan-unit-with-user.acceptance_decision"
-        },
-        "right": "rejected"
       },
-      "connections": {
-        "true": "repair-user-feedback",
-        "false": "route-checkpoint-authority"
-      },
-      "progressNodeId": "user-review",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "review-plan-unit-with-user.acceptance_decision"
+            },
+            "right": "rejected"
+          },
+          "output": "repair-user-feedback"
+        }
+      ],
       "connectionLabels": {
-        "false": "accepted, or autonomous"
+        "success": "accepted, or autonomous"
       }
     },
     {
@@ -1616,7 +1791,8 @@
         ]
       },
       "connections": {
-        "success": "route-user-feedback-resolution"
+        "success": "advance-evidence-iteration",
+        "replan": "advance-plan-revision-for-replan"
       },
       "progressNodeId": "user-review",
       "progressActiveLabel": "{{current_step_index}}/{{total_steps}} i{{current_iteration}} · Feedback fix",
@@ -1624,39 +1800,50 @@
         "summary": "{{current_step_index}}/{{total_steps}} i{{current_iteration}} · Feedback fix",
         "outcome": "Current responsibility in progress",
         "next": "Continue to checks, repair current implementation, or replan before unsafe work"
+      },
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "repair-user-feedback.resolution"
+            },
+            "right": "replan"
+          },
+          "output": "replan"
+        }
+      ],
+      "connectionLabels": {
+        "replan": "feedback invalidates the plan",
+        "success": {
+          "label": "user feedback needs repair",
+          "cycle": {
+            "cause": "The user asked for changes to the unit.",
+            "exit": "The user accepts the unit."
+          }
+        }
       }
     },
     {
       "id": "route-vcs-authority",
       "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "vcs_commits_authorized"
-        },
-        "right": true
-      },
+      "progressNodeId": "finalize",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "vcs_commits_authorized"
+            },
+            "right": true
+          },
+          "output": "true"
+        }
+      ],
       "connections": {
         "true": "finalize-feature",
-        "false": "notify-workflow-complete"
-      },
-      "progressNodeId": "finalize"
-    },
-    {
-      "id": "route-finalization-success",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "finalize-feature.finalization_outcome"
-        },
-        "right": "pass"
-      },
-      "connections": {
-        "true": "notify-workflow-complete",
-        "false": "route-finalization-repository"
-      },
-      "progressNodeId": "finalize"
+        "default": "notify-workflow-complete"
+      }
     },
     {
       "id": "resolve-finalization-blocker",
@@ -1684,7 +1871,9 @@
         ]
       },
       "connections": {
-        "success": "route-finalization-retry"
+        "success": "notify-workflow-stopped",
+        "finalize-feature": "finalize-feature",
+        "notify-workflow-finished-without-finalization": "notify-workflow-finished-without-finalization"
       },
       "progressNodeId": "finalize",
       "progressActiveLabel": "Finalization blocker",
@@ -1692,69 +1881,62 @@
         "summary": "Resolve the concrete external finalization blocker",
         "outcome": "Current responsibility in progress",
         "next": "Retry only after changed state; otherwise obtain explicit user authority for partial closure or termination, or remain waiting"
-      }
-    },
-    {
-      "id": "route-finalization-retry",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "resolve-finalization-blocker.blocker_decision"
+      },
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "resolve-finalization-blocker.blocker_decision"
+            },
+            "right": "retry"
+          },
+          "output": "finalize-feature"
         },
-        "right": "retry"
-      },
-      "connections": {
-        "true": "finalize-feature",
-        "false": "route-finalization-skip"
-      },
-      "progressNodeId": "finalize",
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "resolve-finalization-blocker.blocker_decision"
+            },
+            "right": "finish_without_finalization"
+          },
+          "output": "notify-workflow-finished-without-finalization"
+        }
+      ],
       "connectionLabels": {
-        "true": {
+        "finalize-feature": {
           "label": "retry finalization",
           "cycle": {
             "cause": "Finalization failed on something retryable.",
             "exit": "Finalization completes."
           }
-        }
-      }
-    },
-    {
-      "id": "route-finalization-skip",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "resolve-finalization-blocker.blocker_decision"
         },
-        "right": "finish_without_finalization"
-      },
-      "connections": {
-        "true": "notify-workflow-finished-without-finalization",
-        "false": "notify-workflow-stopped"
-      },
-      "progressNodeId": "finalize",
-      "connectionLabels": {
-        "false": "finalization could not complete"
+        "success": "finalization could not complete"
       }
     },
     {
       "id": "route-plan-complete",
       "type": "condition",
-      "condition": {
-        "operator": "gte",
-        "left": {
-          "contextPath": "current_step_index"
-        },
-        "right": {
-          "contextPath": "total_steps"
+      "progressNodeId": "checkpoint",
+      "cases": [
+        {
+          "when": {
+            "operator": "gte",
+            "left": {
+              "contextPath": "current_step_index"
+            },
+            "right": {
+              "contextPath": "total_steps"
+            }
+          },
+          "output": "true"
         }
-      },
+      ],
       "connections": {
         "true": "validate-feature-wide",
-        "false": "advance-plan-unit"
+        "default": "advance-plan-unit"
       },
-      "progressNodeId": "checkpoint",
       "connectionLabels": {
         "true": "last unit closed"
       }
@@ -1809,7 +1991,9 @@
         ]
       },
       "connections": {
-        "success": "route-feature-external"
+        "success": "review-final-semantics",
+        "wait-for-feature-state-change": "wait-for-feature-state-change",
+        "repair-feature-validation": "repair-feature-validation"
       },
       "progressNodeId": "feature-validation",
       "progressActiveLabel": "Feature validation",
@@ -1817,41 +2001,31 @@
         "summary": "Feature validation",
         "outcome": "Current responsibility in progress",
         "next": "Complete locally, obtain a required decision, repair current evidence, replan, or stop"
-      }
-    },
-    {
-      "id": "route-feature-external",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "validate-feature-wide.validation_outcome"
+      },
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "validate-feature-wide.validation_outcome"
+            },
+            "right": "external_blocker"
+          },
+          "output": "wait-for-feature-state-change"
         },
-        "right": "external_blocker"
-      },
-      "connections": {
-        "true": "wait-for-feature-state-change",
-        "false": "route-feature-repository"
-      },
-      "progressNodeId": "feature-validation"
-    },
-    {
-      "id": "route-feature-repository",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "validate-feature-wide.validation_outcome"
-        },
-        "right": "repository_failure"
-      },
-      "connections": {
-        "true": "repair-feature-validation",
-        "false": "review-final-semantics"
-      },
-      "progressNodeId": "feature-validation",
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "validate-feature-wide.validation_outcome"
+            },
+            "right": "repository_failure"
+          },
+          "output": "repair-feature-validation"
+        }
+      ],
       "connectionLabels": {
-        "false": "feature evidence green"
+        "success": "feature evidence green"
       }
     },
     {
@@ -1880,7 +2054,8 @@
         ]
       },
       "connections": {
-        "success": "route-feature-repair-replan"
+        "success": "validate-feature-wide",
+        "advance-plan-revision-for-replan": "advance-plan-revision-for-replan"
       },
       "progressNodeId": "feature-validation",
       "progressActiveLabel": "Repair feature validation",
@@ -1888,6 +2063,28 @@
         "summary": "Repair feature validation",
         "outcome": "Current responsibility in progress",
         "next": "Complete locally, obtain a required decision, repair current evidence, replan, or stop"
+      },
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "repair-feature-validation.repair_outcome"
+            },
+            "right": "replan"
+          },
+          "output": "advance-plan-revision-for-replan"
+        }
+      ],
+      "connectionLabels": {
+        "advance-plan-revision-for-replan": "repository failure needs a plan change",
+        "success": {
+          "label": "repaired, validate again",
+          "cycle": {
+            "cause": "A feature-wide repair did not need a replan, so validation runs again.",
+            "exit": "Feature-wide validation passes."
+          }
+        }
       }
     },
     {
@@ -1915,7 +2112,8 @@
         ]
       },
       "connections": {
-        "success": "route-feature-retry"
+        "success": "notify-workflow-stopped",
+        "validate-feature-wide": "validate-feature-wide"
       },
       "progressNodeId": "feature-validation",
       "progressActiveLabel": "Feature blocker",
@@ -1923,32 +2121,28 @@
         "summary": "Resolve the feature-validation external blocker",
         "outcome": "Current responsibility in progress",
         "next": "Retry only after changed state; otherwise obtain explicit user authority to end the whole workflow or remain waiting"
-      }
-    },
-    {
-      "id": "route-feature-retry",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "wait-for-feature-state-change.blocker_decision"
-        },
-        "right": "retry"
       },
-      "connections": {
-        "true": "validate-feature-wide",
-        "false": "notify-workflow-stopped"
-      },
-      "progressNodeId": "feature-validation",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "wait-for-feature-state-change.blocker_decision"
+            },
+            "right": "retry"
+          },
+          "output": "validate-feature-wide"
+        }
+      ],
       "connectionLabels": {
-        "true": {
+        "validate-feature-wide": {
           "label": "retry feature-wide validation",
           "cycle": {
-            "cause": "Feature-wide validation failed and the repair stayed local.",
-            "exit": "Feature-wide validation passes."
+            "cause": "The external state that blocked feature-wide validation changed, so feature-wide validation can be retried.",
+            "exit": "Feature-wide validation passes, exposes a repository-owned cause, or the workflow is explicitly stopped."
           }
         },
-        "false": "external blocker did not clear"
+        "success": "external blocker did not clear"
       }
     },
     {
@@ -2010,7 +2204,9 @@
         ]
       },
       "connections": {
-        "success": "route-final-review-replan"
+        "success": "create-final-report",
+        "advance-plan-revision-for-replan": "advance-plan-revision-for-replan",
+        "repair-final-semantics": "repair-final-semantics"
       },
       "progressNodeId": "final-review",
       "progressActiveLabel": "Independent final review",
@@ -2018,23 +2214,32 @@
         "summary": "Independent final review",
         "outcome": "Current responsibility in progress",
         "next": "Complete locally, obtain a required decision, repair current evidence, replan, or stop"
-      }
-    },
-    {
-      "id": "route-final-semantic-review",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "review-final-semantics.review_outcome"
+      },
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "review-final-semantics.review_outcome"
+            },
+            "right": "replan"
+          },
+          "output": "advance-plan-revision-for-replan"
         },
-        "right": "repair"
-      },
-      "connections": {
-        "true": "repair-final-semantics",
-        "false": "create-final-report"
-      },
-      "progressNodeId": "final-review"
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "review-final-semantics.review_outcome"
+            },
+            "right": "repair"
+          },
+          "output": "repair-final-semantics"
+        }
+      ],
+      "connectionLabels": {
+        "advance-plan-revision-for-replan": "executable or upstream defect found"
+      }
     },
     {
       "id": "repair-final-semantics",
@@ -2109,7 +2314,8 @@
         ]
       },
       "connections": {
-        "success": "route-final-repair-replan"
+        "success": "validate-feature-wide",
+        "advance-plan-revision-for-replan": "advance-plan-revision-for-replan"
       },
       "progressNodeId": "final-review",
       "progressActiveLabel": "Repair final evidence",
@@ -2117,6 +2323,28 @@
         "summary": "Repair final evidence",
         "outcome": "Current responsibility in progress",
         "next": "Complete locally, obtain a required decision, repair current evidence, replan, or stop"
+      },
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "repair-final-semantics.repair_outcome"
+            },
+            "right": "replan"
+          },
+          "output": "advance-plan-revision-for-replan"
+        }
+      ],
+      "connectionLabels": {
+        "advance-plan-revision-for-replan": "executable or upstream defect found",
+        "success": {
+          "label": "gate-local repair",
+          "cycle": {
+            "cause": "The final review found a non-executable correction, so feature validation is re-established after it.",
+            "exit": "A final review with zero gaps."
+          }
+        }
       }
     },
     {
@@ -2168,7 +2396,8 @@
         ]
       },
       "connections": {
-        "success": "route-feature-acceptance"
+        "success": "advance-plan-revision-after-feedback",
+        "route-vcs-authority": "route-vcs-authority"
       },
       "progressNodeId": "final-review",
       "progressActiveLabel": "Final result review",
@@ -2176,25 +2405,21 @@
         "summary": "Obtain interactive acceptance of the complete factual result",
         "outcome": "Current responsibility in progress",
         "next": "Finalize after acceptance, or create a reviewed repair plan"
-      }
-    },
-    {
-      "id": "route-feature-acceptance",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "report-and-accept-feature.feature_decision"
-        },
-        "right": "accepted"
       },
-      "connections": {
-        "true": "route-vcs-authority",
-        "false": "advance-plan-revision-after-feedback"
-      },
-      "progressNodeId": "final-review",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "report-and-accept-feature.feature_decision"
+            },
+            "right": "accepted"
+          },
+          "output": "route-vcs-authority"
+        }
+      ],
       "connectionLabels": {
-        "true": "accepted, or autonomous"
+        "route-vcs-authority": "accepted, or autonomous"
       }
     },
     {
@@ -2241,32 +2466,6 @@
       "progressNodeId": "stopped"
     },
     {
-      "id": "route-user-feedback-resolution",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "repair-user-feedback.resolution"
-        },
-        "right": "replan"
-      },
-      "connections": {
-        "true": "advance-plan-revision-for-replan",
-        "false": "advance-evidence-iteration"
-      },
-      "progressNodeId": "user-review",
-      "connectionLabels": {
-        "true": "feedback invalidates the plan",
-        "false": {
-          "label": "user feedback needs repair",
-          "cycle": {
-            "cause": "The user asked for changes to the unit.",
-            "exit": "The user accepts the unit."
-          }
-        }
-      }
-    },
-    {
       "id": "finalize-feature",
       "type": "agent-directive",
       "directive": "Within the already authorized project-native commit boundary, reconcile only remaining task-owned changes created after or deliberately excluded from the last unit checkpoint. Read `vcs-baseline.md`, the accepted result and actual diff. Preserve checkpoint history and unrelated work; do not stash, reset, clean, squash, amend, rebase, rewrite history, push or publish.\n\nCreate a final commit when required or verify a true no-op. Replace `finalization.md` with the semantic remaining scope, actual outcome, material limitation or blocker, and real revision identifier when one was created. Do not copy status, diff, log, command output, changed-file inventory, totals, timings or hashes. Return `finalization_outcome=pass|repository_failure|external_blocker` and the current `progress_finalize_outcome`.\n",
@@ -2292,7 +2491,9 @@
         ]
       },
       "connections": {
-        "success": "route-finalization-success"
+        "success": "resolve-finalization-blocker",
+        "notify-workflow-complete": "notify-workflow-complete",
+        "repair-finalization-repository": "repair-finalization-repository"
       },
       "progressNodeId": "finalize",
       "progressActiveLabel": "Finalize repository",
@@ -2300,23 +2501,29 @@
         "summary": "Reconcile the accepted result within existing local VCS authority",
         "outcome": "Current responsibility in progress",
         "next": "Complete on success, or resolve only the concrete finalization blocker"
-      }
-    },
-    {
-      "id": "route-finalization-repository",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "finalize-feature.finalization_outcome"
+      },
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "finalize-feature.finalization_outcome"
+            },
+            "right": "pass"
+          },
+          "output": "notify-workflow-complete"
         },
-        "right": "repository_failure"
-      },
-      "connections": {
-        "true": "repair-finalization-repository",
-        "false": "resolve-finalization-blocker"
-      },
-      "progressNodeId": "finalize"
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "finalize-feature.finalization_outcome"
+            },
+            "right": "repository_failure"
+          },
+          "output": "repair-finalization-repository"
+        }
+      ]
     },
     {
       "id": "repair-finalization-repository",
@@ -2344,7 +2551,8 @@
         ]
       },
       "connections": {
-        "success": "route-finalization-repair-replan"
+        "success": "finalize-feature",
+        "advance-plan-revision-for-replan": "advance-plan-revision-for-replan"
       },
       "progressNodeId": "finalize",
       "progressActiveLabel": "Repair finalization",
@@ -2352,23 +2560,56 @@
         "summary": "Repair finalization",
         "outcome": "Current responsibility in progress",
         "next": "Complete locally, obtain a required decision, repair current evidence, replan, or stop"
+      },
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "repair-finalization-repository.repair_outcome"
+            },
+            "right": "replan"
+          },
+          "output": "advance-plan-revision-for-replan"
+        }
+      ],
+      "connectionLabels": {
+        "advance-plan-revision-for-replan": {
+          "label": "finalization found an upstream cause",
+          "cycle": {
+            "cause": "Finalization exposed a defect whose cause lies upstream, so the plan is revised.",
+            "exit": "The revised plan is reviewed, activated, and finalization succeeds."
+          }
+        },
+        "success": {
+          "label": "repaired, finalize again",
+          "cycle": {
+            "cause": "A finalization repair stayed local, so finalization is repeated.",
+            "exit": "Finalization completes."
+          }
+        }
       }
     },
     {
       "id": "route-checkpoint-authority",
       "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "vcs_commits_authorized"
-        },
-        "right": true
-      },
+      "progressNodeId": "checkpoint",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "vcs_commits_authorized"
+            },
+            "right": true
+          },
+          "output": "true"
+        }
+      ],
       "connections": {
         "true": "checkpoint-plan-unit",
-        "false": "route-plan-complete"
-      },
-      "progressNodeId": "checkpoint"
+        "default": "route-plan-complete"
+      }
     },
     {
       "id": "checkpoint-plan-unit",
@@ -2400,18 +2641,23 @@
     {
       "id": "route-operating-mode-requirements",
       "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "operating_mode"
-        },
-        "right": "autonomous"
-      },
+      "progressNodeId": "intake",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "operating_mode"
+            },
+            "right": "autonomous"
+          },
+          "output": "true"
+        }
+      ],
       "connections": {
         "true": "assess-project-health",
-        "false": "confirm-requirements"
+        "default": "confirm-requirements"
       },
-      "progressNodeId": "intake",
       "connectionLabels": {
         "true": "requirements confirmed, or autonomous"
       }
@@ -2445,7 +2691,9 @@
         ]
       },
       "connections": {
-        "success": "route-completeness-review-replan"
+        "success": "route-unit-html-report",
+        "approve-current-unit-closure": "approve-current-unit-closure",
+        "repair-unit-completeness": "repair-unit-completeness"
       },
       "progressNodeId": "completeness",
       "progressActiveLabel": "Independent review · {{current_step_index}}/{{total_steps}} · i{{current_iteration}}",
@@ -2453,25 +2701,32 @@
         "summary": "Independent review · {{current_step_index}}/{{total_steps}} · i{{current_iteration}}",
         "outcome": "Current responsibility in progress",
         "next": "Continue through remaining review, repair, checkpoint policy, or final reconciliation"
-      }
-    },
-    {
-      "id": "route-unit-completeness",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "review-unit-completeness.review_outcome"
+      },
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "review-unit-completeness.review_outcome"
+            },
+            "right": "replan"
+          },
+          "output": "approve-current-unit-closure"
         },
-        "right": "repair"
-      },
-      "connections": {
-        "true": "repair-unit-completeness",
-        "false": "route-unit-html-report"
-      },
-      "progressNodeId": "completeness",
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "review-unit-completeness.review_outcome"
+            },
+            "right": "repair"
+          },
+          "output": "repair-unit-completeness"
+        }
+      ],
       "connectionLabels": {
-        "false": "zero findings"
+        "success": "zero findings",
+        "approve-current-unit-closure": "upstream cause"
       }
     },
     {
@@ -2527,7 +2782,10 @@
         ]
       },
       "connections": {
-        "success": "route-completeness-repair-outcome"
+        "success": "advance-evidence-iteration",
+        "approve-current-unit-closure": "approve-current-unit-closure",
+        "mark-current-evidence-iteration": "mark-current-evidence-iteration",
+        "mark-verification-only-iteration": "mark-verification-only-iteration"
       },
       "progressNodeId": "completeness",
       "progressActiveLabel": "Repair completeness · {{current_step_index}}/{{total_steps}} · i{{current_iteration}}",
@@ -2535,6 +2793,62 @@
         "summary": "Repair completeness · {{current_step_index}}/{{total_steps}} · i{{current_iteration}}",
         "outcome": "Current responsibility in progress",
         "next": "Continue through remaining review, repair, checkpoint policy, or final reconciliation"
+      },
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "repair-unit-completeness.repair_outcome"
+            },
+            "right": "replan"
+          },
+          "output": "approve-current-unit-closure"
+        },
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "repair-unit-completeness.mutation_scope"
+            },
+            "right": "gate_local"
+          },
+          "output": "mark-current-evidence-iteration"
+        },
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "repair-unit-completeness.mutation_scope"
+            },
+            "right": "verification_only"
+          },
+          "output": "mark-verification-only-iteration"
+        }
+      ],
+      "connectionLabels": {
+        "approve-current-unit-closure": "upstream cause",
+        "mark-current-evidence-iteration": {
+          "label": "gate-local repair",
+          "cycle": {
+            "cause": "Completeness review found a non-executable documentation, link, or evidence-projection defect repaired within the gate.",
+            "exit": "Completeness review reports zero findings."
+          }
+        },
+        "mark-verification-only-iteration": {
+          "label": "verification-only repair",
+          "cycle": {
+            "cause": "Completeness repair changed only verification evidence while product behavior remained unchanged, so validation repeats on the unchanged product.",
+            "exit": "Completeness review reports zero findings after affected validation passes."
+          }
+        },
+        "success": {
+          "label": "product defect found",
+          "cycle": {
+            "cause": "The completeness review found a defect that only a product change can resolve.",
+            "exit": "A completeness review with zero findings."
+          }
+        }
       }
     },
     {
@@ -2615,102 +2929,6 @@
           "cycle": {
             "cause": "New facts, missed scope, or an upstream defect invalidated the remaining plan.",
             "exit": "The revised plan passes review and is activated."
-          }
-        }
-      }
-    },
-    {
-      "id": "route-test-adequacy-reach",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "repair-test-adequacy.mutation_scope"
-        },
-        "right": "verification_only"
-      },
-      "connections": {
-        "true": "mark-verification-only-iteration",
-        "false": "advance-evidence-iteration"
-      },
-      "progressNodeId": "unit-validation",
-      "connectionLabels": {
-        "true": {
-          "label": "product repair",
-          "cycle": {
-            "cause": "A gate found a defect whose repair reaches product code, so the unit is re-implemented and re-validated.",
-            "exit": "Every gate passes without a product change."
-          }
-        },
-        "false": {
-          "label": "product repair",
-          "cycle": {
-            "cause": "A gate found a defect whose repair reaches product code, so the unit is re-implemented and re-validated.",
-            "exit": "Every gate passes without a product change."
-          }
-        }
-      }
-    },
-    {
-      "id": "route-architecture-reach",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "repair-architecture.mutation_scope"
-        },
-        "right": "gate_local"
-      },
-      "connections": {
-        "true": "review-architecture",
-        "false": "advance-evidence-iteration"
-      },
-      "progressNodeId": "unit-validation",
-      "connectionLabels": {
-        "true": {
-          "label": "architecture review again",
-          "cycle": {
-            "cause": "The architecture repair stayed within the gate's reach, so the review is repeated.",
-            "exit": "The architecture review passes."
-          }
-        },
-        "false": {
-          "label": "product repair",
-          "cycle": {
-            "cause": "A gate found a defect whose repair reaches product code, so the unit is re-implemented and re-validated.",
-            "exit": "Every gate passes without a product change."
-          }
-        }
-      }
-    },
-    {
-      "id": "route-unit-completeness-reach",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "repair-unit-completeness.mutation_scope"
-        },
-        "right": "verification_only"
-      },
-      "connections": {
-        "true": "mark-verification-only-iteration",
-        "false": "advance-evidence-iteration"
-      },
-      "progressNodeId": "completeness",
-      "connectionLabels": {
-        "true": {
-          "label": "product defect found",
-          "cycle": {
-            "cause": "The completeness review found a defect that only a product change can resolve.",
-            "exit": "A completeness review with zero findings."
-          }
-        },
-        "false": {
-          "label": "product defect found",
-          "cycle": {
-            "cause": "The completeness review found a defect that only a product change can resolve.",
-            "exit": "A completeness review with zero findings."
           }
         }
       }
@@ -2813,442 +3031,26 @@
       }
     },
     {
-      "id": "route-plan-review-replan",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "review-plan.review_outcome"
-        },
-        "right": "replan"
-      },
-      "connections": {
-        "true": "advance-plan-revision-for-replan",
-        "false": "route-plan-review"
-      },
-      "progressNodeId": "plan",
-      "connectionLabels": {
-        "true": "plan itself is wrong"
-      }
-    },
-    {
-      "id": "route-plan-repair-outcome",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "repair-plan.repair_outcome"
-        },
-        "right": "replan"
-      },
-      "connections": {
-        "true": "advance-plan-revision-for-replan",
-        "false": "review-plan"
-      },
-      "progressNodeId": "plan",
-      "connectionLabels": {
-        "true": "plan itself is wrong",
-        "false": {
-          "label": "review found issues",
-          "cycle": {
-            "cause": "The independent reviewer recorded blocking findings, so the plan is repaired and reviewed again.",
-            "exit": "A review with zero blocking findings."
-          }
-        }
-      }
-    },
-    {
-      "id": "route-test-adequacy-replan",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "review-test-adequacy.review_outcome"
-        },
-        "right": "replan"
-      },
-      "connections": {
-        "true": "approve-current-unit-closure",
-        "false": "route-test-adequacy"
-      },
-      "progressNodeId": "unit-validation",
-      "connectionLabels": {
-        "true": "upstream cause"
-      }
-    },
-    {
       "id": "route-current-verification-only",
       "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "product_review_iteration"
-        },
-        "right": {
-          "contextPath": "current_iteration"
+      "progressNodeId": "unit-validation",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "product_review_iteration"
+            },
+            "right": {
+              "contextPath": "current_iteration"
+            }
+          },
+          "output": "true"
         }
-      },
+      ],
       "connections": {
         "true": "validate-runtime",
-        "false": "review-architecture"
-      },
-      "progressNodeId": "unit-validation"
-    },
-    {
-      "id": "route-test-repair-outcome",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "repair-test-adequacy.repair_outcome"
-        },
-        "right": "replan"
-      },
-      "connections": {
-        "true": "approve-current-unit-closure",
-        "false": "route-test-adequacy-reach"
-      },
-      "progressNodeId": "unit-validation",
-      "connectionLabels": {
-        "true": "upstream cause"
-      }
-    },
-    {
-      "id": "route-architecture-repair-outcome",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "repair-architecture.repair_outcome"
-        },
-        "right": "replan"
-      },
-      "connections": {
-        "true": "approve-current-unit-closure",
-        "false": "route-architecture-reach"
-      },
-      "progressNodeId": "unit-validation",
-      "connectionLabels": {
-        "true": "upstream cause"
-      }
-    },
-    {
-      "id": "route-completeness-review-replan",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "review-unit-completeness.review_outcome"
-        },
-        "right": "replan"
-      },
-      "connections": {
-        "true": "approve-current-unit-closure",
-        "false": "route-unit-completeness"
-      },
-      "progressNodeId": "completeness",
-      "connectionLabels": {
-        "true": "upstream cause"
-      }
-    },
-    {
-      "id": "route-completeness-repair-outcome",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "repair-unit-completeness.repair_outcome"
-        },
-        "right": "replan"
-      },
-      "connections": {
-        "true": "approve-current-unit-closure",
-        "false": "route-completeness-repair-gate-local"
-      },
-      "progressNodeId": "completeness",
-      "connectionLabels": {
-        "true": "upstream cause"
-      }
-    },
-    {
-      "id": "route-completeness-repair-gate-local",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "repair-unit-completeness.mutation_scope"
-        },
-        "right": "gate_local"
-      },
-      "connections": {
-        "true": "mark-current-evidence-iteration",
-        "false": "route-unit-completeness-reach"
-      },
-      "progressNodeId": "completeness",
-      "connectionLabels": {
-        "true": {
-          "label": "product defect found",
-          "cycle": {
-            "cause": "The completeness review found a defect that only a product change can resolve.",
-            "exit": "A completeness review with zero findings."
-          }
-        }
-      }
-    },
-    {
-      "id": "route-final-review-replan",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "review-final-semantics.review_outcome"
-        },
-        "right": "replan"
-      },
-      "connections": {
-        "true": "advance-plan-revision-for-replan",
-        "false": "route-final-semantic-review"
-      },
-      "progressNodeId": "final-review",
-      "connectionLabels": {
-        "true": "executable defect found"
-      }
-    },
-    {
-      "id": "route-final-repair-replan",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "repair-final-semantics.repair_outcome"
-        },
-        "right": "replan"
-      },
-      "connections": {
-        "true": "advance-plan-revision-for-replan",
-        "false": "validate-feature-wide"
-      },
-      "progressNodeId": "final-review",
-      "connectionLabels": {
-        "true": "executable defect found",
-        "false": {
-          "label": "gate-local repair",
-          "cycle": {
-            "cause": "The final review found a non-executable correction, so feature validation is re-established after it.",
-            "exit": "A final review with zero gaps."
-          }
-        }
-      }
-    },
-    {
-      "id": "route-cheap-repair-replan",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "repair-cheap-validation.repair_outcome"
-        },
-        "right": "replan"
-      },
-      "connections": {
-        "true": "approve-current-unit-closure",
-        "false": "route-cheap-repair-scope"
-      },
-      "progressNodeId": "unit-validation",
-      "connectionLabels": {
-        "true": "upstream cause"
-      }
-    },
-    {
-      "id": "route-cheap-repair-scope",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "repair-cheap-validation.mutation_scope"
-        },
-        "right": "verification_only"
-      },
-      "connections": {
-        "true": "mark-verification-only-iteration",
-        "false": "advance-evidence-iteration"
-      },
-      "progressNodeId": "unit-validation",
-      "connectionLabels": {
-        "true": {
-          "label": "product repair",
-          "cycle": {
-            "cause": "A gate found a defect whose repair reaches product code, so the unit is re-implemented and re-validated.",
-            "exit": "Every gate passes without a product change."
-          }
-        },
-        "false": {
-          "label": "product repair",
-          "cycle": {
-            "cause": "A gate found a defect whose repair reaches product code, so the unit is re-implemented and re-validated.",
-            "exit": "Every gate passes without a product change."
-          }
-        }
-      }
-    },
-    {
-      "id": "route-runtime-repair-replan",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "repair-runtime.repair_outcome"
-        },
-        "right": "replan"
-      },
-      "connections": {
-        "true": "approve-current-unit-closure",
-        "false": "route-runtime-repair-scope"
-      },
-      "progressNodeId": "unit-validation",
-      "connectionLabels": {
-        "true": "upstream cause"
-      }
-    },
-    {
-      "id": "route-runtime-repair-scope",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "repair-runtime.mutation_scope"
-        },
-        "right": "verification_only"
-      },
-      "connections": {
-        "true": "mark-verification-only-iteration",
-        "false": "advance-evidence-iteration"
-      },
-      "progressNodeId": "unit-validation",
-      "connectionLabels": {
-        "true": {
-          "label": "product repair",
-          "cycle": {
-            "cause": "A gate found a defect whose repair reaches product code, so the unit is re-implemented and re-validated.",
-            "exit": "Every gate passes without a product change."
-          }
-        },
-        "false": {
-          "label": "product repair",
-          "cycle": {
-            "cause": "A gate found a defect whose repair reaches product code, so the unit is re-implemented and re-validated.",
-            "exit": "Every gate passes without a product change."
-          }
-        }
-      }
-    },
-    {
-      "id": "route-expensive-repair-replan",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "repair-expensive.repair_outcome"
-        },
-        "right": "replan"
-      },
-      "connections": {
-        "true": "approve-current-unit-closure",
-        "false": "route-expensive-repair-scope"
-      },
-      "progressNodeId": "broad-validation",
-      "connectionLabels": {
-        "true": "upstream cause"
-      }
-    },
-    {
-      "id": "route-expensive-repair-scope",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "repair-expensive.mutation_scope"
-        },
-        "right": "verification_only"
-      },
-      "connections": {
-        "true": "mark-verification-only-iteration",
-        "false": "advance-evidence-iteration"
-      },
-      "progressNodeId": "broad-validation",
-      "connectionLabels": {
-        "true": {
-          "label": "documentation exposed a product defect",
-          "cycle": {
-            "cause": "Writing the documentation revealed behavior that must change before the docs can be true.",
-            "exit": "Documentation describes the current behavior truthfully."
-          }
-        },
-        "false": {
-          "label": "documentation exposed a product defect",
-          "cycle": {
-            "cause": "Writing the documentation revealed behavior that must change before the docs can be true.",
-            "exit": "Documentation describes the current behavior truthfully."
-          }
-        }
-      }
-    },
-    {
-      "id": "route-feature-repair-replan",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "repair-feature-validation.repair_outcome"
-        },
-        "right": "replan"
-      },
-      "connections": {
-        "true": "advance-plan-revision-for-replan",
-        "false": "validate-feature-wide"
-      },
-      "progressNodeId": "feature-validation",
-      "connectionLabels": {
-        "true": "repository failure needs a plan change",
-        "false": {
-          "label": "repaired, validate again",
-          "cycle": {
-            "cause": "A feature-wide repair did not need a replan, so validation runs again.",
-            "exit": "Feature-wide validation passes."
-          }
-        }
-      }
-    },
-    {
-      "id": "route-finalization-repair-replan",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "repair-finalization-repository.repair_outcome"
-        },
-        "right": "replan"
-      },
-      "connections": {
-        "true": "advance-plan-revision-for-replan",
-        "false": "finalize-feature"
-      },
-      "progressNodeId": "finalize",
-      "connectionLabels": {
-        "true": {
-          "label": "finalization found an upstream cause",
-          "cycle": {
-            "cause": "Finalization exposed a defect whose cause lies upstream, so the plan is revised.",
-            "exit": "The revised plan is reviewed, activated, and finalization succeeds."
-          }
-        },
-        "false": {
-          "label": "repaired, finalize again",
-          "cycle": {
-            "cause": "A finalization repair stayed local, so finalization is repeated.",
-            "exit": "Finalization completes."
-          }
-        }
+        "default": "review-architecture"
       }
     },
     {
@@ -3319,7 +3121,8 @@
         ]
       },
       "connections": {
-        "success": "route-implementation-preparation"
+        "success": "approve-current-unit-closure",
+        "implement-plan-unit": "implement-plan-unit"
       },
       "progressNodeId": "implement",
       "progressActiveLabel": "Prepare · {{current_step_index}}/{{total_steps}}",
@@ -3327,25 +3130,21 @@
         "summary": "Ground the exact current unit in the repository before mutation",
         "outcome": "Current responsibility in progress",
         "next": "Implement when ready, or close the unit for replan"
-      }
-    },
-    {
-      "id": "route-implementation-preparation",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "prepare-plan-unit-implementation.preparation_outcome"
-        },
-        "right": "ready"
       },
-      "connections": {
-        "true": "implement-plan-unit",
-        "false": "approve-current-unit-closure"
-      },
-      "progressNodeId": "implement",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "prepare-plan-unit-implementation.preparation_outcome"
+            },
+            "right": "ready"
+          },
+          "output": "implement-plan-unit"
+        }
+      ],
       "connectionLabels": {
-        "false": "preparation found the plan invalid"
+        "success": "preparation found the plan invalid"
       }
     },
     {
@@ -3374,7 +3173,8 @@
         ]
       },
       "connections": {
-        "success": "route-plan-unit-completion"
+        "success": "approve-current-unit-closure",
+        "validate-cheap": "validate-cheap"
       },
       "progressNodeId": "implement",
       "progressActiveLabel": "Complete unit · {{current_step_index}}/{{total_steps}}",
@@ -3382,43 +3182,44 @@
         "summary": "Freshly complete every producer-owned consequence of the current unit",
         "outcome": "Current responsibility in progress",
         "next": "Run cheap checks when ready, or replan an invalid upstream contract"
-      }
-    },
-    {
-      "id": "route-plan-unit-completion",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "complete-plan-unit.completion_outcome"
-        },
-        "right": "ready"
       },
-      "connections": {
-        "true": "validate-cheap",
-        "false": "approve-current-unit-closure"
-      },
-      "progressNodeId": "implement",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "complete-plan-unit.completion_outcome"
+            },
+            "right": "ready"
+          },
+          "output": "validate-cheap"
+        }
+      ],
       "connectionLabels": {
-        "true": "unit implemented",
-        "false": "preparation found the plan invalid"
+        "validate-cheap": "unit implemented",
+        "success": "completion found an upstream contract invalid"
       }
     },
     {
       "id": "route-plan-activation-mode",
       "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "operating_mode"
-        },
-        "right": "interactive"
-      },
+      "progressNodeId": "plan-approval",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "operating_mode"
+            },
+            "right": "interactive"
+          },
+          "output": "true"
+        }
+      ],
       "connections": {
         "true": "notify-plan-approval",
-        "false": "activate-reviewed-plan"
-      },
-      "progressNodeId": "plan-approval"
+        "default": "activate-reviewed-plan"
+      }
     },
     {
       "id": "notify-plan-approval",
@@ -3454,7 +3255,7 @@
         ]
       },
       "connections": {
-        "success": "initialize-implementation-iteration"
+        "success": "prepare-plan-unit-implementation"
       },
       "progressNodeId": "plan-approval",
       "progressActiveLabel": "Activate plan r{{plan_revision}}",
@@ -3465,23 +3266,33 @@
       },
       "connectionLabels": {
         "success": "plan activated"
-      }
+      },
+      "expressions": [
+        "current_iteration = 1",
+        "previous_iteration = 0",
+        "product_review_iteration = 0"
+      ]
     },
     {
       "id": "route-unit-html-report",
       "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "prepare-plan-unit-implementation.visual_mode"
-        },
-        "right": "html_report"
-      },
+      "progressNodeId": "user-review",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "prepare-plan-unit-implementation.visual_mode"
+            },
+            "right": "html_report"
+          },
+          "output": "true"
+        }
+      ],
       "connections": {
         "true": "create-and-upload-step-report",
-        "false": "route-unit-approval-required"
-      },
-      "progressNodeId": "user-review"
+        "default": "route-unit-approval-required"
+      }
     },
     {
       "id": "create-and-upload-step-report",
@@ -3531,20 +3342,25 @@
     {
       "id": "route-unit-approval-required",
       "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "prepare-plan-unit-implementation.approval_required"
-        },
-        "right": true
-      },
+      "progressNodeId": "user-review",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "prepare-plan-unit-implementation.approval_required"
+            },
+            "right": true
+          },
+          "output": "true"
+        }
+      ],
       "connections": {
         "true": "notify-unit-approval",
-        "false": "route-checkpoint-authority"
+        "default": "route-checkpoint-authority"
       },
-      "progressNodeId": "user-review",
       "connectionLabels": {
-        "false": "accepted, or autonomous"
+        "default": "accepted, or autonomous"
       }
     },
     {
@@ -3609,20 +3425,25 @@
     {
       "id": "route-final-acceptance-mode",
       "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "operating_mode"
-        },
-        "right": "interactive"
-      },
+      "progressNodeId": "final-review",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "operating_mode"
+            },
+            "right": "interactive"
+          },
+          "output": "true"
+        }
+      ],
       "connections": {
         "true": "notify-final-approval",
-        "false": "route-vcs-authority"
+        "default": "route-vcs-authority"
       },
-      "progressNodeId": "final-review",
       "connectionLabels": {
-        "false": "accepted, or autonomous"
+        "default": "accepted, or autonomous"
       }
     },
     {

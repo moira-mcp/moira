@@ -255,17 +255,17 @@ the current shape locally.
 
 ```bash
 # Label a boundary edge (the edge leaves the node's block)
-moira-workflow <flow>.json set-label check-plan-approved approved "plan approved"
+moira-workflow <flow>.json set-label present-plan check-steps-remaining "plan approved"
 
 # Explain a return: a label plus the cause of the loop and the condition that ends it
-moira-workflow <flow>.json set-label route-review-verdict default "review found defects" \
-  --cause "The independent review reported blocking findings." \
-  --exit "The review passes."
+moira-workflow <flow>.json set-label repair-answer changed "repair changed the answer" \
+  --cause "Review found an answer defect, so the package is rebuilt." \
+  --exit "The independent review has no blockers."
 
-moira-workflow <flow>.json clear-label check-plan-approved approved
+moira-workflow <flow>.json clear-label present-plan check-steps-remaining
 
 # Own a node by a block (sets progressNodeId; the block must exist)
-moira-workflow <flow>.json set-block route-plan-approval plan
+moira-workflow <flow>.json set-block present-plan plan-approval
 
 # Add a block at the end, or right after another block; edit its description or outcome
 moira-workflow <flow>.json add-block deliver "Deliver" "Hand the result over" --after execute \

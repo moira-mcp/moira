@@ -201,12 +201,12 @@ const scenarios: TestScenario[] = [
         progress_plan_outcome: "Plan repair reassessed as requiring replanning",
       },
     },
-    ["route-plan-repair-outcome", "replan-from-plan-reassess", "review-plan", "end"],
+    ["fix-plan", "replan-from-plan-reassess", "review-plan", "end"],
   ),
   scenario(
     "plan reviewer can request direct replan",
     { "review-plan": [planReview("replan"), planReview("pass")] },
-    ["route-plan-review-replan", "replan-from-plan-review", "review-plan", "end"],
+    ["review-plan", "replan-from-plan-review", "review-plan", "end"],
   ),
   scenario(
     "plan review bound can authorize one changed repair",
@@ -259,7 +259,7 @@ const scenarios: TestScenario[] = [
         progress_step_review_outcome: "Result repair produced a changed attempt",
       },
     },
-    ["repair-step", "route-step-repair-budget", "increment-step-retry", "review-step", "end"],
+    ["repair-step", "increment-step-retry", "review-step", "end"],
   ),
   scenario(
     "evidence repair returns to review without consuming result retry",
@@ -274,7 +274,7 @@ const scenarios: TestScenario[] = [
         progress_step_review_outcome: "Evidence repair produced a changed projection",
       },
     },
-    ["route-step-repair-owner", "repair-step", "review-step", "end"],
+    ["review-step", "repair-step", "review-step", "end"],
   ),
   scenario(
     "step repair reassessment replans from its exact cause",
@@ -290,7 +290,7 @@ const scenarios: TestScenario[] = [
         progress_step_review_outcome: "Step repair reassessed as requiring replanning",
       },
     },
-    ["route-step-repair-outcome", "replan-from-step-reassess", "review-plan", "end"],
+    ["repair-step", "replan-from-step-reassess", "review-plan", "end"],
   ),
   scenario(
     "step reviewer can request direct replan",
@@ -301,7 +301,7 @@ const scenarios: TestScenario[] = [
       ],
       "review-step": [stepVerdict(1, 1, "replan"), stepVerdict(2, 1, "pass")],
     },
-    ["route-verifier-replan", "replan-from-verdict", "review-plan", "end"],
+    ["review-step", "replan-from-verdict", "review-plan", "end"],
   ),
   scenario(
     "retry exhaustion can authorize another changed repair",
@@ -355,7 +355,7 @@ const scenarios: TestScenario[] = [
         progress_step_review_outcome: "Retry exhaustion requires replanning",
       },
     },
-    ["route-replan-choice", "replan-from-decision", "review-plan", "end"],
+    ["ask-retry-decision", "replan-from-decision", "review-plan", "end"],
     { initialVariables: { max_retries: 1 } },
   ),
   scenario(
@@ -403,12 +403,12 @@ const scenarios: TestScenario[] = [
         progress_final_review_outcome: "Final repair reassessed as requiring replanning",
       },
     },
-    ["route-final-repair-outcome", "replan-from-final-reassess", "review-plan", "end"],
+    ["fix-final-review", "replan-from-final-reassess", "review-plan", "end"],
   ),
   scenario(
     "final reviewer can request direct replan",
     { "final-review": [finalReview(1, "replan"), finalReview(2, "pass")] },
-    ["route-final-review-replan", "replan-from-final-review", "review-plan", "end"],
+    ["final-review", "replan-from-final-review", "review-plan", "end"],
   ),
   scenario(
     "final review bound can authorize one changed repair",
@@ -562,6 +562,219 @@ describe("Robust Task cause-aware contract", () => {
       "replan",
       "finish_incomplete",
     ]);
+
+    const routing = (id: string) => {
+      const decision = node(workflow, id);
+      return {
+        cases: decision.cases.map((entry: any) => ({
+          path: entry.when.left.contextPath,
+          operator: entry.when.operator,
+          right: entry.when.right,
+          output: entry.output,
+        })),
+        connections: decision.connections,
+      };
+    };
+    expect(routing("review-plan")).toEqual({
+      cases: [
+        {
+          path: "review-plan.review_outcome",
+          operator: "eq",
+          right: "replan",
+          output: "replan-from-plan-review",
+        },
+        {
+          path: "review-plan.review_outcome",
+          operator: "eq",
+          right: "repair",
+          output: "check-plan-review-limit",
+        },
+      ],
+      connections: {
+        "replan-from-plan-review": "replan-from-plan-review",
+        "check-plan-review-limit": "check-plan-review-limit",
+        success: "notify-plan-ready",
+      },
+    });
+    expect(routing("ask-plan-review-limit")).toEqual({
+      cases: [
+        {
+          path: "ask-plan-review-limit.decision",
+          operator: "eq",
+          right: "repair",
+          output: "reset-plan-review-for-repair",
+        },
+      ],
+      connections: {
+        "reset-plan-review-for-repair": "reset-plan-review-for-repair",
+        success: "deliver-result",
+      },
+    });
+    expect(routing("approve-plan")).toEqual({
+      cases: [
+        {
+          path: "approve-plan.decision",
+          operator: "eq",
+          right: "yes",
+          output: "check-all-steps-done",
+        },
+      ],
+      connections: { "check-all-steps-done": "check-all-steps-done", success: "revise-plan" },
+    });
+    expect(routing("fix-plan")).toEqual({
+      cases: [
+        {
+          path: "fix-plan.repair_outcome",
+          operator: "eq",
+          right: "reassess",
+          output: "replan-from-plan-reassess",
+        },
+      ],
+      connections: {
+        "replan-from-plan-reassess": "replan-from-plan-reassess",
+        success: "increment-plan-review-round",
+      },
+    });
+    expect(routing("review-step")).toEqual({
+      cases: [
+        {
+          path: "review-step.review_outcome",
+          operator: "eq",
+          right: "replan",
+          output: "replan-from-verdict",
+        },
+        {
+          path: "review-step.review_outcome",
+          operator: "eq",
+          right: "pass",
+          output: "close-step",
+        },
+        {
+          path: "review-step.repair_owner",
+          operator: "eq",
+          right: "result",
+          output: "check-step-retry-limit",
+        },
+      ],
+      connections: {
+        "replan-from-verdict": "replan-from-verdict",
+        "close-step": "close-step",
+        "check-step-retry-limit": "check-step-retry-limit",
+        success: "repair-step",
+      },
+    });
+    expect(routing("ask-retry-decision")).toEqual({
+      cases: [
+        {
+          path: "ask-retry-decision.decision",
+          operator: "eq",
+          right: "retry",
+          output: "reset-step-retry",
+        },
+        {
+          path: "ask-retry-decision.decision",
+          operator: "eq",
+          right: "replan",
+          output: "replan-from-decision",
+        },
+      ],
+      connections: {
+        "reset-step-retry": "reset-step-retry",
+        "replan-from-decision": "replan-from-decision",
+        success: "deliver-result",
+      },
+    });
+    expect(routing("repair-step")).toEqual({
+      cases: [
+        {
+          path: "repair-step.repair_outcome",
+          operator: "eq",
+          right: "reassess",
+          output: "replan-from-step-reassess",
+        },
+        {
+          path: "review-step.repair_owner",
+          operator: "eq",
+          right: "result",
+          output: "increment-step-retry",
+        },
+      ],
+      connections: {
+        "replan-from-step-reassess": "replan-from-step-reassess",
+        "increment-step-retry": "increment-step-retry",
+        success: "review-step",
+      },
+    });
+    expect(routing("final-review")).toEqual({
+      cases: [
+        {
+          path: "final-review.review_outcome",
+          operator: "eq",
+          right: "pass",
+          output: "deliver-result",
+        },
+        {
+          path: "final-review.review_outcome",
+          operator: "eq",
+          right: "replan",
+          output: "replan-from-final-review",
+        },
+      ],
+      connections: {
+        "deliver-result": "deliver-result",
+        "replan-from-final-review": "replan-from-final-review",
+        success: "check-final-review-limit",
+      },
+    });
+    expect(routing("ask-final-review-limit")).toEqual({
+      cases: [
+        {
+          path: "ask-final-review-limit.decision",
+          operator: "eq",
+          right: "repair",
+          output: "reset-final-for-repair",
+        },
+      ],
+      connections: {
+        "reset-final-for-repair": "reset-final-for-repair",
+        success: "deliver-result",
+      },
+    });
+    expect(routing("fix-final-review")).toEqual({
+      cases: [
+        {
+          path: "fix-final-review.repair_outcome",
+          operator: "eq",
+          right: "reassess",
+          output: "replan-from-final-reassess",
+        },
+      ],
+      connections: {
+        "replan-from-final-reassess": "replan-from-final-reassess",
+        success: "increment-final-review-round",
+      },
+    });
+
+    for (const removedRouter of [
+      "route-plan-review-replan",
+      "route-plan-review",
+      "route-plan-review-limit",
+      "route-plan-approval",
+      "route-verifier-replan",
+      "route-step-accepted",
+      "route-step-repair-owner",
+      "route-retry-choice",
+      "route-replan-choice",
+      "route-final-review",
+      "route-final-review-replan",
+      "route-final-review-limit",
+      "route-plan-repair-outcome",
+      "route-step-repair-outcome",
+      "route-step-repair-budget",
+      "route-final-repair-outcome",
+    ]) {
+      expect(workflow.nodes.some((candidate) => candidate.id === removedRouter)).toBe(false);
+    }
     expect(node(workflow, "end").finalOutput).toEqual([
       "workspace_path",
       "delivery_file",

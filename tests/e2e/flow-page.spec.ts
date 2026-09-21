@@ -123,7 +123,7 @@ test("reads a bundled flow as a process on the map and as nodes on the graph, an
   await page.goto(`${BASE_URL}/workflows/moira/quick-task?block=plan-review`);
   await expect(page.getByTestId("block-detail")).toHaveAttribute("data-block-id", "plan-review");
   await openSteps(page);
-  await expect(page.getByTestId("block-detail").locator("[data-node-id]")).toHaveCount(3);
+  await expect(page.getByTestId("block-detail").locator("[data-node-id]")).toHaveCount(2);
   await page.getByTestId("map-toolbar").getByTestId("toolbar-finder").click();
   await page.getByTestId("map-node-finder").fill("fix-issues");
   await page.locator('[data-node-match="fix-issues"]').click();
@@ -159,7 +159,8 @@ test("reads a bundled flow as a process on the map and as nodes on the graph, an
   await expect(nodePanel).toHaveAttribute("data-node-id", "final-review");
   const connections = page.getByTestId("node-panel-connections");
   await expect(connections).toBeVisible();
-  await expect(connections).toContainText("check-review-clean");
+  await expect(connections).toContainText("route-operating-mode-result-presentation");
+  await expect(connections).toContainText("fix-issues");
   await expect(connections).not.toContainText("Decision");
 
   // The walkthrough lives in the URL; `walkthrough.spec.ts` runs every one of its steps through
@@ -233,7 +234,7 @@ test("an owner edits the definition in place; the save persists and advances the
     // Move a routing node to another block: the diagnostic appears without a round trip and
     // blocks the save; moving it back clears it.
     await openSteps(page);
-    await page.getByTestId("edit-owner-check-plan-review-clean").click();
+    await page.getByTestId("edit-owner-plan-review").click();
     await page.getByRole("option", { name: "Understand the task" }).click();
     await expect(page.getByTestId("flow-diagnostics")).toContainText("unlabeled-edge");
     await expect(page.getByTestId("flow-edit-save")).toBeDisabled();
@@ -241,9 +242,9 @@ test("an owner edits the definition in place; the save persists and advances the
     await openBlock(page, "scope");
     await openSteps(page);
     await expect(
-      page.locator('[data-node-id="check-plan-review-clean"] [data-testid="inline-diagnostic"]'),
+      page.locator('[data-node-id="plan-review"] [data-testid="inline-diagnostic"]'),
     ).toHaveAttribute("data-diagnostic", /unlabeled-edge/);
-    await page.getByTestId("edit-owner-check-plan-review-clean").click();
+    await page.getByTestId("edit-owner-plan-review").click();
     await page.getByRole("option", { name: "Independent plan review" }).click();
     await expect(page.getByTestId("flow-diagnostics")).toHaveCount(0);
     await expect(page.getByTestId("inline-diagnostic")).toHaveCount(0);

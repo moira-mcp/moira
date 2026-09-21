@@ -2,7 +2,7 @@
   "id": "be95cedc-35ec-4314-87ce-331ac3d11579",
   "metadata": {
     "name": "Robust Task",
-    "version": "9.5.0",
+    "version": "9.6.0",
     "description": "Executes one complex authorized task through durable planning, canonical materialized guidance, cause-owned recovery and independently reviewed delivery without imposing a software-specific lifecycle. It creates an execution-correlated workspace, captures the complete task and authority, materializes one domain-neutral guide, produces and independently reviews a current plan, executes plan steps with concise durable evidence and materially changed retry attempts, and preserves restartable immutable history across context loss. Cause-aware step and final reviews separate result defects from evidence/projection defects and upstream plan or criterion defects; result and evidence repair have bounded budgets, while spreading or invalid work enters material replanning instead of false success. Autonomous mode skips only human waits; interactive mode keeps plan and recovery decisions. Outcomes distinguish complete and truthfully incomplete work and expose stable artifacts rather than process narration. Choose Robust Task for critical or long-running general work that needs recovery; use Quick Task for a bounded non-development task, Todo List for a supplied checklist, or Software Development Flow for one complete repository implementation lifecycle.",
     "tags": [
       "задача",
@@ -10,7 +10,8 @@
       "план",
       "повтор",
       "эскалация"
-    ]
+    ],
+    "schemaVersion": 1
   },
   "nodes": [
     {
@@ -154,48 +155,61 @@
         ]
       },
       "connections": {
-        "success": "route-plan-review-replan"
+        "replan-from-plan-review": "replan-from-plan-review",
+        "check-plan-review-limit": "check-plan-review-limit",
+        "success": "notify-plan-ready"
       },
       "progressNodeId": "plan",
       "progressActiveLabel": "Review plan · {{plan_review_round}}/{{max_review_rounds}}",
       "progressActiveContent": {
         "summary": "Independently review the exact current complete plan",
         "next": "Approve a clean plan, repair it, or replace it from an upstream cause"
-      }
-    },
-    {
-      "id": "route-plan-review",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "review-plan.review_outcome"
+      },
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "review-plan.review_outcome"
+            },
+            "right": "replan"
+          },
+          "output": "replan-from-plan-review"
         },
-        "right": "repair"
-      },
-      "connections": {
-        "true": "check-plan-review-limit",
-        "false": "notify-plan-ready"
-      },
-      "progressNodeId": "plan"
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "review-plan.review_outcome"
+            },
+            "right": "repair"
+          },
+          "output": "check-plan-review-limit"
+        }
+      ]
     },
     {
       "id": "check-plan-review-limit",
       "type": "condition",
-      "condition": {
-        "operator": "gte",
-        "left": {
-          "contextPath": "plan_review_round"
-        },
-        "right": {
-          "contextPath": "max_review_rounds"
+      "progressNodeId": "plan",
+      "cases": [
+        {
+          "when": {
+            "operator": "gte",
+            "left": {
+              "contextPath": "plan_review_round"
+            },
+            "right": {
+              "contextPath": "max_review_rounds"
+            }
+          },
+          "output": "true"
         }
-      },
+      ],
       "connections": {
         "true": "ask-plan-review-limit",
-        "false": "fix-plan"
-      },
-      "progressNodeId": "plan"
+        "default": "fix-plan"
+      }
     },
     {
       "id": "ask-plan-review-limit",
@@ -223,32 +237,29 @@
         ]
       },
       "connections": {
-        "success": "route-plan-review-limit"
+        "reset-plan-review-for-repair": "reset-plan-review-for-repair",
+        "success": "deliver-result"
       },
       "progressNodeId": "plan",
       "progressActiveLabel": "Resolve plan review bound",
       "progressActiveContent": {
         "summary": "Resolve the bounded plan-review decision from current evidence",
         "next": "Perform one justified changed repair or deliver truthfully incomplete"
-      }
-    },
-    {
-      "id": "route-plan-review-limit",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "ask-plan-review-limit.decision"
-        },
-        "right": "repair"
       },
-      "connections": {
-        "true": "reset-plan-review-for-repair",
-        "false": "deliver-result"
-      },
-      "progressNodeId": "plan",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "ask-plan-review-limit.decision"
+            },
+            "right": "repair"
+          },
+          "output": "reset-plan-review-for-repair"
+        }
+      ],
       "connectionLabels": {
-        "false": "plan review limit reached, stop"
+        "success": "plan review limit reached, stop"
       }
     },
     {
@@ -356,14 +367,27 @@
         ]
       },
       "connections": {
-        "success": "route-plan-repair-outcome"
+        "replan-from-plan-reassess": "replan-from-plan-reassess",
+        "success": "increment-plan-review-round"
       },
       "progressNodeId": "plan",
       "progressActiveLabel": "Repair plan · {{plan_review_round}}/{{max_review_rounds}}",
       "progressActiveContent": {
         "summary": "Repair the current plan or return its cause to planning",
         "next": "Repeat independent plan review or replace the plan from reassessment"
-      }
+      },
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "fix-plan.repair_outcome"
+            },
+            "right": "reassess"
+          },
+          "output": "replan-from-plan-reassess"
+        }
+      ]
     },
     {
       "id": "increment-plan-review-round",
@@ -423,32 +447,29 @@
         ]
       },
       "connections": {
-        "success": "route-plan-approval"
+        "check-all-steps-done": "check-all-steps-done",
+        "success": "revise-plan"
       },
       "progressNodeId": "plan",
       "progressActiveLabel": "Confirm plan",
       "progressActiveContent": {
         "summary": "Present the independently reviewed current plan for approval",
         "next": "Execute an approved plan or replace it from exact feedback"
-      }
-    },
-    {
-      "id": "route-plan-approval",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "approve-plan.decision"
-        },
-        "right": "yes"
       },
-      "connections": {
-        "true": "check-all-steps-done",
-        "false": "revise-plan"
-      },
-      "progressNodeId": "plan",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "approve-plan.decision"
+            },
+            "right": "yes"
+          },
+          "output": "check-all-steps-done"
+        }
+      ],
       "connectionLabels": {
-        "true": "plan approved"
+        "check-all-steps-done": "plan approved"
       }
     },
     {
@@ -499,20 +520,25 @@
     {
       "id": "check-all-steps-done",
       "type": "condition",
-      "condition": {
-        "operator": "gt",
-        "left": {
-          "contextPath": "current_step"
-        },
-        "right": {
-          "contextPath": "total_steps"
+      "progressNodeId": "execute",
+      "cases": [
+        {
+          "when": {
+            "operator": "gt",
+            "left": {
+              "contextPath": "current_step"
+            },
+            "right": {
+              "contextPath": "total_steps"
+            }
+          },
+          "output": "true"
         }
-      },
+      ],
       "connections": {
         "true": "reset-final-review-round",
-        "false": "execute-step"
+        "default": "execute-step"
       },
-      "progressNodeId": "execute",
       "connectionLabels": {
         "true": "all plan steps done"
       }
@@ -608,32 +634,51 @@
         ]
       },
       "connections": {
-        "success": "route-verifier-replan"
+        "replan-from-verdict": "replan-from-verdict",
+        "close-step": "close-step",
+        "check-step-retry-limit": "check-step-retry-limit",
+        "success": "repair-step"
       },
       "progressNodeId": "step-review",
       "progressActiveLabel": "Review step {{current_step}}/{{total_steps}}",
       "progressActiveContent": {
         "summary": "Independently review the exact current step attempt",
         "next": "Close, repair, recover, or replace the plan from the classified cause"
-      }
-    },
-    {
-      "id": "route-verifier-replan",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "review-step.review_outcome"
+      },
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "review-step.review_outcome"
+            },
+            "right": "replan"
+          },
+          "output": "replan-from-verdict"
         },
-        "right": "replan"
-      },
-      "connections": {
-        "true": "replan-from-verdict",
-        "false": "route-step-accepted"
-      },
-      "progressNodeId": "step-review",
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "review-step.review_outcome"
+            },
+            "right": "pass"
+          },
+          "output": "close-step"
+        },
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "review-step.repair_owner"
+            },
+            "right": "result"
+          },
+          "output": "check-step-retry-limit"
+        }
+      ],
       "connectionLabels": {
-        "true": {
+        "replan-from-verdict": {
           "label": "reviewer requires a replan",
           "cycle": {
             "cause": "The step review found the plan itself wrong, not just the attempt.",
@@ -641,22 +686,6 @@
           }
         }
       }
-    },
-    {
-      "id": "route-step-accepted",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "review-step.review_outcome"
-        },
-        "right": "pass"
-      },
-      "connections": {
-        "true": "close-step",
-        "false": "route-step-repair-owner"
-      },
-      "progressNodeId": "step-review"
     },
     {
       "id": "close-step",
@@ -702,20 +731,25 @@
     {
       "id": "check-step-retry-limit",
       "type": "condition",
-      "condition": {
-        "operator": "gte",
-        "left": {
-          "contextPath": "step_retry"
-        },
-        "right": {
-          "contextPath": "max_retries"
+      "progressNodeId": "step-review",
+      "cases": [
+        {
+          "when": {
+            "operator": "gte",
+            "left": {
+              "contextPath": "step_retry"
+            },
+            "right": {
+              "contextPath": "max_retries"
+            }
+          },
+          "output": "true"
         }
-      },
+      ],
       "connections": {
         "true": "notify-escalation",
-        "false": "repair-step"
-      },
-      "progressNodeId": "step-review"
+        "default": "repair-step"
+      }
     },
     {
       "id": "notify-escalation",
@@ -764,13 +798,47 @@
         ]
       },
       "connections": {
-        "success": "route-retry-choice"
+        "reset-step-retry": "reset-step-retry",
+        "replan-from-decision": "replan-from-decision",
+        "success": "deliver-result"
       },
       "progressNodeId": "step-review",
       "progressActiveLabel": "Recovery · step {{current_step}}/{{total_steps}}",
       "progressActiveContent": {
         "summary": "Resolve exhausted result-repair recovery from changed knowledge or exact unresolved scope",
         "next": "Retry with changed knowledge, replace the plan, or deliver truthfully incomplete"
+      },
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "ask-retry-decision.decision"
+            },
+            "right": "retry"
+          },
+          "output": "reset-step-retry"
+        },
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "ask-retry-decision.decision"
+            },
+            "right": "replan"
+          },
+          "output": "replan-from-decision"
+        }
+      ],
+      "connectionLabels": {
+        "replan-from-decision": {
+          "label": "user chose to replan",
+          "cycle": {
+            "cause": "After the retry budget ran out the user decided to replan instead of stopping.",
+            "exit": "The replaced plan is reviewed and approved again."
+          }
+        },
+        "success": "user chose to stop"
       }
     },
     {
@@ -980,51 +1048,71 @@
         ]
       },
       "connections": {
-        "success": "route-final-review"
+        "deliver-result": "deliver-result",
+        "replan-from-final-review": "replan-from-final-review",
+        "success": "check-final-review-limit"
       },
       "progressNodeId": "final-review",
       "progressActiveLabel": "Final review · {{final_review_round}}/{{max_review_rounds}}",
       "progressActiveContent": {
         "summary": "Independently review the real deliverable and every active obligation",
         "next": "Deliver, repair locally, or replace the plan from the classified cause"
-      }
-    },
-    {
-      "id": "route-final-review",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "final-review.review_outcome"
+      },
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "final-review.review_outcome"
+            },
+            "right": "pass"
+          },
+          "output": "deliver-result"
         },
-        "right": "pass"
-      },
-      "connections": {
-        "true": "deliver-result",
-        "false": "route-final-review-replan"
-      },
-      "progressNodeId": "final-review",
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "final-review.review_outcome"
+            },
+            "right": "replan"
+          },
+          "output": "replan-from-final-review"
+        }
+      ],
       "connectionLabels": {
-        "true": "final review passed"
+        "deliver-result": "final review passed",
+        "replan-from-final-review": {
+          "label": "final review requires a replan",
+          "cycle": {
+            "cause": "The final review found a defect whose cause lies in the plan.",
+            "exit": "The replaced plan is reviewed and approved again."
+          }
+        }
       }
     },
     {
       "id": "check-final-review-limit",
       "type": "condition",
-      "condition": {
-        "operator": "gte",
-        "left": {
-          "contextPath": "final_review_round"
-        },
-        "right": {
-          "contextPath": "max_review_rounds"
+      "progressNodeId": "final-review",
+      "cases": [
+        {
+          "when": {
+            "operator": "gte",
+            "left": {
+              "contextPath": "final_review_round"
+            },
+            "right": {
+              "contextPath": "max_review_rounds"
+            }
+          },
+          "output": "true"
         }
-      },
+      ],
       "connections": {
         "true": "ask-final-review-limit",
-        "false": "fix-final-review"
-      },
-      "progressNodeId": "final-review"
+        "default": "fix-final-review"
+      }
     },
     {
       "id": "ask-final-review-limit",
@@ -1053,32 +1141,29 @@
         ]
       },
       "connections": {
-        "success": "route-final-review-limit"
+        "reset-final-for-repair": "reset-final-for-repair",
+        "success": "deliver-result"
       },
       "progressNodeId": "final-review",
       "progressActiveLabel": "Resolve final review bound",
       "progressActiveContent": {
         "summary": "Resolve the bounded final-review decision from the exact current report",
         "next": "Perform one justified changed repair or deliver explicitly incomplete"
-      }
-    },
-    {
-      "id": "route-final-review-limit",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "ask-final-review-limit.decision"
-        },
-        "right": "repair"
       },
-      "connections": {
-        "true": "reset-final-for-repair",
-        "false": "deliver-result"
-      },
-      "progressNodeId": "final-review",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "ask-final-review-limit.decision"
+            },
+            "right": "repair"
+          },
+          "output": "reset-final-for-repair"
+        }
+      ],
       "connectionLabels": {
-        "false": "final review limit reached, stop"
+        "success": "final review limit reached, stop"
       }
     },
     {
@@ -1143,13 +1228,35 @@
         ]
       },
       "connections": {
-        "success": "route-final-repair-outcome"
+        "replan-from-final-reassess": "replan-from-final-reassess",
+        "success": "increment-final-review-round"
       },
       "progressNodeId": "final-review",
       "progressActiveLabel": "Repair final result · {{final_review_round}}/{{max_review_rounds}}",
       "progressActiveContent": {
         "summary": "Repair the selected final owner or return its cause to planning",
         "next": "Repeat independent final review or replace the plan from reassessment"
+      },
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "fix-final-review.repair_outcome"
+            },
+            "right": "reassess"
+          },
+          "output": "replan-from-final-reassess"
+        }
+      ],
+      "connectionLabels": {
+        "replan-from-final-reassess": {
+          "label": "final repair exposed a plan defect",
+          "cycle": {
+            "cause": "Repairing a final finding showed that the plan must change.",
+            "exit": "The replaced plan is reviewed and approved again."
+          }
+        }
       }
     },
     {
@@ -1216,81 +1323,28 @@
       "progressNodeId": "deliver"
     },
     {
-      "id": "route-retry-choice",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "ask-retry-decision.decision"
-        },
-        "right": "retry"
-      },
-      "connections": {
-        "true": "reset-step-retry",
-        "false": "route-replan-choice"
-      },
-      "progressNodeId": "step-review"
-    },
-    {
-      "id": "route-replan-choice",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "ask-retry-decision.decision"
-        },
-        "right": "replan"
-      },
-      "connections": {
-        "true": "replan-from-decision",
-        "false": "deliver-result"
-      },
-      "progressNodeId": "step-review",
-      "connectionLabels": {
-        "false": "user chose to stop",
-        "true": {
-          "label": "user chose to replan",
-          "cycle": {
-            "cause": "After the retry budget ran out the user decided to replan instead of stopping.",
-            "exit": "The replaced plan is reviewed and approved again."
-          }
-        }
-      }
-    },
-    {
       "id": "route-operating-mode-plan-approval",
       "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "operating_mode"
-        },
-        "right": "autonomous"
-      },
+      "progressNodeId": "plan",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "operating_mode"
+            },
+            "right": "autonomous"
+          },
+          "output": "true"
+        }
+      ],
       "connections": {
         "true": "check-all-steps-done",
-        "false": "approve-plan"
+        "default": "approve-plan"
       },
-      "progressNodeId": "plan",
       "connectionLabels": {
         "true": "autonomous mode, plan accepted"
       }
-    },
-    {
-      "id": "route-plan-review-replan",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "review-plan.review_outcome"
-        },
-        "right": "replan"
-      },
-      "connections": {
-        "true": "replan-from-plan-review",
-        "false": "route-plan-review"
-      },
-      "progressNodeId": "plan"
     },
     {
       "id": "replan-from-plan-review",
@@ -1336,38 +1390,6 @@
           }
         }
       }
-    },
-    {
-      "id": "route-plan-repair-outcome",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "fix-plan.repair_outcome"
-        },
-        "right": "reassess"
-      },
-      "connections": {
-        "true": "replan-from-plan-reassess",
-        "false": "increment-plan-review-round"
-      },
-      "progressNodeId": "plan"
-    },
-    {
-      "id": "route-step-repair-owner",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "review-step.repair_owner"
-        },
-        "right": "result"
-      },
-      "connections": {
-        "true": "check-step-retry-limit",
-        "false": "repair-step"
-      },
-      "progressNodeId": "step-review"
     },
     {
       "id": "repair-step",
@@ -1438,57 +1460,47 @@
         ]
       },
       "connections": {
-        "success": "route-step-repair-outcome"
+        "replan-from-step-reassess": "replan-from-step-reassess",
+        "increment-step-retry": "increment-step-retry",
+        "success": "review-step"
       },
       "progressNodeId": "step-review",
       "progressActiveLabel": "Repair step {{current_step}}/{{total_steps}}",
       "progressActiveContent": {
         "summary": "Repair the selected step owner or return its cause to planning",
         "next": "Repeat independent step review or replace the plan from reassessment"
-      }
-    },
-    {
-      "id": "route-step-repair-outcome",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "repair-step.repair_outcome"
+      },
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "repair-step.repair_outcome"
+            },
+            "right": "reassess"
+          },
+          "output": "replan-from-step-reassess"
         },
-        "right": "reassess"
-      },
-      "connections": {
-        "true": "replan-from-step-reassess",
-        "false": "route-step-repair-budget"
-      },
-      "progressNodeId": "step-review",
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "review-step.repair_owner"
+            },
+            "right": "result"
+          },
+          "output": "increment-step-retry"
+        }
+      ],
       "connectionLabels": {
-        "true": {
+        "replan-from-step-reassess": {
           "label": "repair exposed a plan defect",
           "cycle": {
             "cause": "Repairing the step showed that the plan must change.",
             "exit": "The replaced plan is reviewed and approved again."
           }
-        }
-      }
-    },
-    {
-      "id": "route-step-repair-budget",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "review-step.repair_owner"
         },
-        "right": "result"
-      },
-      "connections": {
-        "true": "increment-step-retry",
-        "false": "review-step"
-      },
-      "progressNodeId": "step-review",
-      "connectionLabels": {
-        "false": {
+        "success": {
           "label": "repaired, review again without a retry",
           "cycle": {
             "cause": "The repair did not consume a retry, so the step is reviewed again.",
@@ -1507,56 +1519,6 @@
         "default": "final-review"
       },
       "progressNodeId": "final-review"
-    },
-    {
-      "id": "route-final-review-replan",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "final-review.review_outcome"
-        },
-        "right": "replan"
-      },
-      "connections": {
-        "true": "replan-from-final-review",
-        "false": "check-final-review-limit"
-      },
-      "progressNodeId": "final-review",
-      "connectionLabels": {
-        "true": {
-          "label": "final review requires a replan",
-          "cycle": {
-            "cause": "The final review found a defect whose cause lies in the plan.",
-            "exit": "The replaced plan is reviewed and approved again."
-          }
-        }
-      }
-    },
-    {
-      "id": "route-final-repair-outcome",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "fix-final-review.repair_outcome"
-        },
-        "right": "reassess"
-      },
-      "connections": {
-        "true": "replan-from-final-reassess",
-        "false": "increment-final-review-round"
-      },
-      "progressNodeId": "final-review",
-      "connectionLabels": {
-        "true": {
-          "label": "final repair exposed a plan defect",
-          "cycle": {
-            "cause": "Repairing a final finding showed that the plan must change.",
-            "exit": "The replaced plan is reviewed and approved again."
-          }
-        }
-      }
     },
     {
       "id": "replan-from-final-review",

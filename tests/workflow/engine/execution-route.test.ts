@@ -105,13 +105,10 @@ describe("recorded route of real runs", () => {
       "get-task:success",
       "create-plan:success",
       "plan-review:success",
-      "check-plan-review-clean:default",
       "repair-plan:success",
-      "plan-review:success",
-      "check-plan-review-clean:true",
+      "plan-review:route-operating-mode-plan-approval",
       "route-operating-mode-plan-approval:default",
-      "present-plan:success",
-      "check-plan-approved:true",
+      "present-plan:check-steps-remaining",
       "check-steps-remaining:true",
       "execute-step:success",
       "close-completed-step:default",
@@ -122,12 +119,12 @@ describe("recorded route of real runs", () => {
       "execute-step:null",
     ]);
     expect(execution.visits!.at(-1)).toMatchObject({ waited: true, changes: {} });
-    expect(execution.visits![12].changes).toEqual({
+    expect(execution.visits![9].changes).toEqual({
       "execute-step.progress_execution_outcome": "Unit 1 done",
       progress_execution_outcome: "Unit 1 done",
     });
     // An expression writes its global by name and into its node-local scope.
-    expect(execution.visits![13].changes).toEqual({
+    expect(execution.visits![10].changes).toEqual({
       current_step: 1,
       "close-completed-step.current_step": 1,
     });
@@ -155,7 +152,7 @@ describe("recorded route of real runs", () => {
     // Loops: the second plan review after the repair, and every pass of the execution cycle after
     // the first.
     expect(projected.route.filter((entry) => entry.loop).map((entry) => entry.seq)).toEqual([
-      6, 7, 14, 15, 16, 17, 18,
+      5, 11, 12, 13, 14, 15,
     ]);
     const currentStep = projected.variables.find((variable) => variable.name === "current_step")!;
     expect(currentStep.current).toBe(2);
@@ -248,7 +245,7 @@ describe("recorded route of real runs", () => {
         .visits!.filter((visit) => visit.nodeId === "plan-review")
         .map((visit) => [visit.exitKey, visit.adjusted ?? false]),
     ).toEqual([
-      ["success", false],
+      ["route-operating-mode-plan-approval", false],
       [null, true],
     ]);
 

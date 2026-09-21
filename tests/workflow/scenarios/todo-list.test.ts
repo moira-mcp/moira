@@ -149,6 +149,8 @@ describe("todo-list minimal sequential checklist", () => {
     expect(obtain.directive).toContain("otherwise plan the checklist once");
     expect(obtain.directive).not.toContain("Content and order are separate responsibilities");
     expect(obtain.completionCondition).toContain("guide-compliant");
+    expect(obtain.expressions).toEqual(["total_tasks = tasks.length", "current_task = 1"]);
+    expect(obtain.connections).toEqual({ success: "check-tasks-remaining" });
 
     const execute = workflow.nodes.find((node) => node.id === "execute-task");
     expect(execute?.type).toBe("agent-directive");
@@ -170,6 +172,16 @@ describe("todo-list minimal sequential checklist", () => {
     expect(execute.directive).toContain(
       "If the task is incomplete or blocked, do not call `step()`",
     );
+    expect(execute.expressions).toEqual(["current_task = current_task + 1"]);
+    expect(execute.connections).toEqual({ success: "check-tasks-remaining" });
+    expect(execute.connectionLabels?.success).toEqual({
+      label: "task done, prepare the next one",
+      cycle: {
+        cause: "The current task is done, so the cursor advances and the next task is prepared.",
+        exit: "No tasks remain on the checklist.",
+      },
+    });
+    expect(workflow.nodes).toHaveLength(9);
 
     // The checklist may be replaced mid-run, but only through a jump target: no node routes into
     // it, so a revision is always a deliberate agent decision, never a step the flow walks into.
@@ -435,7 +447,7 @@ describe("todo-list minimal sequential checklist", () => {
       },
       expect: {
         status: "completed",
-        reaches: ["obtain-tasks", "derive-plan-state", "execute-task", "end"],
+        reaches: ["obtain-tasks", "check-tasks-remaining", "execute-task", "end"],
         contextContains: { total_tasks: 2, current_task: 3 },
       },
     });
@@ -462,14 +474,14 @@ describe("todo-list minimal sequential checklist", () => {
       allowValidationErrorsAt: ["execute-task"],
       expect: {
         status: "completed",
-        reaches: ["execute-task", "advance-task-cursor", "end"],
+        reaches: ["execute-task", "check-tasks-remaining", "end"],
         contextContains: { current_task: 2 },
       },
     });
 
     expect(observedCursors).toEqual([1, 1, 1]);
     expect(result.inputSubmissionCounts["execute-task"]).toBe(3);
-    expect(result.visitedNodes.filter((id) => id === "advance-task-cursor")).toHaveLength(1);
+    expect(result.finalContext.current_task).toBe(2);
   });
 
   test("accepts the exact 500-character evidence boundary", async () => {
@@ -479,7 +491,7 @@ describe("todo-list minimal sequential checklist", () => {
         "obtain-tasks": intake([suppliedTasks[0]]),
         "execute-task": completedTask("x".repeat(500)),
       },
-      expect: { status: "completed", reaches: ["advance-task-cursor", "end"] },
+      expect: { status: "completed", reaches: ["execute-task", "check-tasks-remaining", "end"] },
     });
 
     expect(result.inputSubmissionCounts["execute-task"]).toBe(1);
@@ -500,7 +512,7 @@ describe("todo-list minimal sequential checklist", () => {
         ],
       },
       allowValidationErrorsAt: ["execute-task"],
-      expect: { status: "completed", reaches: ["advance-task-cursor", "end"] },
+      expect: { status: "completed", reaches: ["execute-task", "check-tasks-remaining", "end"] },
     });
 
     expect(result.inputSubmissionCounts["execute-task"]).toBe(2);

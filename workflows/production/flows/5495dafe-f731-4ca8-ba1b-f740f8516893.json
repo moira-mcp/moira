@@ -1,16 +1,16 @@
 {
-  "slug": "telegram-setup",
   "id": "5495dafe-f731-4ca8-ba1b-f740f8516893",
   "metadata": {
     "name": "Telegram Setup",
-    "version": "2.1.0",
+    "version": "2.2.0",
     "description": "Interactive, secret-safe setup and verification of the current user's Moira Telegram notifications. It inspects masked existing settings, lets the user test or explicitly replace them, guides bot and chat-ID setup without storing credentials in workflow state, writes only telegram.bot_token, telegram.chat_id and telegram.enabled through the supported settings tool, verifies masked persisted state, sends a bounded secret-free test, and distinguishes handler send, user receipt, changed-evidence retry, reconfiguration, incomplete, blocked and skipped outcomes. Final output never contains the bot token or full chat ID. On an unconfigured account, start this bootstrap workflow with skipNotificationCheck: true because its own legacy test node would otherwise trigger ordinary-notification preflight. skipTelegramCheck remains a deprecated compatibility alias.",
     "tags": [
       "telegram",
       "настройка",
       "уведомления",
       "интеграция"
-    ]
+    ],
+    "schemaVersion": 1
   },
   "variableRegistry": {},
   "nodes": [
@@ -87,66 +87,49 @@
         ]
       },
       "connections": {
-        "success": "route-skipped"
-      },
-      "progressNodeId": "intake"
-    },
-    {
-      "id": "route-skipped",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "resolve-setup.setup_path"
-        },
-        "right": "skip"
-      },
-      "connections": {
-        "true": "end-skipped",
-        "false": "route-blocked"
+        "skip": "end-skipped",
+        "blocked": "end-blocked",
+        "configure": "configure-settings",
+        "success": "test-notification"
       },
       "progressNodeId": "intake",
-      "connectionLabels": {
-        "true": "пользователь отказался от настройки"
-      }
-    },
-    {
-      "id": "route-blocked",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "resolve-setup.setup_path"
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "resolve-setup.setup_path"
+            },
+            "right": "skip"
+          },
+          "output": "skip"
         },
-        "right": "blocked"
-      },
-      "connections": {
-        "true": "end-blocked",
-        "false": "route-configure"
-      },
-      "progressNodeId": "intake",
-      "connectionLabels": {
-        "true": "настройку нельзя начать"
-      }
-    },
-    {
-      "id": "route-configure",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "resolve-setup.setup_path"
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "resolve-setup.setup_path"
+            },
+            "right": "blocked"
+          },
+          "output": "blocked"
         },
-        "right": "configure"
-      },
-      "connections": {
-        "true": "configure-settings",
-        "false": "test-notification"
-      },
-      "progressNodeId": "intake",
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "resolve-setup.setup_path"
+            },
+            "right": "configure"
+          },
+          "output": "configure"
+        }
+      ],
       "connectionLabels": {
-        "true": "настройки нужно задать или заменить",
-        "false": "настройки уже есть — проверяем их как есть"
+        "skip": "пользователь отказался от настройки",
+        "blocked": "настройку нельзя начать",
+        "configure": "настройки нужно задать или заменить",
+        "success": "настройки уже есть — проверяем их как есть"
       }
     },
     {
@@ -223,28 +206,25 @@
         ]
       },
       "connections": {
-        "success": "route-configured"
-      },
-      "progressNodeId": "configure"
-    },
-    {
-      "id": "route-configured",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "configure-settings.configuration_outcome"
-        },
-        "right": "configured"
-      },
-      "connections": {
-        "true": "test-notification",
-        "false": "end-blocked"
+        "configured": "test-notification",
+        "success": "end-blocked"
       },
       "progressNodeId": "configure",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "configure-settings.configuration_outcome"
+            },
+            "right": "configured"
+          },
+          "output": "configured"
+        }
+      ],
       "connectionLabels": {
-        "true": "бот и чат записаны",
-        "false": "записать настройки не удалось"
+        "configured": "бот и чат записаны",
+        "success": "записать настройки не удалось"
       }
     },
     {
@@ -264,21 +244,26 @@
     {
       "id": "route-test-sent",
       "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "test-notification.telegramNotificationSent"
-        },
-        "right": true
-      },
+      "progressNodeId": "test",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "test-notification.telegramNotificationSent"
+            },
+            "right": true
+          },
+          "output": "true"
+        }
+      ],
       "connections": {
         "true": "confirm-received",
-        "false": "recovery-not-sent"
+        "default": "recovery-not-sent"
       },
-      "progressNodeId": "test",
       "connectionLabels": {
         "true": "обработчик принял отправку",
-        "false": "принятой отправки не было"
+        "default": "принятой отправки не было"
       }
     },
     {
@@ -309,28 +294,25 @@
         ]
       },
       "connections": {
-        "success": "route-received"
-      },
-      "progressNodeId": "receipt"
-    },
-    {
-      "id": "route-received",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "confirm-received.receipt_status"
-        },
-        "right": "received"
-      },
-      "connections": {
-        "true": "end-success",
-        "false": "recovery-not-received"
+        "received": "end-success",
+        "success": "recovery-not-received"
       },
       "progressNodeId": "receipt",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "confirm-received.receipt_status"
+            },
+            "right": "received"
+          },
+          "output": "received"
+        }
+      ],
       "connectionLabels": {
-        "true": "пользователь получил сообщение в нужном чате",
-        "false": "сообщение до пользователя не дошло"
+        "received": "пользователь получил сообщение в нужном чате",
+        "success": "сообщение до пользователя не дошло"
       }
     },
     {
@@ -400,9 +382,50 @@
         ]
       },
       "connections": {
-        "success": "route-retry-send-error"
+        "retry": "test-notification",
+        "reconfigure": "configure-settings",
+        "success": "end-incomplete-send-error"
       },
-      "progressNodeId": "recovery"
+      "progressNodeId": "recovery",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "recovery-send-error.recovery_action"
+            },
+            "right": "retry"
+          },
+          "output": "retry"
+        },
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "recovery-send-error.recovery_action"
+            },
+            "right": "reconfigure"
+          },
+          "output": "reconfigure"
+        }
+      ],
+      "connectionLabels": {
+        "retry": {
+          "label": "пользователь назвал изменившееся условие — отправляем снова",
+          "cycle": {
+            "cause": "Обработчик вернул ошибку отправки, и пользователь сообщил об изменившемся условии, после которого попытку имеет смысл повторить.",
+            "exit": "Заканчивается полученным сообщением, перенастройкой бота и чата или завершением без работающих уведомлений."
+          }
+        },
+        "reconfigure": {
+          "label": "пользователь решил задать бот и чат заново",
+          "cycle": {
+            "cause": "Ошибка отправки указывает на непригодные токен или чат, и пользователь выбрал перенастройку вместо повторной отправки.",
+            "exit": "Заканчивается полученным сообщением, невозможностью записать настройки или завершением без работающих уведомлений."
+          }
+        },
+        "success": "пользователь закончил без работающих уведомлений"
+      }
     },
     {
       "id": "recovery-not-sent",
@@ -471,9 +494,50 @@
         ]
       },
       "connections": {
-        "success": "route-retry-not-sent"
+        "retry": "test-notification",
+        "reconfigure": "configure-settings",
+        "success": "end-incomplete-not-sent"
       },
-      "progressNodeId": "recovery"
+      "progressNodeId": "recovery",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "recovery-not-sent.recovery_action"
+            },
+            "right": "retry"
+          },
+          "output": "retry"
+        },
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "recovery-not-sent.recovery_action"
+            },
+            "right": "reconfigure"
+          },
+          "output": "reconfigure"
+        }
+      ],
+      "connectionLabels": {
+        "retry": {
+          "label": "пользователь назвал изменившееся условие — отправляем снова",
+          "cycle": {
+            "cause": "Принятой отправки не наблюдалось, и пользователь сообщил об изменившемся условии, после которого попытку имеет смысл повторить.",
+            "exit": "Заканчивается полученным сообщением, перенастройкой бота и чата или завершением без работающих уведомлений."
+          }
+        },
+        "reconfigure": {
+          "label": "пользователь решил задать бот и чат заново",
+          "cycle": {
+            "cause": "Принятой отправки не наблюдалось, и пользователь выбрал задать бот и чат заново, а не повторять попытку.",
+            "exit": "Заканчивается полученным сообщением, невозможностью записать настройки или завершением без работающих уведомлений."
+          }
+        },
+        "success": "пользователь закончил без работающих уведомлений"
+      }
     },
     {
       "id": "recovery-not-received",
@@ -542,59 +606,49 @@
         ]
       },
       "connections": {
-        "success": "route-retry-not-received"
-      },
-      "progressNodeId": "recovery"
-    },
-    {
-      "id": "route-retry-send-error",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "recovery-send-error.recovery_action"
-        },
-        "right": "retry"
-      },
-      "connections": {
-        "true": "test-notification",
-        "false": "route-reconfigure-send-error"
+        "retry": "test-notification",
+        "reconfigure": "configure-settings",
+        "success": "end-incomplete-not-received"
       },
       "progressNodeId": "recovery",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "recovery-not-received.recovery_action"
+            },
+            "right": "retry"
+          },
+          "output": "retry"
+        },
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "recovery-not-received.recovery_action"
+            },
+            "right": "reconfigure"
+          },
+          "output": "reconfigure"
+        }
+      ],
       "connectionLabels": {
-        "true": {
+        "retry": {
           "label": "пользователь назвал изменившееся условие — отправляем снова",
           "cycle": {
-            "cause": "Обработчик вернул ошибку отправки, и пользователь сообщил об изменившемся условии, после которого попытку имеет смысл повторить.",
+            "cause": "Отправка была принята, но сообщение не дошло, и пользователь сообщил об изменившемся условии, после которого попытку имеет смысл повторить.",
             "exit": "Заканчивается полученным сообщением, перенастройкой бота и чата или завершением без работающих уведомлений."
           }
-        }
-      }
-    },
-    {
-      "id": "route-reconfigure-send-error",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "recovery-send-error.recovery_action"
         },
-        "right": "reconfigure"
-      },
-      "connections": {
-        "true": "configure-settings",
-        "false": "end-incomplete-send-error"
-      },
-      "progressNodeId": "recovery",
-      "connectionLabels": {
-        "true": {
+        "reconfigure": {
           "label": "пользователь решил задать бот и чат заново",
           "cycle": {
-            "cause": "Ошибка отправки указывает на непригодные токен или чат, и пользователь выбрал перенастройку вместо повторной отправки.",
+            "cause": "Отправка принята, но сообщение не дошло, и пользователь выбрал задать бот и чат заново — вероятно, указан не тот чат.",
             "exit": "Заканчивается полученным сообщением, невозможностью записать настройки или завершением без работающих уведомлений."
           }
         },
-        "false": "пользователь закончил без работающих уведомлений"
+        "success": "пользователь закончил без работающих уведомлений"
       }
     },
     {
@@ -609,57 +663,6 @@
       "progressNodeId": "incomplete"
     },
     {
-      "id": "route-retry-not-sent",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "recovery-not-sent.recovery_action"
-        },
-        "right": "retry"
-      },
-      "connections": {
-        "true": "test-notification",
-        "false": "route-reconfigure-not-sent"
-      },
-      "progressNodeId": "recovery",
-      "connectionLabels": {
-        "true": {
-          "label": "пользователь назвал изменившееся условие — отправляем снова",
-          "cycle": {
-            "cause": "Принятой отправки не наблюдалось, и пользователь сообщил об изменившемся условии, после которого попытку имеет смысл повторить.",
-            "exit": "Заканчивается полученным сообщением, перенастройкой бота и чата или завершением без работающих уведомлений."
-          }
-        }
-      }
-    },
-    {
-      "id": "route-reconfigure-not-sent",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "recovery-not-sent.recovery_action"
-        },
-        "right": "reconfigure"
-      },
-      "connections": {
-        "true": "configure-settings",
-        "false": "end-incomplete-not-sent"
-      },
-      "progressNodeId": "recovery",
-      "connectionLabels": {
-        "true": {
-          "label": "пользователь решил задать бот и чат заново",
-          "cycle": {
-            "cause": "Принятой отправки не наблюдалось, и пользователь выбрал задать бот и чат заново, а не повторять попытку.",
-            "exit": "Заканчивается полученным сообщением, невозможностью записать настройки или завершением без работающих уведомлений."
-          }
-        },
-        "false": "пользователь закончил без работающих уведомлений"
-      }
-    },
-    {
       "id": "end-incomplete-not-sent",
       "type": "end",
       "finalOutput": [
@@ -669,57 +672,6 @@
         "recovery-not-sent.recovery_summary"
       ],
       "progressNodeId": "incomplete"
-    },
-    {
-      "id": "route-retry-not-received",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "recovery-not-received.recovery_action"
-        },
-        "right": "retry"
-      },
-      "connections": {
-        "true": "test-notification",
-        "false": "route-reconfigure-not-received"
-      },
-      "progressNodeId": "recovery",
-      "connectionLabels": {
-        "true": {
-          "label": "пользователь назвал изменившееся условие — отправляем снова",
-          "cycle": {
-            "cause": "Отправка была принята, но сообщение не дошло, и пользователь сообщил об изменившемся условии, после которого попытку имеет смысл повторить.",
-            "exit": "Заканчивается полученным сообщением, перенастройкой бота и чата или завершением без работающих уведомлений."
-          }
-        }
-      }
-    },
-    {
-      "id": "route-reconfigure-not-received",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "recovery-not-received.recovery_action"
-        },
-        "right": "reconfigure"
-      },
-      "connections": {
-        "true": "configure-settings",
-        "false": "end-incomplete-not-received"
-      },
-      "progressNodeId": "recovery",
-      "connectionLabels": {
-        "true": {
-          "label": "пользователь решил задать бот и чат заново",
-          "cycle": {
-            "cause": "Отправка принята, но сообщение не дошло, и пользователь выбрал задать бот и чат заново — вероятно, указан не тот чат.",
-            "exit": "Заканчивается полученным сообщением, невозможностью записать настройки или завершением без работающих уведомлений."
-          }
-        },
-        "false": "пользователь закончил без работающих уведомлений"
-      }
     },
     {
       "id": "end-incomplete-not-received",
@@ -763,8 +715,6 @@
       "progressNodeId": "skipped"
     }
   ],
-  "owner": "system-moira",
-  "visibility": "public",
   "progress": {
     "title": "Настройка уведомлений в Telegram",
     "goal": "Довести уведомления Moira в Telegram до состояния, подтверждённого настоящим полученным сообщением, не сохраняя секретов в состоянии запуска.",
@@ -833,5 +783,8 @@
         }
       }
     ]
-  }
+  },
+  "slug": "telegram-setup",
+  "owner": "system-moira",
+  "visibility": "public"
 }

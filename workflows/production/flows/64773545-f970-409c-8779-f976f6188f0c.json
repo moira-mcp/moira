@@ -1,16 +1,16 @@
 {
-  "slug": "architecture-design-flow",
   "id": "64773545-f970-409c-8779-f976f6188f0c",
   "metadata": {
     "name": "Architecture Design Flow",
-    "version": "2.1.0",
+    "version": "2.2.0",
     "description": "Produces a decision-ready, maintained architecture package for either a new system or an existing product. It resolves source and delivery authority, materializes a durable workspace, performs scenario-appropriate requirements discovery or evidence-backed reverse engineering, develops proportionate architecture decisions and documentation without forcing C4, DDD, arc42, Mermaid or arbitrary counts, validates only mechanically observable package properties, and requires independent whole-package review. Cause-owned repair and independently reviewed contract correction return to the earliest stale responsibility; autonomous mode skips only final user acceptance. Outcomes distinguish complete, reviewed-limited, blocked, workspace failure and interactive abort, while project delivery occurs only to an explicitly authorized target. The workflow never changes product code, commits, publishes, notifies, releases or deploys.",
     "tags": [
       "архитектура",
       "проектирование",
       "решения",
       "разработка"
-    ]
+    ],
+    "schemaVersion": 1
   },
   "nodes": [
     {
@@ -145,28 +145,25 @@
         ]
       },
       "connections": {
-        "success": "route-intake-ready"
-      },
-      "progressNodeId": "intake"
-    },
-    {
-      "id": "route-intake-ready",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "intake.intake_outcome"
-        },
-        "right": "ready"
-      },
-      "connections": {
-        "true": "materialize-workspace",
-        "false": "finalize-intake-blocked"
+        "success": "materialize-workspace",
+        "blocked": "finalize-intake-blocked"
       },
       "progressNodeId": "intake",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "intake.intake_outcome"
+            },
+            "right": "blocked"
+          },
+          "output": "blocked"
+        }
+      ],
       "connectionLabels": {
-        "true": "заявка собрана",
-        "false": "заявку собрать не удалось"
+        "success": "заявка собрана",
+        "blocked": "заявку собрать не удалось"
       }
     },
     {
@@ -360,45 +357,47 @@
         ]
       },
       "connections": {
-        "success": "route-contract-ready"
-      },
-      "progressNodeId": "workspace"
-    },
-    {
-      "id": "route-contract-ready",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "initialize-contract.contract_outcome"
-        },
-        "right": "ready"
-      },
-      "connections": {
-        "true": "route-scenario",
-        "false": "finalize-blocked"
+        "success": "route-scenario",
+        "blocked": "finalize-blocked"
       },
       "progressNodeId": "workspace",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "initialize-contract.contract_outcome"
+            },
+            "right": "blocked"
+          },
+          "output": "blocked"
+        }
+      ],
       "connectionLabels": {
-        "true": "контракт работы записан",
-        "false": "контракт из заявки не выводится"
+        "success": "контракт работы записан",
+        "blocked": "контракт из заявки не выводится"
       }
     },
     {
       "id": "route-scenario",
       "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "scenario_type"
-        },
-        "right": "new"
-      },
+      "progressNodeId": "discovery",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "scenario_type"
+            },
+            "right": "new"
+          },
+          "output": "true"
+        }
+      ],
       "connections": {
         "true": "discover-new-system",
-        "false": "discover-existing-system"
-      },
-      "progressNodeId": "discovery"
+        "default": "discover-existing-system"
+      }
     },
     {
       "id": "discover-new-system",
@@ -519,47 +518,37 @@
         ]
       },
       "connections": {
-        "success": "route-new-discovery-ready"
-      },
-      "progressNodeId": "discovery"
-    },
-    {
-      "id": "route-new-discovery-ready",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "discover-new-system.discovery_outcome"
-        },
-        "right": "ready"
-      },
-      "connections": {
-        "true": "design-architecture",
-        "false": "route-new-discovery-replan"
+        "success": "design-architecture",
+        "replan": "reassess-contract",
+        "blocked": "finalize-blocked"
       },
       "progressNodeId": "discovery",
-      "connectionLabels": {
-        "true": "предмет новой системы изучен"
-      }
-    },
-    {
-      "id": "route-new-discovery-replan",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "discover-new-system.discovery_outcome"
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "discover-new-system.discovery_outcome"
+            },
+            "right": "replan"
+          },
+          "output": "replan"
         },
-        "right": "replan"
-      },
-      "connections": {
-        "true": "reassess-contract",
-        "false": "finalize-blocked"
-      },
-      "progressNodeId": "discovery",
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "discover-new-system.discovery_outcome"
+            },
+            "right": "blocked"
+          },
+          "output": "blocked"
+        }
+      ],
       "connectionLabels": {
-        "true": "изучение новой системы требует пересмотра договорённостей",
-        "false": "изучить предмет новой системы не удалось"
+        "success": "предмет новой системы изучен",
+        "replan": "изучение новой системы требует пересмотра договорённостей",
+        "blocked": "изучить предмет новой системы не удалось"
       }
     },
     {
@@ -681,47 +670,37 @@
         ]
       },
       "connections": {
-        "success": "route-existing-discovery-ready"
-      },
-      "progressNodeId": "discovery"
-    },
-    {
-      "id": "route-existing-discovery-ready",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "discover-existing-system.discovery_outcome"
-        },
-        "right": "ready"
-      },
-      "connections": {
-        "true": "design-architecture",
-        "false": "route-existing-discovery-replan"
+        "success": "design-architecture",
+        "replan": "reassess-contract",
+        "blocked": "finalize-blocked"
       },
       "progressNodeId": "discovery",
-      "connectionLabels": {
-        "true": "существующая система изучена по её исходнику"
-      }
-    },
-    {
-      "id": "route-existing-discovery-replan",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "discover-existing-system.discovery_outcome"
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "discover-existing-system.discovery_outcome"
+            },
+            "right": "replan"
+          },
+          "output": "replan"
         },
-        "right": "replan"
-      },
-      "connections": {
-        "true": "reassess-contract",
-        "false": "finalize-blocked"
-      },
-      "progressNodeId": "discovery",
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "discover-existing-system.discovery_outcome"
+            },
+            "right": "blocked"
+          },
+          "output": "blocked"
+        }
+      ],
       "connectionLabels": {
-        "true": "изучение существующей системы требует пересмотра договорённостей",
-        "false": "изучить существующую систему не удалось"
+        "success": "существующая система изучена по её исходнику",
+        "replan": "изучение существующей системы требует пересмотра договорённостей",
+        "blocked": "изучить существующую систему не удалось"
       }
     },
     {
@@ -831,47 +810,37 @@
         ]
       },
       "connections": {
-        "success": "route-architecture-ready"
-      },
-      "progressNodeId": "design"
-    },
-    {
-      "id": "route-architecture-ready",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "design-architecture.architecture_outcome"
-        },
-        "right": "ready"
-      },
-      "connections": {
-        "true": "create-architecture-package",
-        "false": "route-architecture-replan"
+        "success": "create-architecture-package",
+        "replan": "reassess-contract",
+        "blocked": "finalize-blocked"
       },
       "progressNodeId": "design",
-      "connectionLabels": {
-        "true": "архитектурные решения готовы"
-      }
-    },
-    {
-      "id": "route-architecture-replan",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "design-architecture.architecture_outcome"
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "design-architecture.architecture_outcome"
+            },
+            "right": "replan"
+          },
+          "output": "replan"
         },
-        "right": "replan"
-      },
-      "connections": {
-        "true": "reassess-contract",
-        "false": "finalize-blocked"
-      },
-      "progressNodeId": "design",
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "design-architecture.architecture_outcome"
+            },
+            "right": "blocked"
+          },
+          "output": "blocked"
+        }
+      ],
       "connectionLabels": {
-        "true": "решения требуют пересмотра договорённостей",
-        "false": "принять решения не удалось"
+        "success": "архитектурные решения готовы",
+        "replan": "решения требуют пересмотра договорённостей",
+        "blocked": "принять решения не удалось"
       }
     },
     {
@@ -981,47 +950,37 @@
         ]
       },
       "connections": {
-        "success": "route-package-ready"
-      },
-      "progressNodeId": "package"
-    },
-    {
-      "id": "route-package-ready",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "create-architecture-package.package_outcome"
-        },
-        "right": "ready"
-      },
-      "connections": {
-        "true": "complete-architecture-package",
-        "false": "route-package-replan"
+        "success": "complete-architecture-package",
+        "replan": "reassess-contract",
+        "blocked": "finalize-blocked"
       },
       "progressNodeId": "package",
-      "connectionLabels": {
-        "true": "пакет собран"
-      }
-    },
-    {
-      "id": "route-package-replan",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "create-architecture-package.package_outcome"
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "create-architecture-package.package_outcome"
+            },
+            "right": "replan"
+          },
+          "output": "replan"
         },
-        "right": "replan"
-      },
-      "connections": {
-        "true": "reassess-contract",
-        "false": "finalize-blocked"
-      },
-      "progressNodeId": "package",
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "create-architecture-package.package_outcome"
+            },
+            "right": "blocked"
+          },
+          "output": "blocked"
+        }
+      ],
       "connectionLabels": {
-        "true": "сборка требует пересмотра договорённостей",
-        "false": "собрать пакет не удалось"
+        "success": "пакет собран",
+        "replan": "сборка требует пересмотра договорённостей",
+        "blocked": "собрать пакет не удалось"
       }
     },
     {
@@ -1167,47 +1126,37 @@
         ]
       },
       "connections": {
-        "success": "route-completion-ready"
-      },
-      "progressNodeId": "completion"
-    },
-    {
-      "id": "route-completion-ready",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "complete-architecture-package.completion_outcome"
-        },
-        "right": "ready"
-      },
-      "connections": {
-        "true": "validate-architecture-package",
-        "false": "route-completion-replan"
+        "success": "validate-architecture-package",
+        "replan": "reassess-contract",
+        "blocked": "finalize-blocked"
       },
       "progressNodeId": "completion",
-      "connectionLabels": {
-        "true": "пакет доведён, класс результата объявлен"
-      }
-    },
-    {
-      "id": "route-completion-replan",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "complete-architecture-package.completion_outcome"
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "complete-architecture-package.completion_outcome"
+            },
+            "right": "replan"
+          },
+          "output": "replan"
         },
-        "right": "replan"
-      },
-      "connections": {
-        "true": "reassess-contract",
-        "false": "finalize-blocked"
-      },
-      "progressNodeId": "completion",
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "complete-architecture-package.completion_outcome"
+            },
+            "right": "blocked"
+          },
+          "output": "blocked"
+        }
+      ],
       "connectionLabels": {
-        "true": "доведение требует пересмотра договорённостей",
-        "false": "довести пакет не удалось"
+        "success": "пакет доведён, класс результата объявлен",
+        "replan": "доведение требует пересмотра договорённостей",
+        "blocked": "довести пакет не удалось"
       }
     },
     {
@@ -1374,146 +1323,163 @@
         ]
       },
       "connections": {
-        "success": "route-validation-pass"
-      },
-      "progressNodeId": "validation"
-    },
-    {
-      "id": "route-validation-pass",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "validate-architecture-package.validation_outcome"
-        },
-        "right": "pass"
-      },
-      "connections": {
-        "true": "architecture-review",
-        "false": "route-validation-repair"
+        "success": "architecture-review",
+        "validation": "repair-validation-mechanical",
+        "completion": "complete-architecture-package",
+        "package": "repair-package-validation",
+        "architecture": "repair-architecture-validation",
+        "discovery": "repair-discovery-validation",
+        "replan": "reassess-contract",
+        "blocked": "finalize-blocked"
       },
       "progressNodeId": "validation",
-      "connectionLabels": {
-        "true": "пакет прошёл механическую проверку"
-      }
-    },
-    {
-      "id": "route-validation-repair",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "validate-architecture-package.validation_outcome"
+      "cases": [
+        {
+          "when": {
+            "operator": "and",
+            "conditions": [
+              {
+                "operator": "eq",
+                "left": {
+                  "contextPath": "validate-architecture-package.validation_outcome"
+                },
+                "right": "repair"
+              },
+              {
+                "operator": "eq",
+                "left": {
+                  "contextPath": "validate-architecture-package.repair_owner"
+                },
+                "right": "validation"
+              }
+            ]
+          },
+          "output": "validation"
         },
-        "right": "repair"
-      },
-      "connections": {
-        "true": "route-validation-validation",
-        "false": "route-validation-replan"
-      },
-      "progressNodeId": "validation"
-    },
-    {
-      "id": "route-validation-validation",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "validate-architecture-package.repair_owner"
+        {
+          "when": {
+            "operator": "and",
+            "conditions": [
+              {
+                "operator": "eq",
+                "left": {
+                  "contextPath": "validate-architecture-package.validation_outcome"
+                },
+                "right": "repair"
+              },
+              {
+                "operator": "eq",
+                "left": {
+                  "contextPath": "validate-architecture-package.repair_owner"
+                },
+                "right": "completion"
+              }
+            ]
+          },
+          "output": "completion"
         },
-        "right": "validation"
-      },
-      "connections": {
-        "true": "repair-validation-mechanical",
-        "false": "route-validation-completion"
-      },
-      "progressNodeId": "validation",
-      "connectionLabels": {
-        "true": "правку берёт сама проверка"
-      }
-    },
-    {
-      "id": "route-validation-completion",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "validate-architecture-package.repair_owner"
+        {
+          "when": {
+            "operator": "and",
+            "conditions": [
+              {
+                "operator": "eq",
+                "left": {
+                  "contextPath": "validate-architecture-package.validation_outcome"
+                },
+                "right": "repair"
+              },
+              {
+                "operator": "eq",
+                "left": {
+                  "contextPath": "validate-architecture-package.repair_owner"
+                },
+                "right": "package"
+              }
+            ]
+          },
+          "output": "package"
         },
-        "right": "completion"
-      },
-      "connections": {
-        "true": "complete-architecture-package",
-        "false": "route-validation-package"
-      },
-      "progressNodeId": "validation",
+        {
+          "when": {
+            "operator": "and",
+            "conditions": [
+              {
+                "operator": "eq",
+                "left": {
+                  "contextPath": "validate-architecture-package.validation_outcome"
+                },
+                "right": "repair"
+              },
+              {
+                "operator": "eq",
+                "left": {
+                  "contextPath": "validate-architecture-package.repair_owner"
+                },
+                "right": "architecture"
+              }
+            ]
+          },
+          "output": "architecture"
+        },
+        {
+          "when": {
+            "operator": "and",
+            "conditions": [
+              {
+                "operator": "eq",
+                "left": {
+                  "contextPath": "validate-architecture-package.validation_outcome"
+                },
+                "right": "repair"
+              },
+              {
+                "operator": "eq",
+                "left": {
+                  "contextPath": "validate-architecture-package.repair_owner"
+                },
+                "right": "discovery"
+              }
+            ]
+          },
+          "output": "discovery"
+        },
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "validate-architecture-package.validation_outcome"
+            },
+            "right": "replan"
+          },
+          "output": "replan"
+        },
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "validate-architecture-package.validation_outcome"
+            },
+            "right": "blocked"
+          },
+          "output": "blocked"
+        }
+      ],
       "connectionLabels": {
-        "true": {
+        "success": "пакет прошёл механическую проверку",
+        "validation": "правку берёт сама проверка",
+        "completion": {
           "label": "правку берёт доведение пакета",
           "cycle": {
             "cause": "Механическая проверка нашла дефект, который правит владелец доведения: он воспроизводит все текущие замечания и переписывает свою часть прямо на этой стадии.",
             "exit": "Доведённый заново пакет снова проходит ту же проверку; неснимаемый дефект уводит в пересмотр договорённостей или в остановку."
           }
-        }
-      }
-    },
-    {
-      "id": "route-validation-package",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "validate-architecture-package.repair_owner"
         },
-        "right": "package"
-      },
-      "connections": {
-        "true": "repair-package-validation",
-        "false": "route-validation-architecture"
-      },
-      "progressNodeId": "validation",
-      "connectionLabels": {
-        "true": "правку берёт сборка пакета"
-      }
-    },
-    {
-      "id": "route-validation-architecture",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "validate-architecture-package.repair_owner"
-        },
-        "right": "architecture"
-      },
-      "connections": {
-        "true": "repair-architecture-validation",
-        "false": "repair-discovery-validation"
-      },
-      "progressNodeId": "validation",
-      "connectionLabels": {
-        "true": "правку берут архитектурные решения",
-        "false": "правку берёт изучение предмета"
-      }
-    },
-    {
-      "id": "route-validation-replan",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "validate-architecture-package.validation_outcome"
-        },
-        "right": "replan"
-      },
-      "connections": {
-        "true": "reassess-contract",
-        "false": "finalize-blocked"
-      },
-      "progressNodeId": "validation",
-      "connectionLabels": {
-        "true": "проверка требует пересмотра договорённостей",
-        "false": "проверка признала работу непроходимой"
+        "package": "правку берёт сборка пакета",
+        "architecture": "правку берут архитектурные решения",
+        "discovery": "правку берёт изучение предмета",
+        "replan": "проверка требует пересмотра договорённостей",
+        "blocked": "проверка признала работу непроходимой"
       }
     },
     {
@@ -1678,146 +1644,163 @@
         ]
       },
       "connections": {
-        "success": "route-review-pass"
-      },
-      "progressNodeId": "review"
-    },
-    {
-      "id": "route-review-pass",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "architecture-review.review_outcome"
-        },
-        "right": "pass"
-      },
-      "connections": {
-        "true": "route-mode",
-        "false": "route-review-repair"
+        "success": "route-mode",
+        "validation": "repair-validation-semantic",
+        "completion": "complete-architecture-package",
+        "package": "repair-package-semantic",
+        "architecture": "repair-architecture-semantic",
+        "discovery": "repair-discovery-semantic",
+        "replan": "reassess-contract",
+        "blocked": "finalize-blocked"
       },
       "progressNodeId": "review",
-      "connectionLabels": {
-        "true": "ревью приняло пакет"
-      }
-    },
-    {
-      "id": "route-review-repair",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "architecture-review.review_outcome"
+      "cases": [
+        {
+          "when": {
+            "operator": "and",
+            "conditions": [
+              {
+                "operator": "eq",
+                "left": {
+                  "contextPath": "architecture-review.review_outcome"
+                },
+                "right": "repair"
+              },
+              {
+                "operator": "eq",
+                "left": {
+                  "contextPath": "architecture-review.repair_owner"
+                },
+                "right": "validation"
+              }
+            ]
+          },
+          "output": "validation"
         },
-        "right": "repair"
-      },
-      "connections": {
-        "true": "route-review-validation",
-        "false": "route-review-replan"
-      },
-      "progressNodeId": "review"
-    },
-    {
-      "id": "route-review-validation",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "architecture-review.repair_owner"
+        {
+          "when": {
+            "operator": "and",
+            "conditions": [
+              {
+                "operator": "eq",
+                "left": {
+                  "contextPath": "architecture-review.review_outcome"
+                },
+                "right": "repair"
+              },
+              {
+                "operator": "eq",
+                "left": {
+                  "contextPath": "architecture-review.repair_owner"
+                },
+                "right": "completion"
+              }
+            ]
+          },
+          "output": "completion"
         },
-        "right": "validation"
-      },
-      "connections": {
-        "true": "repair-validation-semantic",
-        "false": "route-review-completion"
-      },
-      "progressNodeId": "review",
-      "connectionLabels": {
-        "true": "правку берёт механическая проверка"
-      }
-    },
-    {
-      "id": "route-review-completion",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "architecture-review.repair_owner"
+        {
+          "when": {
+            "operator": "and",
+            "conditions": [
+              {
+                "operator": "eq",
+                "left": {
+                  "contextPath": "architecture-review.review_outcome"
+                },
+                "right": "repair"
+              },
+              {
+                "operator": "eq",
+                "left": {
+                  "contextPath": "architecture-review.repair_owner"
+                },
+                "right": "package"
+              }
+            ]
+          },
+          "output": "package"
         },
-        "right": "completion"
-      },
-      "connections": {
-        "true": "complete-architecture-package",
-        "false": "route-review-package"
-      },
-      "progressNodeId": "review",
+        {
+          "when": {
+            "operator": "and",
+            "conditions": [
+              {
+                "operator": "eq",
+                "left": {
+                  "contextPath": "architecture-review.review_outcome"
+                },
+                "right": "repair"
+              },
+              {
+                "operator": "eq",
+                "left": {
+                  "contextPath": "architecture-review.repair_owner"
+                },
+                "right": "architecture"
+              }
+            ]
+          },
+          "output": "architecture"
+        },
+        {
+          "when": {
+            "operator": "and",
+            "conditions": [
+              {
+                "operator": "eq",
+                "left": {
+                  "contextPath": "architecture-review.review_outcome"
+                },
+                "right": "repair"
+              },
+              {
+                "operator": "eq",
+                "left": {
+                  "contextPath": "architecture-review.repair_owner"
+                },
+                "right": "discovery"
+              }
+            ]
+          },
+          "output": "discovery"
+        },
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "architecture-review.review_outcome"
+            },
+            "right": "replan"
+          },
+          "output": "replan"
+        },
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "architecture-review.review_outcome"
+            },
+            "right": "blocked"
+          },
+          "output": "blocked"
+        }
+      ],
       "connectionLabels": {
-        "true": {
+        "success": "ревью приняло пакет",
+        "validation": "правку берёт механическая проверка",
+        "completion": {
           "label": "правку берёт доведение пакета",
           "cycle": {
             "cause": "Ревью нашло находку, которую правит владелец доведения: он воспроизводит все текущие блокирующие находки и переписывает свою часть прямо на этой стадии.",
             "exit": "Доведённый заново пакет снова проходит проверку и ревью; неснимаемая находка уводит в пересмотр договорённостей или в остановку."
           }
-        }
-      }
-    },
-    {
-      "id": "route-review-package",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "architecture-review.repair_owner"
         },
-        "right": "package"
-      },
-      "connections": {
-        "true": "repair-package-semantic",
-        "false": "route-review-architecture"
-      },
-      "progressNodeId": "review",
-      "connectionLabels": {
-        "true": "правку берёт сборка пакета"
-      }
-    },
-    {
-      "id": "route-review-architecture",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "architecture-review.repair_owner"
-        },
-        "right": "architecture"
-      },
-      "connections": {
-        "true": "repair-architecture-semantic",
-        "false": "repair-discovery-semantic"
-      },
-      "progressNodeId": "review",
-      "connectionLabels": {
-        "true": "правку берут архитектурные решения",
-        "false": "правку берёт изучение предмета"
-      }
-    },
-    {
-      "id": "route-review-replan",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "architecture-review.review_outcome"
-        },
-        "right": "replan"
-      },
-      "connections": {
-        "true": "reassess-contract",
-        "false": "finalize-blocked"
-      },
-      "progressNodeId": "review",
-      "connectionLabels": {
-        "true": "ревью требует пересмотра договорённостей",
-        "false": "ревью признало работу непроходимой"
+        "package": "правку берёт сборка пакета",
+        "architecture": "правку берут архитектурные решения",
+        "discovery": "правку берёт изучение предмета",
+        "replan": "ревью требует пересмотра договорённостей",
+        "blocked": "ревью признало работу непроходимой"
       }
     },
     {
@@ -1943,53 +1926,43 @@
         ]
       },
       "connections": {
-        "success": "repair-package-validation-changed"
-      },
-      "progressNodeId": "repair-validation"
-    },
-    {
-      "id": "repair-package-validation-changed",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "repair-package-validation.repair_outcome"
-        },
-        "right": "changed"
-      },
-      "connections": {
-        "true": "complete-architecture-package",
-        "false": "repair-package-validation-blocked"
+        "success": "complete-architecture-package",
+        "reassess": "reassess-contract",
+        "blocked": "finalize-blocked"
       },
       "progressNodeId": "repair-validation",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "repair-package-validation.repair_outcome"
+            },
+            "right": "reassess"
+          },
+          "output": "reassess"
+        },
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "repair-package-validation.repair_outcome"
+            },
+            "right": "blocked"
+          },
+          "output": "blocked"
+        }
+      ],
       "connectionLabels": {
-        "true": {
+        "success": {
           "label": "пакет исправлен по механической проверке",
           "cycle": {
             "cause": "Механическая проверка нашла дефект, источник которого — сборка пакета, и её владелец переписал свою часть.",
             "exit": "Исправленный пакет заново доводится и проходит проверку; неснимаемый дефект уводит в пересмотр договорённостей или в остановку."
           }
-        }
-      }
-    },
-    {
-      "id": "repair-package-validation-blocked",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "repair-package-validation.repair_outcome"
         },
-        "right": "blocked"
-      },
-      "connections": {
-        "true": "finalize-blocked",
-        "false": "reassess-contract"
-      },
-      "progressNodeId": "repair-validation",
-      "connectionLabels": {
-        "true": "правка пакета по проверке непроходима",
-        "false": "правка пакета по проверке требует пересмотра договорённостей"
+        "reassess": "правка пакета по проверке требует пересмотра договорённостей",
+        "blocked": "правка пакета по проверке непроходима"
       }
     },
     {
@@ -2115,53 +2088,43 @@
         ]
       },
       "connections": {
-        "success": "repair-package-semantic-changed"
-      },
-      "progressNodeId": "repair-review"
-    },
-    {
-      "id": "repair-package-semantic-changed",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "repair-package-semantic.repair_outcome"
-        },
-        "right": "changed"
-      },
-      "connections": {
-        "true": "complete-architecture-package",
-        "false": "repair-package-semantic-blocked"
+        "success": "complete-architecture-package",
+        "reassess": "reassess-contract",
+        "blocked": "finalize-blocked"
       },
       "progressNodeId": "repair-review",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "repair-package-semantic.repair_outcome"
+            },
+            "right": "reassess"
+          },
+          "output": "reassess"
+        },
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "repair-package-semantic.repair_outcome"
+            },
+            "right": "blocked"
+          },
+          "output": "blocked"
+        }
+      ],
       "connectionLabels": {
-        "true": {
+        "success": {
           "label": "пакет исправлен по ревью",
           "cycle": {
             "cause": "Ревью нашло находку, источник которой — сборка пакета, и её владелец переписал свою часть.",
             "exit": "Исправленный пакет заново доводится и проходит проверку и ревью; неснимаемая находка уводит в пересмотр договорённостей или в остановку."
           }
-        }
-      }
-    },
-    {
-      "id": "repair-package-semantic-blocked",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "repair-package-semantic.repair_outcome"
         },
-        "right": "blocked"
-      },
-      "connections": {
-        "true": "finalize-blocked",
-        "false": "reassess-contract"
-      },
-      "progressNodeId": "repair-review",
-      "connectionLabels": {
-        "true": "правка пакета по ревью непроходима",
-        "false": "правка пакета по ревью требует пересмотра договорённостей"
+        "reassess": "правка пакета по ревью требует пересмотра договорённостей",
+        "blocked": "правка пакета по ревью непроходима"
       }
     },
     {
@@ -2287,53 +2250,43 @@
         ]
       },
       "connections": {
-        "success": "repair-architecture-validation-changed"
-      },
-      "progressNodeId": "repair-validation"
-    },
-    {
-      "id": "repair-architecture-validation-changed",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "repair-architecture-validation.repair_outcome"
-        },
-        "right": "changed"
-      },
-      "connections": {
-        "true": "create-architecture-package",
-        "false": "repair-architecture-validation-blocked"
+        "success": "create-architecture-package",
+        "reassess": "reassess-contract",
+        "blocked": "finalize-blocked"
       },
       "progressNodeId": "repair-validation",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "repair-architecture-validation.repair_outcome"
+            },
+            "right": "reassess"
+          },
+          "output": "reassess"
+        },
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "repair-architecture-validation.repair_outcome"
+            },
+            "right": "blocked"
+          },
+          "output": "blocked"
+        }
+      ],
       "connectionLabels": {
-        "true": {
+        "success": {
           "label": "решения исправлены по механической проверке",
           "cycle": {
             "cause": "Механическая проверка нашла дефект, источник которого — сами архитектурные решения, и их владелец их переписал.",
             "exit": "Пакет собирается заново из исправленных решений, доводится и снова проходит проверку; неснимаемый дефект уводит в пересмотр договорённостей или в остановку."
           }
-        }
-      }
-    },
-    {
-      "id": "repair-architecture-validation-blocked",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "repair-architecture-validation.repair_outcome"
         },
-        "right": "blocked"
-      },
-      "connections": {
-        "true": "finalize-blocked",
-        "false": "reassess-contract"
-      },
-      "progressNodeId": "repair-validation",
-      "connectionLabels": {
-        "true": "правка решений по проверке непроходима",
-        "false": "правка решений по проверке требует пересмотра договорённостей"
+        "reassess": "правка решений по проверке требует пересмотра договорённостей",
+        "blocked": "правка решений по проверке непроходима"
       }
     },
     {
@@ -2459,53 +2412,43 @@
         ]
       },
       "connections": {
-        "success": "repair-architecture-semantic-changed"
-      },
-      "progressNodeId": "repair-review"
-    },
-    {
-      "id": "repair-architecture-semantic-changed",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "repair-architecture-semantic.repair_outcome"
-        },
-        "right": "changed"
-      },
-      "connections": {
-        "true": "create-architecture-package",
-        "false": "repair-architecture-semantic-blocked"
+        "success": "create-architecture-package",
+        "reassess": "reassess-contract",
+        "blocked": "finalize-blocked"
       },
       "progressNodeId": "repair-review",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "repair-architecture-semantic.repair_outcome"
+            },
+            "right": "reassess"
+          },
+          "output": "reassess"
+        },
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "repair-architecture-semantic.repair_outcome"
+            },
+            "right": "blocked"
+          },
+          "output": "blocked"
+        }
+      ],
       "connectionLabels": {
-        "true": {
+        "success": {
           "label": "решения исправлены по ревью",
           "cycle": {
             "cause": "Ревью нашло находку, источник которой — сами архитектурные решения, и их владелец их переписал.",
             "exit": "Пакет собирается заново из исправленных решений и снова проходит проверку и ревью; неснимаемая находка уводит в пересмотр договорённостей или в остановку."
           }
-        }
-      }
-    },
-    {
-      "id": "repair-architecture-semantic-blocked",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "repair-architecture-semantic.repair_outcome"
         },
-        "right": "blocked"
-      },
-      "connections": {
-        "true": "finalize-blocked",
-        "false": "reassess-contract"
-      },
-      "progressNodeId": "repair-review",
-      "connectionLabels": {
-        "true": "правка решений по ревью непроходима",
-        "false": "правка решений по ревью требует пересмотра договорённостей"
+        "reassess": "правка решений по ревью требует пересмотра договорённостей",
+        "blocked": "правка решений по ревью непроходима"
       }
     },
     {
@@ -2631,53 +2574,43 @@
         ]
       },
       "connections": {
-        "success": "repair-discovery-validation-changed"
-      },
-      "progressNodeId": "repair-validation"
-    },
-    {
-      "id": "repair-discovery-validation-changed",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "repair-discovery-validation.repair_outcome"
-        },
-        "right": "changed"
-      },
-      "connections": {
-        "true": "route-scenario",
-        "false": "repair-discovery-validation-blocked"
+        "success": "route-scenario",
+        "reassess": "reassess-contract",
+        "blocked": "finalize-blocked"
       },
       "progressNodeId": "repair-validation",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "repair-discovery-validation.repair_outcome"
+            },
+            "right": "reassess"
+          },
+          "output": "reassess"
+        },
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "repair-discovery-validation.repair_outcome"
+            },
+            "right": "blocked"
+          },
+          "output": "blocked"
+        }
+      ],
       "connectionLabels": {
-        "true": {
+        "success": {
           "label": "предмет изучен заново по механической проверке",
           "cycle": {
             "cause": "Механическая проверка нашла дефект, источник которого — изучение предмета: собранного материала или доказательств не хватает для пакета.",
             "exit": "Предмет изучается заново по своему сценарию, решения и пакет пересобираются и снова проходят проверку; неснимаемый дефект уводит в пересмотр договорённостей или в остановку."
           }
-        }
-      }
-    },
-    {
-      "id": "repair-discovery-validation-blocked",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "repair-discovery-validation.repair_outcome"
         },
-        "right": "blocked"
-      },
-      "connections": {
-        "true": "finalize-blocked",
-        "false": "reassess-contract"
-      },
-      "progressNodeId": "repair-validation",
-      "connectionLabels": {
-        "true": "правка изучения по проверке непроходима",
-        "false": "правка изучения по проверке требует пересмотра договорённостей"
+        "reassess": "правка изучения по проверке требует пересмотра договорённостей",
+        "blocked": "правка изучения по проверке непроходима"
       }
     },
     {
@@ -2803,53 +2736,43 @@
         ]
       },
       "connections": {
-        "success": "repair-discovery-semantic-changed"
-      },
-      "progressNodeId": "repair-review"
-    },
-    {
-      "id": "repair-discovery-semantic-changed",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "repair-discovery-semantic.repair_outcome"
-        },
-        "right": "changed"
-      },
-      "connections": {
-        "true": "route-scenario",
-        "false": "repair-discovery-semantic-blocked"
+        "success": "route-scenario",
+        "reassess": "reassess-contract",
+        "blocked": "finalize-blocked"
       },
       "progressNodeId": "repair-review",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "repair-discovery-semantic.repair_outcome"
+            },
+            "right": "reassess"
+          },
+          "output": "reassess"
+        },
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "repair-discovery-semantic.repair_outcome"
+            },
+            "right": "blocked"
+          },
+          "output": "blocked"
+        }
+      ],
       "connectionLabels": {
-        "true": {
+        "success": {
           "label": "предмет изучен заново по ревью",
           "cycle": {
             "cause": "Ревью нашло находку, источник которой — изучение предмета: утверждения пакета не обеспечены собранными доказательствами.",
             "exit": "Предмет изучается заново, решения и пакет пересобираются и снова проходят проверку и ревью; неснимаемая находка уводит в пересмотр договорённостей или в остановку."
           }
-        }
-      }
-    },
-    {
-      "id": "repair-discovery-semantic-blocked",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "repair-discovery-semantic.repair_outcome"
         },
-        "right": "blocked"
-      },
-      "connections": {
-        "true": "finalize-blocked",
-        "false": "reassess-contract"
-      },
-      "progressNodeId": "repair-review",
-      "connectionLabels": {
-        "true": "правка изучения по ревью непроходима",
-        "false": "правка изучения по ревью требует пересмотра договорённостей"
+        "reassess": "правка изучения по ревью требует пересмотра договорённостей",
+        "blocked": "правка изучения по ревью непроходима"
       }
     },
     {
@@ -2975,53 +2898,43 @@
         ]
       },
       "connections": {
-        "success": "repair-validation-mechanical-changed"
-      },
-      "progressNodeId": "repair-validation"
-    },
-    {
-      "id": "repair-validation-mechanical-changed",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "repair-validation-mechanical.repair_outcome"
-        },
-        "right": "changed"
-      },
-      "connections": {
-        "true": "validate-architecture-package",
-        "false": "repair-validation-mechanical-blocked"
+        "success": "validate-architecture-package",
+        "reassess": "reassess-contract",
+        "blocked": "finalize-blocked"
       },
       "progressNodeId": "repair-validation",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "repair-validation-mechanical.repair_outcome"
+            },
+            "right": "reassess"
+          },
+          "output": "reassess"
+        },
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "repair-validation-mechanical.repair_outcome"
+            },
+            "right": "blocked"
+          },
+          "output": "blocked"
+        }
+      ],
       "connectionLabels": {
-        "true": {
+        "success": {
           "label": "проверка переделана",
           "cycle": {
             "cause": "Проверка сама оказалась негодной: её наблюдения или критерии неверны, и её владелец переписал их.",
             "exit": "Пакет проверяется заново по исправленным наблюдениям и идёт на ревью; неснимаемый дефект уводит в пересмотр договорённостей или в остановку."
           }
-        }
-      }
-    },
-    {
-      "id": "repair-validation-mechanical-blocked",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "repair-validation-mechanical.repair_outcome"
         },
-        "right": "blocked"
-      },
-      "connections": {
-        "true": "finalize-blocked",
-        "false": "reassess-contract"
-      },
-      "progressNodeId": "repair-validation",
-      "connectionLabels": {
-        "true": "переделка проверки непроходима",
-        "false": "переделка проверки требует пересмотра договорённостей"
+        "reassess": "переделка проверки требует пересмотра договорённостей",
+        "blocked": "переделка проверки непроходима"
       }
     },
     {
@@ -3147,53 +3060,43 @@
         ]
       },
       "connections": {
-        "success": "repair-validation-semantic-changed"
-      },
-      "progressNodeId": "repair-review"
-    },
-    {
-      "id": "repair-validation-semantic-changed",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "repair-validation-semantic.repair_outcome"
-        },
-        "right": "changed"
-      },
-      "connections": {
-        "true": "validate-architecture-package",
-        "false": "repair-validation-semantic-blocked"
+        "success": "validate-architecture-package",
+        "reassess": "reassess-contract",
+        "blocked": "finalize-blocked"
       },
       "progressNodeId": "repair-review",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "repair-validation-semantic.repair_outcome"
+            },
+            "right": "reassess"
+          },
+          "output": "reassess"
+        },
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "repair-validation-semantic.repair_outcome"
+            },
+            "right": "blocked"
+          },
+          "output": "blocked"
+        }
+      ],
       "connectionLabels": {
-        "true": {
+        "success": {
           "label": "проверка переделана по ревью",
           "cycle": {
             "cause": "Ревью нашло, что негодна сама механическая проверка: она пропускает или ложно отмечает то, что должна наблюдать.",
             "exit": "Пакет проверяется заново по исправленным наблюдениям и снова идёт на ревью; неснимаемая находка уводит в пересмотр договорённостей или в остановку."
           }
-        }
-      }
-    },
-    {
-      "id": "repair-validation-semantic-blocked",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "repair-validation-semantic.repair_outcome"
         },
-        "right": "blocked"
-      },
-      "connections": {
-        "true": "finalize-blocked",
-        "false": "reassess-contract"
-      },
-      "progressNodeId": "repair-review",
-      "connectionLabels": {
-        "true": "переделка проверки по ревью непроходима",
-        "false": "переделка проверки по ревью требует пересмотра договорённостей"
+        "reassess": "переделка проверки по ревью требует пересмотра договорённостей",
+        "blocked": "переделка проверки по ревью непроходима"
       }
     },
     {
@@ -3275,27 +3178,24 @@
         ]
       },
       "connections": {
-        "success": "route-reassessment-corrected"
-      },
-      "progressNodeId": "contract"
-    },
-    {
-      "id": "route-reassessment-corrected",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "reassess-contract.reassessment_outcome"
-        },
-        "right": "corrected"
-      },
-      "connections": {
-        "true": "corrected-contract-review",
-        "false": "finalize-blocked"
+        "success": "corrected-contract-review",
+        "blocked": "finalize-blocked"
       },
       "progressNodeId": "contract",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "reassess-contract.reassessment_outcome"
+            },
+            "right": "blocked"
+          },
+          "output": "blocked"
+        }
+      ],
       "connectionLabels": {
-        "false": "договорённости исправить не удалось"
+        "blocked": "договорённости исправить не удалось"
       }
     },
     {
@@ -3402,151 +3302,127 @@
         ]
       },
       "connections": {
-        "success": "route-contract-review-pass"
-      },
-      "progressNodeId": "contract"
-    },
-    {
-      "id": "route-contract-review-pass",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "corrected-contract-review.contract_review_outcome"
-        },
-        "right": "pass"
-      },
-      "connections": {
-        "true": "route-reentry-discovery",
-        "false": "route-contract-review-blocked"
-      },
-      "progressNodeId": "contract"
-    },
-    {
-      "id": "route-contract-review-blocked",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "corrected-contract-review.contract_review_outcome"
-        },
-        "right": "blocked"
-      },
-      "connections": {
-        "true": "finalize-blocked",
-        "false": "reassess-contract"
+        "success": "route-reentry-discovery",
+        "replan": "reassess-contract",
+        "blocked": "finalize-blocked"
       },
       "progressNodeId": "contract",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "corrected-contract-review.contract_review_outcome"
+            },
+            "right": "replan"
+          },
+          "output": "replan"
+        },
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "corrected-contract-review.contract_review_outcome"
+            },
+            "right": "blocked"
+          },
+          "output": "blocked"
+        }
+      ],
       "connectionLabels": {
-        "true": "проверка дополнения признала работу непроходимой",
-        "false": {
+        "replan": {
           "label": "дополнение к контракту отправлено на доработку",
           "cycle": {
             "cause": "Независимая проверка нашла, что дополнение ещё не годится: оно расходится с исходной целью, границами или полномочиями либо называет не самую раннюю устаревшую стадию.",
             "exit": "Дополнение переписывается и проверяется снова, пока не будет принято; признанное непроходимым уводит работу в остановку."
           }
-        }
+        },
+        "blocked": "проверка дополнения признала работу непроходимой"
       }
     },
     {
       "id": "route-reentry-discovery",
       "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "reentry_owner"
-        },
-        "right": "discovery"
-      },
-      "connections": {
-        "true": "route-scenario",
-        "false": "route-reentry-architecture"
-      },
       "progressNodeId": "contract",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "reentry_owner"
+            },
+            "right": "discovery"
+          },
+          "output": "discovery"
+        },
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "reentry_owner"
+            },
+            "right": "architecture"
+          },
+          "output": "architecture"
+        },
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "reentry_owner"
+            },
+            "right": "package"
+          },
+          "output": "package"
+        },
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "reentry_owner"
+            },
+            "right": "validation"
+          },
+          "output": "validation"
+        }
+      ],
+      "connections": {
+        "discovery": "route-scenario",
+        "architecture": "design-architecture",
+        "package": "create-architecture-package",
+        "validation": "validate-architecture-package",
+        "default": "complete-architecture-package"
+      },
       "connectionLabels": {
-        "true": {
+        "discovery": {
           "label": "работа входит заново с изучения предмета",
           "cycle": {
             "cause": "Принятое дополнение к контракту обесценило самую раннюю стадию — изучение предмета.",
             "exit": "Предмет, решения, пакет и его доведение проходятся заново под исправленными договорённостями и доходят до приёмки; очередной тупик уводит в остановку."
           }
-        }
-      }
-    },
-    {
-      "id": "route-reentry-architecture",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "reentry_owner"
         },
-        "right": "architecture"
-      },
-      "connections": {
-        "true": "design-architecture",
-        "false": "route-reentry-package"
-      },
-      "progressNodeId": "contract",
-      "connectionLabels": {
-        "true": {
+        "architecture": {
           "label": "работа входит заново с решений",
           "cycle": {
             "cause": "Принятое дополнение оставило изучение предмета в силе, но обесценило архитектурные решения.",
             "exit": "Решения принимаются заново, пакет пересобирается, и работа идёт до приёмки; очередной тупик уводит в остановку."
           }
-        }
-      }
-    },
-    {
-      "id": "route-reentry-package",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "reentry_owner"
         },
-        "right": "package"
-      },
-      "connections": {
-        "true": "create-architecture-package",
-        "false": "route-reentry-validation"
-      },
-      "progressNodeId": "contract",
-      "connectionLabels": {
-        "true": {
+        "package": {
           "label": "работа входит заново со сборки пакета",
           "cycle": {
             "cause": "Принятое дополнение оставило предмет и решения в силе, но обесценило собранный пакет.",
             "exit": "Пакет собирается заново, доводится и снова проходит проверку и ревью; очередной тупик уводит в остановку."
           }
-        }
-      }
-    },
-    {
-      "id": "route-reentry-validation",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "reentry_owner"
         },
-        "right": "validation"
-      },
-      "connections": {
-        "true": "validate-architecture-package",
-        "false": "complete-architecture-package"
-      },
-      "progressNodeId": "contract",
-      "connectionLabels": {
-        "true": {
+        "validation": {
           "label": "работа входит заново с механической проверки",
           "cycle": {
             "cause": "Принятое дополнение затронуло только критерии проверки пакета, а сам пакет остался в силе.",
             "exit": "Пакет проверяется заново по исправленным критериям и идёт на ревью; очередной тупик уводит в остановку."
           }
         },
-        "false": {
+        "default": {
           "label": "работа входит заново с доведения пакета",
           "cycle": {
             "cause": "Принятое дополнение затронуло только доведение результата: пакет остаётся в силе, а его полнота и класс результата объявлены по устаревшим договорённостям.",
@@ -3558,20 +3434,25 @@
     {
       "id": "route-mode",
       "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "operating_mode"
-        },
-        "right": "interactive"
-      },
+      "progressNodeId": "acceptance",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "operating_mode"
+            },
+            "right": "interactive"
+          },
+          "output": "true"
+        }
+      ],
       "connections": {
         "true": "interactive-acceptance",
-        "false": "route-delivery-scope"
+        "default": "route-delivery-scope"
       },
-      "progressNodeId": "acceptance",
       "connectionLabels": {
-        "false": "автономный режим: приёмка не проводится"
+        "default": "автономный режим: приёмка не проводится"
       }
     },
     {
@@ -3654,172 +3535,199 @@
         ]
       },
       "connections": {
-        "success": "route-user-accept"
-      },
-      "progressNodeId": "acceptance"
-    },
-    {
-      "id": "route-user-accept",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "interactive-acceptance.user_decision"
-        },
-        "right": "accept"
-      },
-      "connections": {
-        "true": "route-delivery-scope",
-        "false": "route-user-abort"
+        "success": "route-delivery-scope",
+        "abort": "finalize-aborted",
+        "discovery": "route-scenario",
+        "architecture": "design-architecture",
+        "package": "create-architecture-package",
+        "validation": "validate-architecture-package",
+        "completion": "complete-architecture-package",
+        "contract": "reassess-contract"
       },
       "progressNodeId": "acceptance",
-      "connectionLabels": {
-        "true": "пользователь принял пакет"
-      }
-    },
-    {
-      "id": "route-user-abort",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "interactive-acceptance.user_decision"
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "interactive-acceptance.user_decision"
+            },
+            "right": "abort"
+          },
+          "output": "abort"
         },
-        "right": "abort"
-      },
-      "connections": {
-        "true": "finalize-aborted",
-        "false": "route-rework-discovery"
-      },
-      "progressNodeId": "acceptance",
-      "connectionLabels": {
-        "true": "пользователь прервал работу"
-      }
-    },
-    {
-      "id": "route-rework-discovery",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "interactive-acceptance.rework_owner"
+        {
+          "when": {
+            "operator": "and",
+            "conditions": [
+              {
+                "operator": "eq",
+                "left": {
+                  "contextPath": "interactive-acceptance.user_decision"
+                },
+                "right": "rework"
+              },
+              {
+                "operator": "eq",
+                "left": {
+                  "contextPath": "interactive-acceptance.rework_owner"
+                },
+                "right": "discovery"
+              }
+            ]
+          },
+          "output": "discovery"
         },
-        "right": "discovery"
-      },
-      "connections": {
-        "true": "route-scenario",
-        "false": "route-rework-architecture"
-      },
-      "progressNodeId": "acceptance",
+        {
+          "when": {
+            "operator": "and",
+            "conditions": [
+              {
+                "operator": "eq",
+                "left": {
+                  "contextPath": "interactive-acceptance.user_decision"
+                },
+                "right": "rework"
+              },
+              {
+                "operator": "eq",
+                "left": {
+                  "contextPath": "interactive-acceptance.rework_owner"
+                },
+                "right": "architecture"
+              }
+            ]
+          },
+          "output": "architecture"
+        },
+        {
+          "when": {
+            "operator": "and",
+            "conditions": [
+              {
+                "operator": "eq",
+                "left": {
+                  "contextPath": "interactive-acceptance.user_decision"
+                },
+                "right": "rework"
+              },
+              {
+                "operator": "eq",
+                "left": {
+                  "contextPath": "interactive-acceptance.rework_owner"
+                },
+                "right": "package"
+              }
+            ]
+          },
+          "output": "package"
+        },
+        {
+          "when": {
+            "operator": "and",
+            "conditions": [
+              {
+                "operator": "eq",
+                "left": {
+                  "contextPath": "interactive-acceptance.user_decision"
+                },
+                "right": "rework"
+              },
+              {
+                "operator": "eq",
+                "left": {
+                  "contextPath": "interactive-acceptance.rework_owner"
+                },
+                "right": "validation"
+              }
+            ]
+          },
+          "output": "validation"
+        },
+        {
+          "when": {
+            "operator": "and",
+            "conditions": [
+              {
+                "operator": "eq",
+                "left": {
+                  "contextPath": "interactive-acceptance.user_decision"
+                },
+                "right": "rework"
+              },
+              {
+                "operator": "eq",
+                "left": {
+                  "contextPath": "interactive-acceptance.rework_owner"
+                },
+                "right": "completion"
+              }
+            ]
+          },
+          "output": "completion"
+        },
+        {
+          "when": {
+            "operator": "and",
+            "conditions": [
+              {
+                "operator": "eq",
+                "left": {
+                  "contextPath": "interactive-acceptance.user_decision"
+                },
+                "right": "rework"
+              },
+              {
+                "operator": "eq",
+                "left": {
+                  "contextPath": "interactive-acceptance.rework_owner"
+                },
+                "right": "contract"
+              }
+            ]
+          },
+          "output": "contract"
+        }
+      ],
       "connectionLabels": {
-        "true": {
+        "success": "пользователь принял пакет",
+        "abort": "пользователь прервал работу",
+        "discovery": {
           "label": "пользователь вернул работу к изучению предмета",
           "cycle": {
             "cause": "Пользователь при приёмке назвал изучение предмета: собранная картина требований или текущего состояния его не устраивает.",
             "exit": "Предмет изучается заново, решения и пакет пересобираются, и приёмка повторяется; принятая или прерванная пользователем работа выходит из круга."
           }
-        }
-      }
-    },
-    {
-      "id": "route-rework-architecture",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "interactive-acceptance.rework_owner"
         },
-        "right": "architecture"
-      },
-      "connections": {
-        "true": "design-architecture",
-        "false": "route-rework-package"
-      },
-      "progressNodeId": "acceptance",
-      "connectionLabels": {
-        "true": {
+        "architecture": {
           "label": "пользователь вернул работу к решениям",
           "cycle": {
             "cause": "Пользователь при приёмке назвал архитектурные решения: картина предмета его устраивает, а принятые по ней решения нет.",
             "exit": "Решения принимаются заново, пакет пересобирается, и приёмка повторяется; принятая или прерванная пользователем работа выходит из круга."
           }
-        }
-      }
-    },
-    {
-      "id": "route-rework-package",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "interactive-acceptance.rework_owner"
         },
-        "right": "package"
-      },
-      "connections": {
-        "true": "create-architecture-package",
-        "false": "route-rework-validation"
-      },
-      "progressNodeId": "acceptance",
-      "connectionLabels": {
-        "true": {
+        "package": {
           "label": "пользователь вернул работу к сборке пакета",
           "cycle": {
             "cause": "Пользователь при приёмке назвал пакет: решения его устраивают, а состав и подача пакета нет.",
             "exit": "Пакет собирается заново, доводится и снова проходит проверку и ревью, и приёмка повторяется; принятая или прерванная работа выходит из круга."
           }
-        }
-      }
-    },
-    {
-      "id": "route-rework-validation",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "interactive-acceptance.rework_owner"
         },
-        "right": "validation"
-      },
-      "connections": {
-        "true": "validate-architecture-package",
-        "false": "route-rework-completion"
-      },
-      "progressNodeId": "acceptance",
-      "connectionLabels": {
-        "true": {
+        "validation": {
           "label": "пользователь вернул работу к механической проверке",
           "cycle": {
             "cause": "Пользователь при приёмке назвал проверку: он не согласен с тем, что и как в пакете проверялось наблюдаемо.",
             "exit": "Пакет проверяется заново, идёт на ревью, и приёмка повторяется; принятая или прерванная работа выходит из круга."
           }
-        }
-      }
-    },
-    {
-      "id": "route-rework-completion",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "interactive-acceptance.rework_owner"
         },
-        "right": "completion"
-      },
-      "connections": {
-        "true": "complete-architecture-package",
-        "false": "reassess-contract"
-      },
-      "progressNodeId": "acceptance",
-      "connectionLabels": {
-        "true": {
+        "completion": {
           "label": "пользователь вернул работу к доведению пакета",
           "cycle": {
             "cause": "Пользователь при приёмке назвал доведение: объявленные полнота и ограничения результата его не устраивают.",
             "exit": "Пакет доводится заново и снова проходит проверку и ревью, и приёмка повторяется; принятая или прерванная работа выходит из круга."
           }
         },
-        "false": {
+        "contract": {
           "label": "пользователь требует пересмотра договорённостей",
           "cycle": {
             "cause": "Пользователь при приёмке не назвал ни одну рабочую стадию, то есть его замечание касается самих договорённостей о цели, границах или полномочиях.",
@@ -3831,20 +3739,25 @@
     {
       "id": "route-delivery-scope",
       "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "delivery_scope"
-        },
-        "right": "project"
-      },
+      "progressNodeId": "delivery",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "delivery_scope"
+            },
+            "right": "project"
+          },
+          "output": "true"
+        }
+      ],
       "connections": {
         "true": "deliver-package",
-        "false": "route-final-status"
+        "default": "route-final-status"
       },
-      "progressNodeId": "delivery",
       "connectionLabels": {
-        "false": "передавать некуда: результат остаётся в рабочем каталоге"
+        "default": "передавать некуда: результат остаётся в рабочем каталоге"
       }
     },
     {
@@ -3970,86 +3883,86 @@
         ]
       },
       "connections": {
-        "success": "route-delivery-complete"
-      },
-      "progressNodeId": "delivery"
-    },
-    {
-      "id": "route-delivery-complete",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "deliver-package.delivery_outcome"
-        },
-        "right": "delivered"
-      },
-      "connections": {
-        "true": "route-final-status-delivered",
-        "false": "route-delivery-replan"
+        "success": "route-final-status-delivered",
+        "replan": "reassess-contract",
+        "blocked": "finalize-blocked"
       },
       "progressNodeId": "delivery",
-      "connectionLabels": {
-        "true": "пакет передан по разрешённому адресу"
-      }
-    },
-    {
-      "id": "route-delivery-replan",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "deliver-package.delivery_outcome"
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "deliver-package.delivery_outcome"
+            },
+            "right": "replan"
+          },
+          "output": "replan"
         },
-        "right": "replan"
-      },
-      "connections": {
-        "true": "reassess-contract",
-        "false": "finalize-blocked"
-      },
-      "progressNodeId": "delivery",
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "deliver-package.delivery_outcome"
+            },
+            "right": "blocked"
+          },
+          "output": "blocked"
+        }
+      ],
       "connectionLabels": {
-        "true": {
+        "success": "пакет передан по разрешённому адресу",
+        "replan": {
           "label": "передача требует пересмотра договорённостей",
           "cycle": {
             "cause": "Условие передачи оказалось негодным: разрешённый адрес или критерий передачи не соответствуют контракту.",
             "exit": "Договорённости исправляются, работа входит заново с названной устаревшей стадии и снова доходит до передачи; неисправимая передача уводит в остановку."
           }
         },
-        "false": "передать пакет по адресу не удалось"
+        "blocked": "передать пакет по адресу не удалось"
       }
     },
     {
       "id": "route-final-status",
       "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "result_status"
-        },
-        "right": "complete"
-      },
+      "progressNodeId": "final",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "result_status"
+            },
+            "right": "complete"
+          },
+          "output": "true"
+        }
+      ],
       "connections": {
         "true": "finalize-complete",
-        "false": "finalize-limited"
-      },
-      "progressNodeId": "final"
+        "default": "finalize-limited"
+      }
     },
     {
       "id": "route-final-status-delivered",
       "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "result_status"
-        },
-        "right": "complete"
-      },
+      "progressNodeId": "final",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "result_status"
+            },
+            "right": "complete"
+          },
+          "output": "true"
+        }
+      ],
       "connections": {
         "true": "finalize-complete-delivered",
-        "false": "finalize-limited-delivered"
-      },
-      "progressNodeId": "final"
+        "default": "finalize-limited-delivered"
+      }
     },
     {
       "id": "finalize-complete-delivered",
@@ -4611,8 +4524,6 @@
       "description": "Stable path to the accepted local architecture package."
     }
   },
-  "owner": "system-moira",
-  "visibility": "public",
   "progress": {
     "title": "Architecture Design",
     "goal": "Довести один архитектурный вопрос — по новой системе или по уже существующей — до поддерживаемого пакета решений, независимо проверенного и честно названного полным или ограниченным.",
@@ -4723,5 +4634,8 @@
         }
       }
     ]
-  }
+  },
+  "slug": "architecture-design-flow",
+  "owner": "system-moira",
+  "visibility": "public"
 }

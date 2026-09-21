@@ -287,7 +287,7 @@ describe("deep-corpus-research", () => {
             { user_decision: "accept" },
           ],
         }),
-        expect: { status: "completed", reaches: ["route-rework-research", "end"] },
+        expect: { status: "completed", reaches: ["end"] },
       },
       {
         name: "process revision",
@@ -306,6 +306,14 @@ describe("deep-corpus-research", () => {
     for (const scenario of cases) {
       const result = await run(scenario);
       if (!result.passed) throw new Error(`${scenario.name}: ${JSON.stringify(result)}`);
+      if (scenario.name === "interactive rework") {
+        expect(result.inputSubmissionCounts["interactive-acceptance"]).toBe(2);
+        expect(result.inputSubmissionCounts["research-evidence"]).toBe(2);
+        const acceptance = result.visitedNodes.indexOf("interactive-acceptance");
+        expect(result.visitedNodes.indexOf("research-evidence", acceptance + 1)).toBeGreaterThan(
+          acceptance,
+        );
+      }
     }
   });
 });

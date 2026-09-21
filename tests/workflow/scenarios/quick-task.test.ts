@@ -126,7 +126,7 @@ describe("quick-task scenarios", () => {
             "present-autonomous-result",
             "end",
           ],
-          avoids: ["present-plan", "revise-plan", "present-to-user", "check-user-accepts"],
+          avoids: ["present-plan", "revise-plan", "present-to-user", "rework"],
         },
       },
       {

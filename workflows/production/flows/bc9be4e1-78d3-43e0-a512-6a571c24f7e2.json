@@ -1,17 +1,15 @@
 {
-  "slug": "prd-creation",
-  "owner": "system-moira",
-  "visibility": "public",
   "id": "bc9be4e1-78d3-43e0-a512-6a571c24f7e2",
   "metadata": {
     "name": "PRD Creation Workflow",
-    "version": "2.1.0",
+    "version": "2.2.0",
     "description": "Creates an independently reviewed, evidence-grounded Product Requirements Document (PRD) for a product problem, feature, change, API, page, module, or system. It inspects supplied requirements and authorized project or research evidence, records honest evidence gaps and applicability decisions, and defines problem, personas, urgency, cost of inaction, solution rationale and alternatives, in and out scope, constraints, dependencies, traceable prioritized requirements and observable acceptance criteria, linked user stories, relevant edge and recovery behavior, measurable metrics, assumptions, risks, open questions, limitations, and readiness. In one traversal-safe local workspace it writes prd-requirements.md, addressed prd-standards.md, a strict canonical prd.contract.json, and its readable prd.md projection. An independent file-backed reviewer checks evidence, traceability, completeness, internal consistency, JSON-to-Markdown equality, and authority; any finding enters repair and the same review repeats, so delivery is unreachable while known blocking gaps remain. The terminal result identifies the accepted durable PRD. This workflow creates only local PRD artifacts: it does not implement the product, modify project files, execute tests, use VCS, publish, notify, or deploy. Choose PRD Creation when the deliverable is reviewed product requirements; choose UX Design for experience design, Architecture Design for technical architecture, Test Planning or Test Generation for verification artifacts, or Software Development Flow for implementation with tests and documentation.",
     "tags": [
       "требования",
       "продукт",
       "документ"
-    ]
+    ],
+    "schemaVersion": 1
   },
   "nodes": [
     {
@@ -916,21 +914,26 @@
     {
       "id": "review-gate",
       "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "issues_count"
-        },
-        "right": 0
-      },
+      "progressNodeId": "review",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "issues_count"
+            },
+            "right": 0
+          },
+          "output": "true"
+        }
+      ],
       "connections": {
         "true": "present",
-        "false": "repair"
+        "default": "repair"
       },
-      "progressNodeId": "review",
       "connectionLabels": {
         "true": "no blocking findings",
-        "false": "review found blocking findings"
+        "default": "review found blocking findings"
       }
     },
     {
@@ -1872,5 +1875,8 @@
         }
       }
     ]
-  }
+  },
+  "slug": "prd-creation",
+  "owner": "system-moira",
+  "visibility": "public"
 }

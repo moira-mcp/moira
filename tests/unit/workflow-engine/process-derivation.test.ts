@@ -120,8 +120,8 @@ describe("process derivation from the authored graph", () => {
   test("derives the annotated Software Development Flow in authored order with its hubs and no diagnostics", () => {
     const result = counts(bundled("software-development-flow"));
     expect(result.blocks).toBe(15);
-    expect(result.transitions).toBe(49);
-    expect(result.cycles).toBe(23);
+    expect(result.transitions).toBe(55);
+    expect(result.cycles).toBe(28);
     expect(result.diagnostics).toEqual([]);
     expect(result.order.slice(0, 4)).toEqual(["intake", "health", "plan", "plan-approval"]);
     expect(result.order.slice(-3)).toEqual(["replan", "finalize", "stopped"]);
@@ -413,10 +413,12 @@ describe("validator enforces the block contract through the derivation", () => {
 
   test("a Quick Task copy with one node unowned, one boundary label removed and one description blank fails with exactly those diagnostics", async () => {
     const workflow = bundled("quick-task");
-    const check = workflow.nodes.find((n) => n.id === "check-plan-review-clean")!;
-    delete check.progressNodeId;
-    const approved = workflow.nodes.find((n) => n.id === "check-plan-approved")!;
-    delete (approved as { connectionLabels?: Record<string, unknown> }).connectionLabels!.true;
+    const repair = workflow.nodes.find((n) => n.id === "repair-plan")!;
+    delete repair.progressNodeId;
+    const approval = workflow.nodes.find((n) => n.id === "present-plan")!;
+    delete (approval as { connectionLabels?: Record<string, unknown> }).connectionLabels![
+      "check-steps-remaining"
+    ];
     workflow.progress!.nodes.find((b) => b.id === "plan")!.content = {
       outcome: "{{progress_plan_outcome}}",
     };
@@ -427,8 +429,8 @@ describe("validator enforces the block contract through the derivation", () => {
       "empty-description",
       "unlabeled-edge",
     ]);
-    expect(errors[0]).toContain("check-plan-review-clean");
-    expect(errors[2]).toContain("check-plan-approved.true");
+    expect(errors[0]).toContain("repair-plan");
+    expect(errors[2]).toContain("present-plan.check-steps-remaining");
   });
 
   test("an unconnected block is a validation error on its progress entry", async () => {
@@ -463,7 +465,7 @@ describe("validator enforces the block contract through the derivation", () => {
 
   test("the same copy without progress passes: a workflow without progress is unaffected", async () => {
     const workflow = bundled("quick-task");
-    delete workflow.nodes.find((n) => n.id === "check-plan-review-clean")!.progressNodeId;
+    delete workflow.nodes.find((n) => n.id === "plan-review")!.progressNodeId;
     delete workflow.progress;
     for (const node of workflow.nodes) delete node.progressNodeId;
     for (const node of workflow.nodes) {

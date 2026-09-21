@@ -24,7 +24,7 @@ describe("GET /api/workflows/:id/process response", () => {
 
   test("carries diagnostics for a workflow that violates the contract", () => {
     const workflow = bundled("robust-task");
-    delete workflow.nodes.find((node) => node.id === "route-plan-review")!.progressNodeId;
+    delete workflow.nodes.find((node) => node.id === "check-plan-review-limit")!.progressNodeId;
     const response = buildWorkflowProcessResponse("wf-2", workflow);
     expect(response.process?.diagnostics.some((d) => d.code === "unowned-node")).toBe(true);
   });
