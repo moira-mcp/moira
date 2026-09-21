@@ -1496,10 +1496,12 @@ The graph is the process view's detailed layer, not a separate rendering:
   controls, the folded step finder (`graph-node-finder`, whose pick brings the step into view), the
   layout presets, zoom/fit, the minimap switch and the page's trailing controls. The opening
   placement uses `useOpeningPlacement`: a `focusRequest` (node id + token) or a run's
-  `currentNodeId` fits the view to that node; a definition opens readable on its first block at
-  `GRAPH_OPENING_ZOOM`. The placement key includes the layout generation, so it is applied again
-  after the measured second pass. The minimap (`showMinimap`, passed by both process pages) renders
-  after an idle callback, only while the toolbar's switch is on (`moira.diagram.minimap`, off by
+  `currentNodeId` fits the view to that node. Opening and explicit step focus can zoom down to the
+  graph viewport's minimum, so the whole step card fits in a narrow pane; a definition opens on its
+  first block at `GRAPH_OPENING_ZOOM`. The placement key includes the layout generation, so it is
+  applied again after the measured second pass. The minimap (`showMinimap`, passed by both process
+  pages) renders after an idle callback, only while the toolbar's switch is on
+  (`moira.diagram.minimap`, off by
   default, so a card in the corner stays clickable) and not on
   a phone (`useIsMobile`), where it would cover the graph. The block selected in the contents or on
   the map (`selectedBlockId`) is the ringed group (`data-selected` on `BlockGroupView`), brought

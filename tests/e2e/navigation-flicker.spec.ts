@@ -16,7 +16,14 @@ import { test, expect, type Page, type Route } from "./fixtures.js";
 import { getTestBaseUrl } from "../utils/test-config.js";
 import { createAuthenticatedMCPClient, startWorkflowExecutionState } from "../utils/mcp-auth.js";
 import { loginAsAdmin } from "./helpers/auth-helper.js";
-import { MAP, cameraOf, expectNoLoaders, mapCardBoxes, settledCamera } from "./helpers/diagram.js";
+import {
+  MAP,
+  cameraOf,
+  expectNoLoaders,
+  mapCardBoxes,
+  restingCamera,
+  settledCamera,
+} from "./helpers/diagram.js";
 
 const BASE_URL = getTestBaseUrl();
 
@@ -214,9 +221,35 @@ test("choosing a block on the map moves the camera and nothing else", async ({ p
     expect(await cameraOf(page, MAP)).toBe(panned);
     await expectNoLoaders(page);
 
+    // Pan the map as a reader would: the plan card is outside the camera after choosing verify.
+    // Put its centre inside the pane, but off-centre so selecting it still moves the camera.
+    const planCard = page.locator(`${MAP} [data-block-id="plan"]`);
+    const planBox = (await planCard.boundingBox())!;
+    const targetX = diagram.x + diagram.width * 0.65;
+    const targetY = diagram.y + diagram.height * 0.55;
+    await page.mouse.move(diagram.x + diagram.width / 2, diagram.y + diagram.height / 2);
+    await page.mouse.wheel(
+      2 * (planBox.x + planBox.width / 2 - targetX),
+      2 * (planBox.y + planBox.height / 2 - targetY),
+    );
+    await expect(planCard).toBeInViewport();
+    await expect
+      .poll(async () => {
+        const box = await planCard.boundingBox();
+        return (
+          !!box &&
+          box.x + box.width / 2 >= diagram.x &&
+          box.x + box.width / 2 <= diagram.x + diagram.width &&
+          box.y + box.height / 2 >= diagram.y &&
+          box.y + box.height / 2 <= diagram.y + diagram.height
+        );
+      })
+      .toBe(true);
+    await restingCamera(page, MAP);
+
     // From the card itself: the same contract, and still the same container.
     const onCard = await cameraOf(page, MAP);
-    await page.locator(`${MAP} [data-block-id="plan"]`).click();
+    await planCard.click();
     await expect(page.getByTestId("block-detail")).toHaveAttribute("data-block-id", "plan");
     await expect.poll(() => cameraOf(page, MAP), { timeout: 5000 }).not.toBe(onCard);
     await expectNoLoaders(page);

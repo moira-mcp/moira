@@ -96,6 +96,10 @@ test("the preset is one choice for both views and it survives a reload", async (
   await expect.poll(() => mapExtent(page), { timeout: 10000 }).toMatch(/^\d+x\d+$/);
   const asColumn = (await mapExtent(page))!;
 
+  // The preset's hint stays open under the pointer but cannot intercept the Graph tab.
+  const hintWrapper = page.locator("[data-radix-popper-content-wrapper]:has([data-hint-layer])");
+  await expect(hintWrapper).toBeVisible();
+  await expect(hintWrapper).toHaveCSS("pointer-events", "none");
   // The graph opens under the same preset, marked in its own toolbar.
   await page.getByTestId("flow-modes").locator('[data-mode="graph"]').click();
   await expect(page.locator("[data-graph-node]").first()).toBeVisible({ timeout: 20000 });

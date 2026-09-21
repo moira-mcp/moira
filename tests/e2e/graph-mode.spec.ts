@@ -18,7 +18,7 @@ import { test, expect } from "./fixtures.js";
 import { getTestBaseUrl } from "../utils/test-config.js";
 import { createAuthenticatedMCPClient, startWorkflowExecutionState } from "../utils/mcp-auth.js";
 import { loginAsAdmin } from "./helpers/auth-helper.js";
-import { GRAPH, settledCamera } from "./helpers/diagram.js";
+import { GRAPH, restingCamera, settledCamera } from "./helpers/diagram.js";
 
 const BASE_URL = getTestBaseUrl();
 
@@ -124,6 +124,11 @@ test("the flow page's graph draws every node as a card in its block's group, wit
 
   // Hovering a port lights that connection and dims the others, so one line can be followed
   // through the corridor it shares with its neighbours.
+  // The return's source can start outside the graph pane; the finder moves the camera to it.
+  await page.getByTestId("graph-toolbar").getByTestId("toolbar-finder").click();
+  await page.getByTestId("graph-node-finder").fill(sourceId);
+  await page.locator(`[data-node-match="${sourceId}"]`).click();
+  await restingCamera(page, GRAPH);
   await sourcePort.hover();
   await expect(page.locator(`[data-transition="${returnLink}"][data-focused="true"]`)).toHaveCount(
     1,

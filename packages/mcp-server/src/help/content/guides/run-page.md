@@ -48,7 +48,9 @@ The two tabs above the picture show the same run in two ways; the choice is in t
   directive, the completion condition, the returned fields, the expressions, the cases, the
   connections as `output → target` with the case that selects each output, the validation, the
   playbooks and a catalog-drawn node's configuration, with a breadcrumb back to the block and a
-  "Show on the graph" action that brings the step into view.
+  "Show on the graph" action that brings the step into view. When the graph opens on the current
+  step or moves to a chosen step, its whole card fits in the diagram pane; zoom in to read a card
+  that appears small in a narrow pane.
 
 Both views share one toolbar above the diagram: the **Map / Graph** switch, the contents fold
 button, the route cursor, the step finder (it answers "which block is this step in" and, on the
