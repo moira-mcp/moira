@@ -160,7 +160,8 @@ test("reads a bundled flow as a process on the map and as nodes on the graph, an
   const connections = page.getByTestId("node-panel-connections");
   await expect(connections).toBeVisible();
   await expect(connections).toContainText("route-operating-mode-result-presentation");
-  await expect(connections).toContainText("fix-issues");
+  const repairConnection = connections.getByRole("button", { name: "Repair review findings" });
+  await expect(repairConnection).toBeVisible();
   await expect(connections).not.toContainText("Decision");
 
   // The walkthrough lives in the URL; `walkthrough.spec.ts` runs every one of its steps through

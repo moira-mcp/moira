@@ -148,6 +148,11 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/* The delegated hint is display-only; Radix's popper wrapper must not cover nearby controls. */
+[data-radix-popper-content-wrapper]:has([data-hint-layer]) {
+  pointer-events: none;
+}
+
 /*
  * Scroll containers of the process views: one thin, theme-coloured scrollbar in both themes. The
  * thumb is the muted foreground at reduced alpha, so it reads on the light and the dark ground;
