@@ -228,7 +228,114 @@ describe("data-analysis", () => {
   });
 
   test("validates the graph and terminal analysis projection", async () => {
+    expect(workflow.metadata.version).toBe("2.2.0");
     expect(node(workflow, "end").finalOutput).toEqual(["analysis_result"]);
+    for (const removed of [
+      "delivery-mode-file",
+      "problem-approval-gate",
+      "usable-sources-gate",
+      "review-data-file-gate",
+      "review-data-inline-gate",
+      "review-result-file-gate",
+      "review-result-inline-gate",
+      "final-approval-gate",
+      "route-data-repair-limited",
+      "route-result-repair-source",
+      "route-result-repair-data",
+    ]) {
+      expect(workflow.nodes.find((candidate) => candidate.id === removed)).toBeUndefined();
+    }
+    for (const expected of [
+      {
+        id: "capture-context",
+        cases: [
+          { path: "delivery_mode", operator: "eq", right: "filesystem", output: "filesystem" },
+        ],
+        connections: { filesystem: "materialize-workspace", success: "frame-problem" },
+      },
+      {
+        id: "approve-problem",
+        cases: [
+          { path: "approve-problem.decision", operator: "eq", right: "revise", output: "revise" },
+        ],
+        connections: { revise: "revise-problem", success: "resume-stage-gate" },
+      },
+      {
+        id: "acquire-sources",
+        cases: [{ path: "usable_source_count", operator: "eq", right: 0, output: "limited" }],
+        connections: { limited: "produce-limited-result", success: "prepare-data" },
+      },
+      {
+        id: "review-data-file",
+        cases: [
+          { path: "review-data-file.issues_count", operator: "gt", right: 0, output: "repair" },
+        ],
+        connections: { repair: "repair-data-file", success: "analyze-and-synthesize" },
+      },
+      {
+        id: "review-data-inline",
+        cases: [
+          { path: "review-data-inline.issues_count", operator: "gt", right: 0, output: "repair" },
+        ],
+        connections: { repair: "repair-data-inline", success: "analyze-and-synthesize" },
+      },
+      {
+        id: "review-result-file",
+        cases: [
+          { path: "review-result-file.issues_count", operator: "gt", right: 0, output: "repair" },
+        ],
+        connections: { repair: "repair-result-file", success: "final-approval-mode" },
+      },
+      {
+        id: "review-result-inline",
+        cases: [
+          { path: "review-result-inline.issues_count", operator: "gt", right: 0, output: "repair" },
+        ],
+        connections: { repair: "repair-result-inline", success: "final-approval-mode" },
+      },
+      {
+        id: "approve-final",
+        cases: [
+          { path: "approve-final.decision", operator: "eq", right: "revise", output: "revise" },
+        ],
+        connections: { revise: "revise-final-from-feedback", success: "end" },
+      },
+      {
+        id: "route-data-repair-source",
+        cases: [
+          { path: "readiness_repair_reach", operator: "eq", right: "source", output: "source" },
+          { path: "readiness_repair_reach", operator: "eq", right: "limited", output: "limited" },
+        ],
+        connections: {
+          source: "acquire-sources",
+          limited: "produce-limited-result",
+          default: "readiness-review-mode",
+        },
+      },
+      {
+        id: "route-result-repair-contract",
+        cases: [
+          { path: "result_repair_reach", operator: "eq", right: "contract", output: "contract" },
+          { path: "result_repair_reach", operator: "eq", right: "source", output: "source" },
+          { path: "result_repair_reach", operator: "eq", right: "data", output: "data" },
+        ],
+        connections: {
+          contract: "frame-problem",
+          source: "acquire-sources",
+          data: "prepare-data",
+          default: "final-review-mode",
+        },
+      },
+    ]) {
+      const actual = node(workflow, expected.id);
+      expect(actual.connections).toEqual(expected.connections);
+      expect(actual.cases).toEqual(
+        expected.cases.map(({ path, operator, right, output }) => ({
+          when: { operator, left: { contextPath: path }, right },
+          output,
+        })),
+      );
+    }
     const validation = await new GraphValidator().validateUnified(workflow);
     expect(validation.issues.filter((issue) => issue.severity === "error")).toEqual([]);
   });
@@ -293,20 +400,16 @@ describe("data-analysis", () => {
     expect(compactRoute(result)).toEqual([
       "start",
       "capture-context",
-      "delivery-mode-file",
       "frame-problem",
       "problem-approval-mode",
       "resume-stage-gate",
       "acquire-sources",
-      "usable-sources-gate",
       "prepare-data",
       "readiness-review-mode",
       "review-data-inline",
-      "review-data-inline-gate",
       "analyze-and-synthesize",
       "final-review-mode",
       "review-result-inline",
-      "review-result-inline-gate",
       "final-approval-mode",
       "end",
     ]);

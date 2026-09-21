@@ -1,17 +1,15 @@
 {
-  "slug": "user-onboarding",
-  "owner": "system-moira",
-  "visibility": "public",
   "id": "a1838a9a-d3a5-448e-aae1-18e15eeb8286",
   "metadata": {
     "name": "Moira User Onboarding",
-    "version": "3.2.0",
+    "version": "3.3.0",
     "description": "Interactive first-time orientation for Moira users. It demonstrates directives, completion conditions, input schemas, and verified step progression; reads every page of the current authorized public catalog; and presents every observed workflow exactly once with its purpose, deliverable, cost/durability profile, authority boundary, and closest alternatives derived from current catalog descriptions rather than a frozen list. It then captures either an exact qualified current identity or the create-or-edit path through Workflow Management Flow, gives tailored guidance, and requires an explicit start-or-defer decision. On start it creates exactly the selected workflow as a child of the onboarding execution, uses skipNotificationCheck only to bypass optional ordinary notification preflight without granting notification authority, and requires the current user's valid Telegram bot token and chat ID for trusted PIN delivery when the selected workflow contains lock nodes. Lock setup guidance without a Process ID leaves the start incomplete until relevant external state changes. It creates no durable artifacts. Invalid or absent catalog choices return to selection; defer performs no mutation; and errors without a process cannot report success. Authority is limited to reading the accessible public catalog and the one explicitly approved child start; it does not change settings, configure Telegram, publish, deploy, mutate production, or continue the child substantive work. Choose it for a first Moira orientation; users who already know their goal should start the relevant workflow directly.",
     "tags": [
       "онбординг",
       "пользователь",
       "обучение"
-    ]
+    ],
+    "schemaVersion": 1
   },
   "nodes": [
     {
@@ -78,20 +76,25 @@
     {
       "id": "selection-valid",
       "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "welcome.selection_valid"
-        },
-        "right": true
-      },
+      "progressNodeId": "welcome",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "welcome.selection_valid"
+            },
+            "right": true
+          },
+          "output": "true"
+        }
+      ],
       "connections": {
         "true": "route-intent",
-        "false": "welcome"
+        "default": "welcome"
       },
-      "progressNodeId": "welcome",
       "connectionLabels": {
-        "false": {
+        "default": {
           "label": "selection unclear, ask again",
           "cycle": {
             "cause": "The answer did not name a valid choice.",
@@ -103,21 +106,26 @@
     {
       "id": "route-intent",
       "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "user_intent"
-        },
-        "right": "try_existing"
-      },
+      "progressNodeId": "welcome",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "user_intent"
+            },
+            "right": "try_existing"
+          },
+          "output": "true"
+        }
+      ],
       "connections": {
         "true": "launch-workflow",
-        "false": "suggest-creation"
+        "default": "suggest-creation"
       },
-      "progressNodeId": "welcome",
       "connectionLabels": {
         "true": "wants to run a workflow",
-        "false": "no matching workflow"
+        "default": "no matching workflow"
       }
     },
     {
@@ -144,21 +152,26 @@
     {
       "id": "check-start-now",
       "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "handoff_decision"
-        },
-        "right": "start"
-      },
+      "progressNodeId": "choose",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "handoff_decision"
+            },
+            "right": "start"
+          },
+          "output": "true"
+        }
+      ],
       "connections": {
         "true": "start-chosen-workflow",
-        "false": "end"
+        "default": "end"
       },
-      "progressNodeId": "choose",
       "connectionLabels": {
         "true": "start now",
-        "false": "finish without starting"
+        "default": "finish without starting"
       }
     },
     {
@@ -271,5 +284,8 @@
         }
       }
     ]
-  }
+  },
+  "slug": "user-onboarding",
+  "owner": "system-moira",
+  "visibility": "public"
 }

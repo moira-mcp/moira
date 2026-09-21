@@ -1,17 +1,15 @@
 {
-  "slug": "test-planning",
-  "owner": "system-moira",
-  "visibility": "public",
   "id": "31526b3b-d623-4e34-b62d-ef0327e9bd11",
   "metadata": {
     "name": "Test Planning Workflow",
-    "version": "2.1.0",
+    "version": "2.2.0",
     "description": "Creates a reviewed, risk-prioritized test plan for a feature, change, API, page, module, or system. It accepts supplied requirements, acceptance criteria, user scenarios, constraints, and risks, and first discovers missing context from available project evidence before asking for material unknowns. The workflow records requirements, analyzes applicable technical, business, security, data-integrity, compatibility, and operational risks, selects only relevant test categories with justified exclusions, and defines traceable P0-P3 cases with executable steps and observable expected results. In one traversal-safe local workspace it writes requirements.md, a schema-validated canonical test-plan.contract.json, and a ready-to-use test-plan.md. An independent file-backed reviewer checks every criterion and risk plus contract-to-Markdown consistency; any finding enters repair and the same review repeats, so delivery is unreachable while known gaps remain. It only creates local planning artifacts: it does not execute tests, change product code, commit, publish, notify, or deploy; test execution may only be recommended for a separately authorized caller or workflow. Choose Test Planning when you need an independently reviewed test strategy and case plan; choose Test Generation when you need test code, or a full development workflow when you need implementation together with tests and documentation.",
     "tags": [
       "тесты",
       "планирование",
       "качество"
-    ]
+    ],
+    "schemaVersion": 1
   },
   "nodes": [
     {
@@ -242,21 +240,26 @@
     {
       "id": "review-gate",
       "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "issues_count"
-        },
-        "right": 0
-      },
+      "progressNodeId": "review",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "issues_count"
+            },
+            "right": 0
+          },
+          "output": "true"
+        }
+      ],
       "connections": {
         "true": "present",
-        "false": "repair"
+        "default": "repair"
       },
-      "progressNodeId": "review",
       "connectionLabels": {
         "true": "no blocking findings",
-        "false": "review found blocking findings"
+        "default": "review found blocking findings"
       }
     },
     {
@@ -524,5 +527,8 @@
         }
       }
     ]
-  }
+  },
+  "slug": "test-planning",
+  "owner": "system-moira",
+  "visibility": "public"
 }

@@ -2,7 +2,7 @@
   "id": "1617b350-5e58-46a9-a783-fb9a69aec9bd",
   "metadata": {
     "name": "Verified Research",
-    "version": "4.0.0",
+    "version": "4.1.0",
     "description": "Bounded external-source research for one specific question and one evidence-linked answer. Frames the decision, use, audience and answer language, confirms independently that the planned sources stay inside the declared privacy, licensing and consent ceiling before any of them is acquired, gathers and critically reads a proportionate set of primary and authoritative sources, preserves meaningful disagreement, distinguishes sourced facts, quotations, calculations, inference, assumptions, uncertainty and gaps, and produces complete source-register, readings, answer, limitations, validation and independent-review records. Runs from an execution workspace or, when none can be created, from memory with the storage limitation stated and the result honestly limited. Supports autonomous and interactive operation, cause-owned answer or evidence repair bounded by a repair-round budget with a truthful procedural outcome when it is exhausted, useful explicitly limited answers when evidence is incomplete, truthful blocked and aborted outcomes, and replan when the criterion or method is invalid. Choose Deep Corpus Research for separately authorized corpus-scale exhaustive reading. Completion is local and reported to the user through their configured channels: this workflow does not publish, commit, deploy or mutate production.",
     "tags": [
       "исследование",
@@ -10,7 +10,8 @@
       "проверка",
       "факты",
       "отчёт"
-    ]
+    ],
+    "schemaVersion": 1
   },
   "nodes": [
     {
@@ -154,46 +155,36 @@
         ]
       },
       "connections": {
-        "success": "route-intake-actionable"
-      },
-      "progressNodeId": "b1-intake"
-    },
-    {
-      "id": "route-intake-actionable",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "intake.intake_outcome"
-        },
-        "right": "actionable"
-      },
-      "connections": {
-        "true": "materialize-workspace",
-        "false": "route-intake-clarify"
+        "actionable": "materialize-workspace",
+        "clarify": "clarify-question",
+        "success": "end-intake-blocked"
       },
       "progressNodeId": "b1-intake",
-      "connectionLabels": {
-        "true": "question is clear"
-      }
-    },
-    {
-      "id": "route-intake-clarify",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "intake.intake_outcome"
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "intake.intake_outcome"
+            },
+            "right": "actionable"
+          },
+          "output": "actionable"
         },
-        "right": "clarify"
-      },
-      "connections": {
-        "true": "clarify-question",
-        "false": "end-intake-blocked"
-      },
-      "progressNodeId": "b1-intake",
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "intake.intake_outcome"
+            },
+            "right": "clarify"
+          },
+          "output": "clarify"
+        }
+      ],
       "connectionLabels": {
-        "false": "question cannot be researched"
+        "actionable": "question is clear",
+        "success": "question cannot be researched"
       }
     },
     {
@@ -284,28 +275,25 @@
         ]
       },
       "connections": {
-        "success": "route-clarification-ready"
-      },
-      "progressNodeId": "b1-intake"
-    },
-    {
-      "id": "route-clarification-ready",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "clarify-question.clarification_outcome"
-        },
-        "right": "ready"
-      },
-      "connections": {
-        "true": "materialize-workspace",
-        "false": "end-intake-blocked"
+        "ready": "materialize-workspace",
+        "success": "end-intake-blocked"
       },
       "progressNodeId": "b1-intake",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "clarify-question.clarification_outcome"
+            },
+            "right": "ready"
+          },
+          "output": "ready"
+        }
+      ],
       "connectionLabels": {
-        "true": "clarification received",
-        "false": "clarification not obtained"
+        "ready": "clarification received",
+        "success": "clarification not obtained"
       }
     },
     {
@@ -476,47 +464,37 @@
         ]
       },
       "connections": {
-        "success": "route-framing-ready"
-      },
-      "progressNodeId": "b3-framing"
-    },
-    {
-      "id": "route-framing-ready",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "frame-research.framing_outcome"
-        },
-        "right": "ready"
-      },
-      "connections": {
-        "true": "review-source-policy",
-        "false": "route-framing-replan"
+        "ready": "review-source-policy",
+        "replan": "reassess-contract",
+        "success": "finalize-blocked"
       },
       "progressNodeId": "b3-framing",
-      "connectionLabels": {
-        "true": "framing ready"
-      }
-    },
-    {
-      "id": "route-framing-replan",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "frame-research.framing_outcome"
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "frame-research.framing_outcome"
+            },
+            "right": "ready"
+          },
+          "output": "ready"
         },
-        "right": "replan"
-      },
-      "connections": {
-        "true": "reassess-contract",
-        "false": "finalize-blocked"
-      },
-      "progressNodeId": "b3-framing",
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "frame-research.framing_outcome"
+            },
+            "right": "replan"
+          },
+          "output": "replan"
+        }
+      ],
       "connectionLabels": {
-        "true": "framing method is invalid",
-        "false": "framing prerequisite is irreducible"
+        "ready": "framing ready",
+        "replan": "framing method is invalid",
+        "success": "framing prerequisite is irreducible"
       }
     },
     {
@@ -608,59 +586,49 @@
         ]
       },
       "connections": {
-        "success": "route-evidence-usable"
+        "usable": "synthesize-answer",
+        "replan": "reassess-contract",
+        "success": "finalize-blocked"
       },
-      "progressNodeId": "b5-evidence"
-    },
-    {
-      "id": "route-evidence-usable",
-      "type": "condition",
-      "condition": {
-        "operator": "or",
-        "conditions": [
-          {
-            "operator": "eq",
-            "left": {
-              "contextPath": "evidence_status"
-            },
-            "right": "ready"
+      "progressNodeId": "b5-evidence",
+      "cases": [
+        {
+          "when": {
+            "operator": "or",
+            "conditions": [
+              {
+                "operator": "eq",
+                "left": {
+                  "contextPath": "evidence_status"
+                },
+                "right": "ready"
+              },
+              {
+                "operator": "eq",
+                "left": {
+                  "contextPath": "evidence_status"
+                },
+                "right": "limited"
+              }
+            ]
           },
-          {
+          "output": "usable"
+        },
+        {
+          "when": {
             "operator": "eq",
             "left": {
               "contextPath": "evidence_status"
             },
-            "right": "limited"
-          }
-        ]
-      },
-      "connections": {
-        "true": "synthesize-answer",
-        "false": "route-evidence-replan"
-      },
-      "progressNodeId": "b5-evidence",
+            "right": "replan"
+          },
+          "output": "replan"
+        }
+      ],
       "connectionLabels": {
-        "true": "evidence usable"
-      }
-    },
-    {
-      "id": "route-evidence-replan",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "evidence_status"
-        },
-        "right": "replan"
-      },
-      "connections": {
-        "true": "reassess-contract",
-        "false": "finalize-blocked"
-      },
-      "progressNodeId": "b5-evidence",
-      "connectionLabels": {
-        "true": "evidence method is invalid",
-        "false": "evidence is unobtainable"
+        "usable": "evidence usable",
+        "replan": "evidence method is invalid",
+        "success": "evidence is unobtainable"
       }
     },
     {
@@ -756,47 +724,37 @@
         ]
       },
       "connections": {
-        "success": "route-synthesis-ready"
-      },
-      "progressNodeId": "b6-synthesis"
-    },
-    {
-      "id": "route-synthesis-ready",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "synthesize-answer.synthesis_outcome"
-        },
-        "right": "ready"
-      },
-      "connections": {
-        "true": "package-completion",
-        "false": "route-synthesis-replan"
+        "ready": "package-completion",
+        "replan": "reassess-contract",
+        "success": "finalize-blocked"
       },
       "progressNodeId": "b6-synthesis",
-      "connectionLabels": {
-        "true": "answer written"
-      }
-    },
-    {
-      "id": "route-synthesis-replan",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "synthesize-answer.synthesis_outcome"
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "synthesize-answer.synthesis_outcome"
+            },
+            "right": "ready"
+          },
+          "output": "ready"
         },
-        "right": "replan"
-      },
-      "connections": {
-        "true": "reassess-contract",
-        "false": "finalize-blocked"
-      },
-      "progressNodeId": "b6-synthesis",
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "synthesize-answer.synthesis_outcome"
+            },
+            "right": "replan"
+          },
+          "output": "replan"
+        }
+      ],
       "connectionLabels": {
-        "true": "framing does not support an answer",
-        "false": "answer is unreachable"
+        "ready": "answer written",
+        "replan": "framing does not support an answer",
+        "success": "answer is unreachable"
       }
     },
     {
@@ -926,47 +884,37 @@
         ]
       },
       "connections": {
-        "success": "route-completion-ready"
-      },
-      "progressNodeId": "b7-package"
-    },
-    {
-      "id": "route-completion-ready",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "package-completion.completion_outcome"
-        },
-        "right": "ready"
-      },
-      "connections": {
-        "true": "validate-package",
-        "false": "route-completion-replan"
+        "ready": "validate-package",
+        "replan": "reassess-contract",
+        "success": "finalize-blocked"
       },
       "progressNodeId": "b7-package",
-      "connectionLabels": {
-        "true": "package complete"
-      }
-    },
-    {
-      "id": "route-completion-replan",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "package-completion.completion_outcome"
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "package-completion.completion_outcome"
+            },
+            "right": "ready"
+          },
+          "output": "ready"
         },
-        "right": "replan"
-      },
-      "connections": {
-        "true": "reassess-contract",
-        "false": "finalize-blocked"
-      },
-      "progressNodeId": "b7-package",
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "package-completion.completion_outcome"
+            },
+            "right": "replan"
+          },
+          "output": "replan"
+        }
+      ],
       "connectionLabels": {
-        "true": "contract is invalid",
-        "false": "package is unreachable"
+        "ready": "package complete",
+        "replan": "contract is invalid",
+        "success": "package is unreachable"
       }
     },
     {
@@ -1024,85 +972,61 @@
         ]
       },
       "connections": {
-        "success": "route-validation-pass"
-      },
-      "progressNodeId": "b8-validation"
-    },
-    {
-      "id": "route-validation-pass",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "validate-package.validation_outcome"
-        },
-        "right": "pass"
-      },
-      "connections": {
-        "true": "semantic-review",
-        "false": "route-validation-package"
+        "pass": "semantic-review",
+        "package_repair": "repair-answer",
+        "evidence_repair": "repair-evidence",
+        "replan": "reassess-contract",
+        "success": "finalize-blocked"
       },
       "progressNodeId": "b8-validation",
-      "connectionLabels": {
-        "true": "checks passed"
-      }
-    },
-    {
-      "id": "route-validation-package",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "validate-package.validation_outcome"
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "validate-package.validation_outcome"
+            },
+            "right": "pass"
+          },
+          "output": "pass"
         },
-        "right": "package_repair"
-      },
-      "connections": {
-        "true": "repair-answer",
-        "false": "route-validation-evidence"
-      },
-      "progressNodeId": "b8-validation",
-      "connectionLabels": {
-        "true": "package needs repair"
-      }
-    },
-    {
-      "id": "route-validation-evidence",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "validate-package.validation_outcome"
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "validate-package.validation_outcome"
+            },
+            "right": "package_repair"
+          },
+          "output": "package_repair"
         },
-        "right": "evidence_repair"
-      },
-      "connections": {
-        "true": "repair-evidence",
-        "false": "route-validation-replan"
-      },
-      "progressNodeId": "b8-validation",
-      "connectionLabels": {
-        "true": "evidence base needs repair"
-      }
-    },
-    {
-      "id": "route-validation-replan",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "validate-package.validation_outcome"
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "validate-package.validation_outcome"
+            },
+            "right": "evidence_repair"
+          },
+          "output": "evidence_repair"
         },
-        "right": "replan"
-      },
-      "connections": {
-        "true": "reassess-contract",
-        "false": "finalize-blocked"
-      },
-      "progressNodeId": "b8-validation",
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "validate-package.validation_outcome"
+            },
+            "right": "replan"
+          },
+          "output": "replan"
+        }
+      ],
       "connectionLabels": {
-        "true": "validation criterion is invalid",
-        "false": "package cannot be fixed"
+        "pass": "checks passed",
+        "package_repair": "package needs repair",
+        "evidence_repair": "evidence base needs repair",
+        "replan": "validation criterion is invalid",
+        "success": "package cannot be fixed"
       }
     },
     {
@@ -1202,79 +1126,69 @@
         ]
       },
       "connections": {
-        "success": "route-review-pass"
-      },
-      "progressNodeId": "b9-review"
-    },
-    {
-      "id": "route-review-pass",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "semantic-review.review_outcome"
-        },
-        "right": "pass"
-      },
-      "connections": {
-        "true": "reset-review-round",
-        "false": "route-review-repair"
-      },
-      "progressNodeId": "b9-review"
-    },
-    {
-      "id": "route-review-repair",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "semantic-review.review_outcome"
-        },
-        "right": "repair"
-      },
-      "connections": {
-        "true": "increment-review-round",
-        "false": "route-review-replan"
+        "pass": "reset-review-round",
+        "repair": "increment-review-round",
+        "replan": "reassess-contract",
+        "success": "finalize-blocked"
       },
       "progressNodeId": "b9-review",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "semantic-review.review_outcome"
+            },
+            "right": "pass"
+          },
+          "output": "pass"
+        },
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "semantic-review.review_outcome"
+            },
+            "right": "repair"
+          },
+          "output": "repair"
+        },
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "semantic-review.review_outcome"
+            },
+            "right": "replan"
+          },
+          "output": "replan"
+        }
+      ],
       "connectionLabels": {
-        "true": "review found a defect"
+        "repair": "review found a defect",
+        "replan": "cause lies upstream",
+        "success": "defect is irreducible"
       }
     },
     {
       "id": "route-review-answer",
       "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "semantic-review.repair_owner"
-        },
-        "right": "answer"
-      },
+      "progressNodeId": "b10-repair",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "semantic-review.repair_owner"
+            },
+            "right": "answer"
+          },
+          "output": "true"
+        }
+      ],
       "connections": {
         "true": "repair-answer",
-        "false": "repair-evidence"
-      },
-      "progressNodeId": "b10-repair"
-    },
-    {
-      "id": "route-review-replan",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "semantic-review.review_outcome"
-        },
-        "right": "replan"
-      },
-      "connections": {
-        "true": "reassess-contract",
-        "false": "finalize-blocked"
-      },
-      "progressNodeId": "b9-review",
-      "connectionLabels": {
-        "true": "cause lies upstream",
-        "false": "defect is irreducible"
+        "default": "repair-evidence"
       }
     },
     {
@@ -1370,53 +1284,43 @@
         ]
       },
       "connections": {
-        "success": "route-answer-repair-changed"
-      },
-      "progressNodeId": "b10-repair"
-    },
-    {
-      "id": "route-answer-repair-changed",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "repair-answer.repair_outcome"
-        },
-        "right": "changed"
-      },
-      "connections": {
-        "true": "package-completion",
-        "false": "route-answer-repair-blocked"
+        "changed": "package-completion",
+        "blocked": "finalize-blocked",
+        "success": "reassess-contract"
       },
       "progressNodeId": "b10-repair",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "repair-answer.repair_outcome"
+            },
+            "right": "changed"
+          },
+          "output": "changed"
+        },
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "repair-answer.repair_outcome"
+            },
+            "right": "blocked"
+          },
+          "output": "blocked"
+        }
+      ],
       "connectionLabels": {
-        "true": {
+        "changed": {
           "label": "repair changed the answer",
           "cycle": {
             "cause": "Independent review or validation found a defect owned by the answer, so the package is rebuilt and re-checked.",
             "exit": "Ends when review returns no blockers, when the repair budget runs out, or when the repair owner sends the cause upstream."
           }
-        }
-      }
-    },
-    {
-      "id": "route-answer-repair-blocked",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "repair-answer.repair_outcome"
         },
-        "right": "blocked"
-      },
-      "connections": {
-        "true": "finalize-blocked",
-        "false": "reassess-contract"
-      },
-      "progressNodeId": "b10-repair",
-      "connectionLabels": {
-        "true": "answer repair is impossible",
-        "false": "repair needs the contract reassessed"
+        "blocked": "answer repair is impossible",
+        "success": "repair needs the contract reassessed"
       }
     },
     {
@@ -1513,53 +1417,43 @@
         ]
       },
       "connections": {
-        "success": "route-evidence-repair-changed"
-      },
-      "progressNodeId": "b10-repair"
-    },
-    {
-      "id": "route-evidence-repair-changed",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "repair-evidence.repair_outcome"
-        },
-        "right": "changed"
-      },
-      "connections": {
-        "true": "review-source-policy",
-        "false": "route-evidence-repair-blocked"
+        "changed": "review-source-policy",
+        "blocked": "finalize-blocked",
+        "success": "reassess-contract"
       },
       "progressNodeId": "b10-repair",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "repair-evidence.repair_outcome"
+            },
+            "right": "changed"
+          },
+          "output": "changed"
+        },
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "repair-evidence.repair_outcome"
+            },
+            "right": "blocked"
+          },
+          "output": "blocked"
+        }
+      ],
       "connectionLabels": {
-        "true": {
+        "changed": {
           "label": "repair changed the evidence base",
           "cycle": {
             "cause": "Independent review or validation found a defect owned by the evidence, and rebuilding it starts again from the source-authority check because new sources may be planned.",
             "exit": "Ends when review returns no blockers, when the repair budget runs out, or when the repair owner sends the cause upstream."
           }
-        }
-      }
-    },
-    {
-      "id": "route-evidence-repair-blocked",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "repair-evidence.repair_outcome"
         },
-        "right": "blocked"
-      },
-      "connections": {
-        "true": "finalize-blocked",
-        "false": "reassess-contract"
-      },
-      "progressNodeId": "b10-repair",
-      "connectionLabels": {
-        "true": "evidence repair is impossible",
-        "false": "repair needs the contract reassessed"
+        "blocked": "evidence repair is impossible",
+        "success": "repair needs the contract reassessed"
       }
     },
     {
@@ -1626,27 +1520,24 @@
         ]
       },
       "connections": {
-        "success": "route-reassessment-corrected"
-      },
-      "progressNodeId": "b12-contract"
-    },
-    {
-      "id": "route-reassessment-corrected",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "reassess-contract.reassessment_outcome"
-        },
-        "right": "corrected"
-      },
-      "connections": {
-        "true": "corrected-contract-review",
-        "false": "finalize-blocked"
+        "corrected": "corrected-contract-review",
+        "success": "finalize-blocked"
       },
       "progressNodeId": "b12-contract",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "reassess-contract.reassessment_outcome"
+            },
+            "right": "corrected"
+          },
+          "output": "corrected"
+        }
+      ],
       "connectionLabels": {
-        "false": "contract cannot be corrected"
+        "success": "contract cannot be corrected"
       }
     },
     {
@@ -1703,53 +1594,43 @@
         ]
       },
       "connections": {
-        "success": "route-contract-review-pass"
-      },
-      "progressNodeId": "b12-contract"
-    },
-    {
-      "id": "route-contract-review-pass",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "corrected-contract-review.contract_review_outcome"
-        },
-        "right": "pass"
-      },
-      "connections": {
-        "true": "set-scope-contract",
-        "false": "route-contract-review-blocked"
+        "pass": "set-scope-contract",
+        "blocked": "finalize-blocked",
+        "success": "reassess-contract"
       },
       "progressNodeId": "b12-contract",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "corrected-contract-review.contract_review_outcome"
+            },
+            "right": "pass"
+          },
+          "output": "pass"
+        },
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "corrected-contract-review.contract_review_outcome"
+            },
+            "right": "blocked"
+          },
+          "output": "blocked"
+        }
+      ],
       "connectionLabels": {
-        "true": {
+        "pass": {
           "label": "corrected contract reviewed and accepted",
           "cycle": {
             "cause": "The reading of the question, method or acceptance criterion was wrong and has been corrected and independently reviewed, so the framing is redone against it.",
             "exit": "Ends when the framing holds against the corrected contract, or when the contract is declared uncorrectable."
           }
-        }
-      }
-    },
-    {
-      "id": "route-contract-review-blocked",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "corrected-contract-review.contract_review_outcome"
         },
-        "right": "blocked"
-      },
-      "connections": {
-        "true": "finalize-blocked",
-        "false": "reassess-contract"
-      },
-      "progressNodeId": "b12-contract",
-      "connectionLabels": {
-        "true": "contract review is blocked",
-        "false": {
+        "blocked": "contract review is blocked",
+        "success": {
           "label": "contract review asked for another correction",
           "cycle": {
             "cause": "The independent review of the corrected contract found blockers the contract owner can still fix, so the correction is reworked.",
@@ -1761,20 +1642,25 @@
     {
       "id": "route-mode-acceptance",
       "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "operating_mode"
-        },
-        "right": "interactive"
-      },
+      "progressNodeId": "b13-acceptance",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "operating_mode"
+            },
+            "right": "interactive"
+          },
+          "output": "true"
+        }
+      ],
       "connections": {
         "true": "interactive-acceptance",
-        "false": "route-final-storage-mode"
+        "default": "route-final-storage-mode"
       },
-      "progressNodeId": "b13-acceptance",
       "connectionLabels": {
-        "false": "autonomous run needs no acceptance"
+        "default": "autonomous run needs no acceptance"
       }
     },
     {
@@ -1835,122 +1721,91 @@
         ]
       },
       "connections": {
-        "success": "route-user-accept"
-      },
-      "progressNodeId": "b13-acceptance"
-    },
-    {
-      "id": "route-user-accept",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "interactive-acceptance.user_decision"
-        },
-        "right": "accept"
-      },
-      "connections": {
-        "true": "route-final-storage-mode",
-        "false": "route-user-abort"
+        "accept": "route-final-storage-mode",
+        "abort": "finalize-aborted",
+        "framing": "set-scope-framing",
+        "evidence": "set-scope-evidence",
+        "answer": "synthesize-answer",
+        "success": "reassess-contract"
       },
       "progressNodeId": "b13-acceptance",
-      "connectionLabels": {
-        "true": "user accepted the result"
-      }
-    },
-    {
-      "id": "route-user-abort",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "interactive-acceptance.user_decision"
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "interactive-acceptance.user_decision"
+            },
+            "right": "accept"
+          },
+          "output": "accept"
         },
-        "right": "abort"
-      },
-      "connections": {
-        "true": "finalize-aborted",
-        "false": "route-rework-framing"
-      },
-      "progressNodeId": "b13-acceptance",
-      "connectionLabels": {
-        "true": "user aborted the run"
-      }
-    },
-    {
-      "id": "route-rework-framing",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "interactive-acceptance.rework_owner"
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "interactive-acceptance.user_decision"
+            },
+            "right": "abort"
+          },
+          "output": "abort"
         },
-        "right": "framing"
-      },
-      "connections": {
-        "true": "set-scope-framing",
-        "false": "route-rework-evidence"
-      },
-      "progressNodeId": "b13-acceptance",
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "interactive-acceptance.rework_owner"
+            },
+            "right": "framing"
+          },
+          "output": "framing"
+        },
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "interactive-acceptance.rework_owner"
+            },
+            "right": "evidence"
+          },
+          "output": "evidence"
+        },
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "interactive-acceptance.rework_owner"
+            },
+            "right": "answer"
+          },
+          "output": "answer"
+        }
+      ],
       "connectionLabels": {
-        "true": {
+        "accept": "user accepted the result",
+        "abort": "user aborted the run",
+        "framing": {
           "label": "user asked to rethink the framing",
           "cycle": {
             "cause": "The user accepted neither the answer nor its framing and named framing as the earliest stale owner.",
             "exit": "Ends when the user accepts the reworked result or aborts."
           }
-        }
-      }
-    },
-    {
-      "id": "route-rework-evidence",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "interactive-acceptance.rework_owner"
         },
-        "right": "evidence"
-      },
-      "connections": {
-        "true": "set-scope-evidence",
-        "false": "route-rework-answer"
-      },
-      "progressNodeId": "b13-acceptance",
-      "connectionLabels": {
-        "true": {
+        "evidence": {
           "label": "user asked to renew the evidence base",
           "cycle": {
             "cause": "The user named evidence as the earliest stale owner, so the accepted framing stays and only the source plan is renewed before gathering again.",
             "exit": "Ends when the user accepts the reworked result or aborts."
           }
-        }
-      }
-    },
-    {
-      "id": "route-rework-answer",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "interactive-acceptance.rework_owner"
         },
-        "right": "answer"
-      },
-      "connections": {
-        "true": "synthesize-answer",
-        "false": "reassess-contract"
-      },
-      "progressNodeId": "b13-acceptance",
-      "connectionLabels": {
-        "true": {
+        "answer": {
           "label": "user asked to rewrite the answer",
           "cycle": {
             "cause": "The user named the answer as the earliest stale owner, so the evidence stands and only the synthesis is redone.",
             "exit": "Ends when the user accepts the reworked result or aborts."
           }
         },
-        "false": {
+        "success": {
           "label": "user asked to reassess the contract",
           "cycle": {
             "cause": "The user named the contract as the earliest stale owner, so the reading of the question or method is reassessed before anything else is redone.",
@@ -2130,26 +1985,6 @@
         "clarify-question.blocker_reason"
       ],
       "progressNodeId": "b15-stop"
-    },
-    {
-      "id": "route-final-answer-status",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "evidence_status"
-        },
-        "right": "ready"
-      },
-      "connections": {
-        "true": "finalize-result",
-        "false": "finalize-limited"
-      },
-      "progressNodeId": "b14-delivery",
-      "connectionLabels": {
-        "true": "evidence was complete",
-        "false": "evidence was limited"
-      }
     },
     {
       "id": "finalize-limited",
@@ -2374,47 +2209,37 @@
         ]
       },
       "connections": {
-        "success": "route-source-policy-pass"
-      },
-      "progressNodeId": "b4-source-policy"
-    },
-    {
-      "id": "route-source-policy-pass",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "review-source-policy.policy_review_outcome"
-        },
-        "right": "pass"
-      },
-      "connections": {
-        "true": "research-evidence",
-        "false": "route-source-policy-blocked"
+        "pass": "research-evidence",
+        "blocked": "finalize-blocked",
+        "success": "set-scope-policy"
       },
       "progressNodeId": "b4-source-policy",
-      "connectionLabels": {
-        "true": "source authority confirmed"
-      }
-    },
-    {
-      "id": "route-source-policy-blocked",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "review-source-policy.policy_review_outcome"
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "review-source-policy.policy_review_outcome"
+            },
+            "right": "pass"
+          },
+          "output": "pass"
         },
-        "right": "blocked"
-      },
-      "connections": {
-        "true": "finalize-blocked",
-        "false": "set-scope-policy"
-      },
-      "progressNodeId": "b4-source-policy",
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "review-source-policy.policy_review_outcome"
+            },
+            "right": "blocked"
+          },
+          "output": "blocked"
+        }
+      ],
       "connectionLabels": {
-        "true": "evidence unobtainable within the ceiling",
-        "false": {
+        "pass": "source authority confirmed",
+        "blocked": "evidence unobtainable within the ceiling",
+        "success": {
           "label": "planned sources exceed the ceiling",
           "cycle": {
             "cause": "An independent check found a planned source or access method outside the declared privacy, licensing or consent ceiling, so the framing owner has to renew the source plan.",
@@ -2451,41 +2276,51 @@
     {
       "id": "route-review-budget",
       "type": "condition",
-      "condition": {
-        "operator": "lte",
-        "left": {
-          "contextPath": "review_round"
-        },
-        "right": {
-          "contextPath": "max_review_rounds"
+      "progressNodeId": "b10-repair",
+      "cases": [
+        {
+          "when": {
+            "operator": "lte",
+            "left": {
+              "contextPath": "review_round"
+            },
+            "right": {
+              "contextPath": "max_review_rounds"
+            }
+          },
+          "output": "true"
         }
-      },
+      ],
       "connections": {
         "true": "route-review-answer",
-        "false": "route-limit-mode"
+        "default": "route-limit-mode"
       },
-      "progressNodeId": "b10-repair",
       "connectionLabels": {
-        "false": "repair budget exhausted"
+        "default": "repair budget exhausted"
       }
     },
     {
       "id": "route-limit-mode",
       "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "operating_mode"
-        },
-        "right": "interactive"
-      },
+      "progressNodeId": "b11-budget",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "operating_mode"
+            },
+            "right": "interactive"
+          },
+          "output": "true"
+        }
+      ],
       "connections": {
         "true": "ask-review-limit",
-        "false": "finalize-review-exhausted"
+        "default": "finalize-review-exhausted"
       },
-      "progressNodeId": "b11-budget",
       "connectionLabels": {
-        "false": "autonomous run finishes with a limited result"
+        "default": "autonomous run finishes with a limited result"
       }
     },
     {
@@ -2510,27 +2345,24 @@
         ]
       },
       "connections": {
-        "success": "route-limit-decision"
-      },
-      "progressNodeId": "b11-budget"
-    },
-    {
-      "id": "route-limit-decision",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "ask-review-limit.limit_decision"
-        },
-        "right": "continue"
-      },
-      "connections": {
-        "true": "reset-review-round-limit",
-        "false": "finalize-review-exhausted"
+        "continue": "reset-review-round-limit",
+        "success": "finalize-review-exhausted"
       },
       "progressNodeId": "b11-budget",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "ask-review-limit.limit_decision"
+            },
+            "right": "continue"
+          },
+          "output": "continue"
+        }
+      ],
       "connectionLabels": {
-        "false": "user chose to finish"
+        "success": "user chose to finish"
       }
     },
     {
@@ -2556,21 +2388,38 @@
     {
       "id": "route-final-storage-mode",
       "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "storage_mode"
-        },
-        "right": "memory"
-      },
-      "connections": {
-        "true": "finalize-limited",
-        "false": "route-final-answer-status"
-      },
       "progressNodeId": "b14-delivery",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "storage_mode"
+            },
+            "right": "memory"
+          },
+          "output": "memory"
+        },
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "evidence_status"
+            },
+            "right": "ready"
+          },
+          "output": "ready"
+        }
+      ],
+      "connections": {
+        "memory": "finalize-limited",
+        "ready": "finalize-result",
+        "default": "finalize-limited"
+      },
       "connectionLabels": {
-        "true": "run had no workspace — result is limited",
-        "false": "workspace held the package"
+        "default": "evidence was limited",
+        "memory": "run had no workspace — result is limited",
+        "ready": "evidence was complete"
       }
     },
     {
@@ -2645,21 +2494,26 @@
     {
       "id": "route-terminal-class",
       "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "terminal_status"
-        },
-        "right": "complete"
-      },
+      "progressNodeId": "b14-delivery",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "terminal_status"
+            },
+            "right": "complete"
+          },
+          "output": "true"
+        }
+      ],
       "connections": {
         "true": "end",
-        "false": "end-limited"
+        "default": "end-limited"
       },
-      "progressNodeId": "b14-delivery",
       "connectionLabels": {
         "true": "result is complete",
-        "false": "result is limited"
+        "default": "result is limited"
       }
     }
   ],
@@ -2824,9 +2678,6 @@
       "maxLength": 2000
     }
   },
-  "slug": "verified-research",
-  "owner": "system-moira",
-  "visibility": "public",
   "progress": {
     "title": "Verified Research",
     "goal": "Answer one bounded research question with evidence-linked, independently reviewed material and an honest result class.",
@@ -2937,5 +2788,8 @@
         }
       }
     ]
-  }
+  },
+  "slug": "verified-research",
+  "owner": "system-moira",
+  "visibility": "public"
 }

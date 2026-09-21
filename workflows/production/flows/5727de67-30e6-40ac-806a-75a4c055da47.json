@@ -2,7 +2,7 @@
   "id": "5727de67-30e6-40ac-806a-75a4c055da47",
   "metadata": {
     "name": "Workflow Management Flow",
-    "version": "6.10.1",
+    "version": "6.11.0",
     "description": "Creates or edits one complete Moira workflow through reconciled sources, independently reviewed semantic design, official mutation, quality review, and authority-bound delivery. It materializes nine canonical thematic authoring references and requires each substantive consumer to read its exact applicable files while keeping local node contracts concise. It preserves the process block contract (every node owned by a described block, every boundary edge and return labelled, one readable order), cause-aware repair/replan, publication authority, repository identity, and the complete create/edit route model; it does not execute the downstream task.",
     "author": "mcp-moira-team",
     "tags": [
@@ -11,7 +11,8 @@
       "editing",
       "meta",
       "proactive"
-    ]
+    ],
+    "schemaVersion": 1
   },
   "nodes": [
     {
@@ -146,21 +147,26 @@
     {
       "type": "condition",
       "id": "route-action-type",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "get-action-type.action_type"
-        },
-        "right": "create"
-      },
+      "progressNodeId": "source",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "get-action-type.action_type"
+            },
+            "right": "create"
+          },
+          "output": "true"
+        }
+      ],
       "connections": {
         "true": "gather-workflow-requirements",
-        "false": "prepare-edit-workflow"
+        "default": "prepare-edit-workflow"
       },
-      "progressNodeId": "source",
       "connectionLabels": {
         "true": "create a new workflow",
-        "false": "edit an existing workflow"
+        "default": "edit an existing workflow"
       }
     },
     {
@@ -256,32 +262,29 @@
         ]
       },
       "connections": {
-        "success": "route-structure-approval"
+        "success": "refine-structure",
+        "approved": "create-workflow-json"
       },
       "progressNodeId": "design",
       "progressActiveLabel": "Approve workflow structure",
       "progressActiveContent": {
         "summary": "Ask whether the proposed create design is accepted",
         "next": "Build after approval, or refine and re-review the design"
-      }
-    },
-    {
-      "type": "condition",
-      "id": "route-structure-approval",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "approve-structure.structure_approved"
-        },
-        "right": "yes"
       },
-      "connections": {
-        "true": "create-workflow-json",
-        "false": "refine-structure"
-      },
-      "progressNodeId": "design",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "approve-structure.structure_approved"
+            },
+            "right": "yes"
+          },
+          "output": "approved"
+        }
+      ],
       "connectionLabels": {
-        "true": "structure approved, build"
+        "approved": "structure approved, build"
       }
     },
     {
@@ -407,7 +410,8 @@
       "type": "agent-directive",
       "id": "user-final-review",
       "connections": {
-        "success": "route-save-decision"
+        "success": "route-final-feedback-action",
+        "approved": "ask-upload"
       },
       "directive": "Present the accepted workflow at {{workflow_artifact_path}} and explain the user-visible result, how it satisfies the requirements, changed and protected routes, verification performed, limitations, and where to inspect full workspace artifacts. Read the accepted JSON, current `{{workspace_path}}/workspace/workflow-schema.txt`, and approved design or edit plan. Do not reproduce the complete starts, terminals, cycles, reachability, coverage, or data-flow inventory; the projection owns that detail. Do not treat structural validation as semantic proof.\n\nAsk whether the workflow is approved. Return `work_approved` as `yes` or `no`; when `no`, return the user's exact non-empty `final_feedback` for the earliest stale create/edit responsibility. Replace `progress_delivery_outcome` with the truthful current approval state.\n",
       "completionCondition": "The user received a presentation grounded in the accepted JSON and current complete structural projection and either approved the resulting workflow or supplied actionable final feedback",
@@ -460,23 +464,19 @@
       "progressActiveContent": {
         "summary": "Ask whether the resulting workflow is accepted",
         "next": "Choose delivery after approval, or revise requirements after feedback"
-      }
-    },
-    {
-      "type": "condition",
-      "id": "route-save-decision",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "user-final-review.work_approved"
-        },
-        "right": "yes"
       },
-      "connections": {
-        "true": "ask-upload",
-        "false": "route-final-feedback-action"
-      },
-      "progressNodeId": "delivery"
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "user-final-review.work_approved"
+            },
+            "right": "yes"
+          },
+          "output": "approved"
+        }
+      ]
     },
     {
       "type": "end",
@@ -492,22 +492,6 @@
       "finalOutput": [
         "action_type"
       ],
-      "progressNodeId": "delivery"
-    },
-    {
-      "type": "condition",
-      "id": "route-upload-skip",
-      "connections": {
-        "true": "save-workflow-to-target",
-        "false": "route-local-sync"
-      },
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "ask-upload.upload_confirmed"
-        },
-        "right": true
-      },
       "progressNodeId": "delivery"
     },
     {
@@ -557,30 +541,27 @@
         ]
       },
       "connections": {
-        "success": "route-upload-result"
+        "success": "handle-upload-error",
+        "uploaded": "route-local-sync"
       },
       "progressNodeId": "delivery",
       "progressActiveLabel": "Upload workflow",
       "progressActiveContent": {
         "summary": "Perform the separately authorized server upload",
         "next": "Complete delivery on success, or resolve the concrete upload failure"
-      }
-    },
-    {
-      "type": "condition",
-      "id": "route-upload-result",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "save-workflow-to-target.upload_success"
-        },
-        "right": "yes"
       },
-      "connections": {
-        "true": "route-local-sync",
-        "false": "handle-upload-error"
-      },
-      "progressNodeId": "delivery"
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "save-workflow-to-target.upload_success"
+            },
+            "right": "yes"
+          },
+          "output": "uploaded"
+        }
+      ]
     },
     {
       "type": "agent-directive",
@@ -611,51 +592,59 @@
         ]
       },
       "connections": {
-        "success": "route-error-action-new"
+        "success": "end-cancelled",
+        "retry": "save-workflow-to-target",
+        "skip": "route-local-sync"
       },
       "progressNodeId": "delivery",
       "progressActiveLabel": "Resolve upload failure",
       "progressActiveContent": {
         "summary": "Choose recovery for the concrete upload failure",
         "next": "Retry an authorized upload, keep the local result, or cancel"
-      }
-    },
-    {
-      "type": "condition",
-      "id": "route-error-action-new",
-      "condition": {
-        "operator": "or",
-        "conditions": [
-          {
-            "operator": "eq",
-            "left": {
-              "contextPath": "handle-upload-error.error_action"
-            },
-            "right": "retry"
-          },
-          {
-            "operator": "eq",
-            "left": {
-              "contextPath": "handle-upload-error.error_action"
-            },
-            "right": "copy_new"
-          },
-          {
-            "operator": "eq",
-            "left": {
-              "contextPath": "handle-upload-error.error_action"
-            },
-            "right": "admin_override"
-          }
-        ]
       },
-      "connections": {
-        "true": "save-workflow-to-target",
-        "false": "route-error-skip-or-cancel"
-      },
-      "progressNodeId": "delivery",
+      "cases": [
+        {
+          "when": {
+            "operator": "or",
+            "conditions": [
+              {
+                "operator": "eq",
+                "left": {
+                  "contextPath": "handle-upload-error.error_action"
+                },
+                "right": "retry"
+              },
+              {
+                "operator": "eq",
+                "left": {
+                  "contextPath": "handle-upload-error.error_action"
+                },
+                "right": "copy_new"
+              },
+              {
+                "operator": "eq",
+                "left": {
+                  "contextPath": "handle-upload-error.error_action"
+                },
+                "right": "admin_override"
+              }
+            ]
+          },
+          "output": "retry"
+        },
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "handle-upload-error.error_action"
+            },
+            "right": "skip"
+          },
+          "output": "skip"
+        }
+      ],
       "connectionLabels": {
-        "true": {
+        "retry": {
           "label": "retry the upload",
           "cycle": {
             "cause": "The upload failed and the user chose to try again.",
@@ -663,22 +652,6 @@
           }
         }
       }
-    },
-    {
-      "type": "condition",
-      "id": "route-error-skip-or-cancel",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "handle-upload-error.error_action"
-        },
-        "right": "skip"
-      },
-      "connections": {
-        "true": "route-local-sync",
-        "false": "end-cancelled"
-      },
-      "progressNodeId": "delivery"
     },
     {
       "type": "agent-directive",
@@ -803,13 +776,42 @@
         ]
       },
       "connections": {
-        "success": "route-edit-design-repair-changed"
+        "success": "reassess-design-contract",
+        "changed": "review-workflow-design"
       },
       "progressNodeId": "design",
       "progressActiveLabel": "Repair edit design",
       "progressActiveContent": {
         "summary": "Repair the current edit design against review findings",
         "next": "Independent design re-review"
+      },
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "fix-edit-plan.repair_outcome"
+            },
+            "right": "changed"
+          },
+          "output": "changed"
+        }
+      ],
+      "connectionLabels": {
+        "changed": {
+          "label": "edit plan fixed, review again",
+          "cycle": {
+            "cause": "The edit plan was repaired within the review's reach.",
+            "exit": "The design review passes."
+          }
+        },
+        "success": {
+          "label": "repair needs a contract change",
+          "cycle": {
+            "cause": "The repair requires reassessing the design contract.",
+            "exit": "The design review passes."
+          }
+        }
       }
     },
     {
@@ -858,32 +860,29 @@
         ]
       },
       "connections": {
-        "success": "route-edit-plan-approved"
+        "success": "revise-edit-plan",
+        "approved": "apply-workflow-changes"
       },
       "progressNodeId": "design",
       "progressActiveLabel": "Present edit plan",
       "progressActiveContent": {
         "summary": "Ask whether the proposed edit plan is accepted",
         "next": "Build after approval, or revise and re-review the plan"
-      }
-    },
-    {
-      "type": "condition",
-      "id": "route-edit-plan-approved",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "present-edit-plan.plan_approval"
-        },
-        "right": "yes"
       },
-      "connections": {
-        "true": "apply-workflow-changes",
-        "false": "revise-edit-plan"
-      },
-      "progressNodeId": "design",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "present-edit-plan.plan_approval"
+            },
+            "right": "yes"
+          },
+          "output": "approved"
+        }
+      ],
       "connectionLabels": {
-        "true": "edit plan approved, apply"
+        "approved": "edit plan approved, apply"
       }
     },
     {
@@ -976,14 +975,27 @@
         ]
       },
       "connections": {
-        "success": "route-upload-skip"
+        "success": "route-local-sync",
+        "confirmed": "save-workflow-to-target"
       },
       "progressNodeId": "delivery",
       "progressActiveLabel": "Resolve workflow upload",
       "progressActiveContent": {
         "summary": "Choose whether server upload is authorized",
         "next": "Upload when authorized, otherwise synchronize a real local target or finish"
-      }
+      },
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "ask-upload.upload_confirmed"
+            },
+            "right": true
+          },
+          "output": "confirmed"
+        }
+      ]
     },
     {
       "type": "agent-directive",
@@ -1012,30 +1024,47 @@
         ]
       },
       "connections": {
-        "success": "route-quality-review"
+        "success": "fix-quality-issues",
+        "pass": "route-operating-mode-final",
+        "replan": "reassess-design-contract"
       },
       "progressNodeId": "review",
       "progressActiveLabel": "Review workflow quality",
       "progressActiveContent": {
         "summary": "Review the complete workflow against requirements and current schema",
         "next": "Repair, replan, or delivery"
-      }
-    },
-    {
-      "type": "condition",
-      "id": "route-quality-review",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "review-workflow-quality.quality_review_outcome"
+      },
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "review-workflow-quality.quality_review_outcome"
+            },
+            "right": "pass"
+          },
+          "output": "pass"
         },
-        "right": "pass"
-      },
-      "connections": {
-        "true": "route-operating-mode-final",
-        "false": "route-quality-review-replan"
-      },
-      "progressNodeId": "review"
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "review-workflow-quality.quality_review_outcome"
+            },
+            "right": "replan"
+          },
+          "output": "replan"
+        }
+      ],
+      "connectionLabels": {
+        "replan": {
+          "label": "review found a contract defect",
+          "cycle": {
+            "cause": "The quality review found a defect in the design contract itself.",
+            "exit": "The reassessed contract passes design review and the rebuilt workflow passes quality review."
+          }
+        }
+      }
     },
     {
       "type": "agent-directive",
@@ -1095,30 +1124,64 @@
         ]
       },
       "connections": {
-        "success": "route-quality-repair-changed"
+        "success": "reassess-design-contract",
+        "changed": "review-workflow-quality"
       },
       "progressNodeId": "review",
       "progressActiveLabel": "Repair workflow quality",
       "progressActiveContent": {
         "summary": "Repair the confirmed quality findings in the current workflow",
         "next": "Repeat independent quality review"
+      },
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "fix-quality-issues.repair_outcome"
+            },
+            "right": "changed"
+          },
+          "output": "changed"
+        }
+      ],
+      "connectionLabels": {
+        "success": {
+          "label": "repair needs a contract change",
+          "cycle": {
+            "cause": "Fixing the quality findings requires changing the design contract.",
+            "exit": "The reassessed contract passes design review and the rebuilt workflow passes quality review."
+          }
+        },
+        "changed": {
+          "label": "fixed, review quality again",
+          "cycle": {
+            "cause": "The quality findings were fixed without touching the contract.",
+            "exit": "The quality review passes."
+          }
+        }
       }
     },
     {
       "type": "condition",
       "id": "route-final-feedback-action",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "action_type"
-        },
-        "right": "create"
-      },
+      "progressNodeId": "delivery",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "action_type"
+            },
+            "right": "create"
+          },
+          "output": "true"
+        }
+      ],
       "connections": {
         "true": "revise-create-requirements",
-        "false": "revise-edit-requirements"
+        "default": "revise-edit-requirements"
       },
-      "progressNodeId": "delivery",
       "connectionLabels": {
         "true": {
           "label": "user feedback changes the requirements",
@@ -1127,7 +1190,7 @@
             "exit": "The user accepts the result."
           }
         },
-        "false": {
+        "default": {
           "label": "user feedback changes the edit requirements",
           "cycle": {
             "cause": "The user rejected the result of an edit, so the edit requirements are revised.",
@@ -1158,28 +1221,25 @@
         ]
       },
       "connections": {
-        "success": "route-full-antipattern-audit"
+        "success": "create-edit-plan",
+        "audit": "audit-complete-workflow"
       },
       "progressNodeId": "requirements",
-      "progressActiveLabel": "Choose audit depth"
-    },
-    {
-      "id": "route-full-antipattern-audit",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "ask-full-antipattern-audit.full_antipattern_audit"
-        },
-        "right": "yes"
-      },
-      "connections": {
-        "true": "audit-complete-workflow",
-        "false": "create-edit-plan"
-      },
-      "progressNodeId": "requirements",
+      "progressActiveLabel": "Choose audit depth",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "ask-full-antipattern-audit.full_antipattern_audit"
+            },
+            "right": "yes"
+          },
+          "output": "audit"
+        }
+      ],
       "connectionLabels": {
-        "false": "requirements captured, plan the edit"
+        "success": "requirements captured, plan the edit"
       }
     },
     {
@@ -1317,34 +1377,44 @@
     {
       "type": "condition",
       "id": "route-local-sync",
-      "condition": {
-        "operator": "neq",
-        "left": {
-          "contextPath": "local_workflow_path"
-        },
-        "right": ""
-      },
+      "progressNodeId": "delivery",
+      "cases": [
+        {
+          "when": {
+            "operator": "neq",
+            "left": {
+              "contextPath": "local_workflow_path"
+            },
+            "right": ""
+          },
+          "output": "true"
+        }
+      ],
       "connections": {
         "true": "sync-local-file",
-        "false": "end"
-      },
-      "progressNodeId": "delivery"
+        "default": "end"
+      }
     },
     {
       "id": "route-operating-mode-structure",
       "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "operating_mode"
-        },
-        "right": "autonomous"
-      },
+      "progressNodeId": "design",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "operating_mode"
+            },
+            "right": "autonomous"
+          },
+          "output": "true"
+        }
+      ],
       "connections": {
         "true": "create-workflow-json",
-        "false": "approve-structure"
+        "default": "approve-structure"
       },
-      "progressNodeId": "design",
       "connectionLabels": {
         "true": "autonomous mode, build"
       }
@@ -1352,18 +1422,23 @@
     {
       "id": "route-operating-mode-plan",
       "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "operating_mode"
-        },
-        "right": "autonomous"
-      },
+      "progressNodeId": "design",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "operating_mode"
+            },
+            "right": "autonomous"
+          },
+          "output": "true"
+        }
+      ],
       "connections": {
         "true": "apply-workflow-changes",
-        "false": "present-edit-plan"
+        "default": "present-edit-plan"
       },
-      "progressNodeId": "design",
       "connectionLabels": {
         "true": "autonomous mode, apply"
       }
@@ -1371,21 +1446,26 @@
     {
       "id": "route-operating-mode-final",
       "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "operating_mode"
-        },
-        "right": "autonomous"
-      },
+      "progressNodeId": "review",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "operating_mode"
+            },
+            "right": "autonomous"
+          },
+          "output": "true"
+        }
+      ],
       "connections": {
         "true": "report-final-result",
-        "false": "user-final-review"
+        "default": "user-final-review"
       },
-      "progressNodeId": "review",
       "connectionLabels": {
         "true": "review passed, report",
-        "false": "review passed, user final review"
+        "default": "review passed, user final review"
       }
     },
     {
@@ -1473,78 +1553,80 @@
         ]
       },
       "connections": {
-        "success": "route-design-review-pass"
+        "success": "route-action-design-repair",
+        "pass": "route-action-after-design-review",
+        "replan": "reassess-design-contract"
       },
       "progressNodeId": "design",
       "progressActiveLabel": "Review workflow design",
       "progressActiveContent": {
         "summary": "Independently review the current workflow design",
         "next": "Accept, repair, or replan the design"
-      }
-    },
-    {
-      "type": "condition",
-      "id": "route-design-review-pass",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "review-workflow-design.design_review_outcome"
+      },
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "review-workflow-design.design_review_outcome"
+            },
+            "right": "pass"
+          },
+          "output": "pass"
         },
-        "right": "pass"
-      },
-      "connections": {
-        "true": "route-action-after-design-review",
-        "false": "route-design-review-replan"
-      },
-      "progressNodeId": "design"
-    },
-    {
-      "type": "condition",
-      "id": "route-design-review-replan",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "review-workflow-design.design_review_outcome"
-        },
-        "right": "replan"
-      },
-      "connections": {
-        "true": "reassess-design-contract",
-        "false": "route-action-design-repair"
-      },
-      "progressNodeId": "design"
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "review-workflow-design.design_review_outcome"
+            },
+            "right": "replan"
+          },
+          "output": "replan"
+        }
+      ]
     },
     {
       "type": "condition",
       "id": "route-action-after-design-review",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "get-action-type.action_type"
-        },
-        "right": "create"
-      },
+      "progressNodeId": "design",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "get-action-type.action_type"
+            },
+            "right": "create"
+          },
+          "output": "true"
+        }
+      ],
       "connections": {
         "true": "route-operating-mode-structure",
-        "false": "route-operating-mode-plan"
-      },
-      "progressNodeId": "design"
+        "default": "route-operating-mode-plan"
+      }
     },
     {
       "type": "condition",
       "id": "route-action-design-repair",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "get-action-type.action_type"
-        },
-        "right": "create"
-      },
+      "progressNodeId": "design",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "get-action-type.action_type"
+            },
+            "right": "create"
+          },
+          "output": "true"
+        }
+      ],
       "connections": {
         "true": "fix-create-design",
-        "false": "fix-edit-plan"
-      },
-      "progressNodeId": "design"
+        "default": "fix-edit-plan"
+      }
     },
     {
       "type": "agent-directive",
@@ -1608,13 +1690,42 @@
         ]
       },
       "connections": {
-        "success": "route-create-design-repair-changed"
+        "success": "reassess-design-contract",
+        "changed": "review-workflow-design"
       },
       "progressNodeId": "design",
       "progressActiveLabel": "Repair create design",
       "progressActiveContent": {
         "summary": "Repair the current create design against review findings",
         "next": "Independent design re-review"
+      },
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "fix-create-design.repair_outcome"
+            },
+            "right": "changed"
+          },
+          "output": "changed"
+        }
+      ],
+      "connectionLabels": {
+        "changed": {
+          "label": "design fixed, review again",
+          "cycle": {
+            "cause": "The design was repaired within the review's reach.",
+            "exit": "The design review passes."
+          }
+        },
+        "success": {
+          "label": "repair needs a contract change",
+          "cycle": {
+            "cause": "The repair requires reassessing the design contract.",
+            "exit": "The design review passes."
+          }
+        }
       }
     },
     {
@@ -1654,18 +1765,23 @@
     {
       "type": "condition",
       "id": "route-action-after-reassessment",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "get-action-type.action_type"
-        },
-        "right": "create"
-      },
+      "progressNodeId": "design",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "get-action-type.action_type"
+            },
+            "right": "create"
+          },
+          "output": "true"
+        }
+      ],
       "connections": {
         "true": "design-workflow-structure",
-        "false": "create-edit-plan"
+        "default": "create-edit-plan"
       },
-      "progressNodeId": "design",
       "connectionLabels": {
         "true": {
           "label": "contract reassessed, design again",
@@ -1674,131 +1790,10 @@
             "exit": "The design review passes."
           }
         },
-        "false": {
+        "default": {
           "label": "contract reassessed, plan the edit again",
           "cycle": {
             "cause": "The reassessed contract restarts the edit plan.",
-            "exit": "The design review passes."
-          }
-        }
-      }
-    },
-    {
-      "type": "condition",
-      "id": "route-quality-review-replan",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "review-workflow-quality.quality_review_outcome"
-        },
-        "right": "replan"
-      },
-      "connections": {
-        "true": "reassess-design-contract",
-        "false": "fix-quality-issues"
-      },
-      "progressNodeId": "review",
-      "connectionLabels": {
-        "true": {
-          "label": "review found a contract defect",
-          "cycle": {
-            "cause": "The quality review found a defect in the design contract itself.",
-            "exit": "The reassessed contract passes design review and the rebuilt workflow passes quality review."
-          }
-        }
-      }
-    },
-    {
-      "type": "condition",
-      "id": "route-quality-repair-changed",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "fix-quality-issues.repair_outcome"
-        },
-        "right": "changed"
-      },
-      "connections": {
-        "true": "review-workflow-quality",
-        "false": "reassess-design-contract"
-      },
-      "progressNodeId": "review",
-      "connectionLabels": {
-        "false": {
-          "label": "repair needs a contract change",
-          "cycle": {
-            "cause": "Fixing the quality findings requires changing the design contract.",
-            "exit": "The reassessed contract passes design review and the rebuilt workflow passes quality review."
-          }
-        },
-        "true": {
-          "label": "fixed, review quality again",
-          "cycle": {
-            "cause": "The quality findings were fixed without touching the contract.",
-            "exit": "The quality review passes."
-          }
-        }
-      }
-    },
-    {
-      "type": "condition",
-      "id": "route-create-design-repair-changed",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "fix-create-design.repair_outcome"
-        },
-        "right": "changed"
-      },
-      "connections": {
-        "true": "review-workflow-design",
-        "false": "reassess-design-contract"
-      },
-      "progressNodeId": "design",
-      "connectionLabels": {
-        "true": {
-          "label": "design fixed, review again",
-          "cycle": {
-            "cause": "The design was repaired within the review's reach.",
-            "exit": "The design review passes."
-          }
-        },
-        "false": {
-          "label": "repair needs a contract change",
-          "cycle": {
-            "cause": "The repair requires reassessing the design contract.",
-            "exit": "The design review passes."
-          }
-        }
-      }
-    },
-    {
-      "type": "condition",
-      "id": "route-edit-design-repair-changed",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "fix-edit-plan.repair_outcome"
-        },
-        "right": "changed"
-      },
-      "connections": {
-        "true": "review-workflow-design",
-        "false": "reassess-design-contract"
-      },
-      "progressNodeId": "design",
-      "connectionLabels": {
-        "true": {
-          "label": "edit plan fixed, review again",
-          "cycle": {
-            "cause": "The edit plan was repaired within the review's reach.",
-            "exit": "The design review passes."
-          }
-        },
-        "false": {
-          "label": "repair needs a contract change",
-          "cycle": {
-            "cause": "The repair requires reassessing the design contract.",
             "exit": "The design review passes."
           }
         }

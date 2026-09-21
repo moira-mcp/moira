@@ -2,14 +2,15 @@
   "id": "41246c35-cada-43ae-917c-57b1ea90c1bd",
   "metadata": {
     "name": "Test Suite Audit",
-    "version": "4.1.0",
+    "version": "4.2.0",
     "description": "Feature-first audit of an existing project test suite against real production behavior. The flow resolves a traversal-safe workspace and authority boundary, inventories the complete in-scope source and test corpus, builds and independently reviews a production-grounded taxonomy, maps every test in deterministic independently reviewed batches, and produces reviewed coverage, redundancy, gap, weak-assertion and exact-change recommendations. Users can correct resolved scope or taxonomy without losing unaffected evidence, request analysis only, authorize only the exact reviewed mutation set, revise recommendations, or abort. If changes are authorized, it records a pre-change baseline and recovery contract, applies one logical mutation class at a time with immediate targeted checks, independently reviews the actual delta, runs all applicable broader project gates, and either repairs within authority or performs and verifies a scoped revert. Irreducible evidence or an unsafe baseline can produce only an explicitly selected limited non-mutating report. Local Markdown and self-contained HTML reports are independently reviewed before optional authorized static publication and optional configured user notification; local mode has no external side effects, and upload or notification failure remains visible. The flow preserves unrelated dirty work, never treats sampling as authorization, never reports failing changed tests as success, and never broadens access or discovers credentials. Choose Test Suite Audit to assess and optionally refactor an existing suite; use Test Planning to design strategy before implementation, Test Generation to add tests for a defined target, Data Analysis for supplied datasets, or Software Development Flow for complete product delivery.",
     "tags": [
       "тесты",
       "аудит",
       "качество",
       "покрытие"
-    ]
+    ],
+    "schemaVersion": 1
   },
   "nodes": [
     {
@@ -174,27 +175,24 @@
         ]
       },
       "connections": {
-        "success": "taxonomy-clean"
-      },
-      "progressNodeId": "taxonomy"
-    },
-    {
-      "id": "taxonomy-clean",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "review-taxonomy.issues_count"
-        },
-        "right": 0
-      },
-      "connections": {
-        "true": "confirm-scope-taxonomy",
-        "false": "repair-taxonomy"
+        "clean": "confirm-scope-taxonomy",
+        "success": "repair-taxonomy"
       },
       "progressNodeId": "taxonomy",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "review-taxonomy.issues_count"
+            },
+            "right": 0
+          },
+          "output": "clean"
+        }
+      ],
       "connectionLabels": {
-        "true": "рецензия таксономии без замечаний"
+        "clean": "рецензия таксономии без замечаний"
       }
     },
     {
@@ -240,53 +238,43 @@
         ]
       },
       "connections": {
-        "success": "taxonomy-repair-scope"
-      },
-      "progressNodeId": "taxonomy"
-    },
-    {
-      "id": "taxonomy-repair-scope",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "repair-taxonomy.repair_reach"
-        },
-        "right": "scope"
-      },
-      "connections": {
-        "true": "reset-for-scope",
-        "false": "taxonomy-repair-irreducible"
+        "scope": "reset-for-scope",
+        "irreducible": "irreducible-decision",
+        "success": "review-taxonomy"
       },
       "progressNodeId": "taxonomy",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "repair-taxonomy.repair_reach"
+            },
+            "right": "scope"
+          },
+          "output": "scope"
+        },
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "repair-taxonomy.repair_reach"
+            },
+            "right": "irreducible"
+          },
+          "output": "irreducible"
+        }
+      ],
       "connectionLabels": {
-        "true": {
+        "scope": {
           "label": "ремонт достаёт до объёма аудита",
           "cycle": {
             "cause": "Рецензия таксономии подтвердила дефект, чей самый ранний источник — разрешённый объём и опись корпуса, поэтому опись строится заново.",
             "exit": "Цикл кончается, когда рецензия таксономии проходит без замечаний, либо очередной ремонт объявляет дефект неустранимым и пользователь выбирает ограниченный отчёт или прекращение."
           }
-        }
-      }
-    },
-    {
-      "id": "taxonomy-repair-irreducible",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "repair-taxonomy.repair_reach"
         },
-        "right": "irreducible"
-      },
-      "connections": {
-        "true": "irreducible-decision",
-        "false": "review-taxonomy"
-      },
-      "progressNodeId": "taxonomy",
-      "connectionLabels": {
-        "true": "дефект неустраним при нынешнем доступе",
-        "false": {
+        "irreducible": "дефект неустраним при нынешнем доступе",
+        "success": {
           "label": "ремонт остался внутри таксономии",
           "cycle": {
             "cause": "Подтверждённый дефект починен в самой таксономии, и исправленная таксономия обязана снова пройти независимую рецензию.",
@@ -350,27 +338,24 @@
         ]
       },
       "connections": {
-        "success": "scope-taxonomy-accepted"
-      },
-      "progressNodeId": "confirm"
-    },
-    {
-      "id": "scope-taxonomy-accepted",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "confirm-scope-taxonomy.decision"
-        },
-        "right": "accept"
-      },
-      "connections": {
-        "true": "check-batches",
-        "false": "apply-user-correction"
+        "accept": "check-batches",
+        "success": "apply-user-correction"
       },
       "progressNodeId": "confirm",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "confirm-scope-taxonomy.decision"
+            },
+            "right": "accept"
+          },
+          "output": "accept"
+        }
+      ],
       "connectionLabels": {
-        "true": "пользователь принял объём и таксономию"
+        "accept": "пользователь принял объём и таксономию"
       }
     },
     {
@@ -406,18 +391,23 @@
     {
       "id": "user-correction-scope",
       "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "confirm-scope-taxonomy.correction_target"
-        },
-        "right": "scope"
-      },
+      "progressNodeId": "confirm",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "confirm-scope-taxonomy.correction_target"
+            },
+            "right": "scope"
+          },
+          "output": "true"
+        }
+      ],
       "connections": {
         "true": "discover-corpus",
-        "false": "review-taxonomy"
+        "default": "review-taxonomy"
       },
-      "progressNodeId": "confirm",
       "connectionLabels": {
         "true": {
           "label": "пользователь поправил объём аудита",
@@ -426,7 +416,7 @@
             "exit": "Цикл кончается, когда пользователь принимает объём и таксономию и работа уходит в разбор тестов по партиям."
           }
         },
-        "false": {
+        "default": {
           "label": "пользователь поправил таксономию",
           "cycle": {
             "cause": "Пользователь не принял показанные артефакты и назвал поправкой таксономию, поэтому исправленная таксономия снова идёт на независимую рецензию.",
@@ -438,22 +428,27 @@
     {
       "id": "check-batches",
       "type": "condition",
-      "condition": {
-        "operator": "lt",
-        "left": {
-          "contextPath": "batch_cursor"
-        },
-        "right": {
-          "contextPath": "batch_total"
+      "progressNodeId": "mapping",
+      "cases": [
+        {
+          "when": {
+            "operator": "lt",
+            "left": {
+              "contextPath": "batch_cursor"
+            },
+            "right": {
+              "contextPath": "batch_total"
+            }
+          },
+          "output": "true"
         }
-      },
+      ],
       "connections": {
         "true": "map-batch",
-        "false": "analyze-suite"
+        "default": "analyze-suite"
       },
-      "progressNodeId": "mapping",
       "connectionLabels": {
-        "false": "все партии плана разобраны"
+        "default": "все партии плана разобраны"
       }
     },
     {
@@ -491,25 +486,22 @@
         ]
       },
       "connections": {
-        "success": "mapping-clean"
+        "clean": "increment-batch",
+        "success": "repair-mapping"
       },
-      "progressNodeId": "mapping"
-    },
-    {
-      "id": "mapping-clean",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "review-mapping.issues_count"
-        },
-        "right": 0
-      },
-      "connections": {
-        "true": "increment-batch",
-        "false": "repair-mapping"
-      },
-      "progressNodeId": "mapping"
+      "progressNodeId": "mapping",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "review-mapping.issues_count"
+            },
+            "right": 0
+          },
+          "output": "clean"
+        }
+      ]
     },
     {
       "id": "repair-mapping",
@@ -535,78 +527,61 @@
         ]
       },
       "connections": {
-        "success": "mapping-repair-scope"
-      },
-      "progressNodeId": "mapping"
-    },
-    {
-      "id": "mapping-repair-scope",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "repair-mapping.repair_reach"
-        },
-        "right": "scope"
-      },
-      "connections": {
-        "true": "reset-for-scope",
-        "false": "mapping-repair-taxonomy"
+        "scope": "reset-for-scope",
+        "taxonomy": "reset-for-taxonomy",
+        "irreducible": "irreducible-decision",
+        "success": "review-mapping"
       },
       "progressNodeId": "mapping",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "repair-mapping.repair_reach"
+            },
+            "right": "scope"
+          },
+          "output": "scope"
+        },
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "repair-mapping.repair_reach"
+            },
+            "right": "taxonomy"
+          },
+          "output": "taxonomy"
+        },
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "repair-mapping.repair_reach"
+            },
+            "right": "irreducible"
+          },
+          "output": "irreducible"
+        }
+      ],
       "connectionLabels": {
-        "true": {
+        "scope": {
           "label": "ремонт разбора достаёт до объёма аудита",
           "cycle": {
             "cause": "Рецензия разбора партии подтвердила дефект, чей источник — объём и опись корпуса, поэтому опись строится заново, а разбор начинается с первой партии.",
             "exit": "Цикл кончается, когда все партии плана разобраны и приняты рецензией, либо ремонт объявляет дефект неустранимым и пользователь выбирает ограниченный отчёт или прекращение."
           }
-        }
-      }
-    },
-    {
-      "id": "mapping-repair-taxonomy",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "repair-mapping.repair_reach"
         },
-        "right": "taxonomy"
-      },
-      "connections": {
-        "true": "reset-for-taxonomy",
-        "false": "mapping-repair-irreducible"
-      },
-      "progressNodeId": "mapping",
-      "connectionLabels": {
-        "true": {
+        "taxonomy": {
           "label": "ремонт разбора достаёт до таксономии",
           "cycle": {
             "cause": "Рецензия разбора партии подтвердила дефект, чей источник — таксономия, поэтому она чинится и снова проходит рецензию, а разбор начинается с первой партии.",
             "exit": "Цикл кончается, когда все партии плана разобраны и приняты рецензией, либо ремонт объявляет дефект неустранимым и пользователь выбирает ограниченный отчёт или прекращение."
           }
-        }
-      }
-    },
-    {
-      "id": "mapping-repair-irreducible",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "repair-mapping.repair_reach"
         },
-        "right": "irreducible"
-      },
-      "connections": {
-        "true": "irreducible-decision",
-        "false": "review-mapping"
-      },
-      "progressNodeId": "mapping",
-      "connectionLabels": {
-        "true": "дефект неустраним при нынешнем доступе",
-        "false": {
+        "irreducible": "дефект неустраним при нынешнем доступе",
+        "success": {
           "label": "ремонт остался внутри разбора партии",
           "cycle": {
             "cause": "Дефект починен в самом разборе текущей партии, и исправленный разбор обязан снова пройти независимую рецензию.",
@@ -677,28 +652,25 @@
         ]
       },
       "connections": {
-        "success": "irreducible-limited"
-      },
-      "progressNodeId": "irreducible"
-    },
-    {
-      "id": "irreducible-limited",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "irreducible-decision.decision"
-        },
-        "right": "limited_report"
-      },
-      "connections": {
-        "true": "set-limited-outcome",
-        "false": "set-abort-outcome"
+        "limited_report": "set-limited-outcome",
+        "success": "set-abort-outcome"
       },
       "progressNodeId": "irreducible",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "irreducible-decision.decision"
+            },
+            "right": "limited_report"
+          },
+          "output": "limited_report"
+        }
+      ],
       "connectionLabels": {
-        "true": "пользователь выбрал отчёт без изменений",
-        "false": "пользователь выбрал прекращение"
+        "limited_report": "пользователь выбрал отчёт без изменений",
+        "success": "пользователь выбрал прекращение"
       }
     },
     {
@@ -756,27 +728,24 @@
         ]
       },
       "connections": {
-        "success": "analysis-clean"
-      },
-      "progressNodeId": "analysis"
-    },
-    {
-      "id": "analysis-clean",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "review-analysis.issues_count"
-        },
-        "right": 0
-      },
-      "connections": {
-        "true": "present-recommendations",
-        "false": "repair-analysis"
+        "clean": "present-recommendations",
+        "success": "repair-analysis"
       },
       "progressNodeId": "analysis",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "review-analysis.issues_count"
+            },
+            "right": 0
+          },
+          "output": "clean"
+        }
+      ],
       "connectionLabels": {
-        "true": "рецензия выводов без замечаний"
+        "clean": "рецензия выводов без замечаний"
       }
     },
     {
@@ -802,59 +771,49 @@
         ]
       },
       "connections": {
-        "success": "analysis-repair-scope"
-      },
-      "progressNodeId": "analysis"
-    },
-    {
-      "id": "analysis-repair-scope",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "repair-analysis.repair_reach"
-        },
-        "right": "scope"
-      },
-      "connections": {
-        "true": "reset-for-scope",
-        "false": "analysis-repair-taxonomy"
+        "scope": "reset-for-scope",
+        "taxonomy": "reset-for-taxonomy",
+        "success": "review-analysis"
       },
       "progressNodeId": "analysis",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "repair-analysis.repair_reach"
+            },
+            "right": "scope"
+          },
+          "output": "scope"
+        },
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "repair-analysis.repair_reach"
+            },
+            "right": "taxonomy"
+          },
+          "output": "taxonomy"
+        }
+      ],
       "connectionLabels": {
-        "true": {
+        "scope": {
           "label": "ремонт выводов достаёт до объёма аудита",
           "cycle": {
             "cause": "Рецензия выводов подтвердила дефект, чей источник — объём и опись корпуса, поэтому опись строится заново, а разбор начинается с первой партии.",
             "exit": "Цикл кончается, когда рецензия выводов проходит без замечаний и набор рекомендаций предъявляется пользователю."
           }
-        }
-      }
-    },
-    {
-      "id": "analysis-repair-taxonomy",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "repair-analysis.repair_reach"
         },
-        "right": "taxonomy"
-      },
-      "connections": {
-        "true": "reset-for-taxonomy",
-        "false": "review-analysis"
-      },
-      "progressNodeId": "analysis",
-      "connectionLabels": {
-        "true": {
+        "taxonomy": {
           "label": "ремонт выводов достаёт до таксономии",
           "cycle": {
             "cause": "Рецензия выводов подтвердила дефект, чей источник — таксономия, поэтому она чинится и снова проходит рецензию, а разбор начинается с первой партии.",
             "exit": "Цикл кончается, когда рецензия выводов проходит без замечаний и набор рекомендаций предъявляется пользователю."
           }
         },
-        "false": {
+        "success": {
           "label": "ремонт остался внутри выводов",
           "cycle": {
             "cause": "Дефект починен в самих выводах по набору, и исправленные выводы обязаны снова пройти независимую рецензию.",
@@ -912,65 +871,48 @@
         ]
       },
       "connections": {
-        "success": "decision-abort"
-      },
-      "progressNodeId": "decision"
-    },
-    {
-      "id": "decision-abort",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "present-recommendations.decision"
-        },
-        "right": "abort"
-      },
-      "connections": {
-        "true": "set-abort-outcome",
-        "false": "decision-apply"
+        "abort": "set-abort-outcome",
+        "apply": "establish-baseline",
+        "revise": "revise-recommendations",
+        "success": "set-analysis-outcome"
       },
       "progressNodeId": "decision",
-      "connectionLabels": {
-        "true": "пользователь прекратил работу"
-      }
-    },
-    {
-      "id": "decision-apply",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "present-recommendations.decision"
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "present-recommendations.decision"
+            },
+            "right": "abort"
+          },
+          "output": "abort"
         },
-        "right": "apply"
-      },
-      "connections": {
-        "true": "establish-baseline",
-        "false": "decision-revise"
-      },
-      "progressNodeId": "decision",
-      "connectionLabels": {
-        "true": "пользователь разрешил применить ровно этот набор"
-      }
-    },
-    {
-      "id": "decision-revise",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "present-recommendations.decision"
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "present-recommendations.decision"
+            },
+            "right": "apply"
+          },
+          "output": "apply"
         },
-        "right": "revise"
-      },
-      "connections": {
-        "true": "revise-recommendations",
-        "false": "set-analysis-outcome"
-      },
-      "progressNodeId": "decision",
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "present-recommendations.decision"
+            },
+            "right": "revise"
+          },
+          "output": "revise"
+        }
+      ],
       "connectionLabels": {
-        "false": "пользователь выбрал только анализ"
+        "abort": "пользователь прекратил работу",
+        "apply": "пользователь разрешил применить ровно этот набор",
+        "success": "пользователь выбрал только анализ"
       }
     },
     {
@@ -996,59 +938,49 @@
         ]
       },
       "connections": {
-        "success": "revision-scope"
-      },
-      "progressNodeId": "decision"
-    },
-    {
-      "id": "revision-scope",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "revise-recommendations.repair_reach"
-        },
-        "right": "scope"
-      },
-      "connections": {
-        "true": "reset-for-scope",
-        "false": "revision-taxonomy"
+        "scope": "reset-for-scope",
+        "taxonomy": "reset-for-taxonomy",
+        "success": "review-analysis"
       },
       "progressNodeId": "decision",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "revise-recommendations.repair_reach"
+            },
+            "right": "scope"
+          },
+          "output": "scope"
+        },
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "revise-recommendations.repair_reach"
+            },
+            "right": "taxonomy"
+          },
+          "output": "taxonomy"
+        }
+      ],
       "connectionLabels": {
-        "true": {
+        "scope": {
           "label": "доработка рекомендаций достаёт до объёма аудита",
           "cycle": {
             "cause": "Пользователь потребовал доработать рекомендации, и правка ложится на объём и опись корпуса, поэтому опись строится заново, а разбор начинается с первой партии.",
             "exit": "Цикл кончается, когда пользователь выбирает применение набора, только анализ или прекращение."
           }
-        }
-      }
-    },
-    {
-      "id": "revision-taxonomy",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "revise-recommendations.repair_reach"
         },
-        "right": "taxonomy"
-      },
-      "connections": {
-        "true": "reset-for-taxonomy",
-        "false": "review-analysis"
-      },
-      "progressNodeId": "decision",
-      "connectionLabels": {
-        "true": {
+        "taxonomy": {
           "label": "доработка рекомендаций достаёт до таксономии",
           "cycle": {
             "cause": "Пользователь потребовал доработать рекомендации, и правка ложится на таксономию, поэтому она чинится и снова проходит рецензию, а разбор начинается с первой партии.",
             "exit": "Цикл кончается, когда пользователь выбирает применение набора, только анализ или прекращение."
           }
         },
-        "false": {
+        "success": {
           "label": "доработка осталась внутри выводов",
           "cycle": {
             "cause": "Пользователь потребовал доработать рекомендации, и правка ложится на сами выводы, поэтому они переписываются и снова идут на независимую рецензию.",
@@ -1141,44 +1073,36 @@
         ]
       },
       "connections": {
-        "success": "baseline-ready"
-      },
-      "progressNodeId": "baseline"
-    },
-    {
-      "id": "baseline-ready",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "establish-baseline.baseline_state"
-        },
-        "right": "ready"
-      },
-      "connections": {
-        "true": "has-change-classes",
-        "false": "baseline-limited-decision"
-      },
-      "progressNodeId": "baseline"
-    },
-    {
-      "id": "has-change-classes",
-      "type": "condition",
-      "condition": {
-        "operator": "gt",
-        "left": {
-          "contextPath": "change_class_total"
-        },
-        "right": 0
-      },
-      "connections": {
-        "true": "check-change-classes",
-        "false": "set-no-changes-outcome"
+        "limited": "baseline-limited-decision",
+        "no_changes": "set-no-changes-outcome",
+        "success": "check-change-classes"
       },
       "progressNodeId": "baseline",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "establish-baseline.baseline_state"
+            },
+            "right": "limited"
+          },
+          "output": "limited"
+        },
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "change_class_total"
+            },
+            "right": 0
+          },
+          "output": "no_changes"
+        }
+      ],
       "connectionLabels": {
-        "true": "есть разрешённые классы изменений",
-        "false": "применять нечего"
+        "no_changes": "применять нечего",
+        "success": "есть разрешённые классы изменений"
       }
     },
     {
@@ -1203,49 +1127,51 @@
         ]
       },
       "connections": {
-        "success": "baseline-limited"
-      },
-      "progressNodeId": "baseline"
-    },
-    {
-      "id": "baseline-limited",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "baseline-limited-decision.decision"
-        },
-        "right": "limited_report"
-      },
-      "connections": {
-        "true": "set-limited-outcome",
-        "false": "set-abort-outcome"
+        "limited_report": "set-limited-outcome",
+        "success": "set-abort-outcome"
       },
       "progressNodeId": "baseline",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "baseline-limited-decision.decision"
+            },
+            "right": "limited_report"
+          },
+          "output": "limited_report"
+        }
+      ],
       "connectionLabels": {
-        "true": "пользователь выбрал отчёт без изменений",
-        "false": "пользователь выбрал прекращение"
+        "limited_report": "пользователь выбрал отчёт без изменений",
+        "success": "пользователь выбрал прекращение"
       }
     },
     {
       "id": "check-change-classes",
       "type": "condition",
-      "condition": {
-        "operator": "lt",
-        "left": {
-          "contextPath": "change_class_cursor"
-        },
-        "right": {
-          "contextPath": "change_class_total"
+      "progressNodeId": "apply",
+      "cases": [
+        {
+          "when": {
+            "operator": "lt",
+            "left": {
+              "contextPath": "change_class_cursor"
+            },
+            "right": {
+              "contextPath": "change_class_total"
+            }
+          },
+          "output": "true"
         }
-      },
+      ],
       "connections": {
         "true": "apply-change-class",
-        "false": "review-changes"
+        "default": "review-changes"
       },
-      "progressNodeId": "apply",
       "connectionLabels": {
-        "false": "все классы изменений внесены и проверены"
+        "default": "все классы изменений внесены и проверены"
       }
     },
     {
@@ -1285,25 +1211,22 @@
         ]
       },
       "connections": {
-        "success": "class-check-pass"
+        "pass": "increment-change-class",
+        "success": "class-failure-decision"
       },
-      "progressNodeId": "apply"
-    },
-    {
-      "id": "class-check-pass",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "targeted-check-class.check_state"
-        },
-        "right": "pass"
-      },
-      "connections": {
-        "true": "increment-change-class",
-        "false": "class-failure-decision"
-      },
-      "progressNodeId": "apply"
+      "progressNodeId": "apply",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "targeted-check-class.check_state"
+            },
+            "right": "pass"
+          },
+          "output": "pass"
+        }
+      ]
     },
     {
       "id": "class-failure-decision",
@@ -1327,27 +1250,24 @@
         ]
       },
       "connections": {
-        "success": "class-failure-repair"
-      },
-      "progressNodeId": "apply"
-    },
-    {
-      "id": "class-failure-repair",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "class-failure-decision.decision"
-        },
-        "right": "repair"
-      },
-      "connections": {
-        "true": "repair-class-failure",
-        "false": "revert-changes"
+        "repair": "repair-class-failure",
+        "success": "revert-changes"
       },
       "progressNodeId": "apply",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "class-failure-decision.decision"
+            },
+            "right": "repair"
+          },
+          "output": "repair"
+        }
+      ],
       "connectionLabels": {
-        "false": "пользователь выбрал откат"
+        "success": "пользователь выбрал откат"
       }
     },
     {
@@ -1414,27 +1334,24 @@
         ]
       },
       "connections": {
-        "success": "changes-clean"
-      },
-      "progressNodeId": "changereview"
-    },
-    {
-      "id": "changes-clean",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "review-changes.issues_count"
-        },
-        "right": 0
-      },
-      "connections": {
-        "true": "broad-verification",
-        "false": "repair-changes"
+        "clean": "broad-verification",
+        "success": "repair-changes"
       },
       "progressNodeId": "changereview",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "review-changes.issues_count"
+            },
+            "right": 0
+          },
+          "output": "clean"
+        }
+      ],
       "connectionLabels": {
-        "true": "рецензия изменений без замечаний"
+        "clean": "рецензия изменений без замечаний"
       }
     },
     {
@@ -1459,34 +1376,31 @@
         ]
       },
       "connections": {
-        "success": "change-repair-contained"
-      },
-      "progressNodeId": "changereview"
-    },
-    {
-      "id": "change-repair-contained",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "repair-changes.repair_reach"
-        },
-        "right": "contained"
-      },
-      "connections": {
-        "true": "review-changes",
-        "false": "review-analysis"
+        "contained": "review-changes",
+        "success": "review-analysis"
       },
       "progressNodeId": "changereview",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "repair-changes.repair_reach"
+            },
+            "right": "contained"
+          },
+          "output": "contained"
+        }
+      ],
       "connectionLabels": {
-        "true": {
+        "contained": {
           "label": "ремонт удержан внутри разрешённого набора",
           "cycle": {
             "cause": "Рецензия изменений нашла дефекты, и починка, не выходящая за разрешённый набор рекомендаций, обязана снова пройти ту же независимую рецензию.",
             "exit": "Цикл кончается, когда рецензия изменений проходит без замечаний и работа уходит в широкие проверки проекта."
           }
         },
-        "false": {
+        "success": {
           "label": "ремонт выходит за разрешённый набор",
           "cycle": {
             "cause": "Починка потребовала изменений вне разрешённого пользователем набора рекомендаций, а расширять полномочия нельзя, поэтому работа возвращается к выводам.",
@@ -1517,27 +1431,24 @@
         ]
       },
       "connections": {
-        "success": "verification-pass"
-      },
-      "progressNodeId": "verify"
-    },
-    {
-      "id": "verification-pass",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "broad-verification.verification_state"
-        },
-        "right": "pass"
-      },
-      "connections": {
-        "true": "set-applied-outcome",
-        "false": "failure-decision"
+        "pass": "set-applied-outcome",
+        "success": "failure-decision"
       },
       "progressNodeId": "verify",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "broad-verification.verification_state"
+            },
+            "right": "pass"
+          },
+          "output": "pass"
+        }
+      ],
       "connectionLabels": {
-        "true": "широкие проверки проекта пройдены"
+        "pass": "широкие проверки проекта пройдены"
       }
     },
     {
@@ -1562,27 +1473,24 @@
         ]
       },
       "connections": {
-        "success": "failure-repair"
-      },
-      "progressNodeId": "verify"
-    },
-    {
-      "id": "failure-repair",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "failure-decision.decision"
-        },
-        "right": "repair"
-      },
-      "connections": {
-        "true": "repair-failure",
-        "false": "revert-changes"
+        "repair": "repair-failure",
+        "success": "revert-changes"
       },
       "progressNodeId": "verify",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "failure-decision.decision"
+            },
+            "right": "repair"
+          },
+          "output": "repair"
+        }
+      ],
       "connectionLabels": {
-        "false": "пользователь выбрал откат"
+        "success": "пользователь выбрал откат"
       }
     },
     {
@@ -1631,9 +1539,26 @@
         ]
       },
       "connections": {
-        "success": "restoration-complete"
+        "restored": "set-reverted-outcome",
+        "success": "set-blocked-outcome"
       },
-      "progressNodeId": "revert"
+      "progressNodeId": "revert",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "revert-changes.restoration_state"
+            },
+            "right": "restored"
+          },
+          "output": "restored"
+        }
+      ],
+      "connectionLabels": {
+        "restored": "исходное состояние восстановлено",
+        "success": "восстановление не удалось"
+      }
     },
     {
       "id": "set-no-changes-outcome",
@@ -1647,26 +1572,6 @@
       "progressNodeId": "outcome",
       "connectionLabels": {
         "default": "итог: изменений не потребовалось"
-      }
-    },
-    {
-      "id": "restoration-complete",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "revert-changes.restoration_state"
-        },
-        "right": "restored"
-      },
-      "connections": {
-        "true": "set-reverted-outcome",
-        "false": "set-blocked-outcome"
-      },
-      "progressNodeId": "revert",
-      "connectionLabels": {
-        "true": "исходное состояние восстановлено",
-        "false": "восстановление не удалось"
       }
     },
     {
@@ -1746,27 +1651,24 @@
         ]
       },
       "connections": {
-        "success": "final-report-clean"
-      },
-      "progressNodeId": "report"
-    },
-    {
-      "id": "final-report-clean",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "review-final-report.issues_count"
-        },
-        "right": 0
-      },
-      "connections": {
-        "true": "initialize-delivery-state",
-        "false": "repair-final-report"
+        "clean": "initialize-delivery-state",
+        "success": "repair-final-report"
       },
       "progressNodeId": "report",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "review-final-report.issues_count"
+            },
+            "right": 0
+          },
+          "output": "clean"
+        }
+      ],
       "connectionLabels": {
-        "true": "рецензия отчёта без замечаний"
+        "clean": "рецензия отчёта без замечаний"
       }
     },
     {
@@ -1793,52 +1695,53 @@
         ]
       },
       "connections": {
-        "success": "final-repair-report"
-      },
-      "progressNodeId": "report"
-    },
-    {
-      "id": "final-repair-report",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "repair-final-report.repair_reach"
-        },
-        "right": "report"
-      },
-      "connections": {
-        "true": "review-final-report",
-        "false": "final-repair-analysis"
+        "report": "review-final-report",
+        "analysis": "review-analysis",
+        "work_applied": "final-outcome-applied",
+        "success": "final-outcome-reverted"
       },
       "progressNodeId": "report",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "repair-final-report.repair_reach"
+            },
+            "right": "report"
+          },
+          "output": "report"
+        },
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "repair-final-report.repair_reach"
+            },
+            "right": "analysis"
+          },
+          "output": "analysis"
+        },
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "repair-final-report.repair_reach"
+            },
+            "right": "work_applied"
+          },
+          "output": "work_applied"
+        }
+      ],
       "connectionLabels": {
-        "true": {
+        "report": {
           "label": "ремонт остался внутри отчёта",
           "cycle": {
             "cause": "Рецензия отчёта нашла дефекты в самом отчёте, и исправленный отчёт обязан снова пройти независимую рецензию.",
             "exit": "Цикл кончается, когда рецензия отчёта проходит без замечаний и работа уходит в выдачу."
           }
-        }
-      }
-    },
-    {
-      "id": "final-repair-analysis",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "repair-final-report.repair_reach"
         },
-        "right": "analysis"
-      },
-      "connections": {
-        "true": "review-analysis",
-        "false": "final-repair-applied-kind"
-      },
-      "progressNodeId": "report",
-      "connectionLabels": {
-        "true": {
+        "analysis": {
           "label": "ремонт отчёта достаёт до выводов",
           "cycle": {
             "cause": "Рецензия отчёта подтвердила дефект, чей источник — сами выводы по набору, поэтому они переписываются и снова проходят независимую рецензию.",
@@ -1870,25 +1773,22 @@
         ]
       },
       "connections": {
-        "success": "delivery-local"
+        "local": "end-report",
+        "success": "upload-report"
       },
-      "progressNodeId": "delivery"
-    },
-    {
-      "id": "delivery-local",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "delivery-decision.delivery"
-        },
-        "right": "local"
-      },
-      "connections": {
-        "true": "end-report",
-        "false": "upload-report"
-      },
-      "progressNodeId": "delivery"
+      "progressNodeId": "delivery",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "delivery-decision.delivery"
+            },
+            "right": "local"
+          },
+          "output": "local"
+        }
+      ]
     },
     {
       "id": "upload-report",
@@ -1947,41 +1847,43 @@
         ]
       },
       "connections": {
-        "success": "upload-complete"
+        "uploaded": "notification-requested",
+        "success": "set-delivery-failed"
       },
-      "progressNodeId": "delivery"
-    },
-    {
-      "id": "upload-complete",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "upload-report.upload_state"
-        },
-        "right": "uploaded"
-      },
-      "connections": {
-        "true": "notification-requested",
-        "false": "set-delivery-failed"
-      },
-      "progressNodeId": "delivery"
+      "progressNodeId": "delivery",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "upload-report.upload_state"
+            },
+            "right": "uploaded"
+          },
+          "output": "uploaded"
+        }
+      ]
     },
     {
       "id": "notification-requested",
       "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "delivery-decision.delivery"
-        },
-        "right": "publish_notify"
-      },
+      "progressNodeId": "delivery",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "delivery-decision.delivery"
+            },
+            "right": "publish_notify"
+          },
+          "output": "true"
+        }
+      ],
       "connections": {
         "true": "notify-user",
-        "false": "end-report"
-      },
-      "progressNodeId": "delivery"
+        "default": "end-report"
+      }
     },
     {
       "id": "notify-user",
@@ -2068,38 +1970,27 @@
       "progressNodeId": "delivery"
     },
     {
-      "id": "final-repair-applied-kind",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "repair-final-report.repair_reach"
-        },
-        "right": "work_applied"
-      },
-      "connections": {
-        "true": "final-outcome-applied",
-        "false": "final-outcome-reverted"
-      },
-      "progressNodeId": "report"
-    },
-    {
       "id": "final-outcome-applied",
       "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "outcome"
-        },
-        "right": "changes_applied"
-      },
+      "progressNodeId": "report",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "outcome"
+            },
+            "right": "changes_applied"
+          },
+          "output": "true"
+        }
+      ],
       "connections": {
         "true": "repair-final-applied-work",
-        "false": "set-blocked-outcome"
+        "default": "set-blocked-outcome"
       },
-      "progressNodeId": "report",
       "connectionLabels": {
-        "false": {
+        "default": {
           "label": "внесённой работы для починки нет",
           "cycle": {
             "cause": "Рецензия отчёта потребовала починить внесённую работу, но нынешний класс итога — не «изменения внесены», поэтому чинить нечего.",
@@ -2135,20 +2026,25 @@
     {
       "id": "final-outcome-reverted",
       "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "outcome"
-        },
-        "right": "changes_reverted"
-      },
+      "progressNodeId": "report",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "outcome"
+            },
+            "right": "changes_reverted"
+          },
+          "output": "true"
+        }
+      ],
       "connections": {
         "true": "repair-final-reverted-work",
-        "false": "set-blocked-outcome"
+        "default": "set-blocked-outcome"
       },
-      "progressNodeId": "report",
       "connectionLabels": {
-        "false": {
+        "default": {
           "label": "откаченной работы для починки нет",
           "cycle": {
             "cause": "Рецензия отчёта потребовала починить откат, но нынешний класс итога — не «изменения откачены», поэтому чинить нечего.",
@@ -2179,34 +2075,31 @@
         ]
       },
       "connections": {
-        "success": "final-restoration-complete"
-      },
-      "progressNodeId": "report"
-    },
-    {
-      "id": "final-restoration-complete",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "repair-final-reverted-work.restoration_state"
-        },
-        "right": "restored"
-      },
-      "connections": {
-        "true": "set-reverted-outcome",
-        "false": "set-blocked-outcome"
+        "restored": "set-reverted-outcome",
+        "success": "set-blocked-outcome"
       },
       "progressNodeId": "report",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "repair-final-reverted-work.restoration_state"
+            },
+            "right": "restored"
+          },
+          "output": "restored"
+        }
+      ],
       "connectionLabels": {
-        "true": {
+        "restored": {
           "label": "откат доведён до конца",
           "cycle": {
             "cause": "Рецензия отчёта нашла дефект в откате, и после его починки класс итога объявляется заново по проверенному состоянию репозитория.",
             "exit": "Цикл кончается, когда объявленный заново класс итога попадает в переписанный отчёт, чья рецензия проходит без замечаний."
           }
         },
-        "false": {
+        "success": {
           "label": "починить откат не удалось",
           "cycle": {
             "cause": "Починка отката не вернула репозиторий в состояние до аудита, поэтому объявляется класс «восстановление не удалось».",
@@ -2289,9 +2182,6 @@
       "description": "Immutable project-neutral Test Suite Audit policy materialized for every independent reader"
     }
   },
-  "slug": "test-suite-audit",
-  "owner": "system-moira",
-  "visibility": "public",
   "progress": {
     "title": "Аудит тестового набора",
     "goal": "Оценить существующий тестовый набор против настоящего поведения продукта и, если пользователь это разрешил, безопасно внести ровно проверенный набор изменений с честным отчётом о результате.",
@@ -2322,6 +2212,11 @@
         "label": "Разбор тестов по партиям",
         "content": {
           "summary": "Партия за партией читаются настоящие тесты с их действительными проверками и сопоставляются с поведением продукта; каждая партия проходит независимую рецензию и ремонт, и стадия кончается, когда разобраны все партии плана."
+        },
+        "list": {
+          "current": "batch_cursor",
+          "total": "batch_total",
+          "indexBase": 0
         }
       },
       {
@@ -2357,6 +2252,11 @@
         "label": "Внесение изменений по классам",
         "content": {
           "summary": "Разрешённые изменения вносятся по одному логическому классу за раз, и каждый класс сразу проверяется нацеленными проверками до начала следующего; на провале пользователь выбирает починку в пределах того же класса или откат."
+        },
+        "list": {
+          "current": "change_class_cursor",
+          "total": "change_class_total",
+          "indexBase": 0
         }
       },
       {
@@ -2409,5 +2309,8 @@
         }
       }
     ]
-  }
+  },
+  "slug": "test-suite-audit",
+  "owner": "system-moira",
+  "visibility": "public"
 }

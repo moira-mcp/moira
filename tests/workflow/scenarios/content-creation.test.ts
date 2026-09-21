@@ -224,7 +224,7 @@ describe("content-creation", () => {
           }),
           expect: {
             status: "completed",
-            reaches: ["route-rework-evidence", "build-evidence", "end"],
+            reaches: ["build-evidence", "end"],
           },
         },
       },
@@ -322,6 +322,14 @@ describe("content-creation", () => {
     for (const current of cases) {
       const result = await run(current.scenario, current.materializeError);
       if (!result.passed) throw new Error(`${current.scenario.name}: ${JSON.stringify(result)}`);
+      if (current.scenario.name === "interactive evidence rework") {
+        const firstEvidence = result.visitedNodes.indexOf("build-evidence");
+        const firstAcceptance = result.visitedNodes.indexOf("interactive-acceptance");
+        const repeatedEvidence = result.visitedNodes.lastIndexOf("build-evidence");
+        expect(firstAcceptance).toBeGreaterThan(firstEvidence);
+        expect(repeatedEvidence).toBeGreaterThan(firstAcceptance);
+        expect(result.inputSubmissionCounts["build-evidence"]).toBe(2);
+      }
     }
   });
 });

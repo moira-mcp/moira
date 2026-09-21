@@ -1,18 +1,16 @@
 {
-  "slug": "data-analysis",
-  "owner": "system-moira",
-  "visibility": "public",
   "id": "5dd9c5c3-1176-4967-9d6c-798134b769df",
   "metadata": {
     "name": "Data Analysis",
-    "version": "2.1.0",
+    "version": "2.2.0",
     "description": "Evidence-driven analysis of one or more supplied or explicitly authorized inline, file, or API data sources. Captures the analytical question, decision context, scope, audience, constraints, confidentiality policy, and per-source authorization/availability; produces either a bounded filesystem workspace report or a self-contained inline result; and covers acquisition, preparation and readiness, question-appropriate exploration and methods, optional privacy-safe visualization, evidence-backed conclusions, limitations, recommendations, and reproducibility. Independent readiness and final-result reviews require changed-work repair; autonomous mode skips only human approvals, while interactive mode keeps problem and final acceptance. Unavailable, unauthorized, or insufficient data yields a reviewed limited result rather than false success. The flow never broadens access, exposes credentials or unnecessary raw sensitive records, uploads or publishes data, deploys models, mutates production, or sends substantive notifications. Choose it to analyze datasets already supplied or authorized; use Verified Research or Iterative Research when the primary task is discovering and verifying external literature or web sources.",
     "tags": [
       "данные",
       "анализ",
       "отчёт",
       "статистика"
-    ]
+    ],
+    "schemaVersion": 1
   },
   "nodes": [
     {
@@ -98,28 +96,25 @@
           }
         ]
       },
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "delivery_mode"
+            },
+            "right": "filesystem"
+          },
+          "output": "filesystem"
+        }
+      ],
       "connections": {
-        "success": "delivery-mode-file"
-      },
-      "progressNodeId": "contract"
-    },
-    {
-      "id": "delivery-mode-file",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "delivery_mode"
-        },
-        "right": "filesystem"
-      },
-      "connections": {
-        "true": "materialize-workspace",
-        "false": "frame-problem"
+        "filesystem": "materialize-workspace",
+        "success": "frame-problem"
       },
       "progressNodeId": "contract",
       "connectionLabels": {
-        "false": "результат выдаётся ответом, рабочий каталог не нужен"
+        "success": "результат выдаётся ответом, рабочий каталог не нужен"
       }
     },
     {
@@ -171,20 +166,25 @@
     {
       "id": "problem-approval-mode",
       "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "operating_mode"
-        },
-        "right": "interactive"
-      },
+      "progressNodeId": "framing",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "operating_mode"
+            },
+            "right": "interactive"
+          },
+          "output": "true"
+        }
+      ],
       "connections": {
         "true": "approve-problem",
-        "false": "resume-stage-gate"
+        "default": "resume-stage-gate"
       },
-      "progressNodeId": "framing",
       "connectionLabels": {
-        "false": "автономный режим — постановка не утверждается человеком"
+        "default": "автономный режим — постановка не утверждается человеком"
       }
     },
     {
@@ -232,28 +232,25 @@
           }
         ]
       },
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "approve-problem.decision"
+            },
+            "right": "revise"
+          },
+          "output": "revise"
+        }
+      ],
       "connections": {
-        "success": "problem-approval-gate"
-      },
-      "progressNodeId": "framing"
-    },
-    {
-      "id": "problem-approval-gate",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "approve-problem.decision"
-        },
-        "right": "accepted"
-      },
-      "connections": {
-        "true": "resume-stage-gate",
-        "false": "revise-problem"
+        "revise": "revise-problem",
+        "success": "resume-stage-gate"
       },
       "progressNodeId": "framing",
       "connectionLabels": {
-        "true": "пользователь принял постановку"
+        "success": "пользователь принял постановку"
       }
     },
     {
@@ -314,20 +311,25 @@
     {
       "id": "resume-stage-gate",
       "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "resume_stage"
-        },
-        "right": "acquisition"
-      },
+      "progressNodeId": "acquisition",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "resume_stage"
+            },
+            "right": "acquisition"
+          },
+          "output": "true"
+        }
+      ],
       "connections": {
         "true": "acquire-sources",
-        "false": "analyze-and-synthesize"
+        "default": "analyze-and-synthesize"
       },
-      "progressNodeId": "acquisition",
       "connectionLabels": {
-        "false": "возобновление после правки процесса — заново собирать источники не нужно"
+        "default": "возобновление после правки процесса — заново собирать источники не нужно"
       }
     },
     {
@@ -355,29 +357,26 @@
           "acquisition_summary"
         ]
       },
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "usable_source_count"
+            },
+            "right": 0
+          },
+          "output": "limited"
+        }
+      ],
       "connections": {
-        "success": "usable-sources-gate"
-      },
-      "progressNodeId": "acquisition"
-    },
-    {
-      "id": "usable-sources-gate",
-      "type": "condition",
-      "condition": {
-        "operator": "gt",
-        "left": {
-          "contextPath": "usable_source_count"
-        },
-        "right": 0
-      },
-      "connections": {
-        "true": "prepare-data",
-        "false": "produce-limited-result"
+        "limited": "produce-limited-result",
+        "success": "prepare-data"
       },
       "progressNodeId": "acquisition",
       "connectionLabels": {
-        "true": "есть хотя бы один законно пригодный источник",
-        "false": "пригодных источников нет"
+        "limited": "пригодных источников нет",
+        "success": "есть хотя бы один законно пригодный источник"
       }
     },
     {
@@ -410,18 +409,23 @@
     {
       "id": "readiness-review-mode",
       "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "delivery_mode"
-        },
-        "right": "filesystem"
-      },
+      "progressNodeId": "readiness",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "delivery_mode"
+            },
+            "right": "filesystem"
+          },
+          "output": "true"
+        }
+      ],
       "connections": {
         "true": "review-data-file",
-        "false": "review-data-inline"
-      },
-      "progressNodeId": "readiness"
+        "default": "review-data-inline"
+      }
     },
     {
       "id": "review-data-file",
@@ -441,28 +445,25 @@
           "issues_count"
         ]
       },
+      "cases": [
+        {
+          "when": {
+            "operator": "gt",
+            "left": {
+              "contextPath": "review-data-file.issues_count"
+            },
+            "right": 0
+          },
+          "output": "repair"
+        }
+      ],
       "connections": {
-        "success": "review-data-file-gate"
-      },
-      "progressNodeId": "readiness"
-    },
-    {
-      "id": "review-data-file-gate",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "review-data-file.issues_count"
-        },
-        "right": 0
-      },
-      "connections": {
-        "true": "analyze-and-synthesize",
-        "false": "repair-data-file"
+        "repair": "repair-data-file",
+        "success": "analyze-and-synthesize"
       },
       "progressNodeId": "readiness",
       "connectionLabels": {
-        "true": "проверяющий не нашёл замечаний к готовности"
+        "success": "проверяющий не нашёл замечаний к готовности"
       }
     },
     {
@@ -527,28 +528,25 @@
           }
         ]
       },
+      "cases": [
+        {
+          "when": {
+            "operator": "gt",
+            "left": {
+              "contextPath": "review-data-inline.issues_count"
+            },
+            "right": 0
+          },
+          "output": "repair"
+        }
+      ],
       "connections": {
-        "success": "review-data-inline-gate"
-      },
-      "progressNodeId": "readiness"
-    },
-    {
-      "id": "review-data-inline-gate",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "review-data-inline.issues_count"
-        },
-        "right": 0
-      },
-      "connections": {
-        "true": "analyze-and-synthesize",
-        "false": "repair-data-inline"
+        "repair": "repair-data-inline",
+        "success": "analyze-and-synthesize"
       },
       "progressNodeId": "readiness",
       "connectionLabels": {
-        "true": "проверяющий не нашёл замечаний к готовности"
+        "success": "проверяющий не нашёл замечаний к готовности"
       }
     },
     {
@@ -616,46 +614,44 @@
     {
       "id": "route-data-repair-source",
       "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "readiness_repair_reach"
-        },
-        "right": "source"
-      },
-      "connections": {
-        "true": "acquire-sources",
-        "false": "route-data-repair-limited"
-      },
       "progressNodeId": "readiness",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "readiness_repair_reach"
+            },
+            "right": "source"
+          },
+          "output": "source"
+        },
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "readiness_repair_reach"
+            },
+            "right": "limited"
+          },
+          "output": "limited"
+        }
+      ],
+      "connections": {
+        "source": "acquire-sources",
+        "limited": "produce-limited-result",
+        "default": "readiness-review-mode"
+      },
       "connectionLabels": {
-        "true": {
+        "source": {
           "label": "починка достаёт до источников",
           "cycle": {
             "cause": "проверка готовности нашла изъян в доступе к данным или в их происхождении, который не закрыть без повторного чтения источников",
             "exit": "повторно собранные и подготовленные данные проходят проверку готовности без замечаний либо признаются непригодными и запуск уходит к ограниченному результату"
           }
-        }
-      }
-    },
-    {
-      "id": "route-data-repair-limited",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "readiness_repair_reach"
         },
-        "right": "limited"
-      },
-      "connections": {
-        "true": "produce-limited-result",
-        "false": "readiness-review-mode"
-      },
-      "progressNodeId": "readiness",
-      "connectionLabels": {
-        "true": "данные непригодны — дальше только ограниченный результат",
-        "false": {
+        "limited": "данные непригодны — дальше только ограниченный результат",
+        "default": {
           "label": "починка уложилась в подготовку — повторная проверка",
           "cycle": {
             "cause": "проверяющий нашёл изъян готовности, закрываемый переделкой самой подготовки данных",
@@ -715,18 +711,23 @@
     {
       "id": "final-review-mode",
       "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "delivery_mode"
-        },
-        "right": "filesystem"
-      },
+      "progressNodeId": "final-review",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "delivery_mode"
+            },
+            "right": "filesystem"
+          },
+          "output": "true"
+        }
+      ],
       "connections": {
         "true": "review-result-file",
-        "false": "review-result-inline"
-      },
-      "progressNodeId": "final-review"
+        "default": "review-result-inline"
+      }
     },
     {
       "id": "review-result-file",
@@ -746,28 +747,25 @@
           "issues_count"
         ]
       },
+      "cases": [
+        {
+          "when": {
+            "operator": "gt",
+            "left": {
+              "contextPath": "review-result-file.issues_count"
+            },
+            "right": 0
+          },
+          "output": "repair"
+        }
+      ],
       "connections": {
-        "success": "review-result-file-gate"
-      },
-      "progressNodeId": "final-review"
-    },
-    {
-      "id": "review-result-file-gate",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "review-result-file.issues_count"
-        },
-        "right": 0
-      },
-      "connections": {
-        "true": "final-approval-mode",
-        "false": "repair-result-file"
+        "repair": "repair-result-file",
+        "success": "final-approval-mode"
       },
       "progressNodeId": "final-review",
       "connectionLabels": {
-        "true": "итоговая проверка не нашла замечаний"
+        "success": "итоговая проверка не нашла замечаний"
       }
     },
     {
@@ -832,28 +830,25 @@
           }
         ]
       },
+      "cases": [
+        {
+          "when": {
+            "operator": "gt",
+            "left": {
+              "contextPath": "review-result-inline.issues_count"
+            },
+            "right": 0
+          },
+          "output": "repair"
+        }
+      ],
       "connections": {
-        "success": "review-result-inline-gate"
-      },
-      "progressNodeId": "final-review"
-    },
-    {
-      "id": "review-result-inline-gate",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "review-result-inline.issues_count"
-        },
-        "right": 0
-      },
-      "connections": {
-        "true": "final-approval-mode",
-        "false": "repair-result-inline"
+        "repair": "repair-result-inline",
+        "success": "final-approval-mode"
       },
       "progressNodeId": "final-review",
       "connectionLabels": {
-        "true": "итоговая проверка не нашла замечаний"
+        "success": "итоговая проверка не нашла замечаний"
       }
     },
     {
@@ -1163,77 +1158,68 @@
     {
       "id": "route-result-repair-contract",
       "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "result_repair_reach"
-        },
-        "right": "contract"
-      },
-      "connections": {
-        "true": "frame-problem",
-        "false": "route-result-repair-source"
-      },
       "progressNodeId": "final-review",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "result_repair_reach"
+            },
+            "right": "contract"
+          },
+          "output": "contract"
+        },
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "result_repair_reach"
+            },
+            "right": "source"
+          },
+          "output": "source"
+        },
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "result_repair_reach"
+            },
+            "right": "data"
+          },
+          "output": "data"
+        }
+      ],
+      "connections": {
+        "contract": "frame-problem",
+        "source": "acquire-sources",
+        "data": "prepare-data",
+        "default": "final-review-mode"
+      },
       "connectionLabels": {
-        "true": {
+        "contract": {
           "label": "изъян в самом контракте задачи",
           "cycle": {
             "cause": "итоговая проверка показала, что неверны вопрос, границы, критерии успеха, политика конфиденциальности или перечень источников, а не оформление результата",
             "exit": "переписанный контракт проводит работу заново до итоговой проверки, которая не находит замечаний"
           }
-        }
-      }
-    },
-    {
-      "id": "route-result-repair-source",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "result_repair_reach"
         },
-        "right": "source"
-      },
-      "connections": {
-        "true": "acquire-sources",
-        "false": "route-result-repair-data"
-      },
-      "progressNodeId": "final-review",
-      "connectionLabels": {
-        "true": {
+        "source": {
           "label": "нужен повторный сбор источников",
           "cycle": {
             "cause": "итоговая проверка нашла изъян в доступе к источникам или в происхождении данных",
             "exit": "повторно собранные данные доводятся до результата, принимаемого итоговой проверкой"
           }
-        }
-      }
-    },
-    {
-      "id": "route-result-repair-data",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "result_repair_reach"
         },
-        "right": "data"
-      },
-      "connections": {
-        "true": "prepare-data",
-        "false": "final-review-mode"
-      },
-      "progressNodeId": "final-review",
-      "connectionLabels": {
-        "true": {
+        "data": {
           "label": "нужна переделка подготовки данных",
           "cycle": {
             "cause": "итоговая проверка показала изъян в подготовке данных или в методической опоре выводов",
             "exit": "переделанные данные и результат проходят итоговую проверку без замечаний"
           }
         },
-        "false": {
+        "default": {
           "label": "починка уложилась в сам результат — повторная проверка",
           "cycle": {
             "cause": "изъян закрывается переделкой самого результата, без возврата к контракту, сбору или подготовке",
@@ -1245,18 +1231,23 @@
     {
       "id": "final-approval-mode",
       "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "operating_mode"
-        },
-        "right": "interactive"
-      },
+      "progressNodeId": "acceptance",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "operating_mode"
+            },
+            "right": "interactive"
+          },
+          "output": "true"
+        }
+      ],
       "connections": {
         "true": "approve-final",
-        "false": "end"
-      },
-      "progressNodeId": "acceptance"
+        "default": "end"
+      }
     },
     {
       "id": "approve-final",
@@ -1303,24 +1294,21 @@
           }
         ]
       },
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "approve-final.decision"
+            },
+            "right": "revise"
+          },
+          "output": "revise"
+        }
+      ],
       "connections": {
-        "success": "final-approval-gate"
-      },
-      "progressNodeId": "acceptance"
-    },
-    {
-      "id": "final-approval-gate",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "approve-final.decision"
-        },
-        "right": "accepted"
-      },
-      "connections": {
-        "true": "end",
-        "false": "revise-final-from-feedback"
+        "revise": "revise-final-from-feedback",
+        "success": "end"
       },
       "progressNodeId": "acceptance"
     },
@@ -2218,5 +2206,8 @@
         }
       }
     ]
-  }
+  },
+  "slug": "data-analysis",
+  "owner": "system-moira",
+  "visibility": "public"
 }

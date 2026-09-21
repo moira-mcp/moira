@@ -1,16 +1,16 @@
 {
-  "slug": "workflow-presentation-generator",
   "id": "a4d6cc4c-2319-4426-a788-34d410441357",
   "metadata": {
     "name": "Workflow Presentation Generator",
-    "version": "2.1.0",
+    "version": "2.2.0",
     "description": "Creates a source-faithful, self-contained local HTML presentation for any authorized Moira workflow, with distinct business and technical views. It accepts an accessible Moira identity or authorized JSON path, materializes an execution-correlated workspace, obtains the complete source, validates it and generates the official full structural projection, labels source facts versus inference, scales large graphs through progressive disclosure, excludes secrets and unrelated private content, and produces network-independent HTML suitable for the Moira static sandbox. Deterministic file/HTML checks and genuinely independent semantic/visual review precede complete or reviewed-limited local delivery. Cause-owned source, content, HTML, completion and validation repair reruns stale gates; invalid criteria use independently reviewed contract correction. Autonomous mode skips only final acceptance. The workflow never mutates the source, publishes, uploads, notifies, commits, releases or deploys.",
     "tags": [
       "презентация",
       "флоу",
       "документация",
       "показ"
-    ]
+    ],
+    "schemaVersion": 1
   },
   "variableRegistry": {
     "operating_mode": {
@@ -231,29 +231,26 @@
           }
         ]
       },
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "intake.intake_outcome"
+            },
+            "right": "blocked"
+          },
+          "output": "blocked"
+        }
+      ],
       "connections": {
-        "success": "route-intake-ready"
-      },
-      "progressNodeId": "intake"
-    },
-    {
-      "id": "route-intake-ready",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "intake.intake_outcome"
-        },
-        "right": "ready"
-      },
-      "connections": {
-        "true": "materialize-workspace",
-        "false": "finalize-intake-blocked"
+        "blocked": "finalize-intake-blocked",
+        "success": "materialize-workspace"
       },
       "progressNodeId": "intake",
       "connectionLabels": {
-        "true": "заявка полна — можно готовить рабочий каталог",
-        "false": "заявки не хватает, чтобы начать"
+        "blocked": "заявки не хватает, чтобы начать",
+        "success": "заявка полна — можно готовить рабочий каталог"
       }
     },
     {
@@ -389,29 +386,26 @@
           }
         ]
       },
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "initialize-contract.contract_outcome"
+            },
+            "right": "blocked"
+          },
+          "output": "blocked"
+        }
+      ],
       "connections": {
-        "success": "route-contract-ready"
-      },
-      "progressNodeId": "workspace"
-    },
-    {
-      "id": "route-contract-ready",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "initialize-contract.contract_outcome"
-        },
-        "right": "ready"
-      },
-      "connections": {
-        "true": "prepare-source",
-        "false": "finalize-blocked"
+        "blocked": "finalize-blocked",
+        "success": "prepare-source"
       },
       "progressNodeId": "workspace",
       "connectionLabels": {
-        "true": "контракт презентации записан",
-        "false": "контракт записать невозможно"
+        "blocked": "контракт записать невозможно",
+        "success": "контракт презентации записан"
       }
     },
     {
@@ -520,48 +514,38 @@
           }
         ]
       },
-      "connections": {
-        "success": "route-source-ready"
-      },
-      "progressNodeId": "source"
-    },
-    {
-      "id": "route-source-ready",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "prepare-source.source_outcome"
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "prepare-source.source_outcome"
+            },
+            "right": "replan"
+          },
+          "output": "replan"
         },
-        "right": "ready"
-      },
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "prepare-source.source_outcome"
+            },
+            "right": "blocked"
+          },
+          "output": "blocked"
+        }
+      ],
       "connections": {
-        "true": "develop-content",
-        "false": "route-source-replan"
+        "replan": "reassess-contract",
+        "blocked": "finalize-blocked",
+        "success": "develop-content"
       },
       "progressNodeId": "source",
       "connectionLabels": {
-        "true": "исходник получен и спроецирован"
-      }
-    },
-    {
-      "id": "route-source-replan",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "prepare-source.source_outcome"
-        },
-        "right": "replan"
-      },
-      "connections": {
-        "true": "reassess-contract",
-        "false": "finalize-blocked"
-      },
-      "progressNodeId": "source",
-      "connectionLabels": {
-        "true": "получение исходника упирается в контракт",
-        "false": "исходник получить невозможно"
+        "replan": "получение исходника упирается в контракт",
+        "blocked": "исходник получить невозможно",
+        "success": "исходник получен и спроецирован"
       }
     },
     {
@@ -670,48 +654,38 @@
           }
         ]
       },
-      "connections": {
-        "success": "route-content-ready"
-      },
-      "progressNodeId": "content"
-    },
-    {
-      "id": "route-content-ready",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "develop-content.content_outcome"
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "develop-content.content_outcome"
+            },
+            "right": "replan"
+          },
+          "output": "replan"
         },
-        "right": "ready"
-      },
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "develop-content.content_outcome"
+            },
+            "right": "blocked"
+          },
+          "output": "blocked"
+        }
+      ],
       "connections": {
-        "true": "generate-html",
-        "false": "route-content-replan"
+        "replan": "reassess-contract",
+        "blocked": "finalize-blocked",
+        "success": "generate-html"
       },
       "progressNodeId": "content",
       "connectionLabels": {
-        "true": "содержание готово"
-      }
-    },
-    {
-      "id": "route-content-replan",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "develop-content.content_outcome"
-        },
-        "right": "replan"
-      },
-      "connections": {
-        "true": "reassess-contract",
-        "false": "finalize-blocked"
-      },
-      "progressNodeId": "content",
-      "connectionLabels": {
-        "true": "содержание упирается в контракт",
-        "false": "содержание составить невозможно"
+        "replan": "содержание упирается в контракт",
+        "blocked": "содержание составить невозможно",
+        "success": "содержание готово"
       }
     },
     {
@@ -820,48 +794,38 @@
           }
         ]
       },
-      "connections": {
-        "success": "route-html-ready"
-      },
-      "progressNodeId": "html"
-    },
-    {
-      "id": "route-html-ready",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "generate-html.html_outcome"
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "generate-html.html_outcome"
+            },
+            "right": "replan"
+          },
+          "output": "replan"
         },
-        "right": "ready"
-      },
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "generate-html.html_outcome"
+            },
+            "right": "blocked"
+          },
+          "output": "blocked"
+        }
+      ],
       "connections": {
-        "true": "complete-presentation",
-        "false": "route-html-replan"
+        "replan": "reassess-contract",
+        "blocked": "finalize-blocked",
+        "success": "complete-presentation"
       },
       "progressNodeId": "html",
       "connectionLabels": {
-        "true": "HTML собран"
-      }
-    },
-    {
-      "id": "route-html-replan",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "generate-html.html_outcome"
-        },
-        "right": "replan"
-      },
-      "connections": {
-        "true": "reassess-contract",
-        "false": "finalize-blocked"
-      },
-      "progressNodeId": "html",
-      "connectionLabels": {
-        "true": "сборка HTML упирается в контракт",
-        "false": "HTML собрать невозможно"
+        "replan": "сборка HTML упирается в контракт",
+        "blocked": "HTML собрать невозможно",
+        "success": "HTML собран"
       }
     },
     {
@@ -1006,48 +970,38 @@
           }
         ]
       },
-      "connections": {
-        "success": "route-completion-ready"
-      },
-      "progressNodeId": "completion"
-    },
-    {
-      "id": "route-completion-ready",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "complete-presentation.completion_outcome"
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "complete-presentation.completion_outcome"
+            },
+            "right": "replan"
+          },
+          "output": "replan"
         },
-        "right": "ready"
-      },
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "complete-presentation.completion_outcome"
+            },
+            "right": "blocked"
+          },
+          "output": "blocked"
+        }
+      ],
       "connections": {
-        "true": "validate-presentation",
-        "false": "route-completion-replan"
+        "replan": "reassess-contract",
+        "blocked": "finalize-blocked",
+        "success": "validate-presentation"
       },
       "progressNodeId": "completion",
       "connectionLabels": {
-        "true": "полнота результата зафиксирована"
-      }
-    },
-    {
-      "id": "route-completion-replan",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "complete-presentation.completion_outcome"
-        },
-        "right": "replan"
-      },
-      "connections": {
-        "true": "reassess-contract",
-        "false": "finalize-blocked"
-      },
-      "progressNodeId": "completion",
-      "connectionLabels": {
-        "true": "фиксация полноты упирается в контракт",
-        "false": "полноту зафиксировать невозможно"
+        "replan": "фиксация полноты упирается в контракт",
+        "blocked": "полноту зафиксировать невозможно",
+        "success": "полнота результата зафиксирована"
       }
     },
     {
@@ -1213,171 +1167,188 @@
           }
         ]
       },
-      "connections": {
-        "success": "route-validation-pass"
-      },
-      "progressNodeId": "validation"
-    },
-    {
-      "id": "route-validation-pass",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "validate-presentation.validation_outcome"
+      "cases": [
+        {
+          "when": {
+            "operator": "and",
+            "conditions": [
+              {
+                "operator": "eq",
+                "left": {
+                  "contextPath": "validate-presentation.validation_outcome"
+                },
+                "right": "repair"
+              },
+              {
+                "operator": "eq",
+                "left": {
+                  "contextPath": "validate-presentation.repair_owner"
+                },
+                "right": "source"
+              }
+            ]
+          },
+          "output": "source"
         },
-        "right": "pass"
-      },
+        {
+          "when": {
+            "operator": "and",
+            "conditions": [
+              {
+                "operator": "eq",
+                "left": {
+                  "contextPath": "validate-presentation.validation_outcome"
+                },
+                "right": "repair"
+              },
+              {
+                "operator": "eq",
+                "left": {
+                  "contextPath": "validate-presentation.repair_owner"
+                },
+                "right": "content"
+              }
+            ]
+          },
+          "output": "content"
+        },
+        {
+          "when": {
+            "operator": "and",
+            "conditions": [
+              {
+                "operator": "eq",
+                "left": {
+                  "contextPath": "validate-presentation.validation_outcome"
+                },
+                "right": "repair"
+              },
+              {
+                "operator": "eq",
+                "left": {
+                  "contextPath": "validate-presentation.repair_owner"
+                },
+                "right": "html"
+              }
+            ]
+          },
+          "output": "html"
+        },
+        {
+          "when": {
+            "operator": "and",
+            "conditions": [
+              {
+                "operator": "eq",
+                "left": {
+                  "contextPath": "validate-presentation.validation_outcome"
+                },
+                "right": "repair"
+              },
+              {
+                "operator": "eq",
+                "left": {
+                  "contextPath": "validate-presentation.repair_owner"
+                },
+                "right": "validation"
+              }
+            ]
+          },
+          "output": "validation"
+        },
+        {
+          "when": {
+            "operator": "and",
+            "conditions": [
+              {
+                "operator": "eq",
+                "left": {
+                  "contextPath": "validate-presentation.validation_outcome"
+                },
+                "right": "repair"
+              },
+              {
+                "operator": "eq",
+                "left": {
+                  "contextPath": "validate-presentation.repair_owner"
+                },
+                "right": "completion"
+              }
+            ]
+          },
+          "output": "completion"
+        },
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "validate-presentation.validation_outcome"
+            },
+            "right": "replan"
+          },
+          "output": "replan"
+        },
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "validate-presentation.validation_outcome"
+            },
+            "right": "blocked"
+          },
+          "output": "blocked"
+        }
+      ],
       "connections": {
-        "true": "presentation-review",
-        "false": "route-validation-repair"
+        "source": "prepare-source",
+        "content": "develop-content",
+        "html": "generate-html",
+        "validation": "validate-presentation",
+        "completion": "complete-presentation",
+        "replan": "reassess-contract",
+        "blocked": "finalize-blocked",
+        "success": "presentation-review"
       },
       "progressNodeId": "validation",
       "connectionLabels": {
-        "true": "наблюдаемые проверки пройдены"
-      }
-    },
-    {
-      "id": "route-validation-repair",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "validate-presentation.validation_outcome"
-        },
-        "right": "repair"
-      },
-      "connections": {
-        "true": "route-validation-owner-source",
-        "false": "route-validation-replan"
-      },
-      "progressNodeId": "validation"
-    },
-    {
-      "id": "route-validation-owner-source",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "validate-presentation.repair_owner"
-        },
-        "right": "source"
-      },
-      "connections": {
-        "true": "prepare-source",
-        "false": "route-validation-owner-content"
-      },
-      "progressNodeId": "validation",
-      "connectionLabels": {
-        "true": {
+        "source": {
           "label": "изъян принадлежит исходнику",
           "cycle": {
             "cause": "проверка файлов нашла изъян и назвала его владельцем исходник флоу: файл или проекция не соответствуют наблюдаемому",
             "exit": "переделанная стадия заново проходит проверку файлов и доходит до независимого разбора, либо изъян уводит работу на пересмотр контракта или в остановку"
           }
-        }
-      }
-    },
-    {
-      "id": "route-validation-owner-content",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "validate-presentation.repair_owner"
         },
-        "right": "content"
-      },
-      "connections": {
-        "true": "develop-content",
-        "false": "route-validation-owner-html"
-      },
-      "progressNodeId": "validation",
-      "connectionLabels": {
-        "true": {
+        "content": {
           "label": "изъян принадлежит содержанию",
           "cycle": {
             "cause": "проверка файлов нашла изъян и назвала его владельцем содержание презентации",
             "exit": "переделанная стадия заново проходит проверку файлов и доходит до независимого разбора, либо изъян уводит работу на пересмотр контракта или в остановку"
           }
-        }
-      }
-    },
-    {
-      "id": "route-validation-owner-html",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "validate-presentation.repair_owner"
         },
-        "right": "html"
-      },
-      "connections": {
-        "true": "generate-html",
-        "false": "route-validation-owner-validation"
-      },
-      "progressNodeId": "validation",
-      "connectionLabels": {
-        "true": {
+        "html": {
           "label": "изъян принадлежит HTML",
           "cycle": {
             "cause": "проверка файлов нашла изъян и назвала его владельцем сборку HTML: файл не разбирается, ссылки не ведут или есть сетевая зависимость",
             "exit": "переделанная стадия заново проходит проверку файлов и доходит до независимого разбора, либо изъян уводит работу на пересмотр контракта или в остановку"
           }
-        }
-      }
-    },
-    {
-      "id": "route-validation-owner-validation",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "validate-presentation.repair_owner"
         },
-        "right": "validation"
-      },
-      "connections": {
-        "true": "validate-presentation",
-        "false": "complete-presentation"
-      },
-      "progressNodeId": "validation",
-      "connectionLabels": {
-        "true": {
+        "validation": {
           "label": "изъян принадлежит самой проверке",
           "cycle": {
             "cause": "проверка файлов нашла изъян и назвала его владельцем саму проверку: наблюдения записаны неверно или неполно",
             "exit": "переделанная стадия заново проходит проверку файлов и доходит до независимого разбора, либо изъян уводит работу на пересмотр контракта или в остановку"
           }
         },
-        "false": {
+        "completion": {
           "label": "изъян принадлежит фиксации полноты",
           "cycle": {
             "cause": "проверка файлов нашла изъян и назвала его владельцем фиксацию полноты результата",
             "exit": "переделанная стадия заново проходит проверку файлов и доходит до независимого разбора, либо изъян уводит работу на пересмотр контракта или в остановку"
           }
-        }
-      }
-    },
-    {
-      "id": "route-validation-replan",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "validate-presentation.validation_outcome"
         },
-        "right": "replan"
-      },
-      "connections": {
-        "true": "reassess-contract",
-        "false": "finalize-blocked"
-      },
-      "progressNodeId": "validation",
-      "connectionLabels": {
-        "true": "проверка файлов упирается в контракт",
-        "false": "проверку пройти невозможно"
+        "replan": "проверка файлов упирается в контракт",
+        "blocked": "проверку пройти невозможно",
+        "success": "наблюдаемые проверки пройдены"
       }
     },
     {
@@ -1541,171 +1512,188 @@
           }
         ]
       },
-      "connections": {
-        "success": "route-review-pass"
-      },
-      "progressNodeId": "review"
-    },
-    {
-      "id": "route-review-pass",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "presentation-review.review_outcome"
+      "cases": [
+        {
+          "when": {
+            "operator": "and",
+            "conditions": [
+              {
+                "operator": "eq",
+                "left": {
+                  "contextPath": "presentation-review.review_outcome"
+                },
+                "right": "repair"
+              },
+              {
+                "operator": "eq",
+                "left": {
+                  "contextPath": "presentation-review.repair_owner"
+                },
+                "right": "source"
+              }
+            ]
+          },
+          "output": "source"
         },
-        "right": "pass"
-      },
+        {
+          "when": {
+            "operator": "and",
+            "conditions": [
+              {
+                "operator": "eq",
+                "left": {
+                  "contextPath": "presentation-review.review_outcome"
+                },
+                "right": "repair"
+              },
+              {
+                "operator": "eq",
+                "left": {
+                  "contextPath": "presentation-review.repair_owner"
+                },
+                "right": "content"
+              }
+            ]
+          },
+          "output": "content"
+        },
+        {
+          "when": {
+            "operator": "and",
+            "conditions": [
+              {
+                "operator": "eq",
+                "left": {
+                  "contextPath": "presentation-review.review_outcome"
+                },
+                "right": "repair"
+              },
+              {
+                "operator": "eq",
+                "left": {
+                  "contextPath": "presentation-review.repair_owner"
+                },
+                "right": "html"
+              }
+            ]
+          },
+          "output": "html"
+        },
+        {
+          "when": {
+            "operator": "and",
+            "conditions": [
+              {
+                "operator": "eq",
+                "left": {
+                  "contextPath": "presentation-review.review_outcome"
+                },
+                "right": "repair"
+              },
+              {
+                "operator": "eq",
+                "left": {
+                  "contextPath": "presentation-review.repair_owner"
+                },
+                "right": "validation"
+              }
+            ]
+          },
+          "output": "validation"
+        },
+        {
+          "when": {
+            "operator": "and",
+            "conditions": [
+              {
+                "operator": "eq",
+                "left": {
+                  "contextPath": "presentation-review.review_outcome"
+                },
+                "right": "repair"
+              },
+              {
+                "operator": "eq",
+                "left": {
+                  "contextPath": "presentation-review.repair_owner"
+                },
+                "right": "completion"
+              }
+            ]
+          },
+          "output": "completion"
+        },
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "presentation-review.review_outcome"
+            },
+            "right": "replan"
+          },
+          "output": "replan"
+        },
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "presentation-review.review_outcome"
+            },
+            "right": "blocked"
+          },
+          "output": "blocked"
+        }
+      ],
       "connections": {
-        "true": "route-mode",
-        "false": "route-review-repair"
+        "source": "prepare-source",
+        "content": "develop-content",
+        "html": "generate-html",
+        "validation": "validate-presentation",
+        "completion": "complete-presentation",
+        "replan": "reassess-contract",
+        "blocked": "finalize-blocked",
+        "success": "route-mode"
       },
       "progressNodeId": "review",
       "connectionLabels": {
-        "true": "разбор принял презентацию"
-      }
-    },
-    {
-      "id": "route-review-repair",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "presentation-review.review_outcome"
-        },
-        "right": "repair"
-      },
-      "connections": {
-        "true": "route-review-owner-source",
-        "false": "route-review-replan"
-      },
-      "progressNodeId": "review"
-    },
-    {
-      "id": "route-review-owner-source",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "presentation-review.repair_owner"
-        },
-        "right": "source"
-      },
-      "connections": {
-        "true": "prepare-source",
-        "false": "route-review-owner-content"
-      },
-      "progressNodeId": "review",
-      "connectionLabels": {
-        "true": {
+        "source": {
           "label": "разбор вернул работу к исходнику",
           "cycle": {
             "cause": "независимый разбор нашёл изъян по существу и назвал его владельцем исходник флоу или его происхождение",
             "exit": "переделанная стадия заново проходит проверку файлов и независимый разбор, либо изъян уводит работу на пересмотр контракта или в остановку"
           }
-        }
-      }
-    },
-    {
-      "id": "route-review-owner-content",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "presentation-review.repair_owner"
         },
-        "right": "content"
-      },
-      "connections": {
-        "true": "develop-content",
-        "false": "route-review-owner-html"
-      },
-      "progressNodeId": "review",
-      "connectionLabels": {
-        "true": {
+        "content": {
           "label": "разбор вернул работу к содержанию",
           "cycle": {
             "cause": "независимый разбор нашёл изъян по существу и назвал его владельцем содержание: неверное деловое описание, неподтверждённый вывод или неточность по технике",
             "exit": "переделанная стадия заново проходит проверку файлов и независимый разбор, либо изъян уводит работу на пересмотр контракта или в остановку"
           }
-        }
-      }
-    },
-    {
-      "id": "route-review-owner-html",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "presentation-review.repair_owner"
         },
-        "right": "html"
-      },
-      "connections": {
-        "true": "generate-html",
-        "false": "route-review-owner-validation"
-      },
-      "progressNodeId": "review",
-      "connectionLabels": {
-        "true": {
+        "html": {
           "label": "разбор вернул работу к HTML",
           "cycle": {
             "cause": "независимый разбор нашёл изъян по существу и назвал его владельцем сборку HTML: подача, доступность или читаемость большого графа",
             "exit": "переделанная стадия заново проходит проверку файлов и независимый разбор, либо изъян уводит работу на пересмотр контракта или в остановку"
           }
-        }
-      }
-    },
-    {
-      "id": "route-review-owner-validation",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "presentation-review.repair_owner"
         },
-        "right": "validation"
-      },
-      "connections": {
-        "true": "validate-presentation",
-        "false": "complete-presentation"
-      },
-      "progressNodeId": "review",
-      "connectionLabels": {
-        "true": {
+        "validation": {
           "label": "разбор вернул работу к проверке файлов",
           "cycle": {
             "cause": "независимый разбор нашёл изъян по существу и назвал его владельцем саму проверку файлов",
             "exit": "переделанная стадия заново проходит проверку файлов и независимый разбор, либо изъян уводит работу на пересмотр контракта или в остановку"
           }
         },
-        "false": {
+        "completion": {
           "label": "разбор вернул работу к фиксации полноты",
           "cycle": {
             "cause": "независимый разбор нашёл изъян по существу и назвал его владельцем фиксацию полноты результата",
             "exit": "переделанная стадия заново проходит проверку файлов и независимый разбор, либо изъян уводит работу на пересмотр контракта или в остановку"
           }
-        }
-      }
-    },
-    {
-      "id": "route-review-replan",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "presentation-review.review_outcome"
         },
-        "right": "replan"
-      },
-      "connections": {
-        "true": "reassess-contract",
-        "false": "finalize-blocked"
-      },
-      "progressNodeId": "review",
-      "connectionLabels": {
-        "true": "разбор упирается в контракт",
-        "false": "замечания разбора неустранимы"
+        "replan": "разбор упирается в контракт",
+        "blocked": "замечания разбора неустранимы",
+        "success": "разбор принял презентацию"
       }
     },
     {
@@ -1786,28 +1774,25 @@
           }
         ]
       },
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "reassess-contract.reassessment_outcome"
+            },
+            "right": "blocked"
+          },
+          "output": "blocked"
+        }
+      ],
       "connections": {
-        "success": "route-reassessment-corrected"
-      },
-      "progressNodeId": "reassessment"
-    },
-    {
-      "id": "route-reassessment-corrected",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "reassess-contract.reassessment_outcome"
-        },
-        "right": "corrected"
-      },
-      "connections": {
-        "true": "corrected-contract-review",
-        "false": "finalize-blocked"
+        "blocked": "finalize-blocked",
+        "success": "corrected-contract-review"
       },
       "progressNodeId": "reassessment",
       "connectionLabels": {
-        "false": "исправить контракт невозможно"
+        "blocked": "исправить контракт невозможно"
       }
     },
     {
@@ -1913,152 +1898,128 @@
           }
         ]
       },
-      "connections": {
-        "success": "route-contract-review-pass"
-      },
-      "progressNodeId": "reassessment"
-    },
-    {
-      "id": "route-contract-review-pass",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "corrected-contract-review.contract_review_outcome"
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "corrected-contract-review.contract_review_outcome"
+            },
+            "right": "replan"
+          },
+          "output": "replan"
         },
-        "right": "pass"
-      },
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "corrected-contract-review.contract_review_outcome"
+            },
+            "right": "blocked"
+          },
+          "output": "blocked"
+        }
+      ],
       "connections": {
-        "true": "route-reentry-source",
-        "false": "route-contract-review-blocked"
-      },
-      "progressNodeId": "reassessment"
-    },
-    {
-      "id": "route-contract-review-blocked",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "corrected-contract-review.contract_review_outcome"
-        },
-        "right": "blocked"
-      },
-      "connections": {
-        "true": "finalize-blocked",
-        "false": "reassess-contract"
+        "replan": "reassess-contract",
+        "blocked": "finalize-blocked",
+        "success": "route-reentry-source"
       },
       "progressNodeId": "reassessment",
       "connectionLabels": {
-        "true": "исправленный контракт признан негодным",
-        "false": {
+        "replan": {
           "label": "исправление негодно — контракт переписывается снова",
           "cycle": {
             "cause": "проверка исправленного контракта не признала правку годной, но допустила повторный пересмотр с изменённым знанием",
             "exit": "очередное исправление проходит проверку контракта и возвращает работу в дело либо признаётся негодным и запуск останавливается"
           }
-        }
+        },
+        "blocked": "исправленный контракт признан негодным"
       }
     },
     {
       "id": "route-reentry-source",
       "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "reentry_owner"
-        },
-        "right": "source"
-      },
-      "connections": {
-        "true": "prepare-source",
-        "false": "route-reentry-content"
-      },
       "progressNodeId": "reassessment",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "reentry_owner"
+            },
+            "right": "source"
+          },
+          "output": "source"
+        },
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "reentry_owner"
+            },
+            "right": "content"
+          },
+          "output": "content"
+        },
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "reentry_owner"
+            },
+            "right": "html"
+          },
+          "output": "html"
+        },
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "reentry_owner"
+            },
+            "right": "validation"
+          },
+          "output": "validation"
+        }
+      ],
+      "connections": {
+        "source": "prepare-source",
+        "content": "develop-content",
+        "html": "generate-html",
+        "validation": "validate-presentation",
+        "default": "complete-presentation"
+      },
       "connectionLabels": {
-        "true": {
+        "source": {
           "label": "возобновление с исходника",
           "cycle": {
             "cause": "исправленный контракт принят отдельной проверкой, и работа возобновляется с самой ранней устаревшей стадии — получения исходника",
             "exit": "работа по исправленному контракту доходит до принятой разбором презентации, либо контракт снова признаётся негодным и запуск останавливается"
           }
-        }
-      }
-    },
-    {
-      "id": "route-reentry-content",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "reentry_owner"
         },
-        "right": "content"
-      },
-      "connections": {
-        "true": "develop-content",
-        "false": "route-reentry-html"
-      },
-      "progressNodeId": "reassessment",
-      "connectionLabels": {
-        "true": {
+        "content": {
           "label": "возобновление с содержания",
           "cycle": {
             "cause": "исправленный контракт принят отдельной проверкой, и работа возобновляется с самой ранней устаревшей стадии — содержания",
             "exit": "работа по исправленному контракту доходит до принятой разбором презентации, либо контракт снова признаётся негодным и запуск останавливается"
           }
-        }
-      }
-    },
-    {
-      "id": "route-reentry-html",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "reentry_owner"
         },
-        "right": "html"
-      },
-      "connections": {
-        "true": "generate-html",
-        "false": "route-reentry-validation"
-      },
-      "progressNodeId": "reassessment",
-      "connectionLabels": {
-        "true": {
+        "html": {
           "label": "возобновление со сборки HTML",
           "cycle": {
             "cause": "исправленный контракт принят отдельной проверкой, и работа возобновляется с самой ранней устаревшей стадии — сборки HTML",
             "exit": "работа по исправленному контракту доходит до принятой разбором презентации, либо контракт снова признаётся негодным и запуск останавливается"
           }
-        }
-      }
-    },
-    {
-      "id": "route-reentry-validation",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "reentry_owner"
         },
-        "right": "validation"
-      },
-      "connections": {
-        "true": "validate-presentation",
-        "false": "complete-presentation"
-      },
-      "progressNodeId": "reassessment",
-      "connectionLabels": {
-        "true": {
+        "validation": {
           "label": "возобновление с проверки файлов",
           "cycle": {
             "cause": "исправленный контракт принят отдельной проверкой, и работа возобновляется с самой ранней устаревшей стадии — проверки файлов",
             "exit": "работа по исправленному контракту доходит до принятой разбором презентации, либо контракт снова признаётся негодным и запуск останавливается"
           }
         },
-        "false": {
+        "default": {
           "label": "возобновление с фиксации полноты",
           "cycle": {
             "cause": "исправленный контракт принят отдельной проверкой, и работа возобновляется с самой ранней устаревшей стадии — фиксации полноты",
@@ -2070,20 +2031,25 @@
     {
       "id": "route-mode",
       "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "operating_mode"
-        },
-        "right": "interactive"
-      },
+      "progressNodeId": "acceptance",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "operating_mode"
+            },
+            "right": "interactive"
+          },
+          "output": "true"
+        }
+      ],
       "connections": {
         "true": "interactive-acceptance",
-        "false": "route-final-status"
+        "default": "route-final-status"
       },
-      "progressNodeId": "acceptance",
       "connectionLabels": {
-        "false": "автономный режим — человеку презентацию не показывают"
+        "default": "автономный режим — человеку презентацию не показывают"
       }
     },
     {
@@ -2165,196 +2131,228 @@
           }
         ]
       },
-      "connections": {
-        "success": "route-user-accept"
-      },
-      "progressNodeId": "acceptance"
-    },
-    {
-      "id": "route-user-accept",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "interactive-acceptance.user_decision"
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "interactive-acceptance.user_decision"
+            },
+            "right": "abort"
+          },
+          "output": "abort"
         },
-        "right": "accept"
-      },
+        {
+          "when": {
+            "operator": "and",
+            "conditions": [
+              {
+                "operator": "eq",
+                "left": {
+                  "contextPath": "interactive-acceptance.user_decision"
+                },
+                "right": "rework"
+              },
+              {
+                "operator": "eq",
+                "left": {
+                  "contextPath": "interactive-acceptance.rework_owner"
+                },
+                "right": "source"
+              }
+            ]
+          },
+          "output": "source"
+        },
+        {
+          "when": {
+            "operator": "and",
+            "conditions": [
+              {
+                "operator": "eq",
+                "left": {
+                  "contextPath": "interactive-acceptance.user_decision"
+                },
+                "right": "rework"
+              },
+              {
+                "operator": "eq",
+                "left": {
+                  "contextPath": "interactive-acceptance.rework_owner"
+                },
+                "right": "content"
+              }
+            ]
+          },
+          "output": "content"
+        },
+        {
+          "when": {
+            "operator": "and",
+            "conditions": [
+              {
+                "operator": "eq",
+                "left": {
+                  "contextPath": "interactive-acceptance.user_decision"
+                },
+                "right": "rework"
+              },
+              {
+                "operator": "eq",
+                "left": {
+                  "contextPath": "interactive-acceptance.rework_owner"
+                },
+                "right": "html"
+              }
+            ]
+          },
+          "output": "html"
+        },
+        {
+          "when": {
+            "operator": "and",
+            "conditions": [
+              {
+                "operator": "eq",
+                "left": {
+                  "contextPath": "interactive-acceptance.user_decision"
+                },
+                "right": "rework"
+              },
+              {
+                "operator": "eq",
+                "left": {
+                  "contextPath": "interactive-acceptance.rework_owner"
+                },
+                "right": "validation"
+              }
+            ]
+          },
+          "output": "validation"
+        },
+        {
+          "when": {
+            "operator": "and",
+            "conditions": [
+              {
+                "operator": "eq",
+                "left": {
+                  "contextPath": "interactive-acceptance.user_decision"
+                },
+                "right": "rework"
+              },
+              {
+                "operator": "eq",
+                "left": {
+                  "contextPath": "interactive-acceptance.rework_owner"
+                },
+                "right": "completion"
+              }
+            ]
+          },
+          "output": "completion"
+        },
+        {
+          "when": {
+            "operator": "and",
+            "conditions": [
+              {
+                "operator": "eq",
+                "left": {
+                  "contextPath": "interactive-acceptance.user_decision"
+                },
+                "right": "rework"
+              },
+              {
+                "operator": "eq",
+                "left": {
+                  "contextPath": "interactive-acceptance.rework_owner"
+                },
+                "right": "contract"
+              }
+            ]
+          },
+          "output": "contract"
+        }
+      ],
       "connections": {
-        "true": "route-final-status",
-        "false": "route-user-abort"
+        "abort": "finalize-aborted",
+        "source": "prepare-source",
+        "content": "develop-content",
+        "html": "generate-html",
+        "validation": "validate-presentation",
+        "completion": "complete-presentation",
+        "contract": "reassess-contract",
+        "success": "route-final-status"
       },
       "progressNodeId": "acceptance",
       "connectionLabels": {
-        "true": "пользователь принял презентацию"
-      }
-    },
-    {
-      "id": "route-user-abort",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "interactive-acceptance.user_decision"
-        },
-        "right": "abort"
-      },
-      "connections": {
-        "true": "finalize-aborted",
-        "false": "route-rework-source"
-      },
-      "progressNodeId": "acceptance",
-      "connectionLabels": {
-        "true": "пользователь прервал работу"
-      }
-    },
-    {
-      "id": "route-rework-source",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "interactive-acceptance.rework_owner"
-        },
-        "right": "source"
-      },
-      "connections": {
-        "true": "prepare-source",
-        "false": "route-rework-content"
-      },
-      "progressNodeId": "acceptance",
-      "connectionLabels": {
-        "true": {
+        "abort": "пользователь прервал работу",
+        "source": {
           "label": "доработка достаёт до исходника",
           "cycle": {
             "cause": "пользователь не принял презентацию и назвал стадию на доработку — получение исходника",
             "exit": "переделанная работа снова проходит проверку файлов и независимый разбор и показывается пользователю до приёмки или прерывания"
           }
-        }
-      }
-    },
-    {
-      "id": "route-rework-content",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "interactive-acceptance.rework_owner"
         },
-        "right": "content"
-      },
-      "connections": {
-        "true": "develop-content",
-        "false": "route-rework-html"
-      },
-      "progressNodeId": "acceptance",
-      "connectionLabels": {
-        "true": {
+        "content": {
           "label": "доработка достаёт до содержания",
           "cycle": {
             "cause": "пользователь не принял презентацию и назвал стадию на доработку — содержание",
             "exit": "переделанная работа снова проходит проверку файлов и независимый разбор и показывается пользователю до приёмки или прерывания"
           }
-        }
-      }
-    },
-    {
-      "id": "route-rework-html",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "interactive-acceptance.rework_owner"
         },
-        "right": "html"
-      },
-      "connections": {
-        "true": "generate-html",
-        "false": "route-rework-validation"
-      },
-      "progressNodeId": "acceptance",
-      "connectionLabels": {
-        "true": {
+        "html": {
           "label": "доработка достаёт до HTML",
           "cycle": {
             "cause": "пользователь не принял презентацию и назвал стадию на доработку — сборку HTML",
             "exit": "переделанная работа снова проходит проверку файлов и независимый разбор и показывается пользователю до приёмки или прерывания"
           }
-        }
-      }
-    },
-    {
-      "id": "route-rework-validation",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "interactive-acceptance.rework_owner"
         },
-        "right": "validation"
-      },
-      "connections": {
-        "true": "validate-presentation",
-        "false": "route-rework-completion"
-      },
-      "progressNodeId": "acceptance",
-      "connectionLabels": {
-        "true": {
+        "validation": {
           "label": "доработка достаёт до проверки файлов",
           "cycle": {
             "cause": "пользователь не принял презентацию и назвал стадию на доработку — проверку файлов",
             "exit": "переделанная работа снова проходит проверку файлов и независимый разбор и показывается пользователю до приёмки или прерывания"
           }
-        }
-      }
-    },
-    {
-      "id": "route-rework-completion",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "interactive-acceptance.rework_owner"
         },
-        "right": "completion"
-      },
-      "connections": {
-        "true": "complete-presentation",
-        "false": "reassess-contract"
-      },
-      "progressNodeId": "acceptance",
-      "connectionLabels": {
-        "true": {
+        "completion": {
           "label": "доработка достаёт до фиксации полноты",
           "cycle": {
             "cause": "пользователь не принял презентацию и назвал стадию на доработку — фиксацию полноты результата",
             "exit": "переделанная работа снова проходит проверку файлов и независимый разбор и показывается пользователю до приёмки или прерывания"
           }
         },
-        "false": {
+        "contract": {
           "label": "доработка достаёт до контракта",
           "cycle": {
             "cause": "пользователь не принял презентацию и назвал стадию на доработку — сам контракт презентации",
             "exit": "переделанная работа снова проходит проверку файлов и независимый разбор и показывается пользователю до приёмки или прерывания"
           }
-        }
+        },
+        "success": "пользователь принял презентацию"
       }
     },
     {
       "id": "route-final-status",
       "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "result_status"
-        },
-        "right": "complete"
-      },
+      "progressNodeId": "delivery",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "result_status"
+            },
+            "right": "complete"
+          },
+          "output": "true"
+        }
+      ],
       "connections": {
         "true": "finalize-complete",
-        "false": "finalize-limited"
-      },
-      "progressNodeId": "delivery"
+        "default": "finalize-limited"
+      }
     },
     {
       "id": "finalize-complete",
@@ -2645,8 +2643,6 @@
       "progressNodeId": "reassessment"
     }
   ],
-  "owner": "system-moira",
-  "visibility": "public",
   "progress": {
     "title": "Workflow Presentation Generator",
     "goal": "Сделать по одному разрешённому флоу Moira самодостаточную локальную HTML-презентацию, верную исходнику: с деловым и техническим взглядами, честно разделяющую факты источника и вывод автора.",
@@ -2750,5 +2746,8 @@
         }
       }
     ]
-  }
+  },
+  "slug": "workflow-presentation-generator",
+  "owner": "system-moira",
+  "visibility": "public"
 }

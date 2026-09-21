@@ -2,14 +2,15 @@
   "id": "e21e3890-daf3-44b9-8143-9fa8be1b9231",
   "metadata": {
     "name": "Quick Task",
-    "version": "4.8.0",
+    "version": "4.9.0",
     "description": "Executes one bounded non-development task of 1–10 work units in an execution-correlated filesystem workspace. It resolves the goal, observable result, scope, constraints, authority and autonomous or interactive mode; writes immutable versioned plan, decision and review records; requires independent plan review before execution; and runs approved work sequentially with durable per-step evidence. A guarded mid-run revision creates a new complete plan version while preserving the evidenced completed prefix, and final independent review checks the actual result before truthful mode-specific presentation: interactive runs retain acceptance or rework, while autonomous runs present the result and end without inventing a decision. The originating request remains the authority ceiling; plan approval does not authorize unrelated external, destructive, publication, production or VCS effects. Choose Quick Task for bounded work outside a software-development lifecycle; use Todo List when the checklist is already known and minimal orchestration is enough, Robust Task for stronger retry/recovery and durable critical work, or Software Development Flow for repository implementation with tests and documentation.",
     "tags": [
       "задача",
       "быстро",
       "план",
       "ревью"
-    ]
+    ],
+    "schemaVersion": 1
   },
   "nodes": [
     {
@@ -132,32 +133,29 @@
         ]
       },
       "connections": {
-        "success": "check-plan-review-clean"
+        "success": "repair-plan",
+        "route-operating-mode-plan-approval": "route-operating-mode-plan-approval"
       },
       "progressNodeId": "plan-review",
       "progressActiveLabel": "Review plan",
       "progressActiveContent": {
         "summary": "Independently review the current complete plan",
         "next": "Continue after a clean review, or repair the plan"
-      }
-    },
-    {
-      "id": "check-plan-review-clean",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "plan-review.issues_count"
-        },
-        "right": 0
       },
-      "connections": {
-        "true": "route-operating-mode-plan-approval",
-        "false": "repair-plan"
-      },
-      "progressNodeId": "plan-review",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "plan-review.issues_count"
+            },
+            "right": 0
+          },
+          "output": "route-operating-mode-plan-approval"
+        }
+      ],
       "connectionLabels": {
-        "true": "no blocking findings"
+        "route-operating-mode-plan-approval": "no blocking findings"
       }
     },
     {
@@ -233,32 +231,29 @@
         ]
       },
       "connections": {
-        "success": "check-plan-approved"
+        "success": "revise-plan",
+        "check-steps-remaining": "check-steps-remaining"
       },
       "progressNodeId": "plan-approval",
       "progressActiveLabel": "Confirm plan",
       "progressActiveContent": {
         "summary": "Present the independently reviewed current plan for approval",
         "next": "Execute an approved plan, or revise it from exact feedback"
-      }
-    },
-    {
-      "id": "check-plan-approved",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "present-plan.approval"
-        },
-        "right": "yes"
       },
-      "connections": {
-        "true": "check-steps-remaining",
-        "false": "revise-plan"
-      },
-      "progressNodeId": "plan-approval",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "present-plan.approval"
+            },
+            "right": "yes"
+          },
+          "output": "check-steps-remaining"
+        }
+      ],
       "connectionLabels": {
-        "true": "approved, or autonomous"
+        "check-steps-remaining": "approved, or autonomous"
       }
     },
     {
@@ -303,22 +298,27 @@
     {
       "id": "check-steps-remaining",
       "type": "condition",
-      "condition": {
-        "operator": "lt",
-        "left": {
-          "contextPath": "current_step"
-        },
-        "right": {
-          "contextPath": "total_steps"
+      "progressNodeId": "execute",
+      "cases": [
+        {
+          "when": {
+            "operator": "lt",
+            "left": {
+              "contextPath": "current_step"
+            },
+            "right": {
+              "contextPath": "total_steps"
+            }
+          },
+          "output": "true"
         }
-      },
+      ],
       "connections": {
         "true": "execute-step",
-        "false": "final-review"
+        "default": "final-review"
       },
-      "progressNodeId": "execute",
       "connectionLabels": {
-        "false": "all units done"
+        "default": "all units done"
       }
     },
     {
@@ -400,49 +400,51 @@
         ]
       },
       "connections": {
-        "success": "check-review-clean"
+        "success": "fix-issues",
+        "route-operating-mode-result-presentation": "route-operating-mode-result-presentation"
       },
       "progressNodeId": "verify",
       "progressActiveLabel": "Review result",
       "progressActiveContent": {
         "summary": "Independently review the actual complete result",
         "next": "Present a clean result, or repair confirmed findings"
-      }
-    },
-    {
-      "id": "check-review-clean",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "final-review.issues_count"
-        },
-        "right": 0
       },
-      "connections": {
-        "true": "route-operating-mode-result-presentation",
-        "false": "fix-issues"
-      },
-      "progressNodeId": "verify",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "final-review.issues_count"
+            },
+            "right": 0
+          },
+          "output": "route-operating-mode-result-presentation"
+        }
+      ],
       "connectionLabels": {
-        "true": "result accepted by review"
+        "route-operating-mode-result-presentation": "result accepted by review"
       }
     },
     {
       "id": "route-operating-mode-result-presentation",
       "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "operating_mode"
-        },
-        "right": "autonomous"
-      },
+      "progressNodeId": "deliver",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "operating_mode"
+            },
+            "right": "autonomous"
+          },
+          "output": "true"
+        }
+      ],
       "connections": {
         "true": "present-autonomous-result",
-        "false": "present-to-user"
-      },
-      "progressNodeId": "deliver"
+        "default": "present-to-user"
+      }
     },
     {
       "id": "present-autonomous-result",
@@ -539,30 +541,27 @@
         ]
       },
       "connections": {
-        "success": "check-user-accepts"
+        "success": "rework",
+        "end": "end"
       },
       "progressNodeId": "deliver",
       "progressActiveLabel": "Present result",
       "progressActiveContent": {
         "summary": "Present the actual independently reviewed result",
         "next": "Complete truthfully, or apply explicitly requested rework"
-      }
-    },
-    {
-      "id": "check-user-accepts",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "present-to-user.decision"
-        },
-        "right": "accept"
       },
-      "connections": {
-        "true": "end",
-        "false": "rework"
-      },
-      "progressNodeId": "deliver"
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "present-to-user.decision"
+            },
+            "right": "accept"
+          },
+          "output": "end"
+        }
+      ]
     },
     {
       "id": "rework",
@@ -608,18 +607,23 @@
     {
       "id": "route-operating-mode-plan-approval",
       "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "operating_mode"
-        },
-        "right": "autonomous"
-      },
+      "progressNodeId": "plan-approval",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "operating_mode"
+            },
+            "right": "autonomous"
+          },
+          "output": "true"
+        }
+      ],
       "connections": {
         "true": "check-steps-remaining",
-        "false": "present-plan"
+        "default": "present-plan"
       },
-      "progressNodeId": "plan-approval",
       "connectionLabels": {
         "true": "approved, or autonomous"
       }

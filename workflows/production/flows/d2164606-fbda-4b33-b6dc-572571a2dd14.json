@@ -2,14 +2,15 @@
   "id": "d2164606-fbda-4b33-b6dc-572571a2dd14",
   "metadata": {
     "name": "Startup Idea Validation",
-    "version": "2.1.0",
+    "version": "2.2.0",
     "description": "Evidence-led startup idea validation from free-form input to a durable local decision package: frames the decision, researches traceable current evidence, analyzes market, demand, competitors, alternatives, technical feasibility, economics, team, regulation and risks, proposes uncertainty-reduction experiments, creates a self-contained offline HTML report, runs deterministic package checks and genuinely independent semantic review, and routes cause-owned repair or contract reassessment. Autonomous mode skips human waits only; interactive mode supports clarification and accepted-result rework. Publication and configured user notification are separately authorized optional effects whose failure never invalidates the local package. Outcomes distinguish complete local validation, blocked prerequisites and explicit abort.",
     "tags": [
       "стартап",
       "идея",
       "проверка",
       "рынок"
-    ]
+    ],
+    "schemaVersion": 1
   },
   "nodes": [
     {
@@ -170,59 +171,62 @@
     {
       "id": "route-intake-actionable",
       "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "intake.intake_outcome"
+      "progressNodeId": "intake",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "intake.intake_outcome"
+            },
+            "right": "actionable"
+          },
+          "output": "true"
         },
-        "right": "actionable"
-      },
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "intake.intake_outcome"
+            },
+            "right": "clarify"
+          },
+          "output": "clarify"
+        }
+      ],
       "connections": {
         "true": "frame-idea",
-        "false": "route-intake-clarify"
+        "clarify": "route-clarification-interactive",
+        "default": "finalize-blocked"
       },
-      "progressNodeId": "intake",
       "connectionLabels": {
-        "true": "идея пригодна к разбору"
-      }
-    },
-    {
-      "id": "route-intake-clarify",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "intake.intake_outcome"
-        },
-        "right": "clarify"
-      },
-      "connections": {
-        "true": "route-clarification-interactive",
-        "false": "finalize-blocked"
-      },
-      "progressNodeId": "intake",
-      "connectionLabels": {
-        "true": "идее нужно уточнение",
-        "false": "идея неразбираема"
+        "true": "идея пригодна к разбору",
+        "clarify": "идее нужно уточнение",
+        "default": "идея неразбираема"
       }
     },
     {
       "id": "route-clarification-interactive",
       "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "operating_mode"
-        },
-        "right": "interactive"
-      },
+      "progressNodeId": "clarification",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "operating_mode"
+            },
+            "right": "interactive"
+          },
+          "output": "true"
+        }
+      ],
       "connections": {
         "true": "clarify-idea",
-        "false": "finalize-blocked"
+        "default": "finalize-blocked"
       },
-      "progressNodeId": "clarification",
       "connectionLabels": {
-        "false": "автономный режим: уточнение спросить не у кого"
+        "default": "автономный режим: уточнение спросить не у кого"
       }
     },
     {
@@ -278,27 +282,24 @@
         ]
       },
       "connections": {
-        "success": "route-clarification-update"
-      },
-      "progressNodeId": "clarification"
-    },
-    {
-      "id": "route-clarification-update",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "clarify-idea.decision"
-        },
-        "right": "update"
-      },
-      "connections": {
-        "true": "revise-intake",
-        "false": "finalize-aborted"
+        "revise-intake": "revise-intake",
+        "success": "finalize-aborted"
       },
       "progressNodeId": "clarification",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "clarify-idea.decision"
+            },
+            "right": "update"
+          },
+          "output": "revise-intake"
+        }
+      ],
       "connectionLabels": {
-        "false": "пользователь прервал запуск вместо уточнения"
+        "success": "пользователь прервал запуск вместо уточнения"
       }
     },
     {
@@ -377,47 +378,37 @@
         ]
       },
       "connections": {
-        "success": "route-framing-ready"
-      },
-      "progressNodeId": "framing"
-    },
-    {
-      "id": "route-framing-ready",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "frame-idea.framing_outcome"
-        },
-        "right": "ready"
-      },
-      "connections": {
-        "true": "research-evidence",
-        "false": "route-framing-replan"
+        "research-evidence": "research-evidence",
+        "reassess-contract": "reassess-contract",
+        "success": "finalize-blocked"
       },
       "progressNodeId": "framing",
-      "connectionLabels": {
-        "true": "постановка готова, исследование можно начинать"
-      }
-    },
-    {
-      "id": "route-framing-replan",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "frame-idea.framing_outcome"
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "frame-idea.framing_outcome"
+            },
+            "right": "ready"
+          },
+          "output": "research-evidence"
         },
-        "right": "replan"
-      },
-      "connections": {
-        "true": "reassess-contract",
-        "false": "finalize-blocked"
-      },
-      "progressNodeId": "framing",
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "frame-idea.framing_outcome"
+            },
+            "right": "replan"
+          },
+          "output": "reassess-contract"
+        }
+      ],
       "connectionLabels": {
-        "true": "постановка требует пересмотра контракта",
-        "false": "ответственную постановку составить нечем"
+        "research-evidence": "постановка готова, исследование можно начинать",
+        "reassess-contract": "постановка требует пересмотра контракта",
+        "success": "ответственную постановку составить нечем"
       }
     },
     {
@@ -479,59 +470,49 @@
         ]
       },
       "connections": {
-        "success": "route-research-proceed"
+        "analyze-feasibility": "analyze-feasibility",
+        "reassess-contract": "reassess-contract",
+        "success": "finalize-blocked"
       },
-      "progressNodeId": "evidence"
-    },
-    {
-      "id": "route-research-proceed",
-      "type": "condition",
-      "condition": {
-        "operator": "or",
-        "conditions": [
-          {
-            "operator": "eq",
-            "left": {
-              "contextPath": "research-evidence.research_outcome"
-            },
-            "right": "ready"
+      "progressNodeId": "evidence",
+      "cases": [
+        {
+          "when": {
+            "operator": "or",
+            "conditions": [
+              {
+                "operator": "eq",
+                "left": {
+                  "contextPath": "research-evidence.research_outcome"
+                },
+                "right": "ready"
+              },
+              {
+                "operator": "eq",
+                "left": {
+                  "contextPath": "research-evidence.research_outcome"
+                },
+                "right": "limited"
+              }
+            ]
           },
-          {
+          "output": "analyze-feasibility"
+        },
+        {
+          "when": {
             "operator": "eq",
             "left": {
               "contextPath": "research-evidence.research_outcome"
             },
-            "right": "limited"
-          }
-        ]
-      },
-      "connections": {
-        "true": "analyze-feasibility",
-        "false": "route-research-replan"
-      },
-      "progressNodeId": "evidence",
+            "right": "replan"
+          },
+          "output": "reassess-contract"
+        }
+      ],
       "connectionLabels": {
-        "true": "свидетельств хватает — полностью или с названными ограничениями"
-      }
-    },
-    {
-      "id": "route-research-replan",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "research-evidence.research_outcome"
-        },
-        "right": "replan"
-      },
-      "connections": {
-        "true": "reassess-contract",
-        "false": "finalize-blocked"
-      },
-      "progressNodeId": "evidence",
-      "connectionLabels": {
-        "true": "исследование требует пересмотра контракта",
-        "false": "исследование невозможно"
+        "analyze-feasibility": "свидетельств хватает — полностью или с названными ограничениями",
+        "reassess-contract": "исследование требует пересмотра контракта",
+        "success": "исследование невозможно"
       }
     },
     {
@@ -648,47 +629,37 @@
         ]
       },
       "connections": {
-        "success": "route-completion-ready"
-      },
-      "progressNodeId": "package"
-    },
-    {
-      "id": "route-completion-ready",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "package-completion.completion_outcome"
-        },
-        "right": "ready"
-      },
-      "connections": {
-        "true": "validate-package",
-        "false": "route-completion-replan"
+        "validate-package": "validate-package",
+        "reassess-contract": "reassess-contract",
+        "success": "finalize-blocked"
       },
       "progressNodeId": "package",
-      "connectionLabels": {
-        "true": "пакет готов к проверкам"
-      }
-    },
-    {
-      "id": "route-completion-replan",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "package-completion.completion_outcome"
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "package-completion.completion_outcome"
+            },
+            "right": "ready"
+          },
+          "output": "validate-package"
         },
-        "right": "replan"
-      },
-      "connections": {
-        "true": "reassess-contract",
-        "false": "finalize-blocked"
-      },
-      "progressNodeId": "package",
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "package-completion.completion_outcome"
+            },
+            "right": "replan"
+          },
+          "output": "reassess-contract"
+        }
+      ],
       "connectionLabels": {
-        "true": "сборка пакета требует пересмотра контракта",
-        "false": "собрать пакет нечем"
+        "validate-package": "пакет готов к проверкам",
+        "reassess-contract": "сборка пакета требует пересмотра контракта",
+        "success": "собрать пакет нечем"
       }
     },
     {
@@ -750,72 +721,55 @@
         ]
       },
       "connections": {
-        "success": "route-validation-pass"
-      },
-      "progressNodeId": "validation"
-    },
-    {
-      "id": "route-validation-pass",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "validate-package.validation_outcome"
-        },
-        "right": "pass"
-      },
-      "connections": {
-        "true": "semantic-review",
-        "false": "route-validation-package"
+        "semantic-review": "semantic-review",
+        "repair-package": "repair-package",
+        "reassess-contract": "reassess-contract",
+        "success": "finalize-blocked"
       },
       "progressNodeId": "validation",
-      "connectionLabels": {
-        "true": "механические проверки пройдены"
-      }
-    },
-    {
-      "id": "route-validation-package",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "validate-package.validation_outcome"
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "validate-package.validation_outcome"
+            },
+            "right": "pass"
+          },
+          "output": "semantic-review"
         },
-        "right": "package_repair"
-      },
-      "connections": {
-        "true": "repair-package",
-        "false": "route-validation-replan"
-      },
-      "progressNodeId": "validation",
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "validate-package.validation_outcome"
+            },
+            "right": "package_repair"
+          },
+          "output": "repair-package"
+        },
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "validate-package.validation_outcome"
+            },
+            "right": "replan"
+          },
+          "output": "reassess-contract"
+        }
+      ],
       "connectionLabels": {
-        "true": {
+        "semantic-review": "механические проверки пройдены",
+        "repair-package": {
           "label": "проверка нашла дефект самого пакета",
           "cycle": {
             "cause": "Детерминированная проверка нашла дефект, за который отвечает сам пакет: состав файлов, форма реестра источников, разбор HTML или сетевая зависимость.",
             "exit": "Заканчивается пакетом, прошедшим проверки, пересмотром контракта или остановкой."
           }
-        }
-      }
-    },
-    {
-      "id": "route-validation-replan",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "validate-package.validation_outcome"
         },
-        "right": "replan"
-      },
-      "connections": {
-        "true": "reassess-contract",
-        "false": "finalize-blocked"
-      },
-      "progressNodeId": "validation",
-      "connectionLabels": {
-        "true": "проверка упирается в сам контракт",
-        "false": "проверить пакет нечем"
+        "reassess-contract": "проверка упирается в сам контракт",
+        "success": "проверить пакет нечем"
       }
     },
     {
@@ -913,53 +867,43 @@
         ]
       },
       "connections": {
-        "success": "route-package-repair-changed"
-      },
-      "progressNodeId": "package"
-    },
-    {
-      "id": "route-package-repair-changed",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "repair-package.repair_outcome"
-        },
-        "right": "changed"
-      },
-      "connections": {
-        "true": "package-completion",
-        "false": "route-package-repair-reassess"
+        "package-completion": "package-completion",
+        "reassess-contract": "reassess-contract",
+        "success": "finalize-blocked"
       },
       "progressNodeId": "package",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "repair-package.repair_outcome"
+            },
+            "right": "changed"
+          },
+          "output": "package-completion"
+        },
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "repair-package.repair_outcome"
+            },
+            "right": "reassess"
+          },
+          "output": "reassess-contract"
+        }
+      ],
       "connectionLabels": {
-        "true": {
+        "package-completion": {
           "label": "пакет изменён и проходится заново",
           "cycle": {
             "cause": "Правка изменила файлы пакета, и завершающий проход производителя нужно повторить по новому состоянию.",
             "exit": "Заканчивается пакетом, прошедшим механическую проверку и независимое ревью, пересмотром контракта или остановкой."
           }
-        }
-      }
-    },
-    {
-      "id": "route-package-repair-reassess",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "repair-package.repair_outcome"
         },
-        "right": "reassess"
-      },
-      "connections": {
-        "true": "reassess-contract",
-        "false": "finalize-blocked"
-      },
-      "progressNodeId": "package",
-      "connectionLabels": {
-        "true": "правка пакета упирается в контракт",
-        "false": "дефект пакета неустраним"
+        "reassess-contract": "правка пакета упирается в контракт",
+        "success": "дефект пакета неустраним"
       }
     },
     {
@@ -1019,91 +963,79 @@
         ]
       },
       "connections": {
-        "success": "route-semantic-pass"
-      },
-      "progressNodeId": "review"
-    },
-    {
-      "id": "route-semantic-pass",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "semantic-review.review_outcome"
-        },
-        "right": "pass"
-      },
-      "connections": {
-        "true": "route-result-mode",
-        "false": "route-semantic-blocked"
+        "route-result-mode": "route-result-mode",
+        "finalize-blocked": "finalize-blocked",
+        "reassess-contract": "reassess-contract",
+        "repair-package": "repair-package",
+        "success": "repair-evidence"
       },
       "progressNodeId": "review",
-      "connectionLabels": {
-        "true": "ревью приняло пакет"
-      }
-    },
-    {
-      "id": "route-semantic-blocked",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "semantic-review.review_outcome"
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "semantic-review.review_outcome"
+            },
+            "right": "pass"
+          },
+          "output": "route-result-mode"
         },
-        "right": "blocked"
-      },
-      "connections": {
-        "true": "finalize-blocked",
-        "false": "route-semantic-replan"
-      },
-      "progressNodeId": "review",
-      "connectionLabels": {
-        "true": "ревью назвало неустранимый блокер"
-      }
-    },
-    {
-      "id": "route-semantic-replan",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "semantic-review.review_outcome"
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "semantic-review.review_outcome"
+            },
+            "right": "blocked"
+          },
+          "output": "finalize-blocked"
         },
-        "right": "replan"
-      },
-      "connections": {
-        "true": "reassess-contract",
-        "false": "route-semantic-repair-owner"
-      },
-      "progressNodeId": "review",
-      "connectionLabels": {
-        "true": "ревью требует пересмотра контракта"
-      }
-    },
-    {
-      "id": "route-semantic-repair-owner",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "semantic-review.repair_owner"
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "semantic-review.review_outcome"
+            },
+            "right": "replan"
+          },
+          "output": "reassess-contract"
         },
-        "right": "package"
-      },
-      "connections": {
-        "true": "repair-package",
-        "false": "repair-evidence"
-      },
-      "progressNodeId": "review",
+        {
+          "when": {
+            "operator": "and",
+            "conditions": [
+              {
+                "operator": "eq",
+                "left": {
+                  "contextPath": "semantic-review.review_outcome"
+                },
+                "right": "repair"
+              },
+              {
+                "operator": "eq",
+                "left": {
+                  "contextPath": "semantic-review.repair_owner"
+                },
+                "right": "package"
+              }
+            ]
+          },
+          "output": "repair-package"
+        }
+      ],
       "connectionLabels": {
-        "true": {
+        "route-result-mode": "ревью приняло пакет",
+        "finalize-blocked": "ревью назвало неустранимый блокер",
+        "reassess-contract": "ревью требует пересмотра контракта",
+        "repair-package": {
           "label": "виновник блокеров — пакет",
           "cycle": {
             "cause": "Независимое ревью нашло воспроизводимые блокеры, за которые отвечает сам пакет решения.",
             "exit": "Заканчивается принятым ревью пакетом, пересмотром контракта или остановкой."
           }
         },
-        "false": {
+        "success": {
           "label": "виновник блокеров — свидетельства",
           "cycle": {
             "cause": "Независимое ревью нашло блокеры, за которые отвечают собранные свидетельства, а не оформление пакета.",
@@ -1207,53 +1139,43 @@
         ]
       },
       "connections": {
-        "success": "route-evidence-repair-changed"
-      },
-      "progressNodeId": "evidence"
-    },
-    {
-      "id": "route-evidence-repair-changed",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "repair-evidence.repair_outcome"
-        },
-        "right": "changed"
-      },
-      "connections": {
-        "true": "research-evidence",
-        "false": "route-evidence-repair-reassess"
+        "research-evidence": "research-evidence",
+        "reassess-contract": "reassess-contract",
+        "success": "finalize-blocked"
       },
       "progressNodeId": "evidence",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "repair-evidence.repair_outcome"
+            },
+            "right": "changed"
+          },
+          "output": "research-evidence"
+        },
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "repair-evidence.repair_outcome"
+            },
+            "right": "reassess"
+          },
+          "output": "reassess-contract"
+        }
+      ],
       "connectionLabels": {
-        "true": {
+        "research-evidence": {
           "label": "свидетельства изменены и собираются заново",
           "cycle": {
             "cause": "Правка изменила подтверждённый класс свидетельств, и всё производное от них нужно пересчитать с исследования.",
             "exit": "Заканчивается принятым ревью пакетом, пересмотром контракта или остановкой."
           }
-        }
-      }
-    },
-    {
-      "id": "route-evidence-repair-reassess",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "repair-evidence.repair_outcome"
         },
-        "right": "reassess"
-      },
-      "connections": {
-        "true": "reassess-contract",
-        "false": "finalize-blocked"
-      },
-      "progressNodeId": "evidence",
-      "connectionLabels": {
-        "true": "правка свидетельств упирается в контракт",
-        "false": "дефект свидетельств неустраним"
+        "reassess-contract": "правка свидетельств упирается в контракт",
+        "success": "дефект свидетельств неустраним"
       }
     },
     {
@@ -1323,44 +1245,36 @@
         ]
       },
       "connections": {
-        "success": "route-reassessment-eligible"
-      },
-      "progressNodeId": "reassess"
-    },
-    {
-      "id": "route-reassessment-eligible",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "reassess-contract.reassessment_outcome"
-        },
-        "right": "eligible"
-      },
-      "connections": {
-        "true": "review-corrected-contract",
-        "false": "route-reassessment-aborted"
-      },
-      "progressNodeId": "reassess"
-    },
-    {
-      "id": "route-reassessment-aborted",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "reassess-contract.reassessment_outcome"
-        },
-        "right": "aborted"
-      },
-      "connections": {
-        "true": "finalize-aborted",
-        "false": "finalize-blocked"
+        "review-corrected-contract": "review-corrected-contract",
+        "finalize-aborted": "finalize-aborted",
+        "success": "finalize-blocked"
       },
       "progressNodeId": "reassess",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "reassess-contract.reassessment_outcome"
+            },
+            "right": "eligible"
+          },
+          "output": "review-corrected-contract"
+        },
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "reassess-contract.reassessment_outcome"
+            },
+            "right": "aborted"
+          },
+          "output": "finalize-aborted"
+        }
+      ],
       "connectionLabels": {
-        "true": "пользователь прервал запуск",
-        "false": "исправлять в контракте нечего"
+        "finalize-aborted": "пользователь прервал запуск",
+        "success": "исправлять в контракте нечего"
       }
     },
     {
@@ -1387,53 +1301,43 @@
         ]
       },
       "connections": {
-        "success": "route-contract-review-pass"
-      },
-      "progressNodeId": "reassess"
-    },
-    {
-      "id": "route-contract-review-pass",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "review-corrected-contract.contract_review_outcome"
-        },
-        "right": "pass"
-      },
-      "connections": {
-        "true": "frame-idea",
-        "false": "route-contract-review-blocked"
+        "frame-idea": "frame-idea",
+        "finalize-blocked": "finalize-blocked",
+        "success": "reassess-contract"
       },
       "progressNodeId": "reassess",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "review-corrected-contract.contract_review_outcome"
+            },
+            "right": "pass"
+          },
+          "output": "frame-idea"
+        },
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "review-corrected-contract.contract_review_outcome"
+            },
+            "right": "blocked"
+          },
+          "output": "finalize-blocked"
+        }
+      ],
       "connectionLabels": {
-        "true": {
+        "frame-idea": {
           "label": "исправленный контракт принят",
           "cycle": {
             "cause": "Контракт запуска исправлен, поэтому постановку и всю производную от неё работу нужно сделать заново по новым условиям.",
             "exit": "Заканчивается пакетом, прошедшим проверку и ревью, прерыванием или остановкой."
           }
-        }
-      }
-    },
-    {
-      "id": "route-contract-review-blocked",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "review-corrected-contract.contract_review_outcome"
         },
-        "right": "blocked"
-      },
-      "connections": {
-        "true": "finalize-blocked",
-        "false": "reassess-contract"
-      },
-      "progressNodeId": "reassess",
-      "connectionLabels": {
-        "true": "ревью контракта назвало неустранимый блокер",
-        "false": {
+        "finalize-blocked": "ревью контракта назвало неустранимый блокер",
+        "success": {
           "label": "поправка контракта вернулась на доработку",
           "cycle": {
             "cause": "Независимое ревью не приняло исправленный контракт и не признало его неустранимым, поэтому поправку составляют заново.",
@@ -1445,18 +1349,23 @@
     {
       "id": "route-result-mode",
       "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "operating_mode"
-        },
-        "right": "autonomous"
-      },
+      "progressNodeId": "acceptance",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "operating_mode"
+            },
+            "right": "autonomous"
+          },
+          "output": "true"
+        }
+      ],
       "connections": {
         "true": "route-publication-authorized",
-        "false": "present-result"
+        "default": "present-result"
       },
-      "progressNodeId": "acceptance",
       "connectionLabels": {
         "true": "автономный режим: приёмка не проводится"
       }
@@ -1515,46 +1424,36 @@
         ]
       },
       "connections": {
-        "success": "route-result-accepted"
-      },
-      "progressNodeId": "acceptance"
-    },
-    {
-      "id": "route-result-accepted",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "present-result.decision"
-        },
-        "right": "accept"
-      },
-      "connections": {
-        "true": "route-publication-authorized",
-        "false": "route-result-rework"
+        "route-publication-authorized": "route-publication-authorized",
+        "rework-result": "rework-result",
+        "success": "finalize-aborted"
       },
       "progressNodeId": "acceptance",
-      "connectionLabels": {
-        "true": "пользователь принял пакет"
-      }
-    },
-    {
-      "id": "route-result-rework",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "present-result.decision"
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "present-result.decision"
+            },
+            "right": "accept"
+          },
+          "output": "route-publication-authorized"
         },
-        "right": "rework"
-      },
-      "connections": {
-        "true": "rework-result",
-        "false": "finalize-aborted"
-      },
-      "progressNodeId": "acceptance",
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "present-result.decision"
+            },
+            "right": "rework"
+          },
+          "output": "rework-result"
+        }
+      ],
       "connectionLabels": {
-        "false": "пользователь прервал запуск вместо доработки"
+        "route-publication-authorized": "пользователь принял пакет",
+        "success": "пользователь прервал запуск вместо доработки"
       }
     },
     {
@@ -1617,181 +1516,160 @@
         ]
       },
       "connections": {
-        "success": "route-rework-framing"
-      },
-      "progressNodeId": "acceptance"
-    },
-    {
-      "id": "route-rework-framing",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "rework-result.rework_owner"
-        },
-        "right": "framing"
-      },
-      "connections": {
-        "true": "frame-idea",
-        "false": "route-rework-evidence"
+        "frame-idea": "frame-idea",
+        "research-evidence": "research-evidence",
+        "analyze-feasibility": "analyze-feasibility",
+        "synthesize-package": "synthesize-package",
+        "reassess-contract": "reassess-contract",
+        "success": "finalize-blocked"
       },
       "progressNodeId": "acceptance",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "rework-result.rework_owner"
+            },
+            "right": "framing"
+          },
+          "output": "frame-idea"
+        },
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "rework-result.rework_owner"
+            },
+            "right": "evidence"
+          },
+          "output": "research-evidence"
+        },
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "rework-result.rework_owner"
+            },
+            "right": "analysis"
+          },
+          "output": "analyze-feasibility"
+        },
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "rework-result.rework_owner"
+            },
+            "right": "presentation"
+          },
+          "output": "synthesize-package"
+        },
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "rework-result.rework_owner"
+            },
+            "right": "reassess"
+          },
+          "output": "reassess-contract"
+        }
+      ],
       "connectionLabels": {
-        "true": {
+        "frame-idea": {
           "label": "доработка: виновник — постановка",
           "cycle": {
             "cause": "Пользователь запросил ограниченную доработку, и самой ранней устаревшей стадией названа постановка.",
             "exit": "Заканчивается принятым пользователем пакетом, прерыванием или остановкой."
           }
-        }
-      }
-    },
-    {
-      "id": "route-rework-evidence",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "rework-result.rework_owner"
         },
-        "right": "evidence"
-      },
-      "connections": {
-        "true": "research-evidence",
-        "false": "route-rework-analysis"
-      },
-      "progressNodeId": "acceptance",
-      "connectionLabels": {
-        "true": {
+        "research-evidence": {
           "label": "доработка: виновник — свидетельства",
           "cycle": {
             "cause": "Пользователь запросил ограниченную доработку, и самой ранней устаревшей стадией названы свидетельства.",
             "exit": "Заканчивается принятым пользователем пакетом, прерыванием или остановкой."
           }
-        }
-      }
-    },
-    {
-      "id": "route-rework-analysis",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "rework-result.rework_owner"
         },
-        "right": "analysis"
-      },
-      "connections": {
-        "true": "analyze-feasibility",
-        "false": "route-rework-presentation"
-      },
-      "progressNodeId": "acceptance",
-      "connectionLabels": {
-        "true": {
+        "analyze-feasibility": {
           "label": "доработка: виновник — разбор выполнимости",
           "cycle": {
             "cause": "Пользователь запросил ограниченную доработку, и самой ранней устаревшей стадией назван разбор выполнимости.",
             "exit": "Заканчивается принятым пользователем пакетом, прерыванием или остановкой."
           }
-        }
-      }
-    },
-    {
-      "id": "route-rework-presentation",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "rework-result.rework_owner"
         },
-        "right": "presentation"
-      },
-      "connections": {
-        "true": "synthesize-package",
-        "false": "route-rework-reassess"
-      },
-      "progressNodeId": "acceptance",
-      "connectionLabels": {
-        "true": {
+        "synthesize-package": {
           "label": "доработка: виновник — подача пакета",
           "cycle": {
             "cause": "Пользователь запросил ограниченную доработку, и она затрагивает только подачу — решение и отчёт.",
             "exit": "Заканчивается принятым пользователем пакетом, прерыванием или остановкой."
           }
-        }
-      }
-    },
-    {
-      "id": "route-rework-reassess",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "rework-result.rework_owner"
         },
-        "right": "reassess"
-      },
-      "connections": {
-        "true": "reassess-contract",
-        "false": "finalize-blocked"
-      },
-      "progressNodeId": "acceptance",
-      "connectionLabels": {
-        "true": {
+        "reassess-contract": {
           "label": "доработка упирается в контракт",
           "cycle": {
             "cause": "Обратная связь пользователя затрагивает сам контракт запуска, а не отдельный артефакт.",
             "exit": "Заканчивается принятым пользователем пакетом, прерыванием или остановкой."
           }
         },
-        "false": "доработка невыполнима"
+        "success": "доработка невыполнима"
       }
     },
     {
       "id": "route-publication-authorized",
       "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "publication_authority"
-        },
-        "right": "authorized"
-      },
-      "connections": {
-        "true": "publish-artifact",
-        "false": "route-publication-interactive"
-      },
-      "progressNodeId": "publication"
-    },
-    {
-      "id": "route-publication-interactive",
-      "type": "condition",
-      "condition": {
-        "operator": "and",
-        "conditions": [
-          {
+      "progressNodeId": "publication",
+      "cases": [
+        {
+          "when": {
             "operator": "eq",
             "left": {
               "contextPath": "publication_authority"
             },
-            "right": "undecided"
+            "right": "authorized"
           },
-          {
-            "operator": "eq",
-            "left": {
-              "contextPath": "operating_mode"
-            },
-            "right": "interactive"
-          }
-        ]
-      },
+          "output": "true"
+        }
+      ],
+      "connections": {
+        "true": "publish-artifact",
+        "default": "route-publication-interactive"
+      }
+    },
+    {
+      "id": "route-publication-interactive",
+      "type": "condition",
+      "progressNodeId": "publication",
+      "cases": [
+        {
+          "when": {
+            "operator": "and",
+            "conditions": [
+              {
+                "operator": "eq",
+                "left": {
+                  "contextPath": "publication_authority"
+                },
+                "right": "undecided"
+              },
+              {
+                "operator": "eq",
+                "left": {
+                  "contextPath": "operating_mode"
+                },
+                "right": "interactive"
+              }
+            ]
+          },
+          "output": "true"
+        }
+      ],
       "connections": {
         "true": "ask-publication",
-        "false": "route-notification-authorized"
+        "default": "route-notification-authorized"
       },
-      "progressNodeId": "publication",
       "connectionLabels": {
-        "false": "публикация не разрешена и спросить не у кого"
+        "default": "публикация не разрешена и спросить не у кого"
       }
     },
     {
@@ -1816,27 +1694,24 @@
         ]
       },
       "connections": {
-        "success": "route-publication-choice"
-      },
-      "progressNodeId": "publication"
-    },
-    {
-      "id": "route-publication-choice",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "ask-publication.decision"
-        },
-        "right": "publish"
-      },
-      "connections": {
-        "true": "publish-artifact",
-        "false": "route-notification-authorized"
+        "publish-artifact": "publish-artifact",
+        "success": "route-notification-authorized"
       },
       "progressNodeId": "publication",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "ask-publication.decision"
+            },
+            "right": "publish"
+          },
+          "output": "publish-artifact"
+        }
+      ],
       "connectionLabels": {
-        "false": "пользователь оставил отчёт только локальным"
+        "success": "пользователь оставил отчёт только локальным"
       }
     },
     {
@@ -1917,48 +1792,58 @@
     {
       "id": "route-notification-authorized",
       "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "notification_authority"
-        },
-        "right": "authorized"
-      },
-      "connections": {
-        "true": "send-notification",
-        "false": "route-notification-interactive"
-      },
-      "progressNodeId": "notification"
-    },
-    {
-      "id": "route-notification-interactive",
-      "type": "condition",
-      "condition": {
-        "operator": "and",
-        "conditions": [
-          {
+      "progressNodeId": "notification",
+      "cases": [
+        {
+          "when": {
             "operator": "eq",
             "left": {
               "contextPath": "notification_authority"
             },
-            "right": "undecided"
+            "right": "authorized"
           },
-          {
-            "operator": "eq",
-            "left": {
-              "contextPath": "operating_mode"
-            },
-            "right": "interactive"
-          }
-        ]
-      },
+          "output": "true"
+        }
+      ],
+      "connections": {
+        "true": "send-notification",
+        "default": "route-notification-interactive"
+      }
+    },
+    {
+      "id": "route-notification-interactive",
+      "type": "condition",
+      "progressNodeId": "notification",
+      "cases": [
+        {
+          "when": {
+            "operator": "and",
+            "conditions": [
+              {
+                "operator": "eq",
+                "left": {
+                  "contextPath": "notification_authority"
+                },
+                "right": "undecided"
+              },
+              {
+                "operator": "eq",
+                "left": {
+                  "contextPath": "operating_mode"
+                },
+                "right": "interactive"
+              }
+            ]
+          },
+          "output": "true"
+        }
+      ],
       "connections": {
         "true": "ask-notification",
-        "false": "finalize-result"
+        "default": "finalize-result"
       },
-      "progressNodeId": "notification",
       "connectionLabels": {
-        "false": "уведомление не разрешено и спросить не у кого"
+        "default": "уведомление не разрешено и спросить не у кого"
       }
     },
     {
@@ -1983,27 +1868,24 @@
         ]
       },
       "connections": {
-        "success": "route-notification-choice"
-      },
-      "progressNodeId": "notification"
-    },
-    {
-      "id": "route-notification-choice",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "ask-notification.decision"
-        },
-        "right": "send"
-      },
-      "connections": {
-        "true": "send-notification",
-        "false": "finalize-result"
+        "send-notification": "send-notification",
+        "success": "finalize-result"
       },
       "progressNodeId": "notification",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "ask-notification.decision"
+            },
+            "right": "send"
+          },
+          "output": "send-notification"
+        }
+      ],
       "connectionLabels": {
-        "false": "пользователь отказался от уведомления"
+        "success": "пользователь отказался от уведомления"
       }
     },
     {
@@ -2244,7 +2126,6 @@
       "progressNodeId": "reassess"
     }
   ],
-  "slug": "startup-idea-validation",
   "variableRegistry": {
     "startup_idea": {
       "type": "string",
@@ -2353,8 +2234,6 @@
       "description": "Bounded truthful terminal summary."
     }
   },
-  "owner": "system-moira",
-  "visibility": "public",
   "progress": {
     "title": "Проверка стартап-идеи",
     "goal": "Довести свободно сформулированную идею до локального пакета решения, где каждый вывод опирается на прослеживаемое свидетельство, а публикация и уведомление остаются отдельно разрешёнными действиями.",
@@ -2458,5 +2337,8 @@
         }
       }
     ]
-  }
+  },
+  "slug": "startup-idea-validation",
+  "owner": "system-moira",
+  "visibility": "public"
 }

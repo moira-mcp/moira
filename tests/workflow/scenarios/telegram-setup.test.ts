@@ -109,6 +109,141 @@ describe("telegram-setup", () => {
     }
   });
 
+  test("routes each agent answer on its producer and keeps only the handler-state condition", () => {
+    const graph = workflow();
+    const routing = new Map(
+      graph.nodes.map((node) => [
+        node.id,
+        {
+          cases: (node as any).cases,
+          connections: node.connections,
+        },
+      ]),
+    );
+
+    expect(routing.get("resolve-setup")).toEqual({
+      cases: [
+        {
+          when: {
+            operator: "eq",
+            left: { contextPath: "resolve-setup.setup_path" },
+            right: "skip",
+          },
+          output: "skip",
+        },
+        {
+          when: {
+            operator: "eq",
+            left: { contextPath: "resolve-setup.setup_path" },
+            right: "blocked",
+          },
+          output: "blocked",
+        },
+        {
+          when: {
+            operator: "eq",
+            left: { contextPath: "resolve-setup.setup_path" },
+            right: "configure",
+          },
+          output: "configure",
+        },
+      ],
+      connections: {
+        skip: "end-skipped",
+        blocked: "end-blocked",
+        configure: "configure-settings",
+        success: "test-notification",
+      },
+    });
+    expect(routing.get("configure-settings")).toEqual({
+      cases: [
+        {
+          when: {
+            operator: "eq",
+            left: { contextPath: "configure-settings.configuration_outcome" },
+            right: "configured",
+          },
+          output: "configured",
+        },
+      ],
+      connections: { configured: "test-notification", success: "end-blocked" },
+    });
+    expect(routing.get("confirm-received")).toEqual({
+      cases: [
+        {
+          when: {
+            operator: "eq",
+            left: { contextPath: "confirm-received.receipt_status" },
+            right: "received",
+          },
+          output: "received",
+        },
+      ],
+      connections: { received: "end-success", success: "recovery-not-received" },
+    });
+
+    for (const [producer, terminal] of [
+      ["recovery-send-error", "end-incomplete-send-error"],
+      ["recovery-not-sent", "end-incomplete-not-sent"],
+      ["recovery-not-received", "end-incomplete-not-received"],
+    ] as const) {
+      expect(routing.get(producer)).toEqual({
+        cases: [
+          {
+            when: {
+              operator: "eq",
+              left: { contextPath: `${producer}.recovery_action` },
+              right: "retry",
+            },
+            output: "retry",
+          },
+          {
+            when: {
+              operator: "eq",
+              left: { contextPath: `${producer}.recovery_action` },
+              right: "reconfigure",
+            },
+            output: "reconfigure",
+          },
+        ],
+        connections: {
+          retry: "test-notification",
+          reconfigure: "configure-settings",
+          success: terminal,
+        },
+      });
+    }
+
+    expect(routing.get("route-test-sent")).toEqual({
+      cases: [
+        {
+          when: {
+            operator: "eq",
+            left: { contextPath: "test-notification.telegramNotificationSent" },
+            right: true,
+          },
+          output: "true",
+        },
+      ],
+      connections: { true: "confirm-received", default: "recovery-not-sent" },
+    });
+
+    const removedRouters = [
+      "route-skipped",
+      "route-blocked",
+      "route-configure",
+      "route-configured",
+      "route-received",
+      "route-retry-send-error",
+      "route-reconfigure-send-error",
+      "route-retry-not-sent",
+      "route-reconfigure-not-sent",
+      "route-retry-not-received",
+      "route-reconfigure-not-received",
+    ];
+    expect(graph.nodes.filter((node) => removedRouters.includes(node.id))).toEqual([]);
+  });
+
   test.each([
     [
       "blocked setup without reason",
@@ -275,7 +410,7 @@ describe("telegram-setup", () => {
           }),
           expect: {
             status: "completed",
-            reaches: ["route-retry-send-error", "end-incomplete-send-error"],
+            reaches: ["recovery-send-error", "end-incomplete-send-error"],
           },
         },
       },
@@ -288,7 +423,7 @@ describe("telegram-setup", () => {
           }),
           expect: {
             status: "completed",
-            reaches: ["route-reconfigure-not-sent", "configure-settings", "end-success"],
+            reaches: ["recovery-not-sent", "configure-settings", "end-success"],
           },
         },
       },
@@ -301,7 +436,7 @@ describe("telegram-setup", () => {
           }),
           expect: {
             status: "completed",
-            reaches: ["route-retry-not-sent", "end-success"],
+            reaches: ["recovery-not-sent", "end-success"],
           },
         },
       },
@@ -314,7 +449,7 @@ describe("telegram-setup", () => {
           }),
           expect: {
             status: "completed",
-            reaches: ["route-reconfigure-send-error", "configure-settings", "end-success"],
+            reaches: ["recovery-send-error", "configure-settings", "end-success"],
           },
         },
       },
@@ -332,7 +467,7 @@ describe("telegram-setup", () => {
             ],
             "recovery-not-received": retry("The user changed the chat state before retry."),
           }),
-          expect: { status: "completed", reaches: ["route-retry-not-received", "end-success"] },
+          expect: { status: "completed", reaches: ["recovery-not-received", "end-success"] },
         },
       },
       {
@@ -351,7 +486,7 @@ describe("telegram-setup", () => {
           }),
           expect: {
             status: "completed",
-            reaches: ["route-reconfigure-not-received", "configure-settings", "end-success"],
+            reaches: ["recovery-not-received", "configure-settings", "end-success"],
           },
         },
       },

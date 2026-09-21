@@ -10,6 +10,7 @@ import {
   runScenario as runScenarioBase,
   type MockInput,
   type MockInputContext,
+  type ScenarioResult,
   type TestScenario,
 } from "../../helpers/scenario-runner.js";
 import { catalogGraph } from "../../helpers/catalog-graphs.js";
@@ -215,6 +216,12 @@ function scenario(
   };
 }
 
+function routeVisits(result: ScenarioResult): string[] {
+  return result.visitedNodes.filter(
+    (node, index, visits) => index === 0 || node !== visits[index - 1],
+  );
+}
+
 const scenarios: TestScenario[] = [
   scenario(
     "create without upload",
@@ -298,7 +305,7 @@ const scenarios: TestScenario[] = [
         { design_review_outcome: "pass" },
       ],
     },
-    ["fix-create-design", "route-create-design-repair-changed", "create-workflow-json", "end"],
+    ["fix-create-design", "review-workflow-design", "create-workflow-json", "end"],
     ["reassess-design-contract"],
   ),
   scenario(
@@ -334,7 +341,7 @@ const scenarios: TestScenario[] = [
         { quality_review_outcome: "pass" },
       ],
     },
-    ["route-quality-review-replan", "reassess-design-contract", "create-edit-plan", "end"],
+    ["review-workflow-quality", "reassess-design-contract", "create-edit-plan", "end"],
     ["fix-quality-issues"],
   ),
   scenario(
@@ -351,7 +358,7 @@ const scenarios: TestScenario[] = [
       ],
       "fix-quality-issues": { repair_outcome: "reassess" },
     },
-    ["fix-quality-issues", "route-quality-repair-changed", "reassess-design-contract", "end"],
+    ["fix-quality-issues", "reassess-design-contract", "end"],
   ),
   scenario(
     "edit server-only source without local synchronization",
@@ -378,7 +385,7 @@ const scenarios: TestScenario[] = [
       ],
       "handle-upload-error": { error_action: "admin_override" },
     },
-    ["handle-upload-error", "route-error-action-new", "end"],
+    ["handle-upload-error", "save-workflow-to-target", "end"],
   ),
   scenario(
     "upload failure can skip",
@@ -388,7 +395,7 @@ const scenarios: TestScenario[] = [
       "save-workflow-to-target": { upload_success: "no", upload_error: "Unavailable" },
       "handle-upload-error": { error_action: "skip" },
     },
-    ["route-error-skip-or-cancel", "end"],
+    ["handle-upload-error", "route-local-sync", "end"],
   ),
   scenario(
     "autonomous create reaches the final report without design or result approval",
@@ -451,6 +458,124 @@ describe("workflow-management-flow", () => {
     workflow = loadWorkflow();
   });
 
+  test("keeps shared gates and routes each local answer on its owning directive", () => {
+    expect(workflow.metadata.version).toBe("6.11.0");
+    expect(
+      workflow.nodes.filter((node) => node.type === "condition").map((node) => node.id),
+    ).toEqual([
+      "route-action-type",
+      "route-final-feedback-action",
+      "route-local-sync",
+      "route-operating-mode-structure",
+      "route-operating-mode-plan",
+      "route-operating-mode-final",
+      "route-action-after-design-review",
+      "route-action-design-repair",
+      "route-action-after-reassessment",
+    ]);
+
+    const eq = (path: string, right: string | boolean, output: string) => ({
+      when: { operator: "eq", left: { contextPath: path }, right },
+      output,
+    });
+    const routes: Array<[string, unknown[], Record<string, string>]> = [
+      [
+        "ask-full-antipattern-audit",
+        [eq("ask-full-antipattern-audit.full_antipattern_audit", "yes", "audit")],
+        { success: "create-edit-plan", audit: "audit-complete-workflow" },
+      ],
+      [
+        "review-workflow-design",
+        [
+          eq("review-workflow-design.design_review_outcome", "pass", "pass"),
+          eq("review-workflow-design.design_review_outcome", "replan", "replan"),
+        ],
+        {
+          success: "route-action-design-repair",
+          pass: "route-action-after-design-review",
+          replan: "reassess-design-contract",
+        },
+      ],
+      [
+        "fix-edit-plan",
+        [eq("fix-edit-plan.repair_outcome", "changed", "changed")],
+        { success: "reassess-design-contract", changed: "review-workflow-design" },
+      ],
+      [
+        "fix-create-design",
+        [eq("fix-create-design.repair_outcome", "changed", "changed")],
+        { success: "reassess-design-contract", changed: "review-workflow-design" },
+      ],
+      [
+        "approve-structure",
+        [eq("approve-structure.structure_approved", "yes", "approved")],
+        { success: "refine-structure", approved: "create-workflow-json" },
+      ],
+      [
+        "present-edit-plan",
+        [eq("present-edit-plan.plan_approval", "yes", "approved")],
+        { success: "revise-edit-plan", approved: "apply-workflow-changes" },
+      ],
+      [
+        "review-workflow-quality",
+        [
+          eq("review-workflow-quality.quality_review_outcome", "pass", "pass"),
+          eq("review-workflow-quality.quality_review_outcome", "replan", "replan"),
+        ],
+        {
+          success: "fix-quality-issues",
+          pass: "route-operating-mode-final",
+          replan: "reassess-design-contract",
+        },
+      ],
+      [
+        "fix-quality-issues",
+        [eq("fix-quality-issues.repair_outcome", "changed", "changed")],
+        { success: "reassess-design-contract", changed: "review-workflow-quality" },
+      ],
+      [
+        "user-final-review",
+        [eq("user-final-review.work_approved", "yes", "approved")],
+        { success: "route-final-feedback-action", approved: "ask-upload" },
+      ],
+      [
+        "ask-upload",
+        [eq("ask-upload.upload_confirmed", true, "confirmed")],
+        { success: "route-local-sync", confirmed: "save-workflow-to-target" },
+      ],
+      [
+        "save-workflow-to-target",
+        [eq("save-workflow-to-target.upload_success", "yes", "uploaded")],
+        { success: "handle-upload-error", uploaded: "route-local-sync" },
+      ],
+      [
+        "handle-upload-error",
+        [
+          {
+            when: {
+              operator: "or",
+              conditions: ["retry", "copy_new", "admin_override"].map((right) => ({
+                operator: "eq",
+                left: { contextPath: "handle-upload-error.error_action" },
+                right,
+              })),
+            },
+            output: "retry",
+          },
+          eq("handle-upload-error.error_action", "skip", "skip"),
+        ],
+        { success: "end-cancelled", retry: "save-workflow-to-target", skip: "route-local-sync" },
+      ],
+    ];
+    for (const [id, cases, connections] of routes) {
+      expect(workflow.nodes.find((node) => node.id === id)).toMatchObject({
+        type: "agent-directive",
+        cases,
+        connections,
+      });
+    }
+  });
+
   test("all create edit audit publication and recovery routes are covered", async () => {
     const results = [];
     for (const item of scenarios) {
@@ -466,6 +591,33 @@ describe("workflow-management-flow", () => {
           )
           .join("\n\n"),
       );
+    }
+    const directTransitions: Record<string, [string, string]> = {
+      "repairable create design returns with changed knowledge": [
+        "fix-create-design",
+        "review-workflow-design",
+      ],
+      "scanner validation defect replans without artifact repair": [
+        "review-workflow-quality",
+        "reassess-design-contract",
+      ],
+      "same-root guard repair exits to reassessment instead of nesting validators": [
+        "fix-quality-issues",
+        "reassess-design-contract",
+      ],
+      "upload failure retries with an explicitly chosen method": [
+        "handle-upload-error",
+        "save-workflow-to-target",
+      ],
+      "upload failure can skip": ["handle-upload-error", "route-local-sync"],
+    };
+    for (const result of results) {
+      const transition = directTransitions[result.scenario];
+      if (!transition) continue;
+      const visits = routeVisits(result);
+      expect(
+        visits.some((node, index) => node === transition[0] && visits[index + 1] === transition[1]),
+      ).toBe(true);
     }
     const coverage = calculateCoverage(workflow, results, { includeGapAnalysis: true });
     expect(coverage.unvisitedNodes).toEqual([]);
