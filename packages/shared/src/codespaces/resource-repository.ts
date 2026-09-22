@@ -20,6 +20,67 @@ const ACTIVE_STATES = [
   "ambiguous",
 ] as const;
 
+/** The per-user setting that turns idle auto-stop on or off; on when the user never set it. */
+export const CODESPACE_AUTO_STOP_SETTING = "codespaces.auto_stop_enabled";
+/** The per-user idle timeout in minutes. */
+export const CODESPACE_IDLE_TIMEOUT_SETTING = "codespaces.idle_timeout_minutes";
+/** Idle timeout bounds and default, in minutes: GitHub's own idle-timeout range. */
+export const CODESPACE_IDLE_TIMEOUT_MINUTES = { minimum: 5, maximum: 240, default: 30 } as const;
+
+/** Operation states that mean something is still running in, or about to reach, the codespace. */
+const ACTIVE_OPERATION_STATES = "'reserved', 'running', 'cancel_pending', 'reconcile_pending'";
+
+/**
+ * A user's stored value for a setting, else the setting's seeded default, else `fallback`. `user`
+ * is the SQL expression naming the user, so the same text serves a per-row scan and a single read.
+ */
+function userSettingSql(user: string, key: string, fallback: string): string {
+  return `COALESCE(
+    (SELECT value FROM userSettingValue WHERE userId = ${user} AND settingKey = '${key}'),
+    (SELECT defaultValue FROM settingDefinition WHERE key = '${key}'),
+    '${fallback}')`;
+}
+
+function autoStopEnabledSql(user: string): string {
+  return `(${userSettingSql(user, CODESPACE_AUTO_STOP_SETTING, "true")} IN ('true', '1'))`;
+}
+
+/** The timeout in minutes, with any value outside the permitted range read as the default. */
+function idleTimeoutMinutesSql(user: string): string {
+  const { minimum, maximum } = CODESPACE_IDLE_TIMEOUT_MINUTES;
+  const value = `CAST(${userSettingSql(
+    user,
+    CODESPACE_IDLE_TIMEOUT_SETTING,
+    String(CODESPACE_IDLE_TIMEOUT_MINUTES.default),
+  )} AS INTEGER)`;
+  return `(CASE WHEN ${value} BETWEEN ${minimum} AND ${maximum} THEN ${value}
+    ELSE ${CODESPACE_IDLE_TIMEOUT_MINUTES.default} END)`;
+}
+
+/**
+ * The one definition of "idle enough to stop", over the `codespaceResource` row in scope, with the
+ * current time as its only parameter. A persistent codespace that is usable and meant to run, whose
+ * owner has auto-stop on, with no operation still running or pending, and whose latest agent
+ * activity through Moira is older than the owner's timeout. That activity is the later of the
+ * record's own (adoption, a completed start) and any operation's last change — commands, file
+ * operations and transfers all run as operations, so this covers their reservation and completion —
+ * or the record's creation. Use outside Moira (browser, editor, SSH) is not visible here, and the
+ * provider's last start time is deliberately not an input: it says when the codespace started, not
+ * that anyone used it.
+ */
+const IDLE_STOP_PREDICATE = `codespaceResource.retentionPolicy = 'persistent'
+  AND codespaceResource.state = 'usable' AND codespaceResource.desiredState = 'running'
+  AND codespaceResource.providerResourceName IS NOT NULL
+  AND ${autoStopEnabledSql("codespaceResource.userId")}
+  AND NOT EXISTS (SELECT 1 FROM codespaceOperation activeOperation
+    WHERE activeOperation.resourceId = codespaceResource.id
+      AND activeOperation.state IN (${ACTIVE_OPERATION_STATES}))
+  AND MAX(codespaceResource.createdAt,
+          COALESCE(codespaceResource.lastActivityAt, 0),
+          COALESCE((SELECT MAX(operation.updatedAt) FROM codespaceOperation operation
+                    WHERE operation.resourceId = codespaceResource.id), 0))
+      + ${idleTimeoutMinutesSql("codespaceResource.userId")} * 60000 <= ?`;
+
 function placeholders(values: readonly unknown[]): string {
   return values.map(() => "?").join(", ");
 }
@@ -468,6 +529,153 @@ export class CodespaceResourceRepository {
     return row?.userId ?? null;
   }
 
+  /** The owner's idle auto-stop preference, with the seeded defaults for anything never set. */
+  idlePolicy(userId: string): { autoStopEnabled: boolean; idleTimeoutMinutes: number } {
+    const row = this.sqlite
+      .prepare(
+        `SELECT ${autoStopEnabledSql("?")} autoStopEnabled,
+                ${idleTimeoutMinutesSql("?")} idleTimeoutMinutes`,
+      )
+      .get(userId, userId, userId) as {
+      autoStopEnabled: number;
+      idleTimeoutMinutes: number;
+    };
+    return {
+      autoStopEnabled: row.autoStopEnabled === 1,
+      idleTimeoutMinutes: row.idleTimeoutMinutes,
+    };
+  }
+
+  /** Codespaces idle long enough to stop now, in one bounded query. */
+  listIdleStopCandidates(
+    provider: string,
+    now: number,
+    limit: number,
+    excludeIds: readonly string[] = [],
+  ): Array<{ id: string; userId: string; generation: number }> {
+    return this.sqlite
+      .prepare(
+        `SELECT id, userId, generation FROM codespaceResource
+         WHERE provider = ? AND ${IDLE_STOP_PREDICATE}
+           ${excludeIds.length > 0 ? `AND id NOT IN (${placeholders(excludeIds)})` : ""}
+         ORDER BY updatedAt, id LIMIT ?`,
+      )
+      .all(provider, now, ...excludeIds, limit) as Array<{
+      id: string;
+      userId: string;
+      generation: number;
+    }>;
+  }
+
+  /**
+   * Requests a stop because the codespace is idle, re-checking the whole idle condition in the same
+   * statement. A reservation or any other activity that landed after the scan makes the condition
+   * false, so a racing operation always wins and nothing is stopped under it.
+   */
+  requestIdleStop(
+    resourceId: string,
+    generation: number,
+    now: number,
+  ): CodespaceResourceRecord | null {
+    const transaction = this.sqlite.transaction(() => {
+      const current = this.requireById(resourceId);
+      const changed = this.sqlite
+        .prepare(
+          `UPDATE codespaceResource SET desiredState = 'stopped', state = 'stop_pending',
+           generation = generation + 1, lastOutcome = 'idle_stop_requested', claimId = NULL,
+           claimExpiresAt = NULL, reconcileFailures = 0, updatedAt = ?
+           WHERE id = ? AND generation = ? AND ${IDLE_STOP_PREDICATE}`,
+        )
+        .run(now, resourceId, generation, now).changes;
+      if (changed !== 1) return null;
+      this.recordLifecycleMutation(
+        resourceId,
+        current.userId,
+        current.provider,
+        generation + 1,
+        "stop",
+        now,
+      );
+      return this.requireById(resourceId);
+    });
+    return transaction.immediate();
+  }
+
+  /**
+   * Takes the right to list up to `limit` users' codespaces from the provider now: users with a
+   * running codespace whose last listing is at least `intervalMs` old, least recently listed first.
+   * The timestamp is written as it is taken, so concurrent ticks never list one user twice.
+   */
+  claimProviderObservations(
+    provider: string,
+    now: number,
+    intervalMs: number,
+    limit: number,
+  ): string[] {
+    const transaction = this.sqlite.transaction(() => {
+      const rows = this.sqlite
+        .prepare(
+          `SELECT c.id, c.userId FROM codespaceConnection c
+           WHERE c.provider = ? AND c.status = 'connected'
+             AND (c.resourcesObservedAt IS NULL OR c.resourcesObservedAt <= ?)
+             AND EXISTS (SELECT 1 FROM codespaceResource r
+               WHERE r.userId = c.userId AND r.provider = c.provider
+                 AND r.retentionPolicy = 'persistent' AND r.state = 'usable'
+                 AND r.desiredState = 'running' AND r.providerResourceName IS NOT NULL)
+           ORDER BY COALESCE(c.resourcesObservedAt, 0), c.id LIMIT ?`,
+        )
+        .all(provider, now - intervalMs, limit) as Array<{ id: string; userId: string }>;
+      const update = this.sqlite.prepare(
+        "UPDATE codespaceConnection SET resourcesObservedAt = ? WHERE id = ?",
+      );
+      for (const row of rows) update.run(now, row.id);
+      return rows.map((row) => row.userId);
+    });
+    return transaction.immediate();
+  }
+
+  /** The records a provider listing is compared against: usable persistent codespaces. */
+  listObservableRunning(userId: string, provider: string): CodespaceResourceRecord[] {
+    return (
+      this.sqlite
+        .prepare(
+          `SELECT * FROM codespaceResource WHERE userId = ? AND provider = ?
+           AND retentionPolicy = 'persistent' AND state = 'usable' AND desiredState = 'running'
+           AND providerResourceName IS NOT NULL ORDER BY createdAt`,
+        )
+        .all(userId, provider) as ResourceRow[]
+    ).map(mapRow);
+  }
+
+  /**
+   * Records that the provider already stopped a codespace Moira held as running — GitHub's own idle
+   * timeout, or a user stopping it outside Moira. No provider call is involved: the codespace is
+   * already where a stop would take it. The new generation fences operations reserved against the
+   * running codespace, and the desired state follows, so the next use starts it again.
+   */
+  markObservedStopped(resourceId: string, generation: number, now: number): boolean {
+    const transaction = this.sqlite.transaction(() => {
+      const changed = this.sqlite
+        .prepare(
+          `UPDATE codespaceResource SET desiredState = 'stopped', state = 'stopped',
+           observedState = 'stopped', generation = generation + 1,
+           lastOutcome = 'provider_observed_stopped', claimId = NULL, claimExpiresAt = NULL,
+           reconcileFailures = 0, updatedAt = ?
+           WHERE id = ? AND generation = ? AND state = 'usable' AND desiredState = 'running'`,
+        )
+        .run(now, resourceId, generation).changes;
+      if (changed !== 1) return false;
+      this.cancelOperationsForGeneration(
+        resourceId,
+        generation + 1,
+        now,
+        "provider_observed_stopped",
+      );
+      return true;
+    });
+    return transaction.immediate();
+  }
+
   /**
    * Moves records that a rebind pass could not re-verify to the back of the rebind order. The order
    * is oldest `updatedAt` first, so without this one record that can never be rebound would be
@@ -634,6 +842,7 @@ export class CodespaceResourceRepository {
           `UPDATE codespaceResource SET providerResourceName = ?, externalOwnerId = ?,
          billableOwnerId = ?, observedRef = ?, state = ?, desiredState = ?, observedState = ?,
          generation = generation + 1, lastOutcome = ?, reconcileFailures = 0,
+         lastActivityAt = CASE WHEN ? = 'usable' THEN ? ELSE lastActivityAt END,
          cleanupDeadlineAt = ?, claimId = NULL, claimExpiresAt = NULL, updatedAt = ?
          WHERE id = ? AND generation = ? AND claimId = ? AND state = 'create_submitted'`,
         )
@@ -646,6 +855,8 @@ export class CodespaceResourceRepository {
           input.state === "usable" ? "running" : "deleted",
           input.state === "usable" ? "running" : "failed",
           input.outcome,
+          input.state,
+          input.now,
           input.cleanupDeadlineAt ?? null,
           input.now,
           input.resourceId,
@@ -954,13 +1165,16 @@ export class CodespaceResourceRepository {
       const changed = this.sqlite
         .prepare(
           `UPDATE codespaceResource SET state = ?, observedState = ?, lastOutcome = ?,
-           claimId = NULL, claimExpiresAt = NULL, reconcileFailures = 0, updatedAt = ?
+           claimId = NULL, claimExpiresAt = NULL, reconcileFailures = 0,
+           lastActivityAt = CASE WHEN ? = 'usable' THEN ? ELSE lastActivityAt END, updatedAt = ?
            WHERE id = ? AND generation = ? AND desiredState = ?`,
         )
         .run(
           input.state,
           input.observedState,
           input.outcome,
+          input.state,
+          input.now,
           input.now,
           input.resourceId,
           input.generation,
@@ -1079,22 +1293,33 @@ export class CodespaceResourceRepository {
    */
   recordProviderObservation(
     resourceId: string,
-    observation: { repositoryFullName: string; observedRef: string | null },
+    observation: {
+      repositoryFullName: string;
+      observedRef: string | null;
+      lastUsedAt: number | null;
+    },
     now: number,
   ): boolean {
+    // A provider that stops reporting its last start leaves the last known time in place: unknown
+    // is not a newer answer.
     return (
       this.sqlite
         .prepare(
-          `UPDATE codespaceResource SET repositoryFullName = ?, observedRef = ?, updatedAt = ?
-           WHERE id = ? AND (repositoryFullName <> ? OR observedRef IS NOT ?)`,
+          `UPDATE codespaceResource SET repositoryFullName = ?, observedRef = ?,
+           providerLastUsedAt = COALESCE(?, providerLastUsedAt), updatedAt = ?
+           WHERE id = ? AND (repositoryFullName <> ? OR observedRef IS NOT ?
+             OR (? IS NOT NULL AND providerLastUsedAt IS NOT ?))`,
         )
         .run(
           observation.repositoryFullName,
           observation.observedRef,
+          observation.lastUsedAt,
           now,
           resourceId,
           observation.repositoryFullName,
           observation.observedRef,
+          observation.lastUsedAt,
+          observation.lastUsedAt,
         ).changes === 1
     );
   }

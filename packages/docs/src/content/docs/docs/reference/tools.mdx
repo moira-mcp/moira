@@ -101,7 +101,7 @@ The separately authenticated Web lock-creation route presents its one-time PIN t
 
 ### Settings and notes
 
-`settings` reads one exact `key`, one `category`, or the complete accessible set. Do not combine `key` and `category` in a get request. Definitions include database-backed settings and settings declared by installed extension manifests. Encrypted values are always masked: database-backed values use `[encrypted]`, while extension values use a bullet mask that retains only the last four characters. Admin-only values and definitions are hidden from non-admin users. Setting a value requires an existing definition and enforces administrative restrictions, the declared type, optional JSON Schema validation, encryption, and Telegram webhook registration when a bot token is saved. A structured JSON value must round-trip without values being omitted or transformed. Extension defaults must satisfy the same type and schema before the manifest is accepted. Listing returns the currently available definitions rather than stored values; removing an extension hides its definitions but keeps its per-user values for a later reinstall.
+`settings` reads one exact `key`, one `category`, or the complete accessible set. Do not combine `key` and `category` in a get request. Definitions include database-backed settings and settings declared by installed extension manifests. Encrypted values are always masked: database-backed values use `[encrypted]`, while extension values use a bullet mask that retains only the last four characters. Admin-only values and definitions are hidden from non-admin users. Setting a value requires an existing definition and enforces administrative restrictions, the declared type, optional JSON Schema validation, the declared minimum and maximum of a built-in number setting, encryption, and Telegram webhook registration when a bot token is saved. A structured JSON value must round-trip without values being omitted or transformed. Extension defaults must satisfy the same type and schema before the manifest is accepted. Listing returns the currently available definitions rather than stored values; removing an extension hides its definitions but keeps its per-user values for a later reinstall.
 
 `notes` stores user-isolated, versioned text. Reads may select a retained version; deletion is soft. Save enforces the configured per-note size, total storage, retained-version, key, and tag limits. Administrators may change the active storage limits.
 
@@ -172,6 +172,17 @@ codespace is rebound automatically on whatever branch it is on. The codespace su
 out, which is `null` until Moira has observed one and while the codespace is on a detached HEAD.
 `create` still takes the input `ref`. Starting a codespace whose GitHub resource Moira is still
 identifying returns the retryable `CODESPACE_CREATE_PENDING`; retry once creation has settled.
+
+An idle codespace pauses on its own. Two user settings decide when: `codespaces.auto_stop_enabled`
+(on by default) and `codespaces.idle_timeout_minutes` (30 by default, 5 to 240), readable and
+writable with the `settings` tool. While pausing is on, Moira stops a codespace once no agent has
+used it through Moira for that long — no command, file action, transfer or start — and it does not
+stop one while a command, including a background command, is still running there. Stopping keeps
+the repository data, and the next call that needs the codespace starts it again. Moira does not see
+direct use in a browser, an editor or over SSH, so a codespace you work in directly is paused on the
+same timeout; turn pausing off if you work in your codespaces directly. Separately, GitHub stops a
+codespace after at most 240 minutes without user or terminal activity, with pausing on or off, and
+that can also end a background command that prints nothing for that long.
 
 `exec` runs argv as data (no shell interpolation) in a repository-relative `cwd` with a
 timeout (`timeout_seconds`, optional) and optional per-stream output limits, and returns bounded `stdout`, `stderr` and the exact

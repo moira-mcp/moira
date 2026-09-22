@@ -283,7 +283,8 @@ Behavior:
 - Classifies every submitted key and stores each permitted valid value independently
 - Commits each extension value together with its audit event; an audit failure leaves the prior value unchanged and lists the key in `refused`
 - Returns HTTP 200 when no key is refused and HTTP 207 when at least one key is refused
-- Names unknown, unauthorized and schema-invalid keys in `refused` without undoing values already listed in `saved`
+- Names unknown, unauthorized, schema-invalid and out-of-range keys in `refused` without undoing values already listed in `saved`
+- Refuses a built-in number setting whose value is below its declared `minimum` or above its declared `maximum`, whether sent as a number or as numeric text
 - Enforces the manifest's declared primitive type and then its optional complete JSON Schema; editable JSON text is parsed before validation, and structured input must round-trip through JSON without omitted or transformed values
 - Registers the Telegram webhook only when `telegram.bot_token` is present in `saved`, never when that key was refused
 
@@ -489,6 +490,7 @@ Validation:
 - Type check (string, number, boolean, json)
 - Enum validation (value in allowed list)
 - String length (minLength, maxLength)
+- Numeric bounds (`minimum`, `maximum`) of a built-in number setting; a number or numeric text outside them returns 400
 - Required field check
 - Installed-extension settings are validated against the complete JSON Schema from the active manifest; JSON settings accept either losslessly JSON-serializable structured values or JSON text
 

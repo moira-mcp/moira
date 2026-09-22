@@ -1,6 +1,9 @@
 import { createHash, randomUUID } from "node:crypto";
 import { CodespaceProviderRegistry } from "./provider-registry.js";
-import { CodespaceResourceRepository } from "./resource-repository.js";
+import {
+  CODESPACE_IDLE_TIMEOUT_MINUTES,
+  CodespaceResourceRepository,
+} from "./resource-repository.js";
 import {
   CodespaceResourceError,
   type CodespaceMachine,
@@ -72,6 +75,19 @@ const RECONCILE_BACKOFF_MAX_MS = 30 * 60_000;
  * are deferred, so a tick normally ends when nothing is due; the bound only caps provider traffic.
  */
 const RECONCILE_BATCH_LIMIT = 20;
+
+/**
+ * How often one user's codespaces are listed from the provider, in reconcile intervals. The listing
+ * is what notices GitHub's own idle shutdowns and use outside Moira; ten intervals (five minutes at
+ * the default interval) keeps it to one list call per user in that time.
+ */
+const PROVIDER_OBSERVATION_INTERVALS = 10;
+
+/** Users whose codespaces one tick may list from the provider. */
+const PROVIDER_OBSERVATION_USERS_PER_TICK = 5;
+
+/** Idle codespaces one tick may request stops for. */
+const IDLE_STOP_LIMIT = 50;
 
 /** Provider states in which the provider is already moving the codespace. */
 const TRANSITIONAL_PROVIDER_STATES: ReadonlySet<CodespaceProviderState> = new Set([
@@ -522,7 +538,11 @@ export class CodespaceResourceService {
         if (exact) {
           this.dependencies.repository.recordProviderObservation(
             record.id,
-            { repositoryFullName: exact.repositoryFullName, observedRef: exact.ref },
+            {
+              repositoryFullName: exact.repositoryFullName,
+              observedRef: exact.ref,
+              lastUsedAt: exact.lastUsedAt,
+            },
             this.now(),
           );
         }
@@ -681,7 +701,10 @@ export class CodespaceResourceService {
         ref: requestedRef,
         machine,
         operationMarker: initial.operationMarker,
-        idleTimeoutMinutes: Math.min(240, Math.max(5, Math.ceil(policy.remoteTtlMs / 60_000))),
+        // Always the provider's maximum. GitHub's own idle timer ignores silent background commands,
+        // so a shorter provider timeout would stop a codespace under a long agent command; the
+        // owner's timeout is enforced by Moira's idle stop, which sees agent activity.
+        idleTimeoutMinutes: CODESPACE_IDLE_TIMEOUT_MINUTES.maximum,
         retentionMinutes: Math.min(
           43_200,
           Math.max(1, Math.ceil((policy.persistentRetentionMs ?? 30 * 24 * 60 * 60_000) / 60_000)),
@@ -1354,7 +1377,11 @@ export class CodespaceResourceService {
     }
     this.dependencies.repository.recordProviderObservation(
       record.id,
-      { repositoryFullName: exact.repositoryFullName, observedRef: exact.ref },
+      {
+        repositoryFullName: exact.repositoryFullName,
+        observedRef: exact.ref,
+        lastUsedAt: exact.lastUsedAt,
+      },
       this.now(),
     );
     return exact;
@@ -1574,7 +1601,11 @@ export class CodespaceResourceService {
       }
       this.dependencies.repository.recordProviderObservation(
         record.id,
-        { repositoryFullName: exact.repositoryFullName, observedRef: exact.ref },
+        {
+          repositoryFullName: exact.repositoryFullName,
+          observedRef: exact.ref,
+          lastUsedAt: exact.lastUsedAt,
+        },
         this.now(),
       );
       if (exact.state === "deleting") {
@@ -1640,6 +1671,10 @@ export class CodespaceResourceService {
     if (this.scheduledReconcileRunning) return;
     this.scheduledReconcileRunning = true;
     try {
+      // A record observed in this tick is left for the next tick's idle scan: an idle stop leads to
+      // a lifecycle pass that reads the codespace again, and no record is looked at twice in a tick.
+      const observed = await this.observeProviderState();
+      await this.stopIdleCodespaces(observed);
       // One rebind attempt per tick, then every due record up to a bound. A record that does not
       // converge is deferred, so it is not claimed twice in one tick and cannot crowd others out.
       if (await this.reconcileOnce()) {
@@ -1649,6 +1684,92 @@ export class CodespaceResourceService {
       }
     } finally {
       this.scheduledReconcileRunning = false;
+    }
+  }
+
+  /**
+   * Lists the codespaces of the users whose observation is due — at most one listing per user per
+   * observation interval — and records what the provider says about each running one: its checked-
+   * out ref and last start time, and, when the provider already stopped it, that it is stopped. Nothing
+   * is mutated at the provider. Returns the records observed.
+   */
+  private async observeProviderState(): Promise<Set<string>> {
+    const observed = new Set<string>();
+    const policy = this.dependencies.policy();
+    if (!policy.enabled) return observed;
+    const provider = this.dependencies.registry.require(this.dependencies.providerId);
+    const users = this.dependencies.repository.claimProviderObservations(
+      provider.id,
+      this.now(),
+      policy.reconcileIntervalMs * PROVIDER_OBSERVATION_INTERVALS,
+      PROVIDER_OBSERVATION_USERS_PER_TICK,
+    );
+    for (const userId of users) {
+      try {
+        const records = this.dependencies.repository.listObservableRunning(userId, provider.id);
+        if (records.length === 0) continue;
+        const credential = await this.dependencies.credentials.getCredential(userId, provider.id);
+        const listed = new Map(
+          (await provider.listOwned(credential)).map((resource) => [resource.name, resource]),
+        );
+        for (const record of records) {
+          observed.add(record.id);
+          const actual = listed.get(record.providerResourceName!);
+          // Absent from the listing, or no longer this record's: lifecycle decides that from an
+          // exact read when the codespace is next used, not a listing.
+          if (!actual || !exactIdentityMatches(actual, record)) continue;
+          this.dependencies.repository.recordProviderObservation(
+            record.id,
+            {
+              repositoryFullName: actual.repositoryFullName,
+              observedRef: actual.ref,
+              lastUsedAt: actual.lastUsedAt,
+            },
+            this.now(),
+          );
+          if (
+            actual.state === "shutdown" &&
+            this.dependencies.repository.markObservedStopped(
+              record.id,
+              record.generation,
+              this.now(),
+            )
+          ) {
+            await this.emit(
+              "stop",
+              this.dependencies.repository.getOwned(userId, record.id)!,
+              "provider_observed_stopped",
+            );
+          }
+        }
+      } catch {
+        // One user's credential or provider failure never holds back another's observation or the
+        // rest of the tick; the next interval observes again.
+      }
+    }
+    return observed;
+  }
+
+  /**
+   * Requests a stop for every codespace idle past its owner's timeout. The stop converges through
+   * ordinary lifecycle, and the next use starts the codespace again. `skip` are records observed in
+   * this tick, stopped (if still idle) in the next.
+   */
+  private async stopIdleCodespaces(skip: ReadonlySet<string>): Promise<void> {
+    if (!this.dependencies.policy().enabled) return;
+    const candidates = this.dependencies.repository.listIdleStopCandidates(
+      this.dependencies.providerId,
+      this.now(),
+      IDLE_STOP_LIMIT,
+      [...skip],
+    );
+    for (const candidate of candidates) {
+      const stopped = this.dependencies.repository.requestIdleStop(
+        candidate.id,
+        candidate.generation,
+        this.now(),
+      );
+      if (stopped) await this.emit("stop", stopped, "idle_stop_requested");
     }
   }
 

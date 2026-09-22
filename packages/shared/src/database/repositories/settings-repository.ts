@@ -9,6 +9,50 @@ import { settingDefinition, userSettingValue } from "../schema.js";
 import { encryptValue, decryptValue } from "@mcp-moira/workflow-engine";
 import type { SettingDefinition } from "@mcp-moira/workflow-engine";
 import type * as schema from "../schema.js";
+import { ValidationError } from "../../errors/app-error.js";
+
+/**
+ * The numeric bounds a built-in definition declares, enforced on every write. Every path that
+ * stores a built-in value — the per-key and bulk HTTP routes, the MCP settings tool and the
+ * settings service — ends here, so the rule has one home. A number arrives as a number from API
+ * clients and as text from the settings screen; both are read as the number they spell.
+ */
+export function assertSettingValueWithinBounds(
+  definition: Pick<SettingDefinition, "key" | "type" | "validation">,
+  value: unknown,
+): void {
+  if (definition.type !== "number" || !definition.validation) return;
+  let schema: { minimum?: unknown; maximum?: unknown };
+  try {
+    schema = JSON.parse(definition.validation) as typeof schema;
+  } catch {
+    return;
+  }
+  const minimum = typeof schema.minimum === "number" ? schema.minimum : null;
+  const maximum = typeof schema.maximum === "number" ? schema.maximum : null;
+  if (minimum === null && maximum === null) return;
+  const number =
+    typeof value === "number"
+      ? value
+      : typeof value === "string" && value.trim() !== ""
+        ? Number(value)
+        : Number.NaN;
+  if (
+    !Number.isFinite(number) ||
+    (minimum !== null && number < minimum) ||
+    (maximum !== null && number > maximum)
+  ) {
+    const range =
+      minimum !== null && maximum !== null
+        ? `between ${minimum} and ${maximum}`
+        : minimum !== null
+          ? `at least ${minimum}`
+          : `at most ${maximum}`;
+    throw new ValidationError(`Value for setting '${definition.key}' must be a number ${range}`, {
+      key: definition.key,
+    });
+  }
+}
 
 export class SettingsRepository {
   constructor(private db: BetterSQLite3Database<typeof schema>) {}
@@ -78,6 +122,11 @@ export class SettingsRepository {
     if (!def) {
       throw new Error(`Setting definition not found: ${key}`);
     }
+
+    assertSettingValueWithinBounds(
+      { key: def.key, type: def.type as SettingDefinition["type"], validation: def.validation },
+      value,
+    );
 
     // Convert to string
     let stringValue: string;

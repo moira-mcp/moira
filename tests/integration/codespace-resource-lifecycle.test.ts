@@ -143,7 +143,7 @@ class FakeProvider implements CodespaceProviderAdapter {
     _token: string,
     input: Parameters<CodespaceProviderAdapter["create"]>[1],
   ): Promise<CodespaceCreateProviderResult> {
-    this.createCalls();
+    this.createCalls(input);
     this.createObservation?.();
     this.resource = {
       name: this.resourceName,
@@ -154,6 +154,7 @@ class FakeProvider implements CodespaceProviderAdapter {
       repositoryFullName: input.repository.fullName,
       ref: this.returnedRef === undefined ? input.ref : this.returnedRef,
       state: this.returnedState,
+      lastUsedAt: null,
       machine: this.returnedMachine,
       createdAt: now,
     };
@@ -330,6 +331,7 @@ function fixture(policyOverrides: Partial<CodespaceResourcePolicy> = {}) {
     advance: (milliseconds: number) => {
       currentTime += milliseconds;
     },
+    clock: () => currentTime,
     policy: effectivePolicy,
     audits,
   };
@@ -2392,6 +2394,225 @@ describe("codespaces that are gone or failed at the provider still converge", ()
       await expect(
         value.service.stopCodespace("user-1", created.resource.id),
       ).resolves.toMatchObject({ state: "stopped", observedState: "failed" });
+      expect(value.provider.stopCalls).not.toHaveBeenCalled();
+    } finally {
+      value.sqlite.close();
+    }
+  });
+});
+
+/** Stores a user's value for one of the codespace idle settings, as the settings screen would. */
+function setPreference(value: Fixture, userId: string, key: string, stored: string) {
+  value.sqlite
+    .prepare(
+      `INSERT OR IGNORE INTO settingDefinition
+       (key, type, category, label, createdAt, updatedAt) VALUES (?, 'string', 'codespaces', ?, 0, 0)`,
+    )
+    .run(key, key);
+  value.sqlite
+    .prepare(
+      `INSERT INTO userSettingValue (userId, settingKey, value, encrypted, updatedAt)
+       VALUES (?, ?, ?, 0, 0)
+       ON CONFLICT DO UPDATE SET value = excluded.value`,
+    )
+    .run(userId, key, stored);
+}
+
+const MINUTE = 60_000;
+
+describe("idle codespaces pause on their own", () => {
+  // GitHub's own idle timer ignores silent background commands, so any provider timeout shorter
+  // than its maximum could stop a codespace under a long agent command. The owner's timeout is
+  // Moira's to enforce; the provider always gets its maximum.
+  test.each([
+    ["the default settings", null, null],
+    ["a chosen 45-minute timeout", "true", "45"],
+    ["auto-pause turned off", "false", "45"],
+  ] as const)(
+    "creation asks the provider for its maximum 240-minute idle timeout with %s",
+    async (_name, autoStop, timeout) => {
+      const value = fixture();
+      try {
+        if (autoStop !== null)
+          setPreference(value, "user-1", "codespaces.auto_stop_enabled", autoStop);
+        if (timeout !== null)
+          setPreference(value, "user-1", "codespaces.idle_timeout_minutes", timeout);
+        await value.service.create("user-1", "301", "refs/heads/main");
+        expect(value.provider.createCalls).toHaveBeenCalledWith(
+          expect.objectContaining({ idleTimeoutMinutes: 240 }),
+        );
+      } finally {
+        value.sqlite.close();
+      }
+    },
+  );
+
+  /**
+   * A codespace created at `now`, then 31 minutes of simulated time in two scheduled ticks: the
+   * first observes the provider (a record observed in a tick is judged in the next), the second
+   * decides. Returns the record afterwards.
+   */
+  async function afterIdleWindow(value: Fixture, arrange: (id: string) => void = () => {}) {
+    const created = await value.service.create("user-1", "301", "refs/heads/main");
+    value.advance(31 * MINUTE);
+    arrange(created.resource.id);
+    await value.service.reconcileTick();
+    value.advance(value.policy.reconcileIntervalMs);
+    await value.service.reconcileTick();
+    return value.repository.getOwned("user-1", created.resource.id)!;
+  }
+
+  test("a codespace idle past its owner's 30 minutes is stopped with an idle outcome", async () => {
+    const value = fixture();
+    try {
+      const record = await afterIdleWindow(value);
+      expect(record).toMatchObject({ state: "stopped", desiredState: "stopped" });
+      expect(value.audits).toContainEqual(
+        expect.objectContaining({ action: "stop", outcome: "idle_stop_requested" }),
+      );
+      expect(value.provider.stopCalls).toHaveBeenCalledTimes(1);
+
+      // The next command still works: start-on-use wakes it.
+      await expect(value.service.ensureRunning("user-1", record.id)).resolves.toMatchObject({
+        state: "usable",
+      });
+    } finally {
+      value.sqlite.close();
+    }
+  });
+
+  test.each([
+    [
+      "auto-pause is turned off",
+      (value: Fixture) => setPreference(value, "user-1", "codespaces.auto_stop_enabled", "false"),
+    ],
+    [
+      "Moira used it a minute ago",
+      (value: Fixture, id: string) =>
+        value.sqlite
+          .prepare("UPDATE codespaceResource SET lastActivityAt = ? WHERE id = ?")
+          .run(value.clock() - MINUTE, id),
+    ],
+    [
+      "a background command is still running in it",
+      (value: Fixture, id: string) => {
+        expect(reserveOperation(value, id)).toBe("reserved");
+        // Old enough that only its running state, not its last change, keeps the codespace awake.
+        value.sqlite
+          .prepare(
+            "UPDATE codespaceOperation SET state = 'running', updatedAt = ? WHERE resourceId = ?",
+          )
+          .run(now, id);
+        value.sqlite
+          .prepare("UPDATE codespaceResource SET lastActivityAt = ? WHERE id = ?")
+          .run(now, id);
+      },
+    ],
+  ])("a codespace is not stopped when %s", async (_name, arrange) => {
+    const value = fixture();
+    try {
+      const record = await afterIdleWindow(value, (id) => arrange(value, id));
+      expect(record).toMatchObject({ state: "usable", desiredState: "running" });
+      expect(value.provider.stopCalls).not.toHaveBeenCalled();
+    } finally {
+      value.sqlite.close();
+    }
+  });
+
+  test("a recent provider last start does not prevent the idle stop", async () => {
+    // GitHub's `last_used_at` is the codespace's last start, not a sign of use; only agent activity
+    // through Moira keeps a codespace awake.
+    const value = fixture();
+    try {
+      const record = await afterIdleWindow(value, () => {
+        value.provider.resource = {
+          ...value.provider.resource!,
+          lastUsedAt: value.clock() - MINUTE,
+        };
+      });
+      expect(record).toMatchObject({
+        state: "stopped",
+        desiredState: "stopped",
+        providerLastUsedAt: expect.any(Number),
+      });
+      expect(value.audits).toContainEqual(
+        expect.objectContaining({ action: "stop", outcome: "idle_stop_requested" }),
+      );
+    } finally {
+      value.sqlite.close();
+    }
+  });
+
+  test("an operation reserved while the idle stop is being decided proceeds and nothing stops", async () => {
+    const value = fixture();
+    try {
+      const created = await value.service.create("user-1", "301", "refs/heads/main");
+      value.advance(31 * MINUTE);
+      await value.service.reconcileTick();
+      value.advance(value.policy.reconcileIntervalMs);
+      // The reservation lands between the idle scan and the stop it would lead to.
+      const scan = value.repository.listIdleStopCandidates.bind(value.repository);
+      let operationId: string | null = null;
+      value.repository.listIdleStopCandidates = (...args) => {
+        const candidates = scan(...args);
+        const reservation = new CodespaceOperationRepository(value.sqlite).reserve({
+          userId: "user-1",
+          resourceId: created.resource.id,
+          inputBytes: 0,
+          stdoutLimitBytes: 1024,
+          stderrLimitBytes: 512,
+          deadlineAt: value.clock() + MINUTE,
+          policy: value.policy,
+          now: value.clock(),
+        });
+        operationId = reservation.operation?.id ?? null;
+        return candidates;
+      };
+      await value.service.reconcileTick();
+
+      expect(operationId).not.toBeNull();
+      expect(
+        value.sqlite.prepare("SELECT state FROM codespaceOperation WHERE id = ?").get(operationId),
+      ).toEqual({ state: "reserved" });
+      expect(value.repository.getOwned("user-1", created.resource.id)).toMatchObject({
+        state: "usable",
+        desiredState: "running",
+      });
+      expect(value.provider.stopCalls).not.toHaveBeenCalled();
+    } finally {
+      value.sqlite.close();
+    }
+  });
+});
+
+describe("the provider's own view of running codespaces is observed periodically", () => {
+  test("a codespace the provider stopped on its own is recorded stopped with its last start time, listing once per interval", async () => {
+    const value = fixture();
+    try {
+      const created = await value.service.create("user-1", "301", "refs/heads/main");
+      const interval = value.policy.reconcileIntervalMs * 10;
+      value.provider.listCalls.mockClear();
+
+      await value.service.reconcileTick();
+      expect(value.provider.listCalls).toHaveBeenCalledTimes(1);
+
+      const lastUsedAt = value.clock() + 2 * MINUTE;
+      value.provider.resource = { ...value.provider.resource!, state: "shutdown", lastUsedAt };
+      value.advance(interval - 1);
+      await value.service.reconcileTick();
+      expect(value.provider.listCalls).toHaveBeenCalledTimes(1);
+      expect(value.repository.getOwned("user-1", created.resource.id)?.state).toBe("usable");
+
+      value.advance(1);
+      await value.service.reconcileTick();
+      expect(value.provider.listCalls).toHaveBeenCalledTimes(2);
+      expect(value.repository.getOwned("user-1", created.resource.id)).toMatchObject({
+        state: "stopped",
+        desiredState: "stopped",
+        observedState: "stopped",
+        providerLastUsedAt: lastUsedAt,
+        lastOutcome: "provider_observed_stopped",
+      });
       expect(value.provider.stopCalls).not.toHaveBeenCalled();
     } finally {
       value.sqlite.close();

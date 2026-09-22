@@ -288,6 +288,13 @@
       "when": 1790000120000,
       "tag": "0039_codespace_observed_ref",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1790000180000,
+      "tag": "0040_codespace_activity",
+      "breakpoints": true
     }
   ]
 }

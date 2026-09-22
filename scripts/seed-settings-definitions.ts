@@ -5,6 +5,9 @@
  */
 
 import {
+  CODESPACE_AUTO_STOP_SETTING,
+  CODESPACE_IDLE_TIMEOUT_MINUTES,
+  CODESPACE_IDLE_TIMEOUT_SETTING,
   getDatabase,
   SettingsRepository,
   createLogger,
@@ -94,6 +97,38 @@ export const initialDefinitions: Omit<SettingDefinition, "createdAt" | "updatedA
     }),
     adminOnly: false,
     protected: false, // User setting, can be deleted
+  },
+
+  // ===== Codespace Settings =====
+  {
+    key: CODESPACE_AUTO_STOP_SETTING,
+    type: "boolean",
+    category: "codespaces",
+    label: "Pause idle codespaces",
+    description:
+      "Stop a cloud codespace when no agent has used it through Moira (commands, file operations, transfers) for the idle timeout. A stopped codespace keeps its files and starts again when an agent next uses it. Moira does not see direct use in the browser or an editor, so turn this off if you work in your codespaces directly; GitHub still stops an idle codespace after at most 240 minutes either way.",
+    defaultValue: "true",
+    required: false,
+    validation: null,
+    adminOnly: false,
+    protected: true,
+  },
+  {
+    key: CODESPACE_IDLE_TIMEOUT_SETTING,
+    type: "number",
+    category: "codespaces",
+    label: "Idle timeout (minutes)",
+    description:
+      "How long a codespace may go without agent activity through Moira (commands, file operations, transfers) before it is paused. Direct use in the browser or an editor is not seen and does not count. GitHub stops an idle codespace after at most 240 minutes regardless of this setting.",
+    defaultValue: String(CODESPACE_IDLE_TIMEOUT_MINUTES.default),
+    required: false,
+    validation: JSON.stringify({
+      type: "number",
+      minimum: CODESPACE_IDLE_TIMEOUT_MINUTES.minimum,
+      maximum: CODESPACE_IDLE_TIMEOUT_MINUTES.maximum,
+    }),
+    adminOnly: false,
+    protected: true,
   },
 
   // ===== MCP Settings (Admin Only) =====

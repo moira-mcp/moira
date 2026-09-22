@@ -118,6 +118,7 @@ class LifecycleProvider implements CodespaceProviderAdapter {
       repositoryFullName: input.repository.fullName,
       ref: input.ref,
       state: "available",
+      lastUsedAt: null,
       machine: input.machine,
       createdAt: Date.now(),
     };

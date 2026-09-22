@@ -100,7 +100,11 @@ back to the record, or no ref when the provider reports none.
   connector reachability. Adoption is the only point where the ref is compared: it
   is compared as a branch name (`refs/heads/x` matches `x`), and a Codespace that
   does not report a ref yet is adopted on the remaining identity. An ambiguous
-  provider response remains pending for exact reconciliation.
+  provider response remains pending for exact reconciliation. The Codespace is
+  always created with GitHub's maximum idle timeout of 240 minutes, whatever the
+  owner's settings: GitHub's own timer does not see a silent background command,
+  so the owner's shorter timeout is enforced by Moira alone (see "Idle
+  auto-pause").
 - Start records desired running state before provider contact. While that
   generation remains current, the official GitHub CLI may restore a Codespace
   that stopped outside Moira. Starting a codespace whose provider resource Moira
@@ -182,6 +186,59 @@ the provider's answer.
 Durable global and provider controls act as kill switches. A disabled control
 rejects new creation, start and operation reservations, while already required
 stop, cancellation and cleanup work remains eligible for reconciliation.
+
+### Idle auto-pause
+
+Two built-in, non-administrative user settings in category `codespaces` control
+idle pausing. The Settings page shows them in its general settings editor, and the
+settings API and the MCP `settings` tool read and write them:
+
+| Setting                           | Type    | Default | Meaning                                                 |
+| --------------------------------- | ------- | ------: | ------------------------------------------------------- |
+| `codespaces.auto_stop_enabled`    | boolean |  `true` | Moira stops the owner's idle codespaces                 |
+| `codespaces.idle_timeout_minutes` | number  |      30 | Idle time before a stop; 5 to 240, the range GitHub has |
+
+A write outside 5–240 is refused on every settings write path; a stored value
+outside that range is read as the default. The `codespaces` setting namespace is
+reserved, so no extension can declare a key in it.
+
+Each scheduled reconciler tick first observes the provider, then stops idle
+codespaces, then reconciles. Idleness counts only agent work through Moira. A
+persistent codespace is idle when it is usable and meant to run, its owner has
+auto-pause on, none of its operations is reserved, running or awaiting
+cancellation or reconciliation (a background command counts as running), and the
+latest of these is older than the owner's timeout: its creation, Moira's own
+activity (adoption, a completed start, an operation reservation) and the last
+change of any of its operations. Commands, file operations and transfers all run
+as operations. For each idle codespace, up to a bounded batch per tick, Moira
+requests a stop exactly as a user stop does, with the outcome
+`idle_stop_requested`; the stop converges through ordinary lifecycle and preserves
+data, and the next operation starts the codespace again. The request re-checks the
+whole idle condition in the same database statement, so an operation reserved
+after the scan wins and nothing is stopped under it.
+
+Moira does not see direct use of a codespace in a browser, an editor or over SSH,
+so a codespace a person works in directly is paused once no agent has used it for
+the owner's timeout; owners who work in their codespaces directly turn auto-pause
+off. Independently of Moira, GitHub stops a codespace after at most 240 minutes
+without user or terminal activity, with auto-pause on or off. That limit equals
+the default `CODESPACE_MAX_BACKGROUND_OPERATION_HOURS`, so GitHub can still stop a
+codespace under a background command that produces no terminal activity near the
+end of its permitted run, and under any such command allowed to run longer by a
+raised setting.
+
+Provider observation lists, in each tick, the codespaces of a bounded number of
+users who have a running codespace and whose last listing is at least ten
+reconcile intervals old, least recently listed first, with one listing per user.
+For each running codespace in the listing, Moira records the checked-out ref and
+the provider's `last_used_at`, which GitHub sets when the codespace was last
+started; it is stored for information and plays no part in the idle decision, and
+a listing that omits it keeps the previous value. A codespace the provider already
+shut down — by its own idle timeout or by a stop outside Moira — is recorded as
+stopped without any provider call: its generation advances, operations of the
+previous generation are cancelled, the stop is audited with the outcome
+`provider_observed_stopped`, and the next use starts it again. A codespace
+observed in a tick is judged for idleness in the next tick.
 
 ## Direct operations
 
@@ -691,7 +748,7 @@ not supplied:
 | `CODESPACE_MAX_ACTIVE_PER_USER`                |       4 | Active resource reservations per user                        |
 | `CODESPACE_MAX_ACTIVE_GLOBAL`                  |      16 | Active resource reservations across the instance             |
 | `CODESPACE_CREATE_THROTTLE_SECONDS`            |      60 | Minimum interval between creation reservations               |
-| `CODESPACE_REMOTE_TTL_MINUTES`                 |     120 | Codespaces idle timeout requested at creation                |
+| `CODESPACE_REMOTE_TTL_MINUTES`                 |     120 | Creation expiry; only legacy disposable rows use it          |
 | `CODESPACE_PERSISTENT_RETENTION_DAYS`          |      30 | Codespaces stopped-codespace retention requested at creation |
 | `CODESPACE_CREATE_DEADLINE_MINUTES`            |      15 | Create reconciliation deadline                               |
 | `CODESPACE_CLEANUP_DEADLINE_MINUTES`           |      15 | Lifecycle cleanup deadline and terminal-result retention     |
@@ -783,7 +840,10 @@ preserves their rows and foreign keys, adds `grantsRefreshedAt` and the monotoni
 converts persisted codespace outcomes, transfer purposes and audit identifiers.
 Migration `0039_codespace_observed_ref.sql` adds the resource's nullable
 `observedRef`, the ref last observed checked out, and its `reconcileFailures`
-counter, which drives the reconciliation retry backoff. The resulting connection, resource, lifecycle-capability, policy-usage,
+counter, which drives the reconciliation retry backoff. Migration
+`0040_codespace_activity.sql` adds the resource's `lastActivityAt` (Moira's last work
+in the codespace) and `providerLastUsedAt` (the provider's last start time, stored for information), and the
+connection's `resourcesObservedAt`, which paces provider observation. The resulting connection, resource, lifecycle-capability, policy-usage,
 provider-mutation, provider-control, operation and private-transfer metadata tables
 use the `codespace` vocabulary. Credential tables
 contain versioned ciphertext; resource, operation and transfer tables contain

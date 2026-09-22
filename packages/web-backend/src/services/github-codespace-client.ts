@@ -435,6 +435,13 @@ export class HttpGitHubCodespaceClient implements GitHubCodespaceClient, Codespa
       // filled in yet has none; neither makes the codespace unreadable.
       ref: typeof gitStatus?.ref === "string" && gitStatus.ref.length > 0 ? gitStatus.ref : null,
       state,
+      // GitHub's `last_used_at` is the "last known time this codespace was started" — a start time,
+      // not a sign of use. Absent or unparsable means GitHub did not say, so it stays unknown.
+      lastUsedAt:
+        typeof codespace.last_used_at === "string" &&
+        Number.isFinite(Date.parse(codespace.last_used_at))
+          ? Date.parse(codespace.last_used_at)
+          : null,
       machine: codespace.machine ? this.parseMachine(codespace.machine) : null,
       createdAt,
     };

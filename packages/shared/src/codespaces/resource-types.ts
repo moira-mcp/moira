@@ -1,4 +1,4 @@
-export const CODESPACE_PROVIDER_CONTRACT_VERSION = 4 as const;
+export const CODESPACE_PROVIDER_CONTRACT_VERSION = 5 as const;
 
 export interface CodespaceRepositoryTarget {
   id: string;
@@ -53,6 +53,12 @@ export interface CodespaceProviderResource {
    * instead of issuing another mutation.
    */
   state: CodespaceProviderState;
+  /**
+   * When the provider last started the codespace (GitHub's `last_used_at`, documented as "last
+   * known time this codespace was started"). It is not a sign of use and is shown for information
+   * only. `null` when the provider does not report it.
+   */
+  lastUsedAt: number | null;
   machine: CodespaceMachine | null;
   createdAt: number;
 }
@@ -207,6 +213,10 @@ export interface CodespaceResourceRecord {
   claimExpiresAt: number | null;
   /** Consecutive reconciler passes that left the record unconverged; drives the retry backoff. */
   reconcileFailures: number;
+  /** Last work Moira did in the codespace; `null` until any. */
+  lastActivityAt: number | null;
+  /** The provider's last start time as last observed, for display only; `null` until observed. */
+  providerLastUsedAt: number | null;
   lastOutcome: string | null;
   createdAt: number;
   updatedAt: number;

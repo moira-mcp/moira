@@ -69,6 +69,8 @@ function codespace(overrides: Partial<CodespaceResourceRecord> = {}): CodespaceR
     claimId: "secret-claim",
     claimExpiresAt: null,
     reconcileFailures: 0,
+    lastActivityAt: null,
+    providerLastUsedAt: null,
     lastOutcome: "provider-private-diagnostic",
     createdAt: 10,
     updatedAt: 20,

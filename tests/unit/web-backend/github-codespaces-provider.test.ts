@@ -249,6 +249,18 @@ describe("GitHub Codespaces provider edge", () => {
     await expect(parsed(overrides)).resolves.toMatchObject({ name: "silver-space-123", ref: null });
   });
 
+  test.each([
+    [
+      "a reported last start",
+      { last_used_at: "2026-09-22T10:15:00Z" },
+      Date.parse("2026-09-22T10:15:00Z"),
+    ],
+    ["no last start", { last_used_at: undefined }, null],
+    ["an unreadable last start", { last_used_at: "yesterday-ish" }, null],
+  ])("reads a codespace with %s", async (_name, overrides, expected) => {
+    await expect(parsed(overrides)).resolves.toMatchObject({ lastUsedAt: expected });
+  });
+
   test("reports the ref a codespace currently has checked out", async () => {
     await expect(parsed({ git_status: { ref: "feature/switched" } })).resolves.toMatchObject({
       ref: "feature/switched",

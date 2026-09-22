@@ -91,6 +91,7 @@ class Provider implements CodespaceProviderAdapter {
       repositoryFullName: input.repository.fullName,
       ref: input.ref,
       state: "available",
+      lastUsedAt: null,
       machine: input.machine,
       createdAt: now,
     };

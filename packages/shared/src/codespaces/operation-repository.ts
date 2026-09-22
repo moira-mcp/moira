@@ -141,6 +141,11 @@ export class CodespaceOperationRepository {
           input.now,
           input.now,
         );
+      // Work reaching the codespace is activity: it holds idle auto-stop off. Completion needs no
+      // separate write, because the idle check also reads the operation's own last change.
+      this.sqlite
+        .prepare("UPDATE codespaceResource SET lastActivityAt = ? WHERE id = ?")
+        .run(input.now, codespace.id);
       return {
         outcome: "reserved",
         operation: this.requireOwned(input.userId, id),

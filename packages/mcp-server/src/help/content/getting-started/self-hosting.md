@@ -263,9 +263,13 @@ personal rather than shared; collaboration happens through version-control branc
 
 Users manage the same codespaces from **Settings → Integrations → Cloud codespaces**: create one for
 an approved repository, start or stop it (stop keeps the repository data) and delete it after an
-explicit confirmation. Administrators open **Admin → Settings → Codespaces** to see the instance
-readiness (configuration, connector, reconciliation backlog, active codespaces and operations against
-their limits) and to pause work with the global or provider kill switch; pausing refuses new
+explicit confirmation. Each user's idle codespaces pause on their own: the **Settings** page's
+`codespaces.auto_stop_enabled` (on by default) and `codespaces.idle_timeout_minutes` (30 by
+default, 5 to 240) decide when Moira stops a codespace no agent has used through Moira, and the next
+agent operation starts it again. Direct use in a browser, an editor or over SSH is not seen, so
+users who work in their codespaces directly should turn pausing off. Administrators open
+**Admin → Settings → Codespaces** to see the instance readiness (configuration, connector,
+reconciliation backlog, active codespaces and operations against their limits) and to pause work with the global or provider kill switch; pausing refuses new
 codespaces, starts and agent operations and stops running codespaces without deleting anything.
 
 For monitoring, `GET /api/health` and the MCP `/health` endpoint report the readiness state
