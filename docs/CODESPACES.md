@@ -451,8 +451,27 @@ inject every action's defaults into every request; the field keeps its descripti
 actions declare differently — `max_bytes`, which `search` bounds at 1 MiB and `download` at 4 MiB —
 is published as both forms under one key, so the projection narrows neither. `operation_id`, whose
 declarations differ only in description, is published once. The `list` action returns the sanitized connection readiness (with the
-same-origin Settings URL), approved repository targets and the user's codespace
-summaries; it is the discovery path for `repository_id` and reusable `codespace_id`.
+same-origin Settings URL), approved repository targets, the user's codespace
+summaries and the user's `limits`; it is the discovery path for `repository_id` and
+reusable `codespace_id`.
+
+`limits` is the view `CodespaceObservabilityService.limits()` builds from policy and
+the database alone, without a provider call, and the website management list returns
+the same view. Every limit in it is the value Moira enforces, taken from the one
+definition every enforcement site reads (`effectiveCodespaceLimits` in
+`resource-policy.ts`), beside the user's current use:
+
+| Group             | Fields                                                                                                                                                                                                           |
+| ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `codespaces`      | `held` (codespaces the user holds, stopped ones and ones being created, identified or cleaned up included), `max_per_user`, `instance_held`, `max_instance`, `create_throttle_seconds`                           |
+| `machine_ceiling` | `cpu_cores`, `memory_bytes`, `storage_bytes`                                                                                                                                                                     |
+| `operations`      | `active` (the user's unfinished operations), `max_concurrent_per_user`, `max_input_bytes`, `max_stdout_bytes`, `max_stderr_bytes`, `max_retained_output_bytes`, `max_duration_seconds`, `max_background_seconds` |
+| `transfers`       | `used_bytes`, `objects`, `inflight_bytes` (bytes still reserved or claimed), `max_bytes_per_user`, `max_inflight_bytes_per_user`, `max_objects_per_user`, `max_file_bytes`, `ttl_seconds`                        |
+| `lifecycle`       | `retention_days`, `start_wait_seconds`, `idle` { `auto_stop_enabled`, `timeout_minutes` (the owner's settings), `provider_max_minutes` (GitHub's maximum idle timeout) }                                         |
+| `provider`        | `billing: "unavailable"`: GitHub does not expose the account's Codespaces quota or billing to Moira                                                                                                              |
+
+`instance_held` is the only instance-wide figure; no other user's codespaces or
+identifiers appear.
 Every grant-dependent discovery or creation action — `list`, `setup_help` and
 `create` — refreshes the stored installation and repository snapshot after a
 bounded TTL before using it. `list` also accepts `refresh: true` to force that
@@ -561,7 +580,8 @@ errors with `code`, safe `message` and `retryable`; actionable setup, authorizat
 capacity refusals carry the same provider link set as `setup_help`, plus the
 same-origin `settings_url` where applicable. A refusal that knows a bounded fact the caller
 may act on adds it to that message: a creation refused by `CODESPACE_POLICY_LIMIT` names
-whether the per-user active ceiling, the instance-wide active ceiling or the creation
+whether the per-user ceiling on held codespaces (stopped ones count, so the message
+suggests deleting one no longer needed), the instance-wide ceiling or the creation
 throttle stopped it, and that ceiling's configured value. The addition never names a
 user, codespace or repository, so a caller refused by instance capacity learns only that
 the instance is full. The website management API adds the same sentence to its own
@@ -591,14 +611,14 @@ The routes are mounted under `/api/integrations/github/codespaces` behind
 `requireAuth` and are a second presentation of the same services the MCP tools use,
 with identical tenant, generation and confirmation authority:
 
-| Method   | Path                  | Behavior                                                                                                                                     |
-| -------- | --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GET`    | `/`                   | Refreshes grants behind the TTL, then returns readiness, connection, approved repositories, `repositories_stale`, and summaries still in use |
-| `POST`   | `/`                   | Refreshes grants before authorization and creation for `repository_id` and `ref`; returns the sanitized (possibly pending) codespace         |
-| `GET`    | `/:codespaceId`       | One owned codespace plus its recent metadata-only operations                                                                                 |
-| `POST`   | `/:codespaceId/start` | Records desired running state; `data_preserved: true`                                                                                        |
-| `POST`   | `/:codespaceId/stop`  | Records desired stopped state; `data_preserved: true`                                                                                        |
-| `DELETE` | `/:codespaceId`       | Requires `confirm_delete: true` and the current `expected_generation`; `data_preserved: false`                                               |
+| Method   | Path                  | Behavior                                                                                                                                              |
+| -------- | --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET`    | `/`                   | Refreshes grants behind the TTL, then returns readiness, connection, approved repositories, `repositories_stale`, summaries still in use and `limits` |
+| `POST`   | `/`                   | Refreshes grants before authorization and creation for `repository_id` and `ref`; returns the sanitized (possibly pending) codespace                  |
+| `GET`    | `/:codespaceId`       | One owned codespace plus its recent metadata-only operations                                                                                          |
+| `POST`   | `/:codespaceId/start` | Records desired running state; `data_preserved: true`                                                                                                 |
+| `POST`   | `/:codespaceId/stop`  | Records desired stopped state; `data_preserved: true`                                                                                                 |
+| `DELETE` | `/:codespaceId`       | Requires `confirm_delete: true` and the current `expected_generation`; `data_preserved: false`                                                        |
 
 Domain failures map to bounded codes: not found and malformed IDs return the generic
 404, generation conflicts and not-running states 409, quota and busy 429, provider
@@ -745,8 +765,8 @@ not supplied:
 | `CODESPACE_MAX_CPU_CORES`                      |       4 | Maximum selected Linux machine CPU cores                     |
 | `CODESPACE_MAX_MEMORY_GB`                      |       8 | Maximum selected machine memory                              |
 | `CODESPACE_MAX_STORAGE_GB`                     |      32 | Maximum selected machine storage                             |
-| `CODESPACE_MAX_ACTIVE_PER_USER`                |       4 | Active resource reservations per user                        |
-| `CODESPACE_MAX_ACTIVE_GLOBAL`                  |      16 | Active resource reservations across the instance             |
+| `CODESPACE_MAX_ACTIVE_PER_USER`                |       4 | Codespaces a user may hold, stopped ones included            |
+| `CODESPACE_MAX_ACTIVE_GLOBAL`                  |      16 | Codespaces held across the instance, stopped ones included   |
 | `CODESPACE_CREATE_THROTTLE_SECONDS`            |      60 | Minimum interval between creation reservations               |
 | `CODESPACE_REMOTE_TTL_MINUTES`                 |     120 | Creation expiry; only legacy disposable rows use it          |
 | `CODESPACE_PERSISTENT_RETENTION_DAYS`          |      30 | Codespaces stopped-codespace retention requested at creation |

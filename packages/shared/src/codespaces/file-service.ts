@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { settleAfterDispatch } from "./settle-after-dispatch.js";
+import { effectiveCodespaceLimits } from "./resource-policy.js";
 import { requireCodespaceTransportAvailable } from "./transport-availability.js";
 import type {
   CodespaceFileOperationResponse,
@@ -94,7 +95,7 @@ function validateRequest(
   ) {
     throw new CodespaceResourceError("CODESPACE_RESOURCE_INVALID", "Invalid codespace path");
   }
-  const maximum = policy.maxTransferFileBytes ?? 4 * 1024 * 1024;
+  const maximum = effectiveCodespaceLimits(policy).transfers.maxFileBytes;
   const inputBytes = inputBytesOverride ?? requestBytes(request);
   if (!Number.isSafeInteger(inputBytes) || inputBytes > maximum) {
     throw new CodespaceResourceError("CODESPACE_POLICY_LIMIT", "File input exceeds its limit");
@@ -238,7 +239,7 @@ export class CodespaceFileService {
       request,
       input.reference.declaredSize ??
         Math.min(
-          this.dependencies.policy().maxTransferFileBytes ?? 4 * 1024 * 1024,
+          effectiveCodespaceLimits(this.dependencies.policy()).transfers.maxFileBytes,
           4 * 1024 * 1024,
         ),
     );
@@ -427,7 +428,7 @@ export class CodespaceFileService {
         inputBytes,
         stdoutLimitBytes: outputLimit,
         stderrLimitBytes: 1,
-        deadlineAt: this.now() + Math.min(policy.maxOperationMs ?? 15 * 60_000, 15 * 60_000),
+        deadlineAt: this.now() + effectiveCodespaceLimits(policy).operations.maxDurationMs,
         policy,
         now: this.now(),
       });
@@ -707,7 +708,7 @@ export class CodespaceFileService {
   }
 
   private outputLimit(request: CodespaceFileRequest, policy: CodespaceResourcePolicy): number {
-    const maximum = policy.maxTransferFileBytes ?? 4 * 1024 * 1024;
+    const maximum = effectiveCodespaceLimits(policy).transfers.maxFileBytes;
     if (request.action === "read") return request.length;
     if (request.action === "download") return request.maxBytes;
     if (request.action === "search") return request.maxBytes;

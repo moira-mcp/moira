@@ -8,11 +8,13 @@ import * as os from "node:os";
 import {
   CODESPACE_PROVIDER_CONTRACT_VERSION,
   CODESPACE_PROVIDER_GITHUB,
+  CodespaceObservabilityService,
   CodespaceOperationRepository,
   CodespaceProviderRegistry,
   CodespaceResourceError,
   CodespaceResourceRepository,
   CodespaceResourceService,
+  CodespaceTransferRepository,
   evaluateCodespaceResourcePolicy,
   projectCodespaceSummary,
   type CodespaceCreateProviderResult,
@@ -2614,6 +2616,150 @@ describe("the provider's own view of running codespaces is observed periodically
         lastOutcome: "provider_observed_stopped",
       });
       expect(value.provider.stopCalls).not.toHaveBeenCalled();
+    } finally {
+      value.sqlite.close();
+    }
+  });
+});
+
+describe("each user sees their own codespace limits beside their use", () => {
+  function limitsOf(value: Fixture, userId: string) {
+    return new CodespaceObservabilityService({
+      providerId: CODESPACE_PROVIDER_GITHUB,
+      config: () => ({ state: "absent" }) as never,
+      policy: () => value.policy,
+      resources: value.repository,
+      operations: new CodespaceOperationRepository(value.sqlite),
+      transfers: new CodespaceTransferRepository(value.sqlite),
+      transport: null,
+      now: value.clock,
+    }).limits(userId);
+  }
+
+  test("a user holding a running and a stopped codespace sees both held against the configured ceiling", async () => {
+    // Values that are nobody's default, so a number that comes from anywhere but the policy fails.
+    const value = fixture({
+      maxActivePerUser: 7,
+      maxActiveGlobal: 9,
+      createThrottleMs: 0,
+      maxConcurrentOperationsPerUser: 3,
+      maxTransferObjectsPerUser: 6,
+      maxTransferBytesPerUser: 5 * 1024 * 1024,
+      maxTransferInflightBytesPerUser: 3 * 1024 * 1024,
+      persistentRetentionMs: 12 * 24 * 60 * 60_000,
+    });
+    try {
+      const running = await value.service.create("user-1", "301", "refs/heads/main");
+      value.provider.park("silver-space-456");
+      const stopped = await value.service.create("user-1", "301", "refs/heads/other");
+      await value.service.stopCodespace("user-1", stopped.resource.id);
+      value.provider.park("silver-space-789");
+      await value.service.create("user-2", "302", "refs/heads/main");
+      expect(reserveOperation(value, running.resource.id)).toBe("reserved");
+      const transfers = new CodespaceTransferRepository(value.sqlite);
+      const reserveTransfer = (declaredSize: number) =>
+        transfers.reserve({
+          userId: "user-1",
+          purpose: "codespace_download",
+          fileName: "result.txt",
+          mimeType: "text/plain",
+          declaredSize,
+          ownerPid: 1,
+          ownerStartTime: null,
+          policy: value.policy,
+          now: value.clock(),
+        })!;
+      // One transfer still in flight, and one already stored: only the first counts as in flight.
+      reserveTransfer(2048);
+      const stored = reserveTransfer(1024);
+      value.sqlite
+        .prepare("UPDATE codespaceTransfer SET state = 'ready' WHERE id = ?")
+        .run(stored.record.id);
+
+      const limits = limitsOf(value, "user-1");
+      expect(limits.codespaces).toEqual({
+        held: 2,
+        max_per_user: 7,
+        instance_held: 3,
+        max_instance: 9,
+        create_throttle_seconds: 0,
+      });
+      expect(limits.operations).toMatchObject({ active: 1, max_concurrent_per_user: 3 });
+      expect(limits.transfers).toMatchObject({
+        used_bytes: 3072,
+        objects: 2,
+        inflight_bytes: 2048,
+        max_bytes_per_user: 5 * 1024 * 1024,
+        max_inflight_bytes_per_user: 3 * 1024 * 1024,
+        max_objects_per_user: 6,
+      });
+      expect(limits.lifecycle).toMatchObject({ retention_days: 12, start_wait_seconds: 60 });
+      expect(limits.machine_ceiling).toEqual({
+        cpu_cores: value.policy.maxCpuCores,
+        memory_bytes: value.policy.maxMemoryBytes,
+        storage_bytes: value.policy.maxStorageBytes,
+      });
+      // Nothing the provider did not say is presented as a number.
+      expect(limits.provider).toEqual({ billing: "unavailable" });
+      // Another user's view counts only their own codespace.
+      expect(limitsOf(value, "user-2").codespaces).toMatchObject({ held: 1, instance_held: 3 });
+    } finally {
+      value.sqlite.close();
+    }
+  });
+
+  test.each([
+    ["never changed", null, null, { auto_stop_enabled: true, timeout_minutes: 30 }],
+    ["turned off", "false", null, { auto_stop_enabled: false, timeout_minutes: 30 }],
+    ["set to 45 minutes", "true", "45", { auto_stop_enabled: true, timeout_minutes: 45 }],
+  ] as const)(
+    "the idle block reports auto-pause %s, with GitHub's own 240-minute maximum",
+    (_name, autoStop, timeout, expected) => {
+      const value = fixture();
+      try {
+        if (autoStop !== null)
+          setPreference(value, "user-1", "codespaces.auto_stop_enabled", autoStop);
+        if (timeout !== null)
+          setPreference(value, "user-1", "codespaces.idle_timeout_minutes", timeout);
+        expect(limitsOf(value, "user-1").lifecycle.idle).toEqual({
+          ...expected,
+          provider_max_minutes: 240,
+        });
+      } finally {
+        value.sqlite.close();
+      }
+    },
+  );
+
+  test("the per-user refusal says stopped codespaces are held and deleting one frees a slot", async () => {
+    const value = fixture();
+    try {
+      const created = await value.service.create("user-1", "301", "refs/heads/main");
+      await value.service.stopCodespace("user-1", created.resource.id);
+      value.provider.park("silver-space-456");
+      await expect(value.service.create("user-1", "301", "refs/heads/main")).rejects.toMatchObject({
+        code: "CODESPACE_POLICY_LIMIT",
+        message: "Codespace per-user held limit reached",
+        detail: expect.stringMatching(
+          /hold 1 codespaces.*Stopped codespaces count too.*delete one/,
+        ),
+      });
+    } finally {
+      value.sqlite.close();
+    }
+  });
+
+  test("the instance refusal says stopped codespaces are held too", async () => {
+    const value = fixture({ maxActivePerUser: 2, maxActiveGlobal: 1 });
+    try {
+      const created = await value.service.create("user-1", "301", "refs/heads/main");
+      await value.service.stopCodespace("user-1", created.resource.id);
+      value.provider.park("silver-space-456");
+      await expect(value.service.create("user-2", "302", "refs/heads/main")).rejects.toMatchObject({
+        code: "CODESPACE_POLICY_LIMIT",
+        message: "Codespace instance held limit reached",
+        detail: expect.stringMatching(/ceiling of 1 held codespaces.*stopped ones count/),
+      });
     } finally {
       value.sqlite.close();
     }

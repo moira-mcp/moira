@@ -47,6 +47,13 @@ describe("codespace management and controls on a default-disabled installation",
       connection: { state: "disabled" },
       repositories: [],
       codespaces: [],
+      // The user's limits are present even while the feature is off: nothing held, and provider
+      // billing reported as unavailable rather than as a number.
+      limits: {
+        codespaces: { held: 0 },
+        lifecycle: { idle: { provider_max_minutes: 240 } },
+        provider: { billing: "unavailable" },
+      },
     });
     expect(JSON.stringify(body)).not.toMatch(/accessToken|refreshToken|clientSecret|vaultKey/);
   });

@@ -4,6 +4,7 @@
 
 import type {
   CodespaceConnectionView,
+  CodespaceLimitsView,
   CodespacePublicReadinessView,
   CodespaceReadinessView,
   CodespaceSummaryView,
@@ -16,6 +17,7 @@ export interface CodespaceManagementView {
   repositories: Array<{ repository_id: string; name: string; private: boolean }>;
   repositories_stale: boolean;
   codespaces: CodespaceSummaryView[];
+  limits: CodespaceLimitsView;
 }
 import { WorkflowValidationStatus } from "./react-flow-types";
 import { WorkflowGraph, ValidationResult, WorkflowFileInfo } from "./workflow-types";

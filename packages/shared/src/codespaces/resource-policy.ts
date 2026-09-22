@@ -183,3 +183,96 @@ export function evaluateCodespaceResourcePolicy(
     transferTtlMs: scaledInteger("CODESPACE_TRANSFER_TTL_MINUTES", 10, 60_000, 1, 60),
   };
 }
+
+/**
+ * Ceilings the connector imposes whatever policy says. A configured policy value above one of these
+ * is cut to it; `evaluateCodespaceResourcePolicy` already keeps shipped values within them.
+ */
+export const CODESPACE_CONNECTOR_LIMITS = {
+  maxInputBytes: 4 * 1024 * 1024,
+  maxOutputBytes: 8 * 1024 * 1024,
+  maxDurationMs: 15 * 60_000,
+  maxBackgroundMs: 24 * 60 * 60_000,
+  maxRetainedOutputBytes: 4 * 1024 * 1024 * 1024,
+  maxTransferFileBytes: 4 * 1024 * 1024,
+} as const;
+
+/** Every limit Moira enforces, with the optional policy values resolved as enforcement reads them. */
+export interface CodespaceEffectiveLimits {
+  persistentRetentionMs: number;
+  operations: {
+    maxConcurrentPerUser: number;
+    maxConcurrentGlobal: number;
+    maxInputBytes: number;
+    maxStdoutBytes: number;
+    maxStderrBytes: number;
+    maxRetainedOutputBytes: number;
+    maxDurationMs: number;
+    maxBackgroundMs: number;
+  };
+  transfers: {
+    maxFileBytes: number;
+    maxBytesPerUser: number;
+    maxBytesGlobal: number;
+    maxObjectsPerUser: number;
+    maxObjectsGlobal: number;
+    maxInflightBytesPerUser: number;
+    maxInflightBytesGlobal: number;
+    ttlMs: number;
+  };
+}
+
+/**
+ * The one place an optional policy value gets its default and its connector ceiling. The code that
+ * enforces a limit and the view that reports it both read it from here, so a caller is never shown
+ * a number that is not the one applied.
+ */
+export function effectiveCodespaceLimits(
+  policy: CodespaceResourcePolicy,
+): CodespaceEffectiveLimits {
+  const connector = CODESPACE_CONNECTOR_LIMITS;
+  return {
+    persistentRetentionMs: policy.persistentRetentionMs ?? 30 * 24 * 60 * 60_000,
+    operations: {
+      maxConcurrentPerUser: policy.maxConcurrentOperationsPerUser ?? 2,
+      maxConcurrentGlobal: policy.maxConcurrentOperationsGlobal ?? 20,
+      maxInputBytes: Math.min(
+        policy.maxOperationInputBytes ?? 1024 * 1024,
+        connector.maxInputBytes,
+      ),
+      maxStdoutBytes: Math.min(
+        policy.maxOperationStdoutBytes ?? 1024 * 1024,
+        connector.maxOutputBytes,
+      ),
+      maxStderrBytes: Math.min(
+        policy.maxOperationStderrBytes ?? 256 * 1024,
+        connector.maxOutputBytes,
+      ),
+      maxRetainedOutputBytes: Math.min(
+        policy.maxRetainedOutputBytes ?? 64 * 1024 * 1024,
+        connector.maxRetainedOutputBytes,
+      ),
+      maxDurationMs: Math.min(
+        policy.maxOperationMs ?? connector.maxDurationMs,
+        connector.maxDurationMs,
+      ),
+      maxBackgroundMs: Math.min(
+        policy.maxBackgroundOperationMs ?? 4 * 60 * 60_000,
+        connector.maxBackgroundMs,
+      ),
+    },
+    transfers: {
+      maxFileBytes: Math.min(
+        policy.maxTransferFileBytes ?? connector.maxTransferFileBytes,
+        connector.maxTransferFileBytes,
+      ),
+      maxBytesPerUser: policy.maxTransferBytesPerUser ?? 100 * 1024 * 1024,
+      maxBytesGlobal: policy.maxTransferBytesGlobal ?? 1024 * 1024 * 1024,
+      maxObjectsPerUser: policy.maxTransferObjectsPerUser ?? 10,
+      maxObjectsGlobal: policy.maxTransferObjectsGlobal ?? 1000,
+      maxInflightBytesPerUser: policy.maxTransferInflightBytesPerUser ?? 40 * 1024 * 1024,
+      maxInflightBytesGlobal: policy.maxTransferInflightBytesGlobal ?? 256 * 1024 * 1024,
+      ttlMs: policy.transferTtlMs ?? 10 * 60_000,
+    },
+  };
+}

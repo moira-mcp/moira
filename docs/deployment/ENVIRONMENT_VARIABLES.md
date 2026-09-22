@@ -173,8 +173,8 @@ docker compose --profile codespaces up -d
 | `CODESPACE_MAX_CPU_CORES`                      |       4 | Maximum selected Linux machine CPU cores                    |
 | `CODESPACE_MAX_MEMORY_GB`                      |       8 | Maximum selected machine memory                             |
 | `CODESPACE_MAX_STORAGE_GB`                     |      32 | Maximum selected machine storage                            |
-| `CODESPACE_MAX_ACTIVE_PER_USER`                |       4 | Active resource reservations per user; maximum 64           |
-| `CODESPACE_MAX_ACTIVE_GLOBAL`                  |      16 | Instance-wide active resource reservations; maximum 1024    |
+| `CODESPACE_MAX_ACTIVE_PER_USER`                |       4 | Codespaces a user holds, stopped included; maximum 64       |
+| `CODESPACE_MAX_ACTIVE_GLOBAL`                  |      16 | Codespaces held instance-wide, stopped included; max 1024   |
 | `CODESPACE_CREATE_THROTTLE_SECONDS`            |      60 | Minimum interval between creation reservations              |
 | `CODESPACE_REMOTE_TTL_MINUTES`                 |     120 | Creation expiry; used only by legacy disposable rows; min 5 |
 | `CODESPACE_PERSISTENT_RETENTION_DAYS`          |      30 | Provider retention requested for stopped codespaces; max 30 |

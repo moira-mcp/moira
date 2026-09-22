@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { CodespaceProviderRegistry } from "./provider-registry.js";
+import { effectiveCodespaceLimits } from "./resource-policy.js";
 import {
   CODESPACE_IDLE_TIMEOUT_MINUTES,
   CodespaceResourceRepository,
@@ -707,7 +708,7 @@ export class CodespaceResourceService {
         idleTimeoutMinutes: CODESPACE_IDLE_TIMEOUT_MINUTES.maximum,
         retentionMinutes: Math.min(
           43_200,
-          Math.max(1, Math.ceil((policy.persistentRetentionMs ?? 30 * 24 * 60 * 60_000) / 60_000)),
+          Math.max(1, Math.ceil(effectiveCodespaceLimits(policy).persistentRetentionMs / 60_000)),
         ),
       });
     } catch {

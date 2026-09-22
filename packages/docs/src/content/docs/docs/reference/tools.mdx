@@ -160,6 +160,16 @@ is absent from it while `get` still answers for its `codespace_id`. `stop` prese
 stored repositories with `repositories_stale: true`; a repository newly granted to the App therefore
 appears without reconnecting once refresh succeeds.
 
+`list` also returns `limits`: the limits Moira enforces for you, next to your current use. It covers
+the codespaces you hold against your own ceiling and the instance-wide one, plus the interval between
+creations; the largest machine you may select; your active operations against the concurrency limit,
+with the input, output, retained-output, duration and background limits; your transfer bytes and
+objects against their limits, the bytes still in flight against the in-flight limit, the largest
+file and the link lifetime; retention of stopped
+codespaces, the start wait and your idle auto-pause setting with GitHub's maximum idle timeout.
+Provider billing is reported as `unavailable`, because GitHub does not expose your Codespaces quota or
+billing to Moira. The website's codespace list returns the same limits.
+
 A provider-side repository rename keeps its codespace usable because identity follows the provider
 repository ID. The stored display name refreshes during lifecycle work; a different repository ID is
 still refused.
@@ -250,8 +260,9 @@ The agent runs as the ordinary Codespace user with that environment's repository
 configured secrets. Moira bounds its own concurrency, input/output size, time and quotas and
 protects the Moira server and other users; it does not sandbox the codespace from the agent its
 owner authorized. A user may hold several codespaces at once, and a creation refused by a ceiling
-says which one refused it: your own active-codespace ceiling, the instance-wide one, or the interval
-between creations. The refusal names that ceiling's configured value and never names another user or
+says which one refused it: your own ceiling on the codespaces you hold, the instance-wide one, or the
+interval between creations. Stopped codespaces count toward your ceiling, so delete one you no longer
+need to free a slot. The refusal names that ceiling's configured value and never names another user or
 their codespaces. When GitHub itself refuses a creation, start, stop or delete, the error says so
 rather than reporting an internal failure: it distinguishes a grant you must reauthorize, a request
 GitHub will refuse again however many times you repeat it, and a provider outage worth retrying, and

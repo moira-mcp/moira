@@ -1321,8 +1321,8 @@ markers, claims, capabilities or credentials.
 
 ### GET /api/integrations/github/codespaces
 
-Returns the instance readiness view, the connection view, approved repositories and
-the user's codespaces.
+Returns the instance readiness view, the connection view, approved repositories, the
+user's codespaces and the user's limits.
 
 ```typescript
 {
@@ -1333,12 +1333,56 @@ the user's codespaces.
     repositories: Array<{ repository_id: string; name: string; private: boolean }>;
     repositories_stale: boolean;
     codespaces: CodespaceSummaryView[];
+    limits: CodespaceLimitsView;
   }
 }
 ```
 
 The route refreshes grants behind the normal TTL. If the provider cannot be reached,
 it keeps the saved repositories and returns `repositories_stale: true`.
+
+`limits` is the same view the MCP `codespace` `list` action returns. Each limit is the
+value Moira enforces, next to the user's current use; it is read from policy and the
+database without a provider call:
+
+```typescript
+interface CodespaceLimitsView {
+  codespaces: {
+    held: number; // stopped codespaces and ones still being created or cleaned up count
+    max_per_user: number;
+    instance_held: number;
+    max_instance: number;
+    create_throttle_seconds: number;
+  };
+  machine_ceiling: { cpu_cores: number; memory_bytes: number; storage_bytes: number };
+  operations: {
+    active: number;
+    max_concurrent_per_user: number;
+    max_input_bytes: number;
+    max_stdout_bytes: number;
+    max_stderr_bytes: number;
+    max_retained_output_bytes: number;
+    max_duration_seconds: number;
+    max_background_seconds: number;
+  };
+  transfers: {
+    used_bytes: number;
+    objects: number;
+    inflight_bytes: number; // bytes of transfers still reserved or claimed
+    max_bytes_per_user: number;
+    max_inflight_bytes_per_user: number;
+    max_objects_per_user: number;
+    max_file_bytes: number;
+    ttl_seconds: number;
+  };
+  lifecycle: {
+    retention_days: number;
+    start_wait_seconds: number;
+    idle: { auto_stop_enabled: boolean; timeout_minutes: number; provider_max_minutes: number };
+  };
+  provider: { billing: "unavailable" }; // GitHub does not expose Codespaces quota or billing
+}
+```
 
 ### POST /api/integrations/github/codespaces
 

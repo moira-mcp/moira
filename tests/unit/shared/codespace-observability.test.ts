@@ -58,10 +58,13 @@ function dependencies(
       ],
       countActive: () => 2,
       dueSummary: () => ({ count: 1, oldestUpdatedAt: NOW - 45_000 }),
+      countHeld: () => 1,
+      idlePolicy: () => ({ autoStopEnabled: true, idleTimeoutMinutes: 30 }),
     },
     operations: {
       countActive: () => 3,
       dueSummary: () => ({ count: 2, oldestUpdatedAt: NOW - 5_000 }),
+      countActiveForUser: () => 1,
     },
     transfers: {
       listLive: () =>
@@ -69,6 +72,7 @@ function dependencies(
           { declaredSize: 1024, observedSize: 512 },
           { declaredSize: 4096, observedSize: null },
         ] as ReturnType<CodespaceObservabilityDependencies["transfers"]["listLive"]>,
+      usageForUser: () => ({ objects: 0, bytes: 0, inflightBytes: 0 }),
     },
     transport: { health: async () => ({ ok: true, reason: null }) },
     now: () => NOW,

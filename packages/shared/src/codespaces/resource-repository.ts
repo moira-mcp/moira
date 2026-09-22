@@ -182,6 +182,21 @@ export class CodespaceResourceRepository {
     });
   }
 
+  /**
+   * Codespaces a user holds: every one that is not finished, stopped ones and ones still being
+   * created or cleaned up included. This is the count the per-user ceiling limits.
+   */
+  countHeld(userId: string, provider: string): number {
+    return (
+      this.sqlite
+        .prepare(
+          `SELECT COUNT(*) count FROM codespaceResource
+           WHERE userId = ? AND provider = ? AND state IN (${placeholders(ACTIVE_STATES)})`,
+        )
+        .get(userId, provider, ...ACTIVE_STATES) as { count: number }
+    ).count;
+  }
+
   countActive(provider: string): number {
     return (
       this.sqlite
@@ -389,35 +404,20 @@ export class CodespaceResourceRepository {
     policy: CodespaceResourcePolicy,
     now: number,
   ): CodespaceCreateCapacityRefusal | null {
-    const activeSql = placeholders(ACTIVE_STATES);
-    const userActive = (
-      this.sqlite
-        .prepare(
-          `SELECT COUNT(*) count FROM codespaceResource
-        WHERE userId = ? AND provider = ? AND state IN (${activeSql})`,
-        )
-        .get(userId, provider, ...ACTIVE_STATES) as { count: number }
-    ).count;
-    const globalActive = (
-      this.sqlite
-        .prepare(
-          `SELECT COUNT(*) count FROM codespaceResource
-        WHERE provider = ? AND state IN (${activeSql})`,
-        )
-        .get(provider, ...ACTIVE_STATES) as { count: number }
-    ).count;
-    if (userActive >= policy.maxActivePerUser) {
+    const userHeld = this.countHeld(userId, provider);
+    const globalActive = this.countActive(provider);
+    if (userHeld >= policy.maxActivePerUser) {
       return {
         outcome: "limit",
-        reason: "Codespace per-user concurrency limit reached",
-        detail: `You already hold ${policy.maxActivePerUser} active codespaces, which is the per-user ceiling. Delete one before creating another.`,
+        reason: "Codespace per-user held limit reached",
+        detail: `You already hold ${policy.maxActivePerUser} codespaces, which is the per-user ceiling. Stopped codespaces count too; delete one you no longer need to free a slot.`,
       };
     }
     if (globalActive >= policy.maxActiveGlobal) {
       return {
         outcome: "limit",
-        reason: "Codespace instance concurrency limit reached",
-        detail: `This Moira instance is at its ceiling of ${policy.maxActiveGlobal} active codespaces. Retry once capacity frees up.`,
+        reason: "Codespace instance held limit reached",
+        detail: `This Moira instance is at its ceiling of ${policy.maxActiveGlobal} held codespaces; stopped ones count too. Retry once capacity frees up.`,
       };
     }
     const last = this.sqlite

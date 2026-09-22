@@ -23,7 +23,12 @@ import type {
   CodespaceTransportAvailability,
 } from "./resource-types.js";
 import type { CodespaceTransferRepository } from "./transfer-repository.js";
-import type { CodespaceReadinessView } from "./views.js";
+import { CODESPACE_IDLE_TIMEOUT_MINUTES } from "./resource-repository.js";
+import {
+  projectCodespaceLimits,
+  type CodespaceLimitsView,
+  type CodespaceReadinessView,
+} from "./views.js";
 
 const TERMINAL_OPERATION_STATES = new Set(["succeeded", "failed", "cancelled", "timed_out"]);
 
@@ -90,9 +95,15 @@ export interface CodespaceObservabilityDependencies {
   providerId: string;
   config: () => CodespaceGitHubConfigStatus;
   policy: () => CodespaceResourcePolicy;
-  resources: Pick<CodespaceResourceRepository, "listControls" | "countActive" | "dueSummary">;
-  operations: Pick<CodespaceOperationRepository, "countActive" | "dueSummary">;
-  transfers: Pick<CodespaceTransferRepository, "listLive">;
+  resources: Pick<
+    CodespaceResourceRepository,
+    "listControls" | "countActive" | "dueSummary" | "countHeld" | "idlePolicy"
+  >;
+  operations: Pick<
+    CodespaceOperationRepository,
+    "countActive" | "dueSummary" | "countActiveForUser"
+  >;
+  transfers: Pick<CodespaceTransferRepository, "listLive" | "usageForUser">;
   /** Present only when the provider composition exists; absent while configuration is missing. */
   transport: CodespaceTransportAvailability | null;
   now?: () => number;
@@ -167,6 +178,23 @@ export class CodespaceObservabilityService {
     } finally {
       if (timer) clearTimeout(timer);
     }
+  }
+
+  /**
+   * One user's limits beside their use, read from policy and the database only: no provider call is
+   * made, so listing codespaces costs the provider nothing more than it did.
+   */
+  limits(userId: string): CodespaceLimitsView {
+    const provider = this.dependencies.providerId;
+    return projectCodespaceLimits({
+      policy: this.dependencies.policy(),
+      held: this.dependencies.resources.countHeld(userId, provider),
+      instanceHeld: this.dependencies.resources.countActive(provider),
+      activeOperations: this.dependencies.operations.countActiveForUser(userId),
+      transfers: this.dependencies.transfers.usageForUser(userId),
+      idle: this.dependencies.resources.idlePolicy(userId),
+      providerIdleMaxMinutes: CODESPACE_IDLE_TIMEOUT_MINUTES.maximum,
+    });
   }
 
   async readiness(): Promise<CodespaceReadinessView> {
