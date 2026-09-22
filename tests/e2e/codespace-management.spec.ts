@@ -53,7 +53,8 @@ function codespace(overrides: Partial<CodespaceSummaryView> = {}): CodespaceSumm
     provider: "github-codespaces",
     repository_id: "101",
     repository: "witqq/private-project",
-    ref: "main",
+    requested_ref: "main",
+    current_ref: "main",
     machine: {
       name: "basicLinux32gb",
       display_name: "2 cores, 8 GB RAM, 32 GB storage",
@@ -112,7 +113,8 @@ test("codespaces are created, stopped and deleted with confirmation from Setting
       const body = request.postDataJSON() as { repository_id: string; ref: string };
       const created = codespace({
         codespace_id: "33333333-3333-4333-8333-333333333333",
-        ref: body.ref,
+        requested_ref: body.ref,
+        current_ref: null,
         state: "create_submitted",
         observed_state: "provisioning",
         generation: 1,

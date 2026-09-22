@@ -41,6 +41,9 @@ function expectedRowsAfterRename(table: string, storedRows: StoredRow[]): Stored
     }
     if (table === "workspaceResource") {
       expected.lastOutcome = String(expected.lastOutcome).replace("workspace_", "codespace_");
+      // Added by the later observed-ref migration, with its defaults for existing rows.
+      expected.observedRef = null;
+      expected.reconcileFailures = 0;
     }
     if (table === "workspaceOperation") {
       expected.lastOutcome = String(expected.lastOutcome).replace("workspace_", "codespace_");

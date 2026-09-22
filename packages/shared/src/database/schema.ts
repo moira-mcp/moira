@@ -288,6 +288,8 @@ export const codespaceResource = sqliteTable(
     repositoryId: text("repositoryId").notNull(),
     repositoryFullName: text("repositoryFullName").notNull(),
     requestedRef: text("requestedRef").notNull(),
+    /** Ref the provider last reported checked out; observed state, not identity. */
+    observedRef: text("observedRef"),
     operationMarker: text("operationMarker").notNull(),
     providerResourceName: text("providerResourceName"),
     externalOwnerId: text("externalOwnerId"),
@@ -308,6 +310,8 @@ export const codespaceResource = sqliteTable(
     cleanupDeadlineAt: integer("cleanupDeadlineAt", { mode: "timestamp_ms" }),
     claimId: text("claimId"),
     claimExpiresAt: integer("claimExpiresAt", { mode: "timestamp_ms" }),
+    /** Consecutive unconverged reconciler passes; drives the bounded retry backoff. */
+    reconcileFailures: integer("reconcileFailures").notNull().default(0),
     lastOutcome: text("lastOutcome"),
     createdAt: integer("createdAt", { mode: "timestamp_ms" }).notNull(),
     updatedAt: integer("updatedAt", { mode: "timestamp_ms" }).notNull(),

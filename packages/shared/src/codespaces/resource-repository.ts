@@ -132,7 +132,10 @@ export class CodespaceResourceRepository {
     ).count;
   }
 
-  /** Records that the reconciliation loop would claim now, regardless of active claims. */
+  /**
+   * Records with reconciliation work outstanding: the ones the loop would claim now, plus those it
+   * holds by an active claim or defers by a retry backoff (both kept in `claimExpiresAt`).
+   */
   dueSummary(now: number): { count: number; oldestUpdatedAt: number | null } {
     const row = this.sqlite
       .prepare(
@@ -465,6 +468,21 @@ export class CodespaceResourceRepository {
     return row?.userId ?? null;
   }
 
+  /**
+   * Moves records that a rebind pass could not re-verify to the back of the rebind order. The order
+   * is oldest `updatedAt` first, so without this one record that can never be rebound would be
+   * selected on every pass and no other user's codespaces would ever be rebound.
+   */
+  touchAuthorizationRebindAttempt(resourceIds: readonly string[], now: number): void {
+    if (resourceIds.length === 0) return;
+    this.sqlite
+      .prepare(
+        `UPDATE codespaceResource SET updatedAt = ?
+         WHERE id IN (${placeholders(resourceIds)}) AND updatedAt < ?`,
+      )
+      .run(now, ...resourceIds, now);
+  }
+
   rebindAuthorization(input: {
     userId: string;
     resourceId: string;
@@ -603,6 +621,7 @@ export class CodespaceResourceRepository {
     resourceName: string;
     ownerId: string;
     billableOwnerId: string;
+    observedRef: string | null;
     state: "usable" | "cleanup_pending";
     outcome: string;
     cleanupDeadlineAt?: number;
@@ -613,8 +632,8 @@ export class CodespaceResourceRepository {
       this.sqlite
         .prepare(
           `UPDATE codespaceResource SET providerResourceName = ?, externalOwnerId = ?,
-         billableOwnerId = ?, state = ?, desiredState = ?, observedState = ?,
-         generation = generation + 1, lastOutcome = ?,
+         billableOwnerId = ?, observedRef = ?, state = ?, desiredState = ?, observedState = ?,
+         generation = generation + 1, lastOutcome = ?, reconcileFailures = 0,
          cleanupDeadlineAt = ?, claimId = NULL, claimExpiresAt = NULL, updatedAt = ?
          WHERE id = ? AND generation = ? AND claimId = ? AND state = 'create_submitted'`,
         )
@@ -622,6 +641,7 @@ export class CodespaceResourceRepository {
           input.resourceName,
           input.ownerId,
           input.billableOwnerId,
+          input.observedRef,
           input.state,
           input.state === "usable" ? "running" : "deleted",
           input.state === "usable" ? "running" : "failed",
@@ -641,6 +661,7 @@ export class CodespaceResourceRepository {
     resourceName: string;
     ownerId: string;
     billableOwnerId: string;
+    observedRef: string | null;
     outcome: string;
     claimId: string;
     now: number;
@@ -649,13 +670,15 @@ export class CodespaceResourceRepository {
       this.sqlite
         .prepare(
           `UPDATE codespaceResource SET providerResourceName = ?, externalOwnerId = ?,
-         billableOwnerId = ?, lastOutcome = ?, claimId = NULL, claimExpiresAt = NULL, updatedAt = ?
+         billableOwnerId = ?, observedRef = ?, lastOutcome = ?, claimId = NULL,
+         claimExpiresAt = NULL, updatedAt = ?
          WHERE id = ? AND generation = ? AND claimId = ? AND state = 'create_submitted'`,
         )
         .run(
           input.resourceName,
           input.ownerId,
           input.billableOwnerId,
+          input.observedRef,
           input.outcome,
           input.now,
           input.resourceId,
@@ -737,7 +760,7 @@ export class CodespaceResourceRepository {
       this.sqlite
         .prepare(
           `UPDATE codespaceResource SET state = 'cleanup_pending', desiredState = 'deleted',
-         generation = generation + 1,
+         generation = generation + 1, reconcileFailures = 0,
          cleanupDeadlineAt = ?, claimId = NULL, claimExpiresAt = NULL, updatedAt = ?
          WHERE id = ? AND userId = ? AND state NOT IN ('deleted', 'rejected')
            AND EXISTS (SELECT 1 FROM codespaceLifecycleCapability c
@@ -758,7 +781,7 @@ export class CodespaceResourceRepository {
       this.sqlite
         .prepare(
           `UPDATE codespaceResource SET state = 'cleanup_pending', desiredState = 'deleted',
-         generation = generation + 1,
+         generation = generation + 1, reconcileFailures = 0,
          cleanupDeadlineAt = ?, claimId = NULL, claimExpiresAt = NULL, updatedAt = ?
          WHERE id = ? AND generation = ? AND state = 'usable'`,
         )
@@ -766,11 +789,16 @@ export class CodespaceResourceRepository {
     );
   }
 
+  /**
+   * Record the intent to run. `"unbound"` means the record exists but Moira has not yet bound it to
+   * one exact provider resource (creation still being identified, or ambiguous), so there is nothing
+   * the provider could be asked to start; `null` means there is no startable record at all.
+   */
   requestStart(
     userId: string,
     resourceId: string,
     now: number,
-  ): CodespaceResourceRecord | "disabled" | null {
+  ): CodespaceResourceRecord | "disabled" | "unbound" | null {
     const transaction = this.sqlite.transaction(() => {
       const current = this.getOwned(userId, resourceId);
       if (
@@ -786,13 +814,14 @@ export class CodespaceResourceRepository {
       ) {
         return current;
       }
-      if (!current.providerResourceName) return null;
+      if (!current.providerResourceName) return "unbound";
       if (this.isDisabled(current.provider)) return "disabled";
       const changed = this.sqlite
         .prepare(
           `UPDATE codespaceResource SET desiredState = 'running', state = 'start_pending',
            generation = generation + 1, lastOutcome = 'start_requested', claimId = NULL,
-           claimExpiresAt = NULL, updatedAt = ? WHERE id = ? AND userId = ? AND generation = ?`,
+           claimExpiresAt = NULL, reconcileFailures = 0, updatedAt = ?
+           WHERE id = ? AND userId = ? AND generation = ?`,
         )
         .run(now, resourceId, userId, current.generation).changes;
       if (changed !== 1) return null;
@@ -849,7 +878,8 @@ export class CodespaceResourceRepository {
         .prepare(
           `UPDATE codespaceResource SET desiredState = 'stopped', state = 'stop_pending',
            generation = generation + 1, lastOutcome = 'stop_requested', claimId = NULL,
-           claimExpiresAt = NULL, updatedAt = ? WHERE id = ? AND userId = ? AND generation = ?`,
+           claimExpiresAt = NULL, reconcileFailures = 0, updatedAt = ?
+           WHERE id = ? AND userId = ? AND generation = ?`,
         )
         .run(now, resourceId, userId, current.generation).changes;
       if (changed !== 1) return null;
@@ -887,7 +917,8 @@ export class CodespaceResourceRepository {
         .prepare(
           `UPDATE codespaceResource SET desiredState = 'deleted', state = 'delete_pending',
            generation = generation + 1, lastOutcome = 'delete_requested', claimId = NULL,
-           claimExpiresAt = NULL, updatedAt = ? WHERE id = ? AND userId = ? AND generation = ?`,
+           claimExpiresAt = NULL, reconcileFailures = 0, updatedAt = ?
+           WHERE id = ? AND userId = ? AND generation = ?`,
         )
         .run(now, resourceId, userId, current.generation).changes;
       if (changed !== 1) return null;
@@ -914,7 +945,7 @@ export class CodespaceResourceRepository {
     resourceId: string;
     generation: number;
     desiredState: "running" | "stopped" | "deleted";
-    observedState: "running" | "stopped" | "absent";
+    observedState: "running" | "stopped" | "absent" | "failed";
     state: "usable" | "stopped" | "deleted";
     outcome: string;
     now: number;
@@ -923,7 +954,7 @@ export class CodespaceResourceRepository {
       const changed = this.sqlite
         .prepare(
           `UPDATE codespaceResource SET state = ?, observedState = ?, lastOutcome = ?,
-           claimId = NULL, claimExpiresAt = NULL, updatedAt = ?
+           claimId = NULL, claimExpiresAt = NULL, reconcileFailures = 0, updatedAt = ?
            WHERE id = ? AND generation = ? AND desiredState = ?`,
         )
         .run(
@@ -971,7 +1002,7 @@ export class CodespaceResourceRepository {
         .prepare(
           `UPDATE codespaceResource SET state = 'deleted', desiredState = 'deleted',
            observedState = 'absent', lastOutcome = ?, claimId = NULL,
-           claimExpiresAt = NULL, updatedAt = ?
+           claimExpiresAt = NULL, reconcileFailures = 0, updatedAt = ?
            WHERE id = ? AND generation = ? AND desiredState = ?
              AND retentionPolicy = 'persistent'`,
         )
@@ -1041,18 +1072,30 @@ export class CodespaceResourceRepository {
   }
 
   /**
-   * The provider's current name for the repository, written back when a lifecycle call observed a
-   * different one. Identity is the repository id, so this changes nothing about what the record is —
-   * it keeps the name a reader sees from being the one the repository had when it was created.
+   * What the provider currently reports about facts that are not identity: the repository's current
+   * name and the ref checked out in the codespace. Identity is the repository id and the exact
+   * resource, so neither changes what the record is — writing them back keeps a reader from seeing
+   * the name the repository had, or the branch the codespace was created on, instead of today's.
    */
-  refreshRepositoryName(resourceId: string, repositoryFullName: string, now: number): boolean {
+  recordProviderObservation(
+    resourceId: string,
+    observation: { repositoryFullName: string; observedRef: string | null },
+    now: number,
+  ): boolean {
     return (
       this.sqlite
         .prepare(
-          `UPDATE codespaceResource SET repositoryFullName = ?, updatedAt = ?
-           WHERE id = ? AND repositoryFullName <> ?`,
+          `UPDATE codespaceResource SET repositoryFullName = ?, observedRef = ?, updatedAt = ?
+           WHERE id = ? AND (repositoryFullName <> ? OR observedRef IS NOT ?)`,
         )
-        .run(repositoryFullName, now, resourceId, repositoryFullName).changes === 1
+        .run(
+          observation.repositoryFullName,
+          observation.observedRef,
+          now,
+          resourceId,
+          observation.repositoryFullName,
+          observation.observedRef,
+        ).changes === 1
     );
   }
 
@@ -1071,7 +1114,7 @@ export class CodespaceResourceRepository {
           .prepare(
             `UPDATE codespaceResource SET desiredState = 'stopped', state = 'stop_pending',
              generation = generation + 1, lastOutcome = 'disconnect_stop_requested',
-             claimId = NULL, claimExpiresAt = NULL, updatedAt = ?
+             claimId = NULL, claimExpiresAt = NULL, reconcileFailures = 0, updatedAt = ?
              WHERE id = ? AND generation = ?`,
           )
           .run(now, row.id, row.generation);
@@ -1161,7 +1204,7 @@ export class CodespaceResourceRepository {
         return this.sqlite
           .prepare(
             `UPDATE codespaceResource SET state = 'cleanup_pending', desiredState = 'deleted',
-           generation = generation + 1,
+           generation = generation + 1, reconcileFailures = 0,
            cleanupDeadlineAt = ?, claimId = NULL, claimExpiresAt = NULL, updatedAt = ?
            WHERE userId = ? AND provider = ?
              AND retentionPolicy = 'legacy_disposable'
@@ -1220,6 +1263,50 @@ export class CodespaceResourceRepository {
          lastOutcome = ?, updatedAt = ? WHERE id = ? AND generation = ? AND claimId = ?`,
         )
         .run(outcome, now, resourceId, generation, claimId).changes === 1
+    );
+  }
+
+  /**
+   * Gives back a claim whose pass did not converge the record, and holds the record back from the
+   * next claims for a bounded, exponentially growing delay: `baseDelayMs` after the first such pass,
+   * doubling with each consecutive one, never more than `maxDelayMs`, and never later than
+   * `latestAt` when one is given (a deadline at which the record must be decided). `claimExpiresAt` with no
+   * claim is the "not before" time `claimDue` already honours, so a stuck record stops being the
+   * first due record on every tick and other records — other users' included — are reached.
+   *
+   * It also applies when the claim was already given back by the pass itself (a lifecycle pass that
+   * left the record pending), but never over another reconciler's live claim.
+   */
+  deferReconcile(input: {
+    resourceId: string;
+    generation: number;
+    claimId: string;
+    outcome: string | null;
+    baseDelayMs: number;
+    maxDelayMs: number;
+    latestAt: number | null;
+    now: number;
+  }): boolean {
+    return (
+      this.sqlite
+        .prepare(
+          `UPDATE codespaceResource SET claimId = NULL,
+           claimExpiresAt = MIN(?, ? + MIN(?, ? * (1 << MIN(reconcileFailures, 30)))),
+           reconcileFailures = reconcileFailures + 1,
+           lastOutcome = COALESCE(?, lastOutcome), updatedAt = ?
+           WHERE id = ? AND generation = ? AND (claimId IS NULL OR claimId = ?)`,
+        )
+        .run(
+          input.latestAt ?? Number.MAX_SAFE_INTEGER,
+          input.now,
+          input.maxDelayMs,
+          input.baseDelayMs,
+          input.outcome,
+          input.now,
+          input.resourceId,
+          input.generation,
+          input.claimId,
+        ).changes === 1
     );
   }
 
@@ -1382,7 +1469,7 @@ export class CodespaceResourceRepository {
           .prepare(
             `UPDATE codespaceResource SET desiredState = 'stopped', state = 'stop_pending',
              generation = generation + 1, lastOutcome = 'provider_disabled_stop_requested',
-             claimId = NULL, claimExpiresAt = NULL, updatedAt = ?
+             claimId = NULL, claimExpiresAt = NULL, reconcileFailures = 0, updatedAt = ?
              WHERE id = ? AND generation = ?`,
           )
           .run(input.now, row.id, row.generation);
@@ -1409,7 +1496,7 @@ export class CodespaceResourceRepository {
         ? this.sqlite
             .prepare(
               `UPDATE codespaceResource SET state = 'cleanup_pending', desiredState = 'deleted',
-             generation = generation + 1,
+             generation = generation + 1, reconcileFailures = 0,
              cleanupDeadlineAt = ?, claimId = NULL, claimExpiresAt = NULL, updatedAt = ?
              WHERE provider = ? AND retentionPolicy = 'legacy_disposable'
                AND state IN ('create_submitted', 'usable', 'ambiguous')`,
@@ -1418,7 +1505,7 @@ export class CodespaceResourceRepository {
         : this.sqlite
             .prepare(
               `UPDATE codespaceResource SET state = 'cleanup_pending', desiredState = 'deleted',
-             generation = generation + 1,
+             generation = generation + 1, reconcileFailures = 0,
              cleanupDeadlineAt = ?, claimId = NULL, claimExpiresAt = NULL, updatedAt = ?
              WHERE retentionPolicy = 'legacy_disposable'
                AND state IN ('create_submitted', 'usable', 'ambiguous')`,

@@ -1311,8 +1311,10 @@ Website management of the user's persistent cloud codespaces. These routes are
 mounted under `/api/integrations/github/codespaces` behind `requireAuth`, use the same
 domain services as the MCP `codespace` tool, and return `Cache-Control: no-store`
 and `Referrer-Policy: no-referrer`. Responses contain the sanitized codespace summary
-(opaque `codespace_id`, provider, repository, ref, machine, state, retention policy,
-desired/observed state, generation, timestamps) and never provider resource names,
+(opaque `codespace_id`, provider, repository, `requested_ref` — the ref the codespace was
+created on — and `current_ref` — the ref the provider last reported checked out, `null` until
+observed or on a detached HEAD — machine, state, retention policy, desired/observed state,
+generation, timestamps) and never provider resource names,
 markers, claims, capabilities or credentials.
 
 ### GET /api/integrations/github/codespaces
@@ -1352,7 +1354,9 @@ timestamps). Unknown, malformed and foreign IDs return `404 CODESPACE_NOT_FOUND`
 ### POST /api/integrations/github/codespaces/:codespaceId/start | /stop
 
 Records the desired running or stopped state and returns the codespace with
-`data_preserved: true`. Stop keeps the repository data.
+`data_preserved: true`. Stop keeps the repository data. Starting a codespace whose provider
+resource is not identified yet returns `409 CODESPACE_CREATE_PENDING`; starting one left
+ambiguous returns `409 CODESPACE_NOT_RUNNING`.
 
 ### DELETE /api/integrations/github/codespaces/:codespaceId
 

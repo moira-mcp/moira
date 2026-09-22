@@ -8,11 +8,13 @@ import * as os from "node:os";
 import {
   CODESPACE_PROVIDER_CONTRACT_VERSION,
   CODESPACE_PROVIDER_GITHUB,
+  CodespaceOperationRepository,
   CodespaceProviderRegistry,
   CodespaceResourceError,
   CodespaceResourceRepository,
   CodespaceResourceService,
   evaluateCodespaceResourcePolicy,
+  projectCodespaceSummary,
   type CodespaceCreateProviderResult,
   type CodespaceMachine,
   type CodespaceProviderAdapter,
@@ -70,6 +72,15 @@ class FakeProvider implements CodespaceProviderAdapter {
   startRefusal: { status: number; providerMessage?: string } | null = null;
   /** A real provider names each resource uniquely; tests that create twice set this. */
   resourceName = "silver-space-123";
+  /** Other codespaces the provider holds, so several users' records can coexist in one test. */
+  others: CodespaceProviderResource[] = [];
+  /** The ref the provider reports for a created codespace; `undefined` echoes the request. */
+  returnedRef: string | null | undefined = undefined;
+  /**
+   * A stop refused the way the real client refuses: an error with a status. `carriedOut` models a
+   * provider that answered with an error but shut the codespace down anyway.
+   */
+  stopRefusal: { status: number; carriedOut?: boolean } | null = null;
   readonly healthCalls = jest.fn();
   readonly machineCalls = jest.fn();
   readonly createCalls = jest.fn();
@@ -77,6 +88,10 @@ class FakeProvider implements CodespaceProviderAdapter {
   readonly startCalls = jest.fn();
   readonly stopCalls = jest.fn();
   readonly deleteCalls = jest.fn();
+  /** Every provider observation, so a test can bound how often one tick looks at the provider. */
+  readonly identityCalls = jest.fn();
+  readonly listCalls = jest.fn();
+  readonly exactCalls = jest.fn();
 
   constructor(
     // A provider id the registry has never seen is a case this suite exercises, so the parameter is
@@ -100,6 +115,7 @@ class FakeProvider implements CodespaceProviderAdapter {
       : { state: "unavailable" as const, reason: "tooling unavailable" };
   }
   async getIdentity() {
+    this.identityCalls();
     return { id: "101", login: "owner" };
   }
   async listMachines(
@@ -136,7 +152,7 @@ class FakeProvider implements CodespaceProviderAdapter {
       billableOwnerId: this.returnedBillableOwnerId,
       repositoryId: input.repository.id,
       repositoryFullName: input.repository.fullName,
-      ref: input.ref,
+      ref: this.returnedRef === undefined ? input.ref : this.returnedRef,
       state: this.returnedState,
       machine: this.returnedMachine,
       createdAt: now,
@@ -155,33 +171,72 @@ class FakeProvider implements CodespaceProviderAdapter {
     return { outcome: "accepted", resource: this.resource };
   }
   async listOwned() {
-    return this.ownedResources ?? (this.resource ? [this.resource] : []);
+    this.listCalls();
+    return this.ownedResources ?? [...(this.resource ? [this.resource] : []), ...this.others];
   }
   async getExact(_token: string, name: string) {
-    return this.resource?.name === name ? this.resource : null;
+    this.exactCalls(name);
+    if (this.resource?.name === name) return this.resource;
+    return this.others.find((other) => other.name === name) ?? null;
   }
-  async stopExact() {
-    this.stopCalls();
-    if (this.resource) this.resource = { ...this.resource, state: "shutdown" };
+  /** Moves the current codespace aside so the next create gets a fresh one. */
+  park(nextName: string) {
+    if (this.resource) this.others.push(this.resource);
+    this.resource = null;
+    this.resourceName = nextName;
+  }
+  private update(name: string, change: Partial<CodespaceProviderResource> | null) {
+    if (this.resource?.name === name) {
+      this.resource = change ? { ...this.resource, ...change } : null;
+      return;
+    }
+    this.others = this.others.flatMap((other) =>
+      other.name !== name ? [other] : change ? [{ ...other, ...change }] : [],
+    );
+  }
+  /** Like GitHub, a codespace the provider is already moving refuses start and stop. */
+  private refuseWhileTransitional(name: string) {
+    const state = this.others.find((other) => other.name === name)?.state ?? this.resource?.state;
+    if (state === "starting" || state === "stopping" || state === "provisioning") {
+      throw Object.assign(new Error("GitHub API request failed"), { status: 409 });
+    }
+  }
+  /** Like GitHub, a failed codespace cannot be stopped. */
+  private refuseStopWhileFailed(name: string) {
+    const state = this.others.find((other) => other.name === name)?.state ?? this.resource?.state;
+    if (state === "failed") {
+      throw Object.assign(new Error("GitHub API request failed"), { status: 409 });
+    }
+  }
+  async stopExact(_token: string, name: string) {
+    this.stopCalls(name);
+    this.refuseWhileTransitional(name);
+    this.refuseStopWhileFailed(name);
+    if (this.stopRefusal) {
+      if (this.stopRefusal.carriedOut) this.update(name, { state: "shutdown" });
+      throw Object.assign(new Error("GitHub API request failed"), {
+        status: this.stopRefusal.status,
+      });
+    }
+    this.update(name, { state: "shutdown" });
     return "accepted" as const;
   }
   /** A provider that accepts a start without the codespace becoming available yet. */
   startStaysPending = false;
-  async startExact() {
-    this.startCalls();
+  async startExact(_token: string, name: string) {
+    this.startCalls(name);
+    this.refuseWhileTransitional(name);
     if (this.startRefusal) {
       throw Object.assign(new Error("GitHub API request failed"), this.startRefusal);
     }
-    if (this.resource && !this.startStaysPending) {
-      this.resource = { ...this.resource, state: "available" };
-    }
+    if (!this.startStaysPending) this.update(name, { state: "available" });
     this.startObservation?.();
     if (this.startGate) await this.startGate;
     return "accepted" as const;
   }
-  async deleteExact() {
-    this.deleteCalls();
-    this.resource = null;
+  async deleteExact(_token: string, name: string) {
+    this.deleteCalls(name);
+    this.update(name, null);
     return "accepted" as const;
   }
   async probeConnector() {
@@ -1003,6 +1058,8 @@ describe("durable persistent codespace lifecycle", () => {
         status: 403,
         providerMessage: "Repository policy changed",
       };
+      // The failed pass deferred the record by one reconcile interval before it is due again.
+      value.advance(value.policy.reconcileIntervalMs);
       await value.createService().reconcileOnce("user-1");
       expect(refusalCount()).toBe(2);
       expect(value.audits.at(-1)).toMatchObject({ reason: "Repository policy changed" });
@@ -1077,11 +1134,12 @@ describe("durable persistent codespace lifecycle", () => {
     ["different account", true, false, 0],
     ["revoked repository grant", false, true, 0],
   ] as const)(
-    "reauthorization rebinds only after exact verification for %s",
+    "reauthorization rebinds only after exact verification for %s, whatever branch is checked out",
     async (_name, changeAccount, removeGrant, expectedRebound) => {
       const value = fixture();
       try {
         const created = await value.service.create("user-1", "301", "refs/heads/main");
+        value.provider.resource = { ...value.provider.resource!, ref: "feature" };
         value.sqlite
           .prepare(
             `UPDATE codespaceConnection SET credentialGeneration = 2,
@@ -1455,7 +1513,7 @@ describe("durable persistent codespace lifecycle", () => {
     }
   });
 
-  test("competing cleanup reconcilers submit one exact stop/delete sequence", async () => {
+  test("competing cleanup reconcilers submit one exact delete and no stop before it", async () => {
     const value = fixture();
     try {
       const created = await value.service.create("user-1", "301", "refs/heads/main");
@@ -1477,7 +1535,7 @@ describe("durable persistent codespace lifecycle", () => {
       ]);
       expect(outcomes.sort()).toEqual([false, true]);
       expect(value.repository.getOwned("user-1", created.resource.id)?.state).toBe("deleted");
-      expect(value.provider.stopCalls).toHaveBeenCalledTimes(1);
+      expect(value.provider.stopCalls).not.toHaveBeenCalled();
       expect(value.provider.deleteCalls).toHaveBeenCalledTimes(1);
     } finally {
       value.sqlite.close();
@@ -1726,6 +1784,615 @@ describe("durable persistent codespace lifecycle", () => {
         desiredState: "running",
         state: "start_pending",
       });
+    } finally {
+      value.sqlite.close();
+    }
+  });
+});
+
+type Fixture = ReturnType<typeof fixture>;
+
+/** What an agent's operation needs from a codespace before it may reserve work on it. */
+function reserveOperation(value: Fixture, codespaceId: string) {
+  return new CodespaceOperationRepository(value.sqlite).reserve({
+    userId: "user-1",
+    resourceId: codespaceId,
+    inputBytes: 0,
+    stdoutLimitBytes: 1024,
+    stderrLimitBytes: 512,
+    deadlineAt: now + 60_000,
+    policy: value.policy,
+    now,
+  }).outcome;
+}
+
+/** A re-authorization as completeConnection records it: a new connection generation, no migration. */
+function reauthorize(value: Fixture, connectionId: string, accountId = "101") {
+  value.sqlite
+    .prepare(
+      `UPDATE codespaceConnection SET credentialGeneration = credentialGeneration + 1,
+       externalAccountId = ?, updatedAt = updatedAt + 1 WHERE id = ?`,
+    )
+    .run(accountId, connectionId);
+}
+
+function resourceRow(value: Fixture, codespaceId: string) {
+  return value.sqlite
+    .prepare(
+      `SELECT state, desiredState, claimExpiresAt, reconcileFailures, authorizationGeneration,
+       lastOutcome FROM codespaceResource WHERE id = ?`,
+    )
+    .get(codespaceId) as {
+    state: string;
+    desiredState: string;
+    claimExpiresAt: number | null;
+    reconcileFailures: number;
+    authorizationGeneration: number;
+    lastOutcome: string | null;
+  };
+}
+
+describe("codespace identity is not the checked-out branch", () => {
+  test("stop, start, rebind, operation reservation and delete keep working after the agent switches branch", async () => {
+    const value = fixture();
+    try {
+      const created = await value.service.create("user-1", "301", "refs/heads/main");
+      const id = created.resource.id;
+      value.provider.resource = { ...value.provider.resource!, ref: "feature" };
+
+      await expect(value.service.stopCodespace("user-1", id)).resolves.toMatchObject({
+        state: "stopped",
+      });
+      await expect(value.service.startCodespace("user-1", id)).resolves.toMatchObject({
+        state: "usable",
+      });
+      expect(reserveOperation(value, id)).toBe("reserved");
+
+      reauthorize(value, "connection-1");
+      expect(value.repository.hasCurrentAuthorization("user-1", id)).toBe(false);
+      await expect(value.service.rebindAfterAuthorization("user-1")).resolves.toBe(1);
+      expect(value.repository.hasCurrentAuthorization("user-1", id)).toBe(true);
+
+      const current = value.service.getCodespace("user-1", id);
+      await expect(
+        value.service.deleteCodespace("user-1", id, current.generation),
+      ).resolves.toMatchObject({ state: "deleted" });
+      expect(value.provider.resource).toBeNull();
+    } finally {
+      value.sqlite.close();
+    }
+  });
+
+  test("reports the branch the provider observed separately from the requested ref", async () => {
+    const value = fixture();
+    try {
+      const created = await value.service.create("user-1", "301", "refs/heads/main");
+      expect(projectCodespaceSummary(created.resource)).toMatchObject({
+        requested_ref: "refs/heads/main",
+        current_ref: "refs/heads/main",
+      });
+
+      value.provider.resource = { ...value.provider.resource!, ref: "feature" };
+      const stopped = await value.service.stopCodespace("user-1", created.resource.id);
+      expect(projectCodespaceSummary(stopped)).toMatchObject({
+        requested_ref: "refs/heads/main",
+        current_ref: "feature",
+      });
+
+      // A detached HEAD reports no ref; it is working state, not a broken codespace.
+      value.provider.resource = { ...value.provider.resource!, ref: null };
+      const started = await value.service.startCodespace("user-1", created.resource.id);
+      expect(started).toMatchObject({ state: "usable", observedRef: null });
+    } finally {
+      value.sqlite.close();
+    }
+  });
+
+  test("lifecycle discovery binds a lost-response codespace whose branch already changed", async () => {
+    const value = fixture();
+    try {
+      value.provider.loseCreateResponse = true;
+      const pending = await value.service.create("user-1", "301", "refs/heads/main");
+      value.provider.resource = { ...value.provider.resource!, ref: "feature" };
+      value.repository.setControl({
+        scope: "global",
+        disabled: true,
+        reason: "incident",
+        updatedBy: null,
+        now,
+        cleanupDeadlineAt: now + 30_000,
+      });
+
+      await value.service.reconcileOnce("user-1");
+      expect(value.repository.getOwned("user-1", pending.resource.id)).toMatchObject({
+        state: "stopped",
+        providerResourceName: "silver-space-123",
+        observedRef: "feature",
+      });
+    } finally {
+      value.sqlite.close();
+    }
+  });
+
+  test("cleanup deletes a disposable codespace whose branch changed", async () => {
+    const value = fixture();
+    try {
+      const created = await value.service.create("user-1", "301", "refs/heads/main");
+      value.sqlite
+        .prepare("UPDATE codespaceResource SET retentionPolicy = 'legacy_disposable' WHERE id = ?")
+        .run(created.resource.id);
+      value.provider.resource = { ...value.provider.resource!, ref: "feature" };
+      value.repository.requestCleanup(
+        "user-1",
+        created.resource.id,
+        created.lifecycleCapability,
+        now + 30_000,
+        now,
+      );
+
+      await value.service.reconcileOnce("user-1");
+      expect(value.repository.getOwned("user-1", created.resource.id)?.state).toBe("deleted");
+      expect(value.provider.deleteCalls).toHaveBeenCalledTimes(1);
+    } finally {
+      value.sqlite.close();
+    }
+  });
+
+  test.each([
+    ["the short name of the requested branch", "usable", "main"],
+    ["no ref yet", "usable", null],
+    ["a different branch", "cleanup_pending", "other"],
+  ] as const)(
+    "adoption compares the requested ref by branch name: a codespace reporting %s becomes %s",
+    async (_name, state, returnedRef) => {
+      const value = fixture();
+      try {
+        value.provider.returnedRef = returnedRef;
+        const result = await value.service
+          .create("user-1", "301", "refs/heads/main")
+          .then((created) => created.resource.state)
+          .catch((error: CodespaceResourceError) => error.code);
+        expect(result).toBe(state === "usable" ? "usable" : "CODESPACE_RESOURCE_INVALID");
+        expect(value.repository.listOwned("user-1", CODESPACE_PROVIDER_GITHUB)[0]?.state).toBe(
+          state,
+        );
+      } finally {
+        value.sqlite.close();
+      }
+    },
+  );
+});
+
+describe("lifecycle looks at the provider before acting", () => {
+  test("a codespace the provider already shut down completes a pending stop without a stop call", async () => {
+    const value = fixture();
+    try {
+      const created = await value.service.create("user-1", "301", "refs/heads/main");
+      value.repository.requestStop("user-1", created.resource.id, now);
+      value.provider.resource = { ...value.provider.resource!, state: "shutdown" };
+
+      await value.service.reconcileOnce("user-1");
+      expect(value.repository.getOwned("user-1", created.resource.id)).toMatchObject({
+        state: "stopped",
+        observedState: "stopped",
+        lastOutcome: "verified_stopped",
+      });
+      expect(value.provider.stopCalls).not.toHaveBeenCalled();
+    } finally {
+      value.sqlite.close();
+    }
+  });
+
+  test("a codespace that is still shutting down waits, then completes once shut down", async () => {
+    const value = fixture();
+    try {
+      const created = await value.service.create("user-1", "301", "refs/heads/main");
+      value.provider.resource = { ...value.provider.resource!, state: "stopping" };
+      await expect(
+        value.service.stopCodespace("user-1", created.resource.id),
+      ).resolves.toMatchObject({ state: "stop_pending", lastOutcome: "provider_stopping" });
+
+      value.provider.resource = { ...value.provider.resource!, state: "shutdown" };
+      await value.service.reconcileOnce("user-1");
+      expect(value.repository.getOwned("user-1", created.resource.id)?.state).toBe("stopped");
+      expect(value.provider.stopCalls).not.toHaveBeenCalled();
+    } finally {
+      value.sqlite.close();
+    }
+  });
+
+  test("a start requested while the codespace is still stopping waits instead of failing", async () => {
+    const value = fixture();
+    try {
+      const created = await value.service.create("user-1", "301", "refs/heads/main");
+      await value.service.stopCodespace("user-1", created.resource.id);
+      value.provider.resource = { ...value.provider.resource!, state: "stopping" };
+
+      await expect(
+        value.service.startCodespace("user-1", created.resource.id),
+      ).resolves.toMatchObject({ state: "start_pending", lastOutcome: "provider_stopping" });
+      expect(value.provider.startCalls).not.toHaveBeenCalled();
+
+      value.provider.resource = { ...value.provider.resource!, state: "shutdown" };
+      await value.service.reconcileOnce("user-1");
+      expect(value.repository.getOwned("user-1", created.resource.id)?.state).toBe("usable");
+      expect(value.provider.startCalls).toHaveBeenCalledTimes(1);
+    } finally {
+      value.sqlite.close();
+    }
+  });
+
+  test("deleting a running codespace deletes it directly without stopping it first", async () => {
+    const value = fixture();
+    try {
+      const created = await value.service.create("user-1", "301", "refs/heads/main");
+      await expect(
+        value.service.deleteCodespace("user-1", created.resource.id, created.resource.generation),
+      ).resolves.toMatchObject({ state: "deleted" });
+      expect(value.provider.stopCalls).not.toHaveBeenCalled();
+      expect(value.provider.deleteCalls).toHaveBeenCalledTimes(1);
+    } finally {
+      value.sqlite.close();
+    }
+  });
+
+  test("a refused stop the provider carried out anyway settles as stopped", async () => {
+    const value = fixture();
+    try {
+      const created = await value.service.create("user-1", "301", "refs/heads/main");
+      value.provider.stopRefusal = { status: 502, carriedOut: true };
+      await expect(
+        value.service.stopCodespace("user-1", created.resource.id),
+      ).resolves.toMatchObject({ state: "stopped" });
+    } finally {
+      value.sqlite.close();
+    }
+  });
+
+  test("a failing stop backs off exponentially up to its cap while another user's record is reconciled", async () => {
+    const value = fixture();
+    try {
+      const first = await value.service.create("user-1", "301", "refs/heads/main");
+      value.provider.park("silver-space-456");
+      const second = await value.service.create("user-2", "302", "refs/heads/main");
+      await value.service.stopCodespace("user-2", second.resource.id);
+      value.repository.requestStart("user-2", second.resource.id, now);
+      // A pending stop outranks a pending start in the claim order, so without a backoff the
+      // failing stop would be claimed on every pass and the start would never be reached.
+      value.repository.requestStop("user-1", first.resource.id, now);
+      value.provider.stopRefusal = { status: 503 };
+
+      await value.service.reconcileOnce();
+      await value.service.reconcileOnce();
+      expect(value.repository.getOwned("user-2", second.resource.id)?.state).toBe("usable");
+      expect(resourceRow(value, first.resource.id)).toMatchObject({
+        state: "stop_pending",
+        reconcileFailures: 1,
+        claimExpiresAt: now + policy.reconcileIntervalMs,
+      });
+
+      // Each retry happens exactly when the previous backoff ends; the next one is measured from it.
+      let clock = now;
+      const delays: number[] = [];
+      for (let attempt = 0; attempt < 8; attempt++) {
+        const due = resourceRow(value, first.resource.id).claimExpiresAt!;
+        await expect(value.service.reconcileOnce("user-1")).resolves.toBe(false);
+        value.advance(due - clock);
+        clock = due;
+        await expect(value.service.reconcileOnce("user-1")).resolves.toBe(true);
+        delays.push(resourceRow(value, first.resource.id).claimExpiresAt! - clock);
+      }
+      expect(resourceRow(value, first.resource.id)).toMatchObject({ state: "stop_pending" });
+      expect(delays.slice(0, 4)).toEqual([2, 4, 8, 16].map((factor) => factor * 60_000));
+      expect(delays.at(-1)).toBe(30 * 60_000);
+    } finally {
+      value.sqlite.close();
+    }
+  });
+});
+
+describe("re-authorization rebinds codespaces and fencing stays fair", () => {
+  test("a same-account re-authorization rebinds a codespace on another branch and lifecycle and reservation work", async () => {
+    const value = fixture();
+    try {
+      const created = await value.service.create("user-1", "301", "refs/heads/main");
+      const id = created.resource.id;
+      value.provider.resource = { ...value.provider.resource!, ref: "feature" };
+      reauthorize(value, "connection-1");
+      // Fenced until the reconciler re-verifies it: the look-alike that stays here is the defect.
+      await expect(value.service.stopCodespace("user-1", id)).rejects.toMatchObject({
+        code: "CODESPACE_RESOURCE_INVALID",
+        message: expect.stringContaining("Reconnect"),
+      });
+
+      await expect(value.service.reconcileOnce("user-1")).resolves.toBe(true);
+      expect(resourceRow(value, id).authorizationGeneration).toBe(2);
+      expect(reserveOperation(value, id)).toBe("reserved");
+      await expect(value.service.stopCodespace("user-1", id)).resolves.toMatchObject({
+        state: "stopped",
+      });
+      await expect(value.service.ensureRunning("user-1", id)).resolves.toMatchObject({
+        state: "usable",
+      });
+    } finally {
+      value.sqlite.close();
+    }
+  });
+
+  test.each([
+    ["a different provider account", (value: Fixture) => reauthorize(value, "connection-1", "999")],
+    [
+      "a disconnect",
+      (value: Fixture) =>
+        value.sqlite
+          .prepare(
+            "UPDATE codespaceConnection SET status = 'disconnected' WHERE id = 'connection-1'",
+          )
+          .run(),
+    ],
+  ])("%s keeps the codespace fenced", async (_name, change) => {
+    const value = fixture();
+    try {
+      const created = await value.service.create("user-1", "301", "refs/heads/main");
+      change(value);
+      await value.service.reconcileOnce("user-1");
+      expect(value.repository.hasCurrentAuthorization("user-1", created.resource.id)).toBe(false);
+      await expect(
+        value.service.startCodespace("user-1", created.resource.id),
+      ).rejects.toMatchObject({ code: "CODESPACE_RESOURCE_INVALID" });
+    } finally {
+      value.sqlite.close();
+    }
+  });
+
+  test("one record that can never be rebound does not hold another user's rebind back", async () => {
+    const value = fixture();
+    try {
+      const unrebindable = await value.service.create("user-1", "301", "refs/heads/main");
+      // Same name, another owner: the provider resource is no longer this record's.
+      value.provider.resource = { ...value.provider.resource!, ownerId: "999" };
+      value.provider.park("silver-space-456");
+      value.advance(1);
+      const rebindable = await value.service.create("user-2", "302", "refs/heads/main");
+      reauthorize(value, "connection-1");
+      reauthorize(value, "connection-2");
+
+      // Two scheduled ticks, one reconcile interval apart, the first after the re-authorizations.
+      value.advance(value.policy.reconcileIntervalMs);
+      await value.service.reconcileOnce();
+      value.advance(value.policy.reconcileIntervalMs);
+      await value.service.reconcileOnce();
+      expect(resourceRow(value, rebindable.resource.id).authorizationGeneration).toBe(2);
+      expect(resourceRow(value, unrebindable.resource.id).authorizationGeneration).toBe(1);
+    } finally {
+      value.sqlite.close();
+    }
+  });
+});
+
+describe("a stuck production-shaped codespace converges by ordinary reconciliation", () => {
+  test.each([
+    ["shut down", "stop_pending", "shutdown", "stopped"],
+    ["running", "stop_pending", "available", "stopped"],
+    ["shut down", "start_pending", "shutdown", "usable"],
+    ["running", "start_pending", "available", "usable"],
+  ] as const)(
+    "a codespace the provider reports %s, recorded %s on a switched branch with a stale authorization",
+    async (_name, recordState, providerState, settled) => {
+      const value = fixture();
+      try {
+        const created = await value.service.create("user-1", "301", "refs/heads/main");
+        const id = created.resource.id;
+        value.provider.resource = {
+          ...value.provider.resource!,
+          ref: "fix/production-branch",
+          state: providerState,
+        };
+        // The record as production held it: pending after repeated refusals, still bound to the
+        // authorization generation that was current before the user re-authorized.
+        value.sqlite
+          .prepare(
+            `UPDATE codespaceResource SET state = ?, desiredState = ?, generation = generation + 5,
+             lastOutcome = 'lifecycle_reconcile_required', reconcileFailures = 3
+             WHERE id = ?`,
+          )
+          .run(recordState, recordState === "stop_pending" ? "stopped" : "running", id);
+        reauthorize(value, "connection-1");
+
+        for (let tick = 0; tick < 3; tick++) {
+          await value.service.reconcileOnce();
+          value.advance(value.policy.reconcileIntervalMs);
+        }
+        expect(resourceRow(value, id)).toMatchObject({
+          state: settled,
+          authorizationGeneration: 2,
+          reconcileFailures: 0,
+        });
+        expect(value.provider.stopCalls.mock.calls.length).toBe(
+          recordState === "stop_pending" && providerState === "available" ? 1 : 0,
+        );
+
+        await expect(value.service.ensureRunning("user-1", id)).resolves.toMatchObject({
+          state: "usable",
+        });
+        expect(reserveOperation(value, id)).toBe("reserved");
+        expect(value.service.getCodespace("user-1", id).observedRef).toBe("fix/production-branch");
+      } finally {
+        value.sqlite.close();
+      }
+    },
+  );
+});
+
+describe("starting a codespace Moira has not bound to a provider resource", () => {
+  test("an ambiguous codespace refuses start as not startable rather than not found", async () => {
+    const value = fixture();
+    try {
+      value.provider.loseCreateResponse = true;
+      const pending = await value.service.create("user-1", "301", "refs/heads/main");
+      value.provider.loseCreateResponse = false;
+      value.provider.ownedResources = [
+        value.provider.resource!,
+        { ...value.provider.resource!, name: "silver-space-duplicate" },
+      ];
+      await value.service.reconcileOnce("user-1");
+      expect(value.service.getCodespace("user-1", pending.resource.id).state).toBe("ambiguous");
+
+      await expect(
+        value.service.startCodespace("user-1", pending.resource.id),
+      ).rejects.toMatchObject({
+        code: "CODESPACE_NOT_RUNNING",
+        detail: expect.stringContaining("ambiguous"),
+      });
+      expect(value.provider.startCalls).not.toHaveBeenCalled();
+    } finally {
+      value.sqlite.close();
+    }
+  });
+
+  test("a codespace still being identified refuses start as pending rather than not found", async () => {
+    const value = fixture();
+    try {
+      value.provider.loseCreateResponse = true;
+      const pending = await value.service.create("user-1", "301", "refs/heads/main");
+      value.provider.resource = null;
+      await expect(
+        value.service.stopCodespace("user-1", pending.resource.id),
+      ).resolves.toMatchObject({ state: "stop_pending", providerResourceName: null });
+
+      await expect(
+        value.service.startCodespace("user-1", pending.resource.id),
+      ).rejects.toMatchObject({
+        code: "CODESPACE_CREATE_PENDING",
+        detail: expect.stringContaining("stop_pending"),
+      });
+    } finally {
+      value.sqlite.close();
+    }
+  });
+});
+
+describe("one scheduled tick looks at each codespace at most once", () => {
+  const observations = (value: Fixture) =>
+    value.provider.identityCalls.mock.calls.length +
+    value.provider.listCalls.mock.calls.length +
+    value.provider.exactCalls.mock.calls.length;
+
+  test.each([
+    [
+      "a create the provider is still provisioning",
+      (value: Fixture) => {
+        value.provider.returnedState = "provisioning";
+      },
+      (_value: Fixture) => {},
+    ],
+    [
+      "a background-accepted create the provider does not list yet",
+      (value: Fixture) => {
+        value.provider.createOutcome = "background";
+      },
+      (value: Fixture) => {
+        value.provider.resource = null;
+      },
+    ],
+  ])(
+    "%s is reconciled once per tick and still meets its create deadline",
+    async (_name, arrange, afterCreate) => {
+      const value = fixture();
+      try {
+        arrange(value);
+        const pending = await value.service.create("user-1", "301", "refs/heads/main");
+        afterCreate(value);
+        expect(pending.resource.state).toBe("create_submitted");
+        value.provider.identityCalls.mockClear();
+        value.provider.listCalls.mockClear();
+        value.provider.exactCalls.mockClear();
+        const auditsBefore = value.audits.length;
+
+        await value.service.reconcileTick();
+        // One pass: the identity plus one exact read or one listing, never a pass per batch slot.
+        expect(observations(value)).toBeLessThanOrEqual(2);
+        expect(value.audits.length - auditsBefore).toBeLessThanOrEqual(1);
+
+        // A second tick in the same instant finds nothing due: the record waits for the next one.
+        await value.service.reconcileTick();
+        expect(observations(value)).toBeLessThanOrEqual(2);
+
+        // The deferral never outlives the create deadline, so an unfinished create still ends there.
+        value.provider.resource = null;
+        value.advance(value.policy.createDeadlineMs);
+        await value.service.reconcileTick();
+        expect(value.repository.getOwned("user-1", pending.resource.id)?.state).toBe("rejected");
+      } finally {
+        value.sqlite.close();
+      }
+    },
+  );
+
+  test("a disposable cleanup whose resource is not visible yet is reconciled once per tick", async () => {
+    const value = fixture();
+    try {
+      value.provider.loseCreateResponse = true;
+      const pending = await value.service.create("user-1", "301", "refs/heads/main");
+      value.provider.resource = null;
+      value.sqlite
+        .prepare(
+          `UPDATE codespaceResource SET retentionPolicy = 'legacy_disposable',
+           state = 'cleanup_pending', desiredState = 'deleted', claimId = NULL,
+           claimExpiresAt = NULL WHERE id = ?`,
+        )
+        .run(pending.resource.id);
+      value.provider.identityCalls.mockClear();
+      value.provider.listCalls.mockClear();
+
+      await value.service.reconcileTick();
+      expect(observations(value)).toBeLessThanOrEqual(2);
+      expect(value.repository.getOwned("user-1", pending.resource.id)?.state).toBe(
+        "cleanup_pending",
+      );
+
+      value.advance(value.policy.createDeadlineMs);
+      await value.service.reconcileTick();
+      expect(value.repository.getOwned("user-1", pending.resource.id)?.state).toBe("deleted");
+    } finally {
+      value.sqlite.close();
+    }
+  });
+});
+
+describe("codespaces that are gone or failed at the provider still converge", () => {
+  test("a codespace deleted on the provider before a re-authorization is rebound, then deletes and frees its slot", async () => {
+    const value = fixture();
+    try {
+      const created = await value.service.create("user-1", "301", "refs/heads/main");
+      value.provider.resource = null;
+      reauthorize(value, "connection-1");
+
+      await value.service.reconcileOnce("user-1");
+      expect(resourceRow(value, created.resource.id).authorizationGeneration).toBe(2);
+      const current = value.service.getCodespace("user-1", created.resource.id);
+      await expect(
+        value.service.deleteCodespace("user-1", created.resource.id, current.generation),
+      ).resolves.toMatchObject({ state: "deleted", observedState: "absent" });
+
+      value.provider.resourceName = "silver-space-456";
+      await expect(value.service.create("user-1", "301", "refs/heads/main")).resolves.toMatchObject(
+        { resource: { state: "usable" } },
+      );
+    } finally {
+      value.sqlite.close();
+    }
+  });
+
+  test("a stop of a codespace the provider reports failed completes without a refused stop call", async () => {
+    const value = fixture();
+    try {
+      const created = await value.service.create("user-1", "301", "refs/heads/main");
+      value.provider.resource = { ...value.provider.resource!, state: "failed" };
+      await expect(
+        value.service.stopCodespace("user-1", created.resource.id),
+      ).resolves.toMatchObject({ state: "stopped", observedState: "failed" });
+      expect(value.provider.stopCalls).not.toHaveBeenCalled();
     } finally {
       value.sqlite.close();
     }

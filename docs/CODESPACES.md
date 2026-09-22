@@ -78,21 +78,35 @@ an existing Codespace and organization billing are unsupported.
 
 Core exposes provider-neutral create, list, get, start, stop and delete
 operations. A resource records tenant and connection ownership, authorization
-generation, repository and ref, exact provider identity, selected machine,
-desired and observed state, retention policy and lifecycle generation.
+generation, repository, the ref requested at creation, the ref the provider last
+reported checked out, exact provider identity, selected machine, desired and
+observed state, retention policy and lifecycle generation.
 
 The provider repository ID is the repository identity. Its full name is display
 metadata: lifecycle reconciliation accepts a provider-side rename, refreshes the
 stored name and still refuses a resource whose provider repository ID changed.
 
+The checked-out branch is working state, not identity. After creation, an exact
+provider resource belongs to a record when its provider name, Moira marker, owner,
+billable owner and repository ID match; the branch it is on is not compared. An
+agent may therefore switch branches inside a codespace, or leave it on a detached
+HEAD, and start, stop, delete, operations, re-authorization rebind and cleanup keep
+addressing the same codespace. Every observation writes the provider's current ref
+back to the record, or no ref when the provider reports none.
+
 - Create persists intent and a unique marker before provider contact. Moira
   adopts only the exact returned Codespace after checking account ownership,
-  personal billing, repository, ref, machine limits, creation time and connector
-  reachability. An ambiguous provider response remains pending for exact
-  reconciliation.
+  personal billing, repository, requested ref, machine limits, creation time and
+  connector reachability. Adoption is the only point where the ref is compared: it
+  is compared as a branch name (`refs/heads/x` matches `x`), and a Codespace that
+  does not report a ref yet is adopted on the remaining identity. An ambiguous
+  provider response remains pending for exact reconciliation.
 - Start records desired running state before provider contact. While that
   generation remains current, the official GitHub CLI may restore a Codespace
-  that stopped outside Moira.
+  that stopped outside Moira. Starting a codespace whose provider resource Moira
+  has not identified yet returns the retryable `CODESPACE_CREATE_PENDING`; one
+  left ambiguous returns `CODESPACE_NOT_RUNNING`, whose detail says it could not
+  be identified uniquely.
 - An operation addressed to a codespace that is not running starts it and then
   runs, so work does not fail because the codespace idled out between two calls.
   The wait for that start is bounded by `CODESPACE_START_WAIT_SECONDS`; exceeding
@@ -109,17 +123,42 @@ stored name and still refuses a resource whose provider repository ID changed.
   observed generation, persists delete intent before provider contact and
   becomes terminal only after the exact Codespace is confirmed absent.
 
+Lifecycle work observes the exact Codespace before it acts. A Codespace already
+in the desired state completes without a provider mutation: a stop of a Codespace
+the provider already shut down makes no stop call, a stop of a Codespace the
+provider reports as failed completes as stopped with the observed state `failed`,
+and a start of an available one only probes the connector. While the provider
+reports the Codespace as
+provisioning, starting or stopping, a start or stop stays pending and issues
+nothing. Delete is issued directly, without a stop first, for persistent delete
+and for legacy cleanup. When the provider refuses a mutation, the Codespace is
+observed again: a record whose goal was reached anyway settles, and one the
+provider is still moving stays pending instead of reporting the refusal.
+
 Repeating a pending lifecycle request does not advance its generation. A
 provider response lost during create, start, stop or delete is reconciled from
 the exact stored identity and intent; broad discovery or deletion is not used.
 Finishing a command, disconnecting an MCP client or ending a conversation never
 deletes a persistent codespace.
 
+The background reconciler takes one re-authorization rebind attempt per tick and
+then a bounded batch of due records. A record whose pass does not converge it waits
+before its next attempt: `CODESPACE_RECONCILE_INTERVAL_SECONDS` after the first
+such pass, doubling with each consecutive one and capped at 30 minutes, and never
+later than the create deadline of a codespace still being created or identified, so
+a tick never takes the same record twice. A new user
+request for the codespace and a pass that settles it reset that wait. Records a
+rebind pass could not re-verify move to the back of the rebind order, so one
+codespace that cannot be rebound does not hold back other users' codespaces.
+
 Disconnect first cancels operations and stops persistent codespaces. It does
-not silently delete their data. A later authorization can rebind a codespace
-only when the same GitHub account, approved repository and exact provider
-resource still match. Stored resource rows from the disposable contract retain
-the explicit `legacy_disposable` policy and continue to follow exact cleanup.
+not silently delete their data. A later authorization rebinds a codespace
+automatically when the same GitHub account, approved repository and exact provider
+resource still match, whichever branch the codespace has checked out, or when that
+exact resource is gone, so a later stop or delete settles it as absent; a different
+account or a disconnected connection keeps it fenced. Stored resource rows from the
+disposable contract retain the explicit `legacy_disposable` policy and continue to
+follow exact cleanup.
 
 A provider that refuses a create, start, stop or delete is reported by what it
 refused rather than as an internal failure. A refused stored grant is
@@ -368,7 +407,10 @@ and the monotonic `grantsVersion`, so a slower process cannot overwrite a newer 
 Deleted and rejected codespaces are finished and accept no operation, so they are
 absent from that listing and from the website's, which reads the same service method.
 The `get` action returns one owned summary; an unknown or foreign ID returns the
-generic `CODESPACE_NOT_FOUND` result. Summaries omit connection and authorization
+generic `CODESPACE_NOT_FOUND` result. A summary reports `requested_ref`, the ref the
+codespace was created on, and `current_ref`, the ref the provider last reported
+checked out, which is `null` until Moira has observed one and while the codespace is
+on a detached HEAD; `create` still takes the input `ref`. Summaries omit connection and authorization
 generations, external owner/billing IDs, operation markers, provider resource names,
 claims and capabilities.
 
@@ -481,8 +523,8 @@ The Settings page renders a Cloud codespaces card under Integrations. It shows t
 instance readiness, discloses that an authorized agent has the Codespace user's
 repository, network and configured-secret access, lets the user create a codespace
 for an approved repository and ref, and lists the user's codespaces with repository,
-ref, provider and machine context, state, desired/observed state, generation and last
-update. Start and Stop are available for stopped and running codespaces; Delete
+current branch (the requested ref until a current one is observed), provider and
+machine context, state, desired/observed state, generation and last update. Start and Stop are available for stopped and running codespaces; Delete
 requires a confirmation that names the repository and points to Stop for keeping data.
 Actions are disabled while a codespace is in a pending, cleanup or ambiguous state.
 The card keeps a saved repository list visible with a stale warning when provider
@@ -515,8 +557,8 @@ decision. Its states are `disabled` (configuration absent or
 configuration), `control_disabled` (a kill switch is on), `connector_unavailable`
 (the credential connector does not answer its health probe) and `ready`. The view
 also carries the configuration state, both controls, connector state, the
-reconciliation backlog (resources and operations the loop would claim now, plus the
-age of the oldest) and active resources/operations and live transfer bytes against
+reconciliation backlog (resources and operations awaiting reconciliation, including
+resources held by a claim or waiting out a retry backoff, plus the age of the oldest) and active resources/operations and live transfer bytes against
 their limits. It contains no user, codespace or operation identifier, and the
 connector is never probed while the feature is disabled.
 
@@ -739,7 +781,9 @@ rewritten. Migration `0037_codespace_rename.sql` renames those tables and indexe
 preserves their rows and foreign keys, adds `grantsRefreshedAt` and the monotonic
 `grantsVersion` to connection snapshots, adds the nullable audit `dedupeKey`, and
 converts persisted codespace outcomes, transfer purposes and audit identifiers.
-The resulting connection, resource, lifecycle-capability, policy-usage,
+Migration `0039_codespace_observed_ref.sql` adds the resource's nullable
+`observedRef`, the ref last observed checked out, and its `reconcileFailures`
+counter, which drives the reconciliation retry backoff. The resulting connection, resource, lifecycle-capability, policy-usage,
 provider-mutation, provider-control, operation and private-transfer metadata tables
 use the `codespace` vocabulary. Credential tables
 contain versioned ciphertext; resource, operation and transfer tables contain

@@ -164,6 +164,15 @@ A provider-side repository rename keeps its codespace usable because identity fo
 repository ID. The stored display name refreshes during lifecycle work; a different repository ID is
 still refused.
 
+The branch checked out in a codespace is not part of its identity. You may switch branches inside a
+codespace, or leave it on a detached HEAD, and `start`, `stop`, `delete`, `exec` and the file actions
+keep working on the same `codespace_id`; after you reconnect GitHub with the same account, the
+codespace is rebound automatically on whatever branch it is on. The codespace summary reports
+`requested_ref`, the ref it was created on, and `current_ref`, the ref GitHub last reported checked
+out, which is `null` until Moira has observed one and while the codespace is on a detached HEAD.
+`create` still takes the input `ref`. Starting a codespace whose GitHub resource Moira is still
+identifying returns the retryable `CODESPACE_CREATE_PENDING`; retry once creation has settled.
+
 `exec` runs argv as data (no shell interpolation) in a repository-relative `cwd` with a
 timeout (`timeout_seconds`, optional) and optional per-stream output limits, and returns bounded `stdout`, `stderr` and the exact
 `exit_code`. Those limits bound the answer, not the command: a command that prints more keeps

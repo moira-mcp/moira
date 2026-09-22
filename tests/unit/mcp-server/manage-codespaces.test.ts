@@ -40,6 +40,7 @@ function codespace(overrides: Partial<CodespaceResourceRecord> = {}): CodespaceR
     repositoryId: "42",
     repositoryFullName: "owner/repository",
     requestedRef: "main",
+    observedRef: "feature/current",
     operationMarker: "secret-marker",
     providerResourceName: "secret-provider-name",
     externalOwnerId: "secret-owner",
@@ -62,6 +63,7 @@ function codespace(overrides: Partial<CodespaceResourceRecord> = {}): CodespaceR
     cleanupDeadlineAt: null,
     claimId: "secret-claim",
     claimExpiresAt: null,
+    reconcileFailures: 0,
     lastOutcome: "verified_usable",
     createdAt: 10,
     updatedAt: 20,
@@ -327,7 +329,14 @@ describe("codespace MCP adapter", () => {
       repositories: [{ repository_id: "42", name: "owner/repository", private: true }],
       codespaces: [{ codespace_id: CODESPACE_ID, generation: 3 }],
     });
-    expect(data(fetched)).toMatchObject({ codespace: { codespace_id: CODESPACE_ID } });
+    // The branch an agent switched to is reported next to, not instead of, the one it asked for.
+    expect(data(fetched)).toMatchObject({
+      codespace: {
+        codespace_id: CODESPACE_ID,
+        requested_ref: "main",
+        current_ref: "feature/current",
+      },
+    });
     const serialized = JSON.stringify([listed, fetched]);
     for (const secret of [
       "secret-connection",

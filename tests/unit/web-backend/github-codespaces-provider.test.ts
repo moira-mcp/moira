@@ -201,6 +201,60 @@ describe("GitHub Codespaces provider edge", () => {
     ).resolves.toMatchObject({ state: "provisioning" });
   });
 
+  async function parsed(overrides: Record<string, unknown>) {
+    const fetchImpl = jest.fn<typeof fetch>().mockResolvedValue(
+      new Response(JSON.stringify(codespace(overrides)), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    return new HttpGitHubCodespaceClient(config, fetchImpl).getExact(
+      "ghu_secret",
+      "silver-space-123",
+    );
+  }
+
+  test.each([
+    ["Available", false, "available"],
+    ["Shutdown", false, "shutdown"],
+    ["Archived", false, "shutdown"],
+    ["ShuttingDown", false, "stopping"],
+    ["Starting", false, "starting"],
+    ["Rebuilding", false, "starting"],
+    ["Updating", false, "starting"],
+    ["Exporting", false, "starting"],
+    ["Moved", false, "starting"],
+    ["Queued", false, "provisioning"],
+    ["Provisioning", false, "provisioning"],
+    ["Awaiting", false, "provisioning"],
+    ["Deleted", false, "deleting"],
+    ["Unavailable", false, "failed"],
+    ["Failed", false, "failed"],
+    ["Available", true, "starting"],
+    ["Shutdown", true, "stopping"],
+  ] as const)(
+    "reads GitHub state %s with pending_operation=%s as %s",
+    async (state, pendingOperation, expected) => {
+      await expect(parsed({ state, pending_operation: pendingOperation })).resolves.toMatchObject({
+        state: expected,
+      });
+    },
+  );
+
+  test.each([
+    ["a detached HEAD without a ref", { git_status: { ahead: 0 } }],
+    ["no git status yet", { git_status: undefined }],
+    ["an empty ref", { git_status: { ref: "" } }],
+  ])("reads a codespace with %s as having no ref instead of failing", async (_name, overrides) => {
+    await expect(parsed(overrides)).resolves.toMatchObject({ name: "silver-space-123", ref: null });
+  });
+
+  test("reports the ref a codespace currently has checked out", async () => {
+    await expect(parsed({ git_status: { ref: "feature/switched" } })).resolves.toMatchObject({
+      ref: "feature/switched",
+    });
+  });
+
   test("pins explicit machine/marker and parses personal ownership from accepted create", async () => {
     const fetchImpl = jest.fn<typeof fetch>().mockResolvedValue(
       new Response(JSON.stringify(codespace()), {

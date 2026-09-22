@@ -353,7 +353,10 @@ export const GitHubCodespaceManagement: React.FC = () => {
                     <div className="min-w-0">
                       <p className="truncate font-medium">
                         {codespace.repository}
-                        <span className="text-muted-foreground"> @ {codespace.ref}</span>
+                        <span className="text-muted-foreground">
+                          {" "}
+                          @ {codespace.current_ref ?? codespace.requested_ref}
+                        </span>
                       </p>
                       <p className="text-xs text-muted-foreground">
                         {t("pages.settings.codespaces.providerLine", {

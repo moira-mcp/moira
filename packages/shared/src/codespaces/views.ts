@@ -10,7 +10,13 @@ export interface CodespaceSummaryView {
   provider: string;
   repository_id: string;
   repository: string;
-  ref: string;
+  /** The ref the codespace was created on. */
+  requested_ref: string;
+  /**
+   * The ref the provider last reported checked out, which changes when an agent switches branches;
+   * `null` until Moira has observed it or while the codespace is on a detached HEAD.
+   */
+  current_ref: string | null;
   machine: {
     name: string;
     display_name: string;
@@ -34,7 +40,8 @@ export function projectCodespaceSummary(codespace: CodespaceResourceRecord): Cod
     provider: codespace.provider,
     repository_id: codespace.repositoryId,
     repository: codespace.repositoryFullName,
-    ref: codespace.requestedRef,
+    requested_ref: codespace.requestedRef,
+    current_ref: codespace.observedRef,
     machine: {
       name: codespace.machine.name,
       display_name: codespace.machine.displayName,

@@ -1,4 +1,4 @@
-export const CODESPACE_PROVIDER_CONTRACT_VERSION = 3 as const;
+export const CODESPACE_PROVIDER_CONTRACT_VERSION = 4 as const;
 
 export interface CodespaceRepositoryTarget {
   id: string;
@@ -31,6 +31,9 @@ export interface CodespaceMachine {
   storageBytes: number;
 }
 
+export type CodespaceProviderState =
+  "provisioning" | "starting" | "available" | "stopping" | "shutdown" | "deleting" | "failed";
+
 export interface CodespaceProviderResource {
   name: string;
   displayName: string;
@@ -38,8 +41,18 @@ export interface CodespaceProviderResource {
   billableOwnerId: string;
   repositoryId: string;
   repositoryFullName: string;
-  ref: string;
-  state: "provisioning" | "available" | "shutdown" | "deleting" | "failed";
+  /**
+   * The Git ref currently checked out in the codespace. It is observed working state, never part of
+   * the codespace's identity: an agent may switch branches at any time. `null` when the provider
+   * reports none, such as a detached HEAD.
+   */
+  ref: string | null;
+  /**
+   * Where the provider says the codespace is. `provisioning`, `starting` and `stopping` are
+   * transitional: the provider is already moving the codespace, so lifecycle work waits for it
+   * instead of issuing another mutation.
+   */
+  state: CodespaceProviderState;
   machine: CodespaceMachine | null;
   createdAt: number;
 }
@@ -170,6 +183,8 @@ export interface CodespaceResourceRecord {
   repositoryId: string;
   repositoryFullName: string;
   requestedRef: string;
+  /** The ref the provider last reported checked out; `null` until observed or when detached. */
+  observedRef: string | null;
   operationMarker: string;
   providerResourceName: string | null;
   externalOwnerId: string | null;
@@ -185,7 +200,13 @@ export interface CodespaceResourceRecord {
   remoteExpiresAt: number;
   cleanupDeadlineAt: number | null;
   claimId: string | null;
+  /**
+   * While `claimId` is null, the earliest time the reconciler may take the record again: a record
+   * whose reconciliation did not converge is deferred rather than retried on every tick.
+   */
   claimExpiresAt: number | null;
+  /** Consecutive reconciler passes that left the record unconverged; drives the retry backoff. */
+  reconcileFailures: number;
   lastOutcome: string | null;
   createdAt: number;
   updatedAt: number;
