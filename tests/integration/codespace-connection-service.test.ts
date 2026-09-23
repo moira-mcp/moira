@@ -53,7 +53,10 @@ class FakeGitHubClient implements GitHubCodespaceClient {
     },
   ];
 
+  exchangeCalls = 0;
+
   async exchangeCode() {
+    this.exchangeCalls += 1;
     return {
       accessToken: "ghu_initial-secret",
       refreshToken: "ghr_initial-secret",
@@ -316,26 +319,34 @@ describe("CodespaceConnectionService with real SQLite persistence", () => {
     expect(repository.getCredential("user-a", "github-codespaces")?.envelope.generation).toBe(2);
   });
 
-  test("retains an encrypted exact retry when superseded-token revocation fails", async () => {
+  test("reauthorization whose old-token revocation fails still commits the new credential and retries the revocation later", async () => {
     await connect();
     sqlite
       .prepare("UPDATE codespaceConnection SET status = 'installation_required' WHERE userId = ?")
       .run("user-a");
     github.revokeTokenFails = true;
-    const reconnectStates = [
-      "state_reconnect_first_abcdefghijklmnopqrstuvwxyz0123456789",
-      "state_reconnect_second_abcdefghijklmnopqrstuvwxyz0123456789",
-    ];
+    github.exchangeCode = async () => ({
+      accessToken: "ghu_successor-secret",
+      refreshToken: "ghr_successor-secret",
+      accessTokenExpiresAt: 2_000_000,
+      refreshTokenExpiresAt: 9_000_000,
+    });
+    const rebinds: string[] = [];
     const reconnect = new CodespaceConnectionService({
       repository,
       config: () => config,
       client: () => github,
       now: () => now,
-      randomState: () => reconnectStates.shift()!,
+      randomState: () => "state_reconnect_abcdefghijklmnopqrstuvwxyz0123456789",
       randomId: () => "pending-old-credential",
+      afterConnect: async (userId) => {
+        rebinds.push(userId);
+      },
     });
     const authorizationUrl = await reconnect.beginAuthorization("user-a", "web-session-a");
 
+    // The new credential is committed before the old one is revoked, so a revocation GitHub refuses
+    // no longer throws the user back to "Reconnect".
     await expect(
       reconnect.completeAuthorization({
         userId: "user-a",
@@ -343,21 +354,134 @@ describe("CodespaceConnectionService with real SQLite persistence", () => {
         state: new URL(authorizationUrl).searchParams.get("state")!,
         code: "github-code-reconnect",
       }),
-    ).rejects.toMatchObject({ code: "AUTH_REFRESH_FAILED" });
-
-    expect(repository.getCredential("user-a", "github-codespaces")?.envelope.generation).toBe(1);
+    ).resolves.toMatchObject({ state: "connected" });
+    expect(repository.getCredential("user-a", "github-codespaces")?.envelope.generation).toBe(2);
+    expect(sqlite.prepare("SELECT credentialGeneration FROM codespaceConnection").get()).toEqual({
+      credentialGeneration: 2,
+    });
+    expect(rebinds).toEqual(["user-a"]);
     const pending = sqlite.prepare("SELECT * FROM codespaceCredentialRevocation").all();
     expect(pending).toHaveLength(1);
     expect(JSON.stringify(pending)).not.toMatch(/ghu_initial-secret|ghr_initial-secret/);
-    expect(reconnect.getStatus("user-a")).toMatchObject({ state: "refresh_failed" });
     expect(github.revokedTokens).toEqual(["ghu_initial-secret"]);
 
+    // The queued revocation is retried by the next grant refresh once GitHub accepts it.
     github.revokeTokenFails = false;
-    await expect(reconnect.beginAuthorization("user-a", "web-session-a")).resolves.toContain(
-      "github.com/login/oauth/authorize",
-    );
+    await reconnect.refreshGrants("user-a", { force: true });
     expect(sqlite.prepare("SELECT * FROM codespaceCredentialRevocation").all()).toEqual([]);
     expect(github.revokedTokens).toEqual(["ghu_initial-secret", "ghu_initial-secret"]);
+    expect(reconnect.getStatus("user-a")).toMatchObject({ state: "connected" });
+  });
+
+  test("the superseded credential is queued for revocation in the same commit as its successor", async () => {
+    await connect();
+    sqlite
+      .prepare("UPDATE codespaceConnection SET status = 'installation_required' WHERE userId = ?")
+      .run("user-a");
+    github.exchangeCode = async () => ({
+      accessToken: "ghu_successor-secret",
+      refreshToken: "ghr_successor-secret",
+      accessTokenExpiresAt: 2_000_000,
+      refreshTokenExpiresAt: 9_000_000,
+    });
+    // The process stops right after the new credential is committed: nothing after the commit runs.
+    const commit = repository.completeConnection.bind(repository);
+    repository.completeConnection = (input) => {
+      commit(input);
+      throw new Error("process stopped after commit");
+    };
+    const reconnect = new CodespaceConnectionService({
+      repository,
+      config: () => config,
+      client: () => github,
+      now: () => now,
+      randomState: () => "state_crash_abcdefghijklmnopqrstuvwxyz0123456789",
+      randomId: () => "pending-superseded",
+    });
+    const authorizationUrl = await reconnect.beginAuthorization("user-a", "web-session-a");
+    await reconnect
+      .completeAuthorization({
+        userId: "user-a",
+        sessionToken: "web-session-a",
+        state: new URL(authorizationUrl).searchParams.get("state")!,
+        code: "github-code-crash",
+      })
+      .catch(() => undefined);
+
+    // The successor is stored, and the credential it replaced is not lost: it waits in the queue.
+    expect(repository.getCredential("user-a", "github-codespaces")?.envelope.generation).toBe(2);
+    const queued = repository.getPendingRevocations("user-a", "github-codespaces");
+    expect(queued.map((row) => row.id)).toContain("pending-superseded");
+    expect(github.revokedTokens).not.toContain("ghu_initial-secret");
+
+    // Whichever path drains the queue next revokes it; here, disconnecting.
+    repository.completeConnection = commit;
+    await reconnect.disconnect("user-a");
+    expect(github.revokedTokens).toContain("ghu_initial-secret");
+    expect(
+      repository.getPendingRevocations("user-a", "github-codespaces").map((row) => row.id),
+    ).not.toContain("pending-superseded");
+  });
+
+  test("authorization no longer forces GitHub's account chooser", async () => {
+    const authorizationUrl = new URL(await service.beginAuthorization("user-a", "web-session-a"));
+    expect(authorizationUrl.searchParams.has("prompt")).toBe(false);
+  });
+
+  test("returning from the App installation connects with the stored credential and no second authorization", async () => {
+    github.installations = [];
+    await connect("installation_required");
+    github.installations = [
+      {
+        id: "9001",
+        accountId: "25282049",
+        accountLogin: "witqq",
+        targetType: "User",
+        repositorySelection: "selected",
+      },
+    ];
+
+    await expect(service.completeInstallationReturn("user-a")).resolves.toBe("connected");
+    expect(service.getStatus("user-a")).toMatchObject({
+      state: "connected",
+      repositories: [expect.objectContaining({ fullName: "witqq/private-project" })],
+    });
+    expect(github.exchangeCalls).toBe(1);
+    expect(github.revokedTokens).toEqual([]);
+  });
+
+  test("an installation return while already connected keeps the connection", async () => {
+    await connect();
+    await expect(service.completeInstallationReturn("user-a")).resolves.toBe("connected");
+    expect(service.getStatus("user-a")).toMatchObject({ state: "connected" });
+    expect(github.exchangeCalls).toBe(1);
+    expect(github.revokedTokens).toEqual([]);
+  });
+
+  test("an installation return without a usable credential asks for authorization", async () => {
+    await expect(service.completeInstallationReturn("user-a")).resolves.toBe(
+      "authorization_required",
+    );
+  });
+
+  test("a Settings read inside the grants cache shows an installation added while installation_required", async () => {
+    github.installations = [];
+    await connect("installation_required");
+    now += 60_000;
+    github.installations = [
+      {
+        id: "9001",
+        accountId: "25282049",
+        accountLogin: "witqq",
+        targetType: "User",
+        repositorySelection: "selected",
+      },
+    ];
+    await expect(service.refreshGrants("user-a")).resolves.toEqual({
+      refreshed: true,
+      stale: false,
+    });
+    expect(service.getStatus("user-a")).toMatchObject({ state: "connected" });
   });
 
   test("retains and later revokes a provisional credential after identity validation fails", async () => {
@@ -422,7 +546,9 @@ describe("CodespaceConnectionService with real SQLite persistence", () => {
         code: "github-code-provisional",
       }),
     ).rejects.toMatchObject({ code: "AUTHORIZATION_FAILED" });
-    expect(github.revokedTokens).toEqual(["ghu_initial-secret", "ghu_provisional-secret"]);
+    // The working credential is kept while the successor fails validation; only the provisional one
+    // is revoked.
+    expect(github.revokedTokens).toEqual(["ghu_provisional-secret"]);
     expect(sqlite.prepare("SELECT * FROM codespaceCredentialRevocation").all()).toHaveLength(1);
 
     await expect(reauthorizing.disconnect("user-a")).resolves.toMatchObject({
@@ -435,7 +561,6 @@ describe("CodespaceConnectionService with real SQLite persistence", () => {
       state: "disconnected",
     });
     expect(github.revokedTokens).toEqual([
-      "ghu_initial-secret",
       "ghu_provisional-secret",
       "ghu_provisional-secret",
       "ghu_provisional-secret",

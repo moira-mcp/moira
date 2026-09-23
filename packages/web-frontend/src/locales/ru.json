@@ -900,6 +900,8 @@
         "connect": "Подключить GitHub",
         "reconnect": "Переподключить GitHub",
         "install": "Установить GitHub App",
+        "checkInstallation": "Проверить установку",
+        "installationStillMissing": "GitHub пока не показывает приложение Moira установленным в вашем аккаунте. Завершите установку на GitHub и проверьте ещё раз.",
         "disconnect": "Отключить",
         "confirmDisconnect": "Отключить GitHub и отозвать сохранённый доступ Moira? Активные облачные сессии больше не будут авторизованы.",
         "disconnected": "GitHub отключён",
@@ -934,8 +936,15 @@
         },
         "outcomes": {
           "connected": "GitHub успешно подключён",
-          "installation_required": "Разрешите установку GitHub App, чтобы завершить настройку",
-          "authorization_failed": "Авторизация GitHub не удалась или истекла. Повторите её из Настроек."
+          "installation_required": "Установите GitHub App в свой аккаунт, чтобы завершить настройку, затем проверьте установку здесь.",
+          "authorization_failed": "Авторизация GitHub не удалась или истекла. Повторите её из Настроек.",
+          "already_connected": "GitHub уже подключён. Чтобы использовать другой аккаунт, сначала отключите его.",
+          "not_configured": "Кодспейсы GitHub не настроены на этом экземпляре Moira.",
+          "credential_unreadable": "Сохранённые учётные данные GitHub не удаётся расшифровать. Выполните шаги восстановления на этой странице, прежде чем подключаться снова.",
+          "grant_revocation_required": "Отзовите разрешение GitHub App Moira на GitHub и подтвердите это на этой странице, прежде чем подключаться снова.",
+          "previous_access_not_revoked": "Moira пока не удалось отозвать ранее сохранённый доступ к GitHub. Попробуйте подключиться чуть позже.",
+          "revocation_pending": "Доступ к GitHub ещё отзывается. Завершите отключение, прежде чем подключаться снова.",
+          "session_required": "Войдите на этот сайт заново, затем подключите GitHub."
         },
         "errors": {
           "INCOMPLETE_CONFIGURATION": {

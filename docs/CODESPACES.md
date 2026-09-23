@@ -750,6 +750,11 @@ on GitHub before the connection works again:
 
 Enable "Request user authorization (OAuth) during installation" and expiring user
 authorization tokens; the callback URL is the exact same-origin Moira path below.
+No Setup URL is needed: with user authorization during installation enabled, GitHub
+returns the browser to the callback URL after an installation, and Moira recognizes
+that return. "Redirect on update" is optional; without it, a user who changes the
+installation's repositories on GitHub applies the change with **Check installation**
+or **Refresh** in Settings.
 If all connection values are absent, the integration is disabled. A partial,
 weak, cross-origin or malformed configuration produces a safe configuration
 error without aborting unrelated authentication. The callback uses HTTPS for a
@@ -804,28 +809,52 @@ cannot exceed 900 seconds and persistent retention cannot exceed 30 days.
 
 All routes are mounted under `/api/integrations` after `requireAuth`.
 
-| Method   | Path                          | Behavior                                                                                                                               |
-| -------- | ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| `GET`    | `/github`                     | Refreshes an expired grant snapshot and returns the sanitized connection view with `repositoriesStale`                                 |
-| `POST`   | `/github/refresh`             | Forces grant enumeration and returns the current view; a provider failure retains the snapshot and sets `repositoriesStale: true`      |
-| `GET`    | `/github/start`               | Stores one-time browser state and redirects to GitHub                                                                                  |
-| `GET`    | `/github/callback`            | Consumes state, verifies GitHub identity/grants and redirects; a GitHub return from App installation (no state) restarts authorization |
-| `DELETE` | `/github`                     | Stops managed work, revokes the GitHub grant and disconnects                                                                           |
-| `DELETE` | `/github/external-revocation` | Clears an eligible blocked state after external grant revocation                                                                       |
+| Method   | Path                          | Behavior                                                                                                                          |
+| -------- | ----------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `GET`    | `/github`                     | Refreshes an expired grant snapshot and returns the sanitized connection view with `repositoriesStale`                            |
+| `POST`   | `/github/refresh`             | Forces grant enumeration and returns the current view; a provider failure retains the snapshot and sets `repositoriesStale: true` |
+| `GET`    | `/github/start`               | Stores one-time browser state and redirects to GitHub; a refused start redirects to Settings with `?github=<outcome>`             |
+| `GET`    | `/github/callback`            | Consumes state, verifies GitHub identity/grants and redirects; a return from App installation (no state) re-reads grants          |
+| `DELETE` | `/github`                     | Stops managed work, revokes the GitHub grant and disconnects                                                                      |
+| `DELETE` | `/github/external-revocation` | Clears an eligible blocked state after external grant revocation                                                                  |
 
 The external-revocation body must be `{ "confirmed": true }`, and the user
 must first revoke the GitHub App grant in GitHub. Start stores a SHA-256 digest
 of one-time state bound to the Moira user, web session and provider. It expires
 after ten minutes, is consumed once and returns only a bounded outcome on the
-same-origin Settings URL. After the user installs the App, GitHub redirects to the
-callback with `installation_id`/`setup_action` and no Moira state; that return is not
-trusted and is answered with a redirect to `/github/start`, so the completed
-authorization re-reads the installations and the connection becomes `connected`. Callback query strings are redacted from application
-logs and omitted from nginx access logs.
+same-origin Settings URL.
+
+Connecting takes one pass through GitHub. **Connect GitHub** starts one
+authorization; when the account has no App installation yet, the callback stores the
+credential and sends the browser straight to the configured installation URL. After
+the user installs or updates the App, GitHub returns the browser to the callback
+with `installation_id`/`setup_action` and no Moira state. Nothing in that return is
+trusted and its code is never exchanged: with a readable stored credential and a
+`connected` or `installation_required` connection, Moira re-reads the installations
+and repositories with that credential and redirects to Settings with
+`github=connected` or `github=installation_required`; otherwise it redirects to the
+absolute `/api/integrations/github/start` URL on the configured origin. The
+authorization does not force GitHub's account chooser, so switching GitHub accounts
+is Disconnect followed by Connect.
+
+A start the browser cannot proceed with redirects to Settings (`303`) with a
+`github` outcome the page explains in a message: `already_connected`,
+`revocation_pending`, `not_configured`, `credential_unreadable`,
+`grant_revocation_required`, `previous_access_not_revoked` (an earlier credential
+still awaits revocation), `session_required` or `authorization_failed`. The callback
+itself redirects with `connected`, `installation_required` or
+`authorization_failed`. Callback query strings are redacted from application logs
+and omitted from nginx access logs.
 
 The Settings integration renders sanitized connection and repository-grant
 state. Its Refresh button uses the forced endpoint, while ordinary page reads
-honor the ten-minute snapshot TTL. A provider enumeration failure leaves the saved list
+honor the ten-minute snapshot TTL, except while the connection is
+`installation_required`: then every read enumerates the grants afresh, so the
+Settings page, the website codespace list and the MCP `list` action show a new
+installation at once. In that state the card offers **Install GitHub App** (when the
+installation URL is configured) and **Check installation**, which forces a grant
+refresh, instead of Reconnect; Reconnect remains for `refresh_failed` and
+`disconnected`. A provider enumeration failure leaves the saved list
 visible with an explicit stale warning. It never returns a provider token, client secret, vault key, connection
 ID or revocation ID. There is no agent-facing authorization, callback, device
 flow or polling method.
@@ -841,6 +870,16 @@ generation compare-and-swap. Concurrent processes wait for that successor.
 Before replacement, the previous credential is copied into an encrypted
 pending-revocation record and revoked exactly. Provider ambiguity, expiry,
 unreadable ciphertext or an abandoned lease prevents use of the predecessor.
+
+A new authorization for a user who already has a credential commits the new
+credential first — the generation advances and codespaces are rebound. The same
+database transaction queues the previous token in an encrypted pending-revocation
+record, so at every moment the old token is either stored or queued; only after the
+commit is it revoked. A revocation GitHub refuses leaves the connection connected
+and the superseded credential queued; the next successful grant refresh,
+authorization or disconnect retries it.
+While such a revocation is still queued, a later explicit Connect is refused with
+the `previous_access_not_revoked` outcome.
 
 If a refresh may have issued a successor that Moira could neither retain nor
 revoke, Settings requires revocation of the entire GitHub App grant followed by

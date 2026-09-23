@@ -648,7 +648,8 @@ connection IDs or revocation IDs.
 
 ### GET /api/integrations/github
 
-Refreshes an expired installation/repository snapshot and returns
+Refreshes an expired installation/repository snapshot (every read while the state is
+`installation_required`) and returns
 `{ success: true, data: CodespaceConnectionView }` for the authenticated user.
 If provider enumeration fails, saved grants remain and `repositoriesStale` is `true`.
 Missing complete server configuration is represented as `disabled` or
@@ -668,10 +669,13 @@ Authentication: Required
 
 Creates one ten-minute, single-use state bound to the current user and web
 session, then returns a `303` redirect to GitHub. A newer start invalidates that
-user's older unconsumed state. Missing/invalid server configuration returns
-`503` with `CODESPACE_NOT_CONFIGURED`. Unreadable stored credentials and an
-untracked refresh successor return their typed safe recovery errors and cannot
-start authorization.
+user's older unconsumed state. The authorization does not force GitHub's account
+chooser. A start that cannot proceed never answers with JSON: it returns a `303`
+redirect to the Settings page with `github=<outcome>`, one of `already_connected`,
+`revocation_pending`, `not_configured` (missing or invalid server configuration),
+`credential_unreadable`, `grant_revocation_required`, `previous_access_not_revoked`
+(an earlier credential still awaits revocation), `session_required` (no current web
+session) or `authorization_failed`.
 
 Authentication: Required
 
@@ -679,10 +683,21 @@ Authentication: Required
 
 Consumes the exact user/session-bound `state`, exchanges `code` server-side,
 verifies the numeric GitHub user and personal installation/repository grants,
-then returns a `303` redirect to the same-origin Settings page. The redirect
-contains only `github=connected`, `github=installation_required`, or
-`github=authorization_failed`. Code, state and provider errors are never
-reflected in the response; nginx also omits this callback from access logs.
+then returns a `303` redirect. When the account has no App installation yet and an
+installation URL is configured, the redirect goes straight to GitHub's installation
+page; otherwise it goes to the same-origin Settings page with only
+`github=connected`, `github=installation_required`, or
+`github=authorization_failed`. A new credential is committed before the previous
+one is revoked; a refused revocation stays queued and does not fail the callback.
+
+GitHub's return after an App installation or update carries `installation_id` or
+`setup_action` and no Moira `state`. Its code is never exchanged: with a readable
+stored credential for a `connected` or `installation_required` connection, the
+route re-reads grants with that credential and redirects to Settings with
+`github=connected` or `github=installation_required`; otherwise it redirects to
+the absolute `/api/integrations/github/start` URL. Code, state and provider errors
+are never reflected in the response; nginx also omits this callback from access
+logs.
 
 Authentication: Required
 

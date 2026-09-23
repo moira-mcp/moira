@@ -72,22 +72,115 @@ describe("GitHub codespace connection web routes", () => {
     expect(response.text).not.toMatch(/code-secret|state-secret|ghu_secret/);
   });
 
-  test("resumes authorization when GitHub returns from an App installation without state", async () => {
-    const completeAuthorization = jest.fn<CodespaceConnectionService["completeAuthorization"]>();
+  test.each([
+    ["connected", "connected"],
+    ["installation_required", "installation_required"],
+  ] as const)(
+    "an App installation return with a stored credential refreshes the grants and lands on Settings as %s",
+    async (result, outcome) => {
+      const completeAuthorization = jest.fn<CodespaceConnectionService["completeAuthorization"]>();
+      const completeInstallationReturn = jest
+        .fn<CodespaceConnectionService["completeInstallationReturn"]>()
+        .mockResolvedValue(result);
+      const service = {
+        getStatus: () => baseStatus,
+        completeAuthorization,
+        completeInstallationReturn,
+      } as unknown as CodespaceConnectionService;
+
+      const response = await request(appWith(service)).get(
+        "/api/integrations/github/callback?code=install-code&installation_id=4242&setup_action=install",
+      );
+
+      expect(response.status).toBe(303);
+      expect(response.headers.location).toBe(
+        `https://moira.example.com/app/settings?github=${outcome}#integrations-github`,
+      );
+      expect(completeInstallationReturn).toHaveBeenCalledWith("user-a");
+      // The install return's own code is never exchanged: the stored credential suffices.
+      expect(completeAuthorization).not.toHaveBeenCalled();
+      expect(response.text).not.toMatch(/install-code|4242/);
+    },
+  );
+
+  test("an App installation return without a usable credential starts authorization on this site", async () => {
     const service = {
       getStatus: () => baseStatus,
-      completeAuthorization,
+      completeInstallationReturn: jest
+        .fn<CodespaceConnectionService["completeInstallationReturn"]>()
+        .mockResolvedValue("authorization_required"),
     } as unknown as CodespaceConnectionService;
 
     const response = await request(appWith(service)).get(
-      "/api/integrations/github/callback?code=install-code&installation_id=4242&setup_action=install",
+      "/api/integrations/github/callback?installation_id=4242&setup_action=install",
     );
 
     expect(response.status).toBe(303);
-    expect(response.headers.location).toBe("/api/integrations/github/start");
-    expect(completeAuthorization).not.toHaveBeenCalled();
-    expect(response.text).not.toMatch(/install-code|4242/);
+    // Absolute and on the configured site, like the Settings URL; the API is served at the site root.
+    expect(response.headers.location).toBe(
+      "https://moira.example.com/api/integrations/github/start",
+    );
   });
+
+  test("an authorization that finds no installation goes straight to the GitHub App install page", async () => {
+    const service = {
+      getStatus: () => baseStatus,
+      completeAuthorization: jest
+        .fn<CodespaceConnectionService["completeAuthorization"]>()
+        .mockResolvedValue({
+          ...baseStatus,
+          state: "installation_required",
+          installationUrl: "https://github.com/apps/moira-codespaces/installations/new",
+        }),
+    } as unknown as CodespaceConnectionService;
+
+    const response = await request(appWith(service)).get(
+      "/api/integrations/github/callback?code=code-abcdef&state=state-abcdefghijklmnopqrstuvwxyz",
+    );
+
+    expect(response.status).toBe(303);
+    expect(response.headers.location).toBe(
+      "https://github.com/apps/moira-codespaces/installations/new",
+    );
+  });
+
+  test.each([
+    [
+      "an account that is already connected",
+      { ...baseStatus, state: "connected" as const },
+      new CodespaceConnectionError("AUTHORIZATION_FAILED", "Disconnect GitHub first"),
+      "already_connected",
+    ],
+    [
+      "an unconfigured instance",
+      baseStatus,
+      new CodespaceConnectionError("CODESPACE_NOT_CONFIGURED", "not configured"),
+      "not_configured",
+    ],
+    [
+      "previous access that could not be revoked",
+      baseStatus,
+      new CodespaceConnectionError("AUTH_REFRESH_FAILED", "Pending GitHub access must be revoked"),
+      "previous_access_not_revoked",
+    ],
+  ])(
+    "a start refused for %s returns the browser to Settings with an outcome instead of JSON",
+    async (_name, status, error, outcome) => {
+      const service = {
+        getStatus: () => status,
+        beginAuthorization: jest
+          .fn<CodespaceConnectionService["beginAuthorization"]>()
+          .mockRejectedValue(error),
+      } as unknown as CodespaceConnectionService;
+
+      const response = await request(appWith(service)).get("/api/integrations/github/start");
+
+      expect(response.status).toBe(303);
+      expect(response.headers.location).toBe(
+        `https://moira.example.com/app/settings?github=${outcome}#integrations-github`,
+      );
+    },
+  );
 
   test("keeps callback inputs secret when status resolution fails before authorization", async () => {
     const service = {

@@ -888,6 +888,8 @@
         "connect": "Connect GitHub",
         "reconnect": "Reconnect GitHub",
         "install": "Install GitHub App",
+        "checkInstallation": "Check installation",
+        "installationStillMissing": "GitHub does not show the Moira App installed on your account yet. Finish the installation on GitHub, then check again.",
         "disconnect": "Disconnect",
         "confirmDisconnect": "Disconnect GitHub and revoke Moira's stored access? Active cloud codespace sessions will no longer be authorized.",
         "disconnected": "GitHub was disconnected",
@@ -922,8 +924,15 @@
         },
         "outcomes": {
           "connected": "GitHub connected successfully",
-          "installation_required": "Authorize the GitHub App installation to finish setup",
-          "authorization_failed": "GitHub authorization failed or expired. Try again from Settings."
+          "installation_required": "Install the GitHub App on your account to finish setup, then check the installation here.",
+          "authorization_failed": "GitHub authorization failed or expired. Try again from Settings.",
+          "already_connected": "GitHub is already connected. To use a different account, disconnect first.",
+          "not_configured": "GitHub codespaces are not configured on this Moira instance.",
+          "credential_unreadable": "The saved GitHub credential cannot be decrypted. Follow the recovery steps on this page before connecting again.",
+          "grant_revocation_required": "Revoke the Moira GitHub App grant on GitHub and confirm it on this page before connecting again.",
+          "previous_access_not_revoked": "Moira could not yet revoke GitHub access it stored earlier. Try connecting again in a moment.",
+          "revocation_pending": "GitHub access is still being revoked. Finish Disconnect before connecting again.",
+          "session_required": "Sign in to this website again, then connect GitHub."
         },
         "errors": {
           "INCOMPLETE_CONFIGURATION": {

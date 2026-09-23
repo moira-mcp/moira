@@ -363,7 +363,7 @@ Tokens. Each section has a stable `data-testid="settings-section-{name}"`.
 - OAuth consents via GET/DELETE /api/user/oauth-consents
 - Sessions via GET/DELETE /api/user/sessions
 - Handle change via PATCH /api/user/handle
-- GitHub codespace connection via GET /api/integrations/github, browser navigation to GET /api/integrations/github/start, and DELETE /api/integrations/github
+- GitHub codespace connection via GET /api/integrations/github, browser navigation to GET /api/integrations/github/start, and DELETE /api/integrations/github; the page reports every `?github=<outcome>` redirect as a localized toast (an unknown outcome as the generic authorization failure), and in `installation_required` the card shows Install GitHub App and Check installation (`github-codespace-check-installation`, a forced refresh) instead of Reconnect
 - External GitHub grant recovery via DELETE /api/integrations/github/external-revocation after the user revokes the grant in GitHub; this covers unreadable credentials and an untracked refresh successor
 - Automatic ten-minute repository-grant refresh on Settings load plus an explicit Refresh button backed by `POST /api/integrations/github/refresh`; a provider failure keeps the saved repositories visible with a stale warning
 

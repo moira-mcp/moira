@@ -27,9 +27,14 @@ const config: Extract<CodespaceGitHubConfigStatus, { state: "available" }> = {
 
 class VerticalGitHubClient implements GitHubCodespaceClient {
   exchangedCode: string | null = null;
+  exchangeCalls = 0;
+  revokedTokens: string[] = [];
   revokedGrantToken: string | null = null;
+  /** Whether the user has installed the App yet. */
+  installed = true;
 
   async exchangeCode(code: string) {
+    this.exchangeCalls += 1;
     this.exchangedCode = code;
     return {
       accessToken: "ghu_vertical-access-secret",
@@ -50,6 +55,7 @@ class VerticalGitHubClient implements GitHubCodespaceClient {
   }
 
   async listInstallations() {
+    if (!this.installed) return [];
     return [
       {
         id: "9001",
@@ -65,7 +71,9 @@ class VerticalGitHubClient implements GitHubCodespaceClient {
     return [{ id: "101", fullName: "witqq/private-project", private: true }];
   }
 
-  async revokeToken() {}
+  async revokeToken(accessToken: string) {
+    this.revokedTokens.push(accessToken);
+  }
 
   async revokeGrant(accessToken: string) {
     this.revokedGrantToken = accessToken;
@@ -153,5 +161,37 @@ describe("GitHub codespace authenticated HTTP lifecycle", () => {
     expect(disconnect.body.data).toMatchObject({ state: "disconnected" });
     expect(github.revokedGrantToken).toBe("ghu_vertical-access-secret");
     expect(sqlite.prepare("SELECT * FROM codespaceCredentialVault").all()).toEqual([]);
+  });
+
+  test("one Connect, one GitHub authorization, then the App install and back to connected", async () => {
+    github.installed = false;
+    const start = await request(app).get("/api/integrations/github/start");
+    const state = new URL(start.headers.location).searchParams.get("state");
+
+    // No installation yet: the browser goes straight on to GitHub's install page.
+    const callback = await request(app).get(
+      `/api/integrations/github/callback?code=vertical-first-code&state=${state}`,
+    );
+    expect(callback.status).toBe(303);
+    expect(callback.headers.location).toBe(config.installationUrl);
+
+    // GitHub returns from the installation without Moira's state, with its own code.
+    github.installed = true;
+    const installReturn = await request(app).get(
+      "/api/integrations/github/callback?code=vertical-install-code&installation_id=9001&setup_action=install",
+    );
+    expect(installReturn.status).toBe(303);
+    expect(installReturn.headers.location).toBe(
+      "https://moira.example.com/app/settings?github=connected#integrations-github",
+    );
+    expect(github.exchangeCalls).toBe(1);
+    expect(github.exchangedCode).toBe("vertical-first-code");
+    expect(github.revokedTokens).toEqual([]);
+
+    const status = await request(app).get("/api/integrations/github");
+    expect(status.body.data).toMatchObject({
+      state: "connected",
+      repositories: [{ fullName: "witqq/private-project" }],
+    });
   });
 });

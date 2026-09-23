@@ -196,7 +196,8 @@ all GitHub App and credential-vault values are present and valid. Create a GitHu
 user authorization tokens and "Request user authorization (OAuth) during installation" enabled,
 grant it the repository permissions Codespaces (write), Codespaces lifecycle admin (write),
 Codespaces metadata (read), Contents (read) and Metadata (read), then configure its callback URL
-to the exact Moira API path and its installation URL to the app's GitHub slug:
+to the exact Moira API path and its installation URL to the app's GitHub slug. No Setup URL is
+needed: GitHub returns the browser to the callback URL after an installation:
 
 ```bash
 CODESPACE_GITHUB_APP_CLIENT_ID=<github-app-client-id>
@@ -233,8 +234,12 @@ Moira could neither retain nor revoke. Revoke the entire GitHub App grant before
 state deliberately disables Reconnect and ordinary Disconnect.
 
 After the container is healthy, each user opens **Settings → Integrations → GitHub**, selects
-**Connect GitHub**, completes the browser authorization and installs the app for the intended
-personal repositories. Authorization never happens through an MCP tool or agent. When setup is
+**Connect GitHub** and authorizes once on GitHub. If the app is not installed on the account yet,
+the browser continues straight to GitHub's installation page; after the user installs it for the
+intended personal repositories, Settings shows the connection as connected without a second
+authorization. If that return does not arrive, **Check installation** reads the installation again.
+To switch GitHub accounts, disconnect and connect again. Authorization never happens through an MCP
+tool or agent. When setup is
 missing or a credential must be renewed, the user returns to this website.
 
 Codespace creation and agent operations additionally require `CODESPACE_CODESPACES_ENABLED=true`
