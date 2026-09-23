@@ -56,11 +56,12 @@ export interface AccessInfo {
   id: string;
   workflowId: string;
   userId: string;
-  userHandle: string;
+  /** `null` when the user is gone; the reader's interface words that, not the repository. */
+  userHandle: string | null;
   userName: string | null;
-  userEmail: string;
+  userEmail: string | null;
   grantedBy: string;
-  grantedByHandle: string;
+  grantedByHandle: string | null;
   inviteId: string | null;
   grantedAt: number;
 }
@@ -455,11 +456,11 @@ export class WorkflowSharingRepository {
       id: row.id,
       workflowId: row.workflowId,
       userId: grantedUserId,
-      userHandle: userRow?.handle || "unknown",
+      userHandle: userRow?.handle || null,
       userName: userRow?.name || null,
-      userEmail: userRow?.email || "unknown",
+      userEmail: userRow?.email || null,
       grantedBy: row.grantedBy,
-      grantedByHandle: grantorRow?.handle || "unknown",
+      grantedByHandle: grantorRow?.handle || null,
       inviteId: row.inviteId,
       grantedAt: (row.grantedAt as Date).getTime(),
     };
@@ -520,11 +521,11 @@ export class WorkflowSharingRepository {
         id: row.id,
         workflowId: row.workflowId,
         userId: grantedUserId,
-        userHandle: userRow?.handle || "unknown",
+        userHandle: userRow?.handle || null,
         userName: userRow?.name || null,
-        userEmail: userRow?.email || "unknown",
+        userEmail: userRow?.email || null,
         grantedBy: row.grantedBy,
-        grantedByHandle: grantorRow?.handle || "unknown",
+        grantedByHandle: grantorRow?.handle || null,
         inviteId: row.inviteId,
         grantedAt: (row.grantedAt as Date).getTime(),
       });

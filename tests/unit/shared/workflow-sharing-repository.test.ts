@@ -414,6 +414,21 @@ describe("WorkflowSharingRepository", () => {
       const access = await repository.getAccess(TEST_WORKFLOW_ID, TEST_RECIPIENT_ID);
       expect(access).toBeNull();
     });
+
+    it("reports a user it cannot find as null, never as an English placeholder", async () => {
+      // No user rows exist here, so neither the recipient nor the grantor can be looked up: the
+      // interface words that in the reader's language, which an "unknown" string would pre-empt.
+      await repository.grantAccess(TEST_WORKFLOW_ID, TEST_RECIPIENT_ID, TEST_OWNER_ID);
+
+      const access = await repository.getAccess(TEST_WORKFLOW_ID, TEST_RECIPIENT_ID);
+      const listed = await repository.listAccess({ workflowId: TEST_WORKFLOW_ID });
+
+      for (const entry of [access, ...listed.accesses]) {
+        expect(entry?.userHandle).toBeNull();
+        expect(entry?.userEmail).toBeNull();
+        expect(entry?.grantedByHandle).toBeNull();
+      }
+    });
   });
 
   describe("listAccess", () => {

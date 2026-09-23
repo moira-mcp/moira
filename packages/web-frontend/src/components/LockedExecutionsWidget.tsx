@@ -22,7 +22,7 @@ interface LockedExecution {
   updatedAt?: number;
   hasActiveLock?: boolean;
   // Admin-only fields
-  userEmail?: string;
+  userEmail?: string | null;
   userName?: string | null;
 }
 
