@@ -33,10 +33,10 @@ export default defineConfig({
   // parallel workers; 30 s leaves headroom without hiding a hung page. Remote browsers add
   // transfer latency to every step.
   timeout: isRemote ? 60000 : 30000,
-  // Whole run: a full local run of the suite measured about six minutes with four workers;
-  // fifteen minutes is the same budget CI uses and keeps a slow machine from being cut off
-  // mid-run, which is what the earlier five-minute budget did.
-  globalTimeout: isRemote ? 1800000 : 900000,
+  // Whole run: a full local run of the suite measured about six minutes with four workers, so
+  // fifteen minutes keeps a slow machine from being cut off mid-run. The CI runner is several times
+  // slower (the nightly run took about 14.5 minutes), so CI and remote browsers get thirty.
+  globalTimeout: isRemote || process.env.CI ? 1800000 : 900000,
   retries: 1,
   // Four workers measured faster overall than five on a developer machine that also runs the
   // Docker container (about six minutes against seven), with the slowest test at 10 s instead
