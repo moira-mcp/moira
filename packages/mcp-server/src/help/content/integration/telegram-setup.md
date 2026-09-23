@@ -32,11 +32,11 @@ Do not put the bot token into a browser URL. URLs can be retained in browser his
 
 ### 3. Save Settings
 
-1. Open Moira and go to **Settings**
-2. Find the **Telegram** card under **Notifications**
-3. Enter your **Bot Token** in the corresponding field
+1. Open Moira and go to **Settings → Notifications**
+2. Find the **Telegram** card; **Telegram setup** in the section heading walks through these steps
+3. Enter your **Bot token** in the corresponding field
 4. Enter your **Chat ID** in the corresponding field
-5. Make sure **Enabled** is toggled on
+5. Make sure **Send notifications to Telegram** is turned on
 6. Click **Save** for each setting
 
 ### 4. Send a Test Notification

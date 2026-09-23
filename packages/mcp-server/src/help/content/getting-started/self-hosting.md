@@ -222,8 +222,8 @@ other low-diversity values are rejected. The vault key is not auto-generated and
 across container restarts; changing it makes existing connection credentials unreadable.
 
 If a key or ciphertext is lost, ordinary Reconnect and Disconnect cannot prove remote revocation.
-First remove the Moira GitHub App grant in GitHub settings. Then return to **Settings →
-Integrations → GitHub** and choose **Forget after external revoke**. The confirmation deletes
+First remove the Moira GitHub App grant in GitHub settings. Then return to **Settings → GitHub &
+Codespaces** and choose **Forget after external revoke**. The confirmation deletes
 unreadable local ciphertext; do not confirm while GitHub still lists the grant.
 If the original key and version are restored, Moira no longer offers this unreadable-credential
 recovery. Ordinary **Reconnect GitHub** and **Disconnect** are available again; both revoke the
@@ -233,7 +233,7 @@ The same external-revoke confirmation appears if a refresh may have returned a n
 Moira could neither retain nor revoke. Revoke the entire GitHub App grant before confirming; this
 state deliberately disables Reconnect and ordinary Disconnect.
 
-After the container is healthy, each user opens **Settings → Integrations → GitHub**, selects
+After the container is healthy, each user opens **Settings → GitHub & Codespaces**, selects
 **Connect GitHub** and authorizes once on GitHub. If the app is not installed on the account yet,
 the browser continues straight to GitHub's installation page; after the user installs it for the
 intended personal repositories, Settings shows the connection as connected without a second
@@ -266,12 +266,14 @@ provider-console links as `setup_help`, plus App installation when its URL is co
 starting any authorization flow. A codespace is
 personal rather than shared; collaboration happens through version-control branches.
 
-Users manage the same codespaces from **Settings → Integrations → Cloud codespaces**: create one for
-an approved repository, start or stop it (stop keeps the repository data) and delete it after an
-explicit confirmation. Each user's idle codespaces pause on their own: the **Settings** page's
-`codespaces.auto_stop_enabled` (on by default) and `codespaces.idle_timeout_minutes` (30 by
-default, 5 to 240) decide when Moira stops a codespace no agent has used through Moira, and the next
-agent operation starts it again. Direct use in a browser, an editor or over SSH is not seen, so
+Users manage the same codespaces from the **Cloud codespaces** card in **Settings → GitHub &
+Codespaces**: create one for an approved repository, start or stop it (stop keeps the repository
+data) and delete it after an explicit confirmation. Each user's idle codespaces pause on their own:
+the **Automatic pause** card in the same section sets `codespaces.auto_stop_enabled` (on by default)
+and `codespaces.idle_timeout_minutes` (30 by default, 5 to 240), which decide when Moira stops a
+codespace no agent has used through Moira, and the next agent operation starts it again. The **Your
+limits** card beside it shows the user's codespace, command and transfer limits against current
+use. Direct use in a browser, an editor or over SSH is not seen, so
 users who work in their codespaces directly should turn pausing off. Administrators open
 **Admin → Settings → Codespaces** to see the instance readiness (configuration, connector,
 reconciliation backlog, active codespaces and operations against their limits) and to pause work with the global or provider kill switch; pausing refuses new

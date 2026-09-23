@@ -705,9 +705,9 @@ export class MoiraApiClient {
   }): Promise<{
     sessions: Array<{
       id: string;
-      ipAddress: string;
-      userAgent: string;
-      country: string;
+      ipAddress: string | null;
+      userAgent: string | null;
+      country: string | null;
       createdAt: string;
       expiresAt: string;
       isCurrent: boolean;
@@ -729,9 +729,9 @@ export class MoiraApiClient {
       ApiResponse<
         Array<{
           id: string;
-          ipAddress: string;
-          userAgent: string;
-          country: string;
+          ipAddress: string | null;
+          userAgent: string | null;
+          country: string | null;
           createdAt: string;
           expiresAt: string;
           isCurrent: boolean;

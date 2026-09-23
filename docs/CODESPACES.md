@@ -190,8 +190,9 @@ stop, cancellation and cleanup work remains eligible for reconciliation.
 ### Idle auto-pause
 
 Two built-in, non-administrative user settings in category `codespaces` control
-idle pausing. The Settings page shows them in its general settings editor, and the
-settings API and the MCP `settings` tool read and write them:
+idle pausing. The Settings page edits them in the Automatic pause card of its GitHub &
+Codespaces section (not in the generic settings editor), and the settings API and the
+MCP `settings` tool read and write them:
 
 | Setting                           | Type    | Default | Meaning                                                 |
 | --------------------------------- | ------- | ------: | ------------------------------------------------------- |
@@ -596,16 +597,40 @@ patches, argv, text and native references do not enter request context.
 
 ## Website management
 
-The Settings page renders a Cloud codespaces card under Integrations. It shows the
-instance readiness, discloses that an authorized agent has the Codespace user's
-repository, network and configured-secret access, lets the user create a codespace
-for an approved repository and ref, and lists the user's codespaces with repository,
-current branch (the requested ref until a current one is observed), provider and
-machine context, state, desired/observed state, generation and last update. Start and Stop are available for stopped and running codespaces; Delete
-requires a confirmation that names the repository and points to Stop for keeping data.
-Actions are disabled while a codespace is in a pending, cleanup or ambiguous state.
-The card keeps a saved repository list visible with a stale warning when provider
-enumeration fails. It never mentions chats or sessions.
+The Settings page's **GitHub & Codespaces** section (anchor `#integrations-github`)
+holds the GitHub connection card, the Cloud codespaces card, the Automatic pause card
+and the Your limits card. One data source feeds all of them: it loads the connection
+view and the codespace view (with repositories and `limits`) together, and any change
+one card makes reloads what it can affect, so disconnecting never leaves codespaces of
+a connection that no longer exists on screen. The section heading offers a help
+popover and a **Setup guide** tour, and the connection card shows a stepper (connect
+GitHub, install the Moira App, grant repositories) marking each step
+done, current, not started or unavailable on this instance.
+
+The Cloud codespaces card shows the instance readiness, discloses that an authorized
+agent has the Codespace user's repository, network and configured-secret access, and
+lets the user create a codespace for an approved repository and ref; the create hint
+states how many codespaces the user holds against the per-user ceiling and that
+stopped codespaces count. It lists the user's codespaces with repository, current
+branch (the requested ref until a current one is observed), provider and machine
+context and a plain-language state badge; a collapsed **Technical details** block
+carries the requested and current ref, desired/observed state and generation, the
+last update and the codespace ID. Start and Stop are available for stopped and
+running codespaces; Delete requires a confirmation that names the repository and
+points to Stop for keeping data. Actions are disabled while a codespace is in a
+pending, cleanup or ambiguous state. The card keeps a saved repository list visible
+with a stale warning when provider enumeration fails. It never mentions chats or
+sessions.
+
+The Automatic pause card edits the two idle settings (a switch and a choice of
+timeouts within 5–240 minutes; a value set through the API or the MCP tool stays
+selectable) and saves each change through the settings API. Its note and help say
+that only agent activity through Moira counts, that direct use in a browser, an
+editor or over SSH is not seen, and that GitHub itself stops a codespace after 240
+minutes. The Your limits card shows the `limits` view: meters for codespaces held,
+commands running and file-transfer bytes against their limits, and a collapsed list of
+every other limit, where billing and quota point to GitHub because GitHub does not
+share them with Moira.
 
 The routes are mounted under `/api/integrations/github/codespaces` behind
 `requireAuth` and are a second presentation of the same services the MCP tools use,

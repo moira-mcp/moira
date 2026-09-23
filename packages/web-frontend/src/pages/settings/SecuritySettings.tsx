@@ -8,8 +8,9 @@ import { useTranslation } from "react-i18next";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
+import { toast } from "sonner";
 
 export const SecuritySettings: React.FC = () => {
   const { t } = useTranslation();
@@ -19,7 +20,6 @@ export const SecuritySettings: React.FC = () => {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [changingPassword, setChangingPassword] = useState(false);
   const [passwordError, setPasswordError] = useState<string | null>(null);
-  const [passwordSuccess, setPasswordSuccess] = useState(false);
 
   const getPasswordStrength = (): { value: number; label: string } => {
     if (!newPassword) return { value: 0, label: "" };
@@ -35,7 +35,6 @@ export const SecuritySettings: React.FC = () => {
   const handleChangePassword = async (e: React.FormEvent) => {
     e.preventDefault();
     setPasswordError(null);
-    setPasswordSuccess(false);
 
     if (!currentPassword || !newPassword || !confirmPassword) {
       setPasswordError(t("pages.settings.security.errors.allRequired"));
@@ -69,14 +68,13 @@ export const SecuritySettings: React.FC = () => {
 
       const data = await response.json();
       if (!response.ok || !data.success) {
-        throw new Error(data.error || "Failed to change password");
+        throw new Error(data.error || t("pages.settings.security.errors.changeFailed"));
       }
 
-      setPasswordSuccess(true);
+      toast.success(t("pages.settings.security.passwordSuccess"));
       setCurrentPassword("");
       setNewPassword("");
       setConfirmPassword("");
-      setTimeout(() => setPasswordSuccess(false), 3000);
     } catch (err) {
       setPasswordError((err as Error).message);
     } finally {
@@ -89,7 +87,8 @@ export const SecuritySettings: React.FC = () => {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>{t("pages.settings.security.title")}</CardTitle>
+        <CardTitle className="text-base">{t("pages.settings.security.title")}</CardTitle>
+        <CardDescription>{t("pages.settings.security.description")}</CardDescription>
       </CardHeader>
       <CardContent>
         <form onSubmit={handleChangePassword} className="space-y-4 max-w-md">
@@ -144,9 +143,10 @@ export const SecuritySettings: React.FC = () => {
             />
           </div>
 
-          {passwordError && <p className="text-sm text-destructive">{passwordError}</p>}
-          {passwordSuccess && (
-            <p className="text-sm text-chart-2">✓ {t("pages.settings.security.passwordSuccess")}</p>
+          {passwordError && (
+            <p className="text-sm text-destructive" role="alert">
+              {passwordError}
+            </p>
           )}
 
           <Button type="submit" disabled={changingPassword}>

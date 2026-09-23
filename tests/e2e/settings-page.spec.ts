@@ -69,6 +69,50 @@ test.describe("Settings Page — Flat Layout", () => {
     ).toBeVisible();
   });
 
+  for (const [lang, tour, label, href] of [
+    [
+      "en",
+      "Telegram setup",
+      "Telegram setup in the documentation",
+      "/docs/integration/telegram-setup/",
+    ],
+    [
+      "ru",
+      "Настройка Telegram",
+      "Настройка Telegram в документации",
+      "/ru/docs/integration/telegram-setup/",
+    ],
+  ] as const) {
+    test(`the Telegram tour and the Telegram documentation are two distinctly named entries, the documentation in the reader's language (${lang})`, async ({
+      page,
+    }) => {
+      await loginAsAdmin(page);
+      await page.goto(`${BASE_URL}/settings?lang=${lang}`);
+      const section = page.getByTestId("settings-section-dynamic");
+      await expect(section).toBeVisible({ timeout: 5000 });
+
+      await expect(page.getByTestId("telegram-guide-open")).toHaveText(tour);
+      const docs = page.getByTestId("user-channel-telegram-docs-link");
+      await expect(docs).toHaveText(label);
+      await expect(docs).toHaveAttribute("href", href);
+    });
+  }
+
+  test("the sessions list carries its title inside its own card", async ({ page }) => {
+    await loginAsAdmin(page);
+    await page.goto(`${BASE_URL}/settings?lang=en`);
+    const sessions = page.getByTestId("settings-section-sessions");
+    await expect(
+      sessions.getByRole("heading", { name: "Active Sessions", level: 3 }),
+    ).toBeVisible();
+    await expect(sessions.getByTestId("sessions-help")).toBeVisible();
+    await expect(sessions.getByTestId(/^session-row-/).first()).toBeVisible();
+    // The card's edge is the heading's container, so the heading sits inside it, not left of it.
+    const card = await sessions.boundingBox();
+    const heading = await sessions.getByRole("heading", { name: "Active Sessions" }).boundingBox();
+    expect(heading!.x).toBeGreaterThan(card!.x + 8);
+  });
+
   test("encrypted fields display as masked", async ({ page }) => {
     await loginAsAdmin(page);
     await page.waitForLoadState("domcontentloaded");
@@ -141,8 +185,7 @@ test.describe("Settings Page — Flat Layout", () => {
     await page.goto(`${BASE_URL}/settings`);
     await page.waitForLoadState("domcontentloaded");
 
-    // Profile section is at the top, find Name input
-    const nameInput = page.locator('input[type="text"]').first();
+    const nameInput = page.getByTestId("profile-name-input");
     await expect(nameInput).toBeVisible({ timeout: 5000 });
 
     const testValue = `TestName_${Date.now()}`;
@@ -151,13 +194,13 @@ test.describe("Settings Page — Flat Layout", () => {
 
     await page.waitForSelector('button:has-text("Save Changes")', { timeout: 10000 });
     await page.click('button:has-text("Save Changes")');
-    await expect(page.locator("text=/success|updated/i")).toBeVisible({ timeout: 10000 });
+    await expect(page.getByText("Profile updated successfully")).toBeVisible({ timeout: 10000 });
 
     // Reload and verify
     await page.reload();
     await page.waitForLoadState("domcontentloaded");
 
-    const nameAfterReload = page.locator('input[type="text"]').first();
+    const nameAfterReload = page.getByTestId("profile-name-input");
     await expect(nameAfterReload).toBeVisible({ timeout: 5000 });
     await expect(nameAfterReload).toHaveValue(testValue);
   });

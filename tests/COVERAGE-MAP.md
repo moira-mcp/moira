@@ -75,7 +75,7 @@ level headings classify the tracked test paths listed beneath them.
 
 **e2e**
 
-- `tests/e2e/api-tokens-settings.spec.ts`
+- `tests/e2e/api-tokens-settings.spec.ts` — creating a token from Settings shows its secret once, the new row carries its name and prefix, and revoking it marks that row revoked; the section's description is not repeated inside the card
 - `tests/e2e/admin-tokens.spec.ts`
 
 ### artifacts
@@ -141,7 +141,7 @@ level headings classify the tracked test paths listed beneath them.
 - `tests/api/admin-logout-all.test.ts`
 - `tests/api/auth/registration-consent.test.ts`
 - `tests/api/authorization.test.ts`
-- `tests/api/user-oauth-sessions-api.test.ts`
+- `tests/api/user-oauth-sessions-api.test.ts` — OAuth consents (empty list, unknown consent refused, authentication required); the session list with the current session marked, unknown address, device and country reported as null (a country otherwise an ISO code) rather than an English placeholder, expired sessions filtered out; revoking a session (not the current one, not another user's, unknown one refused) and authentication required
 
 **e2e**
 
@@ -152,7 +152,7 @@ level headings classify the tracked test paths listed beneath them.
 - `tests/e2e/inspector-oauth-registration.spec.ts`
 - `tests/e2e/logout.spec.ts`
 - `tests/e2e/oauth-consent.spec.ts`
-- `tests/e2e/user-oauth-sessions.spec.ts`
+- `tests/e2e/user-oauth-sessions.spec.ts` — Settings lists connected apps and signed-in devices: the current session marked and not revocable, other sessions revoked by their own row with a toast, device and browser named instead of the raw User-Agent, an unknown location left out instead of printed as a placeholder, and in Russian (mocked sessions) an unknown device named in Russian, an unknown address and location left out, a known country and address shown, and no English "Unknown" anywhere in the list; both the sessions and the connected-apps lists paging through the shared `ServerPagination` in its embedded, non-sticky in-card variant (first, next and last pages of a mocked 20-item list)
 - `tests/e2e/web-login.spec.ts`
 - `tests/e2e/web-registration.spec.ts`
 
@@ -332,6 +332,9 @@ level headings classify the tracked test paths listed beneath them.
 - `tests/unit/web-backend/settings-route-extension-values.test.ts` — public settings HTTP state for per-key save/reset, structural values, mixed 207 outcomes, unknown keys and admin-only mutation/read boundaries
 - `tests/unit/web-backend/validation-service-node-types.test.ts` — visualization compatibility shares engine built-ins and extension classification instead of a drifting backend allowlist
 - `tests/unit/web-frontend/settings-editor-structural-value.test.tsx` — extension-category ownership in EN/RU, editable structural/unset values and visible refusal that preserves a dirty edit
+- `tests/unit/web-frontend/docs-path.test.ts` — a root documentation path mapped to the reader's language (English at the root, Russian under `/ru`, regional codes folded, an unserved language left at the root) and everything that is not a root documentation path — an external URL, an already-prefixed path, an application route, a look-alike prefix — left unchanged
+- `tests/unit/web-frontend/communication-channel-card.test.tsx` — a built-in notification channel's documentation link named with the channel's title from the reader's locale rather than the server's and opening the documentation page in that language (EN and RU), while an extension channel keeps its own title and its own help URL
+- `tests/unit/web-frontend/settings-primitives.test.tsx` — the Settings page's building blocks: a section addressable by its anchor and named by its heading, a subsection that is one card whose header holds its title, help and description above its content, the in-page navigation marking the section being read and updating the link on a choice, help closed until asked, a deep link honoured only once the page's data is ready and landing at the top of the view, a section highlighted on request, a built-in setting's label, description and help taken from the locale with the server's words as fallback, the GitHub setup progress per connection state and repository count, and the device name read from common, headless and programmatic User-Agent headers
 - `tests/unit/web-frontend/workflow-transformer-node-catalog.test.ts` — catalog-driven generic cards preserve real type, declaration, origin, owner, schema and configuration; missing, unavailable and unknown fallbacks remain semantic presentation states; dedicated built-ins keep their renderer
 - `tests/unit/web-frontend/workflow-node-connections.test.tsx` — the node detail sheet's outgoing connections on a four-way routing node: every chip names the output it leaves through (so three edges into one target stay apart), carries the case that selects that output and nothing for an output without a case, and offers its full `output → target` text as the application's hint (`data-hint`, not a native title)
 - `tests/unit/web-frontend/node-panel-schema-readout.test.tsx` — the node level of the right panel reading a catalog-drawn node's configuration against its type: the extension that contributed the type named in the configuration section, declared fields with value, description and `required`, an unset declared field, a field the type does not declare, an empty configuration keeping the whole schema, the same states in Russian, and the standalone detail sheet printing the namespaced type verbatim over the same readout
@@ -424,7 +427,7 @@ level headings classify the tracked test paths listed beneath them.
 **unit**
 
 - `tests/unit/web-frontend/i18n.test.ts`
-- `tests/unit/web-frontend/locale-parity.test.ts` — the words of the process interface in both languages: `en.json` and `ru.json` hold the same keys once plural suffixes are folded away, and each language carries every plural category its own CLDR rules require (English one/other, Russian one/few/many/other); every literal key the diagram, run and flow components name, plus the run-time families enumerated from the layout presets, the view modes, both pages' walkthrough steps and the shared directive/message section, exists in both files (other run-time families, such as duration units and status words, are guarded by the key-set equality only); none of those components writes an accessible label, hint or placeholder as a literal; and none of those components carries a `defaultValue` or `t(key, "text")` fallback or a Russian string written into the component, either of which would render the same words in every language and hide the missing key
+- `tests/unit/web-frontend/locale-parity.test.ts` — no string in either locale tells a reader to put a bot token into a URL (`bot<…>`, `getUpdates`, `api.telegram.org/bot`); the words of the process interface in both languages: `en.json` and `ru.json` hold the same keys once plural suffixes are folded away, and each language carries every plural category its own CLDR rules require (English one/other, Russian one/few/many/other); every literal key the diagram, run and flow components name, plus the run-time families enumerated from the layout presets, the view modes, both pages' walkthrough steps and the shared directive/message section, exists in both files (other run-time families, such as duration units and status words, are guarded by the key-set equality only); none of those components writes an accessible label, hint or placeholder as a literal; and none of those components carries a `defaultValue` or `t(key, "text")` fallback or a Russian string written into the component, either of which would render the same words in every language and hide the missing key
 - `tests/unit/web-frontend/native-title-guard.test.ts` — no native browser tooltip in the process pages' components: the markup of `components/{diagram,run,flow,workflow,execution,access}` and the flow page carries no `title=` attribute (literal or expression) on an intrinsic element or on the prop-forwarding `Badge`/`Button`/`Chip`, and no `<title>` element; a `title` prop on any other component is a heading or hint text and allowed; the scan is checked against the four shapes that produced the class
 
 **e2e**
@@ -737,7 +740,8 @@ level headings classify the tracked test paths listed beneath them.
 **e2e**
 
 - `tests/e2e/admin-settings.spec.ts`
-- `tests/e2e/settings-page.spec.ts` — flat settings layout plus Telegram settings grouped under its metadata-driven communication card with masked secret and persisted enable control
+- `tests/e2e/settings-page.spec.ts` — flat settings layout plus Telegram settings grouped under its metadata-driven communication card with masked secret and persisted enable control, a profile name change confirmed by its toast, the Telegram tour button and the Telegram documentation link named apart, the link named and pointing at the documentation in the reader's language (EN and RU), and the sessions list's heading and help inside its own card
+- `tests/e2e/settings-layout.spec.ts` — the Settings page's seven always-mounted sections each reached from the in-page navigation and marked as current; a `#integrations-github` link landing on and highlighting that section after the data loads, with the page's top no longer in view; narrow screens reaching sections through the chip row without the page growing wider than the screen; help and the page tour opening in English and Russian, the tour ringing the section it explains and leaving no `tour` parameter behind when closed; the GitHub setup guide on the setup steps; and codespace auto-pause (switch and timeout) persisted through the settings API and shown again after a reload
 - `tests/e2e/admin-prompt-editor.spec.ts` — admin prompt-editor master-detail interactions
 
 ### sharing
@@ -872,13 +876,13 @@ level headings classify the tracked test paths listed beneath them.
 
 - `tests/e2e/node-type-catalog.spec.ts` — anonymous catalog denial plus a real authenticated browser workflow whose custom catalog node is drawn from the catalog (no transformer warning) and whose stored configuration is read in the node panel against the schema its type declares: the owning extension and version, a declared key with its value, a declared key left unset and a key the type never declared, with screenshot evidence. The panel heading falls back to the title the type declares (Отправка сообщения) for a node that carries no label of its own, and the exact type string `corporate-messenger.send` is read from `node-panel-type`; the definition declares no process view, so the panel is also shown to stand beside the graph without one
 - `tests/e2e/extension-settings.spec.ts` — authenticated generic settings page renders a distinctive extension communication descriptor, state/capability/trust metadata, schema-backed structured JSON and masked secret, and sends a body-free channel-neutral test request, with screenshot evidence
-- `tests/e2e/dashboard.spec.ts`
+- `tests/e2e/dashboard.spec.ts` — dashboard statistics and quick actions, the Quick Start card, and the sidebar and Quick Start documentation links, which open the Russian documentation for a Russian reader
 - `tests/e2e/mobile-navigation.spec.ts`
 - `tests/e2e/sidebar.spec.ts`
 - `tests/e2e/theme-integration.spec.ts`
 - `tests/e2e/theme-loading-state.spec.ts`
 - `tests/e2e/verify-step24.spec.ts` — navigation, dashboard statistics, execution-card behavior, and beta-banner placement and dismissal
-- `tests/e2e/visual-regression.spec.ts` — light/dark screenshots of the principal application pages
+- `tests/e2e/visual-regression.spec.ts` — light/dark screenshots of the principal application pages (runs only with `PLAYWRIGHT_INCLUDE_EXTERNAL=true`; regenerate one page's baselines with `PLAYWRIGHT_INCLUDE_EXTERNAL=true npm run test:e2e -- --file tests/e2e/visual-regression.spec.ts --grep "<page> - " -- --update-snapshots=all`)
 
 ### codespace-connections
 
@@ -935,7 +939,7 @@ level headings classify the tracked test paths listed beneath them.
 
 **e2e**
 
-- `tests/e2e/codespace-management.spec.ts` — Settings codespace management with intercepted routes: readiness badge, agent-authority disclosure without chat/session wording, personal-billing context, busy state without actions, create, stop keeping data, confirmed generation-bound delete, removal of a row for a codespace the server finished, disabled and administrator-stopped explanations in EN/RU, administrator stop/resume with confirmation, and inspected desktop/narrow screenshots
+- `tests/e2e/codespace-management.spec.ts` — Settings codespace management with intercepted routes: readiness badge, agent-authority disclosure without chat/session wording, personal-billing context, busy state without actions, create, stop keeping data, confirmed generation-bound delete, removal of a row for a codespace the server finished, disabled and administrator-stopped explanations in EN/RU, administrator stop/resume with confirmation, the create hint and held-codespace meter read from the listing's `limits` ("2 of 4"), the three usage meters equal in height with their values on the same line at 1440 and 390 px, a codespace's technical details folded until asked, and inspected desktop/narrow screenshots
 - `tests/e2e/codespace-github-settings.spec.ts` — the installation_required view offering Install and Check installation and never Reconnect in English and Russian, with the check reporting a missing installation and then finishing the connection, website-only connect navigation, callback outcome, connected repositories, explicit repository refresh, disconnect confirmation, unreadable-credential and untracked-refresh full-grant recovery, safe actionable EN/RU states and inspected desktop/narrow screenshots
 
 **docker**

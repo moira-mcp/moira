@@ -11,6 +11,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { mcpClients, configGenerators, deeplinkGenerators } from "@mcp-moira/shared/mcp-clients";
 import type { McpClient } from "@mcp-moira/shared/mcp-clients";
 import { useFeatures } from "@/hooks/useFeatures";
+import { localizedDocsPath } from "@/lib/docs-path";
 
 /**
  * MCP URL baked into the bundle at build time from MOIRA_HOST (webpack
@@ -204,12 +205,7 @@ export const QuickStartCard: React.FC = () => {
   const { t, i18n } = useTranslation();
   const mcpUrl = useMcpUrl();
 
-  const getDocsPath = () => {
-    const lang = i18n.language?.substring(0, 2);
-    return lang === "ru"
-      ? "/ru/docs/getting-started/quickstart/"
-      : "/docs/getting-started/quickstart/";
-  };
+  const getDocsPath = () => localizedDocsPath("/docs/getting-started/quickstart/", i18n.language);
 
   const defaultClient = useMemo(() => mcpClients[0].id, []);
 

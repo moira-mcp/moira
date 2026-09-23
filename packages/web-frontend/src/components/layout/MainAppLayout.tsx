@@ -17,15 +17,12 @@ import { useSession, signOut } from "../../auth/better-auth-client";
 import { SidebarProvider, SidebarInset, SidebarTrigger } from "@/components/ui/sidebar";
 import { AppSidebar, type NavRoute } from "./AppSidebar";
 import { ROUTES, APP_PREFIX } from "../../constants/routes";
+import { localizedDocsPath } from "@/lib/docs-path";
 
 export const MainAppLayout: React.FC = () => {
   const { t, i18n } = useTranslation();
 
-  // Get docs path based on current language (default to /docs/ for English)
-  const getDocsPath = () => {
-    const lang = i18n.language?.substring(0, 2);
-    return lang === "ru" ? "/ru/docs/" : "/docs/";
-  };
+  const getDocsPath = () => localizedDocsPath("/docs/", i18n.language);
 
   const MAIN_APP_ROUTES: NavRoute[] = [
     { path: ROUTES.DASHBOARD, label: t("layout.nav.home"), icon: "🏠" },

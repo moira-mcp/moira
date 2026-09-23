@@ -55,7 +55,7 @@ test.describe("User OAuth and Sessions Management", () => {
   test.describe("OAuth Section", () => {
     test("displays empty state when no consents", async () => {
       await goToOAuthSection(page);
-      await expect(page.locator("text=No OAuth authorizations found")).toBeVisible();
+      await expect(page.getByText("No OAuth authorizations found", { exact: true })).toBeVisible();
     });
 
     test("shows OAuth Authorizations section", async () => {
@@ -82,20 +82,28 @@ test.describe("User OAuth and Sessions Management", () => {
       await goToSessionsSection(page);
 
       await expect(page.locator("text=/IP Address:/i").first()).toBeVisible();
-      await expect(page.locator("text=/Location:/i").first()).toBeVisible();
       await expect(page.locator("text=/Created:/i").first()).toBeVisible();
       await expect(page.locator("text=/Expires:/i").first()).toBeVisible();
+      // No country is known for these sessions: the row leaves it out rather than printing a filler.
+      await expect(page.getByTestId("settings-section-sessions")).not.toContainText("Unknown");
+      // The device is named by browser and system, not by the raw User-Agent header.
+      const device = page
+        .locator('[data-testid^="session-row-"][data-current="true"]')
+        .getByTestId("session-device");
+      // This session signed in through the API client, whose header is the bare product token.
+      const rawHeader = await device.getAttribute("data-hint");
+      expect(rawHeader).toBeTruthy();
+      await expect(device).toHaveText(/ client$| on /);
+      await expect(device).not.toHaveText(rawHeader!);
     });
 
     test("current session revoke button is disabled", async () => {
       await goToSessionsSection(page);
 
       // Find the card containing "Current Session" and check its Revoke button
-      const currentSessionCard = page
-        .locator(".flex.items-start")
-        .filter({ hasText: "Current Session" });
+      const currentSessionCard = page.locator('[data-testid^="session-row-"][data-current="true"]');
 
-      const revokeButton = currentSessionCard.locator('button:has-text("Revoke")');
+      const revokeButton = currentSessionCard.getByRole("button", { name: "Revoke" });
       await expect(revokeButton).toBeDisabled();
     });
 
@@ -111,7 +119,7 @@ test.describe("User OAuth and Sessions Management", () => {
       // In first session, go to sessions tab
       await goToSessionsSection(page);
 
-      const sessionCards = page.locator(".flex.items-start").filter({ hasText: /IP Address:/i });
+      const sessionCards = page.locator('[data-testid^="session-row-"]');
       await expect(sessionCards.first()).toBeVisible({ timeout: 10000 });
       await expect(sessionCards.nth(1)).toBeVisible({ timeout: 10000 });
       const count = await sessionCards.count();
@@ -133,14 +141,16 @@ test.describe("User OAuth and Sessions Management", () => {
 
       await goToSessionsSection(page);
 
-      const allSessions = page.locator(".flex.items-start").filter({ hasText: /IP Address:/i });
+      const allSessions = page.locator('[data-testid^="session-row-"]');
       await expect(allSessions.first()).toBeVisible({ timeout: 10000 });
       await expect(allSessions.nth(1)).toBeVisible({ timeout: 10000 });
       const sessionCount = await allSessions.count();
       expect(sessionCount).toBeGreaterThanOrEqual(2);
 
-      const nonCurrentSession = allSessions.filter({ hasNotText: "Current Session" }).first();
-      const revokeButton = nonCurrentSession.locator('button:has-text("Revoke")');
+      const nonCurrentSession = page
+        .locator('[data-testid^="session-row-"]:not([data-current="true"])')
+        .first();
+      const revokeButton = nonCurrentSession.getByRole("button", { name: "Revoke" });
 
       await expect(revokeButton).toBeEnabled();
       await revokeButton.click();
@@ -148,14 +158,11 @@ test.describe("User OAuth and Sessions Management", () => {
       const alertDialog = page.locator('[role="alertdialog"]');
       await expect(alertDialog).toBeVisible({ timeout: 5000 });
       await alertDialog.locator('button:has-text("Revoke")').click();
-
-      await page.waitForTimeout(2000);
+      await expect(page.getByText("The session was signed out")).toBeVisible();
 
       await goToSessionsSection(page);
 
-      const remainingSessions = page
-        .locator(".flex.items-start")
-        .filter({ hasText: /IP Address:/i });
+      const remainingSessions = page.locator('[data-testid^="session-row-"]');
       const remainingCount = await remainingSessions.count();
       expect(remainingCount).toBeLessThan(sessionCount);
 
@@ -169,6 +176,147 @@ test.describe("User OAuth and Sessions Management", () => {
       await secondPage.close();
       await secondContext.close();
     });
+  });
+
+  test.describe("Unknown session details", () => {
+    test("a Russian reader sees what is known and no English placeholder for what is not", async () => {
+      const now = Date.now();
+      const session = (id: string, fields: Record<string, unknown>) => ({
+        id,
+        createdAt: new Date(now - 3_600_000).toISOString(),
+        expiresAt: new Date(now + 86_400_000).toISOString(),
+        isCurrent: false,
+        ...fields,
+      });
+      // The server reports what it does not know as null.
+      await page.route("**/api/user/sessions*", (route) =>
+        route.fulfill({
+          json: {
+            success: true,
+            data: [
+              session("unknown-everything", { ipAddress: null, userAgent: null, country: null }),
+              session("located", {
+                ipAddress: "203.0.113.7",
+                userAgent: "Mozilla/5.0 (X11; Linux x86_64; rv:130.0) Gecko/20100101 Firefox/130.0",
+                country: "DE",
+              }),
+            ],
+            total: 2,
+            limit: 8,
+            offset: 0,
+            timestamp: new Date(now).toISOString(),
+          },
+        }),
+      );
+      try {
+        await page.goto(`${TEST_BASE_URL}/settings?lang=ru`);
+        const sessions = page.getByTestId("settings-section-sessions");
+        const unknown = sessions.getByTestId("session-row-unknown-everything");
+        const located = sessions.getByTestId("session-row-located");
+        await expect(unknown).toBeVisible();
+
+        await expect(unknown.getByTestId("session-device")).toHaveText("Неизвестное устройство");
+        await expect(unknown.getByTestId("session-location")).toHaveCount(0);
+        await expect(unknown.getByTestId("session-ip")).toHaveCount(0);
+        await expect(located.getByTestId("session-location")).toHaveText("Местоположение: DE");
+        await expect(located.getByTestId("session-ip")).toHaveText("IP адрес: 203.0.113.7");
+        await expect(sessions).not.toContainText("Unknown");
+      } finally {
+        await page.unroute("**/api/user/sessions*");
+        // The language choice is remembered; restore English for the other tests on this page.
+        await page.goto(`${TEST_BASE_URL}/settings?lang=en`);
+      }
+    });
+  });
+
+  test.describe("Paging inside the cards", () => {
+    const TOTAL = 20;
+    const now = Date.now();
+    const lists: ReadonlyArray<{
+      name: string;
+      route: string;
+      pager: string;
+      row: (id: string) => string;
+      item: (id: string) => Record<string, unknown>;
+    }> = [
+      {
+        name: "sessions",
+        route: "**/api/user/sessions*",
+        pager: "sessions-pager",
+        row: (id: string) => `session-row-${id}`,
+        item: (id: string) => ({
+          id,
+          ipAddress: "203.0.113.7",
+          userAgent: "node",
+          country: null,
+          createdAt: new Date(now - 3_600_000).toISOString(),
+          expiresAt: new Date(now + 86_400_000).toISOString(),
+          isCurrent: false,
+        }),
+      },
+      {
+        name: "connected apps",
+        route: "**/api/user/oauth-consents*",
+        pager: "oauth-pager",
+        row: (id: string) => `oauth-consent-${id}`,
+        item: (id: string) => ({
+          id,
+          clientId: `client-${id}`,
+          clientName: `App ${id}`,
+          clientIcon: null,
+          scopes: ["openid"],
+          createdAt: new Date(now - 3_600_000).toISOString(),
+        }),
+      },
+    ];
+
+    for (const list of lists) {
+      test(`the ${list.name} list pages with the shared pager, in its card rather than stuck to the page`, async () => {
+        // A server page of the requested window over TOTAL items named item-1…item-20.
+        await page.route(list.route, (route) => {
+          const url = new URL(route.request().url());
+          const limit = Number(url.searchParams.get("limit") ?? 8);
+          const offset = Number(url.searchParams.get("offset") ?? 0);
+          const ids = Array.from({ length: TOTAL }, (_, index) => `item-${index + 1}`);
+          return route.fulfill({
+            json: {
+              success: true,
+              data: ids.slice(offset, offset + limit).map((id) => list.item(id)),
+              total: TOTAL,
+              limit,
+              offset,
+              timestamp: new Date(now).toISOString(),
+            },
+          });
+        });
+        try {
+          await page.goto(`${TEST_BASE_URL}/settings?lang=en`);
+          const pager = page.getByTestId(list.pager);
+          await pager.scrollIntoViewIfNeeded();
+          await expect(pager).toContainText("Showing 1-8 of 20");
+          await expect(page.getByTestId(list.row("item-1"))).toBeVisible();
+          // The embedded variant: part of the card's flow, not the sticky footer of a full-page list.
+          expect(await pager.evaluate((element) => getComputedStyle(element).position)).toBe(
+            "static",
+          );
+
+          await pager.getByTestId("pagination-next").click();
+          await expect(pager).toContainText("Showing 9-16 of 20");
+          await expect(page.getByTestId(list.row("item-9"))).toBeVisible();
+          await expect(page.getByTestId(list.row("item-1"))).toHaveCount(0);
+
+          await pager.getByTestId("pagination-last").click();
+          await expect(pager).toContainText("Showing 17-20 of 20");
+          await expect(page.getByTestId(list.row("item-20"))).toBeVisible();
+          await expect(pager.getByTestId("pagination-next")).toBeDisabled();
+
+          await pager.getByTestId("pagination-first").click();
+          await expect(pager).toContainText("Showing 1-8 of 20");
+        } finally {
+          await page.unroute(list.route);
+        }
+      });
+    }
   });
 
   test.describe("Section Visibility", () => {

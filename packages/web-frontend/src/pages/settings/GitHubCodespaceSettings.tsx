@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { AlertCircle, CheckCircle2, Github, Loader2, RefreshCw, ShieldCheck } from "lucide-react";
 import { toast } from "sonner";
@@ -9,6 +9,8 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { ConfirmDialog } from "@/components/confirm-dialog";
+import { useGitHubCodespaces } from "./GitHubCodespacesData";
+import { GitHubSetupSteps } from "./GitHubSetupSteps";
 
 function statusVariant(
   state: CodespaceConnectionView["state"],
@@ -22,9 +24,13 @@ function statusVariant(
 
 export const GitHubCodespaceSettings: React.FC = () => {
   const { t } = useTranslation();
-  const [status, setStatus] = useState<CodespaceConnectionView | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState(false);
+  const {
+    connection: status,
+    connectionLoading: loading,
+    connectionError: loadError,
+    applyConnection: setStatus,
+    reloadConnection: loadStatus,
+  } = useGitHubCodespaces();
   const [disconnecting, setDisconnecting] = useState(false);
   const [refreshingRepositories, setRefreshingRepositories] = useState(false);
   const [checkingInstallation, setCheckingInstallation] = useState(false);
@@ -34,21 +40,12 @@ export const GitHubCodespaceSettings: React.FC = () => {
   const disconnectButtonRef = useRef<HTMLButtonElement>(null);
   const externalRevocationButtonRef = useRef<HTMLButtonElement>(null);
 
-  const loadStatus = useCallback(async () => {
-    try {
-      setLoading(true);
-      setLoadError(false);
-      setStatus(await apiClient.getGitHubCodespaceConnection());
-    } catch {
-      setLoadError(true);
-      toast.error(t("pages.settings.github.loadFailed"));
-    } finally {
-      setLoading(false);
-    }
-  }, [t]);
+  // The shared source reports a failed load in the card; a toast says it once as well.
+  useEffect(() => {
+    if (loadError) toast.error(t("pages.settings.github.loadFailed"));
+  }, [loadError, t]);
 
   useEffect(() => {
-    void loadStatus();
     const url = new URL(window.location.href);
     const outcome = url.searchParams.get("github");
     if (outcome) {
@@ -64,7 +61,7 @@ export const GitHubCodespaceSettings: React.FC = () => {
       url.searchParams.delete("github");
       window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
     }
-  }, [loadStatus, t]);
+  }, [t]);
 
   const disconnect = async () => {
     try {
@@ -129,7 +126,7 @@ export const GitHubCodespaceSettings: React.FC = () => {
   const finishExternalRevocation = async () => {
     try {
       setRecoveringExternalRevocation(true);
-      const recoveryReason = status.reason;
+      const recoveryReason = status?.reason;
       setStatus(await apiClient.confirmGitHubExternalRevocation());
       toast.success(
         t(
@@ -198,6 +195,8 @@ export const GitHubCodespaceSettings: React.FC = () => {
         </div>
       </CardHeader>
       <CardContent className="space-y-4">
+        <GitHubSetupSteps connection={status} />
+
         {status.state === "disabled" && (
           <Alert>
             <ShieldCheck aria-hidden="true" />
