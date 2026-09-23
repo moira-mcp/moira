@@ -392,6 +392,19 @@ sqlite3 ./data/moira.db "SELECT * FROM user;"
 npm run test:e2e -- --file tests/e2e/specific-test.spec.ts
 ```
 
+**A failure that appears only in CI** (the nightly E2E runs on a Linux runner far slower than a
+developer machine) usually depends on timing. Reproduce it locally by slowing the browser's CPU with
+`E2E_CPU_THROTTLE`, which every E2E page applies through the shared fixture (Chrome DevTools CPU
+emulation; a rate around 8 reproduces the runner), and repeat the spec without retries:
+
+```bash
+E2E_CPU_THROTTLE=8 npm run test:e2e -- --file tests/e2e/flow-page.spec.ts -- --retries=0 --repeat-each=3
+```
+
+Fix what the slowness exposes; do not raise a timeout. A spec acting on a diagram waits for the
+diagram's `data-diagram-settled="true"` (`settledCamera` in `tests/e2e/helpers/diagram.ts`), never
+for a camera value that a second layout pass or an animated placement can still change.
+
 ---
 
 ## Quick Reference

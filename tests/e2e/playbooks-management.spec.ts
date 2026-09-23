@@ -10,6 +10,7 @@
 import { randomUUID } from "node:crypto";
 import { test, expect } from "./fixtures.js";
 import { login, createTestUser } from "./helpers/auth-helper.js";
+import { graphOverview } from "./helpers/diagram.js";
 import { getTestBaseUrl, getAdminCredentials } from "../utils/test-config.js";
 import {
   callMCPTool,
@@ -298,6 +299,8 @@ test.describe("Playbooks", () => {
       await page.setViewportSize({ width: 1280, height: 1400 });
       await page.goto(`${BASE_URL}/workflows/${workflowId}?view=graph`);
       await expect(page.locator('[data-graph-node="work"]')).toBeVisible({ timeout: 20000 });
+      // The graph opens on its first step; the card after it may lie past the pane's edge.
+      await graphOverview(page);
       await page.locator('[data-graph-node="work"]').click();
       await expect(page.getByTestId("node-panel")).toHaveAttribute("data-node-id", "work");
       await page.getByTestId(`playbook-reference-${mine}`).click();

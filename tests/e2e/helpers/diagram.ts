@@ -24,11 +24,19 @@ export function cameraOf(page: Page, diagram: string): Promise<string> {
     .evaluate((el) => window.getComputedStyle(el).transform);
 }
 
-/** The camera, waited for until React Flow has fitted it (the identity matrix is the unfitted state). */
+/**
+ * The camera once the diagram has finished opening: its layout is final and the opening placement
+ * has arrived, which the diagram publishes as `data-diagram-settled`. A camera read earlier can be
+ * the fit that precedes the placement, or the placement of a layout about to be redone with the
+ * card heights the browser measured — and on a slow machine the reader's (or the test's) next
+ * action lands before the camera moves again.
+ */
 export async function settledCamera(page: Page, diagram: string): Promise<string> {
-  await expect
-    .poll(() => cameraOf(page, diagram), { timeout: 15000 })
-    .not.toMatch(/^(none|matrix\(1, 0, 0, 1, 0, 0\))$/);
+  await expect(page.locator(`${diagram} .react-flow`).first()).toHaveAttribute(
+    "data-diagram-settled",
+    "true",
+    { timeout: 15000 },
+  );
   return cameraOf(page, diagram);
 }
 
@@ -51,6 +59,22 @@ export async function restingCamera(page: Page, diagram: string): Promise<string
     )
     .toBe(true);
   return last;
+}
+
+/**
+ * The whole technical graph on screen, for a spec that clicks a card the opening placement may
+ * have left outside the pane: the graph opens readable on its first block (a run's, on its current
+ * step), so a card further along lies past the pane's edge and only a click taken before that
+ * placement arrives — on a fast machine — would reach it. The overview is taken once the opening
+ * placement has arrived, so no placement moves the camera again under the click.
+ */
+export async function graphOverview(page: Page): Promise<void> {
+  // The technical graph wherever a page mounts it — beside the contents on a page with a process
+  // view, alone on one without — is the diagram drawn under the graph's own toolbar.
+  const graph = '[data-testid="graph-toolbar"] ~ div';
+  await settledCamera(page, graph);
+  await page.getByTestId("graph-toolbar").getByTestId("toolbar-fit").click();
+  await restingCamera(page, graph);
 }
 
 /**

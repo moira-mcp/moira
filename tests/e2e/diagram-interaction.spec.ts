@@ -27,6 +27,7 @@ import {
   centredCard,
   edgePoint,
   graphExtent,
+  graphOverview,
   pulsingGroups,
   restingCamera,
   settledCamera,
@@ -96,14 +97,16 @@ test("on the graph a port and the edge itself both travel to the step at the far
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto(`${BASE_URL}/workflows/moira/quick-task?view=graph`);
   await expect(page.locator('[data-graph-node="get-task"]')).toBeVisible({ timeout: 20000 });
-  await settledCamera(page, GRAPH);
+  // At this width the port on the far side of `get-task` lies past the pane's edge once the graph
+  // has opened on its first block; the overview brings it on screen.
+  await graphOverview(page);
+  const beforePort = await cameraOf(page, GRAPH);
 
   // A port: its `data-peer` is the step the reader is taken to.
   const port = page.locator('[data-graph-node="get-task"] [data-port="out"]').first();
   const peer = await port.getAttribute("data-peer");
   const transition = await port.getAttribute("data-transition");
   expect(peer).toBe("create-plan");
-  const beforePort = await cameraOf(page, GRAPH);
   await port.click();
   await expect.poll(() => cameraOf(page, GRAPH), { timeout: 5000 }).not.toBe(beforePort);
   await expect(page.locator(`[data-transition="${transition}"][data-focused="true"]`)).toHaveCount(
@@ -155,19 +158,13 @@ test("a row of a block card's steps tooltip opens that step on the graph and in 
     // The tooltip content is a portal: the row is clicked where it is drawn.
     await page.locator('[data-step-tip-list] [data-step-row="get-task"]').click();
 
-    // The page moves to the graph and the panel opens on that step, with the sections the step
-    // has: its directive, the evidence it returns and where its outputs lead.
+    // The page moves to the graph, and the step is on it, inside its block's group.
     await expect(page).toHaveURL(/view=graph/);
     await expect(page.getByTestId("execution-progress")).toHaveAttribute("data-view", "graph");
-    const panel = page.getByTestId("node-panel");
-    await expect(panel).toHaveAttribute("data-node-id", "get-task");
-    await expect(page.getByTestId("node-panel-directive")).toBeVisible();
-    await expect(page.getByTestId("node-panel-returns")).toBeVisible();
-    await expect(page.getByTestId("node-panel-connections")).toBeVisible();
-    // The step is on the graph the page switched to, inside its block's group.
     await expect(page.locator('[data-graph-node="get-task"]')).toBeVisible({ timeout: 15000 });
     // The camera and the arrival pulse land on the step the row named, not on the first step of
-    // its block: `start` is what a block-level focus would have centred instead.
+    // its block: `start` is what a block-level focus would have centred instead. The pulse is a
+    // moment that starts when the camera arrives, so it is looked for before anything else.
     await expect
       .poll(() => arrivedCards(page, "data-graph-node"), { timeout: 5000 })
       .toEqual(["get-task"]);
@@ -178,6 +175,13 @@ test("a row of a block card's steps tooltip opens that step on the graph and in 
       "data-selected",
       "true",
     );
+    // The panel opens on that step, with the sections the step has: its directive, the evidence
+    // it returns and where its outputs lead.
+    const panel = page.getByTestId("node-panel");
+    await expect(panel).toHaveAttribute("data-node-id", "get-task");
+    await expect(page.getByTestId("node-panel-directive")).toBeVisible();
+    await expect(page.getByTestId("node-panel-returns")).toBeVisible();
+    await expect(page.getByTestId("node-panel-connections")).toBeVisible();
     // The breadcrumb goes back to the block level of the same panel.
     await page.getByTestId("node-panel-back").click();
     await expect(page.getByTestId("block-detail")).toHaveAttribute("data-block-id", "scope");
@@ -427,6 +431,7 @@ test("nothing on the flow page or the run page falls back to a native tooltip: n
         await expect(page.getByTestId("workflow-visibility-toggle")).toBeVisible();
         await expect(page.getByTestId("flow-edit-toggle")).toBeVisible();
         if (view === "graph") {
+          await graphOverview(page);
           await page.locator('[data-graph-node="plan-review"]').click();
           await expect(page.getByTestId("node-panel")).toHaveAttribute(
             "data-node-id",

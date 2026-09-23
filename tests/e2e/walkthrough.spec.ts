@@ -20,6 +20,7 @@ import { getTestBaseUrl } from "../utils/test-config.js";
 import { createAuthenticatedMCPClient } from "../utils/mcp-auth.js";
 import { loginAsAdmin } from "./helpers/auth-helper.js";
 import { quickTaskWithRepairLoop } from "./helpers/quick-task.js";
+import { GRAPH, graphOverview, settledCamera } from "./helpers/diagram.js";
 
 const BASE_URL = getTestBaseUrl();
 
@@ -68,16 +69,17 @@ async function walkThrough(page: Page, steps: readonly string[]): Promise<void> 
   await expect(page.getByTestId("walkthrough")).toHaveCount(0);
 }
 
-test("the run page's walkthrough highlights a rendered element at every step, in both views", async ({
-  page,
-}) => {
-  const authenticated = await createAuthenticatedMCPClient();
-  const run = await quickTaskWithRepairLoop(authenticated.client);
-  try {
-    await loginAsAdmin(page);
-    await page.setViewportSize({ width: 1600, height: 1000 });
-
-    for (const view of ["map", "graph"] as const) {
+// One test per view: each walks the whole sequence on a run of its own, and both walks in one
+// test would not fit the per-test budget on a CI runner.
+for (const view of ["map", "graph"] as const) {
+  test(`the run page's walkthrough highlights a rendered element at every step, in the ${view} view`, async ({
+    page,
+  }) => {
+    const authenticated = await createAuthenticatedMCPClient();
+    const run = await quickTaskWithRepairLoop(authenticated.client);
+    try {
+      await loginAsAdmin(page);
+      await page.setViewportSize({ width: 1600, height: 1000 });
       await page.goto(`${BASE_URL}/executions/${run.processId}?view=${view}`);
       await expect(page.getByTestId("execution-progress")).toBeVisible({ timeout: 20000 });
       await page.getByTestId("guide-open").click();
@@ -85,11 +87,11 @@ test("the run page's walkthrough highlights a rendered element at every step, in
       await walkThrough(page, RUN_STEPS);
       // No step took the reader out of the view they opened: every anchor exists on both.
       await expect(page.getByTestId("execution-progress")).toHaveAttribute("data-view", view);
+    } finally {
+      await authenticated.cleanup();
     }
-  } finally {
-    await authenticated.cleanup();
-  }
-});
+  });
+}
 
 test("the flow page's walkthrough highlights a rendered element at every step, in both views", async ({
   page,
@@ -199,6 +201,8 @@ async function inRussian(page: Page, processId: string): Promise<void> {
 
   await page.goto(`${BASE_URL}/executions/${processId}?lang=ru&view=graph`);
   await expect(page.locator("[data-graph-node]").first()).toBeVisible({ timeout: 20000 });
+  // The run's graph opens on its current step; it is clicked where the camera settles.
+  await settledCamera(page, GRAPH);
   await page.locator('[data-graph-node="plan-review"]').click();
   await expect(page.getByTestId("node-panel")).toHaveAttribute("data-node-id", "plan-review");
   await expect(page.getByTestId("node-panel-breadcrumb")).toHaveAttribute(
@@ -239,7 +243,9 @@ async function inRussian(page: Page, processId: string): Promise<void> {
   );
   await expect(page.getByTestId("toolbar-minimap")).toHaveAttribute("aria-label", "Навигатор");
 
-  // The node level of the panel, where the section titles used to be bare English words.
+  // The node level of the panel, where the section titles used to be bare English words. The
+  // definition's graph opens on its first block, far from `final-review`.
+  await graphOverview(page);
   await page.locator('[data-graph-node="final-review"]').click();
   const nodePanel = page.getByTestId("node-panel");
   await expect(nodePanel).toHaveAttribute("data-node-id", "final-review");

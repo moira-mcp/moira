@@ -740,7 +740,16 @@ down to its floor), an `onReady` callback that fires after an explicit fit so a 
 its opening viewport, and React Flow's own zoom/fit cluster behind `showControls` — off for both
 process diagrams, which carry those actions in their `DiagramToolbar` instead; `placement.ts`
 (`useOpeningPlacement`) places once on ready and again only when the followed block changes,
-never on a plain refetch. The map's diagram and the technical `WorkflowGraph` both mount through
+never on a plain refetch, and reports `placed` once the camera has arrived there (a pan by the
+reader also ends a placement). A diagram publishes whether it has finished opening as
+`data-diagram-settled` on its viewport: on the map, placed and laid out under the current preset;
+on the graph, also measured at the heights it was laid out with. Tests and anything acting on the
+diagram wait for that state rather than for a camera value. `DiagramViewport` also keeps React
+Flow's measurements across node rebuilds (`measuredNodes.ts`, `useMeasuredNodes`): the diagrams
+rebuild their node objects on every selection or pulse, and a rebuilt node would otherwise lose
+its measured size — on a slow machine for good, leaving edges without handles and every fit
+waiting — so each rebuilt node carries its last measured size, and a node still unmeasured after
+render is measured again. The map's diagram and the technical `WorkflowGraph` both mount through
 it. Scroll containers of the process pages use the `scrollbar-thin` utility
 (`styles/globals.css`), a thin theme-coloured scrollbar in both themes.
 

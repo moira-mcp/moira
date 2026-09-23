@@ -15,7 +15,7 @@
 import { test, expect, type Page } from "./fixtures.js";
 import { getTestBaseUrl } from "../utils/test-config.js";
 import { loginAsAdmin } from "./helpers/auth-helper.js";
-import { MAP, openPanelSection } from "./helpers/diagram.js";
+import { GRAPH, MAP, graphOverview, openPanelSection, settledCamera } from "./helpers/diagram.js";
 
 const BASE_URL = getTestBaseUrl();
 
@@ -44,9 +44,7 @@ async function openSteps(page: Page): Promise<void> {
   await openPanelSection(page, "panel-section-steps");
 }
 
-test("reads a bundled flow as a process on the map and as nodes on the graph, and explains it", async ({
-  page,
-}) => {
+test("reads a bundled flow as a process on the map and explains it", async ({ page }) => {
   await loginAsAdmin(page);
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto(`${BASE_URL}/workflows/moira/quick-task`);
@@ -128,6 +126,17 @@ test("reads a bundled flow as a process on the map and as nodes on the graph, an
   await page.getByTestId("map-node-finder").fill("fix-issues");
   await page.locator('[data-node-match="fix-issues"]').click();
   await expect(page.getByTestId("block-detail")).toHaveAttribute("data-block-id", "verify");
+});
+
+// Reading a bundled flow continues in the two tests below. Each opens the page afresh several
+// times, and one test holding all of those loads would not fit the per-test budget on a CI runner.
+
+test("the technical graph is the page's other view, and a link to a retired view opens the map", async ({
+  page,
+}) => {
+  await loginAsAdmin(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const flow = page.getByTestId("flow-page");
 
   // The technical graph is the other view: its own toolbar, the same panel beside it, and no
   // separate node sidebar any more.
@@ -144,6 +153,14 @@ test("reads a bundled flow as a process on the map and as nodes on the graph, an
     await expect(flow).toHaveAttribute("data-view", "map");
     await expect(page.getByTestId("map-view")).toBeVisible();
   }
+});
+
+test("a step in the block panel opens on the graph as the node level of the panel, and the walkthrough opens from its link", async ({
+  page,
+}) => {
+  await loginAsAdmin(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const flow = page.getByTestId("flow-page");
 
   // A step in the block panel focuses it on the graph, which switches the page's view; clicking
   // its card there opens the node level of the panel, which names the other end of every
@@ -154,6 +171,8 @@ test("reads a bundled flow as a process on the map and as nodes on the graph, an
   await page.getByTestId("block-detail").locator('[data-node-id="final-review"] button').click();
   await expect(flow).toHaveAttribute("data-view", "graph");
   await expect(page).toHaveURL(/view=graph/);
+  // The card is clicked where the focus brings the camera to rest.
+  await settledCamera(page, GRAPH);
   await page.locator('[data-graph-node="final-review"]').click();
   const nodePanel = page.getByTestId("node-panel");
   await expect(nodePanel).toHaveAttribute("data-node-id", "final-review");
@@ -463,6 +482,8 @@ test("a node drawn from the catalog shows its configuration, playbooks and valid
     // The node is drawn from the catalog, not as an unknown type.
     await expect(page.locator(".react-flow__node-catalog")).toHaveCount(1);
 
+    // The graph opens on its first step; the card after it lies past the pane's edge.
+    await graphOverview(page);
     await page.locator('[data-graph-node="send-message"]').click();
     const panel = page.getByTestId("node-panel");
     await expect(panel).toHaveAttribute("data-node-id", "send-message");

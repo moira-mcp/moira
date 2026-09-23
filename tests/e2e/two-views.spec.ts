@@ -26,7 +26,14 @@ import { getTestBaseUrl } from "../utils/test-config.js";
 import { createAuthenticatedMCPClient, startWorkflowExecutionState } from "../utils/mcp-auth.js";
 import { execSqliteInDocker } from "../utils/docker-command.js";
 import { loginAsAdmin } from "./helpers/auth-helper.js";
-import { MAP, expectNoLoaders, mapCardBoxes, openPanelSection } from "./helpers/diagram.js";
+import {
+  GRAPH,
+  MAP,
+  expectNoLoaders,
+  mapCardBoxes,
+  openPanelSection,
+  settledCamera,
+} from "./helpers/diagram.js";
 
 const BASE_URL = getTestBaseUrl();
 
@@ -208,6 +215,9 @@ test("the flow page switches block, step, tab and view without remounting anythi
     "data-selected",
     "true",
   );
+  // The step asked for is the one the camera settles on — not the first step of its block — and
+  // it is clicked there.
+  await settledCamera(page, GRAPH);
   await page.locator('[data-graph-node="execute-step"]').click();
   await expect(page.getByTestId("node-panel")).toHaveAttribute("data-node-id", "execute-step");
   await expectNoLoaders(page);

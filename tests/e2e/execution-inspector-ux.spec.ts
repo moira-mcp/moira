@@ -24,17 +24,17 @@ async function openFirstExecution(page: Page, listUrl = `${BASE_URL}/executions`
 }
 
 /**
- * The technical node graph: the page's `graph` view when the run has a process view, else the
- * only diagram in the main section. Only the view being read is mounted, so once the graph is
- * shown it is the page's single React Flow instance.
+ * The technical node graph: the page's `graph` view. Only the view being read is mounted, so once
+ * the graph is shown it is the page's single React Flow instance. The runs here have a process,
+ * so the view tabs come with it; they are waited for rather than counted, because the process
+ * loads after the page and a count taken before it arrives finds no tab and leaves the map on
+ * screen.
  */
 async function showTechnicalGraph(page: Page) {
   const graphTab = page.getByTestId("run-modes").locator('[data-mode="graph"]');
-  const hasProcess = (await graphTab.count()) > 0;
-  if (hasProcess) {
-    await graphTab.click();
-    await expect(page.getByTestId("execution-progress")).toHaveAttribute("data-view", "graph");
-  }
+  await expect(graphTab).toBeVisible({ timeout: 15000 });
+  await graphTab.click();
+  await expect(page.getByTestId("execution-progress")).toHaveAttribute("data-view", "graph");
   const graph = page.locator(".react-flow").last();
   await expect(graph).toBeVisible({ timeout: 15000 });
   return graph;

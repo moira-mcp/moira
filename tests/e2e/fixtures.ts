@@ -18,6 +18,14 @@ export const test = base.extend<AutoLogFixture>({
     async ({ page }, use, testInfo) => {
       const consoleLogs: string[] = [];
       const networkLogs: string[] = [];
+      // E2E_CPU_THROTTLE=<rate> slows the page's CPU by that factor (Chrome DevTools emulation). A
+      // developer machine renders the diagrams far faster than the CI runner, so timing-sensitive
+      // failures seen only in CI reproduce locally at a rate around 8.
+      const cpuThrottle = Number(process.env.E2E_CPU_THROTTLE);
+      if (cpuThrottle > 1) {
+        const cdp = await page.context().newCDPSession(page);
+        await cdp.send("Emulation.setCPUThrottlingRate", { rate: cpuThrottle });
+      }
 
       // Capture all console messages
       page.on("console", (msg) => {

@@ -381,12 +381,27 @@ const nodeTypes = { block: BlockNodeView };
 const noopEdgeClick = (): void => {};
 const edgeTypes = { routed: RoutedEdgeView };
 
+type MapPreset = "default" | "compact" | "flow" | "vertical";
+
 export function useBlockLayout(
   blocks: RunBlock[],
   hubIds: string[],
-  preset: "default" | "compact" | "flow" | "vertical",
+  preset: MapPreset,
 ): BlockLayout | null {
-  const [layout, setLayout] = useState<BlockLayout | null>(null);
+  return useLaidBlocks(blocks, hubIds, preset).layout;
+}
+
+/**
+ * The map's layout together with the preset it was laid out under: after the reader picks another
+ * preset the previous layout stays on screen until the new one is ready, and only the preset it
+ * carries tells the two apart.
+ */
+function useLaidBlocks(
+  blocks: RunBlock[],
+  hubIds: string[],
+  preset: MapPreset,
+): { layout: BlockLayout | null; preset: MapPreset | null } {
+  const [laid, setLaid] = useState<{ layout: BlockLayout; preset: MapPreset } | null>(null);
   // The layout depends only on the process shape; a projection refresh or a selection change
   // gives new block objects with the same shape and must not lay out again (nor blank the map).
   const signature = useMemo(
@@ -411,14 +426,14 @@ export function useBlockLayout(
     void layoutBlocks(blocks, hubIds, { preset }).then((result) => {
       if (cancelled) return;
       laidRef.current = signature;
-      setLayout(result);
+      setLaid({ layout: result, preset });
     });
     return () => {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- the signature stands for the inputs
   }, [signature]);
-  return layout;
+  return { layout: laid?.layout ?? null, preset: laid?.preset ?? null };
 }
 
 function CanvasInner({
@@ -439,7 +454,7 @@ function CanvasInner({
   const { t } = useTranslation();
   const { actualTheme } = useTheme();
   const [preset] = useLayoutPreset();
-  const layout = useBlockLayout(blocks, progress.process.hubs, preset);
+  const { layout, preset: laidPreset } = useLaidBlocks(blocks, progress.process.hubs, preset);
 
   // The viewport opens fitted to the process, clamped to a readable zoom (a definition has no
   // "current" block). On a
@@ -448,13 +463,18 @@ function CanvasInner({
   // navigation.
   const focusId = currentBlockId(blocks);
   const wrapperRef = useRef<HTMLDivElement>(null);
+  // Whether the camera has been placed on this map before: every placement after the first one
+  // is animated, so the reader sees where the view went.
+  const placedOnce = useRef(false);
+  // Resolves once the camera has arrived, which is when the placement counts as done.
   const placeViewport = useCallback(
-    (rf: ReactFlowInstance<BlockNode, RoutedEdge>, key: string | null) => {
+    (rf: ReactFlowInstance<BlockNode, RoutedEdge>, key: string | null): Promise<unknown> | void => {
       if (!layout) return;
       // `preset|block|WxH`: the block to centre, or "first" for the definition's opening view.
       const parts = (key ?? "").split("|");
       const blockId = parts[1] && parts[1] !== "first" ? parts[1] : null;
-      const animated = parts[3] === "move";
+      const animated = placedOnce.current;
+      placedOnce.current = true;
       if (!blockId) {
         // A definition: keep the fitted zoom but start at the first block with the block row in
         // the upper third, so a process wider than the viewport is read from its beginning; the
@@ -463,16 +483,15 @@ function CanvasInner({
         const first = layout.blocks.find((b) => b.id === blocks[0]?.id) ?? layout.blocks[0];
         if (!first) return;
         const height = wrapperRef.current?.clientHeight ?? 0;
-        void rf.setViewport({
+        return rf.setViewport({
           x: CANVAS_EDGE - first.x * zoom,
           y: Math.round(height * CANVAS_ROW_ANCHOR) - first.y * zoom,
           zoom,
         });
-        return;
       }
       const laid = layout.blocks.find((b) => b.id === blockId);
       if (!laid) return;
-      void rf.setCenter(laid.x + laid.width / 2, laid.y + laid.height / 2 + 40, {
+      return rf.setCenter(laid.x + laid.width / 2, laid.y + laid.height / 2 + 40, {
         zoom: animated ? Math.min(rf.getZoom(), 0.85) : 0.85,
         duration: animated ? 450 : 0,
       });
@@ -483,18 +502,19 @@ function CanvasInner({
   // every projection refresh: re-placing on each render is what made the map jump to the active
   // block whenever another one was selected.
   // The placement follows the laid-out process and the reader's preset: a new preset re-lays
-  // the map, and the camera moves (animated) to the selected block, else the current one.
-  const placedOnce = useRef(false);
+  // the map, and the camera moves (animated) to the selected block, else the current one. The key
+  // names only what the camera follows; whether the move is animated is the placement's own
+  // concern, since a key that changed by itself would place the camera again under the reader.
   const placementKey = layout
-    ? `${preset}|${selectedBlockId ?? focusId ?? "first"}|${layout.width}x${layout.height}|${placedOnce.current ? "move" : "open"}`
+    ? `${preset}|${selectedBlockId ?? focusId ?? "first"}|${layout.width}x${layout.height}`
     : null;
-  useEffect(() => {
-    if (layout) placedOnce.current = true;
-  }, [layout]);
-  const { onInit: placementInit, onReady } = useOpeningPlacement(
-    placeViewport,
-    placementKey as unknown as string | null,
-  );
+  const {
+    onInit: placementInit,
+    onReady,
+    onMoveStart,
+    onMoveEnd,
+    placed,
+  } = useOpeningPlacement(placeViewport, placementKey as unknown as string | null);
   const rfRef = useRef<ReactFlowInstance<BlockNode, RoutedEdge> | null>(null);
   // Travelling along a transition (a port or an edge clicked): the far block comes into view,
   // the edge flashes and the block pulses on arrival, so the jump answers "where did that land".
@@ -731,6 +751,9 @@ function CanvasInner({
           colorMode={actualTheme}
           onInit={onInit}
           onReady={onReady}
+          onMoveStart={onMoveStart}
+          onMoveEnd={onMoveEnd}
+          settled={placed && laidPreset === preset}
           onFit={fitOverview}
           showControls={false}
           // Without a click handler React Flow marks an unselectable edge `inactive` and takes its

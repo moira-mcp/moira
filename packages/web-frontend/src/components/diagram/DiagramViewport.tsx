@@ -14,6 +14,8 @@ import {
   ReactFlow,
   ReactFlowProvider,
   useReactFlow,
+  useStore,
+  useUpdateNodeInternals,
   type Edge,
   type Node,
   type PanelPosition,
@@ -24,6 +26,7 @@ import "@xyflow/react/dist/style.css";
 import { Maximize } from "lucide-react";
 import { diagramInteractionProps, type DiagramKind } from "./interaction";
 import { REVEAL_EVENT } from "./reveal";
+import { useMeasuredNodes } from "./measuredNodes";
 
 export { diagramInteractionProps, type DiagramKind } from "./interaction";
 
@@ -52,6 +55,12 @@ export type DiagramViewportProps<N extends Node = Node, E extends Edge = Edge> =
   onFit?: (instance: ReactFlowInstance<N, E>) => void;
   /** Mount React Flow's own zoom/fit cluster; a diagram with a toolbar of its own turns it off. */
   showControls?: boolean;
+  /**
+   * The diagram has finished opening: its layout is final and the camera has come to rest on the
+   * opening placement. Published as `data-diagram-settled`, the state a reader — or a test —
+   * waits for before acting on what the diagram shows.
+   */
+  settled?: boolean;
 };
 
 /** The fit-to-view button whose action the diagram owns; keeps the stock control's class. */
@@ -83,6 +92,28 @@ function FitButton<N extends Node, E extends Edge>({
 const keepNodesClickable = (): void => {};
 
 /**
+ * The other half of keeping the diagram measured (see `./measuredNodes`): a node that is still
+ * unmeasured once React has rendered it — a rebuild before any size was known to carry can still
+ * land in the window described there — is measured again from its element. The selector folds the unmeasured
+ * nodes into one string, so this runs once per change of that set and cannot loop on a node that
+ * has no size to measure (a hidden one keeps the same string).
+ */
+function MeasureUnmeasured(): null {
+  const unmeasured = useStore((state) => {
+    const ids: string[] = [];
+    for (const node of state.nodeLookup.values()) {
+      if (!node.hidden && !node.internals.handleBounds) ids.push(node.id);
+    }
+    return ids.join("\u0000");
+  });
+  const updateNodeInternals = useUpdateNodeInternals();
+  useEffect(() => {
+    if (unmeasured) updateNodeInternals(unmeasured.split("\u0000"));
+  }, [unmeasured, updateNodeInternals]);
+  return null;
+}
+
+/**
  * The diagram's side of `requestReveal` (see `./reveal`): the viewport moves its camera to the
  * node containing the element that asked. Only the mounted diagram hears the event, and only for
  * nodes it draws.
@@ -109,11 +140,13 @@ export function DiagramViewport<N extends Node = Node, E extends Edge = Edge>({
   controlButtons,
   onFit,
   showControls = true,
+  settled = false,
   children,
   ...rest
 }: DiagramViewportProps<N, E>): React.JSX.Element {
   const policy = useMemo(() => diagramInteractionProps(kind), [kind]);
-  const { onInit, ...flowProps } = rest;
+  const { onInit, nodes: givenNodes, onNodesChange: givenOnNodesChange, ...flowProps } = rest;
+  const measured = useMeasuredNodes(givenNodes, givenOnNodesChange);
   const handleInit = useCallback(
     (instance: ReactFlowInstance<N, E>) => {
       onInit?.(instance);
@@ -136,7 +169,11 @@ export function DiagramViewport<N extends Node = Node, E extends Edge = Edge>({
         onNodeClick={keepNodesClickable}
         proOptions={{ hideAttribution: true }}
         {...flowProps}
+        nodes={measured.nodes}
+        onNodesChange={measured.onNodesChange}
+        data-diagram-settled={settled}
       >
+        <MeasureUnmeasured />
         {showControls && (
           <Controls
             position={controlsPosition}

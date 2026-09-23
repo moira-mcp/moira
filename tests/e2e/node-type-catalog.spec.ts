@@ -15,6 +15,7 @@
 import { test, expect } from "./fixtures.js";
 import { getTestBaseUrl } from "../utils/test-config.js";
 import { loginAsAdmin } from "./helpers/auth-helper.js";
+import { graphOverview } from "./helpers/diagram.js";
 
 const BASE_URL = getTestBaseUrl();
 
@@ -130,6 +131,8 @@ test("custom catalog node renders its owner and config schema in the node panel"
     // The node is drawn from the catalog rather than as an unknown type: the transformer says so
     // in the class React Flow puts on it, and it logs no "not in the catalog" warning.
     await expect(page.locator(".react-flow__node-catalog")).toHaveCount(1);
+    // The graph opens on its first step; the card after it lies past the pane's edge.
+    await graphOverview(page);
     await page.locator('[data-graph-node="send-message"]').click();
 
     const panel = page.getByTestId("node-panel");
