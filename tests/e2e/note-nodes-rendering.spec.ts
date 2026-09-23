@@ -11,6 +11,7 @@
 import { test, expect } from "./fixtures.js";
 import { getTestBaseUrl } from "../utils/test-config.js";
 import { loginAsAdmin } from "./helpers/auth-helper.js";
+import { graphOverview } from "./helpers/diagram.js";
 import { loadWorkflowFixture } from "./fixtures/load-workflow.js";
 
 const BASE_URL = getTestBaseUrl();
@@ -82,6 +83,8 @@ test.describe("Note Nodes Rendering", () => {
     await page.waitForLoadState("domcontentloaded");
     await expect(page.locator('[data-graph-node="write-note"]')).toBeVisible({ timeout: 20000 });
 
+    // The graph opens on its first step; a card further along may lie past the pane's edge.
+    await graphOverview(page);
     await page.locator('[data-graph-node="write-note"]').click();
 
     // The node level of the page's right panel is where a step's details are read.

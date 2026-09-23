@@ -157,7 +157,11 @@ export function DataListView<T>({
       </div>
 
       {/* Content area */}
-      <div className="flex-1 min-h-0 overflow-auto" ref={containerRef as React.Ref<HTMLDivElement>}>
+      <div
+        className="flex-1 min-h-0 overflow-auto"
+        ref={containerRef as React.Ref<HTMLDivElement>}
+        data-testid="data-list-items"
+      >
         {items.length === 0 ? (
           <EmptyState
             icon={emptyIcon}
@@ -189,6 +193,7 @@ export function DataListView<T>({
           pageSize={pagination.pageSize}
           onPageChange={pagination.onPageChange}
           className="shrink-0 pt-4"
+          data-testid="data-list-pagination"
         />
       )}
       {items.length > 0 && pagination.mode === "cursor" && (
@@ -198,6 +203,7 @@ export function DataListView<T>({
           itemCount={pagination.itemCount}
           onPageChange={pagination.onPageChange}
           className="shrink-0 pt-4"
+          data-testid="data-list-pagination"
         />
       )}
     </div>

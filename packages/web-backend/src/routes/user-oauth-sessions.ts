@@ -109,9 +109,10 @@ router.get(
       success: true,
       data: result.sessions.map((s) => ({
         id: s.id,
-        ipAddress: s.ipAddress || "Unknown",
-        userAgent: s.userAgent || "Unknown Device",
-        country: s.country || "Unknown",
+        // A value the server does not know is null; the interface words it in the reader's language.
+        ipAddress: s.ipAddress || null,
+        userAgent: s.userAgent || null,
+        country: s.country || null,
         createdAt: s.createdAt,
         expiresAt: s.expiresAt,
         isCurrent: s.isCurrent,

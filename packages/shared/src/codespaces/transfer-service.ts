@@ -8,13 +8,13 @@ import type {
   CodespaceResourcePolicy,
   CodespaceTransferRecord,
 } from "./resource-types.js";
+import { effectiveCodespaceLimits } from "./resource-policy.js";
 import { CodespaceResourceError } from "./resource-types.js";
 import { CodespaceTransferRepository } from "./transfer-repository.js";
 
 const TOKEN = /^[A-Za-z0-9_-]{43}$/;
 const OBJECT = /^[a-f0-9]{48}$/;
 const FILE_ID = /^(?:sediment:\/\/)?file_[A-Za-z0-9]+$/;
-const MAX_FILE_BYTES = 4 * 1024 * 1024;
 const MIME = /^[a-z0-9][a-z0-9!#$&^_.+-]{0,126}\/[a-z0-9][a-z0-9!#$&^_.+-]{0,126}$/;
 const BINARY_MIME_TYPES = new Set([
   "application/octet-stream",
@@ -156,10 +156,8 @@ export class CodespaceTransferService {
     fetcher: CodespaceNativeReferenceFetcher,
     maxBytes?: number,
   ): Promise<CodespaceTransferHandle> {
-    const maximumBytes = Math.min(
-      this.dependencies.policy().maxTransferFileBytes ?? MAX_FILE_BYTES,
-      MAX_FILE_BYTES,
-    );
+    const maximumBytes = effectiveCodespaceLimits(this.dependencies.policy()).transfers
+      .maxFileBytes;
     if (
       maxBytes !== undefined &&
       (!Number.isSafeInteger(maxBytes) || maxBytes < 0 || maxBytes > maximumBytes)
@@ -504,8 +502,7 @@ export class CodespaceTransferService {
       !supportedCodespaceTransferMime(mimeType) ||
       !Number.isSafeInteger(size) ||
       size < 0 ||
-      size >
-        Math.min(this.dependencies.policy().maxTransferFileBytes ?? MAX_FILE_BYTES, MAX_FILE_BYTES)
+      size > effectiveCodespaceLimits(this.dependencies.policy()).transfers.maxFileBytes
     ) {
       throw new CodespaceResourceError("CODESPACE_RESOURCE_INVALID", "Invalid transfer metadata");
     }

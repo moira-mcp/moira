@@ -126,7 +126,7 @@ type CodespaceNewToolParams<Action extends CodespaceAction> = Exclude<
 
 export interface CodespaceToolServices {
   connection: Pick<CodespaceConnectionService, "getStatus" | "refreshGrants">;
-  observability: Pick<CodespaceObservabilityService, "readiness">;
+  observability: Pick<CodespaceObservabilityService, "readiness" | "limits">;
   guidance: (situation: CodespaceGuidanceSituation) => {
     provider: string;
     situation: CodespaceGuidanceSituation;
@@ -605,6 +605,7 @@ export async function executeCodespaceTool(
           })) ?? [],
         repositories_stale: grants.stale,
         codespaces: services.resource?.listResources(userId).map(projectCodespace) ?? [],
+        limits: services.observability.limits(userId),
       });
     }
 

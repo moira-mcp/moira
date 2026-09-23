@@ -129,7 +129,7 @@ export const Dashboard: React.FC = () => {
           <CardHeader>
             <CardTitle>{t("pages.dashboard.recentWorkflows.title")}</CardTitle>
           </CardHeader>
-          <CardContent>
+          <CardContent data-testid="dashboard-recent-workflows">
             {data.recentWorkflows.length === 0 ? (
               <EmptyState icon={Workflow} title={t("pages.dashboard.recentWorkflows.empty")} />
             ) : (
@@ -166,7 +166,7 @@ export const Dashboard: React.FC = () => {
           <CardHeader>
             <CardTitle>{t("pages.dashboard.recentExecutions.title")}</CardTitle>
           </CardHeader>
-          <CardContent>
+          <CardContent data-testid="dashboard-recent-executions">
             {data.recentExecutions.length === 0 ? (
               <EmptyState icon={Play} title={t("pages.dashboard.recentExecutions.empty")} />
             ) : (

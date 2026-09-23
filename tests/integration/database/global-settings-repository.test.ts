@@ -232,7 +232,7 @@ describe("GlobalSettingsRepository", () => {
     it("returns only settings from specified category", async () => {
       seedSetting("mcp.setting1", "v1", "string", "mcp");
       seedSetting("mcp.setting2", "v2", "string", "mcp");
-      seedSetting("ui.theme", "dark", "string", "ui");
+      seedSetting("other.setting", "v3", "string", "other");
 
       const mcpSettings = await repository.getByCategory("mcp");
 

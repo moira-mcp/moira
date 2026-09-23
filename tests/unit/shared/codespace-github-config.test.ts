@@ -1,5 +1,6 @@
 import { describe, expect, test } from "@jest/globals";
 import { evaluateCodespaceGitHubConfig } from "@mcp-moira/shared";
+import { cpuTimeMs } from "../../utils/cpu-time.js";
 
 const valid = {
   clientId: "Iv23abcdefgh1234",
@@ -73,10 +74,12 @@ describe("GitHub codespace configuration", () => {
     ["/app//", "https://moira.example.com/app/settings#integrations-github"],
     ["/app" + "/".repeat(20_000), "https://moira.example.com/app/settings#integrations-github"],
   ])("normalizes the app prefix %j into the settings link in linear time", (appPrefix, url) => {
-    const started = Date.now();
-    expect(evaluateCodespaceGitHubConfig({ baseUrl: valid.baseUrl, appPrefix }).settingsUrl).toBe(
-      url,
+    const { result, cpuMs } = cpuTimeMs(() =>
+      evaluateCodespaceGitHubConfig({ baseUrl: valid.baseUrl, appPrefix }),
     );
-    expect(Date.now() - started).toBeLessThan(1_000);
+    expect(result.settingsUrl).toBe(url);
+    // Linear normalization costs well under a millisecond here; quadratic work over the 20,000
+    // slashes costs hundreds.
+    expect(cpuMs).toBeLessThan(100);
   });
 });

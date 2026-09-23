@@ -78,21 +78,39 @@ an existing Codespace and organization billing are unsupported.
 
 Core exposes provider-neutral create, list, get, start, stop and delete
 operations. A resource records tenant and connection ownership, authorization
-generation, repository and ref, exact provider identity, selected machine,
-desired and observed state, retention policy and lifecycle generation.
+generation, repository, the ref requested at creation, the ref the provider last
+reported checked out, exact provider identity, selected machine, desired and
+observed state, retention policy and lifecycle generation.
 
 The provider repository ID is the repository identity. Its full name is display
 metadata: lifecycle reconciliation accepts a provider-side rename, refreshes the
 stored name and still refuses a resource whose provider repository ID changed.
 
+The checked-out branch is working state, not identity. After creation, an exact
+provider resource belongs to a record when its provider name, Moira marker, owner,
+billable owner and repository ID match; the branch it is on is not compared. An
+agent may therefore switch branches inside a codespace, or leave it on a detached
+HEAD, and start, stop, delete, operations, re-authorization rebind and cleanup keep
+addressing the same codespace. Every observation writes the provider's current ref
+back to the record, or no ref when the provider reports none.
+
 - Create persists intent and a unique marker before provider contact. Moira
   adopts only the exact returned Codespace after checking account ownership,
-  personal billing, repository, ref, machine limits, creation time and connector
-  reachability. An ambiguous provider response remains pending for exact
-  reconciliation.
+  personal billing, repository, requested ref, machine limits, creation time and
+  connector reachability. Adoption is the only point where the ref is compared: it
+  is compared as a branch name (`refs/heads/x` matches `x`), and a Codespace that
+  does not report a ref yet is adopted on the remaining identity. An ambiguous
+  provider response remains pending for exact reconciliation. The Codespace is
+  always created with GitHub's maximum idle timeout of 240 minutes, whatever the
+  owner's settings: GitHub's own timer does not see a silent background command,
+  so the owner's shorter timeout is enforced by Moira alone (see "Idle
+  auto-pause").
 - Start records desired running state before provider contact. While that
   generation remains current, the official GitHub CLI may restore a Codespace
-  that stopped outside Moira.
+  that stopped outside Moira. Starting a codespace whose provider resource Moira
+  has not identified yet returns the retryable `CODESPACE_CREATE_PENDING`; one
+  left ambiguous returns `CODESPACE_NOT_RUNNING`, whose detail says it could not
+  be identified uniquely.
 - An operation addressed to a codespace that is not running starts it and then
   runs, so work does not fail because the codespace idled out between two calls.
   The wait for that start is bounded by `CODESPACE_START_WAIT_SECONDS`; exceeding
@@ -109,17 +127,42 @@ stored name and still refuses a resource whose provider repository ID changed.
   observed generation, persists delete intent before provider contact and
   becomes terminal only after the exact Codespace is confirmed absent.
 
+Lifecycle work observes the exact Codespace before it acts. A Codespace already
+in the desired state completes without a provider mutation: a stop of a Codespace
+the provider already shut down makes no stop call, a stop of a Codespace the
+provider reports as failed completes as stopped with the observed state `failed`,
+and a start of an available one only probes the connector. While the provider
+reports the Codespace as
+provisioning, starting or stopping, a start or stop stays pending and issues
+nothing. Delete is issued directly, without a stop first, for persistent delete
+and for legacy cleanup. When the provider refuses a mutation, the Codespace is
+observed again: a record whose goal was reached anyway settles, and one the
+provider is still moving stays pending instead of reporting the refusal.
+
 Repeating a pending lifecycle request does not advance its generation. A
 provider response lost during create, start, stop or delete is reconciled from
 the exact stored identity and intent; broad discovery or deletion is not used.
 Finishing a command, disconnecting an MCP client or ending a conversation never
 deletes a persistent codespace.
 
+The background reconciler takes one re-authorization rebind attempt per tick and
+then a bounded batch of due records. A record whose pass does not converge it waits
+before its next attempt: `CODESPACE_RECONCILE_INTERVAL_SECONDS` after the first
+such pass, doubling with each consecutive one and capped at 30 minutes, and never
+later than the create deadline of a codespace still being created or identified, so
+a tick never takes the same record twice. A new user
+request for the codespace and a pass that settles it reset that wait. Records a
+rebind pass could not re-verify move to the back of the rebind order, so one
+codespace that cannot be rebound does not hold back other users' codespaces.
+
 Disconnect first cancels operations and stops persistent codespaces. It does
-not silently delete their data. A later authorization can rebind a codespace
-only when the same GitHub account, approved repository and exact provider
-resource still match. Stored resource rows from the disposable contract retain
-the explicit `legacy_disposable` policy and continue to follow exact cleanup.
+not silently delete their data. A later authorization rebinds a codespace
+automatically when the same GitHub account, approved repository and exact provider
+resource still match, whichever branch the codespace has checked out, or when that
+exact resource is gone, so a later stop or delete settles it as absent; a different
+account or a disconnected connection keeps it fenced. Stored resource rows from the
+disposable contract retain the explicit `legacy_disposable` policy and continue to
+follow exact cleanup.
 
 A provider that refuses a create, start, stop or delete is reported by what it
 refused rather than as an internal failure. A refused stored grant is
@@ -143,6 +186,59 @@ the provider's answer.
 Durable global and provider controls act as kill switches. A disabled control
 rejects new creation, start and operation reservations, while already required
 stop, cancellation and cleanup work remains eligible for reconciliation.
+
+### Idle auto-pause
+
+Two built-in, non-administrative user settings in category `codespaces` control
+idle pausing. The Settings page edits them in the Automatic pause card of its GitHub &
+Codespaces section (not in the generic settings editor), and the settings API and the
+MCP `settings` tool read and write them:
+
+| Setting                           | Type    | Default | Meaning                                                 |
+| --------------------------------- | ------- | ------: | ------------------------------------------------------- |
+| `codespaces.auto_stop_enabled`    | boolean |  `true` | Moira stops the owner's idle codespaces                 |
+| `codespaces.idle_timeout_minutes` | number  |      30 | Idle time before a stop; 5 to 240, the range GitHub has |
+
+A write outside 5–240 is refused on every settings write path; a stored value
+outside that range is read as the default. The `codespaces` setting namespace is
+reserved, so no extension can declare a key in it.
+
+Each scheduled reconciler tick first observes the provider, then stops idle
+codespaces, then reconciles. Idleness counts only agent work through Moira. A
+persistent codespace is idle when it is usable and meant to run, its owner has
+auto-pause on, none of its operations is reserved, running or awaiting
+cancellation or reconciliation (a background command counts as running), and the
+latest of these is older than the owner's timeout: its creation, Moira's own
+activity (adoption, a completed start, an operation reservation) and the last
+change of any of its operations. Commands, file operations and transfers all run
+as operations. For each idle codespace, up to a bounded batch per tick, Moira
+requests a stop exactly as a user stop does, with the outcome
+`idle_stop_requested`; the stop converges through ordinary lifecycle and preserves
+data, and the next operation starts the codespace again. The request re-checks the
+whole idle condition in the same database statement, so an operation reserved
+after the scan wins and nothing is stopped under it.
+
+Moira does not see direct use of a codespace in a browser, an editor or over SSH,
+so a codespace a person works in directly is paused once no agent has used it for
+the owner's timeout; owners who work in their codespaces directly turn auto-pause
+off. Independently of Moira, GitHub stops a codespace after at most 240 minutes
+without user or terminal activity, with auto-pause on or off. That limit equals
+the `CODESPACE_MAX_BACKGROUND_OPERATION_HOURS` ceiling, which is why a higher value
+is refused at startup; GitHub can still stop a codespace under a background command
+that produces no terminal activity near the end of its permitted run.
+
+Provider observation lists, in each tick, the codespaces of a bounded number of
+users who have a running codespace and whose last listing is at least ten
+reconcile intervals old, least recently listed first, with one listing per user.
+For each running codespace in the listing, Moira records the checked-out ref and
+the provider's `last_used_at`, which GitHub sets when the codespace was last
+started; it is stored for information and plays no part in the idle decision, and
+a listing that omits it keeps the previous value. A codespace the provider already
+shut down — by its own idle timeout or by a stop outside Moira — is recorded as
+stopped without any provider call: its generation advances, operations of the
+previous generation are cancelled, the stop is audited with the outcome
+`provider_observed_stopped`, and the next use starts it again. A codespace
+observed in a tick is judged for idleness in the next tick.
 
 ## Direct operations
 
@@ -245,8 +341,8 @@ rather than the generic command failure. A file operation is not reported this w
 journal instead, which is what keeps an interrupted write recoverable.
 
 The fixed connector ceilings are 4 MiB of raw input, 8 MiB for each output
-stream and 15 minutes for a bounded command; a background command's own timer may
-run up to a day. A remote job request is bounded separately and never waits for a
+stream and 15 minutes for a bounded command; a background command is bounded by
+GitHub's 240-minute idle stop, since it cannot outlive its codespace. A remote job request is bounded separately and never waits for a
 command to end. Runtime policy may lower these ceilings but
 cannot raise them. An argv contains 1–128 non-empty arguments; each argument is
 at most 16 KiB, and the relative cwd is at most 4096 bytes.
@@ -355,8 +451,27 @@ inject every action's defaults into every request; the field keeps its descripti
 actions declare differently — `max_bytes`, which `search` bounds at 1 MiB and `download` at 4 MiB —
 is published as both forms under one key, so the projection narrows neither. `operation_id`, whose
 declarations differ only in description, is published once. The `list` action returns the sanitized connection readiness (with the
-same-origin Settings URL), approved repository targets and the user's codespace
-summaries; it is the discovery path for `repository_id` and reusable `codespace_id`.
+same-origin Settings URL), approved repository targets, the user's codespace
+summaries and the user's `limits`; it is the discovery path for `repository_id` and
+reusable `codespace_id`.
+
+`limits` is the view `CodespaceObservabilityService.limits()` builds from policy and
+the database alone, without a provider call, and the website management list returns
+the same view. Every limit in it is the value Moira enforces, taken from the one
+definition every enforcement site reads (`effectiveCodespaceLimits` in
+`resource-policy.ts`), beside the user's current use:
+
+| Group             | Fields                                                                                                                                                                                                           |
+| ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `codespaces`      | `held` (codespaces the user holds, stopped ones and ones being created, identified or cleaned up included), `max_per_user`, `instance_held`, `max_instance`, `create_throttle_seconds`                           |
+| `machine_ceiling` | `cpu_cores`, `memory_bytes`, `storage_bytes`                                                                                                                                                                     |
+| `operations`      | `active` (the user's unfinished operations), `max_concurrent_per_user`, `max_input_bytes`, `max_stdout_bytes`, `max_stderr_bytes`, `max_retained_output_bytes`, `max_duration_seconds`, `max_background_seconds` |
+| `transfers`       | `used_bytes`, `objects`, `inflight_bytes` (bytes still reserved or claimed), `max_bytes_per_user`, `max_inflight_bytes_per_user`, `max_objects_per_user`, `max_file_bytes`, `ttl_seconds`                        |
+| `lifecycle`       | `retention_days`, `start_wait_seconds`, `idle` { `auto_stop_enabled`, `timeout_minutes` (the owner's settings), `provider_max_minutes` (GitHub's maximum idle timeout) }                                         |
+| `provider`        | `billing: "unavailable"`: GitHub does not expose the account's Codespaces quota or billing to Moira                                                                                                              |
+
+`instance_held` is the only instance-wide figure; no other user's codespaces or
+identifiers appear.
 Every grant-dependent discovery or creation action — `list`, `setup_help` and
 `create` — refreshes the stored installation and repository snapshot after a
 bounded TTL before using it. `list` also accepts `refresh: true` to force that
@@ -368,7 +483,10 @@ and the monotonic `grantsVersion`, so a slower process cannot overwrite a newer 
 Deleted and rejected codespaces are finished and accept no operation, so they are
 absent from that listing and from the website's, which reads the same service method.
 The `get` action returns one owned summary; an unknown or foreign ID returns the
-generic `CODESPACE_NOT_FOUND` result. Summaries omit connection and authorization
+generic `CODESPACE_NOT_FOUND` result. A summary reports `requested_ref`, the ref the
+codespace was created on, and `current_ref`, the ref the provider last reported
+checked out, which is `null` until Moira has observed one and while the codespace is
+on a detached HEAD; `create` still takes the input `ref`. Summaries omit connection and authorization
 generations, external owner/billing IDs, operation markers, provider resource names,
 claims and capabilities.
 
@@ -462,7 +580,8 @@ errors with `code`, safe `message` and `retryable`; actionable setup, authorizat
 capacity refusals carry the same provider link set as `setup_help`, plus the
 same-origin `settings_url` where applicable. A refusal that knows a bounded fact the caller
 may act on adds it to that message: a creation refused by `CODESPACE_POLICY_LIMIT` names
-whether the per-user active ceiling, the instance-wide active ceiling or the creation
+whether the per-user ceiling on held codespaces (stopped ones count, so the message
+suggests deleting one no longer needed), the instance-wide ceiling or the creation
 throttle stopped it, and that ceiling's configured value. The addition never names a
 user, codespace or repository, so a caller refused by instance capacity learns only that
 the instance is full. The website management API adds the same sentence to its own
@@ -477,29 +596,53 @@ patches, argv, text and native references do not enter request context.
 
 ## Website management
 
-The Settings page renders a Cloud codespaces card under Integrations. It shows the
-instance readiness, discloses that an authorized agent has the Codespace user's
-repository, network and configured-secret access, lets the user create a codespace
-for an approved repository and ref, and lists the user's codespaces with repository,
-ref, provider and machine context, state, desired/observed state, generation and last
-update. Start and Stop are available for stopped and running codespaces; Delete
-requires a confirmation that names the repository and points to Stop for keeping data.
-Actions are disabled while a codespace is in a pending, cleanup or ambiguous state.
-The card keeps a saved repository list visible with a stale warning when provider
-enumeration fails. It never mentions chats or sessions.
+The Settings page's **GitHub & Codespaces** section (anchor `#integrations-github`)
+holds the GitHub connection card, the Cloud codespaces card, the Automatic pause card
+and the Your limits card. One data source feeds all of them: it loads the connection
+view and the codespace view (with repositories and `limits`) together, and any change
+one card makes reloads what it can affect, so disconnecting never leaves codespaces of
+a connection that no longer exists on screen. The section heading offers a help
+popover and a **Setup guide** tour, and the connection card shows a stepper (connect
+GitHub, install the Moira App, grant repositories) marking each step
+done, current, not started or unavailable on this instance.
+
+The Cloud codespaces card shows the instance readiness, discloses that an authorized
+agent has the Codespace user's repository, network and configured-secret access, and
+lets the user create a codespace for an approved repository and ref; the create hint
+states how many codespaces the user holds against the per-user ceiling and that
+stopped codespaces count. It lists the user's codespaces with repository, current
+branch (the requested ref until a current one is observed), provider and machine
+context and a plain-language state badge; a collapsed **Technical details** block
+carries the requested and current ref, desired/observed state and generation, the
+last update and the codespace ID. Start and Stop are available for stopped and
+running codespaces; Delete requires a confirmation that names the repository and
+points to Stop for keeping data. Actions are disabled while a codespace is in a
+pending, cleanup or ambiguous state. The card keeps a saved repository list visible
+with a stale warning when provider enumeration fails. It never mentions chats or
+sessions.
+
+The Automatic pause card edits the two idle settings (a switch and a choice of
+timeouts within 5–240 minutes; a value set through the API or the MCP tool stays
+selectable) and saves each change through the settings API. Its note and help say
+that only agent activity through Moira counts, that direct use in a browser, an
+editor or over SSH is not seen, and that GitHub itself stops a codespace after 240
+minutes. The Your limits card shows the `limits` view: meters for codespaces held,
+commands running and file-transfer bytes against their limits, and a collapsed list of
+every other limit, where billing and quota point to GitHub because GitHub does not
+share them with Moira.
 
 The routes are mounted under `/api/integrations/github/codespaces` behind
 `requireAuth` and are a second presentation of the same services the MCP tools use,
 with identical tenant, generation and confirmation authority:
 
-| Method   | Path                  | Behavior                                                                                                                                     |
-| -------- | --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GET`    | `/`                   | Refreshes grants behind the TTL, then returns readiness, connection, approved repositories, `repositories_stale`, and summaries still in use |
-| `POST`   | `/`                   | Refreshes grants before authorization and creation for `repository_id` and `ref`; returns the sanitized (possibly pending) codespace         |
-| `GET`    | `/:codespaceId`       | One owned codespace plus its recent metadata-only operations                                                                                 |
-| `POST`   | `/:codespaceId/start` | Records desired running state; `data_preserved: true`                                                                                        |
-| `POST`   | `/:codespaceId/stop`  | Records desired stopped state; `data_preserved: true`                                                                                        |
-| `DELETE` | `/:codespaceId`       | Requires `confirm_delete: true` and the current `expected_generation`; `data_preserved: false`                                               |
+| Method   | Path                  | Behavior                                                                                                                                              |
+| -------- | --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET`    | `/`                   | Refreshes grants behind the TTL, then returns readiness, connection, approved repositories, `repositories_stale`, summaries still in use and `limits` |
+| `POST`   | `/`                   | Refreshes grants before authorization and creation for `repository_id` and `ref`; returns the sanitized (possibly pending) codespace                  |
+| `GET`    | `/:codespaceId`       | One owned codespace plus its recent metadata-only operations                                                                                          |
+| `POST`   | `/:codespaceId/start` | Records desired running state; `data_preserved: true`                                                                                                 |
+| `POST`   | `/:codespaceId/stop`  | Records desired stopped state; `data_preserved: true`                                                                                                 |
+| `DELETE` | `/:codespaceId`       | Requires `confirm_delete: true` and the current `expected_generation`; `data_preserved: false`                                                        |
 
 Domain failures map to bounded codes: not found and malformed IDs return the generic
 404, generation conflicts and not-running states 409, quota and busy 429, provider
@@ -515,8 +658,8 @@ decision. Its states are `disabled` (configuration absent or
 configuration), `control_disabled` (a kill switch is on), `connector_unavailable`
 (the credential connector does not answer its health probe) and `ready`. The view
 also carries the configuration state, both controls, connector state, the
-reconciliation backlog (resources and operations the loop would claim now, plus the
-age of the oldest) and active resources/operations and live transfer bytes against
+reconciliation backlog (resources and operations awaiting reconciliation, including
+resources held by a claim or waiting out a retry backoff, plus the age of the oldest) and active resources/operations and live transfer bytes against
 their limits. It contains no user, codespace or operation identifier, and the
 connector is never probed while the feature is disabled.
 
@@ -631,6 +774,11 @@ on GitHub before the connection works again:
 
 Enable "Request user authorization (OAuth) during installation" and expiring user
 authorization tokens; the callback URL is the exact same-origin Moira path below.
+No Setup URL is needed: with user authorization during installation enabled, GitHub
+returns the browser to the callback URL after an installation, and Moira recognizes
+that return. "Redirect on update" is optional; without it, a user who changes the
+installation's repositories on GitHub applies the change with **Check installation**
+or **Refresh** in Settings.
 If all connection values are absent, the integration is disabled. A partial,
 weak, cross-origin or malformed configuration produces a safe configuration
 error without aborting unrelated authentication. The callback uses HTTPS for a
@@ -646,10 +794,9 @@ not supplied:
 | `CODESPACE_MAX_CPU_CORES`                      |       4 | Maximum selected Linux machine CPU cores                     |
 | `CODESPACE_MAX_MEMORY_GB`                      |       8 | Maximum selected machine memory                              |
 | `CODESPACE_MAX_STORAGE_GB`                     |      32 | Maximum selected machine storage                             |
-| `CODESPACE_MAX_ACTIVE_PER_USER`                |       4 | Active resource reservations per user                        |
-| `CODESPACE_MAX_ACTIVE_GLOBAL`                  |      16 | Active resource reservations across the instance             |
+| `CODESPACE_MAX_ACTIVE_PER_USER`                |       4 | Codespaces a user may hold, stopped ones included            |
+| `CODESPACE_MAX_ACTIVE_GLOBAL`                  |      16 | Codespaces held across the instance, stopped ones included   |
 | `CODESPACE_CREATE_THROTTLE_SECONDS`            |      60 | Minimum interval between creation reservations               |
-| `CODESPACE_REMOTE_TTL_MINUTES`                 |     120 | Codespaces idle timeout requested at creation                |
 | `CODESPACE_PERSISTENT_RETENTION_DAYS`          |      30 | Codespaces stopped-codespace retention requested at creation |
 | `CODESPACE_CREATE_DEADLINE_MINUTES`            |      15 | Create reconciliation deadline                               |
 | `CODESPACE_CLEANUP_DEADLINE_MINUTES`           |      15 | Lifecycle cleanup deadline and terminal-result retention     |
@@ -663,7 +810,7 @@ not supplied:
 | `CODESPACE_MAX_OPERATION_STDERR_KB`            |     256 | Stderr carried by one answer                                 |
 | `CODESPACE_MAX_RETAINED_OUTPUT_MB`             |      64 | Retained output per stream before a command is stopped       |
 | `CODESPACE_MAX_OPERATION_SECONDS`              |     900 | Maximum bounded-command duration                             |
-| `CODESPACE_MAX_BACKGROUND_OPERATION_HOURS`     |       4 | Maximum background-command duration                          |
+| `CODESPACE_MAX_BACKGROUND_OPERATION_HOURS`     |       4 | Background-command duration; 1 to 4, higher is refused       |
 | `CODESPACE_MAX_TRANSFER_FILE_MB`               |       4 | Maximum native or file payload; maximum 4 MiB                |
 | `CODESPACE_MAX_TRANSFER_TOTAL_MB_PER_USER`     |     100 | Live private-transfer bytes per user                         |
 | `CODESPACE_MAX_TRANSFER_TOTAL_MB_GLOBAL`       |    1024 | Live private-transfer bytes across the instance              |
@@ -679,34 +826,64 @@ transfer pairs. Transfer byte and in-flight aggregates cannot be lower than the
 single-file ceiling.
 Configured operation input cannot
 exceed 4096 KiB, either output stream cannot exceed 8192 KiB, command duration
-cannot exceed 900 seconds and persistent retention cannot exceed 30 days.
+cannot exceed 900 seconds, background-command duration cannot exceed 4 hours (GitHub's
+240-minute idle stop) and persistent retention cannot exceed 30 days.
 
 ## Website authorization API
 
 All routes are mounted under `/api/integrations` after `requireAuth`.
 
-| Method   | Path                          | Behavior                                                                                                                               |
-| -------- | ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| `GET`    | `/github`                     | Refreshes an expired grant snapshot and returns the sanitized connection view with `repositoriesStale`                                 |
-| `POST`   | `/github/refresh`             | Forces grant enumeration and returns the current view; a provider failure retains the snapshot and sets `repositoriesStale: true`      |
-| `GET`    | `/github/start`               | Stores one-time browser state and redirects to GitHub                                                                                  |
-| `GET`    | `/github/callback`            | Consumes state, verifies GitHub identity/grants and redirects; a GitHub return from App installation (no state) restarts authorization |
-| `DELETE` | `/github`                     | Stops managed work, revokes the GitHub grant and disconnects                                                                           |
-| `DELETE` | `/github/external-revocation` | Clears an eligible blocked state after external grant revocation                                                                       |
+| Method   | Path                          | Behavior                                                                                                                          |
+| -------- | ----------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `GET`    | `/github`                     | Refreshes an expired grant snapshot and returns the sanitized connection view with `repositoriesStale`                            |
+| `POST`   | `/github/refresh`             | Forces grant enumeration and returns the current view; a provider failure retains the snapshot and sets `repositoriesStale: true` |
+| `GET`    | `/github/start`               | Stores one-time browser state and redirects to GitHub; a refused start redirects to Settings with `?github=<outcome>`             |
+| `GET`    | `/github/callback`            | Consumes state, verifies GitHub identity/grants and redirects; a return from App installation (no state) re-reads grants          |
+| `DELETE` | `/github`                     | Stops managed work, revokes the GitHub grant and disconnects                                                                      |
+| `DELETE` | `/github/external-revocation` | Clears an eligible blocked state after external grant revocation                                                                  |
 
 The external-revocation body must be `{ "confirmed": true }`, and the user
 must first revoke the GitHub App grant in GitHub. Start stores a SHA-256 digest
 of one-time state bound to the Moira user, web session and provider. It expires
 after ten minutes, is consumed once and returns only a bounded outcome on the
-same-origin Settings URL. After the user installs the App, GitHub redirects to the
-callback with `installation_id`/`setup_action` and no Moira state; that return is not
-trusted and is answered with a redirect to `/github/start`, so the completed
-authorization re-reads the installations and the connection becomes `connected`. Callback query strings are redacted from application
-logs and omitted from nginx access logs.
+same-origin Settings URL.
+
+Connecting takes one pass through GitHub. **Connect GitHub** starts one
+authorization; when the account has no App installation yet, the callback stores the
+credential and sends the browser straight to the configured installation URL. After
+the user installs or updates the App, GitHub returns the browser to the callback
+with `installation_id`/`setup_action` and no Moira state. Nothing in that return is
+trusted and its code is never exchanged: with a readable stored credential and a
+`connected` or `installation_required` connection, Moira re-reads the installations
+and repositories with that credential — whatever the snapshot's age, but never inside
+the throttle that follows a failed refresh, because the return carries no one-time
+state and could otherwise be replayed to drive provider calls — and redirects to
+Settings with
+`github=connected` or `github=installation_required`; otherwise it redirects to the
+absolute `/api/integrations/github/start` URL on the configured origin. The
+authorization does not force GitHub's account chooser, so switching GitHub accounts
+is Disconnect followed by Connect.
+
+A start the browser cannot proceed with redirects to Settings (`303`) with a
+`github` outcome the page explains in a message: `already_connected`,
+`revocation_pending`, `not_configured`, `credential_unreadable`,
+`grant_revocation_required`, `previous_access_not_revoked` (an earlier credential
+still awaits revocation), `session_required` or `authorization_failed`. The callback
+itself always redirects (`303`), never answers with JSON: with `connected`,
+`installation_required` or `authorization_failed`, and when not even the connection
+status can be read, to the Settings path on this site under the web app prefix with
+`authorization_failed`. Callback query strings are redacted from application logs
+and omitted from nginx access logs.
 
 The Settings integration renders sanitized connection and repository-grant
 state. Its Refresh button uses the forced endpoint, while ordinary page reads
-honor the ten-minute snapshot TTL. A provider enumeration failure leaves the saved list
+honor the ten-minute snapshot TTL, except while the connection is
+`installation_required`: then every read enumerates the grants afresh, so the
+Settings page, the website codespace list and the MCP `list` action show a new
+installation at once. In that state the card offers **Install GitHub App** (when the
+installation URL is configured) and **Check installation**, which forces a grant
+refresh, instead of Reconnect; Reconnect remains for `refresh_failed` and
+`disconnected`. A provider enumeration failure leaves the saved list
 visible with an explicit stale warning. It never returns a provider token, client secret, vault key, connection
 ID or revocation ID. There is no agent-facing authorization, callback, device
 flow or polling method.
@@ -722,6 +899,20 @@ generation compare-and-swap. Concurrent processes wait for that successor.
 Before replacement, the previous credential is copied into an encrypted
 pending-revocation record and revoked exactly. Provider ambiguity, expiry,
 unreadable ciphertext or an abandoned lease prevents use of the predecessor.
+
+A new authorization for a user who already has a credential commits the new
+credential first — the generation advances and codespaces are rebound. The same
+database transaction queues the previous token in an encrypted pending-revocation
+record, so at every moment the old token is either stored or queued; only after the
+commit is it revoked. A revocation GitHub refuses leaves the connection connected
+and the superseded credential queued; the next successful grant refresh,
+authorization or disconnect retries it. When an authorization fails after it reserved
+the connection — the new credential is rejected, or the commit is rolled back — while
+the previous credential is still the stored one, the connection returns to its
+previous state and that credential keeps working; only a first authorization is
+marked failed.
+While such a revocation is still queued, a later explicit Connect is refused with
+the `previous_access_not_revoked` outcome.
 
 If a refresh may have issued a successor that Moira could neither retain nor
 revoke, Settings requires revocation of the entire GitHub App grant followed by
@@ -739,7 +930,12 @@ rewritten. Migration `0037_codespace_rename.sql` renames those tables and indexe
 preserves their rows and foreign keys, adds `grantsRefreshedAt` and the monotonic
 `grantsVersion` to connection snapshots, adds the nullable audit `dedupeKey`, and
 converts persisted codespace outcomes, transfer purposes and audit identifiers.
-The resulting connection, resource, lifecycle-capability, policy-usage,
+Migration `0039_codespace_observed_ref.sql` adds the resource's nullable
+`observedRef`, the ref last observed checked out, and its `reconcileFailures`
+counter, which drives the reconciliation retry backoff. Migration
+`0040_codespace_activity.sql` adds the resource's `lastActivityAt` (Moira's last work
+in the codespace) and `providerLastUsedAt` (the provider's last start time, stored for information), and the
+connection's `resourcesObservedAt`, which paces provider observation. The resulting connection, resource, lifecycle-capability, policy-usage,
 provider-mutation, provider-control, operation and private-transfer metadata tables
 use the `codespace` vocabulary. Credential tables
 contain versioned ciphertext; resource, operation and transfer tables contain

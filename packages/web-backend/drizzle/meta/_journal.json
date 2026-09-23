@@ -281,6 +281,27 @@
       "when": 1790000060000,
       "tag": "0038_execution_workflow_version",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1790000120000,
+      "tag": "0039_codespace_observed_ref",
+      "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1790000180000,
+      "tag": "0040_codespace_activity",
+      "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "7",
+      "when": 1790000240000,
+      "tag": "0041_retire_ui_theme_setting",
+      "breakpoints": true
     }
   ]
 }

@@ -248,10 +248,10 @@ describe("Test Suite", () => {
 {executionId: '...', workflowId: '...', context: {variables: {...}}}
 
 // get_user_settings
-{'ui.theme': 'dark', 'telegram.bot_token': '...'}
+{'telegram.enabled': false, 'telegram.bot_token': '...'}
 
 // set_user_setting
-{key: 'ui.theme', updated: true}
+{key: 'telegram.enabled', updated: true}
 ```
 
 ### Formatted Text
@@ -504,7 +504,6 @@ docker exec mcp-moira-dev2 tail -100 /var/log/supervisor/mcp-server.log
 
 **SETTINGS_DATA:**
 
-- `UI_THEME_DARK`, `UI_THEME_LIGHT` - Theme settings
 - `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` - Telegram config
 - `PROFILE_DISPLAY_NAME` - Profile settings
 

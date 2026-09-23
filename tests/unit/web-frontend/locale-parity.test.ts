@@ -23,7 +23,10 @@ import { describe, expect, test } from "@jest/globals";
 import { LAYOUT_PRESETS } from "../../../packages/web-frontend/src/components/diagram/layoutPreset.js";
 import { MODES } from "../../../packages/web-frontend/src/components/run/modes.js";
 import { GUIDE_STEPS } from "../../../packages/web-frontend/src/components/run/Walkthrough.js";
+import en from "../../../packages/web-frontend/src/locales/en.json";
+import ru from "../../../packages/web-frontend/src/locales/ru.json";
 import { flowGuideSteps } from "../../../packages/web-frontend/src/components/flow/guideSteps.js";
+import { SETTINGS_TOURS } from "../../../packages/web-frontend/src/pages/settings/settingsTours.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const frontend = path.resolve(here, "../../../packages/web-frontend/src");
@@ -108,7 +111,28 @@ function runtimeKeys(): string[] {
   return keys;
 }
 
+/** Every leaf string of a locale with its key. */
+function entries(tree: Tree, prefix = ""): Array<[string, string]> {
+  return Object.entries(tree).flatMap(([key, value]) =>
+    typeof value === "object" && value !== null
+      ? entries(value, `${prefix}${key}.`)
+      : [[`${prefix}${key}`, value] as [string, string]],
+  );
+}
+
 describe("the English and Russian locales", () => {
+  test.each(["en", "ru"] as const)(
+    "%s never tells a reader to put a bot token into a URL",
+    (language) => {
+      // A token in a URL is kept in browser history, screenshots, proxies and logs; the Telegram
+      // setup guide sends readers to @userinfobot for the chat ID instead.
+      const offenders = entries(read(language))
+        .filter(([, text]) => /bot<|getUpdates|api\.telegram\.org\/bot/i.test(text))
+        .map(([key]) => key);
+      expect(offenders).toEqual([]);
+    },
+  );
+
   test("hold exactly the same keys", () => {
     expect([...BASE.en].filter((key) => !BASE.ru.has(key))).toEqual([]);
     expect([...BASE.ru].filter((key) => !BASE.en.has(key))).toEqual([]);
@@ -189,5 +213,69 @@ describe("the process interface's components", () => {
       }
     }
     expect(offenders).toEqual([]);
+  });
+});
+
+describe("the Settings page's components", () => {
+  /** The page, its section components and the settings primitives. */
+  const settingsFiles = [
+    "pages/Settings.tsx",
+    ...fs
+      .readdirSync(path.join(frontend, "pages/settings"))
+      .map((file) => `pages/settings/${file}`),
+    ...fs
+      .readdirSync(path.join(frontend, "components/settings"))
+      .map((file) => `components/settings/${file}`),
+  ].filter((file) => /\.tsx?$/.test(file));
+  const sources = new Map(
+    settingsFiles.map((file) => [file, fs.readFileSync(path.join(frontend, file), "utf8")]),
+  );
+  const tourKeys = Object.entries(SETTINGS_TOURS).flatMap(([tour, steps]) => [
+    ...["title", "open", "back", "next", "finish", "close"].map(
+      (key) => `pages.settings.tours.${tour}.${key}`,
+    ),
+    ...steps.flatMap((step) => [
+      `pages.settings.tours.${tour}.steps.${step.id}.title`,
+      `pages.settings.tours.${tour}.steps.${step.id}.body`,
+    ]),
+  ]);
+  const referenced = [
+    ...new Set([...sources.values()].flatMap(literalKeys).concat(tourKeys)),
+  ].sort();
+
+  test("reach the locale for a number of keys, not a handful", () => {
+    expect(referenced.length).toBeGreaterThan(150);
+  });
+
+  test.each(["en", "ru"] as const)("name only keys %s defines", (language) => {
+    expect(referenced.filter((key) => !BASE[language].has(key))).toEqual([]);
+  });
+
+  test("carry no accessible label or placeholder written as a literal", () => {
+    const offenders: string[] = [];
+    for (const [file, source] of sources) {
+      for (const line of source.split("\n")) {
+        if (/^\s*(\*|\/\/|\/\*)/.test(line)) continue;
+        for (const match of line.matchAll(
+          /\b(aria-label|placeholder|data-hint)="[A-Za-z][^"]*"/g,
+        )) {
+          offenders.push(`${file}: ${match[0]}`);
+        }
+      }
+    }
+    expect(offenders).toEqual([]);
+  });
+});
+
+describe("Russian wording", () => {
+  test("the sessions list and the admin user view say «IP-адрес», as the sessions search does", () => {
+    expect(ru.pages.settings.sessions.ipAddress).toBe("IP-адрес");
+    expect(ru.pages.settings.sessions.searchPlaceholder).toContain("IP-адрес");
+    expect(JSON.stringify(ru)).not.toContain("IP адрес");
+  });
+
+  test("a user who can no longer be found is named in the reader's language", () => {
+    expect(en.common.unknownUser).toBe("Unknown user");
+    expect(ru.common.unknownUser).toBe("Неизвестный пользователь");
   });
 });

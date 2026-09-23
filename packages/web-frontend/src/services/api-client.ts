@@ -705,9 +705,9 @@ export class MoiraApiClient {
   }): Promise<{
     sessions: Array<{
       id: string;
-      ipAddress: string;
-      userAgent: string;
-      country: string;
+      ipAddress: string | null;
+      userAgent: string | null;
+      country: string | null;
       createdAt: string;
       expiresAt: string;
       isCurrent: boolean;
@@ -729,9 +729,9 @@ export class MoiraApiClient {
       ApiResponse<
         Array<{
           id: string;
-          ipAddress: string;
-          userAgent: string;
-          country: string;
+          ipAddress: string | null;
+          userAgent: string | null;
+          country: string | null;
           createdAt: string;
           expiresAt: string;
           isCurrent: boolean;
@@ -1817,7 +1817,7 @@ export class MoiraApiClient {
       workflowId: string;
       workflowName?: string | null;
       userId: string;
-      userEmail: string;
+      userEmail: string | null;
       userName: string | null;
       status: string;
       currentNodeId: string | null;
@@ -1837,7 +1837,7 @@ export class MoiraApiClient {
           workflowId: string;
           workflowName?: string | null;
           userId: string;
-          userEmail: string;
+          userEmail: string | null;
           userName: string | null;
           status: string;
           currentNodeId: string | null;
@@ -1957,7 +1957,7 @@ export class MoiraApiClient {
     workflowId: string;
     workflowName?: string | null;
     userId: string;
-    userEmail: string;
+    userEmail: string | null;
     userName: string | null;
     status: string;
     currentNodeId: string | null;
@@ -1985,7 +1985,7 @@ export class MoiraApiClient {
         workflowId: string;
         workflowName?: string | null;
         userId: string;
-        userEmail: string;
+        userEmail: string | null;
         userName: string | null;
         status: string;
         currentNodeId: string | null;

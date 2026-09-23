@@ -181,6 +181,13 @@ Non-admin users receive 403 Forbidden from the API and are redirected by the rou
 
 **Registration:** http://localhost:${DOCKER_PORT}/register
 
+**Adding a password to a social-only account:** an account created through a social provider has no
+password. Settings → Security & sign-in says how it signs in and offers a set-password form, backed
+by `POST /api/user/set-password` (Better Auth `setPassword`, which links a credential account). The
+session must be fresh; a stale one is refused with `SESSION_NOT_FRESH` and the user signs in again.
+The change is audited as `USER_PASSWORD_CHANGED`. Accounts that already have a password keep the
+change-password form (`POST /api/user/change-password`).
+
 ## Deep Link Preservation (returnUrl)
 
 When an unauthenticated user visits a protected route (e.g., `/app/admin/audit-log`), the system preserves the intended URL through the login flow:

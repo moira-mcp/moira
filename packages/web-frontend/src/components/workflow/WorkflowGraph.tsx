@@ -257,6 +257,11 @@ export const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
   const [measuredHeights, setMeasuredHeights] = useState<Map<string, number> | null>(null);
   const [layoutGeneration, setLayoutGeneration] = useState(0);
   const laidHeightsRef = useRef<Map<string, number>>(new Map());
+  // The layout is final once the browser has measured its cards at the heights it laid them out
+  // with — no second pass is coming — and it was laid out under the preset now chosen. Together
+  // with the placement having arrived, that is the graph a reader meets once it has opened.
+  const [measuredGeneration, setMeasuredGeneration] = useState(-1);
+  const [laidPreset, setLaidPreset] = useState<string | null>(null);
   // The room the current layout left before the first group; the opening view keeps a third of it.
   const marginRef = useRef<number>(GRAPH_MARGIN);
   const placementKey = `${layoutGeneration}|${
@@ -266,38 +271,52 @@ export const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
         ? `node:current:${currentNodeId}`
         : "first"
   }`;
-  const placeViewport = useCallback((instance: XyflowInstance, generationKey: string) => {
-    const key = generationKey.slice(generationKey.indexOf("|") + 1);
-    // A frame later: a placement after a relayout must see the nodes' new positions.
-    window.requestAnimationFrame(() => {
-      if (key.startsWith("node:")) {
-        const nodeId = key.slice(key.indexOf(":", 5) + 1);
-        // The node itself, not its block: fit the whole card even in a narrow run pane,
-        // animated after the first placement so the reader sees where the jump landed.
-        void instance.fitView({
-          nodes: [{ id: nodeId }],
-          padding: 0.25,
-          maxZoom: 1,
-          duration: 350,
+  // Resolves once the camera has arrived, which is when the placement counts as done.
+  const placeViewport = useCallback(
+    (instance: XyflowInstance, generationKey: string) =>
+      new Promise<unknown>((resolve) => {
+        const key = generationKey.slice(generationKey.indexOf("|") + 1);
+        // A frame later: a placement after a relayout must see the nodes' new positions.
+        window.requestAnimationFrame(() => {
+          if (key.startsWith("node:")) {
+            const nodeId = key.slice(key.indexOf(":", 5) + 1);
+            // The node itself, not its block: fit the whole card even in a narrow run pane,
+            // animated after the first placement so the reader sees where the jump landed.
+            resolve(
+              instance.fitView({
+                nodes: [{ id: nodeId }],
+                padding: 0.25,
+                maxZoom: 1,
+                duration: 350,
+              }),
+            );
+            return;
+          }
+          const first = groupsRef.current[0];
+          if (!first) {
+            resolve(false);
+            return;
+          }
+          const zoom = Math.max(GRAPH_OPENING_ZOOM, instance.getZoom());
+          // The margin before the first group holds the return lanes; a third of it stays in view.
+          resolve(
+            instance.setViewport({
+              x: GRAPH_OPENING_EDGE - (first.x - marginRef.current / 3) * zoom,
+              y: GRAPH_OPENING_EDGE - (first.y - marginRef.current / 3) * zoom,
+              zoom,
+            }),
+          );
         });
-        return;
-      }
-      const first = groupsRef.current[0];
-      if (!first) return;
-      const zoom = Math.max(GRAPH_OPENING_ZOOM, instance.getZoom());
-      // The margin before the first group holds the return lanes; a third of it stays in view.
-      void instance.setViewport({
-        x: GRAPH_OPENING_EDGE - (first.x - marginRef.current / 3) * zoom,
-        y: GRAPH_OPENING_EDGE - (first.y - marginRef.current / 3) * zoom,
-        zoom,
-      });
-    });
-  }, []);
-  const { onInit: placementInit, onReady: placementReady } = useOpeningPlacement<
-    Node,
-    Edge,
-    string
-  >(placeViewport, placementKey);
+      }),
+    [],
+  );
+  const {
+    onInit: placementInit,
+    onReady: placementReady,
+    onMoveStart: placementMoveStart,
+    onMoveEnd: placementMoveEnd,
+    placed,
+  } = useOpeningPlacement<Node, Edge, string>(placeViewport, placementKey);
   /** Brings a step into view: what an arrival chip does when the reader clicks the far end. */
   const focusStep = useCallback((id: string) => {
     void instanceRef.current?.fitView({
@@ -322,10 +341,15 @@ export const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
     (nodeId: string) => setArrival({ nodeId, blockId: blockOfNode.get(nodeId) ?? null }),
     [blockOfNode],
   );
+  // A requested step pulses once the camera has arrived at it, not when the request was made: the
+  // graph may still be laying itself out, and on a slow machine that takes longer than the pulse
+  // lasts, so the reader would land on a card that had already stopped pulsing. Once per request.
+  const announcedRequest = useRef<WorkflowGraphProps["focusRequest"]>(null);
   useEffect(() => {
-    if (!focusRequest) return;
+    if (!focusRequest || !placed || announcedRequest.current === focusRequest) return;
+    announcedRequest.current = focusRequest;
     announceArrival(focusRequest.nodeId);
-  }, [focusRequest, announceArrival]);
+  }, [focusRequest, placed, announceArrival]);
   // The contents picked a block: the camera moves to its group and the group pulses. Skipped on
   // the first render (the opening placement owns it) and when a step focus arrives with it.
   const lastBlock = useRef<string | null>(selectedBlockId);
@@ -357,14 +381,20 @@ export const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
     return () => clearTimeout(timer);
   }, [arrival]);
   const [finderStep, setFinderStep] = useState<string | null>(null);
-  const handleMeasured = useCallback((heights: Map<string, number>) => {
-    // Cards taller or shorter than laid out: lay out again with what the browser measured.
-    let differs = false;
-    for (const [id, height] of heights) {
-      if (Math.abs(height - (laidHeightsRef.current.get(id) ?? 0)) > 2) differs = true;
-    }
-    if (differs) setMeasuredHeights(heights);
-  }, []);
+  const handleMeasured = useCallback(
+    (heights: Map<string, number>) => {
+      // Cards taller or shorter than laid out: lay out again with what the browser measured.
+      let differs = false;
+      for (const [id, height] of heights) {
+        if (Math.abs(height - (laidHeightsRef.current.get(id) ?? 0)) > 2) differs = true;
+      }
+      if (differs) setMeasuredHeights(heights);
+      else setMeasuredGeneration(layoutGeneration);
+    },
+    // A new layout keeps the heights its cards were measured at, so the measured signature may
+    // not change; a new callback per layout is what has each one checked against its own heights.
+    [layoutGeneration],
+  );
   const handleInit = useCallback(
     (instance: XyflowInstance) => {
       instanceRef.current = instance;
@@ -563,6 +593,7 @@ export const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
         if (cancelled) return;
         laidHeightsRef.current = new Map(layout.steps.map((step) => [step.id, step.height]));
         setLayoutGeneration((generation) => generation + 1);
+        setLaidPreset(preset);
         const transformed = new Map(visualizationData.nodes.map((n) => [n.id, n]));
         const blockById = new Map(graphBlocks.map((b) => [b.id, b]));
         const groupNodes: BlockGroupNode[] = layout.groups.map((group) => {
@@ -573,6 +604,10 @@ export const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
             position: { x: group.x, y: group.y },
             // The frame is not interactive and must not sit between the pointer and the edges.
             style: { width: group.width, height: group.height, pointerEvents: "none" },
+            // The layout fixes the frame's size, so it is handed over as measured: React Flow
+            // clamps the steps inside a group against this size, and a frame waiting to be
+            // measured would clamp them against nothing (see `DiagramViewport`).
+            measured: { width: group.width, height: group.height },
             draggable: false,
             selectable: false,
             focusable: false,
@@ -855,6 +890,14 @@ export const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
               onEdgeClick={noopEdgeClick}
               onInit={handleInit}
               onReady={placementReady}
+              onMoveStart={placementMoveStart}
+              onMoveEnd={placementMoveEnd}
+              settled={
+                placed &&
+                !isLayouting &&
+                measuredGeneration === layoutGeneration &&
+                laidPreset === preset
+              }
               showControls={false}
               nodeTypes={nodeTypes}
               edgeTypes={edgeTypes}

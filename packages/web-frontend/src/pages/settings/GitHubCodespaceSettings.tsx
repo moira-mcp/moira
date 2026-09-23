@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { AlertCircle, CheckCircle2, Github, Loader2, RefreshCw, ShieldCheck } from "lucide-react";
 import { toast } from "sonner";
@@ -9,6 +9,8 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { ConfirmDialog } from "@/components/confirm-dialog";
+import { useGitHubCodespaces } from "./GitHubCodespacesData";
+import { GitHubSetupSteps } from "./GitHubSetupSteps";
 
 function statusVariant(
   state: CodespaceConnectionView["state"],
@@ -22,43 +24,44 @@ function statusVariant(
 
 export const GitHubCodespaceSettings: React.FC = () => {
   const { t } = useTranslation();
-  const [status, setStatus] = useState<CodespaceConnectionView | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState(false);
+  const {
+    connection: status,
+    connectionLoading: loading,
+    connectionError: loadError,
+    applyConnection: setStatus,
+    reloadConnection: loadStatus,
+  } = useGitHubCodespaces();
   const [disconnecting, setDisconnecting] = useState(false);
   const [refreshingRepositories, setRefreshingRepositories] = useState(false);
+  const [checkingInstallation, setCheckingInstallation] = useState(false);
   const [confirmDisconnect, setConfirmDisconnect] = useState(false);
   const [recoveringExternalRevocation, setRecoveringExternalRevocation] = useState(false);
   const [confirmExternalRevocation, setConfirmExternalRevocation] = useState(false);
   const disconnectButtonRef = useRef<HTMLButtonElement>(null);
   const externalRevocationButtonRef = useRef<HTMLButtonElement>(null);
 
-  const loadStatus = useCallback(async () => {
-    try {
-      setLoading(true);
-      setLoadError(false);
-      setStatus(await apiClient.getGitHubCodespaceConnection());
-    } catch {
-      setLoadError(true);
-      toast.error(t("pages.settings.github.loadFailed"));
-    } finally {
-      setLoading(false);
-    }
-  }, [t]);
+  // The shared source reports a failed load in the card; a toast says it once as well.
+  useEffect(() => {
+    if (loadError) toast.error(t("pages.settings.github.loadFailed"));
+  }, [loadError, t]);
 
   useEffect(() => {
-    void loadStatus();
     const url = new URL(window.location.href);
     const outcome = url.searchParams.get("github");
     if (outcome) {
       const key = `pages.settings.github.outcomes.${outcome}`;
-      if (outcome === "connected") toast.success(t(key));
-      else if (outcome === "installation_required") toast.warning(t(key));
-      else toast.error(t(key));
+      // An outcome this build does not know is still reported, as the generic failure.
+      const message = t(key, {
+        defaultValue: t("pages.settings.github.outcomes.authorization_failed"),
+      });
+      if (outcome === "connected") toast.success(message);
+      else if (outcome === "installation_required" || outcome === "already_connected")
+        toast.warning(message);
+      else toast.error(message);
       url.searchParams.delete("github");
       window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
     }
-  }, [loadStatus, t]);
+  }, [t]);
 
   const disconnect = async () => {
     try {
@@ -82,6 +85,27 @@ export const GitHubCodespaceSettings: React.FC = () => {
     window.location.assign("/api/integrations/github/start");
   };
 
+  /**
+   * Whether GitHub now shows the App installed, read with the stored credential. It replaces
+   * Reconnect while installation is pending: the credential is fine, only the installation is not.
+   */
+  const checkInstallation = async () => {
+    try {
+      setCheckingInstallation(true);
+      const next = await apiClient.refreshGitHubCodespaceRepositories();
+      setStatus(next);
+      if (next.state === "connected") {
+        toast.success(t("pages.settings.github.outcomes.connected"));
+      } else {
+        toast.warning(t("pages.settings.github.installationStillMissing"));
+      }
+    } catch {
+      toast.error(t("pages.settings.github.repositoriesRefreshFailed"));
+    } finally {
+      setCheckingInstallation(false);
+    }
+  };
+
   const refreshRepositories = async () => {
     try {
       setRefreshingRepositories(true);
@@ -102,7 +126,7 @@ export const GitHubCodespaceSettings: React.FC = () => {
   const finishExternalRevocation = async () => {
     try {
       setRecoveringExternalRevocation(true);
-      const recoveryReason = status.reason;
+      const recoveryReason = status?.reason;
       setStatus(await apiClient.confirmGitHubExternalRevocation());
       toast.success(
         t(
@@ -171,6 +195,8 @@ export const GitHubCodespaceSettings: React.FC = () => {
         </div>
       </CardHeader>
       <CardContent className="space-y-4">
+        <GitHubSetupSteps connection={status} />
+
         {status.state === "disabled" && (
           <Alert>
             <ShieldCheck aria-hidden="true" />
@@ -201,12 +227,29 @@ export const GitHubCodespaceSettings: React.FC = () => {
           </div>
         )}
 
-        {status.state === "installation_required" && status.installationUrl && (
-          <Button asChild>
-            <a href={status.installationUrl} rel="noreferrer">
-              {t("pages.settings.github.install")}
-            </a>
-          </Button>
+        {status.state === "installation_required" && (
+          <div className="flex flex-wrap gap-2">
+            {status.installationUrl && (
+              <Button asChild>
+                <a href={status.installationUrl} rel="noreferrer">
+                  {t("pages.settings.github.install")}
+                </a>
+              </Button>
+            )}
+            <Button
+              variant="outline"
+              disabled={checkingInstallation}
+              onClick={() => void checkInstallation()}
+              data-testid="github-codespace-check-installation"
+            >
+              {checkingInstallation ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <RefreshCw className="mr-2 h-4 w-4" aria-hidden="true" />
+              )}
+              {t("pages.settings.github.checkInstallation")}
+            </Button>
+          </div>
         )}
 
         {status.state === "connected" && (
@@ -266,7 +309,7 @@ export const GitHubCodespaceSettings: React.FC = () => {
         )}
 
         <div className="flex flex-wrap gap-2">
-          {status.canConnect && (
+          {status.canConnect && status.state !== "installation_required" && (
             <Button onClick={startAuthorization} data-testid="github-codespace-connect">
               {status.state === "connection_required" || status.state === "disconnected"
                 ? t("pages.settings.github.connect")

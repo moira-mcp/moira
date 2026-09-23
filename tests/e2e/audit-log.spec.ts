@@ -6,6 +6,7 @@
 import { test, expect } from "./fixtures.js";
 import { getTestBaseUrl } from "../utils/test-config.js";
 import { loginAsAdmin } from "./helpers/auth-helper.js";
+import { execSqliteInDocker } from "../utils/docker-command.js";
 
 const BASE_URL = getTestBaseUrl();
 
@@ -112,6 +113,33 @@ test.describe("Audit Log", () => {
 
     // Verify source filter is also reset (should show "All Sources" text)
     await expect(page.locator('button[role="combobox"]:has-text("All Sources")')).toBeVisible();
+  });
+
+  test("an entry whose user can no longer be found names that in Russian, not in English", async ({
+    page,
+  }) => {
+    // Unique per worker and run; the sqlite3 CLI does not enforce the user foreign key, which is
+    // the one way to reproduce an entry whose user lookup fails.
+    const stamp = `${Date.now()}-${test.info().workerIndex}-${Math.random().toString(36).slice(2, 7)}`;
+    const resource = `probe-missing-user-${stamp}`;
+    execSqliteInDocker(
+      `INSERT INTO auditLog (id, userId, action, resource, source, createdAt)
+       VALUES ('audit-${stamp}', 'ghost-${stamp}', 'test:missing_user', '${resource}', 'api',
+               ${Date.now()});`,
+    );
+    try {
+      await page.goto(`${BASE_URL}/admin/audit-log?lang=ru`);
+      await page.getByPlaceholder("например, workflow, user").fill(resource);
+      const card = page.getByTestId("audit-log-card").filter({ hasText: resource });
+      await expect(card).toHaveCount(1, { timeout: 15000 });
+      await expect(card).toContainText("Неизвестный пользователь");
+      await expect(card).not.toContainText("Unknown");
+
+      await card.click();
+      await expect(page.getByTestId("audit-detail-user")).toHaveText("Неизвестный пользователь");
+    } finally {
+      execSqliteInDocker(`DELETE FROM auditLog WHERE id = 'audit-${stamp}';`);
+    }
   });
 
   test("can view entry details", async ({ page }) => {

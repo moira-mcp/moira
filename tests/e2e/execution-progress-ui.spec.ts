@@ -189,9 +189,7 @@ test("the map shows the repair loop as a repeated block and the block panel tell
   }
 });
 
-test("the route cursor moves the whole page back through the run; both views are deep-linkable", async ({
-  page,
-}) => {
+test("the route cursor moves the whole page back through the run", async ({ page }) => {
   const run = await openRun(page);
   try {
     // The block panel's route facts are the recorded route of the selected block: the repair loop
@@ -218,7 +216,16 @@ test("the route cursor moves the whole page back through the run; both views are
     await expect(page).not.toHaveURL(/at=/);
     await expect(mapCard(page, "plan-review")).toHaveAttribute("data-status", "waiting");
     await expect(mapCard(page, "plan-review")).toContainText("×2");
+  } finally {
+    await run.cleanup();
+  }
+});
 
+// The deep links below open the page afresh several times, so they are tests of their own: one
+// test holding them and the route cursor would not fit the per-test budget on a CI runner.
+test("the graph is a deep-linkable view of its own, with one edge per output", async ({ page }) => {
+  const run = await openRun(page);
+  try {
     // The graph is a page view of its own, deep-linkable, and draws one edge per output.
     await page.goto(`${BASE_URL}/executions/${run.executionId}?view=graph`);
     await expect(page.getByTestId("execution-progress")).toHaveAttribute("data-view", "graph");
@@ -243,7 +250,16 @@ test("the route cursor moves the whole page back through the run; both views are
       .locator('[data-graph-node="plan-review"] [data-handleid^="out:"]')
       .evaluateAll((els) => els.map((el) => el.getAttribute("data-handleid")).sort());
     expect(outputs).toEqual(expectedHandles);
+  } finally {
+    await run.cleanup();
+  }
+});
 
+test("a link to a retired view opens the map, and the walkthrough opens from the toolbar", async ({
+  page,
+}) => {
+  const run = await openRun(page);
+  try {
     // A link written for one of the views this page used to have resolves to the map.
     for (const legacy of ["lanes", "canvas", "outline", "route", "nonsense"]) {
       await page.goto(`${BASE_URL}/executions/${run.executionId}?view=${legacy}`);

@@ -1,4 +1,5 @@
 import { CodespaceOperationRepository } from "./operation-repository.js";
+import { effectiveCodespaceLimits } from "./resource-policy.js";
 import { settleAfterDispatch } from "./settle-after-dispatch.js";
 import { requireCodespaceTransportAvailable } from "./transport-availability.js";
 import type {
@@ -25,18 +26,11 @@ import type {
 } from "./transfer-service.js";
 import { startOnUse, type CodespaceLifecycleStarter } from "./start-on-use.js";
 
-const CONNECTOR_MAX_INPUT_BYTES = 4 * 1024 * 1024;
-const CONNECTOR_MAX_OUTPUT_BYTES = 8 * 1024 * 1024;
-const CONNECTOR_MAX_TIMEOUT_MS = 15 * 60_000;
-const CONNECTOR_MAX_BACKGROUND_TIMEOUT_MS = 24 * 60 * 60_000;
-const DEFAULT_BACKGROUND_TIMEOUT_MS = 4 * 60 * 60_000;
 const DEFAULT_BOUNDED_TIMEOUT_MS = 300_000;
 // A reservation that is never dispatched is reaped on this deadline, whatever the command's own
 // lifetime would have been.
 const RESERVATION_DEADLINE_MS = 15 * 60_000;
-const CONNECTOR_MAX_RETAINED_OUTPUT_BYTES = 4 * 1024 * 1024 * 1024;
 const MAX_OUTPUT_RANGE_BYTES = 4 * 1024 * 1024;
-const DEFAULT_RETAINED_OUTPUT_BYTES = 64 * 1024 * 1024;
 const MAX_CODESPACE_CWD_BYTES = 4096;
 const MAX_SESSION_VARIABLES = 64;
 const MAX_SCRIPT_BYTES = 64 * 1024;
@@ -47,10 +41,7 @@ const MAX_ENVIRONMENT_VALUE_LENGTH = 4096;
  * that stops a command; the payload bounds only decide how much of it a single answer carries.
  */
 function retainedOutputBytes(policy: CodespaceResourcePolicy): number {
-  return Math.min(
-    policy.maxRetainedOutputBytes ?? DEFAULT_RETAINED_OUTPUT_BYTES,
-    CONNECTOR_MAX_RETAINED_OUTPUT_BYTES,
-  );
+  return effectiveCodespaceLimits(policy).operations.maxRetainedOutputBytes;
 }
 
 /** A terminal outcome for an operation that ended without running a command. */
@@ -99,6 +90,7 @@ function validateRequest(
   stderrLimitBytes: number;
   timeoutMs: number;
 } {
+  const limits = effectiveCodespaceLimits(policy).operations;
   // A call carries exactly one kind of work: argv, a script, or ending a session and nothing else.
   const forms = [request.argv !== undefined, request.script !== undefined].filter(Boolean).length;
   if (forms > 1 || (forms === 0 && !request.sessionEnd)) {
@@ -158,8 +150,7 @@ function validateRequest(
   if (
     !Number.isSafeInteger(inputBytes) ||
     inputBytes < 0 ||
-    inputBytes >
-      Math.min(policy.maxOperationInputBytes ?? 1024 * 1024, CONNECTOR_MAX_INPUT_BYTES) ||
+    inputBytes > limits.maxInputBytes ||
     (request.stdin.kind === "reference" &&
       (request.stdin.referenceId.length < 1 ||
         request.stdin.referenceId.length > 2048 ||
@@ -170,12 +161,7 @@ function validateRequest(
   // A bounded command is killed at its timeout inside one request's horizon; a background command
   // is bounded by a codespace-side lifetime instead. The two ceilings are different numbers for
   // different jobs, and the refusal says which one the caller met.
-  const ceilingMs = request.background
-    ? Math.min(
-        policy.maxBackgroundOperationMs ?? DEFAULT_BACKGROUND_TIMEOUT_MS,
-        CONNECTOR_MAX_BACKGROUND_TIMEOUT_MS,
-      )
-    : Math.min(policy.maxOperationMs ?? CONNECTOR_MAX_TIMEOUT_MS, CONNECTOR_MAX_TIMEOUT_MS);
+  const ceilingMs = request.background ? limits.maxBackgroundMs : limits.maxDurationMs;
   // A caller that names no duration gets the one its mode implies: a bounded command's ordinary
   // default, a background command its whole ceiling. Otherwise background would mean "returns
   // immediately and is killed in five minutes".
@@ -216,17 +202,15 @@ function validateRequest(
       );
     }
   }
-  const stdoutLimitBytes = request.maxStdoutBytes ?? policy.maxOperationStdoutBytes ?? 1024 * 1024;
-  const stderrLimitBytes = request.maxStderrBytes ?? policy.maxOperationStderrBytes ?? 256 * 1024;
+  const stdoutLimitBytes = request.maxStdoutBytes ?? limits.maxStdoutBytes;
+  const stderrLimitBytes = request.maxStderrBytes ?? limits.maxStderrBytes;
   if (
     !Number.isSafeInteger(stdoutLimitBytes) ||
     stdoutLimitBytes < 1 ||
-    stdoutLimitBytes >
-      Math.min(policy.maxOperationStdoutBytes ?? 1024 * 1024, CONNECTOR_MAX_OUTPUT_BYTES) ||
+    stdoutLimitBytes > limits.maxStdoutBytes ||
     !Number.isSafeInteger(stderrLimitBytes) ||
     stderrLimitBytes < 1 ||
-    stderrLimitBytes >
-      Math.min(policy.maxOperationStderrBytes ?? 256 * 1024, CONNECTOR_MAX_OUTPUT_BYTES)
+    stderrLimitBytes > limits.maxStderrBytes
   ) {
     throw new CodespaceResourceError(
       "CODESPACE_POLICY_LIMIT",
@@ -278,10 +262,7 @@ export class CodespaceOperationService {
         referenceId: reference.fileId,
         declaredBytes:
           reference.declaredSize ??
-          Math.min(
-            this.dependencies.policy().maxOperationInputBytes ?? 1024 * 1024,
-            CONNECTOR_MAX_INPUT_BYTES,
-          ),
+          effectiveCodespaceLimits(this.dependencies.policy()).operations.maxInputBytes,
         declaredMimeType: reference.mimeType ?? "application/octet-stream",
       },
     };

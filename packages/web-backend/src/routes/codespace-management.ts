@@ -21,7 +21,7 @@ import {
 
 export interface CodespaceManagementServices {
   connection: Pick<CodespaceConnectionService, "getStatus" | "refreshGrants">;
-  observability: Pick<CodespaceObservabilityService, "readiness">;
+  observability: Pick<CodespaceObservabilityService, "readiness" | "limits">;
   resource: Pick<
     CodespaceResourceService,
     | "listRepositories"
@@ -141,6 +141,7 @@ export function createCodespaceManagementRoutes(
             })) ?? [],
           repositories_stale: grants.stale,
           codespaces: services.resource?.listResources(userId).map(projectCodespaceSummary) ?? [],
+          limits: services.observability.limits(userId),
         },
       });
     }),

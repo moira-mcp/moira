@@ -158,6 +158,8 @@ export const codespaceConnection = sqliteTable(
     refreshLeaseId: text("refreshLeaseId"),
     refreshLeaseExpiresAt: integer("refreshLeaseExpiresAt", { mode: "timestamp_ms" }),
     lastErrorCode: text("lastErrorCode"),
+    // When this user's codespaces were last listed from the provider by the periodic observation.
+    resourcesObservedAt: integer("resourcesObservedAt", { mode: "timestamp_ms" }),
     createdAt: integer("createdAt", { mode: "timestamp_ms" }).notNull(),
     updatedAt: integer("updatedAt", { mode: "timestamp_ms" }).notNull(),
   },
@@ -288,6 +290,8 @@ export const codespaceResource = sqliteTable(
     repositoryId: text("repositoryId").notNull(),
     repositoryFullName: text("repositoryFullName").notNull(),
     requestedRef: text("requestedRef").notNull(),
+    /** Ref the provider last reported checked out; observed state, not identity. */
+    observedRef: text("observedRef"),
     operationMarker: text("operationMarker").notNull(),
     providerResourceName: text("providerResourceName"),
     externalOwnerId: text("externalOwnerId"),
@@ -308,6 +312,12 @@ export const codespaceResource = sqliteTable(
     cleanupDeadlineAt: integer("cleanupDeadlineAt", { mode: "timestamp_ms" }),
     claimId: text("claimId"),
     claimExpiresAt: integer("claimExpiresAt", { mode: "timestamp_ms" }),
+    /** Consecutive unconverged reconciler passes; drives the bounded retry backoff. */
+    reconcileFailures: integer("reconcileFailures").notNull().default(0),
+    /** Last work Moira did in the codespace: adoption, a completed start, an operation reserved. */
+    lastActivityAt: integer("lastActivityAt", { mode: "timestamp_ms" }),
+    /** The provider's last start time (GitHub's `last_used_at`), for display only. */
+    providerLastUsedAt: integer("providerLastUsedAt", { mode: "timestamp_ms" }),
     lastOutcome: text("lastOutcome"),
     createdAt: integer("createdAt", { mode: "timestamp_ms" }).notNull(),
     updatedAt: integer("updatedAt", { mode: "timestamp_ms" }).notNull(),
@@ -661,7 +671,7 @@ export const executionMutationAttempt = sqliteTable(
 // ===== Universal Settings System =====
 
 export const settingDefinition = sqliteTable("settingDefinition", {
-  key: text("key").primaryKey(), // telegram.bot_token, ui.theme, etc
+  key: text("key").primaryKey(), // telegram.bot_token, codespaces.idle_timeout_minutes, etc
   type: text("type").notNull(), // 'string' | 'number' | 'boolean' | 'json' | 'encrypted'
   category: text("category").notNull(), // 'telegram' | 'profile' | 'ui' | 'system'
   label: text("label").notNull(), // Display name for UI

@@ -65,7 +65,8 @@ const formatPercentage = (value: number): string => `${value.toFixed(1)}%`;
 
 const statusBadgeClass = (status: string): string => {
   if (status === "completed") return "border-transparent bg-success text-success-foreground";
-  if (status === "failed") return "border-transparent bg-destructive text-destructive-foreground";
+  if (status === "failed")
+    return "border-transparent bg-destructive-fill text-destructive-foreground";
   return "border-transparent bg-info text-info-foreground";
 };
 
@@ -258,7 +259,10 @@ export const AdminDashboard: React.FC = () => {
 
       {/* System Health */}
       {systemStatus.systemHealth && (
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6 mb-8">
+        <div
+          className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6 mb-8"
+          data-testid="admin-system-health"
+        >
           <Card>
             <CardHeader className="pb-2">
               <CardTitle className="text-lg">
@@ -271,7 +275,7 @@ export const AdminDashboard: React.FC = () => {
                   className={`w-3 h-3 rounded-full ${
                     systemStatus.systemHealth.backendStatus === "healthy"
                       ? "bg-success"
-                      : "bg-destructive"
+                      : "bg-destructive-fill"
                   }`}
                 ></span>
                 <span className="text-muted-foreground capitalize">

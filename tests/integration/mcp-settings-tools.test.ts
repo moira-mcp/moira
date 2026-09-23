@@ -50,26 +50,26 @@ describe("MCP Settings Tools", () => {
 
   test("list_setting_definitions filters by category", async () => {
     const notificationDefs = await repository.getSettingDefinitions("notifications");
-    const uiDefs = await repository.getSettingDefinitions("ui");
+    const codespaceDefs = await repository.getSettingDefinitions("codespaces");
 
     expect(notificationDefs.length).toBeGreaterThan(0);
-    expect(uiDefs.length).toBeGreaterThan(0);
+    expect(codespaceDefs.length).toBeGreaterThan(0);
 
     // Verify all are from correct category
     notificationDefs.forEach((def) => {
       expect(def.category).toBe("notifications");
     });
 
-    uiDefs.forEach((def) => {
-      expect(def.category).toBe("ui");
+    codespaceDefs.forEach((def) => {
+      expect(def.category).toBe("codespaces");
     });
   });
 
   test("set and get user setting - simple string value", async () => {
-    await repository.setSetting(TEST_USER_ID, "ui.theme", "light");
-    const value = await repository.getSetting(TEST_USER_ID, "ui.theme");
+    await repository.setSetting(TEST_USER_ID, "profile.display_name", "Probe Name");
+    const value = await repository.getSetting(TEST_USER_ID, "profile.display_name");
 
-    expect(value).toBe("light");
+    expect(value).toBe("Probe Name");
   });
 
   test("set and get user setting - encrypted value", async () => {
@@ -90,16 +90,16 @@ describe("MCP Settings Tools", () => {
 
   test("delete_user_setting resets to default", async () => {
     // Set custom value
-    await repository.setSetting(TEST_USER_ID, "ui.theme", "dark");
-    let value = await repository.getSetting(TEST_USER_ID, "ui.theme");
-    expect(value).toBe("dark");
+    await repository.setSetting(TEST_USER_ID, "codespaces.idle_timeout_minutes", 60);
+    let value = await repository.getSetting(TEST_USER_ID, "codespaces.idle_timeout_minutes");
+    expect(value).toBe(60);
 
     // Delete user value
-    await repository.deleteUserSettingValue(TEST_USER_ID, "ui.theme");
+    await repository.deleteUserSettingValue(TEST_USER_ID, "codespaces.idle_timeout_minutes");
 
     // Should return default value
-    value = await repository.getSetting(TEST_USER_ID, "ui.theme");
-    expect(value).toBe("system"); // Default from definition
+    value = await repository.getSetting(TEST_USER_ID, "codespaces.idle_timeout_minutes");
+    expect(value).toBe(30); // Default from definition
   });
 
   test("get_user_settings returns all settings for category", async () => {

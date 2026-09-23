@@ -10,6 +10,7 @@ import {
   type CodespaceProviderAdapter,
   type CodespaceProviderGuidance,
   type CodespaceProviderResource,
+  type CodespaceProviderState,
   type CodespaceRepositoryTarget,
   type CodespaceGitHubConfigStatus,
 } from "@mcp-moira/shared";
@@ -149,6 +150,52 @@ function requiredString(value: unknown, field: string): string {
     throw new GitHubCodespaceClientError(`GitHub response omitted ${field}`, 502);
   }
   return value;
+}
+
+/**
+ * GitHub's codespace states, lower-cased, mapped onto the provider contract. GitHub documents
+ * Unknown, Created, Queued, Provisioning, Available, Awaiting, Unavailable, Deleted, Moved, Shutdown,
+ * Archived, Starting, ShuttingDown, Failed, Exporting, Updating and Rebuilding. The judgment calls:
+ * - Rebuilding, Updating, Exporting and Moved are provider-side operations after which the
+ *   codespace comes back; they are `starting` so lifecycle work waits instead of acting.
+ * - Archived is a stopped codespace GitHub has archived; starting it restores it, so it is
+ *   `shutdown`.
+ * - Deleted reads as `deleting`: the exact resource is going away and is confirmed by its absence.
+ * - Unavailable joins Failed. Anything unrecognised is `provisioning`, so an unfamiliar state is
+ *   waited on rather than acted on.
+ */
+const GITHUB_CODESPACE_STATES: Readonly<Record<string, CodespaceProviderState>> = {
+  available: "available",
+  shutdown: "shutdown",
+  archived: "shutdown",
+  shuttingdown: "stopping",
+  starting: "starting",
+  rebuilding: "starting",
+  updating: "starting",
+  exporting: "starting",
+  moved: "starting",
+  created: "provisioning",
+  queued: "provisioning",
+  provisioning: "provisioning",
+  awaiting: "provisioning",
+  deleted: "deleting",
+  deleting: "deleting",
+  failed: "failed",
+  unavailable: "failed",
+};
+
+/**
+ * GitHub sets `pending_operation` while an asynchronous operation holds the codespace; until it
+ * clears, the codespace accepts nothing but deletion. A settled state under a pending operation is
+ * therefore reported as the transition it is in: a running codespace is not yet usable, and a shut
+ * down one has not yet settled.
+ */
+function codespaceState(rawState: string, pendingOperation: boolean): CodespaceProviderState {
+  const state = GITHUB_CODESPACE_STATES[rawState.toLowerCase()] ?? "provisioning";
+  if (!pendingOperation) return state;
+  if (state === "available") return "starting";
+  if (state === "shutdown") return "stopping";
+  return state;
 }
 
 function repositoryPath(fullName: string): string {
@@ -366,17 +413,10 @@ export class HttpGitHubCodespaceClient implements GitHubCodespaceClient, Codespa
     const billableOwner = codespace.billable_owner as Record<string, unknown> | undefined;
     const repository = codespace.repository as Record<string, unknown> | undefined;
     const gitStatus = codespace.git_status as Record<string, unknown> | undefined;
-    const rawState = requiredString(codespace.state, "codespace state").toLowerCase();
-    const state =
-      rawState === "available"
-        ? "available"
-        : rawState === "shutdown"
-          ? "shutdown"
-          : rawState === "deleting"
-            ? "deleting"
-            : rawState === "failed" || rawState === "unavailable"
-              ? "failed"
-              : "provisioning";
+    const state = codespaceState(
+      requiredString(codespace.state, "codespace state"),
+      codespace.pending_operation === true,
+    );
     const createdAt = Date.parse(requiredString(codespace.created_at, "codespace created time"));
     if (!Number.isFinite(createdAt)) {
       throw new GitHubCodespaceClientError(
@@ -391,8 +431,17 @@ export class HttpGitHubCodespaceClient implements GitHubCodespaceClient, Codespa
       billableOwnerId: decimalId(billableOwner?.id),
       repositoryId: decimalId(repository?.id),
       repositoryFullName: requiredString(repository?.full_name, "codespace repository name"),
-      ref: requiredString(gitStatus?.ref, "codespace ref"),
+      // The checked-out ref is working state, and a detached HEAD or a git status GitHub has not
+      // filled in yet has none; neither makes the codespace unreadable.
+      ref: typeof gitStatus?.ref === "string" && gitStatus.ref.length > 0 ? gitStatus.ref : null,
       state,
+      // GitHub's `last_used_at` is the "last known time this codespace was started" — a start time,
+      // not a sign of use. Absent or unparsable means GitHub did not say, so it stays unknown.
+      lastUsedAt:
+        typeof codespace.last_used_at === "string" &&
+        Number.isFinite(Date.parse(codespace.last_used_at))
+          ? Date.parse(codespace.last_used_at)
+          : null,
       machine: codespace.machine ? this.parseMachine(codespace.machine) : null,
       createdAt,
     };

@@ -268,3 +268,71 @@ test("GitHub connection load failure keeps Settings usable and retries", async (
   await integration.getByRole("button", { name: "Retry" }).click();
   await expect(integration).toContainText("GitHub codespaces are disabled");
 });
+
+test.describe("while the GitHub App is not installed yet", () => {
+  const installationRequired: CodespaceConnectionView = {
+    ...connected,
+    state: "installation_required",
+    reason: "INSTALLATION_REQUIRED",
+    installationUrl: "https://github.com/apps/moira-codespaces/installations/new",
+    repositories: [],
+    installations: [],
+    canConnect: true,
+    canDisconnect: true,
+  };
+
+  for (const [lang, install, check, reconnect, stillMissing] of [
+    [
+      "en",
+      "Install GitHub App",
+      "Check installation",
+      "Reconnect GitHub",
+      "GitHub does not show the Moira App installed on your account yet",
+    ],
+    [
+      "ru",
+      "Установить GitHub App",
+      "Проверить установку",
+      "Переподключить GitHub",
+      "GitHub пока не показывает приложение Moira установленным",
+    ],
+  ] as const) {
+    test(`Settings offers Install and Check installation, never Reconnect (${lang})`, async ({
+      page,
+    }) => {
+      await loginAsAdmin(page);
+      let refreshed = 0;
+      let installed = false;
+      await page.route("**/api/integrations/github", (route) =>
+        route.fulfill({ json: { success: true, data: installationRequired } }),
+      );
+      await page.route("**/api/integrations/github/refresh", async (route) => {
+        refreshed += 1;
+        await route.fulfill({
+          json: { success: true, data: installed ? connected : installationRequired },
+        });
+      });
+
+      await page.goto(`${baseUrl}/settings?lang=${lang}#integrations-github`);
+      const integration = page.getByTestId("github-codespace-settings");
+      await expect(integration.getByRole("link", { name: install })).toHaveAttribute(
+        "href",
+        installationRequired.installationUrl!,
+      );
+      await expect(page.getByTestId("github-codespace-check-installation")).toHaveText(check);
+      await expect(page.getByTestId("github-codespace-connect")).toHaveCount(0);
+      await expect(integration).not.toContainText(reconnect);
+
+      // Not installed yet: the check says so and the page stays where it is.
+      await page.getByTestId("github-codespace-check-installation").click();
+      await expect(page.getByText(stillMissing)).toBeVisible();
+      expect(refreshed).toBe(1);
+
+      // Installed: the same check finishes the connection without another authorization.
+      installed = true;
+      await page.getByTestId("github-codespace-check-installation").click();
+      await expect(integration).toContainText("witqq/private-project");
+      expect(refreshed).toBe(2);
+    });
+  }
+});

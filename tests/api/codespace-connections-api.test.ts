@@ -42,10 +42,12 @@ describe("GitHub codespace connection API with the default disabled configuratio
       headers: { Cookie: cookie },
       redirect: "manual",
     });
-    expect(start.status).toBe(503);
-    await expect(start.json()).resolves.toMatchObject({
-      error: { code: "CODESPACE_NOT_CONFIGURED" },
-    });
+    // A browser navigation lands back on Settings with the reason, never on a JSON error.
+    expect(start.status).toBe(303);
+    const location = new URL(start.headers.get("location")!);
+    expect(location.pathname).toMatch(/\/settings$/);
+    expect(location.searchParams.get("github")).toBe("not_configured");
+    expect(location.hash).toBe("#integrations-github");
 
     const disconnect = await fetch(`${baseUrl}/api/integrations/github`, {
       method: "DELETE",

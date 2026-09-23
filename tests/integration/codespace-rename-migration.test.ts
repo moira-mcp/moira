@@ -38,9 +38,17 @@ function expectedRowsAfterRename(table: string, storedRows: StoredRow[]): Stored
     if (table === "workspaceConnection") {
       expected.grantsRefreshedAt = null;
       expected.grantsVersion = 0;
+      // Added by the later activity migration.
+      expected.resourcesObservedAt = null;
     }
     if (table === "workspaceResource") {
       expected.lastOutcome = String(expected.lastOutcome).replace("workspace_", "codespace_");
+      // Added by the later observed-ref migration, with its defaults for existing rows.
+      expected.observedRef = null;
+      expected.reconcileFailures = 0;
+      // Added by the later activity migration.
+      expected.lastActivityAt = null;
+      expected.providerLastUsedAt = null;
     }
     if (table === "workspaceOperation") {
       expected.lastOutcome = String(expected.lastOutcome).replace("workspace_", "codespace_");

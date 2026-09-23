@@ -175,7 +175,7 @@ describe("Start Workflow Telegram Pre-flight Check", () => {
       "123456:test-bot-token-123",
     );
     await repository.setSetting(TEST_USER_CONFIGURED, "telegram.chat_id", "123456789");
-    await repository.setSetting(TEST_USER_EXTENSION, "ui.theme", "dark");
+    await repository.setSetting(TEST_USER_EXTENSION, "profile.display_name", "dark");
 
     const extensionAdapter: CommunicationChannelAdapter = {
       id: TEST_EXTENSION_CHANNEL,
@@ -184,10 +184,10 @@ describe("Start Workflow Telegram Pre-flight Check", () => {
       metadata: {
         title: "Test extension channel",
         origin: "extension",
-        settingKeys: ["ui.theme"],
+        settingKeys: ["profile.display_name"],
       },
       async isConfigured(configuration) {
-        return (await configuration.get<string>("ui.theme")) === "dark";
+        return (await configuration.get<string>("profile.display_name")) === "dark";
       },
       async deliver() {},
     };

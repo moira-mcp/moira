@@ -8,23 +8,24 @@ All colors use OKLCH format. Never use hardcoded Tailwind color classes (e.g., `
 
 ### Semantic Tokens
 
-| Token                                    | Purpose                            | Usage                                        |
-| ---------------------------------------- | ---------------------------------- | -------------------------------------------- |
-| `background`                             | Page background                    | `bg-background`                              |
-| `foreground`                             | Primary text                       | `text-foreground`                            |
-| `card` / `card-foreground`               | Card surfaces                      | `bg-card text-card-foreground`               |
-| `popover` / `popover-foreground`         | Dropdown/popover surfaces          | `bg-popover text-popover-foreground`         |
-| `primary` / `primary-foreground`         | Brand actions, primary buttons     | `bg-primary text-primary-foreground`         |
-| `secondary` / `secondary-foreground`     | Secondary buttons, subtle surfaces | `bg-secondary text-secondary-foreground`     |
-| `muted` / `muted-foreground`             | Disabled text, subtle backgrounds  | `bg-muted text-muted-foreground`             |
-| `accent` / `accent-foreground`           | Hover states, highlights           | `bg-accent text-accent-foreground`           |
-| `destructive` / `destructive-foreground` | Delete, error actions              | `bg-destructive text-destructive-foreground` |
-| `success` / `success-foreground`         | Success states                     | `text-success`                               |
-| `warning` / `warning-foreground`         | Warning states                     | `text-warning`                               |
-| `info` / `info-foreground`               | Info states                        | `text-info`                                  |
-| `border`                                 | Borders                            | `border-border`                              |
-| `input`                                  | Form input borders                 | `border-input`                               |
-| `ring`                                   | Focus rings                        | `ring-ring`                                  |
+| Token                                         | Purpose                                    | Usage                                             |
+| --------------------------------------------- | ------------------------------------------ | ------------------------------------------------- |
+| `background`                                  | Page background                            | `bg-background`                                   |
+| `foreground`                                  | Primary text                               | `text-foreground`                                 |
+| `card` / `card-foreground`                    | Card surfaces                              | `bg-card text-card-foreground`                    |
+| `popover` / `popover-foreground`              | Dropdown/popover surfaces                  | `bg-popover text-popover-foreground`              |
+| `primary` / `primary-foreground`              | Brand actions, primary buttons             | `bg-primary text-primary-foreground`              |
+| `secondary` / `secondary-foreground`          | Secondary buttons, subtle surfaces         | `bg-secondary text-secondary-foreground`          |
+| `muted` / `muted-foreground`                  | Disabled text, subtle backgrounds          | `bg-muted text-muted-foreground`                  |
+| `accent` / `accent-foreground`                | Hover states, highlights                   | `bg-accent text-accent-foreground`                |
+| `destructive`                                 | Error text, borders, rings, tints          | `text-destructive`, `border-destructive/30`       |
+| `destructive-fill` / `destructive-foreground` | Solid delete/error fills (buttons, badges) | `bg-destructive-fill text-destructive-foreground` |
+| `success` / `success-foreground`              | Success states                             | `text-success`                                    |
+| `warning` / `warning-foreground`              | Warning states                             | `text-warning`                                    |
+| `info` / `info-foreground`                    | Info states                                | `text-info`                                       |
+| `border`                                      | Borders                                    | `border-border`                                   |
+| `input`                                       | Form input borders                         | `border-input`                                    |
+| `ring`                                        | Focus rings                                | `ring-ring`                                       |
 
 ### Dark Theme OKLCH Targets
 

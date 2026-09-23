@@ -1,5 +1,6 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import type Database from "better-sqlite3";
+import { effectiveCodespaceLimits } from "./resource-policy.js";
 import type { CodespaceResourcePolicy, CodespaceTransferRecord } from "./resource-types.js";
 
 const LIVE_STATES = ["reserved", "ready", "claimed"] as const;
@@ -43,25 +44,22 @@ export class CodespaceTransferRepository {
            FROM codespaceTransfer WHERE state IN (${states})`,
           )
           .get(...LIVE_STATES) as { count: number; bytes: number; inflight: number };
+        const limits = effectiveCodespaceLimits(input.policy).transfers;
         if (
-          input.declaredSize > (input.policy.maxTransferFileBytes ?? 4 * 1024 * 1024) ||
-          user.count >= (input.policy.maxTransferObjectsPerUser ?? 10) ||
-          global.count >= (input.policy.maxTransferObjectsGlobal ?? 1000) ||
-          user.bytes + input.declaredSize >
-            (input.policy.maxTransferBytesPerUser ?? 100 * 1024 * 1024) ||
-          global.bytes + input.declaredSize >
-            (input.policy.maxTransferBytesGlobal ?? 1024 * 1024 * 1024) ||
-          user.inflight + input.declaredSize >
-            (input.policy.maxTransferInflightBytesPerUser ?? 40 * 1024 * 1024) ||
-          global.inflight + input.declaredSize >
-            (input.policy.maxTransferInflightBytesGlobal ?? 256 * 1024 * 1024)
+          input.declaredSize > limits.maxFileBytes ||
+          user.count >= limits.maxObjectsPerUser ||
+          global.count >= limits.maxObjectsGlobal ||
+          user.bytes + input.declaredSize > limits.maxBytesPerUser ||
+          global.bytes + input.declaredSize > limits.maxBytesGlobal ||
+          user.inflight + input.declaredSize > limits.maxInflightBytesPerUser ||
+          global.inflight + input.declaredSize > limits.maxInflightBytesGlobal
         ) {
           return null;
         }
         const id = randomUUID();
         const token = randomBytes(32).toString("base64url");
         const objectKey = randomBytes(24).toString("hex");
-        const expiresAt = input.now + (input.policy.transferTtlMs ?? 10 * 60_000);
+        const expiresAt = input.now + limits.ttlMs;
         this.sqlite
           .prepare(
             `INSERT INTO codespaceTransfer
@@ -176,6 +174,23 @@ export class CodespaceTransferRepository {
          OR (state = 'claimed' AND claimExpiresAt <= ?) ORDER BY createdAt, id`,
       )
       .all(includeReserved ? 1 : 0, now, now) as CodespaceTransferRecord[];
+  }
+
+  /**
+   * The user's live transfers: the objects and declared bytes the per-user ceilings limit, and the
+   * bytes still in flight (reserved or claimed), which the in-flight ceiling limits — the same
+   * predicates `reserve` applies.
+   */
+  usageForUser(userId: string): { objects: number; bytes: number; inflightBytes: number } {
+    return this.sqlite
+      .prepare(
+        `SELECT COUNT(*) objects, COALESCE(SUM(declaredSize), 0) bytes,
+         COALESCE(SUM(CASE WHEN state IN ('reserved','claimed') THEN declaredSize ELSE 0 END), 0)
+           inflightBytes
+         FROM codespaceTransfer
+         WHERE userId = ? AND state IN (${LIVE_STATES.map(() => "?").join(",")})`,
+      )
+      .get(userId, ...LIVE_STATES) as { objects: number; bytes: number; inflightBytes: number };
   }
 
   listLive(): CodespaceTransferRecord[] {

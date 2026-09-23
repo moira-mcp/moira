@@ -11,6 +11,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ConfirmDialog } from "@/components/confirm-dialog";
+import { codespaceErrorMessage } from "@/lib/codespace-error-message";
 
 function formatMiB(bytes: number): string {
   return `${Math.round((bytes / 1024 ** 2) * 10) / 10} MiB`;
@@ -64,9 +65,7 @@ export const AdminCodespaceControls: React.FC = () => {
         t(disabled ? "admin.codespaces.disabledToast" : "admin.codespaces.enabledToast"),
       );
     } catch (error) {
-      toast.error(
-        error instanceof Error && error.message ? error.message : t("admin.codespaces.saveFailed"),
-      );
+      toast.error(codespaceErrorMessage(error, t, "admin.codespaces.saveFailed"));
       throw error;
     } finally {
       setSaving(null);
@@ -126,15 +125,13 @@ export const AdminCodespaceControls: React.FC = () => {
     ],
     [
       t("admin.codespaces.facts.activeOperations"),
-      `${readiness.usage.active_operations} / ${readiness.usage.max_active_operations ?? "—"}`,
+      `${readiness.usage.active_operations} / ${readiness.usage.max_active_operations}`,
     ],
     [
       t("admin.codespaces.facts.transferBytes"),
-      `${formatMiB(readiness.usage.transfer_live_bytes)} / ${
-        readiness.usage.max_transfer_live_bytes === null
-          ? "—"
-          : formatMiB(readiness.usage.max_transfer_live_bytes)
-      }`,
+      `${formatMiB(readiness.usage.transfer_live_bytes)} / ${formatMiB(
+        readiness.usage.max_transfer_live_bytes,
+      )}`,
     ],
   ];
 

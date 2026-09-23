@@ -254,6 +254,19 @@ test.describe("Dashboard Documentation Link", () => {
     console.log("✓ Docs link in sidebar configured correctly (same tab)");
   });
 
+  test("documentation links open the Russian documentation for a Russian reader", async ({
+    page,
+  }) => {
+    await page.goto(`${BASE_URL}/?lang=ru`);
+    await page.waitForLoadState("domcontentloaded");
+
+    await expect(page.locator('a[data-sidebar="menu-button"][href="/ru/docs/"]')).toBeVisible();
+    await expect(page.getByRole("link", { name: "Читать документацию" })).toHaveAttribute(
+      "href",
+      "/ru/docs/getting-started/quickstart/",
+    );
+  });
+
   test("docs link opens documentation page in same tab", async ({ page }) => {
     await page.goto(`${BASE_URL}/`);
     await page.waitForLoadState("domcontentloaded");

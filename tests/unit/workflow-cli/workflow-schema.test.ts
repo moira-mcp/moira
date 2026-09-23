@@ -1,7 +1,7 @@
 import { describe, expect, test } from "@jest/globals";
-import { performance } from "node:perf_hooks";
 import type { WorkflowGraph } from "@mcp-moira/workflow-engine";
 import { renderWorkflowSchema } from "../../../packages/workflow-cli/src/workflow-schema.js";
+import { cpuTimeMs } from "../../utils/cpu-time.js";
 
 function graph(nodes: WorkflowGraph["nodes"]): WorkflowGraph {
   return {
@@ -166,9 +166,7 @@ describe("workflow schema renderer", () => {
       });
     }
 
-    const startedAt = performance.now();
-    const output = renderWorkflowSchema(graph(nodes));
-    const elapsedMs = performance.now() - startedAt;
+    const { result: output, cpuMs } = cpuTimeMs(() => renderWorkflowSchema(graph(nodes)));
 
     expect(output.match(/^ {2}CYCLE /gm)).toHaveLength(cycleCount);
     expect(output).toContain("CYCLE cycle-0");
@@ -176,7 +174,7 @@ describe("workflow schema renderer", () => {
     expect(output).toContain(
       `COVERAGE nodes=${cycleCount + 2}/${cycleCount + 2} edges=${cycleCount + 1}/${cycleCount + 1}`,
     );
-    expect(elapsedMs).toBeLessThan(2_000);
+    expect(cpuMs).toBeLessThan(2_000);
   });
 
   test("should render branch, merge, cycle, schemas and context references losslessly", () => {

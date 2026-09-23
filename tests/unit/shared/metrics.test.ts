@@ -124,7 +124,9 @@ describe("Metrics - normalizeRoute", () => {
     });
 
     it("should normalize settings routes", () => {
-      expect(normalizeRoute("/api/settings/ui.theme")).toBe("/api/settings/ui.theme");
+      expect(normalizeRoute("/api/settings/telegram.enabled")).toBe(
+        "/api/settings/telegram.enabled",
+      );
     });
   });
 });

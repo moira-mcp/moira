@@ -25,7 +25,7 @@ export function TabBadge({
     <span
       className={cn(
         "ml-1 inline-flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[10px] font-semibold leading-4 tabular-nums",
-        tone === "danger" && "bg-destructive text-white",
+        tone === "danger" && "bg-destructive-fill text-destructive-foreground",
         tone === "warning" && "bg-warning text-warning-foreground",
         tone === "neutral" && "bg-muted text-foreground",
       )}

@@ -27,8 +27,11 @@ const MAX_RESULT_BYTES = 8 * 1024 * 1024;
 // Complete output is retained beside the result, so a range read is bounded like a file read and
 // the retained streams themselves are bounded by what the caller declares, never by the payload.
 // A command runs detached inside the codespace, so its own timer is bounded by the codespace's
-// usefulness rather than by any request. Job requests remain bounded separately by the connector.
-const MAX_OPERATION_TIMEOUT_MS = 24 * 60 * 60_000;
+// lifetime rather than by any request: GitHub stops a silent codespace after at most 240 minutes,
+// and a command stops with it. This script runs inside the codespace and cannot import the shared
+// limits, so the value is written out; it equals CODESPACE_CONNECTOR_LIMITS.maxBackgroundMs, which
+// the supervisor's unit test holds. Job requests remain bounded separately by the connector.
+const MAX_OPERATION_TIMEOUT_MS = 240 * 60_000;
 const MAX_RETAINED_OUTPUT_BYTES = 4 * 1024 * 1024 * 1024;
 const MAX_OUTPUT_RANGE_BYTES = 4 * 1024 * 1024;
 const OUTPUT_STREAMS = new Map([

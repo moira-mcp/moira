@@ -117,7 +117,7 @@ describe("complete MCP manage, settings, and list contracts", () => {
       if (index === 1) emptyReminderWorkflowId = saved.id;
     }
 
-    await repository.setSetting(TEST_USER_ID, "ui.theme", "dark");
+    await repository.setSetting(TEST_USER_ID, "profile.display_name", "dark");
     await repository.setSetting(TEST_USER_ID, "telegram.bot_token", "secret-contract-token");
     await repository.setSetting(TEST_USER_ID, "mcp.systemReminder", "admin-only value");
     await repository.setSetting(ADMIN_USER_ID, "mcp.systemReminder", "admin-visible value");
@@ -127,7 +127,7 @@ describe("complete MCP manage, settings, and list contracts", () => {
     for (const workflowId of workflowIds) {
       await repository.deleteWorkflow(workflowId, TEST_USER_ID);
     }
-    await repository.deleteUserSettingValue(TEST_USER_ID, "ui.theme");
+    await repository.deleteUserSettingValue(TEST_USER_ID, "profile.display_name");
     await repository.deleteUserSettingValue(TEST_USER_ID, "telegram.bot_token");
     await repository.deleteUserSettingValue(TEST_USER_ID, "mcp.systemReminder");
     await repository.deleteUserSettingValue(ADMIN_USER_ID, "mcp.systemReminder");
@@ -188,9 +188,9 @@ describe("complete MCP manage, settings, and list contracts", () => {
         manageSettings({ action: "get", ...params }),
       );
 
-    await expect(get({ key: "ui.theme" })).resolves.toEqual({
+    await expect(get({ key: "profile.display_name" })).resolves.toEqual({
       success: true,
-      data: { "ui.theme": "dark" },
+      data: { "profile.display_name": "dark" },
     });
     await expect(get({ key: "telegram.bot_token" })).resolves.toEqual({
       success: true,
@@ -202,14 +202,14 @@ describe("complete MCP manage, settings, and list contracts", () => {
     expect(Object.keys(category).every((key) => key.startsWith("telegram."))).toBe(true);
 
     const all = payload<Record<string, unknown>>(await get({}));
-    expect(all["ui.theme"]).toBe("dark");
+    expect(all["profile.display_name"]).toBe("dark");
     expect(all["telegram.bot_token"]).toBe("[encrypted]");
     expect(all).not.toHaveProperty("mcp.systemReminder");
 
     const adminCategory = await get({ category: "mcp" });
     expect(adminCategory).toEqual({ success: true, data: {} });
 
-    const ambiguous = await get({ key: "ui.theme", category: "ui" });
+    const ambiguous = await get({ key: "profile.display_name", category: "profile" });
     expect(ambiguous.success).toBe(false);
     expect(ambiguous.error).toContain("key or category");
 
@@ -229,7 +229,7 @@ describe("complete MCP manage, settings, and list contracts", () => {
     expect(blankCategory.success).toBe(false);
     expect(blankCategory.error).toContain("empty");
 
-    const emptyKeyWithCategory = await get({ key: "", category: "ui" });
+    const emptyKeyWithCategory = await get({ key: "", category: "profile" });
     expect(emptyKeyWithCategory.success).toBe(false);
     expect(emptyKeyWithCategory.error).toContain("key or category");
 

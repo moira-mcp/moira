@@ -99,7 +99,6 @@ describe("User Sessions API", () => {
       expect(session).toHaveProperty("ipAddress");
       expect(session).toHaveProperty("userAgent");
       expect(session).toHaveProperty("country");
-      expect(typeof session.country).toBe("string");
       expect(session).toHaveProperty("createdAt");
       expect(session).toHaveProperty("expiresAt");
       expect(session).toHaveProperty("isCurrent");
@@ -107,6 +106,24 @@ describe("User Sessions API", () => {
       // At least one session should be marked as current
       const hasCurrentSession = json.data.some((s: any) => s.isCurrent === true);
       expect(hasCurrentSession).toBe(true);
+    });
+
+    test("reports what it does not know as null, never as an English placeholder", async () => {
+      const res = await fetch(`${BASE_URL}/api/user/sessions`, {
+        headers: { Cookie: authCookie },
+      });
+      expect(res.status).toBe(200);
+      const sessions = ((await res.json()) as any).data as Array<Record<string, unknown>>;
+      expect(sessions.length).toBeGreaterThanOrEqual(1);
+
+      // The interface words an unknown value in the reader's language; the API carries none.
+      const described = sessions.map((s) => [s.ipAddress, s.userAgent, s.country]).flat();
+      expect(described).not.toContain("Unknown");
+      expect(described).not.toContain("Unknown Device");
+      // A country is an ISO code from the address lookup, or null when the lookup found none.
+      for (const s of sessions) {
+        expect(s.country === null || /^[A-Z]{2}$/.test(String(s.country))).toBe(true);
+      }
     });
 
     test("filters out expired sessions", async () => {

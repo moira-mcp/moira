@@ -1,11 +1,16 @@
 import { createHash, randomUUID } from "node:crypto";
 import { CodespaceProviderRegistry } from "./provider-registry.js";
-import { CodespaceResourceRepository } from "./resource-repository.js";
+import { effectiveCodespaceLimits } from "./resource-policy.js";
+import {
+  CODESPACE_IDLE_TIMEOUT_MINUTES,
+  CodespaceResourceRepository,
+} from "./resource-repository.js";
 import {
   CodespaceResourceError,
   type CodespaceMachine,
   type CodespaceProviderAdapter,
   type CodespaceProviderResource,
+  type CodespaceProviderState,
   type CodespaceResourcePolicy,
   type CodespaceResourceRecord,
   type CodespaceGuidanceSituation,
@@ -62,6 +67,91 @@ export interface CodespaceControlAuditEvent {
 }
 
 const PROVIDER_CLOCK_SKEW_MS = 5 * 60_000;
+
+/** Longest a record that keeps failing to converge waits between reconciler attempts. */
+const RECONCILE_BACKOFF_MAX_MS = 30 * 60_000;
+
+/**
+ * Due records one scheduled tick may reconcile after its first pass. Records that do not converge
+ * are deferred, so a tick normally ends when nothing is due; the bound only caps provider traffic.
+ */
+const RECONCILE_BATCH_LIMIT = 20;
+
+/**
+ * How often one user's codespaces are listed from the provider, in reconcile intervals. The listing
+ * is what notices GitHub's own idle shutdowns and use outside Moira; ten intervals (five minutes at
+ * the default interval) keeps it to one list call per user in that time.
+ */
+const PROVIDER_OBSERVATION_INTERVALS = 10;
+
+/** Users whose codespaces one tick may list from the provider. */
+const PROVIDER_OBSERVATION_USERS_PER_TICK = 5;
+
+/** Idle codespaces one tick may request stops for. */
+const IDLE_STOP_LIMIT = 50;
+
+/** Provider states in which the provider is already moving the codespace. */
+const TRANSITIONAL_PROVIDER_STATES: ReadonlySet<CodespaceProviderState> = new Set([
+  "provisioning",
+  "starting",
+  "stopping",
+]);
+
+function isTransitional(state: CodespaceProviderState): boolean {
+  return TRANSITIONAL_PROVIDER_STATES.has(state);
+}
+
+/**
+ * The record's coarse observed state for a provider state. A codespace that is shutting down is
+ * still running until the provider says it stopped; the pending outcome names the transition.
+ */
+function observedStateFor(state: CodespaceProviderState): CodespaceResourceRecord["observedState"] {
+  switch (state) {
+    case "available":
+    case "stopping":
+      return "running";
+    case "shutdown":
+      return "stopped";
+    case "deleting":
+      return "deleting";
+    case "failed":
+      return "failed";
+    case "provisioning":
+    case "starting":
+      return "provisioning";
+  }
+}
+
+/** A branch ref and its short name are the same ref: `refs/heads/x` equals `x`. */
+function normalizeRef(ref: string): string {
+  return ref.startsWith("refs/heads/") ? ref.slice("refs/heads/".length) : ref;
+}
+
+/**
+ * The fields that make an exact provider resource the one a record owns. The checked-out ref is
+ * deliberately absent: an agent switches branches inside its codespace, and that must never turn
+ * the codespace into a stranger. Owner, billable owner, repository id and marker still differ for a
+ * resource that belongs to another account or another record.
+ */
+function exactIdentityMatches(
+  actual: CodespaceProviderResource,
+  record: Pick<
+    CodespaceResourceRecord,
+    | "providerResourceName"
+    | "operationMarker"
+    | "externalOwnerId"
+    | "billableOwnerId"
+    | "repositoryId"
+  >,
+): boolean {
+  return (
+    actual.name === record.providerResourceName &&
+    actual.displayName === record.operationMarker &&
+    actual.ownerId === record.externalOwnerId &&
+    actual.billableOwnerId === record.billableOwnerId &&
+    actual.repositoryId === record.repositoryId
+  );
+}
 
 /** States a codespace never leaves: it holds no provider resource and accepts no operation. */
 const FINISHED_RESOURCE_STATES: ReadonlySet<CodespaceResourceRecord["state"]> = new Set([
@@ -216,7 +306,11 @@ function resourceMatches(
     actual.ownerId === accountId &&
     (!requirePersonalBilling || actual.billableOwnerId === accountId) &&
     actual.repositoryId === expected.repositoryId &&
-    actual.ref === expected.requestedRef &&
+    // Adoption is the one moment the requested ref is checked, and only as a branch name: GitHub may
+    // report `refs/heads/x` for a request of `x`. A codespace that reports no ref yet (its git status
+    // is filled in after provisioning, or it is on a detached HEAD) is accepted on the remaining
+    // identity, which already pins it to this record's marker, owner, repository and machine.
+    (actual.ref === null || normalizeRef(actual.ref) === normalizeRef(expected.requestedRef)) &&
     actual.createdAt >= expected.createdAt - 60_000 &&
     actual.createdAt <= expected.createDeadlineAt &&
     machine !== null &&
@@ -426,36 +520,51 @@ export class CodespaceResourceService {
       provider.id,
     );
     if (candidates.length === 0) return 0;
-    const credential = await this.dependencies.credentials.getCredential(userId, provider.id);
-    const identity = await provider.getIdentity(credential);
+    const unrebound = new Set(candidates.map((candidate) => candidate.resource.id));
     let rebound = 0;
-    for (const candidate of candidates) {
-      const record = candidate.resource;
-      if (!record.providerResourceName || record.externalOwnerId !== identity.id) continue;
-      const exact = await provider.getExact(credential, record.providerResourceName);
-      if (
-        !exact ||
-        exact.name !== record.providerResourceName ||
-        exact.displayName !== record.operationMarker ||
-        exact.ownerId !== identity.id ||
-        exact.billableOwnerId !== record.billableOwnerId ||
-        exact.repositoryId !== record.repositoryId ||
-        exact.ref !== record.requestedRef
-      ) {
-        continue;
+    try {
+      const credential = await this.dependencies.credentials.getCredential(userId, provider.id);
+      const identity = await provider.getIdentity(credential);
+      for (const candidate of candidates) {
+        const record = candidate.resource;
+        if (!record.providerResourceName || record.externalOwnerId !== identity.id) continue;
+        const exact = await provider.getExact(credential, record.providerResourceName);
+        // An exact resource that is gone is rebound too: the account and grant are verified, and
+        // there is nothing another account could own under that name. Lifecycle then settles the
+        // absence — a stop or delete completes as absent — instead of the record staying fenced,
+        // undeletable and counted against the user's limit.
+        if (exact && (exact.ownerId !== identity.id || !exactIdentityMatches(exact, record))) {
+          continue;
+        }
+        if (exact) {
+          this.dependencies.repository.recordProviderObservation(
+            record.id,
+            {
+              repositoryFullName: exact.repositoryFullName,
+              observedRef: exact.ref,
+              lastUsedAt: exact.lastUsedAt,
+            },
+            this.now(),
+          );
+        }
+        if (
+          this.dependencies.repository.rebindAuthorization({
+            userId,
+            resourceId: record.id,
+            resourceGeneration: record.generation,
+            expectedAuthorizationGeneration: record.authorizationGeneration,
+            authorizationGeneration: candidate.authorizationGeneration,
+            now: this.now(),
+          })
+        ) {
+          unrebound.delete(record.id);
+          rebound++;
+        }
       }
-      if (
-        this.dependencies.repository.rebindAuthorization({
-          userId,
-          resourceId: record.id,
-          resourceGeneration: record.generation,
-          expectedAuthorizationGeneration: record.authorizationGeneration,
-          authorizationGeneration: candidate.authorizationGeneration,
-          now: this.now(),
-        })
-      ) {
-        rebound++;
-      }
+    } finally {
+      // Whatever was not re-verified — a different identity, a provider failure mid-pass — goes to
+      // the back of the rebind order so it cannot hold every other user's rebind behind it.
+      this.dependencies.repository.touchAuthorizationRebindAttempt([...unrebound], this.now());
     }
     return rebound;
   }
@@ -593,10 +702,13 @@ export class CodespaceResourceService {
         ref: requestedRef,
         machine,
         operationMarker: initial.operationMarker,
-        idleTimeoutMinutes: Math.min(240, Math.max(5, Math.ceil(policy.remoteTtlMs / 60_000))),
+        // Always the provider's maximum. GitHub's own idle timer ignores silent background commands,
+        // so a shorter provider timeout would stop a codespace under a long agent command; the
+        // owner's timeout is enforced by Moira's idle stop, which sees agent activity.
+        idleTimeoutMinutes: CODESPACE_IDLE_TIMEOUT_MINUTES.maximum,
         retentionMinutes: Math.min(
           43_200,
-          Math.max(1, Math.ceil((policy.persistentRetentionMs ?? 30 * 24 * 60 * 60_000) / 60_000)),
+          Math.max(1, Math.ceil(effectiveCodespaceLimits(policy).persistentRetentionMs / 60_000)),
         ),
       });
     } catch {
@@ -675,13 +787,14 @@ export class CodespaceResourceService {
       this.requiresPersonalBilling(),
     );
     let usable = valid && actual.state === "available";
-    if (valid && actual.state === "provisioning") {
+    if (valid && isTransitional(actual.state)) {
       this.dependencies.repository.bindSubmittedResource({
         resourceId: record.id,
         expectedGeneration: record.generation,
         resourceName: actual.name,
         ownerId: actual.ownerId,
         billableOwnerId: actual.billableOwnerId,
+        observedRef: actual.ref,
         outcome: "provisioning",
         claimId,
         now: this.now(),
@@ -707,6 +820,7 @@ export class CodespaceResourceService {
       resourceName: actual.name,
       ownerId: actual.ownerId,
       billableOwnerId: actual.billableOwnerId,
+      observedRef: actual.ref,
       state: usable ? "usable" : "cleanup_pending",
       outcome: usable ? "verified_usable" : valid ? "connector_unavailable" : "verification_failed",
       cleanupDeadlineAt: usable ? undefined : this.now() + policy.cleanupDeadlineMs,
@@ -840,6 +954,23 @@ export class CodespaceResourceService {
         "Codespace provider is disabled",
       );
     }
+    if (requested === "unbound") {
+      // The record exists; what is missing is the exact provider resource a start would address.
+      // Saying "not found" here sent agents looking for a codespace that is listed right beside it.
+      const current = this.getCodespace(userId, resourceId);
+      if (current.state === "ambiguous") {
+        throw new CodespaceResourceError(
+          "CODESPACE_NOT_RUNNING",
+          "Codespace provider resource is ambiguous",
+          "Moira could not identify this codespace's provider resource uniquely (state ambiguous), so it cannot be started.",
+        );
+      }
+      throw new CodespaceResourceError(
+        "CODESPACE_CREATE_PENDING",
+        "Codespace provider resource is not identified yet",
+        `Moira is still identifying this codespace's provider resource (state ${current.state}); retry the start once it has settled.`,
+      );
+    }
     if (!requested) {
       throw new CodespaceResourceError("CODESPACE_NOT_FOUND", "Codespace was not found");
     }
@@ -940,8 +1071,11 @@ export class CodespaceResourceService {
     }
   }
 
+  /**
+   * One reconciliation step: re-verify one user's codespaces after a re-authorization if any are
+   * waiting, otherwise reconcile the next due record. Returns whether it did any work.
+   */
   async reconcileOnce(userId?: string): Promise<boolean> {
-    const policy = this.dependencies.policy();
     const rebindUser = this.dependencies.repository.nextAuthorizationRebindUser(
       this.dependencies.providerId,
       userId,
@@ -950,9 +1084,55 @@ export class CodespaceResourceService {
       try {
         if ((await this.rebindAfterAuthorization(rebindUser)) > 0) return true;
       } catch {
-        // Keep the stale authorization generation fenced and retry later.
+        // Keep the stale authorization generation fenced and retry later; the pass already moved
+        // these records to the back of the rebind order.
       }
     }
+    return this.reconcileNextDue(userId);
+  }
+
+  private deferReconcile(
+    record: CodespaceResourceRecord,
+    claimId: string,
+    outcome: string | null,
+  ): void {
+    const now = this.now();
+    this.dependencies.repository.deferReconcile({
+      resourceId: record.id,
+      generation: record.generation,
+      claimId,
+      outcome,
+      baseDelayMs: this.dependencies.policy().reconcileIntervalMs,
+      maxDelayMs: RECONCILE_BACKOFF_MAX_MS,
+      // A create, or a record not yet bound to its provider resource, is decided at the create
+      // deadline, so the backoff never carries it past that moment; the deadline is still strictly
+      // in the future, so this tick never takes it again.
+      latestAt:
+        (record.state === "create_submitted" || record.providerResourceName === null) &&
+        record.createDeadlineAt > now
+          ? record.createDeadlineAt
+          : null,
+      now,
+    });
+  }
+
+  /**
+   * Defers a record the pass left where it found it — same generation, same state — unless the
+   * pass already deferred it. Several passes end by giving the claim back (a create not visible
+   * yet, one still provisioning, a cleanup target not listed yet); without this, the next claim in
+   * the same tick would take the same record again and ask the provider the same question.
+   */
+  private deferIfUnconverged(record: CodespaceResourceRecord, claimId: string): void {
+    const after = this.dependencies.repository.getOwned(record.userId, record.id);
+    if (!after || after.generation !== record.generation || after.state !== record.state) return;
+    const alreadyDeferred =
+      after.claimId === null && after.claimExpiresAt !== null && after.claimExpiresAt > this.now();
+    if (after.claimId !== null && after.claimId !== claimId) return;
+    if (!alreadyDeferred) this.deferReconcile(record, claimId, null);
+  }
+
+  private async reconcileNextDue(userId?: string): Promise<boolean> {
+    const policy = this.dependencies.policy();
     const claimId = randomUUID();
     const record = this.dependencies.repository.claimDue(
       claimId,
@@ -987,16 +1167,18 @@ export class CodespaceResourceService {
       return true;
     }
     if (["start_pending", "stop_pending", "delete_pending"].includes(record.state)) {
+      let failure: string | null = null;
       try {
         await this.applyPersistentLifecycle(record);
       } catch {
-        this.dependencies.repository.releaseClaim(
-          record.id,
-          record.generation,
-          claimId,
-          "lifecycle_reconcile_required",
-          this.now(),
-        );
+        failure = "lifecycle_reconcile_required";
+      }
+      // A pass that left the record in the same pending generation did not converge it, whether
+      // the provider refused or is still moving the codespace. Either way it waits its backoff
+      // instead of being the first due record again on the next tick.
+      const after = this.dependencies.repository.getOwned(record.userId, record.id);
+      if (after && after.generation === record.generation && after.state === record.state) {
+        this.deferReconcile(record, claimId, failure);
       }
       return true;
     }
@@ -1011,23 +1193,12 @@ export class CodespaceResourceService {
       } else if (record.state === "cleanup_pending") {
         await this.reconcileCleanup(record, claimId, credential, provider);
       } else {
-        this.dependencies.repository.releaseClaim(
-          record.id,
-          record.generation,
-          claimId,
-          "manual_ambiguous_cleanup_required",
-          this.now(),
-        );
+        this.deferReconcile(record, claimId, "manual_ambiguous_cleanup_required");
       }
     } catch {
-      this.dependencies.repository.releaseClaim(
-        record.id,
-        record.generation,
-        claimId,
-        "reconcile_retry_required",
-        this.now(),
-      );
+      this.deferReconcile(record, claimId, "reconcile_retry_required");
     }
+    this.deferIfUnconverged(record, claimId);
     return true;
   }
 
@@ -1059,6 +1230,15 @@ export class CodespaceResourceService {
     }
   }
 
+  /**
+   * Moves one pending persistent codespace toward its desired state, looking before it acts.
+   *
+   * The provider's current state decides what happens: a codespace already where it should be is
+   * completed without a provider call; one the provider is still moving is left pending; only a
+   * codespace that is settled somewhere else receives a mutation. A delete is issued directly,
+   * whatever the codespace is doing. When a mutation fails, the codespace is observed again, because
+   * a refused stop of a codespace that meanwhile shut down has nonetheless reached its goal.
+   */
   private async applyPersistentLifecycleThroughProvider(
     record: CodespaceResourceRecord,
   ): Promise<void> {
@@ -1076,7 +1256,6 @@ export class CodespaceResourceService {
           candidate.ownerId === identity.id &&
           (!this.requiresPersonalBilling() || candidate.billableOwnerId === identity.id) &&
           candidate.repositoryId === record.repositoryId &&
-          candidate.ref === record.requestedRef &&
           candidate.createdAt >= record.createdAt - 60_000 &&
           candidate.createdAt <= record.createDeadlineAt + PROVIDER_CLOCK_SKEW_MS,
       );
@@ -1137,8 +1316,88 @@ export class CodespaceResourceService {
         billableOwnerId: discovered.billableOwnerId,
       };
     }
-    const exact = await provider.getExact(credential, resourceName);
-    if (!exact) {
+    const observe = () => this.observeExact(record, provider, credential);
+    const exact = await observe();
+    if ((await this.settleLifecycleVerified(record, exact, provider, credential)) || !exact) return;
+    if (
+      exact.state === "deleting" ||
+      (record.desiredState !== "deleted" && isTransitional(exact.state))
+    ) {
+      this.markTransitionPending(record, exact);
+      return;
+    }
+    try {
+      if (record.desiredState === "running") await provider.startExact(credential, resourceName);
+      else if (record.desiredState === "stopped")
+        await provider.stopExact(credential, resourceName);
+      else await provider.deleteExact(credential, resourceName);
+    } catch (error) {
+      const reobserved = await observe().catch(() => undefined);
+      if (reobserved === undefined) throw error;
+      if (await this.settleLifecycleVerified(record, reobserved, provider, credential)) return;
+      if (reobserved && (reobserved.state === "deleting" || isTransitional(reobserved.state))) {
+        // The provider refused because it is already moving the codespace; that is progress to
+        // wait for, not a refusal to report.
+        this.markTransitionPending(record, reobserved);
+        return;
+      }
+      throw error;
+    }
+    const observed = await observe();
+    if (await this.settleLifecycleVerified(record, observed, provider, credential)) return;
+    this.dependencies.repository.markLifecyclePending(
+      record.id,
+      record.generation,
+      record.desiredState === "running"
+        ? "start_pending"
+        : record.desiredState === "stopped"
+          ? "stop_pending"
+          : "delete_pending",
+      observed ? observedStateFor(observed.state) : "absent",
+      this.now(),
+    );
+  }
+
+  /**
+   * The exact resource as the provider reports it now, verified to still be this record's. A
+   * different identity under the same name is refused rather than acted on; the facts that are not
+   * identity — the repository's name, the checked-out ref — are written back.
+   */
+  private async observeExact(
+    record: CodespaceResourceRecord,
+    provider: CodespaceProviderAdapter,
+    credential: string,
+  ): Promise<CodespaceProviderResource | null> {
+    const exact = await provider.getExact(credential, record.providerResourceName!);
+    if (!exact) return null;
+    if (!exactIdentityMatches(exact, record)) {
+      throw new CodespaceResourceError(
+        "CODESPACE_RESOURCE_INVALID",
+        "Codespace exact identity changed",
+      );
+    }
+    this.dependencies.repository.recordProviderObservation(
+      record.id,
+      {
+        repositoryFullName: exact.repositoryFullName,
+        observedRef: exact.ref,
+        lastUsedAt: exact.lastUsedAt,
+      },
+      this.now(),
+    );
+    return exact;
+  }
+
+  /**
+   * Completes the record when the observed codespace already is what the record wants, except for a
+   * running target, which needs the connector probe of {@link settleLifecycleVerified}. Returns
+   * whether the record is settled.
+   */
+  private settleLifecycle(
+    record: CodespaceResourceRecord,
+    observed: CodespaceProviderResource | null,
+  ): boolean {
+    if (!observed) {
       if (record.desiredState === "deleted") {
         this.dependencies.repository.completeLifecycle({
           resourceId: record.id,
@@ -1149,110 +1408,71 @@ export class CodespaceResourceService {
           outcome: "verified_absent",
           now: this.now(),
         });
-      } else if (
-        !this.dependencies.repository.completeAbsentPersistentLifecycle(
+      } else {
+        this.dependencies.repository.completeAbsentPersistentLifecycle(
           record.id,
           record.generation,
           record.desiredState,
           "verified_externally_absent",
           this.now(),
-        )
-      ) {
-        return;
+        );
       }
-      return;
+      return true;
     }
+    // A failed codespace runs nothing, so the intent to stop it is met; the provider refuses to
+    // stop it, and asking again would keep the record pending forever. The record stops with the
+    // provider's observation kept as `failed`, so the view does not claim a clean shutdown.
     if (
-      exact.name !== resourceName ||
-      exact.ownerId !== record.externalOwnerId ||
-      exact.billableOwnerId !== record.billableOwnerId ||
-      exact.repositoryId !== record.repositoryId ||
-      exact.ref !== record.requestedRef ||
-      exact.displayName !== record.operationMarker
+      record.desiredState === "stopped" &&
+      (observed.state === "shutdown" || observed.state === "failed")
     ) {
-      throw new CodespaceResourceError(
-        "CODESPACE_RESOURCE_INVALID",
-        "Codespace exact identity changed",
-      );
-    }
-    // The identity held, so any difference in the name is a rename on the provider's side rather than
-    // a different repository. Write it back, or every later reader keeps seeing the name the
-    // repository had when the codespace was created.
-    this.dependencies.repository.refreshRepositoryName(
-      record.id,
-      exact.repositoryFullName,
-      this.now(),
-    );
-    if (record.desiredState === "running") {
-      if (exact.state !== "available") await provider.startExact(credential, resourceName);
-      const observed = await provider.getExact(credential, resourceName);
-      if (observed?.state === "available") {
-        await provider.probeConnector(credential, resourceName);
-        this.dependencies.repository.completeLifecycle({
-          resourceId: record.id,
-          generation: record.generation,
-          desiredState: "running",
-          observedState: "running",
-          state: "usable",
-          outcome: "verified_running",
-          now: this.now(),
-        });
-      } else {
-        this.dependencies.repository.markLifecyclePending(
-          record.id,
-          record.generation,
-          "start_pending",
-          "provisioning",
-          this.now(),
-        );
-      }
-      return;
-    }
-    await provider.stopExact(credential, resourceName);
-    if (record.desiredState === "deleted") {
-      await provider.deleteExact(credential, resourceName);
-      const observed = await provider.getExact(credential, resourceName);
-      if (!observed) {
-        this.dependencies.repository.completeLifecycle({
-          resourceId: record.id,
-          generation: record.generation,
-          desiredState: "deleted",
-          observedState: "absent",
-          state: "deleted",
-          outcome: "verified_absent",
-          now: this.now(),
-        });
-      } else {
-        this.dependencies.repository.markLifecyclePending(
-          record.id,
-          record.generation,
-          "delete_pending",
-          "deleting",
-          this.now(),
-        );
-      }
-      return;
-    }
-    const observed = await provider.getExact(credential, resourceName);
-    if (observed?.state === "shutdown") {
+      const failed = observed.state === "failed";
       this.dependencies.repository.completeLifecycle({
         resourceId: record.id,
         generation: record.generation,
         desiredState: "stopped",
-        observedState: "stopped",
+        observedState: failed ? "failed" : "stopped",
         state: "stopped",
-        outcome: "verified_stopped",
+        outcome: failed ? "verified_failed_not_running" : "verified_stopped",
         now: this.now(),
       });
-    } else {
-      this.dependencies.repository.markLifecyclePending(
-        record.id,
-        record.generation,
-        "stop_pending",
-        observed ? "running" : "absent",
-        this.now(),
-      );
+      return true;
     }
+    return false;
+  }
+
+  private async settleLifecycleVerified(
+    record: CodespaceResourceRecord,
+    observed: CodespaceProviderResource | null,
+    provider: CodespaceProviderAdapter,
+    credential: string,
+  ): Promise<boolean> {
+    if (this.settleLifecycle(record, observed)) return true;
+    if (record.desiredState !== "running" || observed?.state !== "available") return false;
+    await provider.probeConnector(credential, observed.name);
+    this.dependencies.repository.completeLifecycle({
+      resourceId: record.id,
+      generation: record.generation,
+      desiredState: "running",
+      observedState: "running",
+      state: "usable",
+      outcome: "verified_running",
+      now: this.now(),
+    });
+    return true;
+  }
+
+  private markTransitionPending(
+    record: CodespaceResourceRecord,
+    observed: CodespaceProviderResource,
+  ): void {
+    this.dependencies.repository.markLifecyclePending(
+      record.id,
+      record.generation,
+      `provider_${observed.state}`,
+      observedStateFor(observed.state),
+      this.now(),
+    );
   }
 
   private async reconcileCreation(
@@ -1271,7 +1491,6 @@ export class CodespaceResourceService {
           (resource) =>
             resource.displayName === record.operationMarker &&
             resource.repositoryId === record.repositoryId &&
-            resource.ref === record.requestedRef &&
             resource.ownerId === identity.id &&
             (!this.requiresPersonalBilling() || resource.billableOwnerId === identity.id) &&
             resource.createdAt >= record.createdAt - 60_000 &&
@@ -1325,20 +1544,13 @@ export class CodespaceResourceService {
         (resource) =>
           resource.displayName === record.operationMarker &&
           resource.repositoryId === record.repositoryId &&
-          resource.ref === record.requestedRef &&
           resource.ownerId === identity.id &&
           (!this.requiresPersonalBilling() || resource.billableOwnerId === identity.id) &&
           resource.createdAt >= record.createdAt - 60_000 &&
           resource.createdAt <= record.createDeadlineAt + PROVIDER_CLOCK_SKEW_MS,
       );
       if (matches.length > 1) {
-        this.dependencies.repository.releaseClaim(
-          record.id,
-          record.generation,
-          claimId,
-          "multiple_cleanup_matches",
-          this.now(),
-        );
+        this.deferReconcile(record, claimId, "multiple_cleanup_matches");
         return;
       }
       if (matches.length === 0) {
@@ -1384,48 +1596,43 @@ export class CodespaceResourceService {
     }
     const exact = await provider.getExact(credential, resourceName);
     if (exact) {
-      if (
-        exact.name !== resourceName ||
-        exact.displayName !== record.operationMarker ||
-        exact.ownerId !== record.externalOwnerId ||
-        exact.billableOwnerId !== record.billableOwnerId ||
-        exact.repositoryId !== record.repositoryId ||
-        exact.ref !== record.requestedRef
-      ) {
-        this.dependencies.repository.releaseClaim(
-          record.id,
-          record.generation,
-          claimId,
-          "exact_identity_mismatch",
-          this.now(),
-        );
+      if (!exactIdentityMatches(exact, record)) {
+        this.deferReconcile(record, claimId, "exact_identity_mismatch");
         return;
       }
+      this.dependencies.repository.recordProviderObservation(
+        record.id,
+        {
+          repositoryFullName: exact.repositoryFullName,
+          observedRef: exact.ref,
+          lastUsedAt: exact.lastUsedAt,
+        },
+        this.now(),
+      );
+      if (exact.state === "deleting") {
+        this.deferReconcile(record, claimId, "delete_pending");
+        return;
+      }
+      // Deleting needs no stop first: the provider deletes a running or transitional codespace
+      // directly, and a stop in front of it is one more call that can fail and hold cleanup back.
       if (
         !this.dependencies.repository.recordRequiredCleanupMutation({
           resourceId: record.id,
           generation: record.generation,
           claimId,
-          kind: "stop",
+          kind: "delete",
           now: this.now(),
         })
       ) {
         return;
       }
-      const stopped = await provider.stopExact(credential, resourceName);
-      if (stopped !== "absent") {
-        if (
-          !this.dependencies.repository.recordRequiredCleanupMutation({
-            resourceId: record.id,
-            generation: record.generation,
-            claimId,
-            kind: "delete",
-            now: this.now(),
-          })
-        ) {
-          return;
-        }
+      try {
         await provider.deleteExact(credential, resourceName);
+      } catch (error) {
+        // A refused delete of a codespace that is gone anyway has still reached its goal.
+        if ((await provider.getExact(credential, resourceName).catch(() => undefined)) !== null) {
+          throw error;
+        }
       }
     }
     if ((await provider.getExact(credential, resourceName)) === null) {
@@ -1443,33 +1650,127 @@ export class CodespaceResourceService {
         );
       }
     } else {
-      this.dependencies.repository.releaseClaim(
-        record.id,
-        record.generation,
-        claimId,
-        "delete_pending",
-        this.now(),
-      );
+      this.deferReconcile(record, claimId, "delete_pending");
     }
   }
 
   start(): void {
     if (this.timer) return;
-    void this.runScheduledReconcile();
+    void this.reconcileTick();
     this.timer = setInterval(
-      () => void this.runScheduledReconcile(),
+      () => void this.reconcileTick(),
       this.dependencies.policy().reconcileIntervalMs,
     );
     this.timer.unref();
   }
 
-  private async runScheduledReconcile(): Promise<void> {
+  /**
+   * One scheduled reconciliation tick, as `start()` runs it each interval: one rebind attempt, then
+   * the due records up to a bound. Overlapping ticks do not run concurrently.
+   */
+  async reconcileTick(): Promise<void> {
     if (this.scheduledReconcileRunning) return;
     this.scheduledReconcileRunning = true;
     try {
-      await this.reconcileOnce();
+      // A record observed in this tick is left for the next tick's idle scan: an idle stop leads to
+      // a lifecycle pass that reads the codespace again, and no record is looked at twice in a tick.
+      const observed = await this.observeProviderState();
+      await this.stopIdleCodespaces(observed);
+      // One rebind attempt per tick, then every due record up to a bound. A record that does not
+      // converge is deferred, so it is not claimed twice in one tick and cannot crowd others out.
+      if (await this.reconcileOnce()) {
+        for (let pass = 1; pass < RECONCILE_BATCH_LIMIT; pass++) {
+          if (!(await this.reconcileNextDue())) break;
+        }
+      }
     } finally {
       this.scheduledReconcileRunning = false;
+    }
+  }
+
+  /**
+   * Lists the codespaces of the users whose observation is due — at most one listing per user per
+   * observation interval — and records what the provider says about each running one: its checked-
+   * out ref and last start time, and, when the provider already stopped it, that it is stopped. Nothing
+   * is mutated at the provider. Returns the records observed.
+   */
+  private async observeProviderState(): Promise<Set<string>> {
+    const observed = new Set<string>();
+    const policy = this.dependencies.policy();
+    if (!policy.enabled) return observed;
+    const provider = this.dependencies.registry.require(this.dependencies.providerId);
+    const users = this.dependencies.repository.claimProviderObservations(
+      provider.id,
+      this.now(),
+      policy.reconcileIntervalMs * PROVIDER_OBSERVATION_INTERVALS,
+      PROVIDER_OBSERVATION_USERS_PER_TICK,
+    );
+    for (const userId of users) {
+      try {
+        const records = this.dependencies.repository.listObservableRunning(userId, provider.id);
+        if (records.length === 0) continue;
+        const credential = await this.dependencies.credentials.getCredential(userId, provider.id);
+        const listed = new Map(
+          (await provider.listOwned(credential)).map((resource) => [resource.name, resource]),
+        );
+        for (const record of records) {
+          observed.add(record.id);
+          const actual = listed.get(record.providerResourceName!);
+          // Absent from the listing, or no longer this record's: lifecycle decides that from an
+          // exact read when the codespace is next used, not a listing.
+          if (!actual || !exactIdentityMatches(actual, record)) continue;
+          this.dependencies.repository.recordProviderObservation(
+            record.id,
+            {
+              repositoryFullName: actual.repositoryFullName,
+              observedRef: actual.ref,
+              lastUsedAt: actual.lastUsedAt,
+            },
+            this.now(),
+          );
+          if (
+            actual.state === "shutdown" &&
+            this.dependencies.repository.markObservedStopped(
+              record.id,
+              record.generation,
+              this.now(),
+            )
+          ) {
+            await this.emit(
+              "stop",
+              this.dependencies.repository.getOwned(userId, record.id)!,
+              "provider_observed_stopped",
+            );
+          }
+        }
+      } catch {
+        // One user's credential or provider failure never holds back another's observation or the
+        // rest of the tick; the next interval observes again.
+      }
+    }
+    return observed;
+  }
+
+  /**
+   * Requests a stop for every codespace idle past its owner's timeout. The stop converges through
+   * ordinary lifecycle, and the next use starts the codespace again. `skip` are records observed in
+   * this tick, stopped (if still idle) in the next.
+   */
+  private async stopIdleCodespaces(skip: ReadonlySet<string>): Promise<void> {
+    if (!this.dependencies.policy().enabled) return;
+    const candidates = this.dependencies.repository.listIdleStopCandidates(
+      this.dependencies.providerId,
+      this.now(),
+      IDLE_STOP_LIMIT,
+      [...skip],
+    );
+    for (const candidate of candidates) {
+      const stopped = this.dependencies.repository.requestIdleStop(
+        candidate.id,
+        candidate.generation,
+        this.now(),
+      );
+      if (stopped) await this.emit("stop", stopped, "idle_stop_requested");
     }
   }
 

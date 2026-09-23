@@ -17,7 +17,6 @@ const allNames = [
   "CODESPACE_MAX_ACTIVE_PER_USER",
   "CODESPACE_MAX_ACTIVE_GLOBAL",
   "CODESPACE_CREATE_THROTTLE_SECONDS",
-  "CODESPACE_REMOTE_TTL_MINUTES",
   "CODESPACE_PERSISTENT_RETENTION_DAYS",
   "CODESPACE_CREATE_DEADLINE_MINUTES",
   "CODESPACE_CLEANUP_DEADLINE_MINUTES",
@@ -50,6 +49,15 @@ describe("GitHub codespace deployment configuration", () => {
       for (const name of secretNames) {
         expect(source).toMatch(new RegExp(`^${name}=$`, "m"));
       }
+    }
+  });
+
+  test("offers no setting that controls nothing: the removed remote expiry is not configurable", () => {
+    // Persistent codespaces never expire, and legacy disposable rows expire by the time stamped
+    // when they were created, so an operator value would change no behaviour at all.
+    for (const filename of [".env.example", ".env.local.example", "docker-compose.yml"]) {
+      const source = readFileSync(resolve(process.cwd(), filename), "utf8");
+      expect(source).not.toContain("CODESPACE_REMOTE_TTL_MINUTES");
     }
   });
 

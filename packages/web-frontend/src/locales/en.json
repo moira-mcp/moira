@@ -752,14 +752,6 @@
     },
     "settings": {
       "title": "Settings",
-      "loading": "Loading settings...",
-      "required": "is required",
-      "validation": {
-        "mustBeOneOf": "Must be one of: {{values}}",
-        "minLength": "Minimum length: {{length}}",
-        "maxLength": "Maximum length: {{length}}"
-      },
-      "enable": "Enable",
       "channels": {
         "extension": "Extension",
         "test": "Send test",
@@ -768,7 +760,7 @@
         "testSuccess": "Test delivered through {{channel}}",
         "testFailed": "Test delivery through {{channel}} failed",
         "noSettings": "This channel has no user settings.",
-        "setupGuide": "Open the {{channel}} setup guide",
+        "setupGuide": "{{channel}} setup in the documentation",
         "states": {
           "ready": "Ready",
           "disabled": "Disabled",
@@ -803,6 +795,12 @@
           "api_error": "The channel provider rejected the test delivery.",
           "provider_error": "The provider rejected the test delivery.",
           "channel_error": "The channel could not deliver the test message."
+        },
+        "builtin": {
+          "telegram": {
+            "title": "Telegram",
+            "description": "Messages and questions from your workflows, delivered by your own Telegram bot."
+          }
         }
       },
       "codespaces": {
@@ -838,11 +836,11 @@
         "repository": "Repository",
         "ref": "Branch or ref",
         "create": "Create codespace",
-        "createHint": "{{active}} of {{max}} active codespaces are in use on this instance. Codespaces are billed to your personal GitHub account.",
+        "createHint": "You hold {{held}} of {{max}} codespaces. Stopped codespaces count too; delete one you no longer need to free a slot. Codespaces are billed to your personal GitHub account.",
         "list": "Your codespaces",
         "empty": "No codespaces yet.",
         "providerLine": "GitHub Codespaces · personal billing · {{machine}}",
-        "detailLine": "Desired {{desired}}, observed {{observed}} · generation {{generation}} · updated {{updated}}",
+        "detailLine": "Desired {{desired}}, observed {{observed}} · generation {{generation}}",
         "states": {
           "create_pending": "Creating",
           "create_submitted": "Creating",
@@ -874,10 +872,65 @@
         "stop": "Stop",
         "delete": "Delete",
         "confirmDeleteTitle": "Delete this codespace?",
-        "confirmDeleteDescription": "The Codespace for {{repository}} and every uncommitted change inside it will be removed permanently. Use Stop instead to keep the data."
+        "confirmDeleteDescription": "The Codespace for {{repository}} and every uncommitted change inside it will be removed permanently. Use Stop instead to keep the data.",
+        "technicalDetails": "Technical details",
+        "details": {
+          "requestedRef": "Created on",
+          "currentRef": "Checked out now",
+          "unknown": "Not reported yet",
+          "lifecycle": "Lifecycle",
+          "updated": "Updated",
+          "id": "Codespace ID"
+        },
+        "limits": {
+          "title": "Your limits",
+          "description": "What you can use, and how much of it you are using now.",
+          "helpTitle": "About these limits",
+          "helpHeld": "A codespace counts against your limit until it is deleted — stopping it keeps its files and its slot. Delete one you no longer need to free a slot.",
+          "helpBilling": "Codespaces are billed to your personal GitHub account. GitHub does not share billing or quota details with Moira; see them on GitHub.",
+          "held": "Codespaces held",
+          "commands": "Commands running",
+          "transfers": "File transfers",
+          "ofMax": "{{used}} of {{max}}",
+          "more": "All limits",
+          "machine": "Largest machine",
+          "machineValue": "{{cpu}} cores · {{memory}} RAM · {{storage}} storage",
+          "commandDuration": "Longest command",
+          "backgroundDuration": "Longest background command",
+          "commandInput": "Command input",
+          "commandOutput": "Kept command output",
+          "fileSize": "Largest file transfer",
+          "retention": "Stopped codespaces kept",
+          "createInterval": "Time between creations",
+          "instance": "Codespaces on this instance",
+          "billing": "Billing and quota",
+          "billingUnavailable": "Shown on GitHub",
+          "minutes_one": "{{count}} minute",
+          "minutes_other": "{{count}} minutes",
+          "days_one": "{{count}} day",
+          "days_other": "{{count}} days",
+          "seconds_one": "{{count}} second",
+          "seconds_other": "{{count}} seconds"
+        },
+        "autoPause": {
+          "title": "Automatic pause",
+          "description": "Stop codespaces agents are not using, so they do not keep running up your GitHub bill.",
+          "helpTitle": "What counts as activity",
+          "helpCounts": "Only what agents do through Moira: commands, file reads and writes, uploads and downloads. Moira does not see you working in a codespace directly in the browser, an editor or over SSH.",
+          "helpResume": "A paused codespace keeps its files. The next command an agent sends starts it again automatically.",
+          "enable": "Pause idle codespaces",
+          "enableDescription": "Stop a codespace after no agent has used it through Moira for the time below.",
+          "timeout": "Pause after",
+          "timeoutDescription": "How long a codespace may stay unused before it is paused.",
+          "minutes_one": "{{count}} minute",
+          "minutes_other": "{{count}} minutes",
+          "note": "Only agent activity through Moira counts; direct use in the browser or an editor is not seen. If you work in your codespaces directly, turn this off. Either way, GitHub stops a codespace after at most 240 minutes without activity.",
+          "saved": "Automatic pause setting saved",
+          "saveFailed": "Failed to save the automatic pause setting"
+        }
       },
       "github": {
-        "title": "GitHub codespaces",
+        "title": "GitHub account",
         "description": "Connect GitHub on this website so Moira can use approved, user-owned Codespaces. Agents never receive GitHub credentials or authorization links.",
         "loadFailed": "Failed to load the GitHub codespace connection",
         "loadFailedDescription": "Your other settings are still available. Retry this connection status request.",
@@ -888,6 +941,8 @@
         "connect": "Connect GitHub",
         "reconnect": "Reconnect GitHub",
         "install": "Install GitHub App",
+        "checkInstallation": "Check installation",
+        "installationStillMissing": "GitHub does not show the Moira App installed on your account yet. Finish the installation on GitHub, then check again.",
         "disconnect": "Disconnect",
         "confirmDisconnect": "Disconnect GitHub and revoke Moira's stored access? Active cloud codespace sessions will no longer be authorized.",
         "disconnected": "GitHub was disconnected",
@@ -922,8 +977,15 @@
         },
         "outcomes": {
           "connected": "GitHub connected successfully",
-          "installation_required": "Authorize the GitHub App installation to finish setup",
-          "authorization_failed": "GitHub authorization failed or expired. Try again from Settings."
+          "installation_required": "Install the GitHub App on your account to finish setup, then check the installation here.",
+          "authorization_failed": "GitHub authorization failed or expired. Try again from Settings.",
+          "already_connected": "GitHub is already connected. To use a different account, disconnect first.",
+          "not_configured": "GitHub codespaces are not configured on this Moira instance.",
+          "credential_unreadable": "The saved GitHub credential cannot be decrypted. Follow the recovery steps on this page before connecting again.",
+          "grant_revocation_required": "Revoke the Moira GitHub App grant on GitHub and confirm it on this page before connecting again.",
+          "previous_access_not_revoked": "Moira could not yet revoke GitHub access it stored earlier. Try connecting again in a moment.",
+          "revocation_pending": "GitHub access is still being revoked. Finish Disconnect before connecting again.",
+          "session_required": "Sign in to this website again, then connect GitHub."
         },
         "errors": {
           "INCOMPLETE_CONFIGURATION": {
@@ -978,30 +1040,30 @@
             "title": "GitHub connection needs attention",
             "description": "Review the connection and try again from this page."
           }
+        },
+        "steps": {
+          "label": "GitHub setup progress",
+          "account": {
+            "title": "Connect GitHub",
+            "description": "Approve Moira on GitHub."
+          },
+          "install": {
+            "title": "Install the Moira App",
+            "description": "Add the App to your GitHub account."
+          },
+          "repositories": {
+            "title": "Grant repositories",
+            "description": "Choose where agents may work."
+          },
+          "states": {
+            "done": "Done",
+            "current": "Current step",
+            "upcoming": "Not started",
+            "blocked": "Unavailable on this instance"
+          }
         }
       },
-      "saveChanges": "Save Changes",
-      "saving": "Saving...",
-      "cancel": "Cancel",
-      "noSettings": "No settings available in this category",
-      "editFullscreen": "Edit Fullscreen",
-      "history": "History",
-      "setting": "setting",
-      "settings": "settings",
-      "saveSuccess": "Settings saved successfully",
       "saveFailed": "Failed to save settings",
-      "fixErrors": "Please fix validation errors before saving",
-      "tabs": {
-        "profile": "Profile",
-        "security": "Security",
-        "oauth": "OAuth Authorizations",
-        "sessions": "Active Sessions",
-        "notifications": "Notifications",
-        "integrations": "Integrations",
-        "connections": "Connections & Sessions",
-        "settings": "Settings",
-        "apiTokens": "API Tokens"
-      },
       "profile": {
         "title": "Profile Information",
         "name": "Name",
@@ -1023,14 +1085,18 @@
         "handle": "Handle",
         "handlePlaceholder": "your-handle",
         "handleHint": "3-30 characters. Lowercase letters, numbers, and hyphens only. Cannot start or end with a hyphen.",
-        "handleWarningTitle": "Warning:",
         "handleWarningText": "Your handle appears in all workflow URLs (e.g., your-handle/workflow-name). Changing it will break existing links to your workflows.",
         "handleLengthError": "Handle must be between 3 and 30 characters",
         "handleFormatError": "Handle can only contain lowercase letters, numbers, and hyphens. Cannot start or end with a hyphen.",
         "handleChangeWarning": "Are you sure you want to change your handle from \"{{currentHandle}}\" to \"{{handle}}\"? This will change all your workflow URLs.",
         "handleUpdateSuccess": "Handle updated successfully!",
         "changeHandle": "Change Handle",
-        "savingHandle": "Saving..."
+        "savingHandle": "Saving...",
+        "updateFailed": "Failed to update your profile",
+        "handleUpdateFailed": "Failed to change your username",
+        "verificationFailed": "Failed to send the verification email",
+        "handleHelpTitle": "Why changing your handle matters",
+        "handleDescription": "Appears in the links to your workflows, for example your-handle/workflow-name."
       },
       "security": {
         "title": "Security",
@@ -1055,38 +1121,60 @@
           "minLength": "New password must be at least 6 characters",
           "maxLength": "New password must be less than 128 characters",
           "noMatch": "Passwords do not match",
-          "samePassword": "New password must be different from current password"
-        }
+          "samePassword": "New password must be different from current password",
+          "changeFailed": "Failed to change your password",
+          "currentIncorrect": "The current password is incorrect.",
+          "signInAgain": "For your security, sign in again, then set the password.",
+          "alreadySet": "This account already has a password.",
+          "setFailed": "Failed to set the password"
+        },
+        "description": "Use a password you do not use anywhere else.",
+        "setPasswordTitle": "Password",
+        "socialOnlyDescription": "You sign in with {{providers}}, so this account has no password yet. Set one to also sign in with your email address.",
+        "socialProviderFallback": "an external provider",
+        "setPassword": "Set password",
+        "settingPassword": "Setting...",
+        "passwordSetSuccess": "Password set. You can now also sign in with your email address."
       },
       "oauth": {
-        "title": "OAuth Authorizations",
-        "loading": "Loading OAuth consents...",
-        "noConsents": "No OAuth authorizations found.",
+        "noConsents": "No OAuth authorizations found",
         "clientId": "Client ID",
         "permissions": "Permissions:",
         "authorized": "Authorized",
         "revoke": "Revoke",
-        "revoking": "Revoking...",
         "confirmRevoke": "Are you sure you want to revoke this OAuth consent? This will also revoke all associated access tokens.",
-        "revokeFailed": "Failed to revoke consent"
+        "revokeFailed": "Failed to revoke consent",
+        "revoked": "The app's access was revoked",
+        "loadFailed": "Failed to load connected apps",
+        "searchPlaceholder": "Search apps",
+        "noConsentsDescription": "Apps appear here after you approve them on the Moira sign-in page."
       },
       "sessions": {
         "title": "Active Sessions",
-        "loading": "Loading sessions...",
-        "noSessions": "No active sessions found.",
+        "noSessions": "No active sessions found",
         "currentSession": "Current Session",
         "ipAddress": "IP Address",
         "location": "Location",
         "created": "Created",
         "expires": "Expires",
         "revoke": "Revoke",
-        "revoking": "Revoking...",
         "cannotRevokeCurrent": "Cannot revoke current session",
         "confirmRevoke": "Are you sure you want to revoke this session? The user will be logged out on that device.",
-        "revokeFailed": "Failed to revoke session"
+        "revokeFailed": "Failed to revoke session",
+        "description": "Browsers and devices signed in to your account. Sign out any you do not recognise.",
+        "helpTitle": "Sessions and agent access",
+        "helpBody": "A session is one sign-in on the website from a browser or device. Signing it out requires that device to sign in again.",
+        "helpAgents": "AI assistants do not appear here: they connect through Connected apps or API tokens, and are revoked there.",
+        "revoked": "The session was signed out",
+        "loadFailed": "Failed to load your sessions",
+        "client": "{{name}} client",
+        "browserOnOs": "{{browser}} on {{os}}",
+        "unknownDevice": "Unknown device",
+        "automated": "automated",
+        "searchPlaceholder": "Search by device, browser or IP address",
+        "noSessionsDescription": "Sessions appear here when you sign in from a browser."
       },
       "apiTokens": {
-        "description": "Create and manage API tokens for MCP client authentication.",
         "createToken": "Create Token",
         "createDescription": "Create a new API token for MCP client authentication. The token will only be shown once.",
         "tokenName": "Token Name",
@@ -1110,7 +1198,190 @@
         "revoke": "Revoke",
         "confirmRevoke": "Are you sure you want to revoke this token? Any MCP clients using it will lose access immediately.",
         "createFailed": "Failed to create token",
-        "revokeFailed": "Failed to revoke token"
+        "revokeFailed": "Failed to revoke token",
+        "revoked": "The token was revoked",
+        "copyFailed": "Failed to copy the token",
+        "loadFailed": "Failed to load your API tokens",
+        "neverUsed": "never"
+      },
+      "description": "Manage your account, how you sign in, where Moira reaches you and the tools agents use on your behalf.",
+      "navLabel": "Settings sections",
+      "loadFailed": "Some settings could not be loaded",
+      "loadFailedDescription": "The sections below may be incomplete. Your saved settings are not affected.",
+      "retry": "Retry",
+      "sections": {
+        "account": {
+          "title": "Account",
+          "description": "Your name, email address and the username that appears in your workflow links."
+        },
+        "security": {
+          "title": "Security & sign-in",
+          "description": "Your password and the browsers and devices currently signed in to your account."
+        },
+        "notifications": {
+          "title": "Notifications",
+          "description": "Where Moira sends messages from your workflows, such as questions that need your answer.",
+          "helpTitle": "How notifications work",
+          "helpBody": "A workflow step can send you a message or ask you a question through a channel set up here. Each channel shows whether it is ready; send a test to check it.",
+          "helpTrusted": "Trusted delivery lets a channel carry messages that unlock sensitive steps. An administrator must approve it for each channel.",
+          "empty": "No notification channels",
+          "emptyDescription": "This Moira instance has no notification channels installed."
+        },
+        "github": {
+          "title": "GitHub & Codespaces",
+          "description": "Connect GitHub so agents can work in cloud codespaces for the repositories you choose.",
+          "helpTitle": "What agents can do in a codespace",
+          "helpBody": "A codespace is a cloud development machine for one of your repositories. Agents run commands and edit files in it through Moira's codespace tool; they never receive your GitHub credentials.",
+          "helpAuthority": "Inside a codespace an agent has the same access as the codespace user: the repository, the network and any secrets configured for that codespace. Grant only repositories you are comfortable with."
+        },
+        "apps": {
+          "title": "Connected apps",
+          "description": "AI assistants and other MCP clients you have allowed to use Moira with your account.",
+          "helpTitle": "What a connected app is",
+          "helpBody": "When an MCP client such as Claude or ChatGPT connects to Moira, you approve it on the Moira sign-in page. Each approval appears here with the permissions it received.",
+          "helpRevoke": "Revoking an app signs it out everywhere at once. It can connect again only after you approve it again."
+        },
+        "tokens": {
+          "title": "API tokens",
+          "description": "Long-lived keys for MCP clients and scripts that cannot use the browser sign-in.",
+          "helpTitle": "When to use an API token",
+          "helpBody": "Prefer connecting a client through the browser sign-in (see Connected apps). Use a token only for a client that cannot open a browser, such as a CI job or a headless agent.",
+          "helpHeader": "The client sends the token in an HTTP header — Authorization: Bearer <token>.",
+          "helpOnce": "A token is shown once, when you create it. Store it like a password; if it leaks, revoke it here."
+        },
+        "preferences": {
+          "title": "Preferences",
+          "description": "How the website looks and which language it uses in this browser."
+        }
+      },
+      "preferences": {
+        "theme": "Theme",
+        "themeDescription": "Light, dark, or follow your system setting.",
+        "themes": {
+          "light": "Light",
+          "dark": "Dark",
+          "system": "System"
+        },
+        "language": "Language",
+        "languageDescription": "The language of the website's interface."
+      },
+      "definitions": {
+        "telegram": {
+          "bot_token": {
+            "label": "Bot token",
+            "description": "The token @BotFather gave you when you created your bot.",
+            "help": "In Telegram, open @BotFather, send /newbot and follow the prompts. BotFather replies with a token like 123456:ABC-DEF…; paste it here. Moira stores it encrypted and never shows it again."
+          },
+          "chat_id": {
+            "label": "Chat ID",
+            "description": "The chat Moira sends your messages to.",
+            "help": "In Telegram, find @userinfobot and send it any message: it replies with your user ID, which is your chat ID. Also send your own bot any message — Telegram lets a bot write to you only after that. Do not put the bot token into a browser URL: URLs can be retained in browser history, screenshots, proxies and logs."
+          },
+          "enabled": {
+            "label": "Send notifications to Telegram",
+            "description": "Turn off to pause Telegram messages without removing the bot."
+          }
+        }
+      },
+      "tours": {
+        "page": {
+          "title": "Settings tour",
+          "open": "Explain this page",
+          "back": "Back",
+          "next": "Next",
+          "finish": "Finish",
+          "close": "Close tour",
+          "steps": {
+            "nav": {
+              "title": "Jump between sections",
+              "body": "Every setting lives in one of these sections. Pick one to go straight to it; the section you are reading is marked as you scroll."
+            },
+            "account": {
+              "title": "Your account",
+              "body": "Your display name, email and username. The username is part of every workflow link you share, so change it with care."
+            },
+            "security": {
+              "title": "Security & sign-in",
+              "body": "Change your password and see every browser or device signed in to your account. Sign out any you do not recognise."
+            },
+            "notifications": {
+              "title": "Notifications",
+              "body": "Set up where Moira reaches you, such as a Telegram bot, then send a test message to be sure it works."
+            },
+            "github": {
+              "title": "GitHub & Codespaces",
+              "body": "Connect GitHub and choose repositories so agents can work in cloud codespaces. Limits and automatic pausing are set here too."
+            },
+            "apps": {
+              "title": "Connected apps",
+              "body": "AI assistants you have allowed to use Moira. Revoke any you no longer use."
+            },
+            "tokens": {
+              "title": "API tokens",
+              "body": "Keys for clients that cannot use the browser sign-in. A token is shown only once, when you create it."
+            },
+            "preferences": {
+              "title": "Preferences",
+              "body": "Choose the theme and language of the website. These apply in this browser."
+            }
+          }
+        },
+        "github": {
+          "title": "GitHub & Codespaces setup",
+          "open": "Setup guide",
+          "back": "Back",
+          "next": "Next",
+          "finish": "Finish",
+          "close": "Close guide",
+          "steps": {
+            "steps": {
+              "title": "Three steps to connect",
+              "body": "Connect your GitHub account, install the Moira GitHub App, and grant it the repositories agents may work in. The current step is highlighted."
+            },
+            "connect": {
+              "title": "Connect and install",
+              "body": "Press Connect GitHub and approve Moira on GitHub. If the Moira App is not installed yet, GitHub takes you straight to installing it; choose the repositories there. Back here, Check installation confirms it."
+            },
+            "codespaces": {
+              "title": "Create a codespace",
+              "body": "Pick a repository and a branch, then create a codespace. Agents find it by its ID through the codespace tool. Stop keeps its files; Delete removes them."
+            },
+            "limits": {
+              "title": "Know your limits",
+              "body": "How many codespaces you may hold (stopped ones count), how many commands can run at once and how much can be transferred. Delete a codespace you no longer need to free a slot."
+            },
+            "autopause": {
+              "title": "Pause idle codespaces",
+              "body": "Moira stops a codespace no agent has used through Moira for the time you choose, so it does not keep running up your GitHub bill. The next command starts it again."
+            }
+          }
+        },
+        "telegram": {
+          "title": "Telegram setup",
+          "open": "Telegram setup",
+          "back": "Back",
+          "next": "Next",
+          "finish": "Finish",
+          "close": "Close guide",
+          "steps": {
+            "bot": {
+              "title": "Create a bot",
+              "body": "In Telegram, message @BotFather, send /newbot and follow the prompts. Paste the token it gives you here and save."
+            },
+            "chat": {
+              "title": "Find your chat ID",
+              "body": "Message @userinfobot in Telegram: the user ID it replies with is your chat ID. Paste it here and save, then send your own bot any message so it can write to you. Do not put the bot token into a browser URL."
+            },
+            "enable": {
+              "title": "Turn it on",
+              "body": "Tick Send notifications to Telegram and save. The channel shows Ready when everything is in place."
+            },
+            "test": {
+              "title": "Send a test",
+              "body": "Send a test message. If it does not arrive, check the token and chat ID; the error message says which part failed."
+            }
+          }
+        }
       }
     },
     "forgotPasswordUnavailable": {
@@ -2597,7 +2868,34 @@
     },
     "edit": "Edit",
     "close": "Close",
-    "actions": "Actions"
+    "actions": "Actions",
+    "unknownUser": "Unknown user",
+    "codespaceErrors": {
+      "CODESPACE_PROVIDER_DISABLED": "Cloud codespace operations are turned off on this instance.",
+      "CODESPACE_PROVIDER_UNAVAILABLE": "GitHub Codespaces is not answering right now. Try again shortly.",
+      "CODESPACE_POLICY_LIMIT": "A codespace limit was reached. See Your limits for what you hold and what is allowed.",
+      "CODESPACE_SESSION_UNAVAILABLE": "The command session is no longer available in this codespace.",
+      "CODESPACE_OPERATION_BUSY": "Too many codespace operations are running. Try again later.",
+      "CODESPACE_AUTHORIZATION_REQUIRED": "Moira no longer has access to this repository. Reconnect GitHub above.",
+      "CODESPACE_RESULT_EXPIRED": "That result is no longer available.",
+      "CODESPACE_CREATE_REJECTED": "GitHub refused to create the codespace. Check the repository's Codespaces settings on GitHub.",
+      "CODESPACE_CREATE_PENDING": "A codespace is still being created or cleaned up. Wait a moment and try again.",
+      "CODESPACE_NOT_RUNNING": "The codespace is not running.",
+      "CODESPACE_START_TIMEOUT": "The codespace is still starting. Try again shortly.",
+      "CODESPACE_GENERATION_CONFLICT": "The codespace changed in the meantime. Refresh the list and try again.",
+      "CODESPACE_RESOURCE_INVALID": "The request was not valid. Check the repository and the branch.",
+      "CODESPACE_NOT_FOUND": "The codespace was not found. It may already have been deleted.",
+      "CODESPACE_NOT_CONFIGURED": "Cloud codespaces are not configured on this instance.",
+      "CODESPACE_DELETE_CONFIRMATION_REQUIRED": "Deleting a codespace needs confirmation. Try again from the list.",
+      "CODESPACE_CONTROL_INVALID": "The control request was not valid.",
+      "CONNECTION_REQUIRED": "Connect GitHub first.",
+      "INSTALLATION_REQUIRED": "Install the Moira GitHub App first.",
+      "REPOSITORY_NOT_ALLOWED": "Moira may not use this repository. Grant it in the GitHub App's settings.",
+      "AUTH_REFRESH_FAILED": "GitHub access has expired. Reconnect GitHub.",
+      "AUTH_GRANT_REVOCATION_REQUIRED": "Revoke Moira's access on GitHub, then confirm here.",
+      "CREDENTIAL_UNREADABLE": "The stored GitHub access cannot be read. Reconnect GitHub.",
+      "AUTHORIZATION_FAILED": "GitHub authorization failed. Try again."
+    }
   },
   "lockedWidget": {
     "title": "{{count}} locked execution(s)",

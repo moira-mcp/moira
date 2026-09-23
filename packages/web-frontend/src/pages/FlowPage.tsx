@@ -264,8 +264,12 @@ export const FlowPage: React.FC = () => {
   // the selection was made while the graph was hidden (a hidden viewport cannot be fitted).
   useEffect(() => {
     if (mode !== "graph" || !selectedBlockId) return;
-    const first = blocks.find((b) => b.id === selectedBlockId)?.nodeIds[0];
+    const block = blocks.find((b) => b.id === selectedBlockId);
+    const first = block?.nodeIds[0];
     if (!first) return;
+    // A focus already aimed at a step of this block (a step row in the panel) wins over the
+    // block's first step: that request opened the graph, so it must not be overwritten here.
+    if (focusRequest && block?.nodeIds.includes(focusRequest.nodeId)) return;
     requestFocus({ nodeId: first });
     // eslint-disable-next-line react-hooks/exhaustive-deps -- only the tab change re-focuses
   }, [mode]);

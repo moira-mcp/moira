@@ -174,14 +174,15 @@ test.describe("Operational Dashboard", () => {
  * then verifies the analytics UI components render correctly.
  */
 test.describe("Business Analytics (seeded data)", () => {
-  // Unique prefix to identify seeded records for cleanup
-  const SEED_PREFIX = `e2e-ba-${Date.now()}`;
   const seededUserIds: string[] = [];
   const seededWorkflowId = randomUUID();
   const seededExecutionIds: string[] = [];
   const seededAuditIds: string[] = [];
 
   test.beforeAll(async () => {
+    // Unique prefix for the seeded records, made where they are created: two workers can load this
+    // file in the same millisecond, and their user ids must not collide.
+    const SEED_PREFIX = `e2e-ba-${Date.now()}-${randomUUID().slice(0, 8)}`;
     const now = Date.now();
     const DAY = 86_400_000;
 
@@ -326,10 +327,11 @@ test.describe("Business Analytics (seeded data)", () => {
 
 test.describe("Dashboard Interactive Features", () => {
   // Seed audit data to guarantee time series, filter options, and breakdowns
-  const INT_PREFIX = `e2e-int-${Date.now()}`;
   const interactiveAuditIds: string[] = [];
 
   test.beforeAll(async () => {
+    // Made where the rows are created, unique per worker even within one millisecond.
+    const INT_PREFIX = `e2e-int-${Date.now()}-${randomUUID().slice(0, 8)}`;
     const now = Date.now();
     const DAY = 86_400_000;
     const entries = [

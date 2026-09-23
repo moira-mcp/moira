@@ -463,8 +463,9 @@ export const AuditLog: React.FC = () => {
 
               <div>
                 <Label className="text-muted-foreground">{t("admin.auditLog.detail.user")}</Label>
-                <p className="text-foreground">
-                  {selectedEntry.userEmail || t("admin.auditLog.system")}
+                <p className="text-foreground" data-testid="audit-detail-user">
+                  {selectedEntry.userEmail ||
+                    (selectedEntry.userId ? t("common.unknownUser") : t("admin.auditLog.system"))}
                 </p>
                 {selectedEntry.userName && (
                   <p className="text-muted-foreground text-sm">{selectedEntry.userName}</p>

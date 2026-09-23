@@ -729,7 +729,7 @@ router.get(
 
     const enrichedEmails = emails.map((e) => ({
       ...e,
-      userEmail: userMap.get(e.userId)?.email || "Unknown",
+      userEmail: userMap.get(e.userId)?.email || null,
       userName: userMap.get(e.userId)?.name || null,
     }));
 
@@ -1891,7 +1891,7 @@ router.get(
         workflowId: exec.workflowId,
         workflowName: workflowNameMap.get(exec.workflowId) || null,
         userId: exec.userId,
-        userEmail: userInfo?.email || "Unknown",
+        userEmail: userInfo?.email || null,
         userName: userInfo?.name || null,
         status: isLocked ? ("locked" as const) : exec.status,
         currentNodeId: exec.currentNodeId,
@@ -1968,7 +1968,7 @@ router.get(
         workflowId: execution.workflowId,
         workflowName: workflowNameMap.get(execution.workflowId) || null,
         userId: execution.userId,
-        userEmail: userInfo?.email || "Unknown",
+        userEmail: userInfo?.email || null,
         userName: userInfo?.name || null,
         status:
           execution.status === "running" && activeLock ? ("locked" as const) : execution.status,
@@ -2090,7 +2090,7 @@ router.get(
       const userInfo = entry.userId ? userMap.get(entry.userId) : null;
       return {
         ...entry,
-        userEmail: userInfo?.email || (entry.userId ? "Unknown" : null),
+        userEmail: userInfo?.email || null,
         userName: userInfo?.name || null,
       };
     });
@@ -2233,7 +2233,7 @@ router.get(
       return {
         ...a,
         url: getArtifactUrl(a.uuid),
-        userEmail: userInfo?.email || "Unknown",
+        userEmail: userInfo?.email || null,
         userName: userInfo?.name || null,
         userHandle: userInfo?.handle || null,
       };

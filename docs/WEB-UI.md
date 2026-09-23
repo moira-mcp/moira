@@ -94,14 +94,21 @@ frontend/src/
 │   ├── Executions.tsx           # Execution history (ExecutionCard list/grid)
 │   ├── Playbooks.tsx            # Playbooks page (PlaybookCard list/grid, editor, shared history)
 │   ├── ExecutionInspectorPage.tsx   # User execution inspector wrapper
-│   ├── Settings.tsx             # User settings (single scrollable page)
+│   ├── Settings.tsx             # User settings (one page of sections, section navigation, tours)
 │   ├── settings/               # Settings sub-components
 │   │   ├── ProfileSettings.tsx  # Profile info, name editing, handle, email verification
 │   │   ├── SecuritySettings.tsx # Password change with strength indicator
+│   │   ├── SessionsSettings.tsx # Signed-in devices: search, paging, parsed device names, revoke
+│   │   ├── GitHubCodespacesData.tsx # One data source for the GitHub & Codespaces section
 │   │   ├── GitHubCodespaceSettings.tsx # Website-only GitHub codespace connection
-│   │   ├── OAuthSettings.tsx    # OAuth consent management
-│   │   ├── SessionsSettings.tsx # Active session management
-│   │   └── ApiTokensSettings.tsx # API token management (create, list, revoke)
+│   │   ├── GitHubSetupSteps.tsx # Connect → install → grant repositories stepper
+│   │   ├── GitHubCodespaceManagement.tsx # Cloud codespaces card
+│   │   ├── CodespaceAutoPause.tsx # Automatic pause card (idle settings)
+│   │   ├── CodespaceLimitsPanel.tsx # Your limits card
+│   │   ├── OAuthSettings.tsx    # Connected apps (OAuth consents): search, paging, revoke
+│   │   ├── ApiTokensSettings.tsx # API token management (create, list, revoke)
+│   │   ├── PreferencesSettings.tsx # Theme and interface language
+│   │   └── settingsTours.ts     # Page, GitHub & Codespaces and Telegram tours
 │   ├── Admin.tsx                # Admin panel entry
 │   ├── AdminDashboard.tsx       # Admin dashboard with stats + merged analytics
 │   ├── AdminExecutions.tsx      # Admin executions monitoring (PageShell + DataListView)
@@ -145,6 +152,7 @@ For component patterns, color token rules, and new-page checklist: `docs/DESIGN-
 ### Token Categories
 
 - **Core:** `--background`, `--foreground`, `--card`, `--popover`, `--primary`, `--secondary`, `--muted`, `--accent`, `--destructive` (each with `-foreground` variant)
+- **Destructive roles:** `--destructive` is destructive text and accents (text, borders, rings, tints) and must stay readable on dark surfaces; `--destructive-fill` (`bg-destructive-fill`) is a solid destructive fill — buttons, badges, the failed status, danger counters — with `--destructive-foreground` as the text on it. `tests/unit/web-frontend/destructive-contrast.test.ts` holds both pairs to WCAG AA in each theme from `globals.css`.
 - **Semantic:** `--success`, `--warning`, `--info` (each with `-foreground` variant)
 - **Chart:** `--chart-1` through `--chart-5`
 - **Sidebar:** Aliases to main theme variables (`--sidebar: var(--background)`)
@@ -205,7 +213,7 @@ Higher-level composable components in `src/components/`:
 
 DataTable subcomponents: `column-header.tsx` (sortable headers), `pagination.tsx` (page nav + i18n props + aria-labels), `toolbar.tsx` (search + reset).
 
-ServerPagination: used on pages with server-side pagination (Executions, Notes, Artifacts, AdminArtifacts, AdminExecutions, AdminTokens, DeletedWorkflows, UserManagement, AuditLog). Rendered outside the scroll container (sticky at bottom). Supports total-based mode (shows page X of Y, first/prev/next/last) and cursor-based mode (prev/next only). Uses `common.pagination` i18n keys.
+ServerPagination: used on pages with server-side pagination (Executions, Notes, Artifacts, AdminArtifacts, AdminExecutions, AdminTokens, DeletedWorkflows, UserManagement, AuditLog). Rendered outside the scroll container (sticky at bottom). With the opt-in `embedded` prop it renders instead as a static footer inside a card (top rule, wraps on narrow screens, no separate "page X of Y" counter); the Settings page's Active sessions and Connected apps lists use it that way. Supports total-based mode (shows page X of Y, first/prev/next/last) and cursor-based mode (prev/next only). Uses `common.pagination` i18n keys.
 
 `useDynamicPageSize` hook (`hooks/useDynamicPageSize.ts`): calculates optimal page size from container height. Returns `{ pageSize, containerRef }`. Attach `containerRef` to the scrollable container div. Uses ResizeObserver with 500ms debounce. All list/table pages use this hook instead of hardcoded page sizes.
 
@@ -279,7 +287,7 @@ Sidebar navigation:
 - Notes (/notes)
 - Playbooks (/playbooks)
 - Artifacts (/artifacts)
-- Documentation (/docs/) - external link, opens in same tab
+- Documentation (/docs/, or /ru/docs/ for a Russian interface) - external link, opens in same tab
 
 - Settings (/settings)
 - Admin (/admin) — visible only for admin users
@@ -307,49 +315,128 @@ Internal components: `CopyButton`, `CodeBlock`, `CollapsibleSection`, `ClientPan
 
 ### Settings Page
 
-Single scrollable page at `/settings` with all sections rendered flat (no tabs).
+One page at `/settings` whose sections are all always mounted. `Settings.tsx` does not use
+`PageShell`: it has its own two-column layout and per-section loading. The content container keeps
+`data-testid="settings-flat-layout"`.
 
-**Architecture:** `Settings.tsx` renders all sections sequentially with `<h2>` headings and `<Separator>` between them. Container has `data-testid="settings-flat-layout"`.
+**Frame:**
 
-**Sections:**
+- `PageHeader` with the title, a one-sentence description and **Explain this page**, which opens
+  the page tour.
+- `SettingsNav`: on wide screens a sticky list of the sections beside the content, on narrow screens
+  a sticky row of chips above it; the section being read is marked with `aria-current` as the reader
+  scrolls (`useActiveSection`), and choosing one moves to it.
+- Deep links: `/settings#<section-id>` scrolls to and briefly highlights the section once the page's
+  data has loaded, and keeps it in place while content above it settles until the reader scrolls,
+  types or clicks (`useSectionHighlight`, built on `useHighlightTarget`).
+- A failed load shows an alert with Retry; each section shows skeletons while its data loads.
 
-- Profile (`ProfileSettings.tsx`): Name editing, email display with verification badge, handle management with AlertDialog confirmation
-- Security (`SecuritySettings.tsx`): Password change form with Progress-based strength indicator
-- Integrations (`GitHubCodespaceSettings.tsx`): website-only GitHub App connect/reconnect, verified account and repository grants, disconnect confirmation, disabled/configuration/revocation states, and explicit external-grant recovery for unreadable credentials or an untracked refresh successor
-- Integrations (`GitHubCodespaceManagement.tsx`): Cloud codespaces card with instance readiness badge, agent-authority disclosure, create form (approved repository select, ref, active/limit hint), saved repositories kept visible with a separate `repositories_stale` warning after provider refresh failure, per-codespace cards with repository/ref, provider and machine context, state badge, desired/observed state and generation, Start/Stop/Delete actions disabled while pending, destructive delete via `ConfirmDialog` that returns focus to its trigger; never mentions chats or sessions
-- Admin Settings → Codespaces (`AdminCodespaceControls.tsx`): readiness facts (configuration, resource creation, connector, reconciliation backlog, active resources/operations and transfer bytes against limits) and the global/provider kill switches with a reason field and confirmed stop/resume
-- OAuth Authorizations (`OAuthSettings.tsx`): DataListView with consent cards, empty state with KeyRound icon, revoke with ConfirmDialog
-- Active Sessions (`SessionsSettings.tsx`): DataListView with session cards, Current Session badge, revoke disabled for current session
-- API Tokens (`ApiTokensSettings.tsx`): DataListView with token cards showing name, prefix (monospace), dates, status badge (Active/Expired/Revoked). Create dialog with name input and expiration select (30d/90d/365d/never). One-time token display dialog with copy button and warning. Revoke with ConfirmDialog (variant="destructive").
+**Sections** (each a `SettingsSection`: icon, heading, one-sentence description, optional
+`HelpPopover` and actions; the anchor is the section `id`):
 
-**Dynamic Settings Section (Notifications):**
+| Anchor                | Section             | `data-testid`                   | Content                                                                                                                                                                                                                                                  |
+| --------------------- | ------------------- | ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `account`             | Account             | `settings-section-profile`      | `ProfileSettings`: name, email with verification badge, handle with a help popover on why changing it breaks links and a confirmation                                                                                                                    |
+| `security`            | Security & sign-in  | `settings-section-security`     | `SecuritySettings`: the change-password form, or for an account that signs in only through a social provider, how it signs in and a set-password form; an Active Sessions subsection (`settings-section-sessions`, help popover) with `SessionsSettings` |
+| `notifications`       | Notifications       | `settings-section-dynamic`      | One `CommunicationChannelCard` per channel, a help popover, the **Telegram setup** tour button when Telegram is present, an empty state without channels                                                                                                 |
+| `integrations-github` | GitHub & Codespaces | `settings-section-integrations` | Help popover, **Setup guide** tour, and the connection, Cloud codespaces, Automatic pause and Your limits cards under one `GitHubCodespacesProvider`                                                                                                     |
+| `connected-apps`      | Connected apps      | `settings-section-oauth`        | `OAuthSettings` with a help popover                                                                                                                                                                                                                      |
+| `api-tokens`          | API tokens          | `settings-section-api-tokens`   | `ApiTokensSettings` with a help popover on when a token is needed, the Bearer header and the one-time display                                                                                                                                            |
+| `preferences`         | Preferences         | `settings-section-preferences`  | `PreferencesSettings` theme (Light/Dark/System, via `useTheme`) and interface language, both kept in this browser; then the generic editor for remaining definitions (`settings-section-other`)                                                          |
+
+**Tours:** `settingsTours.ts` defines the page tour, the GitHub & Codespaces setup tour and the
+Telegram setup tour, run by the shared `Walkthrough` and addressed by `?tour=<id>&guide=<step>`, so a
+step can be linked and reopened. Every step anchors an element the page always renders. Texts live
+under `pages.settings.tours.<tour>`.
+
+**Reusable primitives** (`components/settings/`): `SettingsSection` and `SettingsSubsection`,
+`SettingsNav` with `useActiveSection`, `HelpPopover` (a question-mark button opening a
+keyboard-operable card, optionally with a documentation link), `useSectionHighlight` and `localizeSettingDefinition`. `lib/user-agent.ts`
+turns a User-Agent header into a browser, operating system and device kind. `lib/docs-path.ts`
+(`localizedDocsPath`) maps a root documentation path (`/docs/...`) to the reader's language
+(`/ru/docs/...` for Russian) and leaves any other URL unchanged; the sidebar documentation link,
+the Quick Start card and the notification channel cards use it. `lib/codespace-error-message.ts`
+(`codespaceErrorMessage`) turns a failed codespace or GitHub-connection request into a message in
+the reader's language: each stable error `code` has its own message under `common.codespaceErrors`,
+and anything else, including a network failure, shows the caller's localized generic message; the
+server's English detail is never shown. The Cloud codespaces card and the admin Codespaces
+controls use it for their failure toasts.
+
+Admin lists and cards that show a user's email (executions, artifacts, the audit log and the
+execution inspector) receive `null` for a user that no longer exists and show the localized
+`common.unknownUser`.
+
+**Section details:**
+
+- Active sessions: search and paging (the shared `ServerPagination` in its `embedded` in-card
+  variant, as for connected apps); each session shows a parsed device
+  name such as "Chrome on macOS" (an unusual or missing header shows a localized "unknown device"),
+  with the raw User-Agent in a hint; the IP address and location appear only when the server knows
+  them (`GET /api/user/sessions` returns `null` for unknown `ipAddress`, `userAgent` and `country`),
+  localized dates, a Current Session badge on the current session, which cannot be
+  revoked, and revoke through `ConfirmDialog` with a toast.
+- Connected apps: a compact consent list with search and paging, localized dates, revoke through
+  `ConfirmDialog` with a toast, and load failures shown to the user.
+- API tokens: the token list inside a card with status badges (Active/Expired/Revoked); a create
+  dialog with name and expiration (30d/90d/365d/never); a one-time token display with copy and
+  warning; revoke through `ConfirmDialog` (variant="destructive").
+- GitHub & Codespaces: `GitHubCodespacesProvider` loads the connection view and the codespace view
+  (repositories and `limits`) together and reloads what a change can affect. The connection card
+  shows the `GitHubSetupSteps` stepper (connect GitHub, install the Moira App, grant repositories;
+  each done, current, not started or unavailable on this instance). The Cloud codespaces card shows
+  instance readiness, the agent-authority disclosure, the create form whose hint says how many
+  codespaces the user holds of the per-user ceiling and that stopped ones count, and per-codespace
+  cards with repository and current branch (`current_ref`, falling back to `requested_ref`),
+  provider and machine context, a plain-language state badge and a collapsed Technical details block
+  (requested and current ref, lifecycle, last update, codespace ID); Start/Stop/Delete are disabled
+  while pending, and delete goes through `ConfirmDialog`. `CodespaceAutoPause` edits
+  `codespaces.auto_stop_enabled` and `codespaces.idle_timeout_minutes` (a switch and a timeout select
+  within the server's 5–240 range) and states that only agent activity through Moira counts and that
+  GitHub stops a codespace after 240 minutes regardless. `CodespaceLimitsPanel` shows meters for
+  codespaces held, commands running and file transfers plus a collapsed list of the other limits;
+  billing and quota point to GitHub.
+
+The administrator counterpart lives on the admin page, not here: Admin Settings → Codespaces
+(`AdminCodespaceControls.tsx`) shows readiness facts (configuration, resource creation, connector,
+reconciliation backlog, active resources/operations and transfer bytes against limits) and the
+global/provider kill switches with a reason field and confirmed stop/resume.
+
+**Dynamic settings:**
 
 - `GET /api/notifications/channels` supplies one current-user descriptor per active communication
   adapter. The descriptor provides title, origin, capabilities, mapped setting keys,
   `ready|disabled|incomplete|unavailable` state and read-only extension trusted-delivery state; it
   contains no setting values, credentials or destinations.
 - Telegram and extension descriptors render through `CommunicationChannelCard`. There is no
-  Telegram key-prefix or component branch.
+  Telegram key-prefix or component branch. A built-in channel's title and description come from the
+  locale files (`pages.settings.channels.builtin.<id>`), an extension's from its descriptor, and the
+  card links to the channel's setup documentation (`user-channel-<id>-docs-link`), localized with
+  `localizedDocsPath`; that link's label and the Send test accessible name use the localized title.
 - Each card maps its exact setting definitions into the existing `SettingsEditor` with
   `categoryLayout="plain"`; structural values remain editable JSON and encrypted values remain
   masked.
+- Built-in definitions read their label, description and help from
+  `pages.settings.definitions.<key>` and fall back to the server's text (`localizeSettingDefinition`),
+  so extension definitions keep their own words; help opens in a `HelpPopover`. The user page hides
+  storage keys (`showKeys={false}`).
 - The test button posts no body to `/api/notifications/channels/:channelId/test`. The server uses
   stored settings for the authenticated user and the common communication service.
 - Saving a mapped setting refreshes descriptor state from the server. Definitions not mapped to a
-  communication channel render under a separate Settings section.
+  communication channel render in Preferences, except categories another section owns (`profile`,
+  `security`, `oauth`, `sessions`, `api-tokens`, and `codespaces`, which the Automatic pause card
+  edits). The theme is a browser preference (the Preferences theme control), not a user setting.
 - Channel fields and test controls have accessible names; capability and state labels remain visible
   without hover.
-
-**Section Order:** Profile → Security → Notifications (when channels exist) → Settings (when
-unmapped dynamic definitions exist) → Integrations → OAuth Authorizations → Active Sessions → API
-Tokens. Each section has a stable `data-testid="settings-section-{name}"`.
 
 **SettingsEditor `collapsible` prop:**
 
 - `collapsible={true}` (default): Collapsible groups with ChevronDown toggle — used by AdminSettings
 - `collapsible={false}`: Flat Card rendering without Collapsible wrapper — used by Settings page
 
-**Implementation:** Settings.tsx → ProfileSettings.tsx, SecuritySettings.tsx, GitHubCodespaceSettings.tsx, OAuthSettings.tsx, SessionsSettings.tsx
+**Implementation:** Settings.tsx → ProfileSettings.tsx, SecuritySettings.tsx, SessionsSettings.tsx,
+GitHubCodespacesData.tsx, GitHubCodespaceSettings.tsx, GitHubCodespaceManagement.tsx,
+CodespaceAutoPause.tsx, CodespaceLimitsPanel.tsx, OAuthSettings.tsx, ApiTokensSettings.tsx,
+PreferencesSettings.tsx
 
 - Loads user profile via GET /api/user/profile
 - Fetches dynamic settings definitions via GET /api/settings/definitions
@@ -358,12 +445,13 @@ Tokens. Each section has a stable `data-testid="settings-section-{name}"`.
 - Saves one edited dynamic value through bulk PUT /api/settings and applies the returned saved/refused result
 - Tests one channel through POST /api/notifications/channels/:channelId/test with no request body
 - Updates profile via PATCH /api/user/profile
-- Changes password via POST /api/user/change-password
+- Reads the account's sign-in methods via Better Auth `listAccounts` (a `credential` account means it has a password; on failure the page assumes it does)
+- Changes password via POST /api/user/change-password, or sets a first password for a social-only account via POST /api/user/set-password; refusals are shown by their `reason` code (`CURRENT_PASSWORD_INCORRECT`, `PASSWORD_ALREADY_SET`, `SESSION_NOT_FRESH`)
 - Resends verification via POST /api/user/resend-verification
 - OAuth consents via GET/DELETE /api/user/oauth-consents
 - Sessions via GET/DELETE /api/user/sessions
 - Handle change via PATCH /api/user/handle
-- GitHub codespace connection via GET /api/integrations/github, browser navigation to GET /api/integrations/github/start, and DELETE /api/integrations/github
+- GitHub codespace connection via GET /api/integrations/github, browser navigation to GET /api/integrations/github/start, and DELETE /api/integrations/github; the page reports every `?github=<outcome>` redirect as a localized toast (an unknown outcome as the generic authorization failure), and in `installation_required` the card shows Install GitHub App and Check installation (`github-codespace-check-installation`, a forced refresh) instead of Reconnect
 - External GitHub grant recovery via DELETE /api/integrations/github/external-revocation after the user revokes the grant in GitHub; this covers unreadable credentials and an untracked refresh successor
 - Automatic ten-minute repository-grant refresh on Settings load plus an explicit Refresh button backed by `POST /api/integrations/github/refresh`; a provider failure keeps the saved repositories visible with a stale warning
 
@@ -652,7 +740,16 @@ down to its floor), an `onReady` callback that fires after an explicit fit so a 
 its opening viewport, and React Flow's own zoom/fit cluster behind `showControls` — off for both
 process diagrams, which carry those actions in their `DiagramToolbar` instead; `placement.ts`
 (`useOpeningPlacement`) places once on ready and again only when the followed block changes,
-never on a plain refetch. The map's diagram and the technical `WorkflowGraph` both mount through
+never on a plain refetch, and reports `placed` once the camera has arrived there (a pan by the
+reader also ends a placement). A diagram publishes whether it has finished opening as
+`data-diagram-settled` on its viewport: on the map, placed and laid out under the current preset;
+on the graph, also measured at the heights it was laid out with. Tests and anything acting on the
+diagram wait for that state rather than for a camera value. `DiagramViewport` also keeps React
+Flow's measurements across node rebuilds (`measuredNodes.ts`, `useMeasuredNodes`): the diagrams
+rebuild their node objects on every selection or pulse, and a rebuilt node would otherwise lose
+its measured size — on a slow machine for good, leaving edges without handles and every fit
+waiting — so each rebuilt node carries its last measured size, and a node still unmeasured after
+render is measured again. The map's diagram and the technical `WorkflowGraph` both mount through
 it. Scroll containers of the process pages use the `scrollbar-thin` utility
 (`styles/globals.css`), a thin theme-coloured scrollbar in both themes.
 
@@ -2078,7 +2175,14 @@ All animations stay under 300ms for interactions, 150ms for micro-interactions.
 
 ### Visual Regression Tests
 
-`tests/e2e/visual-regression.spec.ts` captures 18 baseline screenshots (9 pages × 2 themes). Update baselines after intentional UI changes: `npx testfold e2e -- visual-regression.spec.ts --update-snapshots`.
+`tests/e2e/visual-regression.spec.ts` captures each principal page in the light and the dark theme and
+compares it with the committed chromium baselines. It selects the theme through the `theme` storage
+key `useTheme` reads. Because the application scrolls inside `main#main-content`, the viewport is
+grown to the scrolled content for a page whose length does not depend on data (Settings), while a
+data page is captured at a fixed height and may be clipped below its live data. Regions whose
+content depends on data other tests create are masked at a fixed size. The tolerance is an
+absolute pixel budget rather than a ratio, so a small change on a tall page still fails. Update
+baselines after intentional UI changes: `npx testfold e2e -- visual-regression.spec.ts --update-snapshots`.
 
 ## File Structure Reference
 
@@ -2096,7 +2200,7 @@ frontend/
 │   ├── hooks/                   # useWorkflowData, useLayoutState, use-mobile
 │   ├── services/                # api-client.ts HTTP communication
 │   ├── utils/                   # workflow-transformer.ts
-│   ├── lib/                     # utils.ts for cn() className utility
+│   ├── lib/                     # utils.ts (cn()), user-agent.ts, docs-path.ts, codespace-error-message.ts
 │   └── styles/                  # globals.css (Tailwind v4 + semantic tokens)
 ├── components.json              # shadcn/ui configuration
 ├── package.json                 # Frontend dependencies and scripts

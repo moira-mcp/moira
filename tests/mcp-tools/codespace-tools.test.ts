@@ -178,6 +178,13 @@ describe("Codespace MCP HTTP contract on a default-disabled installation", () =>
       },
       repositories: [],
       codespaces: [],
+      // The user's limits are present even while the feature is off: nothing held, and provider
+      // billing reported as unavailable rather than as a number.
+      limits: {
+        codespaces: { held: 0 },
+        lifecycle: { idle: { provider_max_minutes: 240 } },
+        provider: { billing: "unavailable" },
+      },
     });
     expectSettingsLink(
       (result.structuredContent?.readiness as Record<string, unknown>).settings_url,

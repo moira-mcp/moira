@@ -52,6 +52,12 @@ export interface ConnectedCodespaceInput {
   envelope: CodespaceCredentialEnvelope;
   installations: CodespaceInstallationGrant[];
   repositories: CodespaceRepositoryGrant[];
+  /**
+   * The credential this commit replaces, already encrypted for the revocation queue. It is queued in
+   * the same transaction that stores its successor, so no moment exists in which the old token is
+   * neither stored nor queued for revocation.
+   */
+  supersededRevocation?: { id: string; envelope: CodespaceCredentialEnvelope };
   now: number;
 }
 
@@ -228,6 +234,16 @@ export class CodespaceConnectionRepository {
           input.envelope.generation,
           input.now,
         );
+
+      if (input.supersededRevocation) {
+        this.storePendingRevocation({
+          id: input.supersededRevocation.id,
+          userId: input.userId,
+          provider: input.provider,
+          envelope: input.supersededRevocation.envelope,
+          now: input.now,
+        });
+      }
 
       this.sqlite
         .prepare("DELETE FROM codespaceConnectionRepository WHERE connectionId = ?")
@@ -696,6 +712,26 @@ export class CodespaceConnectionRepository {
         )
         .run(now, connectionId, userId).changes === 1
     );
+  }
+
+  /**
+   * Puts back the status and error a reservation replaced, when the authorization that reserved the
+   * connection never committed its credential. A connection that moved on since (committed,
+   * disconnected) is left alone.
+   */
+  restoreReservedConnection(input: {
+    userId: string;
+    connectionId: string;
+    status: CodespaceConnectionStatus;
+    lastErrorCode: CodespaceConnectionErrorCode | null;
+    now: number;
+  }): void {
+    this.sqlite
+      .prepare(
+        `UPDATE codespaceConnection SET status = ?, lastErrorCode = ?, updatedAt = ?
+         WHERE id = ? AND userId = ? AND status = 'connecting'`,
+      )
+      .run(input.status, input.lastErrorCode, input.now, input.connectionId, input.userId);
   }
 
   markCredentialFailed(

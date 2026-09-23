@@ -30,7 +30,6 @@ const policy: CodespaceResourcePolicy = {
   maxActivePerUser: 2,
   maxActiveGlobal: 4,
   createThrottleMs: 0,
-  remoteTtlMs: 60_000,
   createDeadlineMs: 30_000,
   cleanupDeadlineMs: 30_000,
   claimLeaseMs: 5_000,
@@ -91,6 +90,7 @@ class Provider implements CodespaceProviderAdapter {
       repositoryFullName: input.repository.fullName,
       ref: input.ref,
       state: "available",
+      lastUsedAt: null,
       machine: input.machine,
       createdAt: now,
     };

@@ -6,6 +6,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import {
+  CodespaceConnectionRepository,
   CodespaceOperationRepository,
   CodespaceOperationService,
   CodespaceFileService,
@@ -31,7 +32,6 @@ const policy: CodespaceResourcePolicy = {
   maxActivePerUser: 2,
   maxActiveGlobal: 10,
   createThrottleMs: 0,
-  remoteTtlMs: 60_000,
   createDeadlineMs: 30_000,
   cleanupDeadlineMs: 30_000,
   claimLeaseMs: 5_000,
@@ -1927,6 +1927,63 @@ describe("durable direct codespace operations", () => {
       // The recorded reason is what a later read uses to tell a restart from a cancellation the
       // caller asked for and from a command that failed on its own.
       expect(stored.lastOutcome).toBe("codespace_restarted");
+    } finally {
+      value.sqlite.close();
+    }
+  });
+
+  test("a token refresh between reservation and dispatch keeps the operation dispatchable", async () => {
+    // A refresh advances the connection generation while a reservation holds the old one; it must
+    // carry the codespace and the reservation along, or the command is cancelled as unauthorized.
+    const value = fixture();
+    try {
+      value.sqlite
+        .prepare(
+          `INSERT INTO codespaceCredentialVault
+           (connectionId, envelopeVersion, keyVersion, iv, authTag, ciphertext, generation, updatedAt)
+           VALUES ('connection-1', 2, 'v1', 'iv', 'tag', 'old', 1, ?)`,
+        )
+        .run(now);
+      const connections = new CodespaceConnectionRepository(value.sqlite);
+      value.credentials.getCredential.mockImplementationOnce(async () => {
+        expect(
+          connections.claimRefresh({
+            userId: "user-1",
+            connectionId: "connection-1",
+            expectedGeneration: 1,
+            leaseId: "lease-1",
+            now,
+            leaseExpiresAt: now + 60_000,
+          }),
+        ).toBe(true);
+        expect(
+          connections.completeRefresh({
+            userId: "user-1",
+            connectionId: "connection-1",
+            leaseId: "lease-1",
+            expectedGeneration: 1,
+            envelope: {
+              envelopeVersion: 2,
+              keyVersion: "v1",
+              iv: "iv",
+              authTag: "tag",
+              ciphertext: "new",
+              generation: 2,
+            },
+            now,
+          }),
+        ).toBe(true);
+        return "ghu_refreshed";
+      });
+
+      const response = await value.service.execute("user-1", "codespace-1", {
+        argv: ["true"],
+        cwd: ".",
+        stdin: { kind: "inline", bytes: new Uint8Array() },
+        timeoutMs: 1000,
+      });
+      expect(value.transport.executeCalls).toHaveBeenCalledTimes(1);
+      expect(response.operation).toMatchObject({ state: "succeeded", authorizationGeneration: 2 });
     } finally {
       value.sqlite.close();
     }

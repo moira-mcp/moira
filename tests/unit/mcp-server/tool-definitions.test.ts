@@ -420,7 +420,7 @@ describe("MCP tool definitions", () => {
     expect(start.descriptions.default).toContain("Lock PIN delivery remains mandatory");
 
     const settings = TOOL_DEFINITIONS.find((definition) => definition.name === "settings")!;
-    expect(settings.examples).toContainEqual({ action: "get", key: "ui.theme" });
+    expect(settings.examples).toContainEqual({ action: "get", key: "telegram.enabled" });
     expect(settings.examples).toContainEqual({ action: "get", category: "notifications" });
     expect(settings.examples).toContainEqual({ action: "get" });
   });
@@ -849,15 +849,17 @@ describe("MCP tool definitions", () => {
 
     const settings = TOOL_DEFINITIONS.find((definition) => definition.name === "settings")!;
     for (const input of [
-      { action: "get", key: "ui.theme" },
+      { action: "get", key: "telegram.enabled" },
       { action: "get", category: "notifications" },
       { action: "get" },
       { action: "list", category: "notifications" },
-      { action: "set", key: "ui.theme", value: "dark" },
+      { action: "set", key: "telegram.enabled", value: false },
     ]) {
       expect(settings.schema.safeParse(input).success).toBe(true);
     }
-    expect(description("settings")).toContain('settings({ action: "get", key: "ui.theme" })');
+    expect(description("settings")).toContain(
+      'settings({ action: "get", key: "telegram.enabled" })',
+    );
     expect(description("settings")).toContain(
       'settings({ action: "get", category: "notifications" })',
     );

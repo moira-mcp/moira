@@ -1,5 +1,9 @@
 import { describe, expect, test } from "@jest/globals";
-import { evaluateCodespaceResourcePolicy } from "@mcp-moira/shared";
+import {
+  CODESPACE_CONNECTOR_LIMITS,
+  effectiveCodespaceLimits,
+  evaluateCodespaceResourcePolicy,
+} from "@mcp-moira/shared";
 
 function policy(values: Record<string, string> = {}) {
   return evaluateCodespaceResourcePolicy((name) => values[name]);
@@ -9,6 +13,24 @@ describe("codespace resource policy", () => {
   test("has no per-day operation budget and ignores the removed variable", () => {
     expect(policy()).not.toHaveProperty("maxOperationsPerDay");
     expect(policy({ CODESPACE_MAX_OPERATIONS_PER_DAY: "1" })).toEqual(policy());
+  });
+
+  test("has no remote expiry setting: persistent codespaces never expire and the removed variable changes nothing", () => {
+    expect(policy()).not.toHaveProperty("remoteTtlMs");
+    expect(policy({ CODESPACE_REMOTE_TTL_MINUTES: "30" })).toEqual(policy());
+  });
+
+  test("refuses a background operation limit GitHub cannot keep alive, naming its 240-minute limit", () => {
+    // A command stops with its codespace, and GitHub stops a silent codespace after at most 240
+    // minutes, so a longer background ceiling would promise a lifetime no command can reach.
+    expect(() => policy({ CODESPACE_MAX_BACKGROUND_OPERATION_HOURS: "5" })).toThrow(
+      /CODESPACE_MAX_BACKGROUND_OPERATION_HOURS.*240 minutes/,
+    );
+    expect(policy({ CODESPACE_MAX_BACKGROUND_OPERATION_HOURS: "4" })).toMatchObject({
+      maxBackgroundOperationMs: 4 * 60 * 60_000,
+    });
+    expect(effectiveCodespaceLimits(policy()).operations.maxBackgroundMs).toBe(4 * 60 * 60_000);
+    expect(CODESPACE_CONNECTOR_LIMITS.maxBackgroundMs).toBe(240 * 60_000);
   });
 
   test("is disabled by default with finite hard ceilings", () => {
@@ -45,9 +67,9 @@ describe("codespace resource policy", () => {
       policy({
         CODESPACE_CODESPACES_ENABLED: "true",
         CODESPACE_MAX_MEMORY_GB: "4",
-        CODESPACE_REMOTE_TTL_MINUTES: "30",
+        CODESPACE_CREATE_THROTTLE_SECONDS: "30",
       }),
-    ).toMatchObject({ enabled: true, maxMemoryBytes: 4 * 1024 ** 3, remoteTtlMs: 1_800_000 });
+    ).toMatchObject({ enabled: true, maxMemoryBytes: 4 * 1024 ** 3, createThrottleMs: 30_000 });
     // The wait for a codespace to start is seconds in configuration and milliseconds in policy, and
     // it is bounded on both sides so no deployment can make a caller wait without end or not at all.
     expect(policy({ CODESPACE_START_WAIT_SECONDS: "45" })).toMatchObject({ startWaitMs: 45_000 });
@@ -79,7 +101,7 @@ describe("codespace resource policy", () => {
       3_600_000,
     );
     expect(() => policy({ CODESPACE_MAX_BACKGROUND_OPERATION_HOURS: "0" })).toThrow(/between/);
-    expect(() => policy({ CODESPACE_MAX_BACKGROUND_OPERATION_HOURS: "25" })).toThrow(/between/);
+    expect(() => policy({ CODESPACE_MAX_BACKGROUND_OPERATION_HOURS: "25" })).toThrow(/240 minutes/);
     // A command's retained output is disk, not an answer: it must leave room for the payload the
     // answer carries, and it is far larger than that payload by default.
     expect(policy().maxRetainedOutputBytes).toBeGreaterThan(policy().maxOperationStdoutBytes!);

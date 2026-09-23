@@ -13,7 +13,7 @@ const BADGE_TONE: Record<CardTone, string> = {
   active: "bg-primary text-primary-foreground",
   waiting: "bg-warning text-warning-foreground",
   done: "bg-success text-success-foreground",
-  error: "bg-destructive text-white",
+  error: "bg-destructive-fill text-destructive-foreground",
 };
 
 export function IndexBadge({

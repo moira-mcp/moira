@@ -7,6 +7,7 @@ import type {
   CodespaceResourcePolicy,
   CodespaceResourceRecord,
 } from "./resource-types.js";
+import { effectiveCodespaceLimits } from "./resource-policy.js";
 import { CodespaceResourceRepository } from "./resource-repository.js";
 import { CodespaceResourceError } from "./resource-types.js";
 
@@ -96,10 +97,8 @@ export class CodespaceOperationRepository {
           .prepare(`SELECT COUNT(*) count FROM codespaceOperation WHERE state IN (${activeSql})`)
           .get(...ACTIVE_OPERATION_STATES) as { count: number }
       ).count;
-      if (
-        userCount >= (input.policy.maxConcurrentOperationsPerUser ?? 2) ||
-        globalCount >= (input.policy.maxConcurrentOperationsGlobal ?? 20)
-      ) {
+      const limits = effectiveCodespaceLimits(input.policy).operations;
+      if (userCount >= limits.maxConcurrentPerUser || globalCount >= limits.maxConcurrentGlobal) {
         return { outcome: "busy" } as ReserveOperationResult;
       }
       if (
@@ -141,6 +140,11 @@ export class CodespaceOperationRepository {
           input.now,
           input.now,
         );
+      // Work reaching the codespace is activity: it holds idle auto-stop off. Completion needs no
+      // separate write, because the idle check also reads the operation's own last change.
+      this.sqlite
+        .prepare("UPDATE codespaceResource SET lastActivityAt = ? WHERE id = ?")
+        .run(input.now, codespace.id);
       return {
         outcome: "reserved",
         operation: this.requireOwned(input.userId, id),
@@ -171,6 +175,18 @@ export class CodespaceOperationRepository {
       )
       .run(inputBytes, now, operationId, userId, inputBytes).changes;
     return changed === 1 ? this.getOwned(userId, operationId) : null;
+  }
+
+  /** The user's operations still running or about to run: the count the per-user ceiling limits. */
+  countActiveForUser(userId: string): number {
+    return (
+      this.sqlite
+        .prepare(
+          `SELECT COUNT(*) count FROM codespaceOperation
+           WHERE userId = ? AND state IN (${ACTIVE_OPERATION_STATES.map(() => "?").join(", ")})`,
+        )
+        .get(userId, ...ACTIVE_OPERATION_STATES) as { count: number }
+    ).count;
   }
 
   countActive(): number {

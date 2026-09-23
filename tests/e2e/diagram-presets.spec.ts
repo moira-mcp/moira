@@ -42,7 +42,9 @@ test("the map's presets re-lay it, and the vertical one turns the row of blocks 
       "true",
     );
     await expect(page.locator("[data-layout-preset][data-active]")).toHaveCount(1);
-    await expect.poll(() => mapExtent(page), { timeout: 10000 }).toMatch(/^\d+x\d+$/);
+    // The previous layout stays drawn until the new one is ready: the extent is read once the map
+    // has settled under the chosen preset, not while it still shows the last one.
+    await settledCamera(page, MAP);
     extents[preset] = (await mapExtent(page))!;
     await expect(page.locator(`${MAP} [data-block-id]`)).toHaveCount(7);
   }
@@ -93,7 +95,8 @@ test("the preset is one choice for both views and it survives a reload", async (
   await page.goto(`${BASE_URL}/workflows/moira/quick-task`);
   await expect(page.locator(`${MAP} [data-block-id="scope"]`)).toBeVisible({ timeout: 15000 });
   await page.locator('[data-layout-preset="vertical"]').click();
-  await expect.poll(() => mapExtent(page), { timeout: 10000 }).toMatch(/^\d+x\d+$/);
+  // Read once the map has settled under the new preset: until then it still draws the default.
+  await settledCamera(page, MAP);
   const asColumn = (await mapExtent(page))!;
 
   // The preset's hint stays open under the pointer but cannot intercept the Graph tab.

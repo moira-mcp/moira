@@ -3,6 +3,7 @@
  * Tests the full token lifecycle: create → display → list → revoke
  */
 
+import { randomUUID } from "node:crypto";
 import { test, expect } from "./fixtures.js";
 import { login, createTestUser } from "./helpers/auth-helper.js";
 import { getTestBaseUrl } from "../utils/test-config.js";
@@ -10,11 +11,14 @@ import { getTestBaseUrl } from "../utils/test-config.js";
 const BASE_URL = getTestBaseUrl();
 
 test.describe("API Tokens Settings", () => {
-  const testEmail = `token-e2e-${Date.now()}@test.local`;
+  // Named where the user is created, with a random fragment: two workers can load this file in the
+  // same millisecond, and each must get a user of its own.
+  let testEmail: string;
   const testPassword = "TestPassword123!";
   const testName = "Token Test User";
 
   test.beforeAll(async () => {
+    testEmail = `token-e2e-${Date.now()}-${randomUUID().slice(0, 8)}@test.local`;
     const result = await createTestUser(testEmail, testPassword, testName, true);
     expect(result.success).toBe(true);
   });
@@ -28,6 +32,9 @@ test.describe("API Tokens Settings", () => {
     await section.scrollIntoViewIfNeeded();
     await expect(section).toBeVisible();
     await expect(page.getByTestId("create-token-button")).toBeVisible();
+    // The section says once what tokens are for; the card does not repeat it.
+    await expect(section.getByText("Long-lived keys for MCP clients")).toHaveCount(1);
+    await expect(section.getByText("Create and manage API tokens")).toHaveCount(0);
   });
 
   test("create token, display once, and verify in list", async ({ page }) => {
@@ -109,9 +116,9 @@ test.describe("API Tokens Settings", () => {
     const tokenRow = page.locator('[data-testid="token-name"]', { hasText: tokenName });
     await expect(tokenRow).toBeVisible({ timeout: 5000 });
 
-    // Find the revoke button within the same card
-    const card = tokenRow.locator("xpath=ancestor::div[contains(@class, 'rounded')]").first();
-    const revokeBtn = card.locator('button:has-text("Revoke")');
+    // Find the revoke button within the same token row
+    const card = page.getByTestId(/^token-row-/).filter({ has: tokenRow });
+    const revokeBtn = card.getByRole("button", { name: "Revoke" });
     await revokeBtn.click();
 
     // Confirm in the alert dialog
@@ -122,7 +129,7 @@ test.describe("API Tokens Settings", () => {
     // Verify the token shows "Revoked" status
     await page.waitForTimeout(500);
     await section.scrollIntoViewIfNeeded();
-    const revokedBadge = page.locator("text=Revoked").first();
+    const revokedBadge = card.getByText("Revoked", { exact: true });
     await expect(revokedBadge).toBeVisible({ timeout: 5000 });
   });
 });

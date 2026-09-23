@@ -12,7 +12,8 @@ Theme switching is handled via CSS custom properties — **never use `dark:` pre
 | `--background` / `--foreground`      | Page background and default text   |
 | `--card` / `--card-foreground`       | Card surfaces                      |
 | `--primary` / `--primary-foreground` | Brand color (blue-purple hue 264°) |
-| `--destructive`                      | Error/danger actions               |
+| `--destructive`                      | Error/danger text, borders, tints  |
+| `--destructive-fill`                 | Solid error/danger fills           |
 | `--success`                          | Positive states                    |
 | `--warning`                          | Caution states                     |
 | `--info`                             | Informational badges               |

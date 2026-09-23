@@ -17,6 +17,7 @@ import { Button } from "../ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "../ui/collapsible";
 import { ChevronDown } from "lucide-react";
 import { toast } from "sonner";
+import { HelpPopover } from "./HelpPopover";
 
 export interface SettingDefinition {
   key: string;
@@ -29,6 +30,8 @@ export interface SettingDefinition {
   validation: string | null;
   adminOnly?: boolean;
   sortOrder?: number;
+  /** A longer explanation, opened from a help button beside the label. */
+  help?: string;
 }
 
 export interface SettingValue {
@@ -70,6 +73,11 @@ export interface SettingsEditorProps {
   collapsible?: boolean;
   /** Render only the setting fields when a parent surface already owns the category card. */
   categoryLayout?: "cards" | "plain";
+  /**
+   * Show each setting's storage key under its label. Administrators need it; on a user's page it
+   * is noise, so the user Settings page turns it off.
+   */
+  showKeys?: boolean;
 }
 
 /**
@@ -162,6 +170,7 @@ export const SettingsEditor: React.FC<SettingsEditorProps> = ({
   canReset,
   collapsible = true,
   categoryLayout = "cards",
+  showKeys = true,
 }) => {
   const { t } = useTranslation();
   const [savingKey, setSavingKey] = useState<string | null>(null);
@@ -443,6 +452,11 @@ export const SettingsEditor: React.FC<SettingsEditorProps> = ({
           <div>
             <div className="flex items-center gap-2">
               <span className="font-medium text-foreground">{def.label}</span>
+              {def.help && (
+                <HelpPopover title={def.label} data-testid={`${testIdPrefix}-${def.key}-help`}>
+                  <p>{def.help}</p>
+                </HelpPopover>
+              )}
               {inheritanceLevel && (
                 <span
                   className={`text-xs px-2 py-0.5 rounded ${
@@ -473,7 +487,7 @@ export const SettingsEditor: React.FC<SettingsEditorProps> = ({
             {def.description && (
               <div className="text-sm text-muted-foreground">{def.description}</div>
             )}
-            <div className="text-xs text-muted-foreground mt-1">{def.key}</div>
+            {showKeys && <div className="text-xs text-muted-foreground mt-1">{def.key}</div>}
           </div>
           <div className="flex gap-2">
             {showResetButton && (

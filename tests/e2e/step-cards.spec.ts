@@ -58,23 +58,34 @@ test("the flow page's block panel lays the steps of the densest SDF block on one
   expect(copy.status()).toBe(200);
   const id = ((await copy.json()) as { data: { workflowId: string } }).data.workflowId;
   try {
+    // The block with the most steps is read from the process the page draws; only that block is
+    // then opened on the page.
+    const blocks = (
+      (await (await page.request.get(`${BASE_URL}/api/workflows/${id}/process`)).json()) as {
+        process: { blocks: Array<{ id: string; nodeIds: string[] }> };
+      }
+    ).process.blocks;
+    expect(blocks.length).toBeGreaterThan(1);
+    const densest = blocks.reduce(
+      (best, block) =>
+        block.nodeIds.length > best.count ? { id: block.id, count: block.nodeIds.length } : best,
+      { id: blocks[0].id, count: 0 },
+    );
     await page.goto(`${BASE_URL}/workflows/${id}?edit=1`);
     await expect(page.getByTestId("flow-edit-panel")).toBeVisible();
     const list = '[data-testid="block-detail-steps"]';
-    // Find the block with the most steps, through the map's contents sidebar.
-    const ids = await page
-      .locator('[data-testid="map-contents-list"] [data-block-id]')
-      .evaluateAll((els) => els.map((el) => el.getAttribute("data-block-id")!));
-    expect(ids.length).toBeGreaterThan(1);
-    let densest = { id: ids[0], count: 0 };
+    // The contents sidebar lists exactly those blocks, in that order.
+    await expect(page.locator('[data-testid="map-contents-list"] [data-block-id]')).toHaveCount(
+      blocks.length,
+    );
+    expect(
+      await page
+        .locator('[data-testid="map-contents-list"] [data-block-id]')
+        .evaluateAll((els) => els.map((el) => el.getAttribute("data-block-id"))),
+    ).toEqual(blocks.map((block) => block.id));
     await openPanelSection(page, "panel-section-steps");
-    for (const blockId of ids) {
-      await page.getByTestId(`map-contents-${blockId}`).click();
-      await expect(page.getByTestId("block-detail")).toHaveAttribute("data-block-id", blockId);
-      const count = await page.locator(`${list} [data-node-id]`).count();
-      if (count > densest.count) densest = { id: blockId, count };
-    }
     await page.getByTestId(`map-contents-${densest.id}`).click();
+    await expect(page.getByTestId("block-detail")).toHaveAttribute("data-block-id", densest.id);
     await expect(page.locator(`${list} [data-node-id]`)).toHaveCount(densest.count);
     const cards = await expectOneGrid(page, list);
     expect(cards).toBe(densest.count);

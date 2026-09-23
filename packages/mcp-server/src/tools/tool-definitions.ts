@@ -226,7 +226,7 @@ export const TOOL_DEFINITIONS = [
     schema: settingsSchema,
     responsePolicy: "json",
     examples: [
-      { action: "get", key: "ui.theme" },
+      { action: "get", key: "telegram.enabled" },
       { action: "get", category: "notifications" },
       { action: "get" },
     ],

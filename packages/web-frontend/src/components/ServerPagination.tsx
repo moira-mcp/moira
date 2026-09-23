@@ -6,6 +6,13 @@ interface BaseProps {
   currentPage: number;
   onPageChange: (page: number) => void;
   className?: string;
+  /**
+   * Inside a card instead of under a full-page list: not sticky, separated from the list above by
+   * a rule, wrapping on a narrow screen, and without the page counter the position already gives.
+   * Off by default, which keeps the sticky footer every full-page list uses.
+   */
+  embedded?: boolean;
+  "data-testid"?: string;
 }
 
 interface TotalPaginationProps extends BaseProps {
@@ -28,7 +35,7 @@ type ServerPaginationProps = TotalPaginationProps | CursorPaginationProps;
 
 export function ServerPagination(props: ServerPaginationProps) {
   const { t } = useTranslation();
-  const { currentPage, onPageChange, className } = props;
+  const { currentPage, onPageChange, className, embedded = false } = props;
 
   const isCursor = "hasMore" in props && props.hasMore !== undefined;
 
@@ -40,7 +47,12 @@ export function ServerPagination(props: ServerPaginationProps) {
 
   return (
     <div
-      className={`flex items-center justify-between px-2 sticky bottom-0 bg-background/95 backdrop-blur-sm z-10 ${className ?? ""}`}
+      className={`${
+        embedded
+          ? "flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-t pt-3"
+          : "flex items-center justify-between px-2 sticky bottom-0 bg-background/95 backdrop-blur-sm z-10"
+      } ${className ?? ""}`}
+      data-testid={props["data-testid"]}
     >
       <div className="text-sm text-muted-foreground">
         {isCursor
@@ -52,7 +64,7 @@ export function ServerPagination(props: ServerPaginationProps) {
             })}
       </div>
       <div className="flex items-center space-x-6 lg:space-x-8">
-        {!isCursor && (
+        {!isCursor && !embedded && (
           <div className="flex w-[100px] items-center justify-center text-sm font-medium">
             {t("common.pagination.page", { current: currentPage, total: props.totalPages })}
           </div>

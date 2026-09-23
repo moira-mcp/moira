@@ -1,6 +1,7 @@
-import { test, expect } from "./fixtures.js";
+import { test, expect, type Page } from "./fixtures.js";
 import type {
   CodespaceConnectionView,
+  CodespaceLimitsView,
   CodespaceReadinessView,
   CodespaceSummaryView,
 } from "@mcp-moira/shared";
@@ -47,13 +48,53 @@ const readiness: CodespaceReadinessView = {
   checked_at: Date.now(),
 };
 
+/** The user's limits as `GET /api/integrations/github/codespaces` reports them. */
+const limits: CodespaceLimitsView = {
+  codespaces: {
+    held: 2,
+    max_per_user: 4,
+    instance_held: 3,
+    max_instance: 16,
+    create_throttle_seconds: 60,
+  },
+  machine_ceiling: { cpu_cores: 4, memory_bytes: 8 * 1024 ** 3, storage_bytes: 32 * 1024 ** 3 },
+  operations: {
+    active: 1,
+    max_concurrent_per_user: 8,
+    max_input_bytes: 1024 ** 2,
+    max_stdout_bytes: 1024 ** 2,
+    max_stderr_bytes: 256 * 1024,
+    max_retained_output_bytes: 64 * 1024 ** 2,
+    max_duration_seconds: 900,
+    max_background_seconds: 14_400,
+  },
+  transfers: {
+    // A long value ("12 MB of 100 MB") beside the short ones is what once made the meters uneven.
+    used_bytes: 12 * 1024 ** 2,
+    objects: 0,
+    inflight_bytes: 0,
+    max_bytes_per_user: 100 * 1024 ** 2,
+    max_inflight_bytes_per_user: 40 * 1024 ** 2,
+    max_objects_per_user: 10,
+    max_file_bytes: 4 * 1024 ** 2,
+    ttl_seconds: 600,
+  },
+  lifecycle: {
+    retention_days: 30,
+    start_wait_seconds: 180,
+    idle: { auto_stop_enabled: true, timeout_minutes: 30, provider_max_minutes: 240 },
+  },
+  provider: { billing: "unavailable" },
+};
+
 function codespace(overrides: Partial<CodespaceSummaryView> = {}): CodespaceSummaryView {
   return {
     codespace_id: CODESPACE_ID,
     provider: "github-codespaces",
     repository_id: "101",
     repository: "witqq/private-project",
-    ref: "main",
+    requested_ref: "main",
+    current_ref: "main",
     machine: {
       name: "basicLinux32gb",
       display_name: "2 cores, 8 GB RAM, 32 GB storage",
@@ -71,6 +112,25 @@ function codespace(overrides: Partial<CodespaceSummaryView> = {}): CodespaceSumm
     updated_at: Date.now() - 60_000,
     ...overrides,
   };
+}
+
+/** The three usage meters share one layout: equal height, value on the same line in each. */
+async function expectEvenMeters(page: Page) {
+  const meters = ["held", "commands", "transfers"].map((name) =>
+    page.getByTestId(`codespace-limit-${name}`),
+  );
+  const boxes = await Promise.all(meters.map((meter) => meter.boundingBox()));
+  const heights = boxes.map((box) => Math.round(box!.height));
+  expect(new Set(heights).size, `meter heights ${heights.join(", ")}`).toBe(1);
+  const valueOffsets = await Promise.all(
+    meters.map((meter) =>
+      meter.evaluate((element) => {
+        const value = element.children[1] as HTMLElement;
+        return Math.round(value.getBoundingClientRect().top - element.getBoundingClientRect().top);
+      }),
+    ),
+  );
+  expect(new Set(valueOffsets).size, `value offsets ${valueOffsets.join(", ")}`).toBe(1);
 }
 
 test("codespaces are created, stopped and deleted with confirmation from Settings", async ({
@@ -100,6 +160,7 @@ test("codespaces are created, stopped and deleted with confirmation from Setting
           data: {
             readiness,
             connection,
+            limits,
             repositories: [{ repository_id: "101", name: "witqq/private-project", private: true }],
             repositories_stale: true,
             codespaces,
@@ -112,7 +173,8 @@ test("codespaces are created, stopped and deleted with confirmation from Setting
       const body = request.postDataJSON() as { repository_id: string; ref: string };
       const created = codespace({
         codespace_id: "33333333-3333-4333-8333-333333333333",
-        ref: body.ref,
+        requested_ref: body.ref,
+        current_ref: null,
         state: "create_submitted",
         observed_state: "provisioning",
         generation: 1,
@@ -169,6 +231,20 @@ test("codespaces are created, stopped and deleted with confirmation from Setting
   await expect(page.getByTestId(`github-codespace-state-${SECOND_ID}`)).toHaveText("Creating");
   await expect(page.getByTestId(`github-codespace-delete-${SECOND_ID}`)).toBeDisabled();
   await expect(management).toContainText("personal billing");
+  // The create hint and the limits panel count held codespaces, stopped ones included.
+  await expect(page.getByTestId("github-codespace-create")).toContainText(
+    "You hold 2 of 4 codespaces",
+  );
+  await expect(page.getByTestId("codespace-limit-held")).toContainText("2 of 4");
+  await expect(page.getByTestId("codespace-limit-transfers")).toContainText("12 MB of 100 MB");
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await expectEvenMeters(page);
+  // Technical details stay folded until asked for.
+  await expect(page.getByTestId(`github-codespace-details-${CODESPACE_ID}`)).toHaveCount(0);
+  await page.getByTestId(`github-codespace-details-toggle-${CODESPACE_ID}`).click();
+  await expect(page.getByTestId(`github-codespace-details-${CODESPACE_ID}`)).toContainText(
+    "generation 3",
+  );
 
   const desktop = await page.screenshot({ fullPage: true });
   await testInfo.attach("codespace-management-desktop", {
@@ -206,9 +282,70 @@ test("codespaces are created, stopped and deleted with confirmation from Setting
   expect(requests).toContain(`DELETE /api/integrations/github/codespaces/${CODESPACE_ID}`);
 
   await page.setViewportSize({ width: 390, height: 844 });
+  await expectEvenMeters(page);
   await management.scrollIntoViewIfNeeded();
   const narrow = await page.screenshot({ fullPage: true });
   await testInfo.attach("codespace-management-narrow", { body: narrow, contentType: "image/png" });
+});
+
+test("a failed codespace request is explained in Russian, for a known and an unknown error code", async ({
+  page,
+}) => {
+  await loginAsAdmin(page);
+  // The server's own sentence is English and written for agents; the reader never sees it.
+  const failures = [
+    {
+      status: 429,
+      code: "CODESPACE_POLICY_LIMIT",
+      message: "A codespace quota or limit was reached",
+    },
+    {
+      status: 422,
+      code: "SOMETHING_THIS_BUILD_DOES_NOT_KNOW",
+      message: "Brand new English failure",
+    },
+  ];
+  await page.route("**/api/integrations/github", (route) =>
+    route.fulfill({ json: { success: true, data: connection } }),
+  );
+  await page.route("**/api/integrations/github/codespaces**", async (route) => {
+    const request = route.request();
+    if (request.method() === "POST") {
+      const failure = failures.shift()!;
+      await route.fulfill({
+        status: failure.status,
+        json: { success: false, error: { code: failure.code, message: failure.message } },
+      });
+      return;
+    }
+    await route.fulfill({
+      json: {
+        success: true,
+        data: {
+          readiness,
+          connection,
+          limits,
+          repositories: [{ repository_id: "101", name: "witqq/private-project", private: true }],
+          codespaces: [codespace()],
+        },
+      },
+    });
+  });
+
+  await page.goto(`${baseUrl}/settings?lang=ru#integrations-github`);
+  await page.getByTestId("github-codespace-ref").fill("feature/probe");
+
+  await page.getByTestId("github-codespace-create-submit").click();
+  await expect(
+    page.getByText(
+      "Достигнут лимит кодспейсов. Сколько занято и сколько разрешено, показано в разделе «Ваши лимиты».",
+    ),
+  ).toBeVisible();
+  await page.getByTestId("github-codespace-create-submit").click();
+  await expect(page.getByText("Запрос к кодспейсу отклонён")).toBeVisible();
+
+  await expect(page.getByText("A codespace quota or limit was reached")).toHaveCount(0);
+  await expect(page.getByText("Brand new English failure")).toHaveCount(0);
 });
 
 test("a codespace the server finished disappears from the card", async ({ page }) => {
@@ -229,6 +366,7 @@ test("a codespace the server finished disappears from the card", async ({ page }
           data: {
             readiness,
             connection,
+            limits,
             repositories: [{ repository_id: "101", name: "witqq/private-project", private: true }],
             codespaces,
           },
@@ -286,7 +424,7 @@ test("disabled and administrator-stopped instances explain themselves in both la
     route.fulfill({
       json: {
         success: true,
-        data: { readiness: state, connection, repositories: [], codespaces: [] },
+        data: { readiness: state, connection, limits, repositories: [], codespaces: [] },
       },
     }),
   );

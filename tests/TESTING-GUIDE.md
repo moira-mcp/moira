@@ -275,13 +275,20 @@ test("performance", () => {
   console.log(`Render took ${Date.now() - start}ms`);
 });
 
-// ✅ RIGHT — enforces a performance budget
+// ✅ RIGHT — enforces a budget on the work itself
+import { cpuTimeMs } from "../utils/cpu-time";
+
 test("performance", () => {
-  const start = Date.now();
-  renderDashboard();
-  expect(Date.now() - start).toBeLessThan(500);
+  const { cpuMs } = cpuTimeMs(() => renderDashboard());
+  expect(cpuMs).toBeLessThan(500);
 });
 ```
+
+A test that proves synchronous work is bounded (no catastrophic regex backtracking, linear rather
+than quadratic) measures the process's CPU time with `tests/utils/cpu-time.ts`, not the wall
+clock: on a loaded machine the process waits for a CPU, and that wait fails a wall-clock budget
+without saying anything about the code. A deadline or timeout is tested with fake timers instead of
+real waiting.
 
 ### A6: Copy-Paste Duplication
 
@@ -384,6 +391,19 @@ cat test-results/artifacts/failures/e2e/01-test-name.md
 sqlite3 ./data/moira.db "SELECT * FROM user;"
 npm run test:e2e -- --file tests/e2e/specific-test.spec.ts
 ```
+
+**A failure that appears only in CI** (the nightly E2E runs on a Linux runner far slower than a
+developer machine) usually depends on timing. Reproduce it locally by slowing the browser's CPU with
+`E2E_CPU_THROTTLE`, which every E2E page applies through the shared fixture (Chrome DevTools CPU
+emulation; a rate around 8 reproduces the runner), and repeat the spec without retries:
+
+```bash
+E2E_CPU_THROTTLE=8 npm run test:e2e -- --file tests/e2e/flow-page.spec.ts -- --retries=0 --repeat-each=3
+```
+
+Fix what the slowness exposes; do not raise a timeout. A spec acting on a diagram waits for the
+diagram's `data-diagram-settled="true"` (`settledCamera` in `tests/e2e/helpers/diagram.ts`), never
+for a camera value that a second layout pass or an animated placement can still change.
 
 ---
 

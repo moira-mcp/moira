@@ -388,8 +388,8 @@ lock {"action": "list"}
 
 # User Settings
 settings {"action": "get"}
-settings {"action": "get", "category": "ui"}
-settings {"action": "set", "key": "ui.theme", "value": "dark"}
+settings {"action": "get", "category": "codespaces"}
+settings {"action": "set", "key": "codespaces.idle_timeout_minutes", "value": 60}
 settings {"action": "list"}
 
 # Workflow Tokens

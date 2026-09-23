@@ -3,7 +3,7 @@
  * Tests settings CRUD operations with real database via Docker
  */
 
-import { describe, test, expect, beforeAll } from "@jest/globals";
+import { describe, test, expect, beforeAll, afterAll } from "@jest/globals";
 import { getTestBaseUrl } from "../utils/test-config.js";
 import {
   createTestUserViaApi,
@@ -20,6 +20,12 @@ const TEST_USER = {
 };
 
 let authCookie: string;
+let adminCookie: string;
+
+// A user-level definition the tests own, so they exercise the per-key routes without depending on
+// which built-in settings the product seeds.
+const probeCategory = `test_probe_${Date.now()}`;
+const probeKey = `${probeCategory}.tone`;
 
 beforeAll(async () => {
   await createTestUserViaApi(BASE_URL, TEST_USER.email, TEST_USER.password, TEST_USER.name);
@@ -27,10 +33,39 @@ beforeAll(async () => {
     BASE_URL,
     await signInUser(BASE_URL, TEST_USER.email, TEST_USER.password),
   );
+  adminCookie = formatSessionCookie(BASE_URL, await getAdminSessionCookie(BASE_URL));
+  const created = await fetch(`${BASE_URL}/api/admin/settings/definitions`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Cookie: adminCookie },
+    body: JSON.stringify({
+      key: probeKey,
+      type: "string",
+      category: probeCategory,
+      label: "Probe tone",
+      defaultValue: "calm",
+      validation: JSON.stringify({ type: "string", enum: ["calm", "loud"] }),
+    }),
+  });
+  expect(created.status).toBe(200);
 });
 
+afterAll(async () => {
+  await fetch(`${BASE_URL}/api/admin/settings/definitions/${probeKey}`, {
+    method: "DELETE",
+    headers: { Cookie: adminCookie },
+  });
+});
+
+async function putProbe(body: unknown) {
+  return fetch(`${BASE_URL}/api/settings/${probeKey}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json", Cookie: authCookie },
+    body: JSON.stringify(body),
+  });
+}
+
 describe("Settings API", () => {
-  test("GET /api/settings/definitions returns all definitions", async () => {
+  test("GET /api/settings/definitions returns the seeded definitions and not the retired ui.theme", async () => {
     const res = await fetch(`${BASE_URL}/api/settings/definitions`, {
       headers: { Cookie: authCookie },
     });
@@ -39,13 +74,12 @@ describe("Settings API", () => {
 
     const json = (await res.json()) as any;
     expect(json.success).toBe(true);
-    expect(Array.isArray(json.data)).toBe(true);
-    expect(json.data.length).toBeGreaterThan(0);
 
-    // Check initial definitions exist
     const keys = json.data.map((d: any) => d.key);
     expect(keys).toContain("telegram.bot_token");
-    expect(keys).toContain("ui.theme");
+    expect(keys).toContain("codespaces.idle_timeout_minutes");
+    // It never controlled the theme (the browser keeps it); the migration retired it.
+    expect(keys).not.toContain("ui.theme");
   });
 
   test("GET /api/settings/definitions?category=notifications filters by category", async () => {
@@ -63,14 +97,7 @@ describe("Settings API", () => {
   });
 
   test("PUT /api/settings/:key saves setting value", async () => {
-    const res = await fetch(`${BASE_URL}/api/settings/ui.theme`, {
-      method: "PUT",
-      headers: {
-        "Content-Type": "application/json",
-        Cookie: authCookie,
-      },
-      body: JSON.stringify({ value: "dark" }),
-    });
+    const res = await putProbe({ value: "loud" });
 
     expect(res.status).toBe(200);
 
@@ -80,18 +107,9 @@ describe("Settings API", () => {
   });
 
   test("GET /api/settings/:category returns user settings", async () => {
-    // Set a value first
-    await fetch(`${BASE_URL}/api/settings/ui.theme`, {
-      method: "PUT",
-      headers: {
-        "Content-Type": "application/json",
-        Cookie: authCookie,
-      },
-      body: JSON.stringify({ value: "light" }),
-    });
+    await putProbe({ value: "loud" });
 
-    // Get settings
-    const res = await fetch(`${BASE_URL}/api/settings/ui`, {
+    const res = await fetch(`${BASE_URL}/api/settings/${probeCategory}`, {
       headers: { Cookie: authCookie },
     });
 
@@ -99,7 +117,7 @@ describe("Settings API", () => {
 
     const json = (await res.json()) as any;
     expect(json.success).toBe(true);
-    expect(json.data["ui.theme"]).toBe("light");
+    expect(json.data[probeKey]).toBe("loud");
   });
 
   test("PUT /api/settings/:key encrypts sensitive values", async () => {
@@ -132,14 +150,7 @@ describe("Settings API", () => {
   });
 
   test("PUT /api/settings/:key validates required value", async () => {
-    const res = await fetch(`${BASE_URL}/api/settings/ui.theme`, {
-      method: "PUT",
-      headers: {
-        "Content-Type": "application/json",
-        Cookie: authCookie,
-      },
-      body: JSON.stringify({}), // Missing value
-    });
+    const res = await putProbe({}); // Missing value
 
     expect(res.status).toBe(400);
 
@@ -166,18 +177,9 @@ describe("Settings API", () => {
   });
 
   test("DELETE /api/settings/:key deletes user value", async () => {
-    // Set a value first
-    await fetch(`${BASE_URL}/api/settings/ui.theme`, {
-      method: "PUT",
-      headers: {
-        "Content-Type": "application/json",
-        Cookie: authCookie,
-      },
-      body: JSON.stringify({ value: "dark" }),
-    });
+    await putProbe({ value: "loud" });
 
-    // Delete it
-    const delRes = await fetch(`${BASE_URL}/api/settings/ui.theme`, {
+    const delRes = await fetch(`${BASE_URL}/api/settings/${probeKey}`, {
       method: "DELETE",
       headers: { Cookie: authCookie },
     });
@@ -189,23 +191,16 @@ describe("Settings API", () => {
     expect(json.data.deleted).toBe(true);
 
     // Get settings - should return default value now
-    const getRes = await fetch(`${BASE_URL}/api/settings/ui`, {
+    const getRes = await fetch(`${BASE_URL}/api/settings/${probeCategory}`, {
       headers: { Cookie: authCookie },
     });
 
     const settings = (await getRes.json()) as any;
-    expect(settings.data["ui.theme"]).toBe("system"); // Default value
+    expect(settings.data[probeKey]).toBe("calm"); // Default value
   });
 
   test("PUT /api/settings/:key validates enum values", async () => {
-    const res = await fetch(`${BASE_URL}/api/settings/ui.theme`, {
-      method: "PUT",
-      headers: {
-        "Content-Type": "application/json",
-        Cookie: authCookie,
-      },
-      body: JSON.stringify({ value: "invalid-theme" }), // Not in enum
-    });
+    const res = await putProbe({ value: "invalid-tone" }); // Not in enum
 
     expect(res.status).toBe(400);
 

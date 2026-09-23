@@ -3,6 +3,8 @@ import express from "express";
 import request from "supertest";
 import {
   CodespaceResourceError,
+  evaluateCodespaceResourcePolicy,
+  projectCodespaceLimits,
   type CodespaceReadinessView,
   type CodespaceResourceRecord,
 } from "@mcp-moira/shared";
@@ -30,7 +32,7 @@ const readiness: CodespaceReadinessView = {
     active_operations: 0,
     max_active_operations: 20,
     transfer_live_bytes: 0,
-    max_transfer_live_bytes: null,
+    max_transfer_live_bytes: 1024 ** 3,
   },
   checked_at: 1,
 };
@@ -45,6 +47,7 @@ function codespace(overrides: Partial<CodespaceResourceRecord> = {}): CodespaceR
     repositoryId: "42",
     repositoryFullName: "owner/repository",
     requestedRef: "main",
+    observedRef: "feature/current",
     operationMarker: "secret-marker",
     providerResourceName: "secret-provider-name",
     externalOwnerId: "secret-owner",
@@ -67,6 +70,9 @@ function codespace(overrides: Partial<CodespaceResourceRecord> = {}): CodespaceR
     cleanupDeadlineAt: null,
     claimId: "secret-claim",
     claimExpiresAt: null,
+    reconcileFailures: 0,
+    lastActivityAt: null,
+    providerLastUsedAt: null,
     lastOutcome: "provider-private-diagnostic",
     createdAt: 10,
     updatedAt: 20,
@@ -92,7 +98,7 @@ function services(
       }),
       refreshGrants: jest.fn(async () => ({ refreshed: false, stale: false })),
     },
-    observability: { readiness: async () => readiness },
+    observability: { readiness: async () => readiness, limits: jest.fn(() => LIMITS) },
     resource: {
       listRepositories: () => [{ id: "42", fullName: "owner/repository", private: true }],
       listResources: () => [codespace()],
@@ -128,6 +134,17 @@ function appWith(dependencies: CodespaceManagementServices, userId = "user-a") {
   return app;
 }
 
+/** A user's limits as the domain computes them, from the shipped policy and some use. */
+const LIMITS = projectCodespaceLimits({
+  policy: evaluateCodespaceResourcePolicy(() => undefined),
+  held: 2,
+  instanceHeld: 5,
+  activeOperations: 1,
+  transfers: { objects: 1, bytes: 2048, inflightBytes: 1024 },
+  idle: { autoStopEnabled: true, idleTimeoutMinutes: 30 },
+  providerIdleMaxMinutes: 240,
+});
+
 describe("website codespace management routes", () => {
   test("lists readiness, repositories and sanitized codespaces without internal authority", async () => {
     const dependencies = services();
@@ -142,7 +159,9 @@ describe("website codespace management routes", () => {
       repositories: [{ repository_id: "42", name: "owner/repository", private: true }],
       repositories_stale: false,
       codespaces: [{ codespace_id: CODESPACE_ID, state: "usable", generation: 3 }],
+      limits: LIMITS,
     });
+    expect(dependencies.observability.limits).toHaveBeenCalledWith("user-a");
     expect(dependencies.connection.refreshGrants).toHaveBeenCalledWith("user-a");
     for (const secret of [
       "secret-connection",
@@ -163,6 +182,7 @@ describe("website codespace management routes", () => {
       operation: null,
       observability: {
         readiness: async () => ({ ...readiness, state: "disabled", reason: "NOT_CONFIGURED" }),
+        limits: () => LIMITS,
       },
     });
     const list = await request(appWith(disabled)).get("/api/integrations/github/codespaces");
@@ -258,7 +278,7 @@ describe("website codespace management routes", () => {
           throw new CodespaceResourceError(
             "CODESPACE_POLICY_LIMIT",
             "limit detail",
-            "This Moira instance is at its ceiling of 16 active codespaces.",
+            "This Moira instance is at its ceiling of 16 held codespaces; stopped ones count too.",
           );
         }),
       },
@@ -286,7 +306,7 @@ describe("website codespace management routes", () => {
     expect(limited.status).toBe(429);
     // The operator sentence stays private; the bounded detail the refusal declared safe is shown.
     expect(limited.text).not.toContain("limit detail");
-    expect(limited.body.error.message).toContain("ceiling of 16 active codespaces");
+    expect(limited.body.error.message).toContain("ceiling of 16 held codespaces");
   });
 
   test("returns a codespace with its recent metadata-only operations", async () => {

@@ -12,7 +12,9 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { CheckCircle, AlertTriangle } from "lucide-react";
+import { toast } from "sonner";
 import { useFeatures } from "@/hooks/useFeatures";
+import { HelpPopover } from "@/components/settings/HelpPopover";
 
 export interface UserProfile {
   id: string;
@@ -30,7 +32,7 @@ interface ProfileSettingsProps {
 }
 
 export const ProfileSettings: React.FC<ProfileSettingsProps> = ({ profile, onProfileUpdate }) => {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const { isEnabled, emailDelivery } = useFeatures();
   const emailVerificationRequired = isEnabled("emailVerificationGate");
 
@@ -40,10 +42,7 @@ export const ProfileSettings: React.FC<ProfileSettingsProps> = ({ profile, onPro
   const [savingHandle, setSavingHandle] = useState(false);
   const [profileError, setProfileError] = useState<string | null>(null);
   const [handleError, setHandleError] = useState<string | null>(null);
-  const [profileSuccess, setProfileSuccess] = useState(false);
-  const [handleSuccess, setHandleSuccess] = useState(false);
   const [sendingVerification, setSendingVerification] = useState(false);
-  const [verificationSuccess, setVerificationSuccess] = useState(false);
   const [showHandleConfirm, setShowHandleConfirm] = useState(false);
 
   const reloadProfile = async () => {
@@ -61,7 +60,6 @@ export const ProfileSettings: React.FC<ProfileSettingsProps> = ({ profile, onPro
   const handleSaveProfile = async (e: React.FormEvent) => {
     e.preventDefault();
     setProfileError(null);
-    setProfileSuccess(false);
 
     if (name.length > 100) {
       setProfileError(t("pages.settings.profile.nameMaxLength"));
@@ -79,12 +77,11 @@ export const ProfileSettings: React.FC<ProfileSettingsProps> = ({ profile, onPro
 
       const data = await response.json();
       if (!response.ok || !data.success) {
-        throw new Error(data.error || "Failed to update profile");
+        throw new Error(data.error || t("pages.settings.profile.updateFailed"));
       }
 
-      setProfileSuccess(true);
+      toast.success(t("pages.settings.profile.updateSuccess"));
       await reloadProfile();
-      setTimeout(() => setProfileSuccess(false), 3000);
     } catch (err) {
       setProfileError((err as Error).message);
     } finally {
@@ -94,7 +91,6 @@ export const ProfileSettings: React.FC<ProfileSettingsProps> = ({ profile, onPro
 
   const handleSaveHandle = async () => {
     setHandleError(null);
-    setHandleSuccess(false);
 
     const handleRegex = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/;
     if (!handle || handle.length < 3 || handle.length > 30) {
@@ -122,12 +118,11 @@ export const ProfileSettings: React.FC<ProfileSettingsProps> = ({ profile, onPro
 
       const data = await response.json();
       if (!response.ok || !data.success) {
-        throw new Error(data.error || "Failed to update handle");
+        throw new Error(data.error || t("pages.settings.profile.handleUpdateFailed"));
       }
 
-      setHandleSuccess(true);
+      toast.success(t("pages.settings.profile.handleUpdateSuccess"));
       await reloadProfile();
-      setTimeout(() => setHandleSuccess(false), 3000);
     } catch (err) {
       setHandleError((err as Error).message);
     } finally {
@@ -136,7 +131,6 @@ export const ProfileSettings: React.FC<ProfileSettingsProps> = ({ profile, onPro
   };
 
   const handleResendVerification = async () => {
-    setVerificationSuccess(false);
     try {
       setSendingVerification(true);
       const response = await fetch("/api/user/resend-verification", {
@@ -146,13 +140,16 @@ export const ProfileSettings: React.FC<ProfileSettingsProps> = ({ profile, onPro
 
       const data = await response.json();
       if (!response.ok || !data.success) {
-        throw new Error(data.error || "Failed to send verification email");
+        throw new Error(data.error || t("pages.settings.profile.verificationFailed"));
       }
 
-      setVerificationSuccess(true);
-      setTimeout(() => setVerificationSuccess(false), 5000);
-    } catch {
-      // Error is shown via alert pattern — keeping simple
+      toast.success(t("pages.settings.profile.verificationSent"));
+    } catch (error) {
+      toast.error(
+        error instanceof Error && error.message
+          ? error.message
+          : t("pages.settings.profile.verificationFailed"),
+      );
     } finally {
       setSendingVerification(false);
     }
@@ -163,10 +160,10 @@ export const ProfileSettings: React.FC<ProfileSettingsProps> = ({ profile, onPro
       {/* Profile Card */}
       <Card>
         <CardHeader>
-          <CardTitle>{t("pages.settings.profile.title")}</CardTitle>
+          <CardTitle className="text-base">{t("pages.settings.profile.title")}</CardTitle>
           <CardDescription>
             {t("pages.settings.profile.memberSince")}:{" "}
-            {new Date(profile.createdAt).toLocaleDateString()}
+            {new Date(profile.createdAt).toLocaleDateString(i18n.language, { dateStyle: "long" })}
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -176,6 +173,7 @@ export const ProfileSettings: React.FC<ProfileSettingsProps> = ({ profile, onPro
               <Input
                 id="profile-name"
                 type="text"
+                data-testid="profile-name-input"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 placeholder={t("pages.settings.profile.namePlaceholder")}
@@ -229,17 +227,13 @@ export const ProfileSettings: React.FC<ProfileSettingsProps> = ({ profile, onPro
                     {t("pages.settings.profile.emailDeliveryUnavailable")}
                   </p>
                 )}
-                {verificationSuccess && (
-                  <p className="text-sm text-chart-2 mt-2">
-                    ✓ {t("pages.settings.profile.verificationSent")}
-                  </p>
-                )}
               </div>
             )}
 
-            {profileError && <p className="text-sm text-destructive">{profileError}</p>}
-            {profileSuccess && (
-              <p className="text-sm text-chart-2">✓ {t("pages.settings.profile.updateSuccess")}</p>
+            {profileError && (
+              <p className="text-sm text-destructive" role="alert">
+                {profileError}
+              </p>
             )}
 
             <Button type="submit" disabled={savingProfile}>
@@ -254,11 +248,16 @@ export const ProfileSettings: React.FC<ProfileSettingsProps> = ({ profile, onPro
       {/* Handle Card */}
       <Card>
         <CardHeader>
-          <CardTitle>{t("pages.settings.profile.handleTitle")}</CardTitle>
-          <CardDescription className="text-warning">
-            {t("pages.settings.profile.handleWarningTitle")}{" "}
-            {t("pages.settings.profile.handleWarningText")}
-          </CardDescription>
+          <div className="flex items-center gap-1.5">
+            <CardTitle className="text-base">{t("pages.settings.profile.handleTitle")}</CardTitle>
+            <HelpPopover
+              title={t("pages.settings.profile.handleHelpTitle")}
+              data-testid="handle-help"
+            >
+              <p>{t("pages.settings.profile.handleWarningText")}</p>
+            </HelpPopover>
+          </div>
+          <CardDescription>{t("pages.settings.profile.handleDescription")}</CardDescription>
         </CardHeader>
         <CardContent>
           <form
@@ -285,10 +284,9 @@ export const ProfileSettings: React.FC<ProfileSettingsProps> = ({ profile, onPro
               </p>
             </div>
 
-            {handleError && <p className="text-sm text-destructive">{handleError}</p>}
-            {handleSuccess && (
-              <p className="text-sm text-chart-2">
-                ✓ {t("pages.settings.profile.handleUpdateSuccess")}
+            {handleError && (
+              <p className="text-sm text-destructive" role="alert">
+                {handleError}
               </p>
             )}
 

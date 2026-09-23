@@ -1,13 +1,53 @@
 import { Router } from "express";
-import { CodespaceConnectionError, type CodespaceConnectionService } from "@mcp-moira/shared";
+import {
+  CodespaceConnectionError,
+  codespaceGitHubSettingsPath,
+  type CodespaceConnectionService,
+  type CodespaceConnectionView,
+} from "@mcp-moira/shared";
 import type { AuthenticatedRequest } from "../types/express-types.js";
 import { asyncHandler } from "../middleware/error-middleware.js";
 import { getCodespaceConnectionService } from "../services/codespace-connection-service.js";
 
+/** The Settings URL, absolute or a path on this site, carrying an outcome the page explains. */
 function redirectWithOutcome(settingsUrl: string, outcome: string): string {
-  const url = new URL(settingsUrl);
+  const relative = settingsUrl.startsWith("/");
+  const url = new URL(settingsUrl, relative ? "http://this-site.invalid" : undefined);
   url.searchParams.set("github", outcome);
-  return url.toString();
+  return relative ? `${url.pathname}${url.search}${url.hash}` : url.toString();
+}
+
+/**
+ * The authorization start on the configured site, absolute like the Settings URL it is derived from.
+ * The API is served at the site root in every deployment mode (only the web UI moves under the app
+ * prefix), so the path is taken from the root of that URL.
+ */
+function startUrl(settingsUrl: string): string {
+  return new URL("/api/integrations/github/start", settingsUrl).toString();
+}
+
+/**
+ * Why a browser's authorization start was refused, as a Settings outcome the page explains. A
+ * browser navigation must land on a page, never on a JSON error.
+ */
+function startRefusalOutcome(
+  error: CodespaceConnectionError,
+  state: CodespaceConnectionView["state"],
+): string {
+  if (state === "connected") return "already_connected";
+  if (state === "revocation_pending") return "revocation_pending";
+  switch (error.code) {
+    case "CODESPACE_NOT_CONFIGURED":
+      return "not_configured";
+    case "CREDENTIAL_UNREADABLE":
+      return "credential_unreadable";
+    case "AUTH_GRANT_REVOCATION_REQUIRED":
+      return "grant_revocation_required";
+    case "AUTH_REFRESH_FAILED":
+      return "previous_access_not_revoked";
+    default:
+      return "authorization_failed";
+  }
 }
 
 export function createCodespaceConnectionRoutes(
@@ -50,10 +90,13 @@ export function createCodespaceConnectionRoutes(
     asyncHandler(async (req, res) => {
       const authenticated = req as AuthenticatedRequest;
       if (!authenticated.session?.token) {
-        res.status(401).json({
-          success: false,
-          error: { code: "AUTHENTICATION_REQUIRED", message: "A current web session is required" },
-        });
+        res.redirect(
+          303,
+          redirectWithOutcome(
+            service.getStatus(authenticated.userId).settingsUrl,
+            "session_required",
+          ),
+        );
         return;
       }
       try {
@@ -64,11 +107,11 @@ export function createCodespaceConnectionRoutes(
         res.redirect(303, authorizationUrl);
       } catch (error) {
         if (error instanceof CodespaceConnectionError) {
-          res.status(503).json({
-            success: false,
-            error: { code: error.code, message: error.message },
-            settings_url: service.getStatus(authenticated.userId).settingsUrl,
-          });
+          const status = service.getStatus(authenticated.userId);
+          res.redirect(
+            303,
+            redirectWithOutcome(status.settingsUrl, startRefusalOutcome(error, status.state)),
+          );
           return;
         }
         throw error;
@@ -87,14 +130,21 @@ export function createCodespaceConnectionRoutes(
       }
       const state = typeof req.query.state === "string" ? req.query.state : "";
       const code = typeof req.query.code === "string" ? req.query.code : "";
-      // GitHub sends the browser back here after the user installs the App (setup_action /
-      // installation_id) without Moira's one-time state. Nothing from that return is trusted:
-      // a fresh authorization is started, and its callback re-reads the installations.
+      // GitHub sends the browser back here after the user installs or updates the App
+      // (setup_action / installation_id) without Moira's one-time state. Nothing from that return
+      // is trusted — its code is never exchanged. The stored credential reads the installations
+      // afresh; only without one does the browser start an authorization.
       if (
         !state &&
         (req.query.installation_id !== undefined || req.query.setup_action !== undefined)
       ) {
-        res.redirect(303, "/api/integrations/github/start");
+        const outcome = await service.completeInstallationReturn(authenticated.userId);
+        res.redirect(
+          303,
+          outcome === "authorization_required"
+            ? startUrl(settingsUrl)
+            : redirectWithOutcome(settingsUrl, outcome),
+        );
         return;
       }
       const status = await service.completeAuthorization({
@@ -103,6 +153,12 @@ export function createCodespaceConnectionRoutes(
         state,
         code,
       });
+      // Authorized but the App is not installed yet: continue straight to GitHub's install page,
+      // whose return comes back here and finishes with the credential just stored.
+      if (status.state === "installation_required" && status.installationUrl) {
+        res.redirect(303, status.installationUrl);
+        return;
+      }
       res.redirect(
         303,
         redirectWithOutcome(
@@ -112,14 +168,12 @@ export function createCodespaceConnectionRoutes(
       );
     } catch {
       // GitHub code and state must never enter the shared error/logging projection.
-      if (settingsUrl) {
-        res.redirect(303, redirectWithOutcome(settingsUrl, "authorization_failed"));
-        return;
-      }
-      res.status(400).json({
-        success: false,
-        error: { code: "AUTHORIZATION_FAILED", message: "GitHub authorization failed" },
-      });
+      // A browser navigation lands on a page, never on JSON: when not even the status could be
+      // read, the Settings path on this site needs nothing but the app prefix.
+      res.redirect(
+        303,
+        redirectWithOutcome(settingsUrl ?? codespaceGitHubSettingsPath(), "authorization_failed"),
+      );
     }
   });
 

@@ -3,6 +3,8 @@ import { z } from "zod";
 import {
   CodespaceConnectionError,
   CodespaceResourceError,
+  evaluateCodespaceResourcePolicy,
+  projectCodespaceLimits,
   type CodespaceGuidanceSituation,
   type CodespaceOperationRecord,
   type CodespaceOperationResult,
@@ -40,6 +42,7 @@ function codespace(overrides: Partial<CodespaceResourceRecord> = {}): CodespaceR
     repositoryId: "42",
     repositoryFullName: "owner/repository",
     requestedRef: "main",
+    observedRef: "feature/current",
     operationMarker: "secret-marker",
     providerResourceName: "secret-provider-name",
     externalOwnerId: "secret-owner",
@@ -62,6 +65,9 @@ function codespace(overrides: Partial<CodespaceResourceRecord> = {}): CodespaceR
     cleanupDeadlineAt: null,
     claimId: "secret-claim",
     claimExpiresAt: null,
+    reconcileFailures: 0,
+    lastActivityAt: null,
+    providerLastUsedAt: null,
     lastOutcome: "verified_usable",
     createdAt: 10,
     updatedAt: 20,
@@ -99,9 +105,21 @@ function operation(
   };
 }
 
+/** A user's limits as the domain computes them, from the shipped policy and some use. */
+const LIMITS = projectCodespaceLimits({
+  policy: evaluateCodespaceResourcePolicy(() => undefined),
+  held: 2,
+  instanceHeld: 5,
+  activeOperations: 1,
+  transfers: { objects: 1, bytes: 2048, inflightBytes: 1024 },
+  idle: { autoStopEnabled: true, idleTimeoutMinutes: 30 },
+  providerIdleMaxMinutes: 240,
+});
+
 function services(overrides: Partial<CodespaceToolServices> = {}): CodespaceToolServices {
   return {
     observability: {
+      limits: jest.fn(() => LIMITS),
       readiness: jest.fn(async () => ({
         state: "ready" as const,
         reason: null,
@@ -117,7 +135,7 @@ function services(overrides: Partial<CodespaceToolServices> = {}): CodespaceTool
           active_operations: 0,
           max_active_operations: 20,
           transfer_live_bytes: 0,
-          max_transfer_live_bytes: null,
+          max_transfer_live_bytes: 1024 ** 3,
         },
         checked_at: 50,
       })),
@@ -326,8 +344,18 @@ describe("codespace MCP adapter", () => {
       instance: { state: "ready", provider: "github-codespaces", connector: "available" },
       repositories: [{ repository_id: "42", name: "owner/repository", private: true }],
       codespaces: [{ codespace_id: CODESPACE_ID, generation: 3 }],
+      // The caller's own limits, as the domain computed them for this caller.
+      limits: LIMITS,
     });
-    expect(data(fetched)).toMatchObject({ codespace: { codespace_id: CODESPACE_ID } });
+    expect(dependencies.observability.limits).toHaveBeenCalledWith(USER_ID);
+    // The branch an agent switched to is reported next to, not instead of, the one it asked for.
+    expect(data(fetched)).toMatchObject({
+      codespace: {
+        codespace_id: CODESPACE_ID,
+        requested_ref: "main",
+        current_ref: "feature/current",
+      },
+    });
     const serialized = JSON.stringify([listed, fetched]);
     for (const secret of [
       "secret-connection",
@@ -1097,8 +1125,8 @@ describe("codespace MCP adapter", () => {
         create: jest.fn(async () => {
           throw new CodespaceResourceError(
             "CODESPACE_POLICY_LIMIT",
-            "Codespace per-user concurrency limit reached",
-            "You already hold 4 active codespaces, which is the per-user ceiling.",
+            "Codespace per-user held limit reached",
+            "You already hold 4 codespaces, which is the per-user ceiling. Stopped codespaces count too; delete one you no longer need to free a slot.",
           );
         }),
       },

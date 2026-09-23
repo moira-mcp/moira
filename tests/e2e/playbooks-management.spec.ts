@@ -7,8 +7,10 @@
  * notes and global settings use, so the walk through it here is the same walk.
  */
 
+import { randomUUID } from "node:crypto";
 import { test, expect } from "./fixtures.js";
 import { login, createTestUser } from "./helpers/auth-helper.js";
+import { graphOverview } from "./helpers/diagram.js";
 import { getTestBaseUrl, getAdminCredentials } from "../utils/test-config.js";
 import {
   callMCPTool,
@@ -20,14 +22,17 @@ import {
 
 const BASE_URL = getTestBaseUrl();
 
+// The email is set where the user is created, with a random fragment: two workers can load this
+// file in the same millisecond, and each must get a user of its own.
 const testUser = {
-  email: `playbooks-test-${Date.now()}@example.com`,
+  email: "",
   password: "TestPassword123!",
   name: "Playbooks Test User",
 };
 
 test.describe("Playbooks", () => {
   test.beforeAll(async () => {
+    testUser.email = `playbooks-test-${Date.now()}-${randomUUID().slice(0, 8)}@example.com`;
     const result = await createTestUser(testUser.email, testUser.password, testUser.name, true);
     if (!result.success) {
       throw new Error(`Failed to create test user: ${result.error}`);
@@ -294,6 +299,8 @@ test.describe("Playbooks", () => {
       await page.setViewportSize({ width: 1280, height: 1400 });
       await page.goto(`${BASE_URL}/workflows/${workflowId}?view=graph`);
       await expect(page.locator('[data-graph-node="work"]')).toBeVisible({ timeout: 20000 });
+      // The graph opens on its first step; the card after it may lie past the pane's edge.
+      await graphOverview(page);
       await page.locator('[data-graph-node="work"]').click();
       await expect(page.getByTestId("node-panel")).toHaveAttribute("data-node-id", "work");
       await page.getByTestId(`playbook-reference-${mine}`).click();

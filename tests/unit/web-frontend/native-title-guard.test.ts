@@ -28,6 +28,10 @@ const BOUNDARY = [
   "components/execution",
   "components/access",
   "pages/FlowPage.tsx",
+  // The Settings page and its sections: a disabled button explains itself with a hint, not a title.
+  "pages/Settings.tsx",
+  "pages/settings",
+  "components/settings",
 ];
 
 /** Components that spread their props onto a DOM element, so a `title` on them is native. */

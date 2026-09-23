@@ -30,7 +30,7 @@ const readiness: CodespaceReadinessView = {
     active_operations: 0,
     max_active_operations: 20,
     transfer_live_bytes: 0,
-    max_transfer_live_bytes: null,
+    max_transfer_live_bytes: 1024 ** 3,
   },
   checked_at: 1,
 };

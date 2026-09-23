@@ -17,7 +17,10 @@
   --muted-foreground: oklch(0.5 0.02 264);
   --accent: oklch(0.94 0.015 264);
   --accent-foreground: oklch(0.24 0.02 264);
+  /* Destructive text and accents (text, borders, rings, tints). */
   --destructive: oklch(0.577 0.245 27.325);
+  /* A solid destructive fill and the text drawn on it (buttons, badges, danger counters). */
+  --destructive-fill: oklch(0.577 0.245 27.325);
   --destructive-foreground: oklch(0.985 0 0);
   --success: oklch(0.517 0.174 142);
   --success-foreground: oklch(0.985 0 0);
@@ -61,8 +64,11 @@
   --muted-foreground: oklch(0.708 0.01 260);
   --accent: oklch(0.3 0.015 260);
   --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.396 0.141 25.723);
-  --destructive-foreground: oklch(0.637 0.237 25.331);
+  /* Text needs a light red on dark surfaces and a white label needs a dark fill, so the two roles
+     are separate tokens; each pair is held to WCAG AA by tests/unit/web-frontend/destructive-contrast. */
+  --destructive: oklch(0.704 0.191 22.216);
+  --destructive-fill: oklch(0.505 0.213 27.518);
+  --destructive-foreground: oklch(0.985 0 0);
   --success: oklch(0.448 0.15 150);
   --success-foreground: oklch(0.8 0.14 150);
   --warning: oklch(0.55 0.09 70);
@@ -111,6 +117,7 @@
   --color-accent: var(--accent);
   --color-accent-foreground: var(--accent-foreground);
   --color-destructive: var(--destructive);
+  --color-destructive-fill: var(--destructive-fill);
   --color-destructive-foreground: var(--destructive-foreground);
   --color-success: var(--success);
   --color-success-foreground: var(--success-foreground);

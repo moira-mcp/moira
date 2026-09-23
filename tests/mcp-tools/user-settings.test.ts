@@ -74,8 +74,8 @@ describe("MCP User Settings Tools E2E", () => {
       { action: "get", category: "" },
       { action: "get", key: "   " },
       { action: "get", category: "   " },
-      { action: "get", key: "", category: "ui" },
-      { action: "get", key: "ui.theme", category: "" },
+      { action: "get", key: "", category: "profile" },
+      { action: "get", key: "profile.display_name", category: "" },
     ];
 
     for (const args of emptySelectorRequests) {
@@ -85,15 +85,15 @@ describe("MCP User Settings Tools E2E", () => {
 
     const ambiguous = await callMCPTool(client, "settings", {
       action: "get",
-      key: "ui.theme",
-      category: "ui",
+      key: "profile.display_name",
+      category: "profile",
     });
     expect(ambiguous).toEqual(expect.stringContaining("key or category"));
   });
 
   test("manage_settings set and get workflow", async () => {
-    const testKey = "ui.theme";
-    const testValue = "dark";
+    const testKey = "profile.display_name";
+    const testValue = "MCP Probe";
 
     // Set setting (returns {key, updated: true})
     const setResult = await callMCPTool(client, "settings", {

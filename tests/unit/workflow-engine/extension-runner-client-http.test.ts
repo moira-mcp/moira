@@ -8,7 +8,7 @@
  * error status — so they are observed here through the client's own `fetchImpl` option.
  */
 
-import { describe, test, expect } from "@jest/globals";
+import { describe, expect, jest, test } from "@jest/globals";
 import {
   EXTENSION_API_VERSION,
   HttpExtensionRunnerClient,
@@ -40,9 +40,23 @@ describe("Requests that carry no deadline of their own", () => {
         })) as typeof fetch,
     });
 
-    const started = Date.now();
-    await expect(client.listExtensions()).rejects.toMatchObject({ kind: "runner-unavailable" });
-    expect(Date.now() - started).toBeLessThan(2_000);
+    // The deadline is the configured one, read on a fake clock: still waiting one millisecond
+    // before it, failed at it. A real clock would also count the time a loaded machine takes to
+    // run the test at all.
+    jest.useFakeTimers();
+    try {
+      let settled = false;
+      const lookup = client.listExtensions().finally(() => {
+        settled = true;
+      });
+      lookup.catch(() => undefined);
+      await jest.advanceTimersByTimeAsync(49);
+      expect(settled).toBe(false);
+      await jest.advanceTimersByTimeAsync(1);
+      await expect(lookup).rejects.toMatchObject({ kind: "runner-unavailable" });
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   test.each([

@@ -9,6 +9,7 @@ import {
   CODESPACE_PROVIDER_GITHUB,
   CodespaceConnectionError,
   type CodespaceConnectionSnapshot,
+  type CodespaceCredentialEnvelope,
   type CodespaceCredentialPayload,
   type CodespaceInstallationGrant,
   type CodespaceRepositoryGrant,
@@ -242,11 +243,12 @@ export class CodespaceConnectionService {
     return `pending-revocation:${id}`;
   }
 
-  private retainCredentialForRevocation(
+  /** A credential encrypted for the revocation queue, under its own queue identity. */
+  private encryptForRevocation(
     userId: string,
     config: Extract<CodespaceGitHubConfigStatus, { state: "available" }>,
     credential: CodespaceCredentialPayload,
-  ): string {
+  ): { id: string; envelope: CodespaceCredentialEnvelope } {
     const id = this.randomId();
     const vault = new CodespaceCredentialVault(config.vaultKeyHex, config.vaultKeyVersion);
     const envelope = vault.encrypt(
@@ -256,6 +258,15 @@ export class CodespaceConnectionService {
       1,
       credential,
     );
+    return { id, envelope };
+  }
+
+  private retainCredentialForRevocation(
+    userId: string,
+    config: Extract<CodespaceGitHubConfigStatus, { state: "available" }>,
+    credential: CodespaceCredentialPayload,
+  ): string {
+    const { id, envelope } = this.encryptForRevocation(userId, config, credential);
     this.dependencies.repository.storePendingRevocation({
       id,
       userId,
@@ -524,7 +535,8 @@ export class CodespaceConnectionService {
     authorizationUrl.searchParams.set("redirect_uri", config.callbackUrl);
     authorizationUrl.searchParams.set("state", state);
     authorizationUrl.searchParams.set("allow_signup", "false");
-    authorizationUrl.searchParams.set("prompt", "select_account");
+    // No forced account chooser: GitHub asks only when it has to, and switching accounts is
+    // Disconnect followed by Connect.
     return authorizationUrl.toString();
   }
 
@@ -557,6 +569,8 @@ export class CodespaceConnectionService {
       input.userId,
       CODESPACE_PROVIDER_GITHUB,
     );
+    // The previous credential keeps working until its successor is committed; it is revoked only
+    // afterwards (below), so a revocation GitHub refuses can never leave the user without either.
     let previousCredential: CodespaceCredentialPayload | null = null;
     if (previous) {
       try {
@@ -569,7 +583,6 @@ export class CodespaceConnectionService {
           previous.connection.id,
           previous.envelope,
         );
-        await this.retainAndRevokeCredential(input.userId, config, previousCredential);
       } catch {
         this.dependencies.repository.markCredentialFailed(
           input.userId,
@@ -586,6 +599,7 @@ export class CodespaceConnectionService {
     let token: GitHubCodespaceTokenResponse | null = null;
     let connectionId: string | null = null;
     let installationGrants: CodespaceInstallationGrant[] = [];
+    let supersededRevocation: { id: string; envelope: CodespaceCredentialEnvelope } | null = null;
     try {
       token = await client.exchangeCode(input.code);
       const now = this.now();
@@ -645,6 +659,11 @@ export class CodespaceConnectionService {
         now,
       });
       const generation = (previous?.envelope.generation ?? 0) + 1;
+      // Encrypted now, stored only by the commit below: an authorization that fails before the
+      // commit leaves the working credential untouched and nothing queued.
+      supersededRevocation = previousCredential
+        ? this.encryptForRevocation(input.userId, config, previousCredential)
+        : null;
       const vault = new CodespaceCredentialVault(config.vaultKeyHex, config.vaultKeyVersion);
       const envelope = vault.encrypt(
         input.userId,
@@ -663,6 +682,7 @@ export class CodespaceConnectionService {
         envelope,
         installations: installationGrants,
         repositories: repositoryGrants,
+        ...(supersededRevocation ? { supersededRevocation } : {}),
         now,
       });
     } catch (error) {
@@ -674,13 +694,36 @@ export class CodespaceConnectionService {
         }
       }
       if (connectionId) {
-        this.dependencies.repository.markCredentialFailed(input.userId, connectionId, this.now());
+        if (previous && previousCredential && previous.connection.id === connectionId) {
+          // The credential that worked before is still the stored one: whatever failed (the new
+          // credential, or a database error that rolled the commit back) did not touch it, so the
+          // connection returns to where it was instead of being marked failed.
+          this.dependencies.repository.restoreReservedConnection({
+            userId: input.userId,
+            connectionId,
+            status: previous.connection.status,
+            lastErrorCode: previous.connection.lastErrorCode,
+            now: this.now(),
+          });
+        } else {
+          this.dependencies.repository.markCredentialFailed(input.userId, connectionId, this.now());
+        }
       }
       if (error instanceof CodespaceConnectionError) throw error;
       throw new CodespaceConnectionError("AUTHORIZATION_FAILED", "GitHub authorization failed");
     }
     if (!connectionId) {
       throw new CodespaceConnectionError("AUTHORIZATION_FAILED", "GitHub authorization failed");
+    }
+    let previousRevocationPending = false;
+    if (supersededRevocation) {
+      try {
+        await this.revokePendingCredential(input.userId, config, supersededRevocation.id);
+      } catch {
+        // The superseded credential stays queued, as committed; the next grant refresh,
+        // authorization or disconnect retries it. The new connection stays usable.
+        previousRevocationPending = true;
+      }
     }
     let rebindPending = false;
     try {
@@ -700,9 +743,46 @@ export class CodespaceConnectionService {
           ? "installation_required"
           : rebindPending
             ? "connected_rebind_pending"
-            : "connected",
+            : previousRevocationPending
+              ? "connected_previous_revocation_pending"
+              : "connected",
     });
     return this.getStatus(input.userId);
+  }
+
+  /**
+   * The browser came back from installing (or updating) the GitHub App, without Moira's one-time
+   * state. The credential already stored is enough to read the new installation, so no second
+   * authorization is started: the grants are refreshed at once and the result reported. Only when
+   * there is no usable stored credential does the caller need to start an authorization.
+   */
+  async completeInstallationReturn(
+    userId: string,
+  ): Promise<"connected" | "installation_required" | "authorization_required"> {
+    const config = requireAvailableConfig(this.dependencies.config());
+    const snapshot = this.dependencies.repository.getConnection(userId, CODESPACE_PROVIDER_GITHUB);
+    if (
+      !snapshot ||
+      (snapshot.status !== "connected" && snapshot.status !== "installation_required") ||
+      this.hasUnreadableCredential(userId, config)
+    ) {
+      return "authorization_required";
+    }
+    // Refresh now whatever the cache age, which is what the return is for, but never past the
+    // throttle after a failed refresh: the return carries no one-time state, so a cross-site page
+    // could otherwise send a signed-in browser here again and again to drive provider calls.
+    await this.refreshGrants(userId, { ignoreAge: true });
+    const state = this.getStatus(userId).state;
+    const outcome =
+      state === "connected" || state === "installation_required" ? state : "authorization_required";
+    await this.dependencies.audit?.({
+      action: "complete",
+      userId,
+      provider: CODESPACE_PROVIDER_GITHUB,
+      connectionId: snapshot.id,
+      outcome: `installation_return_${outcome}`,
+    });
+    return outcome;
   }
 
   /**
@@ -716,7 +796,12 @@ export class CodespaceConnectionService {
    */
   async refreshGrants(
     userId: string,
-    options: { force?: boolean } = {},
+    options: {
+      /** Refresh whatever the cache age, and even inside the throttle after a failed refresh. */
+      force?: boolean;
+      /** Refresh whatever the cache age, but still wait out the throttle after a failed refresh. */
+      ignoreAge?: boolean;
+    } = {},
   ): Promise<{ refreshed: boolean; stale: boolean }> {
     const config = this.dependencies.config();
     if (config.state !== "available") return { refreshed: false, stale: false };
@@ -731,7 +816,12 @@ export class CodespaceConnectionService {
     if (!grantSnapshot) return { refreshed: false, stale: false };
     const refreshedAt = grantSnapshot.refreshedAt;
     const age = refreshedAt === null ? Number.POSITIVE_INFINITY : this.now() - refreshedAt;
-    if (!options.force && age < GRANTS_MAX_AGE_MS) return { refreshed: false, stale: false };
+    // While the App is not installed yet the user is usually installing it right now, so a read does
+    // not wait out the cache: the state is rare and short-lived, and the answer changes the page.
+    const awaitingInstallation = snapshot.status === "installation_required";
+    if (!options.force && !options.ignoreAge && !awaitingInstallation && age < GRANTS_MAX_AGE_MS) {
+      return { refreshed: false, stale: false };
+    }
     const failedAt = this.failedGrantRefreshes.get(snapshot.id);
     if (!options.force && failedAt !== undefined && this.now() - failedAt < GRANTS_MAX_AGE_MS) {
       return { refreshed: false, stale: true };
@@ -853,6 +943,13 @@ export class CodespaceConnectionService {
       };
     }
     this.failedGrantRefreshes.delete(snapshot.id);
+    // A superseded credential whose revocation GitHub refused earlier is retried here, while the
+    // provider is evidently reachable. A refusal again leaves it queued; it never fails the read.
+    try {
+      await this.drainPendingRevocations(userId, config);
+    } catch {
+      // Retried on the next refresh, authorization or disconnect.
+    }
     return { refreshed: true, stale: false };
   }
 

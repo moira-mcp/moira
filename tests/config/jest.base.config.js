@@ -32,5 +32,5 @@ export default {
     "!packages/*/src/**/*.d.ts",
     "!packages/*/src/**/index.ts",
   ],
-  setupFilesAfterEnv: ["<rootDir>/tests/setup.ts"],
+  setupFilesAfterEnv: ["<rootDir>/tests/setup.ts", "<rootDir>/tests/config/sqlite-error-realm.ts"],
 };

@@ -65,6 +65,7 @@ export const RESERVED_SETTING_NAMESPACES = [
   "artifacts",
   "notes",
   "executions",
+  "codespaces",
 ] as const;
 
 /** The namespace of a setting key — the part before the first dot. */

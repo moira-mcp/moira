@@ -65,7 +65,8 @@ app.use(requestBodyLogger()); // Must be after express.json()
 **Features:**
 
 - Logs POST, PUT, PATCH bodies only
-- Excludes sensitive endpoints: `/api/auth/**`, `/api/user/change-password`, `/api/public/workflows`
+- Excludes sensitive endpoints: `/api/auth/**`, `/api/user/change-password`, `/api/user/set-password`,
+  `/api/public/workflows`
 - Truncates bodies > 10KB
 - Correlates with X-Request-ID header
 

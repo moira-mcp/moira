@@ -225,11 +225,68 @@ router.post(
       const errorMessage = (authError as Error).message || "Password change failed";
 
       if (errorMessage.includes("Invalid password") || errorMessage.includes("incorrect")) {
-        throw createApiError.validationFailed("Current password is incorrect");
+        throw createApiError.validationFailed("Current password is incorrect", {
+          reason: "CURRENT_PASSWORD_INCORRECT",
+        });
       }
 
       throw authError;
     }
+  }),
+);
+
+/**
+ * POST /api/user/set-password
+ * Give an account that signs in only through a social provider a password as well. Better Auth
+ * links a credential account; an account that already has a password is refused, and so is a
+ * session older than Better Auth's freshness window (the user signs in again first).
+ */
+router.post(
+  "/set-password",
+  asyncHandler(async (req: Request, res: Response) => {
+    const { newPassword } = req.body;
+    const userId = (req as AuthenticatedRequest).userId;
+
+    if (!userId) {
+      throw createApiError.unauthorized("User ID not found in session");
+    }
+    if (typeof newPassword !== "string" || !newPassword) {
+      throw createApiError.validationFailed("A new password is required");
+    }
+    if (newPassword.length < 6) {
+      throw createApiError.validationFailed("New password must be at least 6 characters");
+    }
+    if (newPassword.length > 128) {
+      throw createApiError.validationFailed("New password must be less than 128 characters");
+    }
+
+    try {
+      await auth.api.setPassword({ body: { newPassword }, headers: toHeaders(req.headers) });
+    } catch (authError) {
+      const code = (authError as { body?: { code?: unknown } }).body?.code;
+      if (code === "PASSWORD_ALREADY_SET") {
+        throw createApiError.badRequest("This account already has a password", {
+          reason: "PASSWORD_ALREADY_SET",
+        });
+      }
+      if (code === "SESSION_NOT_FRESH") {
+        throw createApiError.forbidden("Sign in again, then set the password", {
+          reason: "SESSION_NOT_FRESH",
+        });
+      }
+      throw authError;
+    }
+
+    const repository = new DatabaseRepository();
+    await logAuditEvent(repository, req, {
+      userId,
+      action: AuditAction.USER_PASSWORD_CHANGED,
+      resource: "user",
+      resourceId: userId,
+      metadata: { firstPassword: true },
+    });
+
+    res.json({ success: true, message: "Password set" });
   }),
 );
 

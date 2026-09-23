@@ -306,7 +306,7 @@ export const Admin: React.FC = () => {
                       </div>
                       <button
                         onClick={() => handleDeleteDefinition(def.key)}
-                        className="px-3 py-1 text-sm bg-destructive text-destructive-foreground rounded hover:bg-destructive/90"
+                        className="px-3 py-1 text-sm bg-destructive-fill text-destructive-foreground rounded hover:bg-destructive-fill/90"
                       >
                         {t("admin.panel.definitions.delete")}
                       </button>

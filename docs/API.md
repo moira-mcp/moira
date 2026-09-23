@@ -239,14 +239,14 @@ Get user settings for category.
 
 Parameters:
 
-- `category`: Setting category (e.g., "telegram", "ui")
+- `category`: Setting category (e.g., "notifications", "codespaces")
 
 Response:
 
 ```typescript
 {
   success: boolean;
-  data: Record<string, any>; // { "ui.theme": "dark", ... }
+  data: Record<string, any>; // { "codespaces.idle_timeout_minutes": 30, ... }
   timestamp: string;
 }
 ```
@@ -283,7 +283,8 @@ Behavior:
 - Classifies every submitted key and stores each permitted valid value independently
 - Commits each extension value together with its audit event; an audit failure leaves the prior value unchanged and lists the key in `refused`
 - Returns HTTP 200 when no key is refused and HTTP 207 when at least one key is refused
-- Names unknown, unauthorized and schema-invalid keys in `refused` without undoing values already listed in `saved`
+- Names unknown, unauthorized, schema-invalid and out-of-range keys in `refused` without undoing values already listed in `saved`
+- Refuses a built-in number setting whose value is below its declared `minimum` or above its declared `maximum`, whether sent as a number or as numeric text
 - Enforces the manifest's declared primitive type and then its optional complete JSON Schema; editable JSON text is parsed before validation, and structured input must round-trip through JSON without omitted or transformed values
 - Registers the Telegram webhook only when `telegram.bot_token` is present in `saved`, never when that key was refused
 
@@ -474,7 +475,7 @@ Update setting value.
 
 Parameters:
 
-- `key`: Setting key (e.g., "ui.theme")
+- `key`: Setting key (e.g., "codespaces.idle_timeout_minutes")
 
 Request body:
 
@@ -489,6 +490,7 @@ Validation:
 - Type check (string, number, boolean, json)
 - Enum validation (value in allowed list)
 - String length (minLength, maxLength)
+- Numeric bounds (`minimum`, `maximum`) of a built-in number setting; a number or numeric text outside them returns 400
 - Required field check
 - Installed-extension settings are validated against the complete JSON Schema from the active manifest; JSON settings accept either losslessly JSON-serializable structured values or JSON text
 
@@ -601,6 +603,60 @@ delivery without returning secrets or destinations. An unknown or removed channe
 
 Authentication: Required
 
+## User Sessions API
+
+The browsers and devices signed in to the authenticated user's account. The Settings page's
+Security section reads and revokes them here.
+
+### GET /api/user/sessions
+
+List the user's unexpired sessions, one page at a time.
+
+Query parameters (all optional):
+
+- `search`: substring matched against the User-Agent header, IP address and country.
+- `sort`: `createdAt` (default) or `expiresAt`.
+- `sortOrder`: `desc` (default) or `asc`.
+- `limit`: page size, 1–100; default 20.
+- `offset`: number of sessions to skip; default 0.
+
+Response:
+
+```typescript
+{
+  success: true;
+  data: Array<{
+    id: string;
+    ipAddress: string | null; // null when the server did not record the address
+    userAgent: string | null; // the raw User-Agent header; null when none was sent
+    country: string | null; // ISO country code from the address lookup; null when it found none
+    createdAt: string;
+    expiresAt: string;
+    isCurrent: boolean; // the session making this request
+  }>;
+  total: number; // all matching sessions, not just this page
+  limit: number;
+  offset: number;
+  timestamp: string;
+}
+```
+
+A value the server does not know is `null`, never a placeholder word: the client words it in the
+reader's language or leaves it out.
+
+Authentication: Required
+
+### DELETE /api/user/sessions/:sessionId
+
+Sign out one of the user's other sessions. The action is audited.
+
+Errors:
+
+- 400: `sessionId` is the session making the request (sign out instead)
+- 404: no such session for this user
+
+Authentication: Required
+
 ## Codespace Connection API
 
 Website-only GitHub App authorization and connection management. These routes
@@ -646,7 +702,8 @@ connection IDs or revocation IDs.
 
 ### GET /api/integrations/github
 
-Refreshes an expired installation/repository snapshot and returns
+Refreshes an expired installation/repository snapshot (every read while the state is
+`installation_required`) and returns
 `{ success: true, data: CodespaceConnectionView }` for the authenticated user.
 If provider enumeration fails, saved grants remain and `repositoriesStale` is `true`.
 Missing complete server configuration is represented as `disabled` or
@@ -666,10 +723,13 @@ Authentication: Required
 
 Creates one ten-minute, single-use state bound to the current user and web
 session, then returns a `303` redirect to GitHub. A newer start invalidates that
-user's older unconsumed state. Missing/invalid server configuration returns
-`503` with `CODESPACE_NOT_CONFIGURED`. Unreadable stored credentials and an
-untracked refresh successor return their typed safe recovery errors and cannot
-start authorization.
+user's older unconsumed state. The authorization does not force GitHub's account
+chooser. A start that cannot proceed never answers with JSON: it returns a `303`
+redirect to the Settings page with `github=<outcome>`, one of `already_connected`,
+`revocation_pending`, `not_configured` (missing or invalid server configuration),
+`credential_unreadable`, `grant_revocation_required`, `previous_access_not_revoked`
+(an earlier credential still awaits revocation), `session_required` (no current web
+session) or `authorization_failed`.
 
 Authentication: Required
 
@@ -677,10 +737,25 @@ Authentication: Required
 
 Consumes the exact user/session-bound `state`, exchanges `code` server-side,
 verifies the numeric GitHub user and personal installation/repository grants,
-then returns a `303` redirect to the same-origin Settings page. The redirect
-contains only `github=connected`, `github=installation_required`, or
-`github=authorization_failed`. Code, state and provider errors are never
-reflected in the response; nginx also omits this callback from access logs.
+then returns a `303` redirect. When the account has no App installation yet and an
+installation URL is configured, the redirect goes straight to GitHub's installation
+page; otherwise it goes to the same-origin Settings page with only
+`github=connected`, `github=installation_required`, or
+`github=authorization_failed`. A new credential is committed before the previous
+one is revoked; a refused revocation stays queued and does not fail the callback.
+
+GitHub's return after an App installation or update carries `installation_id` or
+`setup_action` and no Moira `state`. Its code is never exchanged: with a readable
+stored credential for a `connected` or `installation_required` connection, the
+route re-reads grants with that credential (whatever the snapshot's age, but not
+inside the throttle after a failed refresh) and redirects to Settings with
+`github=connected` or `github=installation_required`; otherwise it redirects to
+the absolute `/api/integrations/github/start` URL. The route never answers with
+JSON: if even the connection status cannot be read, it redirects to the Settings
+path on this site under the web app prefix with `github=authorization_failed`. A
+failed re-authorization leaves an existing connection and its working credential as
+they were. Code, state and provider errors are never reflected in the response;
+nginx also omits this callback from access logs.
 
 Authentication: Required
 
@@ -1311,14 +1386,16 @@ Website management of the user's persistent cloud codespaces. These routes are
 mounted under `/api/integrations/github/codespaces` behind `requireAuth`, use the same
 domain services as the MCP `codespace` tool, and return `Cache-Control: no-store`
 and `Referrer-Policy: no-referrer`. Responses contain the sanitized codespace summary
-(opaque `codespace_id`, provider, repository, ref, machine, state, retention policy,
-desired/observed state, generation, timestamps) and never provider resource names,
+(opaque `codespace_id`, provider, repository, `requested_ref` — the ref the codespace was
+created on — and `current_ref` — the ref the provider last reported checked out, `null` until
+observed or on a detached HEAD — machine, state, retention policy, desired/observed state,
+generation, timestamps) and never provider resource names,
 markers, claims, capabilities or credentials.
 
 ### GET /api/integrations/github/codespaces
 
-Returns the instance readiness view, the connection view, approved repositories and
-the user's codespaces.
+Returns the instance readiness view, the connection view, approved repositories, the
+user's codespaces and the user's limits.
 
 ```typescript
 {
@@ -1329,12 +1406,56 @@ the user's codespaces.
     repositories: Array<{ repository_id: string; name: string; private: boolean }>;
     repositories_stale: boolean;
     codespaces: CodespaceSummaryView[];
+    limits: CodespaceLimitsView;
   }
 }
 ```
 
 The route refreshes grants behind the normal TTL. If the provider cannot be reached,
 it keeps the saved repositories and returns `repositories_stale: true`.
+
+`limits` is the same view the MCP `codespace` `list` action returns. Each limit is the
+value Moira enforces, next to the user's current use; it is read from policy and the
+database without a provider call:
+
+```typescript
+interface CodespaceLimitsView {
+  codespaces: {
+    held: number; // stopped codespaces and ones still being created or cleaned up count
+    max_per_user: number;
+    instance_held: number;
+    max_instance: number;
+    create_throttle_seconds: number;
+  };
+  machine_ceiling: { cpu_cores: number; memory_bytes: number; storage_bytes: number };
+  operations: {
+    active: number;
+    max_concurrent_per_user: number;
+    max_input_bytes: number;
+    max_stdout_bytes: number;
+    max_stderr_bytes: number;
+    max_retained_output_bytes: number;
+    max_duration_seconds: number;
+    max_background_seconds: number;
+  };
+  transfers: {
+    used_bytes: number;
+    objects: number;
+    inflight_bytes: number; // bytes of transfers still reserved or claimed
+    max_bytes_per_user: number;
+    max_inflight_bytes_per_user: number;
+    max_objects_per_user: number;
+    max_file_bytes: number;
+    ttl_seconds: number;
+  };
+  lifecycle: {
+    retention_days: number;
+    start_wait_seconds: number;
+    idle: { auto_stop_enabled: boolean; timeout_minutes: number; provider_max_minutes: number };
+  };
+  provider: { billing: "unavailable" }; // GitHub does not expose Codespaces quota or billing
+}
+```
 
 ### POST /api/integrations/github/codespaces
 
@@ -1352,7 +1473,9 @@ timestamps). Unknown, malformed and foreign IDs return `404 CODESPACE_NOT_FOUND`
 ### POST /api/integrations/github/codespaces/:codespaceId/start | /stop
 
 Records the desired running or stopped state and returns the codespace with
-`data_preserved: true`. Stop keeps the repository data.
+`data_preserved: true`. Stop keeps the repository data. Starting a codespace whose provider
+resource is not identified yet returns `409 CODESPACE_CREATE_PENDING`; starting one left
+ambiguous returns `409 CODESPACE_NOT_RUNNING`.
 
 ### DELETE /api/integrations/github/codespaces/:codespaceId
 
@@ -1584,7 +1707,7 @@ Response:
 
 Errors:
 
-- 400: Current password incorrect
+- 400: Current password incorrect (`error.details.reason`: `CURRENT_PASSWORD_INCORRECT`)
 - 400: New password less than 6 characters
 - 400: New password same as current password
 
@@ -1595,6 +1718,43 @@ Security:
 - Revokes all sessions except current (user remains logged in)
 - Revokes all OAuth access tokens (requires re-authorization)
 - Creates audit log entry (USER_PASSWORD_CHANGED)
+
+### POST /api/user/set-password
+
+Give an account that signs in only through a social provider (for example GitHub) a password as
+well, through Better Auth's `setPassword`, which links a credential account. The Settings page
+offers it when the account has no password.
+
+Request:
+
+```typescript
+{
+  newPassword: string; // min 6 chars, max 128 chars
+}
+```
+
+Response:
+
+```typescript
+{
+  success: true;
+  message: "Password set";
+}
+```
+
+Errors:
+
+- 400: New password missing, less than 6 or more than 128 characters
+- 400: The account already has a password (`error.details.reason`: `PASSWORD_ALREADY_SET`)
+- 403: The session is older than Better Auth's freshness window; sign in again first
+  (`error.details.reason`: `SESSION_NOT_FRESH`)
+
+Authentication: Required
+
+Security:
+
+- Audited as `USER_PASSWORD_CHANGED` with `metadata.firstPassword: true`
+- The request body is never logged
 
 ### POST /api/user/resend-verification
 
@@ -2655,7 +2815,9 @@ Response:
 }
 ```
 
-User enrichment: `userEmail` and `userName` fields added by joining with user table.
+User enrichment: `userEmail` and `userName` fields added by joining with user table. Both are
+`null` when the entry has no user or the user no longer exists; the client shows a localized
+"unknown user" instead of a placeholder from the server.
 
 Errors:
 
@@ -3197,7 +3359,7 @@ Response:
       workflowId: string;
       workflowName: string | null; // Resolved from workflow table, null if workflow deleted
       userId: string;
-      userEmail: string;
+      userEmail: string | null; // null when the owning user no longer exists
       userName: string | null;
       status: string;
       currentNodeId: string | null;
@@ -3226,7 +3388,7 @@ Response includes `activeLock` when the execution has an active lock:
     id: string;
     workflowId: string;
     userId: string;
-    userEmail: string;
+    userEmail: string | null; // null when the owning user no longer exists
     userName: string | null;
     status: string;
     currentNodeId: string;
@@ -3644,7 +3806,7 @@ Response:
       expiresAt: number;
       createdAt: number;
       updatedAt: number;
-      userEmail: string;
+      userEmail: string | null; // null when the owning user no longer exists
       userName: string | null;
       userHandle: string | null;
     }>;

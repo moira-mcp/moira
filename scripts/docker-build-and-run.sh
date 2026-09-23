@@ -372,16 +372,18 @@ else
     # EXTRA_WORKFLOWS_DIRS is a :-separated list of HOST paths, each a catalog base dir
     # that contains a flows/ subdir (e.g. a private catalog kept outside this repo).
     # Each is bind-mounted and appended to the container's WORKFLOWS_DIRS so the catalog
-    # loader merges them (later entries win on (owner, slug) collisions). Paths may be
-    # relative to the repo root (resolved to absolute below) or absolute.
+    # loader merges them (later entries win on (owner, slug) collisions). A relative path is
+    # resolved against the checkout the script runs from, so a worktree elsewhere on disk resolves
+    # it differently: prefer absolute paths. An entry that does not exist is reported and skipped.
     if [ -n "$EXTRA_WORKFLOWS_DIRS" ]; then
         CONTAINER_WORKFLOWS_DIRS="./workflows/production"
         EXTRA_IDX=0
         IFS=':' read -ra EXTRA_DIR_LIST <<< "$EXTRA_WORKFLOWS_DIRS"
         for EXTRA_DIR in "${EXTRA_DIR_LIST[@]}"; do
             [ -z "$EXTRA_DIR" ] && continue
-            EXTRA_ABS=$(cd "$EXTRA_DIR" 2>/dev/null && pwd)
-            if [ -z "$EXTRA_ABS" ]; then
+            # The resolution is the condition of the `if`: under `set -e` a failing command
+            # substitution in a plain assignment ends the whole script before any warning.
+            if ! EXTRA_ABS=$(cd "$EXTRA_DIR" 2>/dev/null && pwd) || [ -z "$EXTRA_ABS" ]; then
                 echo "  ⚠️  EXTRA_WORKFLOWS_DIRS entry not found, skipping: $EXTRA_DIR"
                 continue
             fi
