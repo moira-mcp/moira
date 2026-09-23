@@ -11,7 +11,11 @@ export interface NormalizedExecution {
   note?: string;
   errorCount?: number;
   error?: string;
-  userDisplay?: string;
+  /**
+   * Admin views only: who owns the execution. `null` when it has an owner whose account can no
+   * longer be found; the card words that in the reader's language.
+   */
+  userDisplay?: string | null;
   createdAt?: number;
   completedAt?: number;
   duration?: number | null;
@@ -35,7 +39,7 @@ interface AdminExecution {
   executionId: string;
   workflowId: string;
   workflowName?: string | null;
-  userEmail: string;
+  userEmail: string | null;
   userName: string | null;
   status: string;
   createdAt?: number;
@@ -85,7 +89,7 @@ export function normalizeExecution(execution: AnyExecution): NormalizedExecution
       workflowId: execution.workflowId,
       workflowName: execution.workflowName,
       status: execution.status,
-      userDisplay: execution.userName || execution.userEmail,
+      userDisplay: execution.userName || execution.userEmail || null,
       createdAt: execution.createdAt,
       completedAt: execution.completedAt,
       error: execution.error,

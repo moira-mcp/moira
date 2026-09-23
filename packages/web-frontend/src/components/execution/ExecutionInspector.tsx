@@ -122,8 +122,8 @@ export interface ExecutionData {
   updatedAt?: number;
   error?: string;
   errors?: ExecutionErrorEntry[];
-  // Optional owner info (available in admin view)
-  userEmail?: string;
+  // Optional owner info (available in admin view); null when the owner's account can no longer be found
+  userEmail?: string | null;
   userName?: string | null;
 }
 
@@ -841,15 +841,16 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
 
         <div className="flex-1" />
 
-        {showOwnerInfo && (execution.userEmail || execution.userName) && (
+        {showOwnerInfo && (
           <Tooltip>
             <TooltipTrigger asChild>
               <span className="text-xs text-muted-foreground truncate max-w-[150px]">
-                {execution.userName || execution.userEmail}
+                {execution.userName || execution.userEmail || t("common.unknownUser")}
               </span>
             </TooltipTrigger>
             <TooltipContent>
-              {t("pages.executionInspector.owner")}: {execution.userName || execution.userEmail}
+              {t("pages.executionInspector.owner")}:{" "}
+              {execution.userName || execution.userEmail || t("common.unknownUser")}
               {execution.userName && execution.userEmail && ` (${execution.userEmail})`}
             </TooltipContent>
           </Tooltip>

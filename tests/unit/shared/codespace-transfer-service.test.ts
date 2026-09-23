@@ -39,7 +39,6 @@ const basePolicy: CodespaceResourcePolicy = {
   maxActivePerUser: 1,
   maxActiveGlobal: 4,
   createThrottleMs: 1,
-  remoteTtlMs: 1,
   createDeadlineMs: 1,
   cleanupDeadlineMs: 1,
   claimLeaseMs: 30_000,

@@ -58,8 +58,19 @@ function normalizeAppPrefix(raw: string | undefined): string {
   return trimmed.startsWith("/") ? trimmed : `/${trimmed}`;
 }
 
+/**
+ * The GitHub section of Settings as a path on this site, under the web app's prefix. It needs no
+ * configuration beyond the prefix, so a browser can be sent there even when the connection status
+ * or the GitHub configuration cannot be read.
+ */
+export function codespaceGitHubSettingsPath(
+  appPrefix: string | undefined = getAppPrefix(),
+): string {
+  return `${normalizeAppPrefix(appPrefix)}/settings#${GITHUB_SETTINGS_FRAGMENT}`;
+}
+
 function safeSettingsUrl(baseUrl: string, appPrefix?: string): string {
-  return `${baseUrl}${normalizeAppPrefix(appPrefix)}/settings#${GITHUB_SETTINGS_FRAGMENT}`;
+  return `${baseUrl}${codespaceGitHubSettingsPath(appPrefix)}`;
 }
 
 function isWeakVaultKey(value: string): boolean {

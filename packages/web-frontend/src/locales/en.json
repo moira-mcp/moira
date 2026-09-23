@@ -1122,9 +1122,19 @@
           "maxLength": "New password must be less than 128 characters",
           "noMatch": "Passwords do not match",
           "samePassword": "New password must be different from current password",
-          "changeFailed": "Failed to change your password"
+          "changeFailed": "Failed to change your password",
+          "currentIncorrect": "The current password is incorrect.",
+          "signInAgain": "For your security, sign in again, then set the password.",
+          "alreadySet": "This account already has a password.",
+          "setFailed": "Failed to set the password"
         },
-        "description": "Use a password you do not use anywhere else."
+        "description": "Use a password you do not use anywhere else.",
+        "setPasswordTitle": "Password",
+        "socialOnlyDescription": "You sign in with {{providers}}, so this account has no password yet. Set one to also sign in with your email address.",
+        "socialProviderFallback": "an external provider",
+        "setPassword": "Set password",
+        "settingPassword": "Setting...",
+        "passwordSetSuccess": "Password set. You can now also sign in with your email address."
       },
       "oauth": {
         "noConsents": "No OAuth authorizations found",
@@ -2858,7 +2868,34 @@
     },
     "edit": "Edit",
     "close": "Close",
-    "actions": "Actions"
+    "actions": "Actions",
+    "unknownUser": "Unknown user",
+    "codespaceErrors": {
+      "CODESPACE_PROVIDER_DISABLED": "Cloud codespace operations are turned off on this instance.",
+      "CODESPACE_PROVIDER_UNAVAILABLE": "GitHub Codespaces is not answering right now. Try again shortly.",
+      "CODESPACE_POLICY_LIMIT": "A codespace limit was reached. See Your limits for what you hold and what is allowed.",
+      "CODESPACE_SESSION_UNAVAILABLE": "The command session is no longer available in this codespace.",
+      "CODESPACE_OPERATION_BUSY": "Too many codespace operations are running. Try again later.",
+      "CODESPACE_AUTHORIZATION_REQUIRED": "Moira no longer has access to this repository. Reconnect GitHub above.",
+      "CODESPACE_RESULT_EXPIRED": "That result is no longer available.",
+      "CODESPACE_CREATE_REJECTED": "GitHub refused to create the codespace. Check the repository's Codespaces settings on GitHub.",
+      "CODESPACE_CREATE_PENDING": "A codespace is still being created or cleaned up. Wait a moment and try again.",
+      "CODESPACE_NOT_RUNNING": "The codespace is not running.",
+      "CODESPACE_START_TIMEOUT": "The codespace is still starting. Try again shortly.",
+      "CODESPACE_GENERATION_CONFLICT": "The codespace changed in the meantime. Refresh the list and try again.",
+      "CODESPACE_RESOURCE_INVALID": "The request was not valid. Check the repository and the branch.",
+      "CODESPACE_NOT_FOUND": "The codespace was not found. It may already have been deleted.",
+      "CODESPACE_NOT_CONFIGURED": "Cloud codespaces are not configured on this instance.",
+      "CODESPACE_DELETE_CONFIRMATION_REQUIRED": "Deleting a codespace needs confirmation. Try again from the list.",
+      "CODESPACE_CONTROL_INVALID": "The control request was not valid.",
+      "CONNECTION_REQUIRED": "Connect GitHub first.",
+      "INSTALLATION_REQUIRED": "Install the Moira GitHub App first.",
+      "REPOSITORY_NOT_ALLOWED": "Moira may not use this repository. Grant it in the GitHub App's settings.",
+      "AUTH_REFRESH_FAILED": "GitHub access has expired. Reconnect GitHub.",
+      "AUTH_GRANT_REVOCATION_REQUIRED": "Revoke Moira's access on GitHub, then confirm here.",
+      "CREDENTIAL_UNREADABLE": "The stored GitHub access cannot be read. Reconnect GitHub.",
+      "AUTHORIZATION_FAILED": "GitHub authorization failed. Try again."
+    }
   },
   "lockedWidget": {
     "title": "{{count}} locked execution(s)",

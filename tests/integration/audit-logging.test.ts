@@ -238,7 +238,7 @@ describe("Audit Logging Integration", () => {
       userId: testUserId,
       action: AuditAction.SETTINGS_SET,
       resource: "settings",
-      resourceId: "ui.theme",
+      resourceId: "profile.display_name",
       metadata: { value: "dark", previousValue: "light" },
     });
 
@@ -246,7 +246,7 @@ describe("Audit Logging Integration", () => {
 
     expect(logs.length).toBeGreaterThan(0);
     expect(logs[0].action).toBe(AuditAction.SETTINGS_SET);
-    expect(logs[0].resourceId).toBe("ui.theme");
+    expect(logs[0].resourceId).toBe("profile.display_name");
   });
 
   test("settings:delete event logged", async () => {

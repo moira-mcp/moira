@@ -372,7 +372,9 @@ export class CodespaceResourceRepository {
           input.machine.memoryBytes,
           input.machine.storageBytes,
           input.now + input.policy.createDeadlineMs,
-          input.now + input.policy.remoteTtlMs,
+          // remoteExpiresAt: a persistent codespace has no remote expiry, and no query reads the
+          // column for one. The column serves legacy disposable rows, each stamped at its creation.
+          input.now,
           input.now,
           input.now,
         );

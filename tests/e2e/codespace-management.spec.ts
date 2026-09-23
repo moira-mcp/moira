@@ -288,6 +288,66 @@ test("codespaces are created, stopped and deleted with confirmation from Setting
   await testInfo.attach("codespace-management-narrow", { body: narrow, contentType: "image/png" });
 });
 
+test("a failed codespace request is explained in Russian, for a known and an unknown error code", async ({
+  page,
+}) => {
+  await loginAsAdmin(page);
+  // The server's own sentence is English and written for agents; the reader never sees it.
+  const failures = [
+    {
+      status: 429,
+      code: "CODESPACE_POLICY_LIMIT",
+      message: "A codespace quota or limit was reached",
+    },
+    {
+      status: 422,
+      code: "SOMETHING_THIS_BUILD_DOES_NOT_KNOW",
+      message: "Brand new English failure",
+    },
+  ];
+  await page.route("**/api/integrations/github", (route) =>
+    route.fulfill({ json: { success: true, data: connection } }),
+  );
+  await page.route("**/api/integrations/github/codespaces**", async (route) => {
+    const request = route.request();
+    if (request.method() === "POST") {
+      const failure = failures.shift()!;
+      await route.fulfill({
+        status: failure.status,
+        json: { success: false, error: { code: failure.code, message: failure.message } },
+      });
+      return;
+    }
+    await route.fulfill({
+      json: {
+        success: true,
+        data: {
+          readiness,
+          connection,
+          limits,
+          repositories: [{ repository_id: "101", name: "witqq/private-project", private: true }],
+          codespaces: [codespace()],
+        },
+      },
+    });
+  });
+
+  await page.goto(`${baseUrl}/settings?lang=ru#integrations-github`);
+  await page.getByTestId("github-codespace-ref").fill("feature/probe");
+
+  await page.getByTestId("github-codespace-create-submit").click();
+  await expect(
+    page.getByText(
+      "Достигнут лимит кодспейсов. Сколько занято и сколько разрешено, показано в разделе «Ваши лимиты».",
+    ),
+  ).toBeVisible();
+  await page.getByTestId("github-codespace-create-submit").click();
+  await expect(page.getByText("Запрос к кодспейсу отклонён")).toBeVisible();
+
+  await expect(page.getByText("A codespace quota or limit was reached")).toHaveCount(0);
+  await expect(page.getByText("Brand new English failure")).toHaveCount(0);
+});
+
 test("a codespace the server finished disappears from the card", async ({ page }) => {
   await loginAsAdmin(page);
   // The server answers a delete it can confirm at once with state "deleted" and then stops

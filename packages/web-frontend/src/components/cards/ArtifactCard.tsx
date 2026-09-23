@@ -21,8 +21,8 @@ export interface ArtifactCardData {
   expiresAt: string;
   createdAt: string;
   updatedAt: string;
-  /** Admin-only: display string for artifact owner */
-  userDisplay?: string;
+  /** Admin-only: the artifact's owner; `null` when the owner's account can no longer be found. */
+  userDisplay?: string | null;
   /** Admin-only: whether artifact is soft-deleted */
   deleted?: boolean;
 }
@@ -124,9 +124,9 @@ export const ArtifactCard: React.FC<ArtifactCardProps> = ({
               {formatDate(artifact.expiresAt)}
             </span>
           )}
-          {artifact.userDisplay && (
+          {artifact.userDisplay !== undefined && (
             <span className="text-[10px] text-muted-foreground font-mono truncate">
-              {artifact.userDisplay}
+              {artifact.userDisplay ?? t("common.unknownUser")}
             </span>
           )}
           <span className="text-[10px] text-muted-foreground ml-auto">
@@ -160,9 +160,9 @@ export const ArtifactCard: React.FC<ArtifactCardProps> = ({
         )}
       </div>
 
-      {artifact.userDisplay && (
+      {artifact.userDisplay !== undefined && (
         <span className="text-[11px] text-muted-foreground font-mono flex-shrink-0 hidden sm:block">
-          {artifact.userDisplay}
+          {artifact.userDisplay ?? t("common.unknownUser")}
         </span>
       )}
 

@@ -94,12 +94,6 @@ const OWNED_CATEGORIES = new Set([
   "codespaces",
 ]);
 
-/**
- * Built-in definitions the page replaces with real controls. `ui.theme` was a free-text field the
- * interface never read; the Preferences section's theme control is the one that works.
- */
-const HIDDEN_KEYS = new Set(["ui.theme"]);
-
 const noop = () => {};
 
 export const Settings: React.FC = () => {
@@ -172,7 +166,7 @@ export const Settings: React.FC = () => {
     [t],
   );
   const pageDefinitions = definitions.filter(
-    (definition) => !OWNED_CATEGORIES.has(definition.category) && !HIDDEN_KEYS.has(definition.key),
+    (definition) => !OWNED_CATEGORIES.has(definition.category),
   );
   const otherDefinitions = pageDefinitions.filter(
     (definition) => !channelSettingKeys.has(definition.key),

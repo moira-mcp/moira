@@ -239,14 +239,14 @@ Get user settings for category.
 
 Parameters:
 
-- `category`: Setting category (e.g., "telegram", "ui")
+- `category`: Setting category (e.g., "notifications", "codespaces")
 
 Response:
 
 ```typescript
 {
   success: boolean;
-  data: Record<string, any>; // { "ui.theme": "dark", ... }
+  data: Record<string, any>; // { "codespaces.idle_timeout_minutes": 30, ... }
   timestamp: string;
 }
 ```
@@ -475,7 +475,7 @@ Update setting value.
 
 Parameters:
 
-- `key`: Setting key (e.g., "ui.theme")
+- `key`: Setting key (e.g., "codespaces.idle_timeout_minutes")
 
 Request body:
 
@@ -603,6 +603,60 @@ delivery without returning secrets or destinations. An unknown or removed channe
 
 Authentication: Required
 
+## User Sessions API
+
+The browsers and devices signed in to the authenticated user's account. The Settings page's
+Security section reads and revokes them here.
+
+### GET /api/user/sessions
+
+List the user's unexpired sessions, one page at a time.
+
+Query parameters (all optional):
+
+- `search`: substring matched against the User-Agent header, IP address and country.
+- `sort`: `createdAt` (default) or `expiresAt`.
+- `sortOrder`: `desc` (default) or `asc`.
+- `limit`: page size, 1–100; default 20.
+- `offset`: number of sessions to skip; default 0.
+
+Response:
+
+```typescript
+{
+  success: true;
+  data: Array<{
+    id: string;
+    ipAddress: string | null; // null when the server did not record the address
+    userAgent: string | null; // the raw User-Agent header; null when none was sent
+    country: string | null; // ISO country code from the address lookup; null when it found none
+    createdAt: string;
+    expiresAt: string;
+    isCurrent: boolean; // the session making this request
+  }>;
+  total: number; // all matching sessions, not just this page
+  limit: number;
+  offset: number;
+  timestamp: string;
+}
+```
+
+A value the server does not know is `null`, never a placeholder word: the client words it in the
+reader's language or leaves it out.
+
+Authentication: Required
+
+### DELETE /api/user/sessions/:sessionId
+
+Sign out one of the user's other sessions. The action is audited.
+
+Errors:
+
+- 400: `sessionId` is the session making the request (sign out instead)
+- 404: no such session for this user
+
+Authentication: Required
+
 ## Codespace Connection API
 
 Website-only GitHub App authorization and connection management. These routes
@@ -693,11 +747,15 @@ one is revoked; a refused revocation stays queued and does not fail the callback
 GitHub's return after an App installation or update carries `installation_id` or
 `setup_action` and no Moira `state`. Its code is never exchanged: with a readable
 stored credential for a `connected` or `installation_required` connection, the
-route re-reads grants with that credential and redirects to Settings with
+route re-reads grants with that credential (whatever the snapshot's age, but not
+inside the throttle after a failed refresh) and redirects to Settings with
 `github=connected` or `github=installation_required`; otherwise it redirects to
-the absolute `/api/integrations/github/start` URL. Code, state and provider errors
-are never reflected in the response; nginx also omits this callback from access
-logs.
+the absolute `/api/integrations/github/start` URL. The route never answers with
+JSON: if even the connection status cannot be read, it redirects to the Settings
+path on this site under the web app prefix with `github=authorization_failed`. A
+failed re-authorization leaves an existing connection and its working credential as
+they were. Code, state and provider errors are never reflected in the response;
+nginx also omits this callback from access logs.
 
 Authentication: Required
 
@@ -1649,7 +1707,7 @@ Response:
 
 Errors:
 
-- 400: Current password incorrect
+- 400: Current password incorrect (`error.details.reason`: `CURRENT_PASSWORD_INCORRECT`)
 - 400: New password less than 6 characters
 - 400: New password same as current password
 
@@ -1660,6 +1718,43 @@ Security:
 - Revokes all sessions except current (user remains logged in)
 - Revokes all OAuth access tokens (requires re-authorization)
 - Creates audit log entry (USER_PASSWORD_CHANGED)
+
+### POST /api/user/set-password
+
+Give an account that signs in only through a social provider (for example GitHub) a password as
+well, through Better Auth's `setPassword`, which links a credential account. The Settings page
+offers it when the account has no password.
+
+Request:
+
+```typescript
+{
+  newPassword: string; // min 6 chars, max 128 chars
+}
+```
+
+Response:
+
+```typescript
+{
+  success: true;
+  message: "Password set";
+}
+```
+
+Errors:
+
+- 400: New password missing, less than 6 or more than 128 characters
+- 400: The account already has a password (`error.details.reason`: `PASSWORD_ALREADY_SET`)
+- 403: The session is older than Better Auth's freshness window; sign in again first
+  (`error.details.reason`: `SESSION_NOT_FRESH`)
+
+Authentication: Required
+
+Security:
+
+- Audited as `USER_PASSWORD_CHANGED` with `metadata.firstPassword: true`
+- The request body is never logged
 
 ### POST /api/user/resend-verification
 
@@ -2720,7 +2815,9 @@ Response:
 }
 ```
 
-User enrichment: `userEmail` and `userName` fields added by joining with user table.
+User enrichment: `userEmail` and `userName` fields added by joining with user table. Both are
+`null` when the entry has no user or the user no longer exists; the client shows a localized
+"unknown user" instead of a placeholder from the server.
 
 Errors:
 
@@ -3262,7 +3359,7 @@ Response:
       workflowId: string;
       workflowName: string | null; // Resolved from workflow table, null if workflow deleted
       userId: string;
-      userEmail: string;
+      userEmail: string | null; // null when the owning user no longer exists
       userName: string | null;
       status: string;
       currentNodeId: string | null;
@@ -3291,7 +3388,7 @@ Response includes `activeLock` when the execution has an active lock:
     id: string;
     workflowId: string;
     userId: string;
-    userEmail: string;
+    userEmail: string | null; // null when the owning user no longer exists
     userName: string | null;
     status: string;
     currentNodeId: string;
@@ -3709,7 +3806,7 @@ Response:
       expiresAt: number;
       createdAt: number;
       updatedAt: number;
-      userEmail: string;
+      userEmail: string | null; // null when the owning user no longer exists
       userName: string | null;
       userHandle: string | null;
     }>;

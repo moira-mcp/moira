@@ -31,7 +31,7 @@ interface AdminArtifactItem {
   createdAt: string;
   updatedAt: string;
   deleted: boolean;
-  userEmail: string;
+  userEmail: string | null;
   userName: string | null;
   userHandle: string | null;
 }
@@ -55,7 +55,7 @@ function toArtifactCardData(item: AdminArtifactItem): ArtifactCardData {
     expiresAt: item.expiresAt,
     createdAt: item.createdAt,
     updatedAt: item.updatedAt,
-    userDisplay: item.userName || item.userEmail,
+    userDisplay: item.userName || item.userEmail || null,
     deleted: item.deleted,
   };
 }
@@ -317,7 +317,7 @@ export const AdminArtifacts: React.FC = () => {
         title={t("admin.artifacts.delete.title")}
         description={t("admin.artifacts.delete.description", {
           name: selectedArtifact?.name,
-          user: selectedArtifact?.userEmail,
+          user: selectedArtifact?.userEmail ?? t("common.unknownUser"),
         })}
         confirmLabel={t("admin.artifacts.actions.delete")}
         cancelLabel={t("common.cancel")}

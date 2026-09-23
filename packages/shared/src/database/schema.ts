@@ -671,7 +671,7 @@ export const executionMutationAttempt = sqliteTable(
 // ===== Universal Settings System =====
 
 export const settingDefinition = sqliteTable("settingDefinition", {
-  key: text("key").primaryKey(), // telegram.bot_token, ui.theme, etc
+  key: text("key").primaryKey(), // telegram.bot_token, codespaces.idle_timeout_minutes, etc
   type: text("type").notNull(), // 'string' | 'number' | 'boolean' | 'json' | 'encrypted'
   category: text("category").notNull(), // 'telegram' | 'profile' | 'ui' | 'system'
   label: text("label").notNull(), // Display name for UI

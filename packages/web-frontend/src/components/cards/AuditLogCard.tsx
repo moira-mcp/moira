@@ -4,6 +4,7 @@
  */
 
 import React from "react";
+import { useTranslation } from "react-i18next";
 import { Shield, Globe, Monitor, User } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
@@ -47,6 +48,9 @@ function getActionColor(action: string): string {
 }
 
 export const AuditLogCard: React.FC<AuditLogCardProps> = ({ entry, compact = false, onClick }) => {
+  const { t } = useTranslation();
+  // A system entry has no user; an entry whose user can no longer be found still says so.
+  const who = entry.userName || entry.userEmail || (entry.userId ? t("common.unknownUser") : null);
   if (!compact) {
     return (
       <CardShell
@@ -69,10 +73,10 @@ export const AuditLogCard: React.FC<AuditLogCardProps> = ({ entry, compact = fal
           </span>
         )}
         <div className="flex-1" />
-        {(entry.userName || entry.userEmail) && (
+        {who && (
           <span className="flex items-center gap-0.5 text-[10px] text-muted-foreground flex-shrink-0 hidden md:flex">
             <User className="w-3 h-3" />
-            {entry.userName || entry.userEmail}
+            {who}
           </span>
         )}
         {entry.source && (
@@ -112,10 +116,10 @@ export const AuditLogCard: React.FC<AuditLogCardProps> = ({ entry, compact = fal
       )}
 
       <div className="flex items-center gap-2 mt-auto flex-wrap text-[10px] text-muted-foreground">
-        {(entry.userName || entry.userEmail) && (
+        {who && (
           <span className="flex items-center gap-0.5">
             <User className="w-3 h-3" />
-            {entry.userName || entry.userEmail}
+            {who}
           </span>
         )}
         {entry.source && (

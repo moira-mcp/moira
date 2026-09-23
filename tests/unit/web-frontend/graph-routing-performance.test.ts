@@ -4,7 +4,7 @@ import path from "node:path";
 
 interface Metric {
   preset: string;
-  milliseconds: number;
+  cpuMilliseconds: number;
   routes: number;
 }
 
@@ -32,8 +32,9 @@ describe("graph routing performance", () => {
     for (const metric of metrics) {
       expect(metric.routes).toBeGreaterThanOrEqual(299);
       // The old per-edge grid build + sorted frontier took about eight seconds in default,
-      // compact and flow. Four seconds keeps CI headroom while still distinguishing it.
-      expect(metric.milliseconds).toBeLessThan(4_000);
+      // compact and flow. Four seconds of CPU keeps CI headroom while still distinguishing it,
+      // and CPU time does not grow when a busy machine makes the benchmark wait for a core.
+      expect(metric.cpuMilliseconds).toBeLessThan(4_000);
     }
   }, 35000);
 });

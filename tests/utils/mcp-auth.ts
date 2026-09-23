@@ -655,7 +655,7 @@ export async function createAuthenticatedMCPClient(
  *
  * @example
  * const settings = await callMCPTool(client, 'get_user_settings', { category: 'ui' });
- * expect(settings).toHaveProperty('ui.theme');
+ * expect(settings).toHaveProperty('telegram.enabled');
  */
 export async function callMCPTool<T = any>(
   client: Client,

@@ -182,27 +182,38 @@ describe("GitHub codespace connection web routes", () => {
     },
   );
 
-  test("keeps callback inputs secret when status resolution fails before authorization", async () => {
-    const service = {
-      getStatus: () => {
-        throw new Error("codespace status unavailable");
-      },
-    } as unknown as CodespaceConnectionService;
+  test.each([
+    ["the site root", undefined, "/settings?github=authorization_failed#integrations-github"],
+    ["an app prefix", "/app/", "/app/settings?github=authorization_failed#integrations-github"],
+  ])(
+    "when the connection status cannot be read, the callback still lands the browser on Settings under %s, never on JSON",
+    async (_label, appBasePath, location) => {
+      const previous = process.env.APP_BASE_PATH;
+      if (appBasePath === undefined) delete process.env.APP_BASE_PATH;
+      else process.env.APP_BASE_PATH = appBasePath;
+      try {
+        const service = {
+          getStatus: () => {
+            throw new Error("codespace status unavailable");
+          },
+        } as unknown as CodespaceConnectionService;
 
-    const response = await request(appWith(service)).get(
-      "/api/integrations/github/callback?code=pre-try-code-secret&state=pre-try-state-secret",
-    );
+        const response = await request(appWith(service)).get(
+          "/api/integrations/github/callback?code=pre-try-code-secret&state=pre-try-state-secret",
+        );
 
-    expect(response.status).toBe(400);
-    expect(response.headers.location).toBeUndefined();
-    expect(response.headers["cache-control"]).toBe("no-store");
-    expect(response.headers["referrer-policy"]).toBe("no-referrer");
-    expect(JSON.stringify(response.body)).not.toMatch(/pre-try-code-secret|pre-try-state-secret/);
-    expect(response.body).toEqual({
-      success: false,
-      error: { code: "AUTHORIZATION_FAILED", message: "GitHub authorization failed" },
-    });
-  });
+        expect(response.status).toBe(303);
+        expect(response.headers.location).toBe(location);
+        expect(response.headers["content-type"] ?? "").not.toMatch(/json/);
+        expect(response.headers["cache-control"]).toBe("no-store");
+        expect(response.headers["referrer-policy"]).toBe("no-referrer");
+        expect(response.text).not.toMatch(/pre-try-code-secret|pre-try-state-secret/);
+      } finally {
+        if (previous === undefined) delete process.env.APP_BASE_PATH;
+        else process.env.APP_BASE_PATH = previous;
+      }
+    },
+  );
 
   test("generic callback errors omit sensitive query context", async () => {
     const app = express();

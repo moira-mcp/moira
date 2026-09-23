@@ -3,6 +3,7 @@
  * Tests the full token lifecycle: create → display → list → revoke
  */
 
+import { randomUUID } from "node:crypto";
 import { test, expect } from "./fixtures.js";
 import { login, createTestUser } from "./helpers/auth-helper.js";
 import { getTestBaseUrl } from "../utils/test-config.js";
@@ -10,11 +11,14 @@ import { getTestBaseUrl } from "../utils/test-config.js";
 const BASE_URL = getTestBaseUrl();
 
 test.describe("API Tokens Settings", () => {
-  const testEmail = `token-e2e-${Date.now()}@test.local`;
+  // Named where the user is created, with a random fragment: two workers can load this file in the
+  // same millisecond, and each must get a user of its own.
+  let testEmail: string;
   const testPassword = "TestPassword123!";
   const testName = "Token Test User";
 
   test.beforeAll(async () => {
+    testEmail = `token-e2e-${Date.now()}-${randomUUID().slice(0, 8)}@test.local`;
     const result = await createTestUser(testEmail, testPassword, testName, true);
     expect(result.success).toBe(true);
   });

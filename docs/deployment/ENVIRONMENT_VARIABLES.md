@@ -176,7 +176,6 @@ docker compose --profile codespaces up -d
 | `CODESPACE_MAX_ACTIVE_PER_USER`                |       4 | Codespaces a user holds, stopped included; maximum 64       |
 | `CODESPACE_MAX_ACTIVE_GLOBAL`                  |      16 | Codespaces held instance-wide, stopped included; max 1024   |
 | `CODESPACE_CREATE_THROTTLE_SECONDS`            |      60 | Minimum interval between creation reservations              |
-| `CODESPACE_REMOTE_TTL_MINUTES`                 |     120 | Creation expiry; used only by legacy disposable rows; min 5 |
 | `CODESPACE_PERSISTENT_RETENTION_DAYS`          |      30 | Provider retention requested for stopped codespaces; max 30 |
 | `CODESPACE_CREATE_DEADLINE_MINUTES`            |      15 | Create reconciliation deadline                              |
 | `CODESPACE_CLEANUP_DEADLINE_MINUTES`           |      15 | Lifecycle cleanup deadline and result retention             |
@@ -190,7 +189,7 @@ docker compose --profile codespaces up -d
 | `CODESPACE_MAX_OPERATION_STDERR_KB`            |     256 | Stderr carried by one answer; maximum 8192 KiB              |
 | `CODESPACE_MAX_RETAINED_OUTPUT_MB`             |      64 | Retained output per stream, in the codespace; maximum 4096  |
 | `CODESPACE_MAX_OPERATION_SECONDS`              |     900 | Bounded-command duration; maximum 900 seconds               |
-| `CODESPACE_MAX_BACKGROUND_OPERATION_HOURS`     |       4 | Background-command duration; maximum 24 hours               |
+| `CODESPACE_MAX_BACKGROUND_OPERATION_HOURS`     |       4 | Background duration; max 4 (GitHub's 240-min idle stop)     |
 | `CODESPACE_MAX_TRANSFER_FILE_MB`               |       4 | File/native payload ceiling; maximum 4 MiB                  |
 | `CODESPACE_MAX_TRANSFER_TOTAL_MB_PER_USER`     |     100 | Live private-transfer bytes per user; maximum 1024 MiB      |
 | `CODESPACE_MAX_TRANSFER_TOTAL_MB_GLOBAL`       |    1024 | Instance live private-transfer bytes; maximum 16384 MiB     |
@@ -460,7 +459,6 @@ CODESPACE_MAX_STORAGE_GB=32
 CODESPACE_MAX_ACTIVE_PER_USER=4
 CODESPACE_MAX_ACTIVE_GLOBAL=16
 CODESPACE_CREATE_THROTTLE_SECONDS=60
-CODESPACE_REMOTE_TTL_MINUTES=120
 CODESPACE_PERSISTENT_RETENTION_DAYS=30
 CODESPACE_CREATE_DEADLINE_MINUTES=15
 CODESPACE_CLEANUP_DEADLINE_MINUTES=15

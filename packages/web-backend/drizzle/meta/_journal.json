@@ -295,6 +295,13 @@
       "when": 1790000180000,
       "tag": "0040_codespace_activity",
       "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "7",
+      "when": 1790000240000,
+      "tag": "0041_retire_ui_theme_setting",
+      "breakpoints": true
     }
   ]
 }

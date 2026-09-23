@@ -714,6 +714,26 @@ export class CodespaceConnectionRepository {
     );
   }
 
+  /**
+   * Puts back the status and error a reservation replaced, when the authorization that reserved the
+   * connection never committed its credential. A connection that moved on since (committed,
+   * disconnected) is left alone.
+   */
+  restoreReservedConnection(input: {
+    userId: string;
+    connectionId: string;
+    status: CodespaceConnectionStatus;
+    lastErrorCode: CodespaceConnectionErrorCode | null;
+    now: number;
+  }): void {
+    this.sqlite
+      .prepare(
+        `UPDATE codespaceConnection SET status = ?, lastErrorCode = ?, updatedAt = ?
+         WHERE id = ? AND userId = ? AND status = 'connecting'`,
+      )
+      .run(input.status, input.lastErrorCode, input.now, input.connectionId, input.userId);
+  }
+
   markCredentialFailed(
     userId: string,
     connectionId: string,

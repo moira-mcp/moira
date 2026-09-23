@@ -152,6 +152,7 @@ For component patterns, color token rules, and new-page checklist: `docs/DESIGN-
 ### Token Categories
 
 - **Core:** `--background`, `--foreground`, `--card`, `--popover`, `--primary`, `--secondary`, `--muted`, `--accent`, `--destructive` (each with `-foreground` variant)
+- **Destructive roles:** `--destructive` is destructive text and accents (text, borders, rings, tints) and must stay readable on dark surfaces; `--destructive-fill` (`bg-destructive-fill`) is a solid destructive fill — buttons, badges, the failed status, danger counters — with `--destructive-foreground` as the text on it. `tests/unit/web-frontend/destructive-contrast.test.ts` holds both pairs to WCAG AA in each theme from `globals.css`.
 - **Semantic:** `--success`, `--warning`, `--info` (each with `-foreground` variant)
 - **Chart:** `--chart-1` through `--chart-5`
 - **Sidebar:** Aliases to main theme variables (`--sidebar: var(--background)`)
@@ -333,15 +334,15 @@ One page at `/settings` whose sections are all always mounted. `Settings.tsx` do
 **Sections** (each a `SettingsSection`: icon, heading, one-sentence description, optional
 `HelpPopover` and actions; the anchor is the section `id`):
 
-| Anchor                | Section             | `data-testid`                   | Content                                                                                                                                                                                         |
-| --------------------- | ------------------- | ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `account`             | Account             | `settings-section-profile`      | `ProfileSettings`: name, email with verification badge, handle with a help popover on why changing it breaks links and a confirmation                                                           |
-| `security`            | Security & sign-in  | `settings-section-security`     | `SecuritySettings` password form; an Active Sessions subsection (`settings-section-sessions`, help popover) with `SessionsSettings`                                                             |
-| `notifications`       | Notifications       | `settings-section-dynamic`      | One `CommunicationChannelCard` per channel, a help popover, the **Telegram setup** tour button when Telegram is present, an empty state without channels                                        |
-| `integrations-github` | GitHub & Codespaces | `settings-section-integrations` | Help popover, **Setup guide** tour, and the connection, Cloud codespaces, Automatic pause and Your limits cards under one `GitHubCodespacesProvider`                                            |
-| `connected-apps`      | Connected apps      | `settings-section-oauth`        | `OAuthSettings` with a help popover                                                                                                                                                             |
-| `api-tokens`          | API tokens          | `settings-section-api-tokens`   | `ApiTokensSettings` with a help popover on when a token is needed, the Bearer header and the one-time display                                                                                   |
-| `preferences`         | Preferences         | `settings-section-preferences`  | `PreferencesSettings` theme (Light/Dark/System, via `useTheme`) and interface language, both kept in this browser; then the generic editor for remaining definitions (`settings-section-other`) |
+| Anchor                | Section             | `data-testid`                   | Content                                                                                                                                                                                                                                                  |
+| --------------------- | ------------------- | ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `account`             | Account             | `settings-section-profile`      | `ProfileSettings`: name, email with verification badge, handle with a help popover on why changing it breaks links and a confirmation                                                                                                                    |
+| `security`            | Security & sign-in  | `settings-section-security`     | `SecuritySettings`: the change-password form, or for an account that signs in only through a social provider, how it signs in and a set-password form; an Active Sessions subsection (`settings-section-sessions`, help popover) with `SessionsSettings` |
+| `notifications`       | Notifications       | `settings-section-dynamic`      | One `CommunicationChannelCard` per channel, a help popover, the **Telegram setup** tour button when Telegram is present, an empty state without channels                                                                                                 |
+| `integrations-github` | GitHub & Codespaces | `settings-section-integrations` | Help popover, **Setup guide** tour, and the connection, Cloud codespaces, Automatic pause and Your limits cards under one `GitHubCodespacesProvider`                                                                                                     |
+| `connected-apps`      | Connected apps      | `settings-section-oauth`        | `OAuthSettings` with a help popover                                                                                                                                                                                                                      |
+| `api-tokens`          | API tokens          | `settings-section-api-tokens`   | `ApiTokensSettings` with a help popover on when a token is needed, the Bearer header and the one-time display                                                                                                                                            |
+| `preferences`         | Preferences         | `settings-section-preferences`  | `PreferencesSettings` theme (Light/Dark/System, via `useTheme`) and interface language, both kept in this browser; then the generic editor for remaining definitions (`settings-section-other`)                                                          |
 
 **Tours:** `settingsTours.ts` defines the page tour, the GitHub & Codespaces setup tour and the
 Telegram setup tour, run by the shared `Walkthrough` and addressed by `?tour=<id>&guide=<step>`, so a
@@ -354,7 +355,16 @@ keyboard-operable card, optionally with a documentation link), `useSectionHighli
 turns a User-Agent header into a browser, operating system and device kind. `lib/docs-path.ts`
 (`localizedDocsPath`) maps a root documentation path (`/docs/...`) to the reader's language
 (`/ru/docs/...` for Russian) and leaves any other URL unchanged; the sidebar documentation link,
-the Quick Start card and the notification channel cards use it.
+the Quick Start card and the notification channel cards use it. `lib/codespace-error-message.ts`
+(`codespaceErrorMessage`) turns a failed codespace or GitHub-connection request into a message in
+the reader's language: each stable error `code` has its own message under `common.codespaceErrors`,
+and anything else, including a network failure, shows the caller's localized generic message; the
+server's English detail is never shown. The Cloud codespaces card and the admin Codespaces
+controls use it for their failure toasts.
+
+Admin lists and cards that show a user's email (executions, artifacts, the audit log and the
+execution inspector) receive `null` for a user that no longer exists and show the localized
+`common.unknownUser`.
 
 **Section details:**
 
@@ -414,7 +424,7 @@ global/provider kill switches with a reason field and confirmed stop/resume.
 - Saving a mapped setting refreshes descriptor state from the server. Definitions not mapped to a
   communication channel render in Preferences, except categories another section owns (`profile`,
   `security`, `oauth`, `sessions`, `api-tokens`, and `codespaces`, which the Automatic pause card
-  edits) and `ui.theme`, which the theme control replaces.
+  edits). The theme is a browser preference (the Preferences theme control), not a user setting.
 - Channel fields and test controls have accessible names; capability and state labels remain visible
   without hover.
 
@@ -435,7 +445,8 @@ PreferencesSettings.tsx
 - Saves one edited dynamic value through bulk PUT /api/settings and applies the returned saved/refused result
 - Tests one channel through POST /api/notifications/channels/:channelId/test with no request body
 - Updates profile via PATCH /api/user/profile
-- Changes password via POST /api/user/change-password
+- Reads the account's sign-in methods via Better Auth `listAccounts` (a `credential` account means it has a password; on failure the page assumes it does)
+- Changes password via POST /api/user/change-password, or sets a first password for a social-only account via POST /api/user/set-password; refusals are shown by their `reason` code (`CURRENT_PASSWORD_INCORRECT`, `PASSWORD_ALREADY_SET`, `SESSION_NOT_FRESH`)
 - Resends verification via POST /api/user/resend-verification
 - OAuth consents via GET/DELETE /api/user/oauth-consents
 - Sessions via GET/DELETE /api/user/sessions
@@ -2155,7 +2166,14 @@ All animations stay under 300ms for interactions, 150ms for micro-interactions.
 
 ### Visual Regression Tests
 
-`tests/e2e/visual-regression.spec.ts` captures 18 baseline screenshots (9 pages × 2 themes). Update baselines after intentional UI changes: `npx testfold e2e -- visual-regression.spec.ts --update-snapshots`.
+`tests/e2e/visual-regression.spec.ts` captures each principal page in the light and the dark theme and
+compares it with the committed chromium baselines. It selects the theme through the `theme` storage
+key `useTheme` reads. Because the application scrolls inside `main#main-content`, the viewport is
+grown to the scrolled content for a page whose length does not depend on data (Settings), while a
+data page is captured at a fixed height and may be clipped below its live data. Regions whose
+content depends on data other tests create are masked at a fixed size. The tolerance is an
+absolute pixel budget rather than a ratio, so a small change on a tall page still fails. Update
+baselines after intentional UI changes: `npx testfold e2e -- visual-regression.spec.ts --update-snapshots`.
 
 ## File Structure Reference
 
@@ -2173,7 +2191,7 @@ frontend/
 │   ├── hooks/                   # useWorkflowData, useLayoutState, use-mobile
 │   ├── services/                # api-client.ts HTTP communication
 │   ├── utils/                   # workflow-transformer.ts
-│   ├── lib/                     # utils.ts (cn()), user-agent.ts (device names), docs-path.ts (localizedDocsPath)
+│   ├── lib/                     # utils.ts (cn()), user-agent.ts, docs-path.ts, codespace-error-message.ts
 │   └── styles/                  # globals.css (Tailwind v4 + semantic tokens)
 ├── components.json              # shadcn/ui configuration
 ├── package.json                 # Frontend dependencies and scripts

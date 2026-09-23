@@ -23,6 +23,8 @@ import { describe, expect, test } from "@jest/globals";
 import { LAYOUT_PRESETS } from "../../../packages/web-frontend/src/components/diagram/layoutPreset.js";
 import { MODES } from "../../../packages/web-frontend/src/components/run/modes.js";
 import { GUIDE_STEPS } from "../../../packages/web-frontend/src/components/run/Walkthrough.js";
+import en from "../../../packages/web-frontend/src/locales/en.json";
+import ru from "../../../packages/web-frontend/src/locales/ru.json";
 import { flowGuideSteps } from "../../../packages/web-frontend/src/components/flow/guideSteps.js";
 import { SETTINGS_TOURS } from "../../../packages/web-frontend/src/pages/settings/settingsTours.js";
 
@@ -262,5 +264,18 @@ describe("the Settings page's components", () => {
       }
     }
     expect(offenders).toEqual([]);
+  });
+});
+
+describe("Russian wording", () => {
+  test("the sessions list and the admin user view say «IP-адрес», as the sessions search does", () => {
+    expect(ru.pages.settings.sessions.ipAddress).toBe("IP-адрес");
+    expect(ru.pages.settings.sessions.searchPlaceholder).toContain("IP-адрес");
+    expect(JSON.stringify(ru)).not.toContain("IP адрес");
+  });
+
+  test("a user who can no longer be found is named in the reader's language", () => {
+    expect(en.common.unknownUser).toBe("Unknown user");
+    expect(ru.common.unknownUser).toBe("Неизвестный пользователь");
   });
 });

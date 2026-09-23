@@ -70,7 +70,11 @@ export function CommunicationChannelCard({
           <div className="min-w-0 space-y-1">
             <div className="flex flex-wrap items-center gap-2">
               <CardTitle className="text-base break-words">{title}</CardTitle>
-              <Badge variant={channel.state === "ready" ? "default" : "outline"}>
+              <Badge
+                variant={channel.state === "ready" ? "default" : "outline"}
+                data-testid={`communication-channel-${channel.id}-state`}
+                data-state={channel.state}
+              >
                 {t(`pages.settings.channels.states.${channel.state}`)}
               </Badge>
               {channel.origin === "extension" && (

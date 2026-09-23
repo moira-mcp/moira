@@ -7,6 +7,7 @@
  * notes and global settings use, so the walk through it here is the same walk.
  */
 
+import { randomUUID } from "node:crypto";
 import { test, expect } from "./fixtures.js";
 import { login, createTestUser } from "./helpers/auth-helper.js";
 import { getTestBaseUrl, getAdminCredentials } from "../utils/test-config.js";
@@ -20,14 +21,17 @@ import {
 
 const BASE_URL = getTestBaseUrl();
 
+// The email is set where the user is created, with a random fragment: two workers can load this
+// file in the same millisecond, and each must get a user of its own.
 const testUser = {
-  email: `playbooks-test-${Date.now()}@example.com`,
+  email: "",
   password: "TestPassword123!",
   name: "Playbooks Test User",
 };
 
 test.describe("Playbooks", () => {
   test.beforeAll(async () => {
+    testUser.email = `playbooks-test-${Date.now()}-${randomUUID().slice(0, 8)}@example.com`;
     const result = await createTestUser(testUser.email, testUser.password, testUser.name, true);
     if (!result.success) {
       throw new Error(`Failed to create test user: ${result.error}`);

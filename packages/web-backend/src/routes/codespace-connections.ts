@@ -1,6 +1,7 @@
 import { Router } from "express";
 import {
   CodespaceConnectionError,
+  codespaceGitHubSettingsPath,
   type CodespaceConnectionService,
   type CodespaceConnectionView,
 } from "@mcp-moira/shared";
@@ -8,10 +9,12 @@ import type { AuthenticatedRequest } from "../types/express-types.js";
 import { asyncHandler } from "../middleware/error-middleware.js";
 import { getCodespaceConnectionService } from "../services/codespace-connection-service.js";
 
+/** The Settings URL, absolute or a path on this site, carrying an outcome the page explains. */
 function redirectWithOutcome(settingsUrl: string, outcome: string): string {
-  const url = new URL(settingsUrl);
+  const relative = settingsUrl.startsWith("/");
+  const url = new URL(settingsUrl, relative ? "http://this-site.invalid" : undefined);
   url.searchParams.set("github", outcome);
-  return url.toString();
+  return relative ? `${url.pathname}${url.search}${url.hash}` : url.toString();
 }
 
 /**
@@ -165,14 +168,12 @@ export function createCodespaceConnectionRoutes(
       );
     } catch {
       // GitHub code and state must never enter the shared error/logging projection.
-      if (settingsUrl) {
-        res.redirect(303, redirectWithOutcome(settingsUrl, "authorization_failed"));
-        return;
-      }
-      res.status(400).json({
-        success: false,
-        error: { code: "AUTHORIZATION_FAILED", message: "GitHub authorization failed" },
-      });
+      // A browser navigation lands on a page, never on JSON: when not even the status could be
+      // read, the Settings path on this site needs nothing but the app prefix.
+      res.redirect(
+        303,
+        redirectWithOutcome(settingsUrl ?? codespaceGitHubSettingsPath(), "authorization_failed"),
+      );
     }
   });
 

@@ -3,6 +3,7 @@
  * Tests admin page: list tokens, search/filter, admin revoke
  */
 
+import { randomUUID } from "node:crypto";
 import { test, expect } from "./fixtures.js";
 import { loginAsAdmin, createTestUser, getSessionCookieHeader } from "./helpers/auth-helper.js";
 import { getTestBaseUrl, getTestFetchUrl } from "../utils/test-config.js";
@@ -28,12 +29,20 @@ async function createTokenViaApi(
 }
 
 test.describe("Admin Token Management", () => {
-  const userEmail = `admin-tokens-e2e-${Date.now()}@test.local`;
   const userPassword = "TestPassword123!";
-  const tokenName = `admin-e2e-token-${Date.now()}`;
+  // Set by beforeAll, and fresh on every run of it. Under fullyParallel a worker runs this hook
+  // again whenever it comes back to this file after tests from other files, in the same module
+  // instance: names fixed when the module loaded would then create a second token with the same
+  // name, and the search would find two.
+  let userEmail: string;
+  let tokenName: string;
   let createdTokenId: string;
 
   test.beforeAll(async () => {
+    const runId = `${Date.now()}-${randomUUID().slice(0, 8)}`;
+    userEmail = `admin-tokens-e2e-${runId}@test.local`;
+    tokenName = `admin-e2e-token-${runId}`;
+
     // Create test user and a token
     const result = await createTestUser(userEmail, userPassword, "Token E2E User", true);
     expect(result.success).toBe(true);

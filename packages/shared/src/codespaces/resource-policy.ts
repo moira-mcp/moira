@@ -1,4 +1,8 @@
+import { CODESPACE_IDLE_TIMEOUT_MINUTES } from "./resource-repository.js";
 import type { CodespaceResourcePolicy } from "./resource-types.js";
+
+/** GitHub's longest idle timeout: it stops a codespace without activity after this many minutes. */
+const GITHUB_MAX_IDLE_MINUTES = CODESPACE_IDLE_TIMEOUT_MINUTES.maximum;
 
 export type CodespacePolicyEnvironment = (name: string) => string | undefined;
 
@@ -108,15 +112,29 @@ export function evaluateCodespaceResourcePolicy(
     8192,
   );
   // A command started in the background is bounded by its own ceiling, which is a codespace-side
-  // lifetime rather than a response deadline and is therefore expressed in hours. Its shipped value
-  // matches the longest idle lifetime a codespace can be given, since a command stops with its
-  // codespace; its minimum of one hour already exceeds any bounded-command ceiling.
+  // lifetime rather than a response deadline and is therefore expressed in hours. A command stops
+  // with its codespace, and GitHub stops a silent codespace after at most 240 minutes, so no value
+  // above 4 hours can be honoured and one is refused rather than promised; the minimum of one hour
+  // already exceeds any bounded-command ceiling.
+  const backgroundHoursRaw = environment("CODESPACE_MAX_BACKGROUND_OPERATION_HOURS");
+  if (
+    backgroundHoursRaw !== undefined &&
+    backgroundHoursRaw !== "" &&
+    Number.isSafeInteger(Number(backgroundHoursRaw)) &&
+    Number(backgroundHoursRaw) * 60 > GITHUB_MAX_IDLE_MINUTES
+  ) {
+    throw new Error(
+      `CODESPACE_MAX_BACKGROUND_OPERATION_HOURS cannot exceed ${GITHUB_MAX_IDLE_MINUTES / 60}: ` +
+        `GitHub stops a codespace after at most ${GITHUB_MAX_IDLE_MINUTES} minutes without ` +
+        "activity, and a background command stops with its codespace",
+    );
+  }
   const backgroundOperationMs = scaledInteger(
     "CODESPACE_MAX_BACKGROUND_OPERATION_HOURS",
     4,
     3_600_000,
     1,
-    24,
+    GITHUB_MAX_IDLE_MINUTES / 60,
   );
   // A codespace that fell asleep is started by the operation that needs it, and that operation waits
   // rather than failing. The wait is bounded so a caller is never held indefinitely by a provider
@@ -158,7 +176,6 @@ export function evaluateCodespaceResourcePolicy(
     maxActivePerUser,
     maxActiveGlobal,
     createThrottleMs: scaledInteger("CODESPACE_CREATE_THROTTLE_SECONDS", 60, 1000),
-    remoteTtlMs: scaledInteger("CODESPACE_REMOTE_TTL_MINUTES", 120, 60_000, 5),
     persistentRetentionMs: persistentRetentionDays * 24 * 60 * 60_000,
     createDeadlineMs: scaledInteger("CODESPACE_CREATE_DEADLINE_MINUTES", 15, 60_000),
     cleanupDeadlineMs: scaledInteger("CODESPACE_CLEANUP_DEADLINE_MINUTES", 15, 60_000),
@@ -192,7 +209,8 @@ export const CODESPACE_CONNECTOR_LIMITS = {
   maxInputBytes: 4 * 1024 * 1024,
   maxOutputBytes: 8 * 1024 * 1024,
   maxDurationMs: 15 * 60_000,
-  maxBackgroundMs: 24 * 60 * 60_000,
+  /** GitHub's longest idle timeout: a background command cannot outlive its codespace. */
+  maxBackgroundMs: GITHUB_MAX_IDLE_MINUTES * 60_000,
   maxRetainedOutputBytes: 4 * 1024 * 1024 * 1024,
   maxTransferFileBytes: 4 * 1024 * 1024,
 } as const;

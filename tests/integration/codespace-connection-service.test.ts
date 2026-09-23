@@ -373,6 +373,49 @@ describe("CodespaceConnectionService with real SQLite persistence", () => {
     expect(reconnect.getStatus("user-a")).toMatchObject({ state: "connected" });
   });
 
+  test("a database error that rolls back the credential commit leaves the previous credential usable", async () => {
+    await connect();
+    // Reauthorizing from installation_required, the state in which Moira offers it: the previous
+    // credential still works, and the user is reconnecting to pick up a new installation.
+    sqlite
+      .prepare("UPDATE codespaceConnection SET status = 'installation_required' WHERE userId = ?")
+      .run("user-a");
+    github.exchangeCode = async () => ({
+      accessToken: "ghu_successor-secret",
+      refreshToken: "ghr_successor-secret",
+      accessTokenExpiresAt: 2_000_000,
+      refreshTokenExpiresAt: 9_000_000,
+    });
+    // The commit's transaction fails as a real database error does: nothing of it is written.
+    repository.completeConnection = () => {
+      throw new Error("SQLITE_BUSY: database is locked");
+    };
+    const reconnect = new CodespaceConnectionService({
+      repository,
+      config: () => config,
+      client: () => github,
+      now: () => now,
+      randomState: () => "state_rollback_abcdefghijklmnopqrstuvwxyz0123456789",
+    });
+    const authorizationUrl = await reconnect.beginAuthorization("user-a", "web-session-a");
+
+    await expect(
+      reconnect.completeAuthorization({
+        userId: "user-a",
+        sessionToken: "web-session-a",
+        state: new URL(authorizationUrl).searchParams.get("state")!,
+        code: "github-code-rollback",
+      }),
+    ).rejects.toMatchObject({ code: "AUTHORIZATION_FAILED" });
+
+    // Not marked failed, and not left half-reserved: the connection is as it was before.
+    expect(reconnect.getStatus("user-a")).toMatchObject({ state: "installation_required" });
+    // The previous credential still serves requests: directly, or through its own refresh token
+    // when its access token is near expiry. The rolled-back successor was never stored.
+    const token = await reconnect.getAccessToken("user-a", { allowInstallationRequired: true });
+    expect(["ghu_initial-secret", "ghu_refreshed-secret"]).toContain(token);
+  });
+
   test("the superseded credential is queued for revocation in the same commit as its successor", async () => {
     await connect();
     sqlite
@@ -456,6 +499,44 @@ describe("CodespaceConnectionService with real SQLite persistence", () => {
     expect(service.getStatus("user-a")).toMatchObject({ state: "connected" });
     expect(github.exchangeCalls).toBe(1);
     expect(github.revokedTokens).toEqual([]);
+  });
+
+  test("a stateless installation return inside the grant-refresh failure window makes no provider call", async () => {
+    // The return carries no one-time state, so anyone can send a signed-in browser to it; it must
+    // not be a way around the throttle that follows a failed refresh.
+    await connect();
+    now += 10 * 60_000 + 1;
+    github.enumerationFails = true;
+    await expect(service.refreshGrants("user-a")).resolves.toEqual({
+      refreshed: false,
+      stale: true,
+    });
+    github.enumerationFails = false;
+    github.installationCalls = 0;
+    github.repositoryListCalls = 0;
+    github.refreshCalls = 0;
+    github.userCalls = 0;
+
+    await expect(service.completeInstallationReturn("user-a")).resolves.toBe("connected");
+    await expect(service.completeInstallationReturn("user-a")).resolves.toBe("connected");
+
+    expect(github.installationCalls).toBe(0);
+    expect(github.repositoryListCalls).toBe(0);
+    expect(github.refreshCalls).toBe(0);
+    expect(github.userCalls).toBe(0);
+  });
+
+  test("a normal installation return refreshes the grants exactly once, even inside the grants cache", async () => {
+    await connect();
+    github.installationCalls = 0;
+    github.repositories = [{ id: "102", fullName: "witqq/just-installed", private: false }];
+
+    await expect(service.completeInstallationReturn("user-a")).resolves.toBe("connected");
+
+    expect(github.installationCalls).toBe(1);
+    expect(service.getStatus("user-a").repositories).toEqual([
+      expect.objectContaining({ fullName: "witqq/just-installed" }),
+    ]);
   });
 
   test("an installation return without a usable credential asks for authorization", async () => {

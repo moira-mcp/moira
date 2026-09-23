@@ -43,7 +43,6 @@ const policy: CodespaceResourcePolicy = {
   maxActivePerUser: 1,
   maxActiveGlobal: 2,
   createThrottleMs: 0,
-  remoteTtlMs: 60_000,
   createDeadlineMs: 30_000,
   cleanupDeadlineMs: 30_000,
   claimLeaseMs: 5_000,
@@ -1101,12 +1100,37 @@ describe("durable persistent codespace lifecycle", () => {
     const value = fixture();
     try {
       const created = await value.service.create("user-1", "301", "refs/heads/main");
-      value.advance(policy.remoteTtlMs);
+      // Its stored remote expiry is its creation time, already past: only the persistent retention
+      // keeps it out of expiry.
+      value.advance(60_000);
       const restartedService = value.createService();
       await expect(restartedService.reconcileOnce("user-1")).resolves.toBe(false);
       expect(value.repository.getOwned("user-1", created.resource.id)?.state).toBe("usable");
       expect(value.provider.stopCalls).not.toHaveBeenCalled();
       expect(value.provider.deleteCalls).not.toHaveBeenCalled();
+    } finally {
+      value.sqlite.close();
+    }
+  });
+
+  test("a legacy disposable codespace still expires at the time stamped when it was created", async () => {
+    const value = fixture();
+    try {
+      const created = await value.service.create("user-1", "301", "refs/heads/main");
+      value.sqlite
+        .prepare(
+          "UPDATE codespaceResource SET retentionPolicy = 'legacy_disposable', remoteExpiresAt = ? WHERE id = ?",
+        )
+        .run(now + 60_000, created.resource.id);
+
+      await expect(value.createService().reconcileOnce("user-1")).resolves.toBe(false);
+      expect(value.repository.getOwned("user-1", created.resource.id)?.state).toBe("usable");
+
+      value.advance(60_000);
+      await expect(value.createService().reconcileOnce("user-1")).resolves.toBe(true);
+      const expired = value.repository.getOwned("user-1", created.resource.id);
+      expect(expired?.state).toBe("cleanup_pending");
+      expect(expired?.lastOutcome).toBe("remote_ttl_expired");
     } finally {
       value.sqlite.close();
     }

@@ -19,6 +19,7 @@ import {
   searchWorkflow,
 } from "@mcp-moira/shared";
 import type { GraphNode, WorkflowGraph } from "@mcp-moira/workflow-engine";
+import { cpuTimeMs } from "../../utils/cpu-time.js";
 
 // Helper to create a minimal valid workflow
 function createWorkflow(overrides: Partial<WorkflowGraph> = {}): WorkflowGraph {
@@ -735,10 +736,9 @@ describe("WorkflowQueryService", () => {
         ] as GraphNode[],
       });
 
-      const startedAt = performance.now();
-      const analysis = analyzeVariableUsage(workflow);
+      const { result: analysis, cpuMs } = cpuTimeMs(() => analyzeVariableUsage(workflow));
 
-      expect(performance.now() - startedAt).toBeLessThan(100);
+      expect(cpuMs).toBeLessThan(100);
       expect(analysis.review.usages).toContainEqual(
         expect.objectContaining({ nodeId: "decision", field: "condition" }),
       );
@@ -876,9 +876,9 @@ describe("WorkflowQueryService", () => {
         ] as GraphNode[],
       });
 
-      const startedAt = performance.now();
-      expect(searchWorkflow(workflow, "(a+)+$")).toEqual([]);
-      expect(performance.now() - startedAt).toBeLessThan(100);
+      const { result, cpuMs } = cpuTimeMs(() => searchWorkflow(workflow, "(a+)+$"));
+      expect(result).toEqual([]);
+      expect(cpuMs).toBeLessThan(100);
     });
   });
 });

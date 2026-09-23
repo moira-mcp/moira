@@ -22,6 +22,7 @@ export function StatCard({ label, value, icon: Icon, trend, className, onClick }
         className,
       )}
       onClick={onClick}
+      data-testid="stat-card"
       role={onClick ? "button" : undefined}
       tabIndex={onClick ? 0 : undefined}
       onKeyDown={

@@ -27,6 +27,7 @@ import {
   MAX_ARTIFACTS_PER_USER,
   AuditAction,
 } from "@mcp-moira/shared";
+import { cpuTimeMs } from "../../utils/cpu-time.js";
 
 const MIGRATIONS_PATH = path.join(process.cwd(), "packages/web-backend/drizzle");
 
@@ -156,10 +157,9 @@ describe("ArtifactService", () => {
 
     it("rejects long unterminated tag-like content in bounded time", () => {
       const content = "<a".repeat(50_000);
-      const startedAt = performance.now();
-      const result = validateHtmlContent(content);
+      const { result, cpuMs } = cpuTimeMs(() => validateHtmlContent(content));
 
-      expect(performance.now() - startedAt).toBeLessThan(100);
+      expect(cpuMs).toBeLessThan(100);
       expect(result.valid).toBe(false);
     });
   });

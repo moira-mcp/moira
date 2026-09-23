@@ -269,9 +269,9 @@ export interface CodespaceReadinessView {
     active_resources: number;
     max_active_resources: number;
     active_operations: number;
-    max_active_operations: number | null;
+    max_active_operations: number;
     transfer_live_bytes: number;
-    max_transfer_live_bytes: number | null;
+    max_transfer_live_bytes: number;
   };
   checked_at: number;
 }

@@ -19,6 +19,7 @@ import {
   HANDLE_MIN_LENGTH,
   HANDLE_MAX_LENGTH,
 } from "@mcp-moira/shared";
+import { cpuTimeMs } from "../../utils/cpu-time.js";
 
 describe("Slug Validation", () => {
   describe("validateSlug", () => {
@@ -157,10 +158,11 @@ describe("Slug Validation", () => {
     });
 
     it("normalizes long punctuation runs without regex backtracking", () => {
-      const startedAt = performance.now();
-      const slug = generateSlugFromName(`alpha${"-".repeat(50_000)}omega`);
+      const { result: slug, cpuMs } = cpuTimeMs(() =>
+        generateSlugFromName(`alpha${"-".repeat(50_000)}omega`),
+      );
 
-      expect(performance.now() - startedAt).toBeLessThan(100);
+      expect(cpuMs).toBeLessThan(100);
       expect(slug).toBe("alpha-omega");
     });
 
@@ -257,10 +259,11 @@ describe("Handle Validation", () => {
 
   describe("generateHandleFromEmail", () => {
     it("normalizes long punctuation runs in bounded time", () => {
-      const startedAt = performance.now();
-      const handle = generateHandleFromEmail(`john${"-".repeat(50_000)}doe@example.com`);
+      const { result: handle, cpuMs } = cpuTimeMs(() =>
+        generateHandleFromEmail(`john${"-".repeat(50_000)}doe@example.com`),
+      );
 
-      expect(performance.now() - startedAt).toBeLessThan(100);
+      expect(cpuMs).toBeLessThan(100);
       expect(handle).toBe("john-doe");
     });
   });

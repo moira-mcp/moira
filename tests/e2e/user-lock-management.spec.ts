@@ -17,16 +17,20 @@ const SEED_PREFIX = "e2e-lock-mgmt";
 
 test.describe("User Lock Management UI", () => {
   // Seeded data IDs for cleanup
-  const seededWorkflowId = `${SEED_PREFIX}-wf-${Date.now()}`;
+  let seededWorkflowId: string;
   const seededExecutionId = randomUUID();
   const seededLockId = randomUUID();
   const seededUserId = randomUUID();
-  const seededUserEmail = `${SEED_PREFIX}-${Date.now()}@example.com`;
+  let seededUserEmail: string;
   const seededUserPassword = "LockTest123!";
   // For regular user test
   let regularUserId: string | undefined;
 
   test.beforeAll(async () => {
+    // Named where the data is created, unique per worker even within one millisecond.
+    const runId = `${Date.now()}-${randomUUID().slice(0, 8)}`;
+    seededWorkflowId = `${SEED_PREFIX}-wf-${runId}`;
+    seededUserEmail = `${SEED_PREFIX}-${runId}@example.com`;
     const now = Date.now();
 
     // 1. Seed a workflow
@@ -44,7 +48,7 @@ test.describe("User Lock Management UI", () => {
 
     execSqliteInDocker(
       `INSERT INTO workflow (id, userId, slug, name, description, version, graph, visibility, createdAt, updatedAt) ` +
-        `VALUES ('${seededWorkflowId}', 'system-admin', '${SEED_PREFIX}-wf-${now}', '${SEED_PREFIX} Test Workflow', 'E2E lock test', '1.0.0', '${graph}', 'public', ${now}, ${now});`,
+        `VALUES ('${seededWorkflowId}', 'system-admin', '${SEED_PREFIX}-wf-${runId}', '${SEED_PREFIX} Test Workflow', 'E2E lock test', '1.0.0', '${graph}', 'public', ${now}, ${now});`,
     );
 
     // 2. Create a test user via API for regular user login tests
@@ -63,7 +67,7 @@ test.describe("User Lock Management UI", () => {
     if (!regularUserId) {
       execSqliteInDocker(
         `INSERT OR IGNORE INTO user (id, email, name, handle, emailVerified, createdAt, updatedAt) ` +
-          `VALUES ('${seededUserId}', '${seededUserEmail}', 'Lock Test User', '${SEED_PREFIX}-user-${now}', 1, '${new Date(now).toISOString()}', '${new Date(now).toISOString()}');`,
+          `VALUES ('${seededUserId}', '${seededUserEmail}', 'Lock Test User', '${SEED_PREFIX}-user-${runId}', 1, '${new Date(now).toISOString()}', '${new Date(now).toISOString()}');`,
       );
     }
 
@@ -215,13 +219,17 @@ test.describe("User Lock Management UI", () => {
 
 test.describe("Web UI Lock Creation", () => {
   const lockCreatePrefix = "e2e-lock-create";
-  const lockCreateWorkflowId = `${lockCreatePrefix}-wf-${Date.now()}`;
+  let lockCreateWorkflowId: string;
   const lockCreateExecutionId = randomUUID();
-  const lockCreateUserEmail = `${lockCreatePrefix}-${Date.now()}@example.com`;
+  let lockCreateUserEmail: string;
   const lockCreateUserPassword = "LockCreate123!";
   let lockCreateUserId: string | undefined;
 
   test.beforeAll(async () => {
+    // Named where the data is created, unique per worker even within one millisecond.
+    const runId = `${Date.now()}-${randomUUID().slice(0, 8)}`;
+    lockCreateWorkflowId = `${lockCreatePrefix}-wf-${runId}`;
+    lockCreateUserEmail = `${lockCreatePrefix}-${runId}@example.com`;
     const now = Date.now();
 
     // 1. Seed a workflow
@@ -246,7 +254,7 @@ test.describe("Web UI Lock Creation", () => {
 
     execSqliteInDocker(
       `INSERT INTO workflow (id, userId, slug, name, description, version, graph, visibility, createdAt, updatedAt) ` +
-        `VALUES ('${lockCreateWorkflowId}', 'system-admin', '${lockCreatePrefix}-wf-${now}', '${lockCreatePrefix} Test Workflow', 'E2E lock create test', '1.0.0', '${graph}', 'public', ${now}, ${now});`,
+        `VALUES ('${lockCreateWorkflowId}', 'system-admin', '${lockCreatePrefix}-wf-${runId}', '${lockCreatePrefix} Test Workflow', 'E2E lock create test', '1.0.0', '${graph}', 'public', ${now}, ${now});`,
     );
 
     // 2. Create a test user
@@ -454,14 +462,18 @@ test.describe("Web UI Lock Creation", () => {
 
 test.describe("Unlock Flow", () => {
   const unlockPrefix = "e2e-unlock";
-  const unlockWorkflowId = `${unlockPrefix}-wf-${Date.now()}`;
+  let unlockWorkflowId: string;
   const unlockExecutionId = randomUUID();
   const unlockLockId = randomUUID();
-  const unlockUserEmail = `${unlockPrefix}-${Date.now()}@example.com`;
+  let unlockUserEmail: string;
   const unlockUserPassword = "Unlock123!";
   let unlockUserId: string | undefined;
 
   test.beforeAll(async () => {
+    // Named where the data is created, unique per worker even within one millisecond.
+    const runId = `${Date.now()}-${randomUUID().slice(0, 8)}`;
+    unlockWorkflowId = `${unlockPrefix}-wf-${runId}`;
+    unlockUserEmail = `${unlockPrefix}-${runId}@example.com`;
     const now = Date.now();
 
     const graph = JSON.stringify({
@@ -481,7 +493,7 @@ test.describe("Unlock Flow", () => {
 
     execSqliteInDocker(
       `INSERT INTO workflow (id, userId, slug, name, description, version, graph, visibility, createdAt, updatedAt) ` +
-        `VALUES ('${unlockWorkflowId}', 'system-admin', '${unlockPrefix}-wf-${now}', '${unlockPrefix} Workflow', 'E2E unlock', '1.0.0', '${graph}', 'public', ${now}, ${now});`,
+        `VALUES ('${unlockWorkflowId}', 'system-admin', '${unlockPrefix}-wf-${runId}', '${unlockPrefix} Workflow', 'E2E unlock', '1.0.0', '${graph}', 'public', ${now}, ${now});`,
     );
 
     const result = await createTestUser(unlockUserEmail, unlockUserPassword, "Unlock User", true);
@@ -592,14 +604,18 @@ test.describe("Unlock Flow", () => {
 
 test.describe("Locked Executions Widget", () => {
   const widgetPrefix = "e2e-widget";
-  const widgetWorkflowId = `${widgetPrefix}-wf-${Date.now()}`;
+  let widgetWorkflowId: string;
   const widgetExecutionId = randomUUID();
   const widgetLockId = randomUUID();
-  const widgetUserEmail = `${widgetPrefix}-${Date.now()}@example.com`;
+  let widgetUserEmail: string;
   const widgetUserPassword = "Widget123!";
   let widgetUserId: string | undefined;
 
   test.beforeAll(async () => {
+    // Named where the data is created, unique per worker even within one millisecond.
+    const runId = `${Date.now()}-${randomUUID().slice(0, 8)}`;
+    widgetWorkflowId = `${widgetPrefix}-wf-${runId}`;
+    widgetUserEmail = `${widgetPrefix}-${runId}@example.com`;
     const now = Date.now();
 
     const graph = JSON.stringify({
@@ -623,7 +639,7 @@ test.describe("Locked Executions Widget", () => {
 
     execSqliteInDocker(
       `INSERT INTO workflow (id, userId, slug, name, description, version, graph, visibility, createdAt, updatedAt) ` +
-        `VALUES ('${widgetWorkflowId}', 'system-admin', '${widgetPrefix}-wf-${now}', '${widgetPrefix} Workflow', 'E2E widget', '1.0.0', '${graph}', 'public', ${now}, ${now});`,
+        `VALUES ('${widgetWorkflowId}', 'system-admin', '${widgetPrefix}-wf-${runId}', '${widgetPrefix} Workflow', 'E2E widget', '1.0.0', '${graph}', 'public', ${now}, ${now});`,
     );
 
     const result = await createTestUser(widgetUserEmail, widgetUserPassword, "Widget User", true);

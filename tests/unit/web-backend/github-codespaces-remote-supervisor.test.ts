@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from "@jest/globals";
+import { CODESPACE_CONNECTOR_LIMITS } from "@mcp-moira/shared";
 import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
@@ -374,7 +375,11 @@ describe("direct Codespace operation supervisor", () => {
     const value = fixture();
     mkdirSync(join(value.repository, "regex"));
     writeFileSync(join(value.repository, "regex", "adversarial.txt"), `${"a".repeat(10_000)}!`);
-    const startedAt = Date.now();
+    // The deadline is shortened to 100 ms in the supervisor under test. Matching `(a+)+$` on this
+    // line is exponential, so a search the deadline did not stop would never return and the test
+    // would fail on its timeout; a truncated result is the deadline's own evidence, independent of
+    // how busy the machine running the test is.
+    let deadlineShortened = false;
     const result = await request(
       value.environment,
       {
@@ -391,14 +396,21 @@ describe("direct Codespace operation supervisor", () => {
           maxBytes: 64 * 1024,
         },
       },
-      (source) =>
-        source.replace("const SEARCH_DEADLINE_MS = 5_000;", "const SEARCH_DEADLINE_MS = 100;"),
+      (source) => {
+        const shortened = source.replace(
+          "const SEARCH_DEADLINE_MS = 5_000;",
+          "const SEARCH_DEADLINE_MS = 100;",
+        );
+        deadlineShortened = shortened !== source;
+        return shortened;
+      },
     );
+    // Otherwise the shipped five-second deadline would stop it too, and the test would prove less.
+    expect(deadlineShortened).toBe(true);
     expect(result).toEqual({
       state: "succeeded",
       value: { action: "search", matches: [], truncated: true },
     });
-    expect(Date.now() - startedAt).toBeLessThan(3_000);
   });
 
   test("rejects traversal, symlink, hard-link, special-file and stale write targets", async () => {
@@ -1255,6 +1267,38 @@ if (process.env.MOIRA_TEST_HOLD_FILE_RUNNER === "1") {
       state: "succeeded",
       stdout: "long\n",
       exitCode: 0,
+    });
+  });
+
+  test("admits a command timer up to the connector's 240-minute ceiling and refuses one past it", async () => {
+    // The supervisor runs inside the codespace and cannot import the shared limits, so its own
+    // ceiling is written out; this keeps the two equal. A command stops with its codespace, and
+    // GitHub stops a silent codespace after at most 240 minutes.
+    const ceiling = CODESPACE_CONNECTOR_LIMITS.maxBackgroundMs;
+    expect(ceiling).toBe(240 * 60_000);
+    const value = fixture();
+    const execute = (remoteMarker: string, timeoutMs: number) =>
+      request(value.environment, {
+        action: "execute",
+        version: 1,
+        remoteMarker,
+        repositoryFullName: "owner/repository",
+        argv: ["/bin/echo", "bounded"],
+        cwd: ".",
+        stdin: "",
+        timeoutMs,
+        maxStdoutBytes: 4096,
+        maxStderrBytes: 4096,
+        maxRetainedBytes: 1024 * 1024,
+      });
+
+    await expect(execute(`moira-op-${"c".repeat(32)}`, ceiling + 1)).rejects.toThrow();
+
+    const admitted = `moira-op-${"d".repeat(32)}`;
+    await expect(execute(admitted, ceiling)).resolves.toEqual({ state: "running" });
+    await expect(inspectUntilTerminal(value.environment, admitted)).resolves.toMatchObject({
+      state: "succeeded",
+      stdout: "bounded\n",
     });
   });
 

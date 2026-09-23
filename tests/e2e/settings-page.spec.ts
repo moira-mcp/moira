@@ -5,7 +5,7 @@
  */
 
 import { test, expect } from "./fixtures.js";
-import { loginAsAdmin } from "./helpers/auth-helper.js";
+import { createTestUser, login, loginAsAdmin } from "./helpers/auth-helper.js";
 import { getTestBaseUrl } from "../utils/test-config.js";
 const BASE_URL = getTestBaseUrl();
 
@@ -132,49 +132,43 @@ test.describe("Settings Page — Flat Layout", () => {
   });
 
   test("boolean toggle works correctly", async ({ page }) => {
-    await loginAsAdmin(page);
-    await page.waitForLoadState("domcontentloaded");
-
-    await page.goto(`${BASE_URL}/settings`);
-    await page.waitForLoadState("domcontentloaded");
-    await page.waitForSelector('h1:has-text("Settings")');
+    // A user of its own: the shared admin's Telegram settings are changed by other tests and
+    // suites, so its starting state would depend on which of them ran last.
+    const email = `settings-toggle-${Date.now()}-${test.info().workerIndex}-${Math.random()
+      .toString(36)
+      .slice(2, 7)}@example.com`;
+    await createTestUser(email, "ToggleUser123!", "Toggle User", true);
+    await login(page, email, "ToggleUser123!");
+    await page.goto(`${BASE_URL}/settings?lang=en`);
 
     const dynamicSection = page.getByTestId("settings-section-dynamic");
     await expect(dynamicSection).toBeVisible({ timeout: 5000 });
     await dynamicSection.scrollIntoViewIfNeeded();
 
-    const checkbox = page.locator('[data-testid="user-channel-telegram-telegram.enabled-input"]');
-    await expect(checkbox).toBeVisible();
-    const initialState = await checkbox.isChecked();
+    // A new user has notifications on and no bot yet: the channel needs setup.
+    const state = page.getByTestId("communication-channel-telegram-state");
+    const checkbox = page.getByTestId("user-channel-telegram-telegram.enabled-input");
+    await expect(checkbox).toBeChecked();
+    await expect(state).toHaveAttribute("data-state", "incomplete");
 
-    // Toggle
     await checkbox.click();
-
-    const saveButton = page.locator('[data-testid="user-channel-telegram-telegram.enabled-save"]');
+    const saveButton = page.getByTestId("user-channel-telegram-telegram.enabled-save");
     await expect(saveButton).toBeEnabled({ timeout: 5000 });
     await saveButton.click();
     await expect(saveButton).toBeDisabled({ timeout: 15000 });
-    await expect(
-      page
-        .getByTestId("communication-channel-telegram")
-        .getByText(initialState ? "Disabled" : "Setup required", { exact: true }),
-    ).toBeVisible({ timeout: 5000 });
+    await expect(state).toHaveAttribute("data-state", "disabled");
+    await expect(state).toHaveText("Disabled");
 
     // Reload and verify persisted
     await page.reload();
-    await page.waitForLoadState("domcontentloaded");
-    await page.waitForSelector('h1:has-text("Settings")');
-
-    const section = page.getByTestId("settings-section-dynamic");
-    await expect(section).toBeVisible({ timeout: 5000 });
-    await section.scrollIntoViewIfNeeded();
-
-    const checkboxAfter = page.locator(
-      '[data-testid="user-channel-telegram-telegram.enabled-input"]',
+    await expect(page.getByTestId("settings-section-dynamic")).toBeVisible({ timeout: 5000 });
+    await expect(
+      page.getByTestId("user-channel-telegram-telegram.enabled-input"),
+    ).not.toBeChecked();
+    await expect(page.getByTestId("communication-channel-telegram-state")).toHaveAttribute(
+      "data-state",
+      "disabled",
     );
-    await expect(checkboxAfter).toBeVisible();
-    const finalState = await checkboxAfter.isChecked();
-    expect(finalState).toBe(!initialState);
   });
 
   test("settings save and persist after reload", async ({ page }) => {

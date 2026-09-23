@@ -68,9 +68,9 @@ export const ExecutionCard: React.FC<ExecutionCardProps> = ({
               {execution.errorCount} {t("common.errorsLabel", { defaultValue: "errors" })}
             </Badge>
           )}
-          {execution.userDisplay && (
+          {execution.userDisplay !== undefined && (
             <span className="text-[10px] text-muted-foreground font-mono">
-              {execution.userDisplay}
+              {execution.userDisplay ?? t("common.unknownUser")}
             </span>
           )}
           <span className="text-[10px] text-muted-foreground ml-auto">
@@ -100,9 +100,9 @@ export const ExecutionCard: React.FC<ExecutionCardProps> = ({
         <span className="text-[10px] text-muted-foreground font-mono hidden md:inline">
           {execution.id.slice(0, 8)}
         </span>
-        {execution.userDisplay && (
+        {execution.userDisplay !== undefined && (
           <span className="text-[11px] text-muted-foreground font-mono hidden sm:block">
-            {execution.userDisplay}
+            {execution.userDisplay ?? t("common.unknownUser")}
           </span>
         )}
       </div>

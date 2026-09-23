@@ -47,11 +47,11 @@ const extensionRouting: Definition = {
   validation: JSON.stringify({ type: "object" }),
 };
 
-const builtInTheme: Definition = {
-  key: "ui.theme",
+const builtInSetting: Definition = {
+  key: "test.flag",
   type: "string",
   category: "ui",
-  label: "Theme",
+  label: "Test flag",
   required: false,
   adminOnly: false,
   protected: true,
@@ -151,7 +151,7 @@ beforeEach(() => {
   for (const definition of [
     extensionToken,
     extensionRouting,
-    builtInTheme,
+    builtInSetting,
     builtInTelegramToken,
     adminSecret,
   ]) {
@@ -185,24 +185,24 @@ describe("Extension settings HTTP behavior", () => {
 
   test("built-in shallow validation still rejects a value of the wrong type", async () => {
     const response = await request(appWithUser("user-3"))
-      .put("/api/settings/ui.theme")
+      .put("/api/settings/test.flag")
       .send({ value: { not: "a string" } });
 
     expect(response.status).toBe(400);
-    expect(stored.has("ui.theme")).toBe(false);
+    expect(stored.has("test.flag")).toBe(false);
   });
 
   test("a mixed bulk request persists allowed values and names every refusal", async () => {
     const app = appWithUser("user-4");
     const response = await request(app).put("/api/settings").send({
-      "ui.theme": "dark",
+      "test.flag": "dark",
       "corporate-messenger.admin-token": "forbidden",
       "unknown.key": "missing",
     });
     const read = await request(app).get("/api/settings");
 
     expect(response.status).toBe(207);
-    expect(response.body.data.saved).toEqual({ "ui.theme": "dark" });
+    expect(response.body.data.saved).toEqual({ "test.flag": "dark" });
     expect(response.body.data.refused).toEqual([
       {
         key: "corporate-messenger.admin-token",
@@ -210,7 +210,7 @@ describe("Extension settings HTTP behavior", () => {
       },
       { key: "unknown.key", reason: "Setting definition not found: unknown.key" },
     ]);
-    expect(read.body.data).toEqual({ "ui.theme": "dark" });
+    expect(read.body.data).toEqual({ "test.flag": "dark" });
   });
 
   test("a refused Telegram token cannot trigger webhook registration", async () => {

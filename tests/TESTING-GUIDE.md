@@ -275,13 +275,20 @@ test("performance", () => {
   console.log(`Render took ${Date.now() - start}ms`);
 });
 
-// ✅ RIGHT — enforces a performance budget
+// ✅ RIGHT — enforces a budget on the work itself
+import { cpuTimeMs } from "../utils/cpu-time";
+
 test("performance", () => {
-  const start = Date.now();
-  renderDashboard();
-  expect(Date.now() - start).toBeLessThan(500);
+  const { cpuMs } = cpuTimeMs(() => renderDashboard());
+  expect(cpuMs).toBeLessThan(500);
 });
 ```
+
+A test that proves synchronous work is bounded (no catastrophic regex backtracking, linear rather
+than quadratic) measures the process's CPU time with `tests/utils/cpu-time.ts`, not the wall
+clock: on a loaded machine the process waits for a CPU, and that wait fails a wall-clock budget
+without saying anything about the code. A deadline or timeout is tested with fake timers instead of
+real waiting.
 
 ### A6: Copy-Paste Duplication
 

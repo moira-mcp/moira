@@ -1,6 +1,7 @@
 import { describe, expect, it } from "@jest/globals";
 import {
   CodespaceObservabilityService,
+  effectiveCodespaceLimits,
   isCodespaceReadinessDegraded,
   metricsRegistry,
   projectPublicCodespaceReadiness,
@@ -34,7 +35,6 @@ const policy: CodespaceResourcePolicy = {
   maxActivePerUser: 1,
   maxActiveGlobal: 4,
   createThrottleMs: 0,
-  remoteTtlMs: 60_000,
   createDeadlineMs: 30_000,
   cleanupDeadlineMs: 30_000,
   claimLeaseMs: 5_000,
@@ -119,6 +119,23 @@ describe("codespace observability", () => {
     ).resolves.toBe(45);
     await expect(gauge("moira_codespace_active", { kind: "resource" })).resolves.toBe(2);
     await expect(gauge("moira_codespace_transfer_live_bytes")).resolves.toBe(4608);
+  });
+
+  it("reports the enforced operation and live-transfer ceilings when the policy leaves them unset", async () => {
+    const unset: CodespaceResourcePolicy = { ...policy };
+    delete unset.maxConcurrentOperationsGlobal;
+    delete unset.maxTransferBytesGlobal;
+    const enforced = effectiveCodespaceLimits(unset);
+
+    const view = await new CodespaceObservabilityService(
+      dependencies({ policy: () => unset }),
+    ).readiness();
+
+    // The ceilings enforcement applies, never an absent value an operator would read as "no limit".
+    expect(view.usage.max_active_operations).toBe(enforced.operations.maxConcurrentGlobal);
+    expect(view.usage.max_transfer_live_bytes).toBe(enforced.transfers.maxBytesGlobal);
+    expect(view.usage.max_active_operations).not.toBeNull();
+    expect(view.usage.max_transfer_live_bytes).not.toBeNull();
   });
 
   it.each([

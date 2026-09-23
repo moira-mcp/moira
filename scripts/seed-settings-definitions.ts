@@ -64,23 +64,6 @@ export const initialDefinitions: Omit<SettingDefinition, "createdAt" | "updatedA
     protected: true, // Critical system setting
   },
 
-  // ===== UI Settings =====
-  {
-    key: "ui.theme",
-    type: "string",
-    category: "ui",
-    label: "Theme",
-    description: "Color theme preference (light, dark, or system)",
-    defaultValue: "system",
-    required: false,
-    validation: JSON.stringify({
-      type: "string",
-      enum: ["light", "dark", "system"],
-    }),
-    adminOnly: false,
-    protected: false, // User setting, can be deleted
-  },
-
   // ===== Profile Settings =====
   {
     key: "profile.display_name",

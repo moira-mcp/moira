@@ -85,6 +85,7 @@ describe("requestBodyLogger middleware", () => {
     it("classifies every password-changing request as sensitive", () => {
       expect(isSensitiveRequestBodyPath("/api/user/change-password")).toBe(true);
       expect(isSensitiveRequestBodyPath("/api/user/change-password-forced")).toBe(true);
+      expect(isSensitiveRequestBodyPath("/api/user/set-password")).toBe(true);
       expect(isSensitiveRequestBodyPath("/api/admin/users/target-id/temporary-password")).toBe(
         true,
       );

@@ -67,14 +67,6 @@ export const MCP_TEST_DATA = {
 
   // Settings test data
   SETTINGS_DATA: {
-    UI_THEME_DARK: {
-      key: "ui.theme",
-      value: "dark",
-    },
-    UI_THEME_LIGHT: {
-      key: "ui.theme",
-      value: "light",
-    },
     TELEGRAM_BOT_TOKEN: {
       key: "telegram.bot_token",
       value: "1234567890:ABCdefGHIjklMNOpqrsTUVwxyz",

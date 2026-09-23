@@ -18,12 +18,13 @@ const LOGGABLE_METHODS = ["POST", "PUT", "PATCH"];
 /**
  * Patterns for sensitive endpoints that should NOT log request body
  * - /api/auth/** - all Better Auth endpoints (credentials, tokens)
- * - /api/user/change-password - password changes
+ * - /api/user/change-password, /api/user/set-password - password changes
  * - /api/public/workflows - workflow tokens
  */
 const SENSITIVE_PATTERNS = [
   /^\/api\/auth\/.*/,
   /^\/api\/user\/change-password(?:-forced)?$/,
+  /^\/api\/user\/set-password$/,
   /^\/api\/admin\/users\/[^/]+\/temporary-password$/,
   /^\/api\/public\/workflows$/,
 ];

@@ -1,4 +1,3 @@
-import { performance } from "node:perf_hooks";
 import {
   estimateStepHeight,
   GRAPH_PRESET_DIRECTIONS,
@@ -59,11 +58,13 @@ const heights = new Map(
     ];
   }),
 );
-const metrics: Array<{ preset: string; milliseconds: number; routes: number }> = [];
+// CPU time of this process, not the wall clock: on a loaded machine the process waits for a CPU,
+// and that wait is not the layout's cost. The benchmark runs alone in its own process.
+const metrics: Array<{ preset: string; cpuMilliseconds: number; routes: number }> = [];
 
 for (const preset of LAYOUT_PRESETS) {
   const directions = GRAPH_PRESET_DIRECTIONS[preset];
-  const started = performance.now();
+  const started = process.cpuUsage();
   const layout = await layoutGraph(
     model,
     directions.outer,
@@ -75,7 +76,10 @@ for (const preset of LAYOUT_PRESETS) {
   if (missing.length > 0) throw new Error(`Missing return routes: ${missing.join(", ")}`);
   metrics.push({
     preset,
-    milliseconds: performance.now() - started,
+    cpuMilliseconds: (() => {
+      const used = process.cpuUsage(started);
+      return (used.user + used.system) / 1000;
+    })(),
     routes: Object.keys(layout.routes).length,
   });
 }

@@ -32,6 +32,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { ConfirmDialog } from "@/components/confirm-dialog";
+import { codespaceErrorMessage } from "@/lib/codespace-error-message";
 
 const BUSY_STATES: ReadonlySet<CodespaceSummaryView["state"]> = new Set([
   "create_pending",
@@ -55,15 +56,14 @@ const TONE_DOT: Record<ReturnType<typeof stateTone>, string> = {
   running: "bg-emerald-500",
   idle: "bg-muted-foreground/50",
   busy: "bg-amber-500 animate-pulse",
-  problem: "bg-red-500",
+  problem: "bg-destructive",
 };
 
 const TONE_BADGE: Record<ReturnType<typeof stateTone>, string> = {
   running: "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
   idle: "border-border bg-muted text-muted-foreground",
   busy: "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400",
-  // The palette the other tones use: the destructive token is too dark on a dark card to read.
-  problem: "border-red-500/30 bg-red-500/10 text-red-700 dark:text-red-400",
+  problem: "border-destructive/30 bg-destructive/10 text-destructive",
 };
 
 export const GitHubCodespaceManagement: React.FC = () => {
@@ -122,10 +122,9 @@ export const GitHubCodespaceManagement: React.FC = () => {
     void load({ silent: true });
   };
 
-  const failureMessage = (error: unknown): string => {
-    const message = error instanceof Error ? error.message : "";
-    return message || t("pages.settings.codespaces.requestFailed");
-  };
+  // The server's own sentence is English and meant for agents; the reader gets the code's message.
+  const failureMessage = (error: unknown): string =>
+    codespaceErrorMessage(error, t, "pages.settings.codespaces.requestFailed");
 
   const create = async () => {
     if (!repositoryId || !ref.trim()) return;

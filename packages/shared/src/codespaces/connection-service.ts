@@ -694,7 +694,20 @@ export class CodespaceConnectionService {
         }
       }
       if (connectionId) {
-        this.dependencies.repository.markCredentialFailed(input.userId, connectionId, this.now());
+        if (previous && previousCredential && previous.connection.id === connectionId) {
+          // The credential that worked before is still the stored one: whatever failed (the new
+          // credential, or a database error that rolled the commit back) did not touch it, so the
+          // connection returns to where it was instead of being marked failed.
+          this.dependencies.repository.restoreReservedConnection({
+            userId: input.userId,
+            connectionId,
+            status: previous.connection.status,
+            lastErrorCode: previous.connection.lastErrorCode,
+            now: this.now(),
+          });
+        } else {
+          this.dependencies.repository.markCredentialFailed(input.userId, connectionId, this.now());
+        }
       }
       if (error instanceof CodespaceConnectionError) throw error;
       throw new CodespaceConnectionError("AUTHORIZATION_FAILED", "GitHub authorization failed");
@@ -755,7 +768,10 @@ export class CodespaceConnectionService {
     ) {
       return "authorization_required";
     }
-    await this.refreshGrants(userId, { force: true });
+    // Refresh now whatever the cache age, which is what the return is for, but never past the
+    // throttle after a failed refresh: the return carries no one-time state, so a cross-site page
+    // could otherwise send a signed-in browser here again and again to drive provider calls.
+    await this.refreshGrants(userId, { ignoreAge: true });
     const state = this.getStatus(userId).state;
     const outcome =
       state === "connected" || state === "installation_required" ? state : "authorization_required";
@@ -780,7 +796,12 @@ export class CodespaceConnectionService {
    */
   async refreshGrants(
     userId: string,
-    options: { force?: boolean } = {},
+    options: {
+      /** Refresh whatever the cache age, and even inside the throttle after a failed refresh. */
+      force?: boolean;
+      /** Refresh whatever the cache age, but still wait out the throttle after a failed refresh. */
+      ignoreAge?: boolean;
+    } = {},
   ): Promise<{ refreshed: boolean; stale: boolean }> {
     const config = this.dependencies.config();
     if (config.state !== "available") return { refreshed: false, stale: false };
@@ -798,7 +819,7 @@ export class CodespaceConnectionService {
     // While the App is not installed yet the user is usually installing it right now, so a read does
     // not wait out the cache: the state is rare and short-lived, and the answer changes the page.
     const awaitingInstallation = snapshot.status === "installation_required";
-    if (!options.force && !awaitingInstallation && age < GRANTS_MAX_AGE_MS) {
+    if (!options.force && !options.ignoreAge && !awaitingInstallation && age < GRANTS_MAX_AGE_MS) {
       return { refreshed: false, stale: false };
     }
     const failedAt = this.failedGrantRefreshes.get(snapshot.id);

@@ -151,7 +151,6 @@ export interface CodespaceResourcePolicy {
   maxActivePerUser: number;
   maxActiveGlobal: number;
   createThrottleMs: number;
-  remoteTtlMs: number;
   /** How long an operation may wait for a stopped codespace it started to become usable. */
   startWaitMs: number;
   persistentRetentionMs?: number;
@@ -203,6 +202,10 @@ export interface CodespaceResourceRecord {
     "unknown" | "provisioning" | "running" | "stopped" | "deleting" | "absent" | "failed";
   generation: number;
   createDeadlineAt: number;
+  /**
+   * When a legacy disposable codespace expires, stamped when it was created. A persistent codespace
+   * never expires; the column holds its creation time and is not read for it.
+   */
   remoteExpiresAt: number;
   cleanupDeadlineAt: number | null;
   claimId: string | null;

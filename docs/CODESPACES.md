@@ -223,10 +223,9 @@ so a codespace a person works in directly is paused once no agent has used it fo
 the owner's timeout; owners who work in their codespaces directly turn auto-pause
 off. Independently of Moira, GitHub stops a codespace after at most 240 minutes
 without user or terminal activity, with auto-pause on or off. That limit equals
-the default `CODESPACE_MAX_BACKGROUND_OPERATION_HOURS`, so GitHub can still stop a
-codespace under a background command that produces no terminal activity near the
-end of its permitted run, and under any such command allowed to run longer by a
-raised setting.
+the `CODESPACE_MAX_BACKGROUND_OPERATION_HOURS` ceiling, which is why a higher value
+is refused at startup; GitHub can still stop a codespace under a background command
+that produces no terminal activity near the end of its permitted run.
 
 Provider observation lists, in each tick, the codespaces of a bounded number of
 users who have a running codespace and whose last listing is at least ten
@@ -342,8 +341,8 @@ rather than the generic command failure. A file operation is not reported this w
 journal instead, which is what keeps an interrupted write recoverable.
 
 The fixed connector ceilings are 4 MiB of raw input, 8 MiB for each output
-stream and 15 minutes for a bounded command; a background command's own timer may
-run up to a day. A remote job request is bounded separately and never waits for a
+stream and 15 minutes for a bounded command; a background command is bounded by
+GitHub's 240-minute idle stop, since it cannot outlive its codespace. A remote job request is bounded separately and never waits for a
 command to end. Runtime policy may lower these ceilings but
 cannot raise them. An argv contains 1–128 non-empty arguments; each argument is
 at most 16 KiB, and the relative cwd is at most 4096 bytes.
@@ -798,7 +797,6 @@ not supplied:
 | `CODESPACE_MAX_ACTIVE_PER_USER`                |       4 | Codespaces a user may hold, stopped ones included            |
 | `CODESPACE_MAX_ACTIVE_GLOBAL`                  |      16 | Codespaces held across the instance, stopped ones included   |
 | `CODESPACE_CREATE_THROTTLE_SECONDS`            |      60 | Minimum interval between creation reservations               |
-| `CODESPACE_REMOTE_TTL_MINUTES`                 |     120 | Creation expiry; only legacy disposable rows use it          |
 | `CODESPACE_PERSISTENT_RETENTION_DAYS`          |      30 | Codespaces stopped-codespace retention requested at creation |
 | `CODESPACE_CREATE_DEADLINE_MINUTES`            |      15 | Create reconciliation deadline                               |
 | `CODESPACE_CLEANUP_DEADLINE_MINUTES`           |      15 | Lifecycle cleanup deadline and terminal-result retention     |
@@ -812,7 +810,7 @@ not supplied:
 | `CODESPACE_MAX_OPERATION_STDERR_KB`            |     256 | Stderr carried by one answer                                 |
 | `CODESPACE_MAX_RETAINED_OUTPUT_MB`             |      64 | Retained output per stream before a command is stopped       |
 | `CODESPACE_MAX_OPERATION_SECONDS`              |     900 | Maximum bounded-command duration                             |
-| `CODESPACE_MAX_BACKGROUND_OPERATION_HOURS`     |       4 | Maximum background-command duration                          |
+| `CODESPACE_MAX_BACKGROUND_OPERATION_HOURS`     |       4 | Background-command duration; 1 to 4, higher is refused       |
 | `CODESPACE_MAX_TRANSFER_FILE_MB`               |       4 | Maximum native or file payload; maximum 4 MiB                |
 | `CODESPACE_MAX_TRANSFER_TOTAL_MB_PER_USER`     |     100 | Live private-transfer bytes per user                         |
 | `CODESPACE_MAX_TRANSFER_TOTAL_MB_GLOBAL`       |    1024 | Live private-transfer bytes across the instance              |
@@ -828,7 +826,8 @@ transfer pairs. Transfer byte and in-flight aggregates cannot be lower than the
 single-file ceiling.
 Configured operation input cannot
 exceed 4096 KiB, either output stream cannot exceed 8192 KiB, command duration
-cannot exceed 900 seconds and persistent retention cannot exceed 30 days.
+cannot exceed 900 seconds, background-command duration cannot exceed 4 hours (GitHub's
+240-minute idle stop) and persistent retention cannot exceed 30 days.
 
 ## Website authorization API
 
@@ -856,7 +855,10 @@ the user installs or updates the App, GitHub returns the browser to the callback
 with `installation_id`/`setup_action` and no Moira state. Nothing in that return is
 trusted and its code is never exchanged: with a readable stored credential and a
 `connected` or `installation_required` connection, Moira re-reads the installations
-and repositories with that credential and redirects to Settings with
+and repositories with that credential — whatever the snapshot's age, but never inside
+the throttle that follows a failed refresh, because the return carries no one-time
+state and could otherwise be replayed to drive provider calls — and redirects to
+Settings with
 `github=connected` or `github=installation_required`; otherwise it redirects to the
 absolute `/api/integrations/github/start` URL on the configured origin. The
 authorization does not force GitHub's account chooser, so switching GitHub accounts
@@ -867,7 +869,9 @@ A start the browser cannot proceed with redirects to Settings (`303`) with a
 `revocation_pending`, `not_configured`, `credential_unreadable`,
 `grant_revocation_required`, `previous_access_not_revoked` (an earlier credential
 still awaits revocation), `session_required` or `authorization_failed`. The callback
-itself redirects with `connected`, `installation_required` or
+itself always redirects (`303`), never answers with JSON: with `connected`,
+`installation_required` or `authorization_failed`, and when not even the connection
+status can be read, to the Settings path on this site under the web app prefix with
 `authorization_failed`. Callback query strings are redacted from application logs
 and omitted from nginx access logs.
 
@@ -902,7 +906,11 @@ database transaction queues the previous token in an encrypted pending-revocatio
 record, so at every moment the old token is either stored or queued; only after the
 commit is it revoked. A revocation GitHub refuses leaves the connection connected
 and the superseded credential queued; the next successful grant refresh,
-authorization or disconnect retries it.
+authorization or disconnect retries it. When an authorization fails after it reserved
+the connection — the new credential is rejected, or the commit is rolled back — while
+the previous credential is still the stored one, the connection returns to its
+previous state and that credential keeps working; only a first authorization is
+marked failed.
 While such a revocation is still queued, a later explicit Connect is refused with
 the `previous_access_not_revoked` outcome.
 

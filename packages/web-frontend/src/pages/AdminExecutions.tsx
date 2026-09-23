@@ -31,7 +31,7 @@ interface AdminExecution {
   workflowId: string;
   workflowName?: string | null;
   userId: string;
-  userEmail: string;
+  userEmail: string | null;
   userName: string | null;
   status: string;
   currentNodeId: string | null;

@@ -24,6 +24,7 @@ import type {
 } from "./resource-types.js";
 import type { CodespaceTransferRepository } from "./transfer-repository.js";
 import { CODESPACE_IDLE_TIMEOUT_MINUTES } from "./resource-repository.js";
+import { effectiveCodespaceLimits } from "./resource-policy.js";
 import {
   projectCodespaceLimits,
   type CodespaceLimitsView,
@@ -202,6 +203,7 @@ export class CodespaceObservabilityService {
     const provider = this.dependencies.providerId;
     const config = this.dependencies.config();
     const policy = this.dependencies.policy();
+    const limits = effectiveCodespaceLimits(policy);
     const controls = this.dependencies.resources.listControls(provider).map((control) => ({
       scope: control.scope,
       disabled: control.disabled,
@@ -267,9 +269,10 @@ export class CodespaceObservabilityService {
         active_resources: this.dependencies.resources.countActive(provider),
         max_active_resources: policy.maxActiveGlobal,
         active_operations: this.dependencies.operations.countActive(),
-        max_active_operations: policy.maxConcurrentOperationsGlobal ?? null,
+        // The ceilings enforcement applies, from the one limits source, not the raw policy value.
+        max_active_operations: limits.operations.maxConcurrentGlobal,
         transfer_live_bytes: transferLiveBytes,
-        max_transfer_live_bytes: policy.maxTransferBytesGlobal ?? null,
+        max_transfer_live_bytes: limits.transfers.maxBytesGlobal,
       },
       checked_at: now,
     };

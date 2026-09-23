@@ -219,7 +219,7 @@ test.describe("User OAuth and Sessions Management", () => {
         await expect(unknown.getByTestId("session-location")).toHaveCount(0);
         await expect(unknown.getByTestId("session-ip")).toHaveCount(0);
         await expect(located.getByTestId("session-location")).toHaveText("Местоположение: DE");
-        await expect(located.getByTestId("session-ip")).toHaveText("IP адрес: 203.0.113.7");
+        await expect(located.getByTestId("session-ip")).toHaveText("IP-адрес: 203.0.113.7");
         await expect(sessions).not.toContainText("Unknown");
       } finally {
         await page.unroute("**/api/user/sessions*");

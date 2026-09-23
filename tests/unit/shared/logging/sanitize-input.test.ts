@@ -11,6 +11,7 @@
  */
 
 import { sanitizeInput, extractResourceIds, wasTruncated } from "@mcp-moira/shared";
+import { cpuTimeMs } from "../../../utils/cpu-time.js";
 
 describe("sanitizeInput", () => {
   describe("sensitive field removal", () => {
@@ -329,10 +330,12 @@ describe("sanitizeInput", () => {
 
     it("handles adversarial email-like input in bounded time", () => {
       const input = `${"a.".repeat(20_000)}@example.com`;
-      const startedAt = performance.now();
-      const { inputData } = sanitizeInput(input);
+      const {
+        result: { inputData },
+        cpuMs,
+      } = cpuTimeMs(() => sanitizeInput(input));
 
-      expect(performance.now() - startedAt).toBeLessThan(100);
+      expect(cpuMs).toBeLessThan(100);
       expect(typeof inputData).toBe("string");
     });
   });

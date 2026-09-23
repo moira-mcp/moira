@@ -49,12 +49,9 @@ export function CodespaceAutoPause({
       setSaving(key);
       await onSave(key, value);
       toast.success(t("pages.settings.codespaces.autoPause.saved"));
-    } catch (error) {
-      toast.error(
-        error instanceof Error && error.message
-          ? error.message
-          : t("pages.settings.codespaces.autoPause.saveFailed"),
-      );
+    } catch {
+      // The settings API answers in English; the reader is told in their own language.
+      toast.error(t("pages.settings.codespaces.autoPause.saveFailed"));
     } finally {
       setSaving(null);
     }
