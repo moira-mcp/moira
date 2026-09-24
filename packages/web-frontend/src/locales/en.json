@@ -3068,7 +3068,7 @@
     "universal": {
       "quickTask": {
         "title": "Quick Task",
-        "description": "Plans the work, does it with evidence, gets an independent review and asks you to accept the result.",
+        "description": "Plans the work, does it with evidence and gets an independent review before handing over the result.",
         "when": "a clear, bounded task that is not software development: a document, a piece of research, a set of changes you want checked.",
         "prompt": "Use Moira's Quick Task for this: …"
       },

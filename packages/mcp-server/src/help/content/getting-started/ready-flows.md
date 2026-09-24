@@ -10,8 +10,9 @@ your agent, for example "Use Moira Quick Task for this: …".
 
 ## Quick Task
 
-`moira/quick-task` plans the work, gets the plan reviewed and approved, carries it out step by step
-with evidence, has the result reviewed independently, and asks you to accept it.
+`moira/quick-task` plans the work, has the plan reviewed independently, carries it out step by step
+with evidence, and has the result reviewed independently. In an interactive run you approve the
+plan and accept the result; an autonomous run delivers the reviewed result without asking.
 
 **Pick it when** the task is clear and bounded, is not a change to a code repository, and fits a
 plan of up to ten steps: a document, a piece of research, a set of edits you want checked. It

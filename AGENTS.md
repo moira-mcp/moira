@@ -232,7 +232,8 @@ slug:
 - `todo-list` — the sequential checklist (`93609982-…json`).
 - `robust-task` — the execution flow with retry, escalation, and replanning
   (`bbbccd66-…json`); it is an execution flow, not a research flow.
-- `quick-task` — bounded plan → approval → execution → review (`e21e3890-…json`).
+- `quick-task` — bounded plan → execution → independent review, with plan approval and result
+  acceptance in interactive mode only (`e21e3890-…json`).
 
 When a request says "standard flows" without naming them, it means exactly this set.
 Research flows (`Verified Research`, `Deep Corpus Research`, `Iterative Research`,

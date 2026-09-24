@@ -1,11 +1,11 @@
 ---
 title: Quick Task
-description: Filesystem-backed bounded non-development planning, execution, independent review, and user acceptance
+description: Filesystem-backed bounded non-development planning, execution and independent review, with user approval and acceptance in interactive mode
 ---
 
 import { Aside } from '@astrojs/starlight/components';
 
-Quick Task runs a bounded multi-step non-development task as Plan → Approve → Execute → Review → Accept. It keeps complete task, plan, review, decision, change, and evidence records in an execution-specific filesystem workspace. Workflow context carries only bounded file references, the approved plan length, the execution cursor, and short values used for routing.
+Quick Task runs a bounded multi-step non-development task as Plan → Approve → Execute → Review → Accept; in autonomous mode the approval and acceptance steps are skipped (see [Operating mode](#operating-mode)). It keeps complete task, plan, review, decision, change, and evidence records in an execution-specific filesystem workspace. Workflow context carries only bounded file references, the approved plan length, the execution cursor, and short values used for routing.
 
 <Aside type="tip">
 Use Quick Task when an agent has filesystem access and bounded non-development work fits a plan of at most ten meaningful units. For software implementation, bug fixing, refactoring, migrations, or rollout, use [Software Development Flow](./software-development-flow/); its plan scales the lifecycle to the actual change. Use [Robust Task](/docs/reference/workflows/robust-task/) when a complex general task needs a stronger recovery policy for partial execution or operational failures.
@@ -74,7 +74,7 @@ An independent reviewer reads `task.md` and the current `plan.md` directly. It w
 
 The user's exact decision and feedback are written to `decision.md`. Context receives only the decision-file path and `yes`/`no` routing value. Requested revisions read the exact feedback from disk, create a new plan iteration, and pass through independent review again.
 
-The plan length becomes authoritative for execution only after the current plan has a clean review and explicit user approval.
+The plan length becomes authoritative for execution only after the current plan has a clean review and, in interactive mode, explicit user approval.
 
 ## Operating mode
 

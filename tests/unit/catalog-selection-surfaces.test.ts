@@ -172,6 +172,24 @@ describe("public workflow selection surfaces", () => {
     expect(russianPrompt).not.toContain("полного жизненного цикла реализации в репозитории");
   });
 
+  it("does not make plan approval a fixed Quick Task stage, which autonomous runs do not have", () => {
+    // An agent told that approval is a required stage waits for a person an autonomous run never asks
+    const english = [
+      read("config/prompts/systemPrompt.md"),
+      read("docs/SYSTEM-PROMPT.md"),
+      read("packages/docs/src/content/docs/docs/SYSTEM-PROMPT.md"),
+    ];
+    const russian = read("packages/docs/src/content/docs/docs/SYSTEM-PROMPT-RU.md");
+    for (const prompt of english) {
+      expect(prompt).not.toMatch(/quick-task[^\n]*→ approval/);
+      expect(prompt).toContain(
+        "plan approval and result acceptance happen only in interactive mode",
+      );
+    }
+    expect(russian).not.toMatch(/quick-task[^\n]*→ подтверждение/);
+    expect(russian).toContain("только в интерактивном режиме");
+  });
+
   it("does not advertise removed identities on live selection surfaces", () => {
     const liveSelectionText = [
       read("config/prompts/systemPrompt.md"),

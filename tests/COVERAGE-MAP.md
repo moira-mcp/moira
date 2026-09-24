@@ -488,6 +488,7 @@ level headings classify the tracked test paths listed beneath them.
 **unit**
 
 - `tests/unit/mcp-server/tool-definitions.test.ts` — unique typed catalog ownership, a server-side record of a sanitized tool failure at both recording sites, classified as warning or error by failure kind, that keeps the original error out of the agent-facing result, root-object schemas without top-level composition through real registration, flat Start discovery with mixed-phase runtime rejection, strict least-authority communication contract, projected blank-selector rejection, complete manage action projection, all-example/schema validity and rendering, deterministic client-visible revision boundaries, EN/RU renderer parity, and closed codespace schemas with published native-file metadata participating in the catalog revision; the one shared `codespace` tool-name constant used by definition and server logging, `setup_help`, positioning as a personal fileless-agent instrument with collaboration through version-control branches, one merged `operation_id` form, both `max_bytes` bounds, canonical system-prompt instruction with byte-identical documentation copies, no `codespace_*` tool name, a published object requiring only `action` while offering every action's fields, and both native file parameters declared on that one tool
+- `tests/unit/catalog-selection-surfaces.test.ts` — the workflow-selection surfaces stay dynamic: the English system-prompt copies are identical and point at the live `list()` result in both languages, removed identities are not advertised, the workflow-template guide keeps qualified examples, and no prompt copy makes plan approval a fixed Quick Task stage (approval and acceptance only in interactive mode)
 - `tests/unit/mcp-server/tool-examples.test.ts` — exact-key, current notification-category, and all-settings registry examples reach the masked read projection
 - `tests/unit/mcp-server/mcp-catalog-lifecycle.test.ts` — SDK-valid singleton initialize classification, exact successful-result stamp ordering, error/other-result non-stamping, and successful-result suppression when the credential cannot be stamped
 - `tests/unit/mcp-server/mcp-tools-revision.test.ts` — deterministic matching, null, and stale catalog-revision decisions with package version retained only as diagnostic response data
@@ -1127,7 +1128,7 @@ level headings classify the tracked test paths listed beneath them.
 - `tests/e2e/workflow-copy-button.spec.ts`
 - `tests/e2e/workflow-delete-restore.spec.ts`
 - `tests/e2e/workflow-list-performance.spec.ts` — the flow list's requests: at most three distinct list requests on load plus exactly one lookup of the recommended flows (`slugs=`), one request per search and per sort change, none before sign-in
-- `tests/e2e/workflow-visibility-toggle.spec.ts`
+- `tests/e2e/workflow-visibility-toggle.spec.ts` — the visibility toggle belongs to the flow's owner: the owner sees `workflow-visibility-toggle` in the header and the same action in the actions menu on a narrow screen, and switches private to public; a non-owner opened on a system flow's page (its title shown first) has neither the toggle nor the menu item
 - `tests/e2e/workflow-visibility.spec.ts`
 
 ### workflow-scenarios
