@@ -12,6 +12,8 @@ import { mcpClients, configGenerators, deeplinkGenerators } from "@mcp-moira/sha
 import type { McpClient } from "@mcp-moira/shared/mcp-clients";
 import { useFeatures } from "@/hooks/useFeatures";
 import { localizedDocsPath } from "@/lib/docs-path";
+import { HidePanelButton } from "./onboarding/HidePanelButton";
+import { usePanelVisible } from "./onboarding/beginnerPanels";
 
 /**
  * MCP URL baked into the bundle at build time from MOIRA_HOST (webpack
@@ -204,24 +206,33 @@ function ClientPanel({ client, mcpUrl }: { client: McpClient; mcpUrl: string }) 
 export const QuickStartCard: React.FC = () => {
   const { t, i18n } = useTranslation();
   const mcpUrl = useMcpUrl();
+  // A beginner panel: its reader can hide it for good. Hooks run before the early return.
+  const visible = usePanelVisible("quick-start");
 
   const getDocsPath = () => localizedDocsPath("/docs/getting-started/quickstart/", i18n.language);
 
   const defaultClient = useMemo(() => mcpClients[0].id, []);
 
+  if (!visible) return null;
   return (
-    <div className="bg-card border border-border rounded-lg p-6 mb-8">
+    <div
+      className="bg-card border border-border rounded-lg p-6 mb-8"
+      data-testid="quick-start-card"
+    >
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-2">
           <BookOpen className="h-5 w-5 text-primary" />
           <h2 className="text-xl font-semibold">{t("pages.dashboard.quickStart.title")}</h2>
         </div>
-        <a
-          href={getDocsPath()}
-          className="inline-flex items-center gap-1 text-sm text-primary hover:underline"
-        >
-          {t("pages.dashboard.quickStart.documentation")}
-        </a>
+        <div className="flex items-center gap-2">
+          <a
+            href={getDocsPath()}
+            className="inline-flex items-center gap-1 text-sm text-primary hover:underline"
+          >
+            {t("pages.dashboard.quickStart.documentation")}
+          </a>
+          <HidePanelButton panel="quick-start" />
+        </div>
       </div>
 
       <p className="text-muted-foreground mb-4 text-sm">

@@ -1285,7 +1285,13 @@
           "system": "System"
         },
         "language": "Language",
-        "languageDescription": "The language of the website's interface."
+        "languageDescription": "The language of the website's interface.",
+        "beginnerPanels": {
+          "title": "Hints for beginners",
+          "description": "Panels that help you get started. Hide the ones you no longer need; turn them back on here.",
+          "shown": "Shown",
+          "hidden": "Hidden"
+        }
       },
       "definitions": {
         "telegram": {
@@ -2985,8 +2991,8 @@
   "onboarding": {
     "title": "Recommended for getting started",
     "agentFirst": "You don't have to choose or build a flow yourself. Describe the task to your agent in plain words — it picks one of these or creates a new flow for you with the Workflow Management Flow. Everything here is optional: open a flow to see how it works.",
-    "hide": "Hide",
-    "show": "Show",
+    "hide": "Collapse",
+    "show": "Expand",
     "open": "Open",
     "whenLabel": "Pick it when",
     "examplesTitle": "Learn how Moira works",
@@ -3022,6 +3028,22 @@
         "title": "Todo List",
         "description": "Works through a checklist one item at a time — the one you give it, or one it writes once from your goal — with a short proof for each.",
         "when": "the steps are clear and just need doing in order."
+      }
+    },
+    "panels": {
+      "hide": "Hide",
+      "hideLabel": "Hide “{{name}}” for good",
+      "hidden": "“{{name}}” is hidden",
+      "hiddenHint": "Bring it back any time in Settings → Preferences.",
+      "undo": "Undo",
+      "failed": "Could not save. Try again.",
+      "names": {
+        "home-intro": "Home page introduction",
+        "quick-start": "Connect your agent",
+        "home-recommended": "Recommended flows on the home page",
+        "workflows-recommended": "Recommended flows on the flow list",
+        "run-variables-guide": "Hint on a run's variables",
+        "registry-guide": "Hint on a flow's declared variables"
       }
     }
   }

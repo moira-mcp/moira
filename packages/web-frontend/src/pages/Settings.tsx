@@ -92,6 +92,8 @@ const OWNED_CATEGORIES = new Set([
   "api-tokens",
   // The auto-pause card in GitHub & Codespaces is their editor.
   "codespaces",
+  // The beginner-panel switches in Preferences are the editor of the interface settings.
+  "ui",
 ]);
 
 const noop = () => {};

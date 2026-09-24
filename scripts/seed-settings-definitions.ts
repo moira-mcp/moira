@@ -114,6 +114,26 @@ export const initialDefinitions: Omit<SettingDefinition, "createdAt" | "updatedA
     protected: true,
   },
 
+  // ===== Interface Settings =====
+  {
+    // The web interface's beginner panels this user has hidden; the ids are the interface's own.
+    key: "ui.hidden_panels",
+    type: "json",
+    category: "ui",
+    label: "Hidden beginner panels",
+    description:
+      "The beginner panels (how Moira works, connect your agent, recommended flows) this user has hidden. Hide one from the panel itself and show it again in Settings → Preferences.",
+    defaultValue: "[]",
+    required: false,
+    validation: JSON.stringify({
+      type: "array",
+      items: { type: "string" },
+      uniqueItems: true,
+    }),
+    adminOnly: false,
+    protected: true,
+  },
+
   // ===== MCP Settings (Admin Only) =====
   {
     key: "mcp.systemReminder",

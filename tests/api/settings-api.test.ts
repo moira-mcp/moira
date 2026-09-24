@@ -210,6 +210,112 @@ describe("Settings API", () => {
   });
 });
 
+describe("Hidden beginner panels", () => {
+  // The web interface stores which beginner panels a user hid in one user setting. Required state:
+  // it is a seeded, non-admin definition in the `ui` category, it reads as an empty list until the
+  // user hides something, the bulk save the interface uses stores the list as a list, and it is the
+  // user's own — another account still has nothing hidden. Plausible wrong states: the definition
+  // is missing (the save is refused), the value comes back as text, or it is global.
+  const key = "ui.hidden_panels";
+
+  test("is a seeded user setting in the ui category that starts empty", async () => {
+    const definitions = (await (
+      await fetch(`${BASE_URL}/api/settings/definitions?category=ui`, {
+        headers: { Cookie: authCookie },
+      })
+    ).json()) as any;
+    expect(definitions.data).toEqual([
+      expect.objectContaining({ key, type: "json", category: "ui", adminOnly: false }),
+    ]);
+
+    const settings = (await (
+      await fetch(`${BASE_URL}/api/settings/ui`, { headers: { Cookie: authCookie } })
+    ).json()) as any;
+    expect(settings.data[key]).toEqual([]);
+  });
+
+  test("a bulk save stores the hidden panels as a list for this user only", async () => {
+    const saved = await fetch(`${BASE_URL}/api/settings`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", Cookie: authCookie },
+      body: JSON.stringify({ [key]: ["home-intro", "quick-start"] }),
+    });
+    expect(saved.status).toBe(200);
+    expect(((await saved.json()) as any).data.refused).toEqual([]);
+
+    const mine = (await (
+      await fetch(`${BASE_URL}/api/settings/ui`, { headers: { Cookie: authCookie } })
+    ).json()) as any;
+    expect(mine.data[key]).toEqual(["home-intro", "quick-start"]);
+
+    const other = {
+      email: `hidden-panels-other-${Date.now()}@example.com`,
+      password: "TestPass123!",
+    };
+    await createTestUserViaApi(BASE_URL, other.email, other.password, "Other Panels User");
+    const otherCookie = formatSessionCookie(
+      BASE_URL,
+      await signInUser(BASE_URL, other.email, other.password),
+    );
+    const theirs = (await (
+      await fetch(`${BASE_URL}/api/settings/ui`, { headers: { Cookie: otherCookie } })
+    ).json()) as any;
+    expect(theirs.data[key]).toEqual([]);
+  });
+});
+
+describe("Hidden beginner panels are held to their declared schema", () => {
+  // Required state: every write path refuses a value that is not a list of unique strings, and the
+  // user's settings stay readable. Plausible wrong state: the bare string is stored, and every later
+  // read of the user's settings fails to parse it (500), bringing every panel back.
+  const key = "ui.hidden_panels";
+
+  async function readUi() {
+    return fetch(`${BASE_URL}/api/settings/ui`, { headers: { Cookie: authCookie } });
+  }
+
+  test.each([
+    ["a bare string", "quick-start"],
+    ["a list with a repeated id", ["quick-start", "quick-start"]],
+    ["a list of non-strings", [1, 2]],
+  ])("a bulk save of %s is refused and the settings stay readable", async (_label, value) => {
+    const res = await fetch(`${BASE_URL}/api/settings`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", Cookie: authCookie },
+      body: JSON.stringify({ [key]: value }),
+    });
+    const body = (await res.json()) as any;
+    expect(body.data.saved).toEqual({});
+    expect(body.data.refused).toEqual([
+      expect.objectContaining({ key, reason: expect.stringContaining("declared schema") }),
+    ]);
+
+    const read = await readUi();
+    expect(read.status).toBe(200);
+    expect(Array.isArray(((await read.json()) as any).data[key])).toBe(true);
+  });
+
+  test("the per-key route stores a valid list", async () => {
+    const res = await fetch(`${BASE_URL}/api/settings/${key}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", Cookie: authCookie },
+      body: JSON.stringify({ value: ["registry-guide"] }),
+    });
+    expect(res.status).toBe(200);
+    expect(((await (await readUi()).json()) as any).data[key]).toEqual(["registry-guide"]);
+  });
+
+  test("the per-key route refuses a value outside the schema", async () => {
+    const res = await fetch(`${BASE_URL}/api/settings/${key}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", Cookie: authCookie },
+      body: JSON.stringify({ value: "quick-start" }),
+    });
+    expect(res.status).toBe(400);
+    expect((await readUi()).status).toBe(200);
+  });
+});
+
 describe("Settings Definitions adminOnly Filtering", () => {
   let adminCookie: string;
   const adminOnlyKey = `test.admin_only_setting_${Date.now()}`;

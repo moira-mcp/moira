@@ -15,6 +15,8 @@ import { useTranslation } from "react-i18next";
 import { Workflow, Play, StickyNote, Plug, MessageSquareText, Route } from "lucide-react";
 import apiClient from "../services/api-client";
 import { ROUTES } from "../constants/routes";
+import { HidePanelButton } from "../components/onboarding/HidePanelButton";
+import { usePanelVisible } from "../components/onboarding/beginnerPanels";
 import { QuickStartCard } from "../components/QuickStartCard";
 import { RecommendedFlows } from "../components/onboarding/RecommendedFlows";
 import { PageShell } from "../components/PageShell";
@@ -32,18 +34,25 @@ const HOW_IT_WORKS = [
   { key: "agent", icon: Route },
 ] as const;
 
-/** The three steps of using Moira, agent first, and the note that the rest is optional. */
-function HowItWorks(): React.JSX.Element {
+/**
+ * The three steps of using Moira, agent first, and the note that the rest is optional. A beginner
+ * panel: its reader can hide it for good.
+ */
+function HowItWorks(): React.JSX.Element | null {
   const { t } = useTranslation();
+  if (!usePanelVisible("home-intro")) return null;
   return (
     <section
       className="mb-8 rounded-2xl border bg-gradient-to-br from-primary/10 via-card to-card p-6 md:p-8"
       aria-labelledby="home-how-title"
       data-testid="home-how-it-works"
     >
-      <h2 id="home-how-title" className="text-2xl font-semibold tracking-tight">
-        {t("pages.dashboard.how.title")}
-      </h2>
+      <div className="flex items-start justify-between gap-3">
+        <h2 id="home-how-title" className="text-2xl font-semibold tracking-tight">
+          {t("pages.dashboard.how.title")}
+        </h2>
+        <HidePanelButton panel="home-intro" />
+      </div>
       <p className="mt-2 max-w-3xl text-muted-foreground">{t("pages.dashboard.how.subtitle")}</p>
       <ol className="mt-6 grid gap-4 md:grid-cols-3" data-testid="home-steps">
         {HOW_IT_WORKS.map(({ key, icon: Icon }, index) => (

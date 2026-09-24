@@ -16,6 +16,10 @@ the three examples; each opens on the **Steps** view — the instructions the ag
 numbered cards joined by arrows. **Map** and **Graph** show the same flow as a process and as the
 full technical graph.
 
+The recommended section, the other panels for newcomers on the home page and the hints on the flow
+and run pages can each be hidden for good. A hidden panel stays hidden on every device you sign in from; bring it back in **Settings →
+Preferences → Hints for beginners**.
+
 ## Level 1 — Simple steps
 
 `moira/example-simple-steps` is a straight line: four steps, no choices. It shows the core of

@@ -286,6 +286,7 @@ Behavior:
 - Names unknown, unauthorized, schema-invalid and out-of-range keys in `refused` without undoing values already listed in `saved`
 - Refuses a built-in number setting whose value is below its declared `minimum` or above its declared `maximum`, whether sent as a number or as numeric text
 - Enforces the manifest's declared primitive type and then its optional complete JSON Schema; editable JSON text is parsed before validation, and structured input must round-trip through JSON without omitted or transformed values
+- Holds a built-in `json` setting (for example `ui.hidden_panels`, the list of beginner panels the user has hidden) to its declared JSON Schema the same way; a value outside it is listed in `refused` and nothing is stored
 - Registers the Telegram webhook only when `telegram.bot_token` is present in `saved`, never when that key was refused
 
 Authentication: Required
@@ -492,7 +493,7 @@ Validation:
 - String length (minLength, maxLength)
 - Numeric bounds (`minimum`, `maximum`) of a built-in number setting; a number or numeric text outside them returns 400
 - Required field check
-- Installed-extension settings are validated against the complete JSON Schema from the active manifest; JSON settings accept either losslessly JSON-serializable structured values or JSON text
+- Installed-extension settings and built-in `json` settings are validated against their complete declared JSON Schema; JSON settings accept either losslessly JSON-serializable structured values or JSON text, and the shallow type check above does not apply to them
 
 Response:
 

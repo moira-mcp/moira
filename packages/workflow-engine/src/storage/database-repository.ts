@@ -548,6 +548,23 @@ export class DatabaseRepository implements IDataRepository {
       );
       return;
     }
+    // A built-in structural setting is held to its declared schema the same way, on every path that
+    // writes it (the settings screen, the per-key route, the MCP tool): a value that does not match
+    // would be stored as text that every later read of the user's settings fails to parse.
+    const builtIn = await this.settingsRepo.getSettingDefinition(key);
+    if (builtIn?.type === "json") {
+      const candidate = prepareExtensionSettingValue(
+        { key, type: "json", validation: builtIn.validation },
+        value,
+      );
+      if (candidate.problem) {
+        throw new ValidationError(
+          `Value for setting '${key}' does not satisfy its declared schema: ${candidate.problem}`,
+          { key },
+        );
+      }
+      value = candidate.value;
+    }
     // Use SettingsService for automatic audit
     await this.settingsService.set(userId, key, value);
   }

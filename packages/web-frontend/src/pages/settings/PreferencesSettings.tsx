@@ -1,7 +1,9 @@
 /**
  * How the website looks and speaks for this reader: the colour theme and the interface language,
  * wired to the same state the rest of the application uses (the theme provider and i18next), so a
- * change here is the change everywhere. Both are kept in this browser.
+ * change here is the change everywhere. Both are kept in this browser. Below them, the beginner
+ * panels: each can be shown or hidden here, and one hidden from the panel itself comes back here.
+ * That choice belongs to the account and follows the reader to every browser.
  */
 
 import React from "react";
@@ -11,6 +13,13 @@ import { useTheme } from "@/hooks/useTheme";
 import { LANGUAGES } from "@/i18n";
 import { Card, CardContent } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
+import { toast } from "sonner";
+import {
+  BEGINNER_PANELS,
+  setPanelHidden,
+  useBeginnerPanels,
+} from "@/components/onboarding/beginnerPanels";
 import { cn } from "@/lib/utils";
 import {
   Select,
@@ -25,6 +34,56 @@ const THEMES = [
   { value: "dark", icon: Moon },
   { value: "system", icon: Monitor },
 ] as const;
+
+function BeginnerPanelsSettings(): React.JSX.Element {
+  const { t } = useTranslation();
+  const { loaded, isHidden } = useBeginnerPanels();
+  return (
+    <div className="space-y-3 p-4 sm:p-5" data-testid="preferences-beginner-panels">
+      <div className="space-y-0.5">
+        <p className="text-sm font-medium">
+          {t("pages.settings.preferences.beginnerPanels.title")}
+        </p>
+        <p className="text-sm text-muted-foreground">
+          {t("pages.settings.preferences.beginnerPanels.description")}
+        </p>
+      </div>
+      <ul className="divide-y rounded-lg border">
+        {BEGINNER_PANELS.map((panel) => {
+          const shown = loaded && !isHidden(panel);
+          const id = `beginner-panel-${panel}`;
+          return (
+            <li key={panel} className="flex items-center justify-between gap-4 px-3 py-2.5">
+              <Label htmlFor={id} className="text-sm font-normal">
+                {t(`onboarding.panels.names.${panel}`)}
+              </Label>
+              <span className="flex items-center gap-2 text-xs text-muted-foreground">
+                {loaded &&
+                  t(
+                    shown
+                      ? "pages.settings.preferences.beginnerPanels.shown"
+                      : "pages.settings.preferences.beginnerPanels.hidden",
+                  )}
+                <Switch
+                  id={id}
+                  checked={shown}
+                  disabled={!loaded}
+                  onCheckedChange={(checked) => {
+                    setPanelHidden(panel, !checked).catch(() =>
+                      toast.error(t("onboarding.panels.failed")),
+                    );
+                  }}
+                  data-testid="beginner-panel-switch"
+                  data-panel={panel}
+                />
+              </span>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
 
 export function PreferencesSettings(): React.JSX.Element {
   const { t, i18n } = useTranslation();
@@ -96,6 +155,7 @@ export function PreferencesSettings(): React.JSX.Element {
             </SelectContent>
           </Select>
         </div>
+        <BeginnerPanelsSettings />
       </CardContent>
     </Card>
   );

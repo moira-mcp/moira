@@ -327,6 +327,7 @@ export function VariablesPanel({
         <GuidanceCallout
           title={t("pages.runPage.variables.guideTitle")}
           testId="guidance-variables"
+          panel="run-variables-guide"
         >
           {t("pages.runPage.variables.guideBody")}
         </GuidanceCallout>

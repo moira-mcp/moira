@@ -88,4 +88,12 @@ export const test = base.extend<AutoLogFixture>({
 });
 
 export { expect, chromium };
-export type { BrowserContext, Dialog, ElementHandle, Locator, Page, Route } from "@playwright/test";
+export type {
+  Browser,
+  BrowserContext,
+  Dialog,
+  ElementHandle,
+  Locator,
+  Page,
+  Route,
+} from "@playwright/test";

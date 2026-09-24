@@ -18,6 +18,7 @@ import {
   resetRecommendedLookups,
 } from "../../../packages/web-frontend/src/components/onboarding/RecommendedFlows";
 import { apiClient } from "../../../packages/web-frontend/src/services/api-client";
+import { resetBeginnerPanels } from "../../../packages/web-frontend/src/components/onboarding/beginnerPanels";
 
 const originalReact = (globalThis as typeof globalThis & { React?: typeof React }).React;
 
@@ -42,6 +43,9 @@ function renderSection(): void {
 beforeEach(() => {
   (globalThis as typeof globalThis & { React?: typeof React }).React = React;
   resetRecommendedLookups();
+  // No panel is hidden: the section's own behaviour is under test here.
+  resetBeginnerPanels();
+  jest.spyOn(apiClient, "getUserSettings").mockResolvedValue({});
 });
 
 afterEach(async () => {

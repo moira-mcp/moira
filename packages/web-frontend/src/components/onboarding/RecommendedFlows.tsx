@@ -4,6 +4,8 @@
  * not have to choose or build a flow at all: their agent does that from a plain description of the
  * task. The flow list shows the full section (foldable, the fold remembered); the home page shows
  * the compact one. An entry is shown once the catalog confirms its flow exists on this instance.
+ * Both are beginner panels: the flow list's can be folded for a moment in this browser, and either
+ * can be hidden for good.
  */
 
 import React, { useEffect, useMemo, useState } from "react";
@@ -15,6 +17,8 @@ import { apiClient } from "../../services/api-client";
 import { ROUTES } from "../../constants/routes";
 import { useStoredFlag } from "../diagram/useStoredFlag";
 import { recommendedFlows, SYSTEM_HANDLE, type RecommendedFlow } from "./recommended";
+import { HidePanelButton } from "./HidePanelButton";
+import { usePanelVisible } from "./beginnerPanels";
 
 /**
  * One lookup per set of slugs for the life of the page. The section can mount more than once in a
@@ -166,7 +170,9 @@ export function RecommendedFlows({
   const { flows, loaded } = useRecommendedFlows();
   const [collapsed, toggleCollapsed] = useStoredFlag("moira.workflows.recommendedCollapsed");
   const compact = variant === "compact";
-  if (loaded && flows.length === 0) return null;
+  const panel = compact ? "home-recommended" : "workflows-recommended";
+  const visible = usePanelVisible(panel);
+  if (!visible || (loaded && flows.length === 0)) return null;
   const open = compact || !collapsed;
   return (
     <section
@@ -187,21 +193,24 @@ export function RecommendedFlows({
             </p>
           )}
         </div>
-        {!compact && (
-          <button
-            type="button"
-            onClick={toggleCollapsed}
-            aria-expanded={open}
-            className="inline-flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
-            data-testid="recommended-toggle"
-          >
-            {open ? t("onboarding.hide") : t("onboarding.show")}
-            <ChevronDown
-              className={cn("size-3.5 transition", open ? "rotate-180" : "rotate-0")}
-              aria-hidden="true"
-            />
-          </button>
-        )}
+        <div className="flex shrink-0 items-center gap-1">
+          {!compact && (
+            <button
+              type="button"
+              onClick={toggleCollapsed}
+              aria-expanded={open}
+              className="inline-flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
+              data-testid="recommended-toggle"
+            >
+              {open ? t("onboarding.hide") : t("onboarding.show")}
+              <ChevronDown
+                className={cn("size-3.5 transition", open ? "rotate-180" : "rotate-0")}
+                aria-hidden="true"
+              />
+            </button>
+          )}
+          <HidePanelButton panel={panel} />
+        </div>
       </div>
       {open && (
         <div className="mt-4 space-y-5">

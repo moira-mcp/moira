@@ -59,7 +59,9 @@ frontend/src/
 │   │   └── EditControls.tsx                         # In-place editors (block text, transitions, owner, node text)
 │   ├── onboarding/              # What is recommended to newcomers
 │   │   ├── recommended.ts                           # The registry: learning examples per language, universal flows, which open on the steps view
-│   │   └── RecommendedFlows.tsx                     # The recommended section (flow list: full; home: compact), one catalog lookup per page
+│   │   ├── RecommendedFlows.tsx                     # The recommended section (flow list: full; home: compact), one catalog lookup per page
+│   │   ├── beginnerPanels.ts                        # The beginner panels and the account's hidden set (user setting ui.hidden_panels)
+│   │   └── HidePanelButton.tsx                      # The one "Hide" control every beginner panel carries
 │   ├── run/                     # Run page: the execution as a process
 │   │   ├── MapView.tsx / CanvasView.tsx                                     # The map view (contents beside the diagram); its ported-card diagram
 │   │   ├── ContentsSidebar.tsx                                              # Contents rows, their fold state, `ContentsLayout` beside either diagram
@@ -111,7 +113,7 @@ frontend/src/
 │   │   ├── CodespaceLimitsPanel.tsx # Your limits card
 │   │   ├── OAuthSettings.tsx    # Connected apps (OAuth consents): search, paging, revoke
 │   │   ├── ApiTokensSettings.tsx # API token management (create, list, revoke)
-│   │   ├── PreferencesSettings.tsx # Theme and interface language
+│   │   ├── PreferencesSettings.tsx # Theme, interface language, and the beginner-panel switches
 │   │   └── settingsTours.ts     # Page, GitHub & Codespaces and Telegram tours
 │   ├── Admin.tsx                # Admin panel entry
 │   ├── AdminDashboard.tsx       # Admin dashboard with stats + merged analytics
@@ -312,6 +314,39 @@ optional (`home-optional`). Below come the connection card (`QuickStartCard`, ti
 agent"), the compact recommended section (`RecommendedFlows variant="compact"`), the stat cards and
 the recent workflows and executions.
 
+### Beginner panels
+
+Six panels are for newcomers:
+
+| Panel                                                    | Id                      | Where                      |
+| -------------------------------------------------------- | ----------------------- | -------------------------- |
+| How it works (`home-how-it-works`)                       | `home-intro`            | home page                  |
+| Connect your agent (`quick-start-card`)                  | `quick-start`           | home page                  |
+| Recommended flows, compact                               | `home-recommended`      | home page                  |
+| Recommended flows, full, with the agent-first note       | `workflows-recommended` | flow list                  |
+| The run's variables hint (`guidance-variables`)          | `run-variables-guide`   | run page, variables panel  |
+| The flow's declared-variables hint (`guidance-registry`) | `registry-guide`        | flow page, variables panel |
+
+The first four carry the same "Hide" control (`HidePanelButton`, `hide-panel` with `data-panel`); the
+two hints are `GuidanceCallout`s given a panel id, whose close button then hides them for the account
+(a callout without an id still closes for the page load, as the block panel's empty state does). One
+click hides the panel; a notice says where to bring it back and offers Undo (`hidePanelWithUndo`).
+A hidden panel renders nothing.
+
+Which panels are hidden belongs to the account: the user setting `ui.hidden_panels` (category
+`ui`, type `json`, a list of panel ids, default empty), seeded like every built-in definition and
+written with the bulk `PUT /api/settings`. `components/onboarding/beginnerPanels.ts` holds the ids and
+one in-page copy of the set, keyed by the signed-in account, that every panel and the Settings
+switches read (`usePanelVisible`, `useBeginnerPanels`, `setPanelHidden`). A panel is drawn only once
+the set is known. A change shows at once; saves run one after another and each applies its change to
+the list re-read from the server, so quick successive hides are all kept and another device's change
+is never undone. A save the server refuses is taken back and reported. Ids the build does not know
+are ignored. The server holds the setting to its declared schema (a list of unique strings) on every
+write path.
+
+Settings → Preferences lists the six panels with shown/hidden switches
+(`preferences-beginner-panels`, `beginner-panel-switch`); it is where a hidden panel comes back.
+
 ### Recommended flows
 
 `components/onboarding/recommended.ts` is the one place that knows what is recommended to
@@ -330,9 +365,10 @@ and offers only the system-owned flows the answer contains. A second mount, or t
 reuses the lookup; a failed lookup is retried on the next mount. With nothing to offer, the section
 is not drawn.
 
-On the flow list the section is full and foldable (`recommended-toggle`; the fold is remembered in
-`localStorage` under `moira.workflows.recommendedCollapsed`) and shows when to pick each universal
-flow. On the home page it is compact.
+On the flow list the section is full and foldable (`recommended-toggle`, "Collapse" / "Expand"; the
+fold is remembered in `localStorage` under `moira.workflows.recommendedCollapsed`) and shows when to
+pick each universal flow. On the home page it is compact. Both are beginner panels: the fold is this
+browser's quick one, while "Hide" removes the section for the account.
 
 ### Connection card
 
@@ -374,15 +410,15 @@ One page at `/settings` whose sections are all always mounted. `Settings.tsx` do
 **Sections** (each a `SettingsSection`: icon, heading, one-sentence description, optional
 `HelpPopover` and actions; the anchor is the section `id`):
 
-| Anchor                | Section             | `data-testid`                   | Content                                                                                                                                                                                                                                                  |
-| --------------------- | ------------------- | ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `account`             | Account             | `settings-section-profile`      | `ProfileSettings`: name, email with verification badge, handle with a help popover on why changing it breaks links and a confirmation                                                                                                                    |
-| `security`            | Security & sign-in  | `settings-section-security`     | `SecuritySettings`: the change-password form, or for an account that signs in only through a social provider, how it signs in and a set-password form; an Active Sessions subsection (`settings-section-sessions`, help popover) with `SessionsSettings` |
-| `notifications`       | Notifications       | `settings-section-dynamic`      | One `CommunicationChannelCard` per channel, a help popover, the **Telegram setup** tour button when Telegram is present, an empty state without channels                                                                                                 |
-| `integrations-github` | GitHub & Codespaces | `settings-section-integrations` | Help popover, **Setup guide** tour, and the connection, Cloud codespaces, Automatic pause and Your limits cards under one `GitHubCodespacesProvider`                                                                                                     |
-| `connected-apps`      | Connected apps      | `settings-section-oauth`        | `OAuthSettings` with a help popover                                                                                                                                                                                                                      |
-| `api-tokens`          | API tokens          | `settings-section-api-tokens`   | `ApiTokensSettings` with a help popover on when a token is needed, the Bearer header and the one-time display                                                                                                                                            |
-| `preferences`         | Preferences         | `settings-section-preferences`  | `PreferencesSettings` theme (Light/Dark/System, via `useTheme`) and interface language, both kept in this browser; then the generic editor for remaining definitions (`settings-section-other`)                                                          |
+| Anchor                | Section             | `data-testid`                   | Content                                                                                                                                                                                                                                                         |
+| --------------------- | ------------------- | ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `account`             | Account             | `settings-section-profile`      | `ProfileSettings`: name, email with verification badge, handle with a help popover on why changing it breaks links and a confirmation                                                                                                                           |
+| `security`            | Security & sign-in  | `settings-section-security`     | `SecuritySettings`: the change-password form, or for an account that signs in only through a social provider, how it signs in and a set-password form; an Active Sessions subsection (`settings-section-sessions`, help popover) with `SessionsSettings`        |
+| `notifications`       | Notifications       | `settings-section-dynamic`      | One `CommunicationChannelCard` per channel, a help popover, the **Telegram setup** tour button when Telegram is present, an empty state without channels                                                                                                        |
+| `integrations-github` | GitHub & Codespaces | `settings-section-integrations` | Help popover, **Setup guide** tour, and the connection, Cloud codespaces, Automatic pause and Your limits cards under one `GitHubCodespacesProvider`                                                                                                            |
+| `connected-apps`      | Connected apps      | `settings-section-oauth`        | `OAuthSettings` with a help popover                                                                                                                                                                                                                             |
+| `api-tokens`          | API tokens          | `settings-section-api-tokens`   | `ApiTokensSettings` with a help popover on when a token is needed, the Bearer header and the one-time display                                                                                                                                                   |
+| `preferences`         | Preferences         | `settings-section-preferences`  | `PreferencesSettings` theme (Light/Dark/System, via `useTheme`) and interface language, both kept in this browser; the beginner-panel switches (the account's `ui.hidden_panels`); then the generic editor for remaining definitions (`settings-section-other`) |
 
 **Tours:** `settingsTours.ts` defines the page tour, the GitHub & Codespaces setup tour and the
 Telegram setup tour, run by the shared `Walkthrough` and addressed by `?tour=<id>&guide=<step>`, so a
@@ -463,8 +499,8 @@ global/provider kill switches with a reason field and confirmed stop/resume.
   stored settings for the authenticated user and the common communication service.
 - Saving a mapped setting refreshes descriptor state from the server. Definitions not mapped to a
   communication channel render in Preferences, except categories another section owns (`profile`,
-  `security`, `oauth`, `sessions`, `api-tokens`, and `codespaces`, which the Automatic pause card
-  edits). The theme is a browser preference (the Preferences theme control), not a user setting.
+  `security`, `oauth`, `sessions`, `api-tokens`, `codespaces`, which the Automatic pause card
+  edits, and `ui`, which the beginner-panel switches edit). The theme is a browser preference (the Preferences theme control), not a user setting.
 - Channel fields and test controls have accessible names; capability and state labels remain visible
   without hover.
 
