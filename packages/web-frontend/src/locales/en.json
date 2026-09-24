@@ -123,8 +123,8 @@
         "clickToConfigure": "Click to configure →"
       },
       "quickStart": {
-        "title": "Quick Start",
-        "description": "Add MCP Moira to your AI assistant. Choose your client below:",
+        "title": "Connect your agent",
+        "description": "Add Moira to your AI assistant once. Choose your client below:",
         "copy": "Copy",
         "copied": "Copied!",
         "learnMore": "Need help?",
@@ -185,11 +185,32 @@
         "hoursAgo": "{{count}}h ago",
         "daysAgo": "{{count}}d ago",
         "running": "Running..."
+      },
+      "how": {
+        "title": "Your agent does the work. Moira keeps it on track.",
+        "subtitle": "Moira gives your agent one clear step at a time and checks each result before it moves on. You don't have to learn how flows work to use it.",
+        "steps": {
+          "connect": {
+            "title": "Connect your agent",
+            "body": "Add Moira to Claude, ChatGPT, Cursor or another MCP client once — the setup is just below."
+          },
+          "describe": {
+            "title": "Describe the task",
+            "body": "Say what you need in plain words, the way you would tell a colleague."
+          },
+          "agent": {
+            "title": "Your agent picks the flow",
+            "body": "It runs a ready flow that fits, or creates a new one for your task through the Workflow Management Flow — simple or complex, whatever the task needs."
+          }
+        },
+        "tryTitle": "Try it — say to your agent:",
+        "tryPrompt": "“Use Moira to run Example 1: Simple Steps for this task: …”",
+        "optional": "Diagrams, variables and editing are here for when you are curious. None of it is required."
       }
     },
     "workflows": {
       "title": "Workflows",
-      "subtitle": "Browse and manage your workflows",
+      "subtitle": "Start with a recommended flow, or browse every flow you can use",
       "explorer": {
         "title": "Workflow Explorer",
         "workflows": "Workflows",
@@ -215,7 +236,8 @@
         "yesterday": "Yesterday",
         "daysAgo": "{{count}} days ago"
       },
-      "confirmDelete": "Delete workflow \"{{name}}\"?"
+      "confirmDelete": "Delete workflow \"{{name}}\"?",
+      "allFlows": "All flows"
     },
     "workflowDetail": {
       "backToWorkflows": "Back to Workflows",
@@ -1512,7 +1534,8 @@
       "diagnostics": "Process diagnostics",
       "modes": {
         "map": "Map",
-        "graph": "Graph"
+        "graph": "Graph",
+        "steps": "Steps"
       },
       "tabs": {
         "block": "Block",
@@ -1603,13 +1626,46 @@
           },
           "explore": {
             "title": "Explore the same process your way",
-            "body": "The highlighted toolbar holds everything that changes what you see. The Map / Graph switch picks the view: the Map is the process the workflow declares, the Graph is every step of the definition. The layout presets beside it re-lay both diagrams — rows, compact, balanced branches, top to bottom — and bring the camera back to the block you were reading. The magnifier finds a step by id or text, and the compass opens the note about the view that is open. Your selection and the camera survive a switch."
+            "body": "The highlighted toolbar holds everything that changes what you see. The Steps / Map / Graph switch picks the view: Steps is what the agent is told, the Map is the process the workflow declares, the Graph is every step of the definition. On the Map and the Graph, the layout presets re-lay the diagram — rows, compact, balanced branches, top to bottom — and bring the camera back to the block you were reading, the magnifier finds a step by id or text, and the compass opens the note about the view that is open. On Steps, the switch beside the view tabs reads variables as plain words. Your selection and the camera survive a switch."
+          },
+          "intro": {
+            "title": "You don't have to build flows",
+            "body": "Moira is made for agents. Describe your task to your agent in plain words: it picks a ready flow or creates one for you through the Workflow Management Flow — simple or complex, whatever fits. This page is for looking inside a flow when you are curious; nothing here is required."
+          },
+          "steps": {
+            "title": "Read it as plain steps",
+            "body": "The Steps view shows the flow as what the agent is told: numbered instructions joined by arrows. Where the agent's answer decides the way on, the arrows fork and name the answer. With “Variables as words” on, every variable reads as ordinary words, so the whole flow reads like a list of instructions."
           }
         }
       },
       "panel": {
         "collapse": "Collapse the panel",
         "expand": "Expand the panel"
+      },
+      "steps": {
+        "start": "Start",
+        "finish": "Finish",
+        "check": "Moira checks a condition",
+        "step": "Step {{number}}",
+        "backTo": "back to step {{number}}",
+        "back": "back",
+        "inline": "Variables as words",
+        "inlineHint": "Read every variable in the instructions as plain words instead of template tokens",
+        "empty": "This flow has no start step to read from.",
+        "loading": "Laying out the steps…",
+        "system": {
+          "expression": "Moira computes values",
+          "materialize": "Moira writes files for the agent",
+          "read-note": "Moira reads a note",
+          "write-note": "Moira saves a note",
+          "upsert-note": "Moira updates a note",
+          "lock": "Moira takes a lock",
+          "subgraph": "Moira runs another flow",
+          "user-notification": "Moira notifies you",
+          "telegram-notification": "Moira notifies you in Telegram",
+          "other": "Moira does this step itself"
+        },
+        "layoutFailed": "The steps could not be laid out. Reload the page, or open the map or the graph."
       }
     },
     "playbooks": {
@@ -2864,7 +2920,8 @@
       "action": "Action",
       "source": "Source",
       "dateFrom": "From",
-      "dateTo": "To"
+      "dateTo": "To",
+      "more": "Filters"
     },
     "edit": "Edit",
     "close": "Close",
@@ -2924,5 +2981,48 @@
     "public": "Public",
     "private": "Private",
     "toggleHint": "Publishing shares the content with everyone signed in; only you can change it."
+  },
+  "onboarding": {
+    "title": "Recommended for getting started",
+    "agentFirst": "You don't have to choose or build a flow yourself. Describe the task to your agent in plain words — it picks one of these or creates a new flow for you with the Workflow Management Flow. Everything here is optional: open a flow to see how it works.",
+    "hide": "Hide",
+    "show": "Show",
+    "open": "Open",
+    "whenLabel": "Pick it when",
+    "examplesTitle": "Learn how Moira works",
+    "examplesSubtitle": "Three tiny example flows, from the simplest to a few paths. Ask your agent to run one on any small task.",
+    "universalTitle": "Ready flows for everyday tasks",
+    "universalSubtitle": "Universal flows for clear tasks without special logic.",
+    "examples": {
+      "simpleSteps": {
+        "title": "Example 1: Simple Steps",
+        "description": "Four steps in a row: understand the task, do it, check the result, report. No choices."
+      },
+      "oneChoice": {
+        "title": "Example 2: One Choice",
+        "description": "Do the task, then one yes-or-no answer decides what happens next."
+      },
+      "severalPaths": {
+        "title": "Example 3: Several Paths",
+        "description": "A question, a bug or an idea: each answer takes its own short path."
+      }
+    },
+    "universal": {
+      "quickTask": {
+        "title": "Quick Task",
+        "description": "Plans the work, does it with evidence, gets an independent review and asks you to accept the result.",
+        "when": "a clear, bounded task that is not software development: a document, a piece of research, a set of changes you want checked."
+      },
+      "robustTask": {
+        "title": "Robust Task",
+        "description": "The same idea built for long or critical work: retries, recovery after interruptions, replanning when the facts change, honest partial results.",
+        "when": "the task is large or important, or likely to run into problems along the way."
+      },
+      "todoList": {
+        "title": "Todo List",
+        "description": "Works through a checklist one item at a time — the one you give it, or one it writes once from your goal — with a short proof for each.",
+        "when": "the steps are clear and just need doing in order."
+      }
+    }
   }
 }

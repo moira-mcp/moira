@@ -1,0 +1,13 @@
+---
+title: "Example 2: One Choice"
+description: "Англоязычная версия учебного примера «Пример 2: Одна развилка»."
+---
+
+Это англоязычная версия примера [Пример 2: Одна развилка](../example-one-choice-ru/): те же шаги, развилки и ответы, а все тексты, которые получает агент, написаны по-английски.
+
+```js
+mcp__moira__start({ action: "prepare", workflowId: "moira/example-one-choice", parentExecutionId: "none" })
+mcp__moira__start({ action: "execute", startAttemptId: "<Start attempt ID from prepare>" })
+```
+
+Это учебный пример. Для настоящей работы не нужно выбирать или собирать флоу: опишите задачу своему агенту — он сам выберет готовый флоу или создаст новый.

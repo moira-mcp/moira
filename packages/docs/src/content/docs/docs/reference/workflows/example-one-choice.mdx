@@ -1,0 +1,32 @@
+---
+title: "Example 2: One Choice"
+description: "A learning example with one fork: the agent does the task, then answers one yes-or-no question — does the result fully match the request? Yes leads to a report; no leads to an honest note about what is missing."
+---
+
+A learning example with one fork: the agent does the task, then answers one yes-or-no question — does the result fully match the request? Yes leads to a report; no leads to an honest note about what is missing. No loops and no variables. For real work, describe the task to your agent and let it choose a ready flow or create one.
+
+## The steps
+
+- Do the task the user asked for.
+- Check the result against the request. Answer yes if it fully matches, or no if something is missing.
+  - **yes — it matches** →
+    - Tell the user in a few sentences what you did.
+  - **no — something is missing** →
+    - Tell the user what is missing and why, and suggest what to do next. Do not start the task again in this flow.
+
+## Start it
+
+The easiest way is to ask your agent in plain words, for example:
+
+> “Run Example 2: One Choice from Moira for this task: …”
+
+An agent that calls the tools directly starts it like this:
+
+```js
+mcp__moira__start({ action: "prepare", workflowId: "moira/example-one-choice", parentExecutionId: "none" })
+mcp__moira__start({ action: "execute", startAttemptId: "<Start attempt ID from prepare>" })
+```
+
+It is a learning example. For real work you do not need to pick or build a flow: describe the task to your agent, and it chooses a ready flow or creates one for you.
+
+The same process with every text in Russian is [Пример 2: Одна развилка](../example-one-choice-ru/).

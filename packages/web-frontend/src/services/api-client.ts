@@ -370,6 +370,9 @@ export class MoiraApiClient {
       if (request?.search) {
         params.append("search", request.search);
       }
+      if (request?.slugs && request.slugs.length > 0) {
+        params.append("slugs", request.slugs.join(","));
+      }
       if (request?.visibility) {
         params.append("visibility", request.visibility);
       }

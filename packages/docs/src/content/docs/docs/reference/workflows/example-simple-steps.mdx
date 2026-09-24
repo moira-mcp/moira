@@ -1,0 +1,30 @@
+---
+title: "Example 1: Simple Steps"
+description: "A learning example for people new to Moira: the agent goes through four plain steps in order — understand the task, do it, check the result, report."
+---
+
+A learning example for people new to Moira: the agent goes through four plain steps in order — understand the task, do it, check the result, report. No branches and no variables. Start it with any small task to see how Moira gives an agent one step at a time. For real work, describe the task to your agent and let it choose a ready flow or create one.
+
+## The steps
+
+- Read the user's request and restate the task in one sentence. If something important is unclear, ask the user before you go on.
+- Do the task. Keep to what the user asked for and do not add extra work.
+- Compare the result with the request. Fix anything that does not match before you go on.
+- Tell the user in a few sentences what you did and how you checked it.
+
+## Start it
+
+The easiest way is to ask your agent in plain words, for example:
+
+> “Run Example 1: Simple Steps from Moira for this task: …”
+
+An agent that calls the tools directly starts it like this:
+
+```js
+mcp__moira__start({ action: "prepare", workflowId: "moira/example-simple-steps", parentExecutionId: "none" })
+mcp__moira__start({ action: "execute", startAttemptId: "<Start attempt ID from prepare>" })
+```
+
+It is a learning example. For real work you do not need to pick or build a flow: describe the task to your agent, and it chooses a ready flow or creates one for you.
+
+The same process with every text in Russian is [Пример 1: Простые шаги](../example-simple-steps-ru/).

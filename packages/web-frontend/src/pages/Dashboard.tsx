@@ -1,7 +1,10 @@
 /* eslint-disable no-console */
 /**
- * Dashboard Page
- * Overview with stat cards, recent workflows, and recent executions
+ * Dashboard Page — the home page.
+ * Leads with how Moira is meant to be used: connect your agent, describe the task in plain words,
+ * and let the agent pick a ready flow or build one — learning flows is optional. Then the agent
+ * connection (per-client setup), a prompt to try, the recommended flows, and the overview: stat
+ * cards, recent workflows and recent executions.
  *
  * Note: console.error used for browser debugging of API errors
  */
@@ -9,10 +12,11 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { Workflow, Play, StickyNote } from "lucide-react";
+import { Workflow, Play, StickyNote, Plug, MessageSquareText, Route } from "lucide-react";
 import apiClient from "../services/api-client";
 import { ROUTES } from "../constants/routes";
 import { QuickStartCard } from "../components/QuickStartCard";
+import { RecommendedFlows } from "../components/onboarding/RecommendedFlows";
 import { PageShell } from "../components/PageShell";
 import { StatCard } from "../components/stat-card";
 import { EmptyState } from "../components/empty-state";
@@ -21,6 +25,56 @@ import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card"
 import { Badge } from "../components/ui/badge";
 import { ExecutionCard } from "../components/cards/ExecutionCard";
 import { normalizeExecution } from "../components/cards/normalize-execution";
+
+const HOW_IT_WORKS = [
+  { key: "connect", icon: Plug },
+  { key: "describe", icon: MessageSquareText },
+  { key: "agent", icon: Route },
+] as const;
+
+/** The three steps of using Moira, agent first, and the note that the rest is optional. */
+function HowItWorks(): React.JSX.Element {
+  const { t } = useTranslation();
+  return (
+    <section
+      className="mb-8 rounded-2xl border bg-gradient-to-br from-primary/10 via-card to-card p-6 md:p-8"
+      aria-labelledby="home-how-title"
+      data-testid="home-how-it-works"
+    >
+      <h2 id="home-how-title" className="text-2xl font-semibold tracking-tight">
+        {t("pages.dashboard.how.title")}
+      </h2>
+      <p className="mt-2 max-w-3xl text-muted-foreground">{t("pages.dashboard.how.subtitle")}</p>
+      <ol className="mt-6 grid gap-4 md:grid-cols-3" data-testid="home-steps">
+        {HOW_IT_WORKS.map(({ key, icon: Icon }, index) => (
+          <li
+            key={key}
+            className="flex flex-col gap-2 rounded-xl border bg-card/80 p-4"
+            data-step={key}
+          >
+            <span className="inline-flex items-center gap-2 text-sm font-semibold">
+              <span className="inline-flex size-7 items-center justify-center rounded-full bg-primary text-primary-foreground">
+                {index + 1}
+              </span>
+              <Icon className="size-4 text-primary" aria-hidden="true" />
+              {t(`pages.dashboard.how.steps.${key}.title`)}
+            </span>
+            <span className="text-sm text-muted-foreground">
+              {t(`pages.dashboard.how.steps.${key}.body`)}
+            </span>
+          </li>
+        ))}
+      </ol>
+      <div className="mt-5 rounded-xl border border-dashed bg-card/60 p-4" data-testid="home-try">
+        <p className="text-sm font-medium">{t("pages.dashboard.how.tryTitle")}</p>
+        <p className="mt-1 font-mono text-sm text-primary">{t("pages.dashboard.how.tryPrompt")}</p>
+      </div>
+      <p className="mt-4 text-sm text-muted-foreground" data-testid="home-optional">
+        {t("pages.dashboard.how.optional")}
+      </p>
+    </section>
+  );
+}
 
 interface DashboardStats {
   workflowsCount: number;
@@ -95,8 +149,12 @@ export const Dashboard: React.FC = () => {
 
   return (
     <PageShell title={t("pages.dashboard.title")}>
-      {/* Quick Start - MCP Configuration */}
+      <HowItWorks />
+
+      {/* Step 1 — connect the agent: per-client MCP configuration */}
       <QuickStartCard />
+
+      <RecommendedFlows variant="compact" />
 
       {/* Stat Cards */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">

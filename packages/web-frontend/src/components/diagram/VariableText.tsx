@@ -46,6 +46,17 @@ const TEMPLATE = /\{\{\s*([A-Za-z_][\w.-]*)(?:\[[^\]]*\])?[^}]*\}\}/g;
 const IDENT = /[A-Za-z_][\w.-]*/g;
 const KEYWORDS = new Set(["true", "false", "null", "and", "or", "not"]);
 
+/** `current_task` → "current task", `review.outcome` → "outcome": a variable as plain words. */
+export function humanizeVariable(name: string): string {
+  const leaf = name.split(".").pop() ?? name;
+  return leaf
+    .replace(/\[[^\]]*\]/g, "")
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/[_-]+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
 /** The registry name a reference resolves to: `node.field` reads the node-local part. */
 function rootOf(name: string): string {
   return name.split(".")[0];
@@ -134,22 +145,48 @@ export function VariableRef({
 }
 
 /**
+ * A reference read as words inside a sentence: the variable's name in plain words, marked only by
+ * a dotted underline, with the registry's explanation on hover.
+ */
+function InlineVariable({ name }: { name: string }): React.JSX.Element {
+  const { registry } = useVariables();
+  const root = rootOf(name);
+  const description = (registry[root] ?? registry[name])?.description;
+  const words = humanizeVariable(name);
+  const token = (
+    <span className="underline decoration-dotted underline-offset-2" data-variable-inline={root}>
+      {words}
+    </span>
+  );
+  return description ? <Hint content={description}>{token}</Hint> : token;
+}
+
+/**
  * A directive or message: `{{…}}` references become tokens that keep their braces, the rest
- * stays text; `compact` is for titles, where a pill would break the line.
+ * stays text; `compact` is for titles, where a pill would break the line. `inline` reads every
+ * reference as plain words instead, so the text is a sentence and not a template.
  */
 export function TemplateText({
   text,
   compact = false,
+  inline = false,
 }: {
   text: string;
   compact?: boolean;
+  inline?: boolean;
 }): React.JSX.Element {
   const parts: React.ReactNode[] = [];
   let last = 0;
   for (const match of text.matchAll(TEMPLATE)) {
     const index = match.index ?? 0;
     if (index > last) parts.push(text.slice(last, index));
-    parts.push(<VariableRef key={`${index}`} name={match[1]} braces compact={compact} />);
+    parts.push(
+      inline ? (
+        <InlineVariable key={`${index}`} name={match[1]} />
+      ) : (
+        <VariableRef key={`${index}`} name={match[1]} braces compact={compact} />
+      ),
+    );
     last = index + match[0].length;
   }
   if (last < text.length) parts.push(text.slice(last));

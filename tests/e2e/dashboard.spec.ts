@@ -172,8 +172,8 @@ test.describe("Dashboard Stats & Quick Actions", () => {
     await page.goto(`${BASE_URL}/`);
     await page.waitForLoadState("domcontentloaded");
 
-    // Check Quick Start section exists
-    await expect(page.getByText("Quick Start")).toBeVisible();
+    // Check the connection section exists (step 1 of the home page's three steps)
+    await expect(page.getByRole("heading", { name: "Connect your agent" })).toBeVisible();
 
     // Check tab list with client names
     await expect(page.getByRole("tab", { name: "Claude Web" })).toBeVisible();

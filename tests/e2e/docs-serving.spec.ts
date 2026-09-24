@@ -28,6 +28,20 @@ test.describe("Docs site served at /docs", () => {
     await expect(page).toHaveTitle(/Moira Documentation/);
   });
 
+  // Starlight keeps its palette in a cascade layer, so an unlayered site palette must be scoped to
+  // the dark theme; otherwise the light theme renders the dark page background.
+  for (const { theme, background } of [
+    { theme: "light", background: "rgb(255, 255, 255)" },
+    { theme: "dark", background: "rgb(23, 24, 28)" },
+  ]) {
+    test(`the ${theme} theme paints the ${theme} page background`, async ({ page }) => {
+      await page.addInitScript((value) => localStorage.setItem("starlight-theme", value), theme);
+      await page.goto(`${BASE_URL}/docs/getting-started/quickstart/`);
+      await expect(page.locator("html")).toHaveAttribute("data-theme", theme);
+      await expect(page.locator("body")).toHaveCSS("background-color", background);
+    });
+  }
+
   test("/ still serves the Web UI SPA", async ({ page }) => {
     const res = await page.goto(`${BASE_URL}/`);
     expect(res?.status()).toBe(200);

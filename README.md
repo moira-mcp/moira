@@ -635,14 +635,14 @@ discovers and reads the English sources directly; pages with an interactive inse
 same authored before/after sections in runtime and public presentation. The special `tools` topic is
 listed alongside those file-backed topics and renders directly from the typed MCP contract.
 
-| Area            | Covers                                                                                  | Path               |
-| --------------- | --------------------------------------------------------------------------------------- | ------------------ |
-| Getting started | Introduction, quickstart, self-hosting                                                  | `getting-started/` |
-| Concepts        | Workflows, nodes, templates, notes, playbooks, artifacts                                | `concepts/`        |
-| Guides          | Writing directives, creating & editing workflows, reading a flow and a run, extensions  | `guides/`          |
-| Reference       | Tools, input schema, magic variables, condition operators, validation, workflow catalog | `reference/`       |
-| Integration     | MCP clients, Claude Code, agent guide, Telegram setup, troubleshooting                  | `integration/`     |
-| Patterns        | Branching, validation loop, escalation, subagent review, workspace, and more            | `patterns/`        |
+| Area            | Covers                                                                                                        | Path               |
+| --------------- | ------------------------------------------------------------------------------------------------------------- | ------------------ |
+| Getting started | Introduction (agent-first), quickstart, tutorial on the learning flows, which ready flow to use, self-hosting | `getting-started/` |
+| Concepts        | Workflows, nodes, templates, notes, playbooks, artifacts                                                      | `concepts/`        |
+| Guides          | Writing directives, creating & editing workflows, reading a flow and a run, extensions                        | `guides/`          |
+| Reference       | Tools, input schema, magic variables, condition operators, validation, workflow catalog                       | `reference/`       |
+| Integration     | MCP clients, Claude Code, agent guide, Telegram setup, troubleshooting                                        | `integration/`     |
+| Patterns        | Branching, validation loop, escalation, subagent review, workspace, and more                                  | `patterns/`        |
 
 ### Internal docs — `docs/`
 

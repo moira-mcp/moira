@@ -53,9 +53,13 @@ frontend/src/
 │   │   ├── reveal.ts                                                       # `requestReveal`: bring an element inside a diagram into the camera
 │   │   └── layoutPreset.ts / interactive.ts / useHighlightTarget.ts / useStoredFlag.ts / useRequest.ts
 │   ├── flow/                    # Flow page: the definition as a process, edited in place (`guideSteps.ts`: its walkthrough)
-│   │   ├── editing.tsx / model.ts / modes.ts        # Edit set (apply, export diff), run-less projection, the two views
+│   │   ├── editing.tsx / model.ts / modes.ts        # Edit set (apply, export diff), run-less projection, the three views
+│   │   ├── StepsView.tsx / stepsModel.ts            # The steps view: what the agent is told, as numbered cards joined by arrows
 │   │   ├── RegistryPanel.tsx                        # The variable registry (panel tab)
 │   │   └── EditControls.tsx                         # In-place editors (block text, transitions, owner, node text)
+│   ├── onboarding/              # What is recommended to newcomers
+│   │   ├── recommended.ts                           # The registry: learning examples per language, universal flows, which open on the steps view
+│   │   └── RecommendedFlows.tsx                     # The recommended section (flow list: full; home: compact), one catalog lookup per page
 │   ├── run/                     # Run page: the execution as a process
 │   │   ├── MapView.tsx / CanvasView.tsx                                     # The map view (contents beside the diagram); its ported-card diagram
 │   │   ├── ContentsSidebar.tsx                                              # Contents rows, their fold state, `ContentsLayout` beside either diagram
@@ -70,14 +74,14 @@ frontend/src/
 │   │   ├── duration.ts / waiting.ts                                         # The engine's duration split worded in the interface language, clock formatting; who-is-waited-for wording
 │   │   └── modes.ts / nodeTypeStyle.tsx
 │   └── workflow/                # Workflow management
-│       ├── WorkflowExplorer.tsx # Workflow list with FilterBar + DataListView + useDebounce
+│       ├── WorkflowExplorer.tsx # Workflow list with FilterBar (filters folded) + DataListView + useDebounce
 │       ├── WorkflowGraph.tsx    # React Flow visualization with its diagram toolbar
 │       ├── WorkflowCard.tsx     # Compact single-row workflow card (icon + name left, owner center, badges right)
 │       ├── NodeDetailSheet.tsx  # Node detail panel (legacy, used in execution views)
 │       ├── WorkflowHeader.tsx   # Workflow metadata display
 │       ├── WorkflowVariablesPanel.tsx # Collapsible variables sidebar
 │       └── WorkflowVisualizationPage.tsx # Container component
-│   ├── QuickStartCard.tsx       # Per-client QuickStart tabs with setup instructions
+│   ├── QuickStartCard.tsx       # "Connect your agent": per-client setup tabs
 │   ├── notes/                   # Notes management components
 │   │   ├── NoteInlineEditor.tsx # Inline expandable card editor (create/edit)
 │   │   └── NoteHistoryDialog.tsx # Notes' source for the shared history dialog
@@ -88,8 +92,8 @@ frontend/src/
 │   └── playbooks/
 │       └── PlaybookEditor.tsx   # Inline playbook editor with the live-runs warning
 ├── pages/
-│   ├── Dashboard.tsx            # Home page with stat cards, Quick Start, recent ExecutionCards
-│   ├── Workflows.tsx            # Workflow explorer + viewer
+│   ├── Dashboard.tsx            # Home page: agent-first steps, connection card, recommended flows, stat cards, recent items
+│   ├── Workflows.tsx            # Recommended flows, then the workflow explorer
 │   ├── FlowPage.tsx             # Flow page: the workflow definition as a process, edit mode for owners
 │   ├── Executions.tsx           # Execution history (ExecutionCard list/grid)
 │   ├── Playbooks.tsx            # Playbooks page (PlaybookCard list/grid, editor, shared history)
@@ -196,7 +200,7 @@ Higher-level composable components in `src/components/`:
 | CardShell             | `cards/CardShell.tsx`               | Universal card wrapper: dual-mode (compact/list), action buttons, `alwaysVisible` for list mode                                                                       |
 | Card Components       | `cards/`                            | Reusable card components (ExecutionCard, NoteCard, ArtifactCard, etc.) built on CardShell                                                                             |
 | PageShell             | `PageShell.tsx`                     | Page layout wrapper: title, description, loading (skeleton), error states, action slot                                                                                |
-| FilterBar             | `FilterBar.tsx`                     | Standardized filter toolbar: search input, filters slot, actions slot, reset button                                                                                   |
+| FilterBar             | `FilterBar.tsx`                     | Standardized filter toolbar: search input, filters slot, actions slot, reset button; `foldFilters` puts filters and reset behind a counted "Filters" button           |
 | LabeledFilter         | `LabeledFilter.tsx`                 | Wrapper adding visible label above any filter control                                                                                                                 |
 | SortSelect            | `SortSelect.tsx`                    | Combined sort field+direction dropdown (e.g., "Created ↓")                                                                                                            |
 | SearchableSelect      | `SearchableSelect.tsx`              | Combobox with text search for dynamic option lists (absolute dropdown + cmdk)                                                                                         |
@@ -294,9 +298,45 @@ Sidebar navigation:
 
 Active route highlighting via NavLink isActive.
 
-### Quick Start Card
+### Home page
 
-Dashboard displays per-client Quick Start card with tabbed interface:
+The home page (`pages/Dashboard.tsx`, route `/`) leads with how Moira is meant to be used
+(`home-how-it-works`). It shows three numbered steps (`home-steps`):
+
+1. connect your agent;
+2. describe the task in plain words;
+3. the agent picks a ready flow or builds one through the Workflow Management Flow.
+
+A prompt to try follows (`home-try`), then the note that diagrams, variables and editing are
+optional (`home-optional`). Below come the connection card (`QuickStartCard`, titled "Connect your
+agent"), the compact recommended section (`RecommendedFlows variant="compact"`), the stat cards and
+the recent workflows and executions.
+
+### Recommended flows
+
+`components/onboarding/recommended.ts` is the one place that knows what is recommended to
+newcomers:
+
+- the three learning examples (`example-simple-steps`, `example-one-choice`,
+  `example-several-paths`), offered as their `-ru` twins when the interface language is Russian;
+- the universal flows Quick Task, Robust Task and Todo List.
+
+All of them are system flows addressed as `moira/<slug>`. Their titles, what each does and, for the
+universal flows, when to pick it are interface text (`onboarding.*`). `preferredFlowView` makes
+the learning examples open on the steps view.
+
+`RecommendedFlows` looks the slugs up once per page with `GET /api/workflows?slugs=…&visibility=public`,
+and offers only the system-owned flows the answer contains. A second mount, or the other page,
+reuses the lookup; a failed lookup is retried on the next mount. With nothing to offer, the section
+is not drawn.
+
+On the flow list the section is full and foldable (`recommended-toggle`; the fold is remembered in
+`localStorage` under `moira.workflows.recommendedCollapsed`) and shows when to pick each universal
+flow. On the home page it is compact.
+
+### Connection card
+
+The home page's connection card ("Connect your agent", `QuickStartCard`) has a tabbed interface:
 
 - Tabs for 11 MCP clients: Claude Code, Copilot CLI, Cursor, Claude Desktop, VS Code, Claude Web, ChatGPT, Perplexity, Continue, Zed, Gemini CLI
 - Setup instructions rendered by `setupType`: `gui` (description with `whitespace-pre-line`), `config` (JSON code block), `cli` (primary + auth + alternative commands), `deeplink` (button + auth + alternative)
@@ -529,9 +569,16 @@ notes disappear, and the map reads its guidance from `pages.flowPage.modeGuide`.
 diagnostics are also shown on the offending block or step (`DiagnosticBadge`), and the registry
 panel edits a whole declaration as JSON Schema besides its type, description and default.
 
-**URL state:** `view` (`map | graph`, default map, registry `components/flow/modes.ts`; any other
-value resolves to `map`; `graph` is the only view of a workflow without `progress`), `block`,
-`guide` (walkthrough step), `edit` (`1` turns on edit mode; ignored for non-owners).
+**URL state:**
+
+- `view` (`steps | map | graph`, registry `components/flow/modes.ts`): the default is `steps` for
+  the learning examples (`preferredFlowView`) and `map` otherwise; any other value resolves to that
+  default; a workflow without `progress` has no map and shows the graph in its place.
+- `block`.
+- `guide` (walkthrough step).
+- `edit` (`1` turns on edit mode; ignored for non-owners).
+- `inline` (`1` or `0`: variables as words on the steps view; without it the reader's stored
+  choice, `moira.flow.inlineVariables`, default on).
 
 **Layout:** the `PageHeader` (`flow-header`) carries the page's text and its own actions — back,
 the workflow name (`flow-title`), `v<version>` as the meta, the description as the header line,
@@ -558,8 +605,24 @@ selected step, which is where a node's details live — including the validation
 catalog configuration sections. The panel is therefore mounted for the graph view and for a
 workflow without `progress` as well; its block level then shows the empty-state callout.
 
-Only the view the tab names is mounted (`flow-view`, `data-view`): the map is `MapView`, and the
-graph is `WorkflowGraph` inside a `ContentsLayout`, so the contents sidebar sits beside both — a
+Only the view the tab names is mounted (`flow-view`, `data-view`). The steps view is `StepsView`,
+and the page's panel is not mounted beside it:
+
+- `stepsModel` walks the definition from its start node in authored order. Agent steps become
+  numbered instruction cards; a condition is a check Moira makes; the engine's other nodes are
+  small system cards; ends are finish markers.
+- Only a node with more than one way out labels its edges. A connection to a node the walk is
+  still inside is a dashed return labelled "back to step N". Nodes reached only by teleport are
+  left out.
+- ELK lays the cards out top to bottom, with card heights measured on a canvas. The shared
+  `DiagramViewport`, the `DiagramToolbar` (without presets; with the **Variables as words** switch,
+  `steps-inline-toggle`) and `useOpeningPlacement` provide the rest.
+- `TemplateText inline` reads each `{{name}}` as `humanizeVariable(name)`, with the registry
+  description in a `Hint`.
+- If the layout engine cannot be loaded or rejects the graph, the view shows an error line
+  (`steps-layout-failed`) instead of the loading state.
+
+The map is `MapView`, and the graph is `WorkflowGraph` inside a `ContentsLayout`, so the contents sidebar sits beside both — a
 workflow without `progress` has no blocks to list and shows the graph alone. The
 graph receives `focusRequest` (a chosen node brought into view), `selectedBlockId` (the block's
 group is ringed and pulses on arrival) and the page's toolbar slots, and it takes its contents
@@ -578,8 +641,9 @@ are applied). The save calls
 `apiClient.updateWorkflow(id, edited, fileInfo.revision)` (`PUT /api/workflows/:id`); a 409 shows
 the conflict text and a 400 the server's message, both keeping the edits; a success clears them and
 reloads the detail and then the process for the new revision, the previous picture staying mounted
-through both. The walkthrough (`Walkthrough`, generic over the page's views) explains block,
-step, evidence, loop, editing and the views.
+through both. The walkthrough (`Walkthrough`, generic over the page's views) opens on
+the agent-first message (anchored on the page header), then the steps view (an instruction card, or
+the **Steps** tab on the map and the graph), then block, step, evidence, loop, editing and the views.
 
 ### Run page (ExecutionInspector component)
 
@@ -1109,9 +1173,11 @@ WorkflowCard displays workflows in a compact single-row format:
 
 **Layout Sections:**
 
-- Left: GitBranch icon + workflow name (truncated) + version badge
+- Left: GitBranch icon + workflow name (truncated) + muted version, and on `lg` and wider the
+  description on the same line (`workflow-card-description`)
 - Center: Owner handle (@username) - hidden on mobile
-- Right: Validation badge (icon) + Visibility badge + Delete button (on hover)
+- Right: Validation badge (icon; muted when valid, highlighted when invalid) + Visibility badge
+  (muted) + Delete button (on hover)
 
 **Responsive Behavior:**
 
@@ -1411,7 +1477,11 @@ interface WorkflowExplorerProps {
 
 ### Workflow Explorer Toolbar
 
-WorkflowExplorer uses `FilterBar` with inline Select controls:
+The flow list page (`pages/Workflows.tsx`) scrolls as a whole: the recommended section, then "All
+flows" and the explorer, which keeps a readable height of its own. WorkflowExplorer uses `FilterBar`
+with `foldFilters`: the search is always shown; status, visibility, sort and reset open from the
+"Filters" button (`filters-toggle`), which counts the filters in effect and keeps them open while
+any is. Opened:
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -1855,6 +1925,7 @@ src/
   "pages": {
     "dashboard": {
       "title", "loading", "error", "retry",
+      "how": { "title", "subtitle", "steps": { "connect", "describe", "agent" }, "tryTitle", "tryPrompt", "optional" },
       "stats": { "totalWorkflows", "executions", "settings", "clickToView", "clickToConfigure" },
       "quickStart": { "title", "description", "configLabel", "copy", "copied", "learnMore", "documentation" },
       "recentWorkflows": { "title", "empty" },
@@ -1862,6 +1933,7 @@ src/
       "time": { "justNow", "minutesAgo", "hoursAgo", "daysAgo", "running" }
     },
     "workflows": {
+      "title", "subtitle", "allFlows",
       "explorer": { "title", "workflows", "loading", "failedToLoad", "retry", "noWorkflows", "noMatch", "statistics", "valid", "invalid", "of" },
       "time": { "today", "yesterday", "daysAgo" }
     },
@@ -1891,6 +1963,12 @@ src/
       "quota": { "storage", "artifacts" },
       "pagination": { "showing", "page", "previous", "next" }
     }
+  },
+  "onboarding": {
+    "title", "agentFirst", "hide", "show", "open", "whenLabel",
+    "examplesTitle", "examplesSubtitle", "universalTitle", "universalSubtitle",
+    "examples": { "simpleSteps", "oneChoice", "severalPaths" },   // each { "title", "description" }
+    "universal": { "quickTask", "robustTask", "todoList" }        // each { "title", "description", "when" }
   },
   "admin": {
     "dashboard": { "title", "failedToLoad", "stats", "systemHealth", "recentActivity", "quickLinks" },

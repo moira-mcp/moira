@@ -28,7 +28,8 @@ test.describe("i18n Stage 3 - Core Application Pages Translations", () => {
 
       // Check workflows explorer content
       await expect(page.locator("text=Workflows").first()).toBeVisible({ timeout: 5000 });
-      // Check FilterBar filter dropdowns (migrated from labeled dropdowns to inline Selects)
+      // The optional filters sit behind the FilterBar's "Filters" fold
+      await page.getByTestId("filters-toggle").click();
       await expect(page.locator('[data-testid="status-filter"]')).toBeVisible();
       await expect(page.locator('[data-testid="visibility-filter"]')).toBeVisible();
     });
@@ -83,7 +84,9 @@ test.describe("i18n Stage 3 - Core Application Pages Translations", () => {
 
       // Check workflows explorer content in Russian
       await expect(page.locator("text=Воркфлоу").first()).toBeVisible({ timeout: 5000 });
-      // Check FilterBar filter dropdowns (migrated from labeled dropdowns to inline Selects)
+      // The optional filters sit behind the FilterBar's "Filters" fold, labelled in Russian
+      await expect(page.getByTestId("filters-toggle")).toContainText("Фильтры");
+      await page.getByTestId("filters-toggle").click();
       await expect(page.locator('[data-testid="status-filter"]')).toBeVisible();
       await expect(page.locator('[data-testid="visibility-filter"]')).toBeVisible();
     });

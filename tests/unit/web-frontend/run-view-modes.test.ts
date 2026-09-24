@@ -1,8 +1,10 @@
 /** @jest-environment jsdom */
 /**
- * The two views both pages offer. The run page and the flow page each register exactly `map` and
- * `graph`, with the map as the default; every id either page used to have — and anything else a
- * deep link may carry — resolves to the map rather than failing. The run page's walkthrough is
+ * The views both pages offer. The run page registers exactly `map` and `graph`; the flow page adds
+ * `steps`, the plain reading of a definition, before them. The map is the default of both, and a
+ * page may name another default (the flow page does for the learning examples); every id either
+ * page used to have — and anything else a deep link may carry — resolves to that default rather
+ * than failing. The run page's walkthrough is
  * anchored in those two views only: every step is reachable from whichever view is open, because
  * it either names a selector for that view or falls back to a view that does. After the redesign
  * the elements the walkthrough points at — the contents sidebar, the block panel, the return
@@ -36,11 +38,17 @@ describe("view modes", () => {
     expect(resolveMode("graph")).toBe("graph");
   });
 
-  test("the flow page registers the same two ids with the same default", () => {
-    expect(FLOW_MODES.map((mode) => mode.id)).toEqual(["map", "graph"]);
+  test("the flow page registers the steps view before the same two, with the same default", () => {
+    expect(FLOW_MODES.map((mode) => mode.id)).toEqual(["steps", "map", "graph"]);
     expect(DEFAULT_FLOW_MODE).toBe("map");
+    expect(resolveFlowMode("steps")).toBe("steps");
     expect(resolveFlowMode("map")).toBe("map");
     expect(resolveFlowMode("graph")).toBe("graph");
+    expect(resolveFlowMode("graph", "steps")).toBe("graph");
+  });
+
+  test.each([...RETIRED, null, undefined])("%p resolves to the page's own default", (value) => {
+    expect(resolveFlowMode(value, "steps")).toBe("steps");
   });
 
   test.each([...RETIRED, null, undefined])("%p resolves to the map on both pages", (value) => {
@@ -105,15 +113,34 @@ describe("the run page's walkthrough", () => {
 describe("the flow page's walkthrough", () => {
   const ids = FLOW_MODES.map((mode) => mode.id);
 
-  test("names no view that is not registered and anchors every step in both", () => {
+  test("names no view that is not registered, and reaches every step from every view", () => {
     const steps = flowGuideSteps(true);
     expect(steps.length).toBeGreaterThan(0);
     for (const step of steps) {
       expect(ids).toContain(step.fallbackView);
       for (const mode of Object.keys(step.targets)) expect(ids).toContain(mode);
-      expect(step.targets.map).toBeTruthy();
-      expect(step.targets.graph).toBeTruthy();
+      for (const mode of ids) {
+        expect(step.targets[mode] ?? step.targets[step.fallbackView]).toBeTruthy();
+      }
     }
+  });
+
+  test("opens on the agent-first message, then the plain steps, anchored where they are drawn", () => {
+    const steps = flowGuideSteps(false);
+    expect(steps.slice(0, 2).map((step) => step.id)).toEqual(["intro", "steps"]);
+    expect(steps[0].targets).toEqual({
+      steps: '[data-testid="flow-header"]',
+      map: '[data-testid="flow-header"]',
+      graph: '[data-testid="flow-header"]',
+    });
+    // The instruction cards exist only on the steps view; on the map and the graph the step points
+    // at the switch that opens them, so it does not take the reader out of their view.
+    expect(steps[1].targets).toEqual({
+      steps: '[data-testid="steps-card"][data-step-kind="instruction"]',
+      map: '[data-testid="flow-modes"] [data-mode="steps"]',
+      graph: '[data-testid="flow-modes"] [data-mode="steps"]',
+    });
+    expect(steps[1].fallbackView).toBe("steps");
   });
 
   test("points the editing step at the edit toggle for an owner and at the header for a reader", () => {
@@ -131,5 +158,6 @@ describe("the flow page's walkthrough", () => {
     expect(byId.get("loop")?.targets.map).toBe('[data-port-kind="return"]');
     expect(byId.get("explore")?.targets.map).toBe('[data-testid="map-toolbar"]');
     expect(byId.get("explore")?.targets.graph).toBe('[data-testid="graph-toolbar"]');
+    expect(byId.get("explore")?.targets.steps).toBe('[data-testid="steps-toolbar"]');
   });
 });

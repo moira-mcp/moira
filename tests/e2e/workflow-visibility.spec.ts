@@ -55,7 +55,10 @@ test.describe("Workflow Visibility Features", () => {
     const allWorkflows = await page.locator("text=Public").count();
     expect(allWorkflows).toBeGreaterThan(0);
 
-    // Verify visibility filter control present (2 comboboxes - validation and visibility)
+    // The list's filters are optional and folded behind "Filters"; opened, the validation,
+    // visibility and sort comboboxes are present
+    await page.getByTestId("filters-toggle").click();
+    await expect(page.getByTestId("visibility-filter")).toBeVisible();
     const comboboxes = page.locator('[role="combobox"]');
     const comboboxCount = await comboboxes.count();
     expect(comboboxCount).toBeGreaterThanOrEqual(2);

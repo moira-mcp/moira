@@ -1,0 +1,33 @@
+---
+title: "Example 3: Several Paths"
+description: "A learning example with a few branches: the agent decides whether the request is a question, a bug or a new idea, and each answer leads to its own short path."
+---
+
+A learning example with a few branches: the agent decides whether the request is a question, a bug or a new idea, and each answer leads to its own short path. No loops and no variables. For real work, describe the task to your agent and let it choose a ready flow or create one.
+
+## The steps
+
+- Read the user's request and decide what it is: a question, a bug to fix, or a new idea.
+  - **a question** →
+    - Answer the question briefly and say where the answer comes from.
+  - **a bug** →
+    - Reproduce the bug, fix it, and show the user that it no longer happens.
+  - **an idea** →
+    - Write a short plan for the idea, at most five steps, and ask the user whether to go ahead.
+
+## Start it
+
+The easiest way is to ask your agent in plain words, for example:
+
+> “Run Example 3: Several Paths from Moira for this task: …”
+
+An agent that calls the tools directly starts it like this:
+
+```js
+mcp__moira__start({ action: "prepare", workflowId: "moira/example-several-paths", parentExecutionId: "none" })
+mcp__moira__start({ action: "execute", startAttemptId: "<Start attempt ID from prepare>" })
+```
+
+It is a learning example. For real work you do not need to pick or build a flow: describe the task to your agent, and it chooses a ready flow or creates one for you.
+
+The same process with every text in Russian is [Пример 3: Несколько путей](../example-several-paths-ru/).

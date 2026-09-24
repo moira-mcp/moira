@@ -105,6 +105,7 @@ export class InMemoryRepository implements IDataRepository {
     const {
       userId,
       search,
+      slugs,
       visibility,
       sort = "createdAt",
       sortOrder = "desc",
@@ -143,6 +144,11 @@ export class InMemoryRepository implements IDataRepository {
         // In-memory uses unknown validation status (not cached)
         validation: { status: "unknown", errors: [], validatedAt: null },
       });
+    }
+
+    // Exact slugs (in-memory uses the ID as the slug)
+    if (slugs) {
+      workflows = workflows.filter((w) => slugs.includes(w.slug));
     }
 
     // Search filter

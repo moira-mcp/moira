@@ -1,9 +1,11 @@
 /**
  * Workflow Card Component
  * Compact single-row card display for workflow selection
- * - Horizontal layout: icon + name/version left, owner center, badges right
- * - Description as tooltip on hover
+ * - Horizontal layout: icon + name/version and, on wide screens, the description left; owner
+ *   center; badges right
+ * - Full description as tooltip on hover
  * - Consistent card height
+ * - The facts a reader rarely needs (valid, public, version) are quiet; a problem (invalid) stands out
  */
 
 import React from "react";
@@ -40,7 +42,7 @@ const getValidationStatusConfig = (validation: any) => {
   if (validation?.isValid === true) {
     return {
       icon: <CheckCircle className="w-3 h-3" />,
-      className: "bg-success/10 text-success border-success/30",
+      className: "bg-transparent text-success/70 border-transparent",
     };
   }
   if (validation?.isValid === false) {
@@ -131,14 +133,14 @@ export const WorkflowCard: React.FC<WorkflowCardProps> = ({
           {workflow.visibility === "public" ? (
             <Badge
               variant="outline"
-              className="text-[10px] px-1 py-0 h-5 flex items-center gap-0.5 border-info/30 text-info bg-info/10"
+              className="text-[10px] px-1 py-0 h-5 flex items-center gap-0.5 border-transparent text-muted-foreground bg-transparent"
             >
               <Globe className="w-3 h-3" />
             </Badge>
           ) : (
             <Badge
               variant="outline"
-              className="text-[10px] px-1 py-0 h-5 flex items-center gap-0.5 border-warning/30 text-warning bg-warning/10"
+              className="text-[10px] px-1 py-0 h-5 flex items-center gap-0.5 border-transparent text-warning bg-transparent"
             >
               <Lock className="w-3 h-3" />
             </Badge>
@@ -174,13 +176,21 @@ export const WorkflowCard: React.FC<WorkflowCardProps> = ({
         {/* Left: Icon + Name + Version */}
         <div className="flex items-center gap-2 min-w-0 flex-1">
           <GitBranch className="w-4 h-4 text-primary flex-shrink-0" />
-          <span className="font-medium text-sm text-foreground truncate">
+          <span className="font-medium text-sm text-foreground truncate flex-shrink-0 max-w-[45%]">
             {workflow.metadata?.name || workflow.id}
           </span>
           {workflow.metadata?.version && (
-            <Badge variant="outline" className="text-[10px] px-1 py-0 h-4 flex-shrink-0">
+            <span className="text-[10px] text-muted-foreground flex-shrink-0 tabular-nums">
               v{workflow.metadata.version}
-            </Badge>
+            </span>
+          )}
+          {workflow.metadata?.description && (
+            <span
+              className="hidden lg:block min-w-0 truncate text-xs text-muted-foreground"
+              data-testid="workflow-card-description"
+            >
+              {workflow.metadata.description}
+            </span>
           )}
         </div>
 
@@ -205,7 +215,7 @@ export const WorkflowCard: React.FC<WorkflowCardProps> = ({
           {workflow.visibility === "public" ? (
             <Badge
               variant="outline"
-              className="text-[10px] px-1 py-0 h-5 flex items-center gap-0.5 border-info/30 text-info bg-info/10"
+              className="text-[10px] px-1 py-0 h-5 flex items-center gap-0.5 border-transparent text-muted-foreground bg-transparent"
             >
               <Globe className="w-3 h-3" />
               <span className="hidden md:inline">{t("components.workflowCard.public")}</span>
@@ -213,7 +223,7 @@ export const WorkflowCard: React.FC<WorkflowCardProps> = ({
           ) : (
             <Badge
               variant="outline"
-              className="text-[10px] px-1 py-0 h-5 flex items-center gap-0.5 border-warning/30 text-warning bg-warning/10"
+              className="text-[10px] px-1 py-0 h-5 flex items-center gap-0.5 border-transparent text-warning bg-transparent"
             >
               <Lock className="w-3 h-3" />
               <span className="hidden md:inline">{t("components.workflowCard.private")}</span>

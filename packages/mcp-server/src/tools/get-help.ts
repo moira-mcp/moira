@@ -447,6 +447,7 @@ function getTopicList(helpDirectory = HELP_CONTENT_DIR): string {
   result += `| bounded non-development filesystem task (1-10 work units) **Recommended** | \`moira/quick-task\` |\n`;
   result += `| complex critical task needing durable recovery, cause-aware independent review, bounded result/evidence repair, replanning, and truthful incomplete delivery | \`moira/robust-task\` |\n`;
   result += `| "create workflow", "make workflow", "new workflow" | \`moira/workflow-management-flow\` |\n`;
+  result += `| a person new to Moira asks to try a small learning example (not for real work); each example has a Russian twin | \`moira/example-simple-steps\`, \`moira/example-one-choice\`, \`moira/example-several-paths\` (Russian: \`moira/example-simple-steps-ru\`, \`moira/example-one-choice-ru\`, \`moira/example-several-paths-ru\`) |\n`;
   result += `| first-time orientation that discovers and compares every currently authorized public workflow before an explicit child start | \`moira/user-onboarding\` |\n`;
   result += `| design or revise a software architecture with explicit constraints, alternatives, decisions, risks, and independent review | \`moira/architecture-design-flow\` |\n`;
   result += `| implement executable tests for one authorized existing-project target without changing production code | \`moira/test-generation\` |\n`;

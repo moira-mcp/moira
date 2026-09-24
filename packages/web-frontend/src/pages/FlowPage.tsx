@@ -2,10 +2,13 @@
  * Flow page — one workflow shown as the process it declares, at /workflows/:id and
  * /workflows/:handle/:slug.
  *
- * The definition's derived process (from the server for the saved definition, re-derived in the
- * browser while there are unsaved edits) is shown through the run page's two views with no run in
- * them: the map (the process as a diagram with its contents sidebar) and the technical node graph
- * with its controls and node details. Both stay mounted once shown. The right panel carries the
+ * The definition is shown in three views. The steps view is the simplest picture: what the agent
+ * is told, as numbered instruction cards joined by arrows, with an optional reading of every
+ * variable as plain words; it exists for every workflow and is where the learning examples open.
+ * The derived process (from the server for the saved definition, re-derived in the browser while
+ * there are unsaved edits) is shown through the run page's two views with no run in them: the map
+ * (the process as a diagram with its contents sidebar) and the technical node graph with its
+ * controls and node details. The right panel carries the
  * selected block's detail — its narrative, the steps that implement it, and how long the block
  * typically takes over the viewer's completed runs of this version — and the variable registry.
  * Owners can turn on edit mode: block names and
@@ -14,8 +17,8 @@
  * once, the derivation's diagnostics appear inline, the export lists the flow-file entries that
  * would change, and the save sends the whole definition against the revision the page loaded.
  * A stale revision or an invalid graph is refused by the server and the edits stay on the page.
- * State is deep-linkable: `view`, `block`, `guide`, `edit`. A workflow without a process view
- * shows the node graph only.
+ * State is deep-linkable: `view`, `block`, `guide`, `edit`, `inline`. A workflow without a process
+ * view has the steps view and the node graph, and opens on the graph.
  */
 
 import React, { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -74,6 +77,8 @@ import { VisibilityToggle } from "../components/access/VisibilityToggle";
 import { ROUTES } from "../constants/routes";
 import type { WorkflowGraph } from "../types/workflow-types";
 import { MapView } from "../components/run/MapView";
+import { StepsView } from "../components/flow/StepsView";
+import { preferredFlowView } from "../components/onboarding/recommended";
 import { BlockDetailPanel } from "../components/run/BlockDetailPanel";
 import { NodePanel } from "../components/run/NodePanel";
 import { useNodeTypes } from "../hooks/useNodeTypes";
@@ -109,6 +114,7 @@ const VIEW_PARAM = "view";
 const BLOCK_PARAM = "block";
 const GUIDE_PARAM = "guide";
 const EDIT_PARAM = "edit";
+const INLINE_PARAM = "inline";
 
 /** The slim pending state of a refetch: the content stays, this says a refresh is running. */
 function PendingIndicator(): React.JSX.Element {
@@ -255,8 +261,15 @@ export const FlowPage: React.FC = () => {
     [progress, statistics],
   );
 
-  const requestedMode = resolveFlowMode(searchParams.get(VIEW_PARAM));
-  const mode: FlowViewMode = process ? requestedMode : "graph";
+  // A learning example opens on the steps view; any other flow on the map, or on the graph when it
+  // has no process view. A `view` in the link wins, except a map the definition cannot draw.
+  const preferredView = preferredFlowView(fileInfo?.ownerHandle, fileInfo?.slug);
+  const requestedMode = resolveFlowMode(searchParams.get(VIEW_PARAM), preferredView ?? "map");
+  const mode: FlowViewMode = requestedMode === "steps" || process ? requestedMode : "graph";
+  // Variables read as words on the steps view: the link's `inline` wins, else the reader's choice.
+  const [inlineStored, toggleInlineStored] = useStoredFlag("moira.flow.inlineVariables", true);
+  const inlineParam = searchParams.get(INLINE_PARAM);
+  const inline = inlineParam === null ? inlineStored : inlineParam === "1";
   // A view is rendered from the first time it is asked for and never unmounted again.
   const blockParam = searchParams.get(BLOCK_PARAM);
   const selectedBlockId = blocks.some((b) => b.id === blockParam) ? blockParam : null;
@@ -343,6 +356,12 @@ export const FlowPage: React.FC = () => {
       setSaving(false);
     }
   }, [fileInfo, edited, setEdits, workflowDetail, t]);
+
+  const toggleInline = useCallback(() => {
+    const next = !inline;
+    update({ [INLINE_PARAM]: next ? "1" : "0" });
+    if (next !== inlineStored) toggleInlineStored();
+  }, [inline, inlineStored, toggleInlineStored, update]);
 
   const onEditsChange = useCallback(
     (next: Parameters<typeof setEdits>[0]) => {
@@ -442,10 +461,10 @@ export const FlowPage: React.FC = () => {
     </>
   );
 
-  const flowModes = process ? (
+  const flowModes = (
     <Tabs value={mode} onValueChange={(value) => update({ [VIEW_PARAM]: value })}>
       <TabsList aria-label={t("pages.runPage.modeLabel")} className="h-8" data-testid="flow-modes">
-        {FLOW_MODES.map((definition) => {
+        {FLOW_MODES.filter((definition) => process || definition.id !== "map").map((definition) => {
           const Icon = definition.icon;
           return (
             <TabsTrigger
@@ -461,7 +480,7 @@ export const FlowPage: React.FC = () => {
         })}
       </TabsList>
     </Tabs>
-  ) : null;
+  );
   const flowTrailing = (
     <>
       {refetching && <PendingIndicator />}
@@ -768,6 +787,17 @@ export const FlowPage: React.FC = () => {
               {/* Only the shown view is mounted: the selection lives in the URL and the graph
                   re-centres on its focus request, so a switch loses nothing. */}
               <div className="lg:flex-1 lg:min-h-0">
+                {mode === "steps" && (
+                  <div className="h-[60vh] lg:h-full">
+                    <StepsView
+                      workflow={edited}
+                      inline={inline}
+                      onToggleInline={toggleInline}
+                      toolbarModes={flowModes}
+                      toolbarTrailing={flowTrailing}
+                    />
+                  </div>
+                )}
                 {progress && mode === "map" && (
                   <div className="lg:h-full">
                     <MapView
@@ -807,13 +837,16 @@ export const FlowPage: React.FC = () => {
                     )}
                   </ContentsLayout>
                 )}
-                {!progress && <div className="h-[60vh] lg:h-full">{technicalGraph}</div>}
+                {!progress && mode === "graph" && (
+                  <div className="h-[60vh] lg:h-full">{technicalGraph}</div>
+                )}
               </div>
             </section>
 
             {/* The panel is the only home of a node's details, so it exists without a process view
-                too (its block level then shows the empty-state callout). */}
-            {
+                too (its block level then shows the empty-state callout). The steps view is the
+                simple picture and keeps the page to itself. */}
+            {mode !== "steps" && (
               <aside
                 className={cn(
                   "relative flex flex-col bg-card overflow-hidden border-t lg:border-t-0 lg:border-l",
@@ -904,7 +937,7 @@ export const FlowPage: React.FC = () => {
                   </Tabs>
                 </div>
               </aside>
-            }
+            )}
           </div>
         )}
 

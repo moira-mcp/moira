@@ -1,0 +1,212 @@
+{
+  "id": "7c2f3b8e-1a4d-4e6b-9c1f-5d8a2e3b4c06",
+  "slug": "example-several-paths-ru",
+  "owner": "system-moira",
+  "visibility": "public",
+  "metadata": {
+    "name": "Пример 3: Несколько путей",
+    "version": "1.0.0",
+    "description": "Учебный пример с несколькими ветками: агент определяет, что пришло — вопрос, ошибка или новая идея, и каждый ответ ведёт по своему короткому пути. Без циклов и без переменных. Для настоящей работы опишите задачу своему агенту — он сам выберет готовый флоу или создаст новый.",
+    "tags": [
+      "пример",
+      "новичок",
+      "ветки"
+    ],
+    "schemaVersion": 1
+  },
+  "progress": {
+    "title": "Несколько путей",
+    "goal": "Обработать запрос по подходящему для него пути.",
+    "nodes": [
+      {
+        "id": "sort",
+        "label": "Разобрать",
+        "content": {
+          "summary": "Понять, что за запрос"
+        }
+      },
+      {
+        "id": "question",
+        "label": "Ответить",
+        "content": {
+          "summary": "Ответить на вопрос"
+        }
+      },
+      {
+        "id": "bug",
+        "label": "Исправить",
+        "content": {
+          "summary": "Исправить ошибку и показать, что её больше нет"
+        }
+      },
+      {
+        "id": "idea",
+        "label": "Спланировать",
+        "content": {
+          "summary": "Составить план идеи и спросить пользователя"
+        }
+      }
+    ]
+  },
+  "nodes": [
+    {
+      "id": "start",
+      "type": "start",
+      "connections": {
+        "default": "sort-request"
+      },
+      "initialData": {
+        "variables": {}
+      },
+      "progressNodeId": "sort"
+    },
+    {
+      "id": "sort-request",
+      "type": "agent-directive",
+      "directive": "Прочитайте запрос пользователя и решите, что это: вопрос (question), ошибка, которую надо исправить (bug), или новая идея (idea).",
+      "completionCondition": "Вы выбрали question, bug или idea.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "question",
+              "bug",
+              "idea"
+            ],
+            "description": "Что за запрос: question, bug или idea"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "connections": {
+        "success": "answer-question",
+        "bug": "fix-bug",
+        "idea": "plan-idea"
+      },
+      "progressNodeId": "sort",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "sort-request.kind"
+            },
+            "right": "bug"
+          },
+          "output": "bug"
+        },
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "sort-request.kind"
+            },
+            "right": "idea"
+          },
+          "output": "idea"
+        }
+      ],
+      "connectionLabels": {
+        "success": "вопрос",
+        "bug": "ошибка",
+        "idea": "идея"
+      }
+    },
+    {
+      "id": "answer-question",
+      "type": "agent-directive",
+      "directive": "Кратко ответьте на вопрос и укажите, откуда взят ответ.",
+      "completionCondition": "Пользователь получил короткий ответ с источником.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "answer": {
+            "type": "string",
+            "description": "Ответ, который вы дали",
+            "minLength": 1,
+            "maxLength": 1000
+          }
+        },
+        "required": [
+          "answer"
+        ]
+      },
+      "connections": {
+        "success": "end-answered"
+      },
+      "progressNodeId": "question"
+    },
+    {
+      "id": "end-answered",
+      "type": "end",
+      "progressNodeId": "question"
+    },
+    {
+      "id": "fix-bug",
+      "type": "agent-directive",
+      "directive": "Воспроизведите ошибку, исправьте её и покажите пользователю, что она больше не возникает.",
+      "completionCondition": "Ошибка исправлена, и пользователь увидел подтверждение.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "fix": {
+            "type": "string",
+            "description": "Что вы исправили и как это показали",
+            "minLength": 1,
+            "maxLength": 1000
+          }
+        },
+        "required": [
+          "fix"
+        ]
+      },
+      "connections": {
+        "success": "end-fixed"
+      },
+      "progressNodeId": "bug"
+    },
+    {
+      "id": "end-fixed",
+      "type": "end",
+      "progressNodeId": "bug"
+    },
+    {
+      "id": "plan-idea",
+      "type": "agent-directive",
+      "directive": "Составьте короткий план идеи, не больше пяти шагов, и спросите пользователя, браться ли за неё.",
+      "completionCondition": "Пользователь получил короткий план и вопрос, браться ли за идею.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "plan": {
+            "type": "string",
+            "description": "План, который вы дали пользователю",
+            "minLength": 1,
+            "maxLength": 1000
+          }
+        },
+        "required": [
+          "plan"
+        ]
+      },
+      "connections": {
+        "success": "end-planned"
+      },
+      "progressNodeId": "idea"
+    },
+    {
+      "id": "end-planned",
+      "type": "end",
+      "progressNodeId": "idea"
+    }
+  ],
+  "variableRegistry": {}
+}

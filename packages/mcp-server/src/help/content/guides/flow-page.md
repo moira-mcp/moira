@@ -7,15 +7,30 @@ Opening a workflow in the web UI (`/workflows/<id>` or `/workflows/<handle>/<slu
 **flow page**: the workflow's definition read as the process it declares, with no run in it.
 Everything on the page is derived from the definition — blocks from `progress.nodes`, membership
 from `progressNodeId`, transitions and loops from the labelled connections — so the picture
-cannot drift from the graph. A workflow without a process view (`progress`) shows the technical
-node graph and its node details instead.
+cannot drift from the graph. A workflow without a process view (`progress`) has no map: it opens
+on the technical node graph with its node details, and the steps view is one click away.
+
+You do not need this page to use Moira: your agent picks a ready flow or builds one for your task
+through the Workflow Management Flow. The page is for looking inside a flow when you want to.
 
 ## Views
 
-The two tabs above the picture show the same definition in two ways; the choice is in the URL as
-`view`.
+The three tabs above the picture show the same definition in three ways; the choice is in the URL
+as `view`.
 
-- **Map** (default) — the process as a diagram with its table of contents: blocks left to right,
+- **Steps** — the simplest picture: what the agent is told, top to bottom. Every instruction is a
+  numbered card with the text the agent receives; arrows join them in the order they come; where
+  the agent's answer (or a check Moira makes on its own) chooses the way on, the arrows fork and
+  carry the answer's label; a connection back to an earlier step is a dashed arrow on the side
+  marked "back to step N"; each end is a finish marker. Steps Moira takes by itself — a condition,
+  an expression, files written for the agent, a note, a lock, a notification — are small dashed
+  cards. There are no node types, ids, schemas or ports, and the page's panel is hidden. **Variables
+  as words** (on by default and remembered; `inline=0` or `inline=1` in the URL) reads every
+  `{{name}}` as the variable's name in plain words — `{{current_task}}` as "current task" — with
+  its description on hover, so the flow reads as a list of instructions; turned off, the
+  references show as `{{…}}` tokens. A card longer than seven lines shows the rest on hover. The
+  learning examples open on this view; nodes reached only by a jump (teleport) are not part of it.
+- **Map** (default for other flows with a process view) — the process as a diagram with its table of contents: blocks left to right,
   the main sequence on one row, each side branch on a row of its own above or below it, a block
   many others lead into or that only loops reach beneath them. Each block is one card: a title band
   with the block's number badge and its name, then its description and its step count, with a
@@ -45,15 +60,16 @@ The two tabs above the picture show the same definition in two ways; the choice 
   back to the block and a "Show on the graph" action; clicking a step in the block panel opens the
   graph on that node the same way.
 
-Both views share one toolbar above the diagram: the **Map / Graph** switch, the contents fold
-button, the step finder (it answers "which block is this step in" and, on the graph, opens that
+The map and the graph share one toolbar above the diagram: the **Steps / Map / Graph** switch,
+the contents fold button, the step finder (it answers "which block is this step in" and, on the graph, opens that
 step), the layout presets, zoom and fit, the navigator switch, the compass, the refresh indicator
 and **Explain this page**. The presets re-lay the open diagram and bring the camera back to the block you were
 reading; each view words them for what it moves — on the map _Rows_, _Compact_, _Balanced_
 (branches on both sides of the main line) and _Top to bottom_, on the graph _Stacked groups_,
 _Compact_, _Groups in a row_ and _Steps top to bottom_ — and both views follow the one you chose.
 The compass opens a note on how to read the view that is open and remembers whether you left it
-open.
+open. The steps view's toolbar carries the same switch, **Variables as words**, zoom and fit, and
+**Explain this page**.
 
 Switching tabs keeps the page as it is: the map keeps its selected block, the graph the position
 you left it at, and nothing reloads.
@@ -102,9 +118,10 @@ to get an editable one.
 
 ## Explaining the page
 
-**Explain this page** walks through the page in six steps — block, step, evidence, loop, editing,
-and the views — highlighting the element that shows each, in whichever view is open: a contents
-row, a step in the block panel (the section it sits in unfolds), the evidence a step must return, a
-return port, the edit toggle (the header for a reader who cannot edit) and the toolbar. A
-highlighted card inside the diagram is brought into the camera. The step is in the URL as `guide`,
+**Explain this page** walks through the page in eight steps — that your agent, not you, picks or
+builds flows; the steps view; block, step, evidence, loop, editing; and the views — highlighting
+the element that shows each, in whichever view is open: the page header, a numbered instruction
+card on the steps view (on the map and the graph, the **Steps** tab), a contents row, a step in the block panel (the section it sits in unfolds), the evidence a step must return, a
+return port, the edit toggle (the header for a reader who cannot edit) and the toolbar. A step whose
+element the open view does not draw moves to the view that does. A highlighted card inside the diagram is brought into the camera. The step is in the URL as `guide`,
 so a position can be linked to. The compass in the toolbar opens the note about the open view.

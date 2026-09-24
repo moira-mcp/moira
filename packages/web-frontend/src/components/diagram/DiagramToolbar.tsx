@@ -63,6 +63,7 @@ export function DiagramToolbar({
   minimap,
   trailing,
   surface = "map",
+  presets = true,
   testId = "diagram-toolbar",
 }: {
   /** The page's view-mode switch (map / graph), first in the row. */
@@ -78,6 +79,8 @@ export function DiagramToolbar({
   trailing?: React.ReactNode;
   /** Which diagram this toolbar belongs to; picks the presets' wording. */
   surface?: PresetSurface;
+  /** Show the layout presets; a diagram with one fixed layout turns them off. */
+  presets?: boolean;
   testId?: string;
 }): React.JSX.Element {
   const { t } = useTranslation();
@@ -113,8 +116,12 @@ export function DiagramToolbar({
         </div>
       )}
       <div className="ml-auto flex shrink-0 items-center gap-0.5">
-        <LayoutPresetButtons variant="toolbar" surface={surface} />
-        <ToolbarDivider />
+        {presets && (
+          <>
+            <LayoutPresetButtons variant="toolbar" surface={surface} />
+            <ToolbarDivider />
+          </>
+        )}
         <ToolbarButton
           onClick={onZoomOut}
           title={t("components.diagram.toolbar.zoomOut")}

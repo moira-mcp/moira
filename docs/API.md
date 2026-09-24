@@ -2275,7 +2275,11 @@ List workflows with filtering, sorting, and pagination.
 
 Query parameters:
 
-- `search`: Search in name and description
+- `search`: Substring search in slug, name and description
+- `slugs`: Comma-separated exact slugs; only workflows with one of them are listed. Each value is
+  read by the shared slug rule (`normalizeSlug`, `validateSlug`) and one that cannot be a slug is
+  dropped, so a list of nothing but such values lists nothing. At most 50 are honoured. The app's
+  recommended section looks up its flows with it.
 - `visibility`: Filter (public, private, all). Default: all
 - `validationStatus`: Filter by validation status (valid, invalid, unknown, all). Default: all
 - `sort`: Sort field (createdAt, name). Default: createdAt

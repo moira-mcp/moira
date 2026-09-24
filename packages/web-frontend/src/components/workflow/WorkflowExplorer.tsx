@@ -1,6 +1,8 @@
 /**
  * Workflow Explorer - workflow list with filtering, sorting, and pagination
- * Uses shared design system: FilterBar + DataListView for consistency with other pages
+ * Uses shared design system: FilterBar + DataListView for consistency with other pages.
+ * The search is always in view; status, visibility and sort are optional and fold behind the
+ * FilterBar's "Filters" button until the reader opens it or one of them is in effect.
  */
 
 import React, { useState, useMemo, useCallback, useEffect, useRef } from "react";
@@ -70,6 +72,10 @@ export const WorkflowExplorer: React.FC<WorkflowExplorerProps> = ({
   };
 
   const debouncedSearch = useDebounce(searchQuery, 300);
+  const activeFilters =
+    (statusFilter !== "all" ? 1 : 0) +
+    (visibilityFilter !== "all" ? 1 : 0) +
+    (sortBy !== "createdAt" || sortOrder !== "desc" ? 1 : 0);
 
   // Reset page on filter changes
   useEffect(() => {
@@ -129,6 +135,7 @@ export const WorkflowExplorer: React.FC<WorkflowExplorerProps> = ({
         onSearchChange={setSearchQuery}
         searchPlaceholder={t("components.searchFilters.searchPlaceholder")}
         onReset={handleReset}
+        foldFilters={{ activeCount: activeFilters }}
         filters={
           <>
             <LabeledFilter label={t("common.filters.status")}>

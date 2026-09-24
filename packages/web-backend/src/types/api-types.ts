@@ -126,6 +126,8 @@ export interface WorkflowListResponse {
 export interface WorkflowListRequest {
   validationStatus?: "valid" | "invalid" | "unknown" | "all";
   search?: string;
+  /** Comma-separated exact slugs; only workflows with one of them are listed. */
+  slugs?: string;
   visibility?: "public" | "private" | "all";
   sort?: "createdAt" | "name";
   sortOrder?: "asc" | "desc";

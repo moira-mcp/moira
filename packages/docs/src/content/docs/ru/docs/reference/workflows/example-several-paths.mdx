@@ -1,0 +1,13 @@
+---
+title: "Example 3: Several Paths"
+description: "Англоязычная версия учебного примера «Пример 3: Несколько путей»."
+---
+
+Это англоязычная версия примера [Пример 3: Несколько путей](../example-several-paths-ru/): те же шаги, развилки и ответы, а все тексты, которые получает агент, написаны по-английски.
+
+```js
+mcp__moira__start({ action: "prepare", workflowId: "moira/example-several-paths", parentExecutionId: "none" })
+mcp__moira__start({ action: "execute", startAttemptId: "<Start attempt ID from prepare>" })
+```
+
+Это учебный пример. Для настоящей работы не нужно выбирать или собирать флоу: опишите задачу своему агенту — он сам выберет готовый флоу или создаст новый.

@@ -1,0 +1,13 @@
+---
+title: "Пример 3: Несколько путей"
+description: "The Russian-language version of the learning example Example 3: Several Paths."
+---
+
+This is the Russian-language version of [Example 3: Several Paths](../example-several-paths/): the same steps, forks and answers, with every text the agent receives written in Russian.
+
+```js
+mcp__moira__start({ action: "prepare", workflowId: "moira/example-several-paths-ru", parentExecutionId: "none" })
+mcp__moira__start({ action: "execute", startAttemptId: "<Start attempt ID from prepare>" })
+```
+
+It is a learning example. For real work you do not need to pick or build a flow: describe the task to your agent, and it chooses a ready flow or creates one for you.

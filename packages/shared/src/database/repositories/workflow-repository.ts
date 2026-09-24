@@ -68,6 +68,7 @@ export const MAX_WORKFLOW_SIZE_BYTES = 5 * 1024 * 1024;
 export interface WorkflowFilter {
   userId: string;
   search?: string; // Search in name, description, and slug
+  slugs?: string[]; // Only workflows whose slug is one of these; an empty list matches nothing
   visibility?: "public" | "private" | "all";
   sort?: "createdAt" | "name";
   sortOrder?: "asc" | "desc";
@@ -484,6 +485,7 @@ export class WorkflowRepository {
     const {
       userId,
       search,
+      slugs,
       visibility,
       sort = "createdAt",
       sortOrder = "desc",
@@ -494,6 +496,7 @@ export class WorkflowRepository {
     this.logger.info("listWithFilters() called", {
       userId,
       search,
+      slugs,
       visibility,
       sort,
       sortOrder,
@@ -549,6 +552,11 @@ export class WorkflowRepository {
           like(workflow.description, `%${search}%`),
         ),
       );
+    }
+
+    // Exact slugs: a caller that knows which catalog entries it wants fetches them in one request
+    if (slugs) {
+      conditions.push(slugs.length > 0 ? inArray(workflow.slug, slugs) : sql`0 = 1`);
     }
 
     const whereClause = and(...conditions)!; // Non-null assertion: conditions always has at least 2 elements

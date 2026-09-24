@@ -1,0 +1,179 @@
+{
+  "id": "7c2f3b8e-1a4d-4e6b-9c1f-5d8a2e3b4c02",
+  "slug": "example-simple-steps-ru",
+  "owner": "system-moira",
+  "visibility": "public",
+  "metadata": {
+    "name": "Пример 1: Простые шаги",
+    "version": "1.0.0",
+    "description": "Учебный пример для знакомства с Мойрой: агент по порядку проходит четыре простых шага — понять задачу, выполнить её, проверить результат, отчитаться. Без развилок и без переменных. Запустите его с любой небольшой задачей, чтобы увидеть, как Мойра выдаёт агенту по одному шагу. Для настоящей работы опишите задачу своему агенту — он сам выберет готовый флоу или создаст новый.",
+    "tags": [
+      "пример",
+      "новичок",
+      "шаги"
+    ],
+    "schemaVersion": 1
+  },
+  "progress": {
+    "title": "Простые шаги",
+    "goal": "Выполнить небольшую задачу за четыре понятных шага.",
+    "nodes": [
+      {
+        "id": "understand",
+        "label": "Понять",
+        "content": {
+          "summary": "Пересказать задачу одним предложением"
+        }
+      },
+      {
+        "id": "work",
+        "label": "Сделать",
+        "content": {
+          "summary": "Выполнить задачу"
+        }
+      },
+      {
+        "id": "check",
+        "label": "Проверить",
+        "content": {
+          "summary": "Сравнить результат с запросом"
+        }
+      },
+      {
+        "id": "report",
+        "label": "Отчитаться",
+        "content": {
+          "summary": "Рассказать пользователю, что сделано"
+        }
+      }
+    ]
+  },
+  "nodes": [
+    {
+      "id": "start",
+      "type": "start",
+      "connections": {
+        "default": "understand-task"
+      },
+      "initialData": {
+        "variables": {}
+      },
+      "progressNodeId": "understand"
+    },
+    {
+      "id": "understand-task",
+      "type": "agent-directive",
+      "directive": "Прочитайте запрос пользователя и перескажите задачу одним предложением. Если что-то важное непонятно, спросите пользователя, прежде чем продолжать.",
+      "completionCondition": "Задача пересказана одним предложением, и ничего важного не осталось непонятным.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "task": {
+            "type": "string",
+            "description": "Задача одним предложением",
+            "minLength": 1,
+            "maxLength": 1000
+          }
+        },
+        "required": [
+          "task"
+        ]
+      },
+      "connections": {
+        "success": "do-task"
+      },
+      "progressNodeId": "understand",
+      "connectionLabels": {
+        "success": "задача понятна"
+      }
+    },
+    {
+      "id": "do-task",
+      "type": "agent-directive",
+      "directive": "Выполните задачу. Делайте только то, о чём просил пользователь, без лишней работы.",
+      "completionCondition": "Задача выполнена.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "result": {
+            "type": "string",
+            "description": "Что вы сделали, одним предложением",
+            "minLength": 1,
+            "maxLength": 1000
+          }
+        },
+        "required": [
+          "result"
+        ]
+      },
+      "connections": {
+        "success": "check-result"
+      },
+      "progressNodeId": "work",
+      "connectionLabels": {
+        "success": "работа сделана"
+      }
+    },
+    {
+      "id": "check-result",
+      "type": "agent-directive",
+      "directive": "Сравните результат с запросом. Если что-то не совпадает, исправьте это, прежде чем продолжать.",
+      "completionCondition": "Результат соответствует запросу.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "check": {
+            "type": "string",
+            "description": "Как вы проверили результат",
+            "minLength": 1,
+            "maxLength": 1000
+          }
+        },
+        "required": [
+          "check"
+        ]
+      },
+      "connections": {
+        "success": "report"
+      },
+      "progressNodeId": "check",
+      "connectionLabels": {
+        "success": "результат проверен"
+      }
+    },
+    {
+      "id": "report",
+      "type": "agent-directive",
+      "directive": "Расскажите пользователю в нескольких предложениях, что вы сделали и как проверили.",
+      "completionCondition": "Пользователь получил короткий отчёт.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "report": {
+            "type": "string",
+            "description": "Отчёт, который вы дали пользователю",
+            "minLength": 1,
+            "maxLength": 1000
+          }
+        },
+        "required": [
+          "report"
+        ]
+      },
+      "connections": {
+        "success": "end"
+      },
+      "progressNodeId": "report"
+    },
+    {
+      "id": "end",
+      "type": "end",
+      "progressNodeId": "report"
+    }
+  ],
+  "variableRegistry": {}
+}

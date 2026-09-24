@@ -1,0 +1,197 @@
+{
+  "id": "7c2f3b8e-1a4d-4e6b-9c1f-5d8a2e3b4c03",
+  "slug": "example-one-choice",
+  "owner": "system-moira",
+  "visibility": "public",
+  "metadata": {
+    "name": "Example 2: One Choice",
+    "version": "1.0.0",
+    "description": "A learning example with one fork: the agent does the task, then answers one yes-or-no question — does the result fully match the request? Yes leads to a report; no leads to an honest note about what is missing. No loops and no variables. For real work, describe the task to your agent and let it choose a ready flow or create one.",
+    "tags": [
+      "example",
+      "beginner",
+      "choice"
+    ],
+    "schemaVersion": 1
+  },
+  "progress": {
+    "title": "One choice",
+    "goal": "Do a task and report honestly whether it fully matches the request.",
+    "nodes": [
+      {
+        "id": "work",
+        "label": "Do",
+        "content": {
+          "summary": "Do the task"
+        }
+      },
+      {
+        "id": "check",
+        "label": "Check",
+        "content": {
+          "summary": "Answer yes or no: does the result match?"
+        }
+      },
+      {
+        "id": "report",
+        "label": "Report",
+        "content": {
+          "summary": "Tell the user what was done"
+        }
+      },
+      {
+        "id": "gap",
+        "label": "Explain the gap",
+        "content": {
+          "summary": "Tell the user what is missing"
+        }
+      }
+    ]
+  },
+  "nodes": [
+    {
+      "id": "start",
+      "type": "start",
+      "connections": {
+        "default": "do-task"
+      },
+      "initialData": {
+        "variables": {}
+      },
+      "progressNodeId": "work"
+    },
+    {
+      "id": "do-task",
+      "type": "agent-directive",
+      "directive": "Do the task the user asked for.",
+      "completionCondition": "The task is done.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "result": {
+            "type": "string",
+            "description": "What you did, in one sentence",
+            "minLength": 1,
+            "maxLength": 1000
+          }
+        },
+        "required": [
+          "result"
+        ]
+      },
+      "connections": {
+        "success": "check-result"
+      },
+      "progressNodeId": "work",
+      "connectionLabels": {
+        "success": "work done"
+      }
+    },
+    {
+      "id": "check-result",
+      "type": "agent-directive",
+      "directive": "Check the result against the request. Answer yes if it fully matches, or no if something is missing.",
+      "completionCondition": "You answered yes or no honestly.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "matches": {
+            "type": "string",
+            "enum": [
+              "yes",
+              "no"
+            ],
+            "description": "Does the result fully match the request? yes or no"
+          }
+        },
+        "required": [
+          "matches"
+        ]
+      },
+      "connections": {
+        "success": "report",
+        "no": "explain-gap"
+      },
+      "progressNodeId": "check",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "check-result.matches"
+            },
+            "right": "no"
+          },
+          "output": "no"
+        }
+      ],
+      "connectionLabels": {
+        "success": "yes — it matches",
+        "no": "no — something is missing"
+      }
+    },
+    {
+      "id": "report",
+      "type": "agent-directive",
+      "directive": "Tell the user in a few sentences what you did.",
+      "completionCondition": "The user has a short report.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "report": {
+            "type": "string",
+            "description": "The report you gave the user",
+            "minLength": 1,
+            "maxLength": 1000
+          }
+        },
+        "required": [
+          "report"
+        ]
+      },
+      "connections": {
+        "success": "end-done"
+      },
+      "progressNodeId": "report"
+    },
+    {
+      "id": "end-done",
+      "type": "end",
+      "progressNodeId": "report"
+    },
+    {
+      "id": "explain-gap",
+      "type": "agent-directive",
+      "directive": "Tell the user what is missing and why, and suggest what to do next. Do not start the task again in this flow.",
+      "completionCondition": "The user knows what is missing and what to do next.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "report": {
+            "type": "string",
+            "description": "What you told the user",
+            "minLength": 1,
+            "maxLength": 1000
+          }
+        },
+        "required": [
+          "report"
+        ]
+      },
+      "connections": {
+        "success": "end-gap"
+      },
+      "progressNodeId": "gap"
+    },
+    {
+      "id": "end-gap",
+      "type": "end",
+      "progressNodeId": "gap"
+    }
+  ],
+  "variableRegistry": {}
+}

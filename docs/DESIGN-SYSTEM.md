@@ -111,6 +111,10 @@ Consistent filter toolbar with search + filter controls + action buttons.
 />
 ```
 
+When a page's filters are optional, `foldFilters={{ activeCount }}` keeps only the search in view
+and puts the filters and the reset behind a "Filters" button (`filters-toggle`). The button counts
+the filters in effect, and the controls stay open while any is in effect. The flow list uses it.
+
 ### CardShell
 
 Universal card wrapper supporting list (default) and grid (`compact`) modes.

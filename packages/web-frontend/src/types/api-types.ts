@@ -142,6 +142,8 @@ export interface AdminStatsResponse extends AdminSystemStatusResponse {
 export interface WorkflowListRequest {
   validationStatus?: "valid" | "invalid" | "warning" | "all";
   search?: string;
+  /** Exact slugs: only workflows with one of them are listed. */
+  slugs?: string[];
   visibility?: "public" | "private" | "all";
   sort?: "createdAt" | "name";
   sortOrder?: "asc" | "desc";
