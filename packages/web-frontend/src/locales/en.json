@@ -1684,7 +1684,13 @@
           "telegram-notification": "Moira notifies you in Telegram",
           "other": "Moira does this step itself"
         },
-        "layoutFailed": "The steps could not be laid out. Reload the page, or open the map or the graph."
+        "layoutFailed": "The steps could not be laid out. Reload the page, or open the map or the graph.",
+        "list": {
+          "next": "Next:",
+          "placed": "{{name}}, before step {{number}}",
+          "backToPlace": "back to: {{place}}",
+          "nth": "{{name}} (#{{n}})"
+        }
       }
     },
     "playbooks": {
@@ -2867,6 +2873,16 @@
         "case": "case",
         "controlOutput": "control output",
         "fallback": "taken when no case holds"
+      },
+      "template": {
+        "if": "if",
+        "unless": "unless",
+        "is": "is",
+        "isNot": "is not",
+        "otherwise": "otherwise",
+        "each": "for each",
+        "item": "the item",
+        "index": "its number"
       }
     },
     "nodePanel": {

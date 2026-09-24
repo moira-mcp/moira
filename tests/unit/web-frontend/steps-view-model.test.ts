@@ -11,7 +11,11 @@
 import { describe, expect, test } from "@jest/globals";
 import * as fs from "fs";
 import * as path from "path";
-import { stepsModel } from "../../../packages/web-frontend/src/components/flow/stepsModel.js";
+import {
+  DIAGRAM_MAX_CARDS,
+  stepsModel,
+  stepsPresentation,
+} from "../../../packages/web-frontend/src/components/flow/stepsModel.js";
 import { humanizeVariable } from "../../../packages/web-frontend/src/components/diagram/VariableText.js";
 import {
   preferredFlowView,
@@ -146,5 +150,34 @@ describe("recommended flows", () => {
     expect(preferredFlowView("someone", "example-one-choice")).toBeNull();
     expect(preferredFlowView("moira", "quick-task")).toBeNull();
     expect(preferredFlowView(undefined, undefined)).toBeNull();
+  });
+});
+
+describe("stepsPresentation", () => {
+  test.each([
+    "example-simple-steps",
+    "example-simple-steps-ru",
+    "example-one-choice",
+    "example-one-choice-ru",
+    "example-several-paths",
+    "example-several-paths-ru",
+    "todo-list",
+  ])("%s stays a drawn diagram", (slug) => {
+    expect(stepsPresentation(stepsModel(catalogFlow(slug) as never))).toBe("diagram");
+  });
+
+  test.each(["quick-task", "robust-task", "software-development-flow"])(
+    "%s reads as a list",
+    (slug) => {
+      const model = stepsModel(catalogFlow(slug) as never);
+      expect(model.cards.length).toBeGreaterThan(DIAGRAM_MAX_CARDS);
+      expect(stepsPresentation(model)).toBe("list");
+    },
+  );
+
+  test("size decides, not returns: a small flow with a loop is still drawn", () => {
+    const todo = stepsModel(catalogFlow("todo-list") as never);
+    expect(todo.edges.some((edge) => edge.back)).toBe(true);
+    expect(stepsPresentation(todo)).toBe("diagram");
   });
 });

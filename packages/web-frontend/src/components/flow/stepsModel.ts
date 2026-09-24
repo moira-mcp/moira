@@ -119,3 +119,19 @@ export function stepsModel(workflow: Pick<WorkflowGraph, "nodes">): StepsModel {
   visit(start);
   return { cards, edges };
 }
+
+/**
+ * The most cards a flow can have and still read well as a drawn diagram. The learning examples and
+ * Todo List — the flows the steps view was made for — walk to 6–8 cards, and a few small domain
+ * flows to 9; the next flows in the catalog walk to 14 and far beyond (Quick Task 18, Robust Task
+ * 42, the Software Development Flow 74), where a drawn web only fits the screen at a zoom nobody
+ * can read. Size decides, not returns: a small flow with a loop still draws well.
+ */
+export const DIAGRAM_MAX_CARDS = 12;
+
+export type StepsPresentation = "diagram" | "list";
+
+/** How the steps view shows this model: drawn when small, as a reading list otherwise. */
+export function stepsPresentation(model: StepsModel): StepsPresentation {
+  return model.cards.length <= DIAGRAM_MAX_CARDS ? "diagram" : "list";
+}

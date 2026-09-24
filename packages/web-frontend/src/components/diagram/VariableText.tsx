@@ -162,9 +162,45 @@ function InlineVariable({ name }: { name: string }): React.JSX.Element {
 }
 
 /**
+ * A template's block helpers and loop words, as the engine supports them: `{{#if x}}`,
+ * `{{#unless x}}`, `{{#eq x 'v'}}`, `{{#neq x 'v'}}`, `{{#each x}}`, `{{else}}`, their closing tags,
+ * and `{{this}}` / `{{@index}}` inside a loop.
+ */
+const BLOCK =
+  /\{\{\s*(?:#(if|unless|eq|neq|each)\s+([A-Za-z_][\w.-]*)(?:\s+(['"])(.*?)\3)?|(else)|(this)|(@index)|\/(?:if|unless|eq|neq|each))\s*\}\}/g;
+
+/** The references of a stretch of text with no block helpers, as tokens or as words. */
+function references(
+  text: string,
+  key: string,
+  compact: boolean,
+  inline: boolean,
+): React.ReactNode[] {
+  const parts: React.ReactNode[] = [];
+  let last = 0;
+  for (const match of text.matchAll(TEMPLATE)) {
+    const index = match.index ?? 0;
+    if (index > last) parts.push(text.slice(last, index));
+    parts.push(
+      inline ? (
+        <InlineVariable key={`${key}.${index}`} name={match[1]} />
+      ) : (
+        <VariableRef key={`${key}.${index}`} name={match[1]} braces compact={compact} />
+      ),
+    );
+    last = index + match[0].length;
+  }
+  if (last < text.length) parts.push(text.slice(last));
+  return parts;
+}
+
+/**
  * A directive or message: `{{…}}` references become tokens that keep their braces, the rest
  * stays text; `compact` is for titles, where a pill would break the line. `inline` reads every
- * reference as plain words instead, so the text is a sentence and not a template.
+ * reference as plain words instead, so the text is a sentence and not a template — block helpers
+ * included: `{{#if x}}` reads "(if x)", `{{#unless x}}` "(unless x)", `{{#eq x 'v'}}` "(if x is
+ * 'v')", `{{#neq x 'v'}}` "(if x is not 'v')", `{{#each x}}` "(for each x)", `{{else}}`
+ * "(otherwise)", `{{this}}` "(the item)", `{{@index}}` "(its number)"; closing tags disappear.
  */
 export function TemplateText({
   text,
@@ -175,21 +211,68 @@ export function TemplateText({
   compact?: boolean;
   inline?: boolean;
 }): React.JSX.Element {
+  const { t } = useTranslation();
+  if (!inline) return <>{references(text, "t", compact, false)}</>;
   const parts: React.ReactNode[] = [];
   let last = 0;
-  for (const match of text.matchAll(TEMPLATE)) {
+  let blockEnd = -1;
+  for (const match of text.matchAll(BLOCK)) {
     const index = match.index ?? 0;
-    if (index > last) parts.push(text.slice(last, index));
-    parts.push(
-      inline ? (
-        <InlineVariable key={`${index}`} name={match[1]} />
-      ) : (
-        <VariableRef key={`${index}`} name={match[1]} braces compact={compact} />
-      ),
+    if (index > last) parts.push(...references(text.slice(last, index), `${index}`, compact, true));
+    const [, helper, name, , value, otherwise, item, position] = match;
+    // A condition read into a sentence keeps a space from the word before it (a block right
+    // before it already ends with one)
+    const lead = index > 0 && index !== blockEnd && !/\s/.test(text[index - 1]) ? " " : "";
+    const word = (content: React.ReactNode, kind: string) => (
+      <span key={`b${index}`} className="text-muted-foreground" data-template-block={kind}>
+        {lead}({content}){" "}
+      </span>
     );
+    if (helper === "each") {
+      parts.push(
+        word(
+          <>
+            {t("components.diagram.template.each")} <InlineVariable name={name} />
+          </>,
+          helper,
+        ),
+      );
+    } else if (helper) {
+      const negated = helper === "unless" || helper === "neq";
+      const compared = (helper === "eq" || helper === "neq") && value !== undefined;
+      parts.push(
+        word(
+          <>
+            {t(
+              helper === "unless"
+                ? "components.diagram.template.unless"
+                : "components.diagram.template.if",
+            )}{" "}
+            <InlineVariable name={name} />
+            {compared && (
+              <>
+                {" "}
+                {t(
+                  negated ? "components.diagram.template.isNot" : "components.diagram.template.is",
+                )}{" "}
+                {`'${value}'`}
+              </>
+            )}
+          </>,
+          helper,
+        ),
+      );
+    } else if (otherwise) {
+      parts.push(word(t("components.diagram.template.otherwise"), "else"));
+    } else if (item) {
+      parts.push(word(t("components.diagram.template.item"), "this"));
+    } else if (position) {
+      parts.push(word(t("components.diagram.template.index"), "index"));
+    }
     last = index + match[0].length;
+    blockEnd = last;
   }
-  if (last < text.length) parts.push(text.slice(last));
+  if (last < text.length) parts.push(...references(text.slice(last), "end", compact, true));
   return <>{parts}</>;
 }
 

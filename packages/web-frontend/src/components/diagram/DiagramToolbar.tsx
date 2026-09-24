@@ -71,9 +71,10 @@ export function DiagramToolbar({
   leading?: React.ReactNode;
   /** The step finder; shown when the search button is pressed. Receives `onClose` via context-free prop. */
   finder?: (close: () => void) => React.ReactNode;
-  onZoomIn: () => void;
-  onZoomOut: () => void;
-  onFit: () => void;
+  /** Zoom and fit; left out where the view is not a diagram (the steps view's reading list). */
+  onZoomIn?: () => void;
+  onZoomOut?: () => void;
+  onFit?: () => void;
   /** The minimap switch, when the diagram has one. */
   minimap?: { on: boolean; toggle: () => void };
   trailing?: React.ReactNode;
@@ -122,30 +123,34 @@ export function DiagramToolbar({
             <ToolbarDivider />
           </>
         )}
-        <ToolbarButton
-          onClick={onZoomOut}
-          title={t("components.diagram.toolbar.zoomOut")}
-          label={t("components.diagram.toolbar.zoomOut")}
-          dataAttributes={{ "data-testid": "toolbar-zoom-out" }}
-        >
-          <ZoomOut className="size-4" />
-        </ToolbarButton>
-        <ToolbarButton
-          onClick={onZoomIn}
-          title={t("components.diagram.toolbar.zoomIn")}
-          label={t("components.diagram.toolbar.zoomIn")}
-          dataAttributes={{ "data-testid": "toolbar-zoom-in" }}
-        >
-          <ZoomIn className="size-4" />
-        </ToolbarButton>
-        <ToolbarButton
-          onClick={onFit}
-          title={t("components.diagram.toolbar.fit")}
-          label={t("components.diagram.toolbar.fit")}
-          dataAttributes={{ "data-testid": "toolbar-fit" }}
-        >
-          <Maximize className="size-4" />
-        </ToolbarButton>
+        {onZoomOut && onZoomIn && onFit && (
+          <>
+            <ToolbarButton
+              onClick={onZoomOut}
+              title={t("components.diagram.toolbar.zoomOut")}
+              label={t("components.diagram.toolbar.zoomOut")}
+              dataAttributes={{ "data-testid": "toolbar-zoom-out" }}
+            >
+              <ZoomOut className="size-4" />
+            </ToolbarButton>
+            <ToolbarButton
+              onClick={onZoomIn}
+              title={t("components.diagram.toolbar.zoomIn")}
+              label={t("components.diagram.toolbar.zoomIn")}
+              dataAttributes={{ "data-testid": "toolbar-zoom-in" }}
+            >
+              <ZoomIn className="size-4" />
+            </ToolbarButton>
+            <ToolbarButton
+              onClick={onFit}
+              title={t("components.diagram.toolbar.fit")}
+              label={t("components.diagram.toolbar.fit")}
+              dataAttributes={{ "data-testid": "toolbar-fit" }}
+            >
+              <Maximize className="size-4" />
+            </ToolbarButton>
+          </>
+        )}
         {minimap && (
           <ToolbarButton
             onClick={minimap.toggle}

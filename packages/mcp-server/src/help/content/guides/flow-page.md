@@ -28,8 +28,22 @@ as `view`.
   as words** (on by default and remembered; `inline=0` or `inline=1` in the URL) reads every
   `{{name}}` as the variable's name in plain words — `{{current_task}}` as "current task" — with
   its description on hover, so the flow reads as a list of instructions; turned off, the
-  references show as `{{…}}` tokens. A card longer than seven lines shows the rest on hover. The
-  learning examples open on this view; nodes reached only by a jump (teleport) are not part of it.
+  references show as `{{…}}` tokens. With it on, template conditions and loops read as words too:
+  `{{#if x}}` as "(if x)", `{{#unless x}}` as "(unless x)", `{{#eq x 'v'}}` as "(if x is 'v')",
+  `{{#neq x 'v'}}` as "(if x is not 'v')", `{{#each x}}` as "(for each x)", `{{else}}` as
+  "(otherwise)", `{{this}}` as "(the item)" and `{{@index}}` as "(its number)". A card
+  longer than seven lines shows the rest on hover. The learning examples open on this view; nodes
+  reached only by a jump (teleport) are not part of it.
+
+  A small flow (up to 12 cards: the learning examples, Todo List) is drawn this way. A larger flow
+  — Quick Task, Robust Task, the Software Development Flow — reads as a list instead: the same
+  cards top to bottom at normal size with the whole text, each ending with its way on ("Next:"
+  and the step, each labelled choice linked to the step it leads to, or "back to step N"). A link
+  scrolls to its step, moves the focus there and marks it for a moment, and a link to a step
+  (`#step-<id>` after the address) opens the list at it. Checks and Moira's own steps are compact
+  rows; a link to one also says where it stands ("Moira checks a condition, before step 12"), with
+  its order ("(#2)") where two would read alike.
+
 - **Map** (default for other flows with a process view) — the process as a diagram with its table of contents: blocks left to right,
   the main sequence on one row, each side branch on a row of its own above or below it, a block
   many others lead into or that only loops reach beneath them. Each block is one card: a title band
@@ -68,8 +82,8 @@ reading; each view words them for what it moves — on the map _Rows_, _Compact_
 (branches on both sides of the main line) and _Top to bottom_, on the graph _Stacked groups_,
 _Compact_, _Groups in a row_ and _Steps top to bottom_ — and both views follow the one you chose.
 The compass opens a note on how to read the view that is open and remembers whether you left it
-open. The steps view's toolbar carries the same switch, **Variables as words**, zoom and fit, and
-**Explain this page**.
+open. The steps view's toolbar carries the same switch, **Variables as words** and **Explain this
+page**, and zoom and fit when the flow is drawn.
 
 Switching tabs keeps the page as it is: the map keeps its selected block, the graph the position
 you left it at, and nothing reloads.

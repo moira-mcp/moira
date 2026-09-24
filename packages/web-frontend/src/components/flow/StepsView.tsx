@@ -9,6 +9,9 @@
  * sequence of sentences. The model comes from `stepsModel`; ELK — the layout engine the technical
  * graph uses — places the cards; the shared diagram substrate supplies pan, zoom, fit and the
  * settled signal.
+ *
+ * That picture is for small flows. A flow beyond `stepsPresentation`'s size rule reads as a list
+ * instead (`StepsList`): the same cards top to bottom at full width, each ending with its way on.
  */
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -32,7 +35,8 @@ import { useOpeningPlacement } from "../diagram/placement";
 import { Hint } from "../diagram/Hint";
 import { TemplateText, VariableProvider, type VariableDefinition } from "../diagram/VariableText";
 import type { WorkflowGraph } from "../../types/workflow-types";
-import { stepsModel, type StepCard, type StepsModel } from "./stepsModel";
+import { stepsModel, stepsPresentation, type StepCard, type StepsModel } from "./stepsModel";
+import { StepsList } from "./StepsList";
 
 const CARD_WIDTH = 360;
 const PILL_WIDTH = 150;
@@ -309,9 +313,12 @@ export function StepsView({
   const { t } = useTranslation();
   const { actualTheme } = useTheme();
   const model = useMemo(() => stepsModel(workflow), [workflow]);
+  const presentation = stepsPresentation(model);
   const [layout, setLayout] = useState<StepsLayout | null>(null);
   const [layoutFailed, setLayoutFailed] = useState(false);
   useEffect(() => {
+    // A reading list needs no layout
+    if (presentation === "list") return;
     let live = true;
     setLayoutFailed(false);
     layoutSteps(model).then(
@@ -326,7 +333,7 @@ export function StepsView({
     return () => {
       live = false;
     };
-  }, [model]);
+  }, [model, presentation]);
 
   const numberOf = useMemo(
     () => new Map(model.cards.map((card) => [card.id, card.number])),
@@ -419,7 +426,11 @@ export function StepsView({
   const inlineLabel = t("pages.flowPage.steps.inline");
   const registry = (workflow.variableRegistry ?? {}) as Record<string, VariableDefinition>;
   return (
-    <div className="flex h-full w-full flex-col overflow-hidden" data-testid="steps-view">
+    <div
+      className="flex h-full w-full flex-col overflow-hidden"
+      data-testid="steps-view"
+      data-presentation={presentation}
+    >
       <DiagramToolbar
         modes={toolbarModes}
         leading={
@@ -439,15 +450,21 @@ export function StepsView({
           </ToolbarButton>
         }
         presets={false}
-        onZoomIn={() => void rfRef.current?.zoomIn({ duration: 200 })}
-        onZoomOut={() => void rfRef.current?.zoomOut({ duration: 200 })}
-        onFit={() => void rfRef.current?.fitView({ padding: 0.12, duration: 200 })}
+        {...(presentation === "diagram" && {
+          onZoomIn: () => void rfRef.current?.zoomIn({ duration: 200 }),
+          onZoomOut: () => void rfRef.current?.zoomOut({ duration: 200 }),
+          onFit: () => void rfRef.current?.fitView({ padding: 0.12, duration: 200 }),
+        })}
         trailing={toolbarTrailing}
         testId="steps-toolbar"
       />
       <div className="min-h-0 flex-1 overflow-hidden bg-muted/20" data-testid="steps-canvas">
         {model.cards.length === 0 ? (
           <p className="p-6 text-sm text-muted-foreground">{t("pages.flowPage.steps.empty")}</p>
+        ) : presentation === "list" ? (
+          <VariableProvider value={{ registry }}>
+            <StepsList model={model} inline={inline} />
+          </VariableProvider>
         ) : layoutFailed ? (
           <p
             className="p-6 text-sm text-destructive"

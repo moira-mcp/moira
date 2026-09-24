@@ -54,7 +54,8 @@ frontend/src/
 │   │   └── layoutPreset.ts / interactive.ts / useHighlightTarget.ts / useStoredFlag.ts / useRequest.ts
 │   ├── flow/                    # Flow page: the definition as a process, edited in place (`guideSteps.ts`: its walkthrough)
 │   │   ├── editing.tsx / model.ts / modes.ts        # Edit set (apply, export diff), run-less projection, the three views
-│   │   ├── StepsView.tsx / stepsModel.ts            # The steps view: what the agent is told, as numbered cards joined by arrows
+│   │   ├── StepsView.tsx / stepsModel.ts            # The steps view: what the agent is told, drawn as numbered cards joined by arrows
+│   │   ├── StepsList.tsx                            # The steps view of a large flow: the same cards as a reading list with jump links
 │   │   ├── RegistryPanel.tsx                        # The variable registry (panel tab)
 │   │   └── EditControls.tsx                         # In-place editors (block text, transitions, owner, node text)
 │   ├── onboarding/              # What is recommended to newcomers
@@ -683,6 +684,28 @@ and the page's panel is not mounted beside it:
   description in a `Hint`.
 - If the layout engine cannot be loaded or rejects the graph, the view shows an error line
   (`steps-layout-failed`) instead of the loading state.
+- `stepsPresentation` picks the presentation by size: at most `DIAGRAM_MAX_CARDS` (12) walked
+  cards are drawn as above. Any larger flow is a reading list (`StepsList`, `steps-list`): no
+  layout, no zoom (the toolbar's zoom handlers are optional). Its parts:
+  - the cards in walk order in a centred column, at normal size with the whole text;
+  - each card ending with its way on ("Next:" with a link, labelled choices with links, "back to
+    step N");
+  - links as anchors (`#step-<id>`) that go to the card through the shared `useHighlightTarget`
+    with `focus`: it scrolls into view (instantly under reduced motion), takes focus (cards are
+    `tabIndex=-1`) and is marked (`data-highlighted`); the same hash, on load or
+    set on the open page (`hashchange`), opens the list at that card and is then dropped from the
+    address, so a later model change does not pull the reader back;
+  - "Step N" as an `h2` on each instruction card (the number badge is `aria-hidden`);
+  - checks and system nodes as compact rows; a link to one names its place ("…, before step N"),
+    with its order ("(#2)") where two would read alike, and a return to one reads "back to: …".
+
+  The view carries `data-presentation`. Cards keep `steps-card` with `data-step-kind` and
+  `data-node-id`, so the walkthrough's anchor holds on both.
+
+- With words on, `TemplateText` also reads the engine's template blocks: `#if`, `#unless`, `#eq`,
+  `#neq`, `#each`, `else`, `this` and `@index` become short words in parentheses
+  (`components.diagram.template.*`), and closing tags are dropped. With words off, the text is
+  shown as authored.
 
 The map is `MapView`, and the graph is `WorkflowGraph` inside a `ContentsLayout`, so the contents sidebar sits beside both — a
 workflow without `progress` has no blocks to list and shows the graph alone. The
