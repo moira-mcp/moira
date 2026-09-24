@@ -298,6 +298,20 @@ ID through `session` and do not automatically retry. The execution owner can ret
 execution with its current revision through
 `session({ action: "cancel-execution", executionId, expectedRevision })`.
 
+A write made on a revision that is no longer current — a reminder, parent, context or cancellation
+whose `expectedRevision` or target revision is older than the stored one, or a message that says
+"reload" or "is stale" — is rejected before anything is written. Re-read that state (`reminders`,
+`variables`, `execution_context`, or the workflow for a workflow revision) and retry with its
+current revisions; user guidance is not required.
+
+When an error carries an `AGENT INSTRUCTIONS` section, follow it. It tells you to stop only where a
+person is needed: missing permission, an authentication or connection problem you cannot resolve, a
+workflow that does not exist, or an effect that may already have happened. Any other error — an
+invalid input, a missing execution, an error with no specific instructions — is yours to resolve:
+diagnose it with `help`, `session` (`diagnose`, `current_step`, `execution_context`) and `list`,
+fix what lies within your task, and ask the user only for a decision, permission, credential or fact
+you cannot obtain yourself.
+
 ## Related Documentation
 
 - [MCP Tools Reference](/docs/docs/reference/tools) - Full tool documentation

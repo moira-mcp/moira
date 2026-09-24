@@ -125,7 +125,8 @@ describe("MCP Messages Module", () => {
       expect(AGENT_INSTRUCTIONS.auth_required).toBeDefined();
       expect(AGENT_INSTRUCTIONS.connection_error).toBeDefined();
       expect(AGENT_INSTRUCTIONS.access_denied).toBeDefined();
-      expect(AGENT_INSTRUCTIONS.unrecoverable).toBeDefined();
+      expect(AGENT_INSTRUCTIONS.stale_state).toBeDefined();
+      expect(AGENT_INSTRUCTIONS.unclassified).toBeDefined();
     });
 
     it("should contain AGENT INSTRUCTIONS header", () => {
@@ -134,26 +135,34 @@ describe("MCP Messages Module", () => {
       }
     });
 
-    it("should contain STOP instruction only in categories that require a user boundary", () => {
-      for (const [category, instructions] of Object.entries(AGENT_INSTRUCTIONS)) {
-        if (
-          category === "stale_attempt" ||
-          category === "processing_attempt" ||
-          category === "conflicting_attempt" ||
-          category === "invalid_step_attempt" ||
-          // A refused recovery changed nothing and names the calls that follow, so the agent acts
-          // on it rather than stopping at a user boundary.
-          category === "recovery_refused"
-        )
-          continue;
-        expect(instructions.toLowerCase()).toContain("stop");
-      }
-      expect(AGENT_INSTRUCTIONS.stale_attempt.toLowerCase()).not.toContain("stop");
-      expect(AGENT_INSTRUCTIONS.processing_attempt.toLowerCase()).not.toContain("stop");
-      expect(AGENT_INSTRUCTIONS.conflicting_attempt.toLowerCase()).not.toContain("stop");
-      expect(AGENT_INSTRUCTIONS.invalid_step_attempt.toLowerCase()).not.toContain("stop");
-      expect(AGENT_INSTRUCTIONS.recovery_refused.toLowerCase()).not.toContain("stop");
+    // An agent is told to stop only where resolving the condition needs a person: a permission, a
+    // reconnection, a missing workflow the user must choose instead of, or an effect that may already
+    // have happened. Everything the agent can resolve says how instead.
+    const HUMAN_BOUNDARY = [
+      "outcome_unknown",
+      "workflow_not_found",
+      "auth_required",
+      "connection_error",
+      "access_denied",
+    ];
+
+    it.each(HUMAN_BOUNDARY)("%s keeps its stop at the human boundary", (category) => {
+      const instructions = AGENT_INSTRUCTIONS[category as keyof typeof AGENT_INSTRUCTIONS];
+      expect(instructions.toLowerCase()).toContain("stop");
     });
+
+    it.each(
+      Object.keys(AGENT_INSTRUCTIONS).filter((category) => !HUMAN_BOUNDARY.includes(category)),
+    )(
+      "%s tells the agent how to recover instead of stopping or waiting for the user",
+      (category) => {
+        const instructions = AGENT_INSTRUCTIONS[category as keyof typeof AGENT_INSTRUCTIONS];
+        expect(instructions.toLowerCase()).not.toMatch(/\bstop\b/);
+        expect(instructions).not.toContain("Do NOT continue independently");
+        expect(instructions.toLowerCase()).not.toContain("wait for user guidance");
+        expect(instructions.toLowerCase()).not.toContain("cannot be automatically recovered");
+      },
+    );
 
     it("should contain numbered steps", () => {
       for (const [, instructions] of Object.entries(AGENT_INSTRUCTIONS)) {
@@ -180,7 +189,7 @@ describe("MCP Messages Module", () => {
       const result = formatError("Workflow not found", undefined, "workflow_not_found");
       expect(result).toContain("Workflow not found");
       expect(result).toContain("AGENT INSTRUCTIONS:");
-      expect(result).toContain("STOP");
+      expect(result).toContain("list()");
     });
 
     it("should append both help and agent instructions", () => {
@@ -257,8 +266,19 @@ describe("MCP Messages Module", () => {
       const result = formatErrorWithAgentInstructions(
         "ATTEMPT_INVALID_OR_EXPIRED: the attempt is unavailable.",
       );
-      expect(result).toContain("STOP and report the full error details to user");
+      expect(result).toContain(AGENT_INSTRUCTIONS.unclassified);
       expect(result).not.toContain("Do NOT reuse the unavailable attempt ID");
+    });
+
+    // The engine raises these after the step's handlers have run and records the attempt as
+    // outcome-unknown, so the agent inspects before anything is redone — never "nothing changed".
+    it.each([
+      "Execution changed while the workflow step was running; retry from current state",
+      "Execution note changed while the workflow step was running; retry from current state",
+    ])("a conflict after the step ran (%s) is treated as an unknown outcome", (message) => {
+      const result = formatErrorWithAgentInstructions(message);
+      expect(result).toContain(AGENT_INSTRUCTIONS.outcome_unknown);
+      expect(result).not.toContain("Nothing was changed");
     });
 
     it("should inspect outcome-unknown attempts without authorizing an automatic retry", () => {
@@ -313,40 +333,55 @@ describe("MCP Messages Module", () => {
       expect(result).toContain("retry");
     });
 
-    it("should use unrecoverable for unknown errors", () => {
+    it("an unrecognised error tells the agent to diagnose and fix it, asking the user only for what it cannot obtain", () => {
       const result = formatErrorWithAgentInstructions("Some completely unknown error");
-      expect(result).toContain("AGENT INSTRUCTIONS:");
-      expect(result).toContain("cannot be automatically recovered");
+      expect(result).toContain(AGENT_INSTRUCTIONS.unclassified);
+      expect(result.toLowerCase()).toContain("diagnose");
+      expect(result).toContain("Ask the user only for");
+      expect(result.toLowerCase()).not.toContain("wait for user guidance");
     });
 
-    it("should always contain STOP instruction", () => {
-      const testCases = [
-        "Workflow not found",
-        "Process expired",
-        "Validation failed",
-        "Access denied",
-        "Connection error",
-        "Unknown internal error",
-      ];
-      for (const msg of testCases) {
-        const result = formatErrorWithAgentInstructions(msg);
-        expect(result.toLowerCase()).toContain("stop");
-      }
+    // Every optimistic-concurrency rejection the engine raises: nothing was written, and re-reading
+    // the named state and retrying resolves it without anyone's help.
+    it.each([
+      "Execution state changed; reload before changing reminders",
+      "Execution reminders changed; reload before changing reminders",
+      "Execution state changed; reload before updating context",
+      "Execution context changed; reload before updating context",
+      "Execution parent changed; reload before changing parent",
+      "Execution state changed; reload before writing",
+      "Execution state changed; reload execution_context before cancelling",
+      "The execution has advanced; reload and answer again",
+      "Execution revision is stale",
+      "Execution context is stale",
+      "Workflow revision conflict: expected 3, stored 4. Read the workflow again and re-apply the changes",
+    ])("a stale-state conflict (%s) is resolved by re-reading and retrying", (message) => {
+      const result = formatErrorWithAgentInstructions(message);
+      expect(result).toContain(AGENT_INSTRUCTIONS.stale_state);
+      expect(result.toLowerCase()).not.toContain("wait for user guidance");
     });
 
-    it("should always contain Do NOT continue instruction", () => {
-      const testCases = [
-        "Workflow not found",
-        "Process expired",
-        "Validation failed",
-        "Access denied",
-        "Connection error",
-        "Unknown internal error",
-      ];
-      for (const msg of testCases) {
-        const result = formatErrorWithAgentInstructions(msg);
-        expect(result).toContain("Do NOT continue independently");
-      }
+    it("a stale-state conflict raised as a ConflictError keeps the reload-and-retry recovery", () => {
+      const result = formatDomainError(
+        new ConflictError("Execution state changed; reload before changing reminders"),
+      );
+      expect(result).toContain(AGENT_INSTRUCTIONS.stale_state);
     });
+
+    it.each(["Validation failed: missing required field", "Process not found or expired"])(
+      "an agent-resolvable error (%s) does not tell the agent to stop",
+      (message) => {
+        const result = formatErrorWithAgentInstructions(message);
+        expect(result).not.toContain("Do NOT continue independently");
+        expect(result.toLowerCase()).not.toMatch(/\bstop\b/);
+      },
+    );
+
+    it.each(["Access denied to this resource", "Authentication required", "Connection timeout"])(
+      "a condition that needs a person (%s) keeps its stop",
+      (message) => {
+        expect(formatErrorWithAgentInstructions(message).toLowerCase()).toContain("stop");
+      },
+    );
   });
 });
