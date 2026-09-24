@@ -2282,7 +2282,12 @@ Query parameters:
   dropped, so a list of nothing but such values lists nothing. At most 50 are honoured. The app's
   recommended section looks up its flows with it.
 - `visibility`: Filter (public, private, all). Default: all
-- `validationStatus`: Filter by validation status (valid, invalid, unknown, all). Default: all
+- `access`: Whose workflows (all, mine, shared, catalog). `mine` is owned by the user; `shared` is
+  reached by an explicit grant to the user or one of their groups and not owned; `catalog` is
+  public and not owned. Default: all readable workflows. Combined with every other filter; the
+  total counts the scope
+- `validationStatus`: Filter by the cached validation status (valid, invalid, unknown, all), applied
+  in the query so the page and the total agree with it. Default: all
 - `sort`: Sort field (createdAt, name). Default: createdAt
 - `sortOrder`: Sort direction (asc, desc). Default: desc
 - `limit`: Results per page (1-100). Default: 20

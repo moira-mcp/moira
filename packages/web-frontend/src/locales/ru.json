@@ -237,7 +237,13 @@
         "daysAgo": "{{count}} дн. назад"
       },
       "confirmDelete": "Удалить воркфлоу \"{{name}}\"?",
-      "allFlows": "Все флоу"
+      "allFlows": "Все флоу",
+      "scopes": {
+        "all": "Все",
+        "mine": "Мои",
+        "shared": "Доступные мне",
+        "catalog": "Каталог"
+      }
     },
     "workflowDetail": {
       "backToWorkflows": "Назад к воркфлоу",
@@ -1309,8 +1315,8 @@
         "beginnerPanels": {
           "title": "Подсказки для новичков",
           "description": "Блоки, которые помогают начать. Скройте ненужные — включить их обратно можно здесь.",
-          "shown": "Показан",
-          "hidden": "Скрыт"
+          "shown": "Показано",
+          "hidden": "Скрыто"
         }
       },
       "definitions": {
@@ -2687,7 +2693,7 @@
       "all": "Все",
       "valid": "Валидные",
       "invalid": "Невалидные",
-      "warning": "С предупреждениями",
+      "unknown": "Не проверен",
       "visibility": "Видимость",
       "visibilityLabel": "Видимость",
       "public": "Публичные",

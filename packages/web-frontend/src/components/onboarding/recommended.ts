@@ -76,3 +76,16 @@ export function preferredFlowView(
 ): FlowViewMode | null {
   return ownerHandle === SYSTEM_HANDLE && slug && EXAMPLE_SLUGS.has(slug) ? "steps" : null;
 }
+
+/**
+ * The interface text that says when to pick a flow, for the flows that carry one (the universal
+ * flows of the system owner); null for every other flow, whose metadata has no such field.
+ */
+export function whenToPickKey(
+  ownerHandle: string | undefined,
+  slug: string | undefined,
+): string | null {
+  if (ownerHandle !== SYSTEM_HANDLE || !slug) return null;
+  const entry = UNIVERSAL.find((flow) => flow.slug === slug);
+  return entry ? `onboarding.universal.${entry.key}.when` : null;
+}

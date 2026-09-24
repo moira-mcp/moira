@@ -4,7 +4,7 @@
  * for all card-based list pages.
  */
 
-import React, { useState, useCallback, type ReactNode } from "react";
+import React, { useState, useCallback, useEffect, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { List, LayoutGrid } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -66,6 +66,8 @@ export interface DataListViewProps<T> {
   toolbar?: ReactNode;
   /** Additional class name for the root container */
   className?: string;
+  /** Told the view mode on mount and on every change, for pages that size pages by it. */
+  onViewModeChange?: (mode: ViewMode) => void;
 }
 
 export function ViewToggle({
@@ -118,6 +120,7 @@ export function DataListView<T>({
   defaultViewMode = "list",
   toolbar,
   className,
+  onViewModeChange,
 }: DataListViewProps<T>) {
   const { t } = useTranslation();
 
@@ -128,6 +131,10 @@ export function DataListView<T>({
       return defaultViewMode;
     }
   });
+
+  useEffect(() => {
+    onViewModeChange?.(viewMode);
+  }, [viewMode, onViewModeChange]);
 
   const handleViewModeChange = useCallback(
     (mode: ViewMode) => {

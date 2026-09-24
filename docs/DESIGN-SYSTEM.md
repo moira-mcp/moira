@@ -117,24 +117,48 @@ the filters in effect, and the controls stay open while any is in effect. The fl
 
 ### CardShell
 
-Universal card wrapper supporting list (default) and grid (`compact`) modes.
+The one list item, in the list view (default) and the grid view (`compact`). An item is given as
+slots and the shell owns the layout, so every list reads the same way.
 
 ```tsx
 <CardShell
   compact={isGrid}
   onClick={() => navigate(item.id)}
+  icon={<FileText />}
+  title={item.name}
+  titleAside={`v${item.version}`}
+  description={item.summary}
+  note={whenToPick}
+  meta={
+    <>
+      <span>@{item.owner}</span>
+      <span>{formatRelativeTime(item.updatedAt)}</span>
+    </>
+  }
+  badges={item.failed && <Badge variant="destructive">Failed</Badge>}
   actions={[
     { icon: <Edit />, label: "Edit", onClick: handleEdit },
     { icon: <Trash />, label: "Delete", onClick: handleDelete, variant: "destructive" },
   ]}
   testId="my-card"
->
-  {/* card content */}
-</CardShell>
+/>
 ```
 
-- **Compact mode**: vertical flex layout, actions float top-right
-- **List mode**: horizontal row (h-10), actions appended at end
+| Slot          | Shows                                                                   |
+| ------------- | ----------------------------------------------------------------------- |
+| `icon`        | A small leading mark of what the item is                                |
+| `title`       | What the reader scans for (`data-slot="card-title"`)                    |
+| `titleAside`  | A quiet fact beside the title: a version, a key                         |
+| `description` | What the item is, up to two lines in the list and three in the grid     |
+| `note`        | One short emphasised line under the description                         |
+| `meta`        | A quiet line of facts: owner, time, size, tags                          |
+| `badges`      | States that need attention (invalid, shared, failed), on the title line |
+| `actions`     | Icon buttons, shown on hover or focus                                   |
+
+- **List view**: a row of up to four lines with padding, actions at the end.
+- **Grid view**: the same slots stacked in a card, the meta line at the bottom.
+- `LIST_ITEM_HEIGHT` and `GRID_ITEM_HEIGHT` are the item heights `useDynamicPageSize` sizes pages by.
+- An item not yet on the slots passes free-form `children` and gets the older single-line row.
 
 ### useDebounce
 
@@ -161,6 +185,8 @@ const debouncedSearch = useDebounce(searchQuery, 300);
 
 All cards use `CardShell` and follow these patterns:
 
+- Give the item as slots; show a badge only for a state that needs attention, not for the normal
+  one (a valid flow has no "valid" badge)
 - Badge height: `h-4` consistently (not h-5)
 - Icon size in cards: `w-4 h-4` for primary icons, `w-3 h-3` for inline metadata icons
 - Action buttons: `h-6 w-6` ghost icon buttons, hidden until hover

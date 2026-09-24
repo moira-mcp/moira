@@ -376,6 +376,9 @@ export class MoiraApiClient {
       if (request?.visibility) {
         params.append("visibility", request.visibility);
       }
+      if (request?.access && request.access !== "all") {
+        params.append("access", request.access);
+      }
       if (request?.sort) {
         params.append("sort", request.sort);
       }

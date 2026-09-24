@@ -129,6 +129,8 @@ export interface WorkflowListRequest {
   /** Comma-separated exact slugs; only workflows with one of them are listed. */
   slugs?: string;
   visibility?: "public" | "private" | "all";
+  /** Whose workflows: mine, shared with me, the public catalog, or all readable ones. */
+  access?: "all" | "mine" | "shared" | "catalog";
   sort?: "createdAt" | "name";
   sortOrder?: "asc" | "desc";
   limit?: string;

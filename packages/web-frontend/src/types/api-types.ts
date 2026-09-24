@@ -140,11 +140,13 @@ export interface AdminStatsResponse extends AdminSystemStatusResponse {
 }
 
 export interface WorkflowListRequest {
-  validationStatus?: "valid" | "invalid" | "warning" | "all";
+  validationStatus?: "valid" | "invalid" | "unknown" | "all";
   search?: string;
   /** Exact slugs: only workflows with one of them are listed. */
   slugs?: string[];
   visibility?: "public" | "private" | "all";
+  /** Whose workflows: mine, shared with me, the public catalog, or all readable ones. */
+  access?: "all" | "mine" | "shared" | "catalog";
   sort?: "createdAt" | "name";
   sortOrder?: "asc" | "desc";
   limit?: number;

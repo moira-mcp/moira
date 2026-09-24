@@ -237,7 +237,13 @@
         "daysAgo": "{{count}} days ago"
       },
       "confirmDelete": "Delete workflow \"{{name}}\"?",
-      "allFlows": "All flows"
+      "allFlows": "All flows",
+      "scopes": {
+        "all": "All",
+        "mine": "Mine",
+        "shared": "Shared with me",
+        "catalog": "Catalog"
+      }
     },
     "workflowDetail": {
       "backToWorkflows": "Back to Workflows",
@@ -2661,7 +2667,7 @@
       "all": "All",
       "valid": "Valid",
       "invalid": "Invalid",
-      "warning": "Warning",
+      "unknown": "Not checked",
       "visibility": "Visibility",
       "visibilityLabel": "Visibility",
       "public": "Public",

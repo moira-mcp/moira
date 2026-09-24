@@ -78,7 +78,7 @@ frontend/src/
 │   └── workflow/                # Workflow management
 │       ├── WorkflowExplorer.tsx # Workflow list with FilterBar (filters folded) + DataListView + useDebounce
 │       ├── WorkflowGraph.tsx    # React Flow visualization with its diagram toolbar
-│       ├── WorkflowCard.tsx     # Compact single-row workflow card (icon + name left, owner center, badges right)
+│       ├── WorkflowCard.tsx     # A flow as a CardShell item: name and version, two-line description, when to pick it, owner/visibility/tags, attention badges
 │       ├── NodeDetailSheet.tsx  # Node detail panel (legacy, used in execution views)
 │       ├── WorkflowHeader.tsx   # Workflow metadata display
 │       ├── WorkflowVariablesPanel.tsx # Collapsible variables sidebar
@@ -199,7 +199,7 @@ Higher-level composable components in `src/components/`:
 | StatusBadge           | `status-badge.tsx`                  | Execution status → semantic color mapping (running/waiting/completed/failed)                                                                                          |
 | DataListView          | `DataListView.tsx`                  | Universal data list wrapper: ViewToggle, grid/list layout, ServerPagination, PageLoader, EmptyState                                                                   |
 | DataTable             | `data-table/`                       | @tanstack/react-table wrapper with sorting, filtering, pagination                                                                                                     |
-| CardShell             | `cards/CardShell.tsx`               | Universal card wrapper: dual-mode (compact/list), action buttons, `alwaysVisible` for list mode                                                                       |
+| CardShell             | `cards/CardShell.tsx`               | The one list item: slots (icon, title, titleAside, description, note, meta, badges, actions) in list and grid views                                                   |
 | Card Components       | `cards/`                            | Reusable card components (ExecutionCard, NoteCard, ArtifactCard, etc.) built on CardShell                                                                             |
 | PageShell             | `PageShell.tsx`                     | Page layout wrapper: title, description, loading (skeleton), error states, action slot                                                                                |
 | FilterBar             | `FilterBar.tsx`                     | Standardized filter toolbar: search input, filters slot, actions slot, reset button; `foldFilters` puts filters and reset behind a counted "Filters" button           |
@@ -316,7 +316,7 @@ the recent workflows and executions.
 
 ### Beginner panels
 
-Six panels are for newcomers:
+The panels for newcomers:
 
 | Panel                                                    | Id                      | Where                      |
 | -------------------------------------------------------- | ----------------------- | -------------------------- |
@@ -344,7 +344,7 @@ is never undone. A save the server refuses is taken back and reported. Ids the b
 are ignored. The server holds the setting to its declared schema (a list of unique strings) on every
 write path.
 
-Settings → Preferences lists the six panels with shown/hidden switches
+Settings → Preferences lists every beginner panel with shown/hidden switches
 (`preferences-beginner-panels`, `beginner-panel-switch`); it is where a hidden panel comes back.
 
 ### Recommended flows
@@ -1199,29 +1199,36 @@ WorkflowCard and FlowPage show "Shared" badge when `accessType === "shared"`:
 
 ### Workflow Card Layout
 
-WorkflowCard displays workflows in a compact single-row format:
+`WorkflowCard` draws a flow through the `CardShell` slots:
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
-│ [icon] Name v1.0.0          @owner         [✓] [🌐] [🗑]        │
+│ [icon] Name  v1.0.0                              [Invalid] [🗑]  │
+│        What the flow does, in up to two readable lines…          │
+│        Pick it when … (recommended universal flows only)         │
+│        @owner  🌐 Public  tag  tag  tag +2                       │
 └──────────────────────────────────────────────────────────────────┘
 ```
 
-**Layout Sections:**
+- **Title line:** the name, the version beside it, and badges only for what needs attention: not
+  valid (`workflow-card-invalid`), not yet validated (`workflow-card-unknown`, from the cached
+  `validation.status`), shared with you (`shared-with-you-badge`).
+- **Description** (`workflow-card-description`): two lines in the list, three in the grid; the whole
+  text in a tooltip on hover over it.
+- **When to pick it** (`workflow-card-when`): the authored onboarding text, for the recommended
+  universal flows only (`whenToPickKey` in `onboarding/recommended.ts`).
+- **Meta:** owner handle (`workflow-card-owner`), visibility in words, up to three tags and a count
+  of the rest.
+- **Delete** (`workflow-card-delete`): on the reader's own flows or for an administrator, shown on
+  hover or focus.
 
-- Left: GitBranch icon + workflow name (truncated) + muted version, and on `lg` and wider the
-  description on the same line (`workflow-card-description`)
-- Center: Owner handle (@username) - hidden on mobile
-- Right: Validation badge (icon; muted when valid, highlighted when invalid) + Visibility badge
-  (muted) + Delete button (on hover)
+### Flow list scopes
 
-**Responsive Behavior:**
-
-- Owner handle: `hidden sm:block`
-- Badge text: `hidden md:inline` (icons always visible)
-- Delete button: `opacity-0 group-hover:opacity-100`
-
-**Tooltip:** Description appears on hover (300ms delay) via Radix UI Tooltip
+Tabs above the list (`workflow-scopes`, `workflow-scope-<scope>`) say whose flows are listed:
+All, Mine, Shared with me, Catalog. Each is one `GET /api/workflows?access=…` query, so sort and
+pages hold inside it, and switching resets to the first page. The status filter offers valid,
+invalid and not checked, and is part of the same query. The page size follows the view mode that
+`DataListView` reports (`onViewModeChange`).
 
 ### Playbooks Page
 
@@ -2361,7 +2368,7 @@ export const MyPage: React.FC = () => {
 
 ### Adding a New Card Component
 
-Cards live in `components/cards/`. Each card has a `compact` prop for grid vs list layout:
+Cards live in `components/cards/`. Each fills `CardShell`'s slots; the shell lays them out for the list view and, with `compact`, the grid view:
 
 ```tsx
 import { CardShell } from "./CardShell";
@@ -2373,15 +2380,15 @@ interface MyCardProps {
 }
 
 export const MyCard: React.FC<MyCardProps> = ({ data, compact, onClick }) => (
-  <CardShell compact={compact} onClick={onClick}>
-    {compact ? (
-      // Vertical layout for grid view
-      <div className="space-y-1">...</div>
-    ) : (
-      // Horizontal layout for list view
-      <div className="flex items-center gap-3">...</div>
-    )}
-  </CardShell>
+  <CardShell
+    compact={compact}
+    onClick={onClick}
+    icon={<FileText />}
+    title={data.name}
+    description={data.summary}
+    meta={<span>{formatRelativeTime(data.updatedAt)}</span>}
+    testId="my-card"
+  />
 );
 ```
 
