@@ -17,10 +17,8 @@ import { FilterBar } from "@/components/FilterBar";
 import { LabeledFilter } from "@/components/LabeledFilter";
 import { SortSelect, makeSortValue, parseSortValue } from "@/components/SortSelect";
 import { useDebounce } from "../../hooks/useDebounce";
-import { useDynamicPageSize } from "../../hooks/useDynamicPageSize";
+import { useListPageSize } from "../../hooks/useListPageSize";
 import { WorkflowCard } from "./WorkflowCard";
-import { GRID_ITEM_HEIGHT, LIST_ITEM_HEIGHT } from "../cards/CardShell";
-import type { ViewMode } from "@/components/DataListView";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Select,
@@ -50,10 +48,7 @@ export const WorkflowExplorer: React.FC<WorkflowExplorerProps> = ({
   isAdmin,
 }) => {
   const { t } = useTranslation();
-  const [viewMode, setViewMode] = useState<ViewMode>("list");
-  const { pageSize, containerRef } = useDynamicPageSize(
-    viewMode === "grid" ? GRID_ITEM_HEIGHT : LIST_ITEM_HEIGHT,
-  );
+  const { pageSize, containerRef, onViewModeChange } = useListPageSize(() => setCurrentPage(1));
   const { workflows, loading, error, loadWorkflows, isAuthenticated } = useWorkflowList();
 
   const hasLoadedOnce = useRef(false);
@@ -156,7 +151,12 @@ export const WorkflowExplorer: React.FC<WorkflowExplorerProps> = ({
       <Tabs value={access} onValueChange={(value) => setAccess(value as Scope)} className="mb-3">
         <TabsList data-testid="workflow-scopes">
           {SCOPES.map((scope) => (
-            <TabsTrigger key={scope} value={scope} data-testid={`workflow-scope-${scope}`}>
+            <TabsTrigger
+              key={scope}
+              value={scope}
+              aria-controls="workflow-list"
+              data-testid={`workflow-scope-${scope}`}
+            >
               {t(`pages.workflows.scopes.${scope}`)}
             </TabsTrigger>
           ))}
@@ -231,43 +231,45 @@ export const WorkflowExplorer: React.FC<WorkflowExplorerProps> = ({
         }
       />
 
-      <DataListView
-        items={displayedWorkflows}
-        renderCard={(workflow, viewMode) => (
-          <WorkflowCard
-            workflow={workflow}
-            isSelected={selectedWorkflowId === workflow.id}
-            onClick={handleWorkflowSelect}
-            onDelete={onDelete}
-            currentUserHandle={currentUserHandle}
-            isAdmin={isAdmin}
-            compact={viewMode === "grid"}
-          />
-        )}
-        keyExtractor={(w) => w.id}
-        storageKey="workflows-view-mode"
-        loading={loading}
-        emptyIcon={Folder}
-        emptyTitle={
-          debouncedSearch ||
-          statusFilter !== "all" ||
-          visibilityFilter !== "all" ||
-          access !== "all"
-            ? t("pages.workflows.explorer.noMatch")
-            : t("pages.workflows.explorer.noWorkflows")
-        }
-        containerRef={containerRef}
-        pagination={{
-          mode: "total",
-          currentPage,
-          totalPages,
-          totalItems: totalWorkflows,
-          pageSize,
-          onPageChange: setCurrentPage,
-        }}
-        className="flex-1 min-h-0 flex flex-col"
-        onViewModeChange={setViewMode}
-      />
+      <div id="workflow-list" className="flex min-h-0 flex-1 flex-col">
+        <DataListView
+          items={displayedWorkflows}
+          renderCard={(workflow, viewMode) => (
+            <WorkflowCard
+              workflow={workflow}
+              isSelected={selectedWorkflowId === workflow.id}
+              onClick={handleWorkflowSelect}
+              onDelete={onDelete}
+              currentUserHandle={currentUserHandle}
+              isAdmin={isAdmin}
+              compact={viewMode === "grid"}
+            />
+          )}
+          keyExtractor={(w) => w.id}
+          storageKey="workflows-view-mode"
+          loading={loading}
+          emptyIcon={Folder}
+          emptyTitle={
+            debouncedSearch ||
+            statusFilter !== "all" ||
+            visibilityFilter !== "all" ||
+            access !== "all"
+              ? t("pages.workflows.explorer.noMatch")
+              : t("pages.workflows.explorer.noWorkflows")
+          }
+          containerRef={containerRef}
+          pagination={{
+            mode: "total",
+            currentPage,
+            totalPages,
+            totalItems: totalWorkflows,
+            pageSize,
+            onPageChange: setCurrentPage,
+          }}
+          className="flex-1 min-h-0 flex flex-col"
+          onViewModeChange={onViewModeChange}
+        />
+      </div>
     </div>
   );
 };

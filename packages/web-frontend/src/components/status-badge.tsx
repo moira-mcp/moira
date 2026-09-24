@@ -1,3 +1,5 @@
+import React from "react";
+import { useTranslation } from "react-i18next";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 
@@ -17,8 +19,14 @@ interface StatusBadgeProps {
   className?: string;
 }
 
+/** An execution's status in the reader's language, coloured by the state. */
 export function StatusBadge({ status, className }: StatusBadgeProps) {
-  return <Badge className={cn(statusStyles[status], className)}>{status}</Badge>;
+  const { t } = useTranslation();
+  return (
+    <Badge className={cn(statusStyles[status], className)} data-status={status}>
+      {t(`common.status.${status}`)}
+    </Badge>
+  );
 }
 
 export type { ExecutionStatus };

@@ -1,6 +1,7 @@
 /**
- * Deleted Workflow Card Component
- * Displays deleted workflow with strikethrough, restore/delete actions using CardShell
+ * A deleted workflow as a CardShell item: its name struck through as the title with a Deleted
+ * badge, its id as the description, and who deleted it and when as the meta line; restore and
+ * delete-for-good are the actions.
  */
 
 import React, { useMemo } from "react";
@@ -56,75 +57,35 @@ export const DeletedWorkflowCard: React.FC<DeletedWorkflowCardProps> = ({
     return list;
   }, [onRestore, onPermanentDelete, workflow, t]);
 
-  if (compact) {
-    return (
-      <CardShell
-        compact
-        onClick={() => onClick?.(workflow)}
-        actions={actions}
-        className="opacity-75"
-        testId="deleted-workflow-card"
-      >
-        <div className="flex items-start justify-between gap-2">
-          <div className="flex items-center gap-2 min-w-0 flex-1">
-            <GitBranch className="w-4 h-4 text-muted-foreground flex-shrink-0" />
-            <span className="font-medium text-sm text-muted-foreground truncate line-through">
-              {workflow.name}
-            </span>
-          </div>
-          <Badge
-            variant="outline"
-            className="text-[10px] px-1 py-0 h-4 border-destructive/30 text-destructive flex-shrink-0"
-          >
-            {t("common.deleted", { defaultValue: "Deleted" })}
-          </Badge>
-        </div>
-
-        <div className="text-xs text-muted-foreground font-mono truncate">{workflow.id}</div>
-
-        <div className="flex items-center gap-1 mt-auto">
-          {workflow.deletedAt && (
-            <span className="text-[10px] text-muted-foreground flex items-center gap-0.5">
-              <Clock className="w-3 h-3" />
-              {formatRelativeTime(workflow.deletedAt)}
-            </span>
-          )}
-        </div>
-      </CardShell>
-    );
-  }
-
   return (
     <CardShell
-      onClick={() => onClick?.(workflow)}
+      compact={compact}
+      onClick={onClick ? () => onClick(workflow) : undefined}
       actions={actions}
       className="opacity-75"
       testId="deleted-workflow-card"
-    >
-      <div className="flex items-center gap-2 min-w-0 flex-1">
-        <GitBranch className="w-4 h-4 text-muted-foreground flex-shrink-0" />
-        <span className="font-medium text-sm text-muted-foreground truncate line-through">
-          {workflow.name}
-        </span>
+      icon={<GitBranch aria-hidden="true" />}
+      title={<span className="text-muted-foreground line-through">{workflow.name}</span>}
+      description={<span className="font-mono text-xs">{workflow.id}</span>}
+      badges={
         <Badge
           variant="outline"
-          className="text-[10px] px-1 py-0 h-4 border-destructive/30 text-destructive flex-shrink-0"
+          className="h-5 border-destructive/30 px-1.5 text-[11px] text-destructive"
         >
           {t("common.deleted", { defaultValue: "Deleted" })}
         </Badge>
-      </div>
-
-      <span className="text-[11px] text-muted-foreground font-mono flex-shrink-0 hidden sm:block">
-        {workflow.deletedBy || workflow.userId}
-      </span>
-
-      <div className="flex items-center gap-1 flex-shrink-0">
-        {workflow.deletedAt && (
-          <span className="text-[10px] text-muted-foreground">
-            {formatRelativeTime(workflow.deletedAt)}
-          </span>
-        )}
-      </div>
-    </CardShell>
+      }
+      meta={
+        <>
+          <span className="font-mono">{workflow.deletedBy || workflow.userId}</span>
+          {workflow.deletedAt && (
+            <span className="inline-flex items-center gap-1">
+              <Clock className="size-3" aria-hidden="true" />
+              {formatRelativeTime(workflow.deletedAt)}
+            </span>
+          )}
+        </>
+      }
+    />
   );
 };

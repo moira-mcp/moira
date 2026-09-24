@@ -2653,7 +2653,7 @@
     "workflowCard": {
       "valid": "Valid",
       "invalid": "Invalid",
-      "unknown": "Unknown",
+      "unknown": "Not checked",
       "public": "Public",
       "private": "Private",
       "sharedWithYou": "Shared",
@@ -2876,6 +2876,10 @@
         "connections": "Connections",
         "materialize": "Materialize"
       }
+    },
+    "artifactCard": {
+      "expiresOn": "Expires {{date}}",
+      "createdOn": "Created {{date}}"
     }
   },
   "common": {
@@ -2964,7 +2968,20 @@
       "AUTH_GRANT_REVOCATION_REQUIRED": "Revoke Moira's access on GitHub, then confirm here.",
       "CREDENTIAL_UNREADABLE": "The stored GitHub access cannot be read. Reconnect GitHub.",
       "AUTHORIZATION_FAILED": "GitHub authorization failed. Try again."
-    }
+    },
+    "locked": "Locked",
+    "deleted": "Deleted",
+    "expired": "Expired",
+    "restore": "Restore",
+    "permanentDelete": "Delete permanently",
+    "admin": "Admin",
+    "verified": "Verified",
+    "unverified": "Not verified",
+    "blocked": "Blocked",
+    "copyUrl": "Copy link",
+    "open": "Open",
+    "view": "View",
+    "history": "History"
   },
   "lockedWidget": {
     "title": "{{count}} locked execution(s)",

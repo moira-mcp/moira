@@ -9,7 +9,8 @@ import { useTranslation } from "react-i18next";
 import { Play } from "lucide-react";
 import { apiClient } from "../services/api-client";
 import { ROUTES } from "../constants/routes";
-import { useDynamicPageSize } from "../hooks/useDynamicPageSize";
+import { useListPageSize } from "../hooks/useListPageSize";
+import { useLatestRequest } from "../hooks/useLatestRequest";
 import { useDebounce } from "../hooks/useDebounce";
 import {
   Select,
@@ -65,14 +66,16 @@ export const AdminExecutions: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState<string>("");
   const debouncedSearch = useDebounce(searchQuery, 300);
 
-  const { pageSize, containerRef } = useDynamicPageSize();
+  const { pageSize, containerRef, onViewModeChange } = useListPageSize(() => setCurrentPage(1));
 
   // Reset page when filters change
   useEffect(() => {
     setCurrentPage(1);
   }, [selectedUserId, selectedStatus, debouncedSearch]);
 
+  const beginRequest = useLatestRequest();
   const loadData = useCallback(async () => {
+    const isCurrent = beginRequest();
     try {
       setLoading(true);
       const offset = (currentPage - 1) * pageSize;
@@ -88,17 +91,19 @@ export const AdminExecutions: React.FC = () => {
         apiClient.getAdminUsers({ limit: 100 }),
       ]);
 
+      if (!isCurrent()) return;
       setExecutions(executionsData.executions);
       setTotal(executionsData.total);
       setUsers(usersData.users.map((u) => ({ id: u.id, email: u.email, name: u.name })));
       setError(null);
     } catch (err: unknown) {
+      if (!isCurrent()) return;
       const message = err instanceof Error ? err.message : t("common.errors.failedToLoad");
       setError(message);
     } finally {
-      setLoading(false);
+      if (isCurrent()) setLoading(false);
     }
-  }, [selectedUserId, selectedStatus, debouncedSearch, currentPage, pageSize, t]);
+  }, [beginRequest, selectedUserId, selectedStatus, debouncedSearch, currentPage, pageSize, t]);
 
   useEffect(() => {
     loadData();
@@ -186,6 +191,7 @@ export const AdminExecutions: React.FC = () => {
       <LockedExecutionsWidget admin />
 
       <DataListView
+        onViewModeChange={onViewModeChange}
         items={executions}
         renderCard={(execution, viewMode) => (
           <ExecutionCard

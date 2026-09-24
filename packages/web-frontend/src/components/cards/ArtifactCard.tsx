@@ -1,6 +1,7 @@
 /**
- * Artifact Card Component
- * Displays artifact info in list (compact) or grid mode using CardShell
+ * An artifact as a CardShell item: its name as the title and its size beside it, deleted or expired
+ * as a badge, and when it expires, who owns it (for an administrator) and when it was made as the
+ * meta line. An expired or deleted artifact is dimmed.
  */
 
 import React, { useMemo } from "react";
@@ -84,99 +85,54 @@ export const ArtifactCard: React.FC<ArtifactCardProps> = ({
     return list;
   }, [onCopyUrl, onEdit, onOpen, onDelete, artifact, t, compact]);
 
-  if (compact) {
-    return (
-      <CardShell
-        compact
-        onClick={() => onClick?.(artifact)}
-        actions={actions}
-        className={cn((isExpired || isDeleted) && "opacity-60")}
-        testId="artifact-card"
-      >
-        <div className="flex items-start justify-between gap-2">
-          <div className="flex items-center gap-2 min-w-0 flex-1">
-            <FileCode className="w-4 h-4 text-primary flex-shrink-0" />
-            <span className="font-medium text-sm text-foreground truncate">{artifact.name}</span>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-2 mt-auto flex-wrap">
-          <Badge variant="outline" className="text-[10px] px-1 py-0 h-4">
-            {formatSize(artifact.size)}
-          </Badge>
-          {isDeleted ? (
-            <Badge
-              variant="outline"
-              className="text-[10px] px-1 py-0 h-4 border-destructive/30 text-destructive"
-            >
-              {t("common.deleted", { defaultValue: "Deleted" })}
-            </Badge>
-          ) : isExpired ? (
-            <Badge
-              variant="outline"
-              className="text-[10px] px-1 py-0 h-4 border-destructive/30 text-destructive"
-            >
-              {t("common.expired", { defaultValue: "Expired" })}
-            </Badge>
-          ) : (
-            <span className="text-[10px] text-muted-foreground">
-              <Clock className="w-3 h-3 inline mr-0.5" />
-              {formatDate(artifact.expiresAt)}
-            </span>
-          )}
-          {artifact.userDisplay !== undefined && (
-            <span className="text-[10px] text-muted-foreground font-mono truncate">
-              {artifact.userDisplay ?? t("common.unknownUser")}
-            </span>
-          )}
-          <span className="text-[10px] text-muted-foreground ml-auto">
-            {formatDate(artifact.createdAt)}
-          </span>
-        </div>
-      </CardShell>
-    );
-  }
+  const stateBadge = isDeleted
+    ? t("common.deleted", { defaultValue: "Deleted" })
+    : isExpired
+      ? t("common.expired", { defaultValue: "Expired" })
+      : null;
 
   return (
     <CardShell
-      onClick={() => onClick?.(artifact)}
+      compact={compact}
+      onClick={onClick ? () => onClick(artifact) : undefined}
       actions={actions}
       className={cn((isExpired || isDeleted) && "opacity-60")}
-      testId={`artifact-row-${artifact.uuid}`}
-    >
-      <div className="flex items-center gap-2 min-w-0 flex-1">
-        <FileCode className="w-4 h-4 text-primary flex-shrink-0" />
-        <span className="font-medium text-sm text-foreground truncate">{artifact.name}</span>
-        <Badge variant="outline" className="text-[10px] px-1 py-0 h-4 flex-shrink-0">
-          {formatSize(artifact.size)}
-        </Badge>
-        {isDeleted && (
+      testId={compact ? "artifact-card" : `artifact-row-${artifact.uuid}`}
+      icon={<FileCode aria-hidden="true" />}
+      title={artifact.name}
+      titleAside={formatSize(artifact.size)}
+      badges={
+        stateBadge && (
           <Badge
             variant="outline"
-            className="text-[10px] px-1 py-0 h-4 border-destructive/30 text-destructive flex-shrink-0"
+            className="h-5 border-destructive/30 px-1.5 text-[11px] text-destructive"
           >
-            {t("common.deleted", { defaultValue: "Deleted" })}
+            {stateBadge}
           </Badge>
-        )}
-      </div>
-
-      {artifact.userDisplay !== undefined && (
-        <span className="text-[11px] text-muted-foreground font-mono flex-shrink-0 hidden sm:block">
-          {artifact.userDisplay ?? t("common.unknownUser")}
-        </span>
-      )}
-
-      <span className="text-[11px] text-muted-foreground flex-shrink-0 hidden sm:block">
-        {isDeleted
-          ? t("common.deleted", { defaultValue: "Deleted" })
-          : isExpired
-            ? t("common.expired", { defaultValue: "Expired" })
-            : formatDate(artifact.expiresAt)}
-      </span>
-
-      <div className="flex items-center gap-1 flex-shrink-0">
-        <span className="text-[10px] text-muted-foreground">{formatDate(artifact.createdAt)}</span>
-      </div>
-    </CardShell>
+        )
+      }
+      meta={
+        <>
+          {!stateBadge && (
+            <span className="inline-flex items-center gap-1">
+              <Clock className="size-3" aria-hidden="true" />
+              {t("components.artifactCard.expiresOn", {
+                defaultValue: "Expires {{date}}",
+                date: formatDate(artifact.expiresAt),
+              })}
+            </span>
+          )}
+          {artifact.userDisplay !== undefined && (
+            <span className="font-mono">{artifact.userDisplay ?? t("common.unknownUser")}</span>
+          )}
+          <span>
+            {t("components.artifactCard.createdOn", {
+              defaultValue: "Created {{date}}",
+              date: formatDate(artifact.createdAt),
+            })}
+          </span>
+        </>
+      }
+    />
   );
 };

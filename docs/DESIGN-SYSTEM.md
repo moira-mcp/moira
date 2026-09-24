@@ -61,7 +61,9 @@ Font: **Inter Variable** (`--font-sans`), monospace: `--font-mono`.
 | Empty state               | `EmptyState`         | `@/components/empty-state`     |
 | Confirmation dialog       | `ConfirmDialog`      | `@/components/confirm-dialog`  |
 | Debounced input value     | `useDebounce`        | `@/hooks/useDebounce`          |
-| Dynamic page sizing       | `useDynamicPageSize` | `@/hooks/useDynamicPageSize`   |
+| List page size            | `useListPageSize`    | `@/hooks/useListPageSize`      |
+| Drop stale list answers   | `useLatestRequest`   | `@/hooks/useLatestRequest`     |
+| Table page size (rows)    | `useDynamicPageSize` | `@/hooks/useDynamicPageSize`   |
 
 ### DO NOT use directly:
 
@@ -157,8 +159,57 @@ slots and the shell owns the layout, so every list reads the same way.
 
 - **List view**: a row of up to four lines with padding, actions at the end.
 - **Grid view**: the same slots stacked in a card, the meta line at the bottom.
-- `LIST_ITEM_HEIGHT` and `GRID_ITEM_HEIGHT` are the item heights `useDynamicPageSize` sizes pages by.
-- An item not yet on the slots passes free-form `children` and gets the older single-line row.
+- `title` is required and there is no free-form content: every list item is drawn from the slots.
+- An item with `onClick` opens from anywhere on it with the pointer; its title is then a button, so
+  the item is reachable with Tab and opens with Enter or Space. Interactive pieces inside a slot (a
+  tag filter, a visibility toggle) stop their click from reaching the item.
+- Each action carries its label as `aria-label` and as the delegated hint (`data-hint`).
+- `LIST_ITEM_HEIGHT` (a list item) and `GRID_ROW_HEIGHT` (a row of grid cards) are the starting
+  heights `useListPageSize` sizes pages by before it measures the drawn items.
+
+### useListPageSize
+
+The page size of a list page drawn with `DataListView` and `CardShell` items:
+
+```tsx
+const { pageSize, containerRef, onViewModeChange } = useListPageSize(() => setCurrentPage(1));
+
+<DataListView containerRef={containerRef} onViewModeChange={onViewModeChange} … />;
+```
+
+- In the list view a page holds the list items that fit the box; in the grid view, the rows that
+  fit times the columns the grid shows at this width (3, 2 or 1). At least two rows.
+- It starts from `LIST_ITEM_HEIGHT` / `GRID_ROW_HEIGHT`, then measures the items a view draws first
+  (`data-slotted`) and sizes by their average height, so a page holds what fits instead of leaving
+  an empty band or cutting an item off. The last item's gap needs no room.
+- That measurement is taken once per view. The items of a later page never change the size, so
+  paging stays on the page the reader chose even when its items are taller or shorter.
+- It follows the container through the list's loader (the container mounts after it) and through
+  resizes, such as a banner or a quota bar loading above the list.
+- When the size changes — a view switch, a resize of the box, or a view's first measurement (which
+  happens on page 1 or right after a view switch) — the callback runs, so the page goes back to
+  page 1 instead of skipping items.
+- A size change refetches, so two requests can overlap. The page's loader drops an answer from an
+  older request with `useLatestRequest` (`@/hooks/useLatestRequest`):
+
+  ```tsx
+  const beginRequest = useLatestRequest();
+  const load = useCallback(async () => {
+    const isCurrent = beginRequest();
+    try {
+      const result = await apiClient.getItems({ limit: pageSize, offset });
+      if (!isCurrent()) return;
+      setItems(result.items);
+    } catch (err) {
+      if (!isCurrent()) return;
+      setError(message(err));
+    } finally {
+      if (isCurrent()) setLoading(false);
+    }
+  }, [beginRequest, pageSize, offset]);
+  ```
+
+- `useDynamicPageSize` is the measurement under it, for a paged table sized by its rows.
 
 ### useDebounce
 
@@ -187,21 +238,21 @@ All cards use `CardShell` and follow these patterns:
 
 - Give the item as slots; show a badge only for a state that needs attention, not for the normal
   one (a valid flow has no "valid" badge)
-- Badge height: `h-4` consistently (not h-5)
-- Icon size in cards: `w-4 h-4` for primary icons, `w-3 h-3` for inline metadata icons
-- Action buttons: `h-6 w-6` ghost icon buttons, hidden until hover
+- Badges in a card: `h-5 px-1.5 text-[11px]` (outline or a state colour)
+- Icon size in cards: the `icon` slot draws `size-4`; inline icons in badges and meta are `size-3`
+- Action buttons: `h-7 w-7` ghost icon buttons, shown on hover or focus (CardShell draws them)
 - Timestamps: use `formatRelativeTime()` for recency, `formatDate()` for absolute dates
 - Card data-testid: descriptive (e.g., `note-card`, `execution-card`)
 
 ## Badge Consistency
 
-| Context             | Classes                                        |
-| ------------------- | ---------------------------------------------- |
-| Standard badge      | `text-[10px] px-1 py-0 h-4`                    |
-| Status/action badge | `text-[10px] px-1.5 py-0 h-4`                  |
-| Error count         | `border-destructive/30 text-destructive`       |
-| Success             | `border-success/30 text-success`               |
-| Warning             | `bg-warning/10 text-warning border-warning/30` |
+| Context          | Classes                                        |
+| ---------------- | ---------------------------------------------- |
+| Card badge       | `h-5 px-1.5 text-[11px]`                       |
+| Execution status | `StatusBadge` (translated `common.status.*`)   |
+| Error count      | `border-destructive/30 text-destructive`       |
+| Success          | `border-success/30 text-success`               |
+| Warning          | `bg-warning/10 text-warning border-warning/30` |
 
 ## Diagram design system
 

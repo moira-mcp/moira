@@ -18,7 +18,8 @@ import { FilterBar } from "../components/FilterBar";
 import { useDebounce } from "../hooks/useDebounce";
 import { NoteInlineEditor } from "../components/notes/NoteInlineEditor";
 import { NoteHistoryDialog } from "../components/notes/NoteHistoryDialog";
-import { useDynamicPageSize } from "../hooks/useDynamicPageSize";
+import { useListPageSize } from "../hooks/useListPageSize";
+import { useLatestRequest } from "../hooks/useLatestRequest";
 import { NoteCard } from "../components/cards";
 import { formatSize } from "../components/cards/format-utils";
 import { DataListView } from "../components/DataListView";
@@ -44,7 +45,7 @@ interface NoteStats {
 
 export const Notes: React.FC = () => {
   const { t } = useTranslation();
-  const { pageSize, containerRef } = useDynamicPageSize();
+  const { pageSize, containerRef, onViewModeChange } = useListPageSize(() => setCurrentPage(1));
 
   // Data state
   const [notes, setNotes] = useState<NoteListItem[]>([]);
@@ -83,7 +84,9 @@ export const Notes: React.FC = () => {
   }, []);
 
   // Load notes
+  const beginRequest = useLatestRequest();
   const loadNotes = useCallback(async () => {
+    const isCurrent = beginRequest();
     try {
       setLoading(true);
 
@@ -94,17 +97,19 @@ export const Notes: React.FC = () => {
         offset: (currentPage - 1) * pageSize,
       });
 
+      if (!isCurrent()) return;
       setNotes(result.notes);
       setTotal(result.total);
       setAllTags(result.allTags);
       setError(null);
     } catch (err: unknown) {
+      if (!isCurrent()) return;
       const message = err instanceof Error ? err.message : t("common.errors.failedToLoad");
       setError(message);
     } finally {
-      setLoading(false);
+      if (isCurrent()) setLoading(false);
     }
-  }, [tagFilter, debouncedSearch, currentPage, pageSize, t]);
+  }, [beginRequest, tagFilter, debouncedSearch, currentPage, pageSize, t]);
 
   useEffect(() => {
     loadNotes();
@@ -266,6 +271,7 @@ export const Notes: React.FC = () => {
       )}
 
       <DataListView
+        onViewModeChange={onViewModeChange}
         items={notes}
         renderCard={(note, viewMode) =>
           editingNoteKey === note.key ? (

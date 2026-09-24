@@ -7,7 +7,8 @@ import React, { useState, useEffect, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { FileCode, BarChart3 } from "lucide-react";
 import { Card, CardContent } from "../components/ui/card";
-import { useDynamicPageSize } from "../hooks/useDynamicPageSize";
+import { useListPageSize } from "../hooks/useListPageSize";
+import { useLatestRequest } from "../hooks/useLatestRequest";
 import { useDebounce } from "@/hooks/useDebounce";
 import { Checkbox } from "../components/ui/checkbox";
 import { toast } from "sonner";
@@ -62,7 +63,7 @@ function toArtifactCardData(item: AdminArtifactItem): ArtifactCardData {
 
 export const AdminArtifacts: React.FC = () => {
   const { t } = useTranslation();
-  const { pageSize, containerRef } = useDynamicPageSize();
+  const { pageSize, containerRef, onViewModeChange } = useListPageSize(() => setCurrentPage(1));
 
   const [artifacts, setArtifacts] = useState<AdminArtifactItem[]>([]);
   const [stats, setStats] = useState<AdminArtifactStats | null>(null);
@@ -94,7 +95,9 @@ export const AdminArtifacts: React.FC = () => {
     }
   }, []);
 
+  const beginRequest = useLatestRequest();
   const loadArtifacts = useCallback(async () => {
+    const isCurrent = beginRequest();
     try {
       setLoading(true);
 
@@ -115,16 +118,18 @@ export const AdminArtifacts: React.FC = () => {
       }
 
       const result = await response.json();
+      if (!isCurrent()) return;
       setArtifacts(result.data.artifacts);
       setTotal(result.data.total);
       setError(null);
     } catch (err: unknown) {
+      if (!isCurrent()) return;
       const message = err instanceof Error ? err.message : t("admin.artifacts.errors.loadFailed");
       setError(message);
     } finally {
-      setLoading(false);
+      if (isCurrent()) setLoading(false);
     }
-  }, [currentPage, debouncedUserSearch, includeExpired, includeDeleted, pageSize, t]);
+  }, [beginRequest, currentPage, debouncedUserSearch, includeExpired, includeDeleted, pageSize, t]);
 
   useEffect(() => {
     loadArtifacts();
@@ -285,6 +290,7 @@ export const AdminArtifacts: React.FC = () => {
       />
 
       <DataListView
+        onViewModeChange={onViewModeChange}
         items={artifacts}
         renderCard={(artifact, viewMode) => (
           <ArtifactCard

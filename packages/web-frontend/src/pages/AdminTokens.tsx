@@ -5,10 +5,11 @@
 
 import React, { useState, useEffect, useCallback } from "react";
 import { useTranslation } from "react-i18next";
-import { KeyRound, User } from "lucide-react";
+import { KeyRound } from "lucide-react";
 import { toast } from "sonner";
 import { apiClient } from "../services/api-client";
-import { useDynamicPageSize } from "../hooks/useDynamicPageSize";
+import { useListPageSize } from "../hooks/useListPageSize";
+import { useLatestRequest } from "../hooks/useLatestRequest";
 import { useDebounce } from "../hooks/useDebounce";
 import {
   Select,
@@ -21,9 +22,7 @@ import { PageShell } from "@/components/PageShell";
 import { FilterBar } from "@/components/FilterBar";
 import { LabeledFilter } from "@/components/LabeledFilter";
 import { DataListView } from "@/components/DataListView";
-import { Card, CardContent } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { TokenCard } from "@/components/cards/TokenCard";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 
 interface AdminToken {
@@ -58,14 +57,16 @@ export const AdminTokens: React.FC = () => {
 
   const [revokeTarget, setRevokeTarget] = useState<AdminToken | null>(null);
 
-  const { pageSize, containerRef } = useDynamicPageSize();
+  const { pageSize, containerRef, onViewModeChange } = useListPageSize(() => setCurrentPage(1));
 
   // Reset page when filters change
   useEffect(() => {
     setCurrentPage(1);
   }, [selectedStatus, debouncedSearch]);
 
+  const beginRequest = useLatestRequest();
   const loadData = useCallback(async () => {
+    const isCurrent = beginRequest();
     try {
       setLoading(true);
       const offset = (currentPage - 1) * pageSize;
@@ -77,16 +78,18 @@ export const AdminTokens: React.FC = () => {
         offset,
       });
 
+      if (!isCurrent()) return;
       setTokens(data.tokens);
       setTotal(data.total);
       setError(null);
     } catch (err: unknown) {
+      if (!isCurrent()) return;
       const message = err instanceof Error ? err.message : t("common.errors.failedToLoad");
       setError(message);
     } finally {
-      setLoading(false);
+      if (isCurrent()) setLoading(false);
     }
-  }, [selectedStatus, debouncedSearch, currentPage, pageSize, t]);
+  }, [beginRequest, selectedStatus, debouncedSearch, currentPage, pageSize, t]);
 
   useEffect(() => {
     loadData();
@@ -110,29 +113,6 @@ export const AdminTokens: React.FC = () => {
   };
 
   const totalPages = Math.ceil(total / pageSize);
-
-  const getStatusBadge = (token: AdminToken) => {
-    if (token.isRevoked) {
-      return <Badge variant="destructive">{t("admin.tokens.statusRevoked")}</Badge>;
-    }
-    if (token.isExpired) {
-      return (
-        <Badge variant="secondary" className="text-orange-600 dark:text-orange-400">
-          {t("admin.tokens.statusExpired")}
-        </Badge>
-      );
-    }
-    return (
-      <Badge variant="outline" className="text-chart-2 border-chart-2/30">
-        {t("admin.tokens.statusActive")}
-      </Badge>
-    );
-  };
-
-  const formatDate = (date: string | null) => {
-    if (!date) return "—";
-    return new Date(date).toLocaleDateString();
-  };
 
   if (loading && tokens.length === 0) {
     return (
@@ -180,61 +160,14 @@ export const AdminTokens: React.FC = () => {
       />
 
       <DataListView
+        onViewModeChange={onViewModeChange}
         items={tokens}
-        renderCard={(token) => (
-          <Card key={token.id} data-testid={`token-row-${token.id}`}>
-            <CardContent className="flex items-start justify-between p-4">
-              <div className="flex-1 space-y-1">
-                <div className="flex items-center gap-2">
-                  <KeyRound className="h-4 w-4 text-muted-foreground" />
-                  <span className="font-medium text-sm" data-testid="token-name">
-                    {token.name}
-                  </span>
-                  {getStatusBadge(token)}
-                </div>
-                <div className="flex items-center gap-4 text-sm text-muted-foreground">
-                  <code
-                    className="text-xs bg-muted px-1.5 py-0.5 rounded font-mono"
-                    data-testid="token-prefix"
-                  >
-                    {token.tokenPrefix}...
-                  </code>
-                </div>
-                <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                  <User className="h-3 w-3" />
-                  <span data-testid="token-user">{token.userEmail}</span>
-                  {token.userName && (
-                    <span className="text-muted-foreground/60">({token.userName})</span>
-                  )}
-                </div>
-                <div className="text-xs text-muted-foreground">
-                  {t("admin.tokens.created")}: {formatDate(token.createdAt)}
-                  {token.expiresAt && (
-                    <>
-                      {" · "}
-                      {t("admin.tokens.expires")}: {formatDate(token.expiresAt)}
-                    </>
-                  )}
-                  {token.lastUsedAt && (
-                    <>
-                      {" · "}
-                      {t("admin.tokens.lastUsed")}: {formatDate(token.lastUsedAt)}
-                    </>
-                  )}
-                </div>
-              </div>
-              {!token.isRevoked && (
-                <Button
-                  variant="destructive"
-                  size="sm"
-                  onClick={() => setRevokeTarget(token)}
-                  data-testid={`revoke-token-${token.id}`}
-                >
-                  {t("admin.tokens.revoke")}
-                </Button>
-              )}
-            </CardContent>
-          </Card>
+        renderCard={(token, viewMode) => (
+          <TokenCard
+            token={token}
+            compact={viewMode === "grid"}
+            onRevoke={() => setRevokeTarget(token)}
+          />
         )}
         keyExtractor={(t) => t.id}
         storageKey="admin-tokens-view-mode"

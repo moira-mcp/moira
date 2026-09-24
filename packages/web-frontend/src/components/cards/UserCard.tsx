@@ -1,7 +1,8 @@
 /**
- * User Card Component
- * Displays user info in list (compact) or grid mode using CardShell
- * Handles 2 data interfaces via normalizeUser()
+ * A user as a CardShell item: the name (or email) as the title, the email as the description,
+ * states that matter (administrator, unverified, blocked, awaiting approval) as badges, and
+ * verification, workflow count and sign-up date as the meta line. Handles 2 data interfaces via
+ * normalizeUser().
  */
 
 import React, { useMemo, type RefObject } from "react";
@@ -91,176 +92,104 @@ export const UserCard: React.FC<UserCardProps> = ({
     return list;
   }, [onView, onEdit, onDelete, onApprove, accountApprovalEnabled, user, t]);
 
-  if (compact) {
-    return (
-      <CardShell
-        compact
-        onClick={() => onClick?.(user)}
-        actions={actions}
-        className={cn(user.blocked && "opacity-60")}
-        testId="user-card"
-      >
-        <div className="flex items-start gap-3">
-          <Avatar className="w-8 h-8 flex-shrink-0">
-            <AvatarFallback className="bg-primary text-primary-foreground text-xs">
-              {getInitials(user.name, user.email)}
-            </AvatarFallback>
-          </Avatar>
-          <div className="min-w-0 flex-1">
-            <p className="font-medium text-sm text-foreground truncate">
-              {user.name || user.email}
-            </p>
-            {user.name && <p className="text-xs text-muted-foreground truncate">{user.email}</p>}
-          </div>
-        </div>
-
-        <div className="flex items-center gap-1 mt-auto flex-wrap">
-          {user.isAdmin && (
-            <Badge className="text-[10px] px-1 py-0 h-4 bg-warning/10 text-warning border-warning/30">
-              <Shield className="w-3 h-3 mr-0.5" />
-              {t("common.admin", { defaultValue: "Admin" })}
-            </Badge>
-          )}
-          {user.emailVerified !== undefined &&
-            (user.emailVerified ? (
-              <Badge
-                variant="outline"
-                className="text-[10px] px-1 py-0 h-4 border-success/30 text-success"
-              >
-                <CheckCircle className="w-3 h-3 mr-0.5" />
-                {t("common.verified", { defaultValue: "Verified" })}
-              </Badge>
-            ) : (
-              <Badge
-                variant="outline"
-                className="text-[10px] px-1 py-0 h-4 border-destructive/30 text-destructive"
-              >
-                <XCircle className="w-3 h-3 mr-0.5" />
-                {t("common.unverified", { defaultValue: "Unverified" })}
-              </Badge>
-            ))}
-          {user.blocked && (
-            <Badge
-              variant="outline"
-              className="text-[10px] px-1 py-0 h-4 border-destructive/30 text-destructive"
-            >
-              <Ban className="w-3 h-3 mr-0.5" />
-              {t("common.blocked", { defaultValue: "Blocked" })}
-            </Badge>
-          )}
-          {accountApprovalEnabled && user.approvedAt !== undefined && (
-            <span
-              ref={approvalStatusRef}
-              tabIndex={-1}
-              data-testid="approval-list-focus-target"
-              className="rounded-sm focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
-            >
-              {user.approvedAt === null ? (
-                <Badge
-                  variant="outline"
-                  className="text-[10px] px-1 py-0 h-4 border-warning/30 text-warning"
-                  data-testid="approval-status-pending"
-                >
-                  <Clock3 className="w-3 h-3 mr-0.5" />
-                  {t("admin.userManagement.status.pendingApproval")}
-                </Badge>
-              ) : (
-                <Badge
-                  variant="outline"
-                  className="text-[10px] px-1 py-0 h-4 border-success/30 text-success"
-                  data-testid="approval-status-approved"
-                >
-                  <UserCheck className="w-3 h-3 mr-0.5" />
-                  {t("admin.userManagement.status.approved")}
-                </Badge>
-              )}
-            </span>
-          )}
-          <span className="text-[10px] text-muted-foreground ml-auto flex items-center gap-0.5">
-            <GitBranch className="w-3 h-3" />
-            {user.workflowsCount}
-          </span>
-        </div>
-      </CardShell>
-    );
-  }
-
+  const badge = "h-5 gap-1 px-1.5 text-[11px]";
+  // Pending approval needs the administrator's attention and is a badge; an approved account is the
+  // normal state and reads as a quiet fact. Either way it is the one focus target the approval
+  // action returns to.
+  const approval =
+    accountApprovalEnabled && user.approvedAt !== undefined
+      ? user.approvedAt === null
+        ? "pending"
+        : "approved"
+      : null;
+  const approvalStatus = approval && (
+    <span
+      ref={approvalStatusRef}
+      tabIndex={-1}
+      data-testid="approval-list-focus-target"
+      className="rounded-sm focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
+    >
+      {approval === "pending" ? (
+        <Badge
+          variant="outline"
+          className={cn(badge, "border-warning/30 text-warning")}
+          data-testid="approval-status-pending"
+        >
+          <Clock3 className="size-3" aria-hidden="true" />
+          {t("admin.userManagement.status.pendingApproval")}
+        </Badge>
+      ) : (
+        <span
+          className="inline-flex items-center gap-1 text-success"
+          data-testid="approval-status-approved"
+        >
+          <UserCheck className="size-3" aria-hidden="true" />
+          {t("admin.userManagement.status.approved")}
+        </span>
+      )}
+    </span>
+  );
   return (
     <CardShell
-      onClick={() => onClick?.(user)}
+      compact={compact}
+      onClick={onClick ? () => onClick(user) : undefined}
       actions={actions}
       className={cn(user.blocked && "opacity-60")}
       testId="user-card"
-    >
-      <Avatar className="w-6 h-6 flex-shrink-0">
-        <AvatarFallback className="bg-primary text-primary-foreground text-[10px]">
-          {getInitials(user.name, user.email)}
-        </AvatarFallback>
-      </Avatar>
-
-      <div className="flex items-center gap-2 min-w-0 flex-1">
-        <span className="font-medium text-sm text-foreground truncate">
-          {user.name || user.email}
-        </span>
-        {user.name && (
-          <span className="text-xs text-muted-foreground truncate hidden sm:inline">
-            {user.email}
+      icon={
+        <Avatar className="size-5">
+          <AvatarFallback className="bg-primary text-[9px] text-primary-foreground">
+            {getInitials(user.name, user.email)}
+          </AvatarFallback>
+        </Avatar>
+      }
+      title={user.name || user.email}
+      description={user.name ? user.email : undefined}
+      badges={
+        <>
+          {user.isAdmin && (
+            <Badge className={cn(badge, "border-warning/30 bg-warning/10 text-warning")}>
+              <Shield className="size-3" aria-hidden="true" />
+              {t("common.admin", { defaultValue: "Admin" })}
+            </Badge>
+          )}
+          {user.emailVerified === false && (
+            <Badge
+              variant="outline"
+              className={cn(badge, "border-destructive/30 text-destructive")}
+            >
+              <XCircle className="size-3" aria-hidden="true" />
+              {t("common.unverified", { defaultValue: "Unverified" })}
+            </Badge>
+          )}
+          {user.blocked && (
+            <Badge
+              variant="outline"
+              className={cn(badge, "border-destructive/30 text-destructive")}
+            >
+              <Ban className="size-3" aria-hidden="true" />
+              {t("common.blocked", { defaultValue: "Blocked" })}
+            </Badge>
+          )}
+          {approval === "pending" && approvalStatus}
+        </>
+      }
+      meta={
+        <>
+          {approval === "approved" && approvalStatus}
+          {user.emailVerified && (
+            <span className="inline-flex items-center gap-1 text-success">
+              <CheckCircle className="size-3" aria-hidden="true" />
+              {t("common.verified", { defaultValue: "Verified" })}
+            </span>
+          )}
+          <span className="inline-flex items-center gap-1">
+            <GitBranch className="size-3" aria-hidden="true" />
+            {user.workflowsCount}
           </span>
-        )}
-      </div>
-
-      <div className="flex items-center gap-1.5 flex-shrink-0">
-        {user.isAdmin && (
-          <Badge className="text-[10px] px-1 py-0 h-4 bg-warning/10 text-warning border-warning/30">
-            <Shield className="w-3 h-3" />
-          </Badge>
-        )}
-        {user.blocked && (
-          <Badge
-            variant="outline"
-            className="text-[10px] px-1 py-0 h-4 border-destructive/30 text-destructive"
-          >
-            <Ban className="w-3 h-3" />
-          </Badge>
-        )}
-        {accountApprovalEnabled && user.approvedAt !== undefined && (
-          <span
-            ref={approvalStatusRef}
-            tabIndex={-1}
-            data-testid="approval-list-focus-target"
-            className="rounded-sm focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
-          >
-            {user.approvedAt === null ? (
-              <Badge
-                variant="outline"
-                className="text-[10px] px-1 py-0 h-4 border-warning/30 text-warning"
-                data-testid="approval-status-pending"
-              >
-                <Clock3 className="w-3 h-3 mr-0.5" />
-                <span className="hidden sm:inline">
-                  {t("admin.userManagement.status.pendingApproval")}
-                </span>
-              </Badge>
-            ) : (
-              <Badge
-                variant="outline"
-                className="text-[10px] px-1 py-0 h-4 border-success/30 text-success"
-                data-testid="approval-status-approved"
-              >
-                <UserCheck className="w-3 h-3" />
-                <span className="sr-only">{t("admin.userManagement.status.approved")}</span>
-              </Badge>
-            )}
-          </span>
-        )}
-        <span className="text-[10px] text-muted-foreground flex items-center gap-0.5">
-          <GitBranch className="w-3 h-3" />
-          {user.workflowsCount}
-        </span>
-        <span className="text-[10px] text-muted-foreground hidden sm:block">
-          {formatDate(user.createdAt)}
-        </span>
-      </div>
-    </CardShell>
+          <span>{formatDate(user.createdAt)}</span>
+        </>
+      }
+    />
   );
 };

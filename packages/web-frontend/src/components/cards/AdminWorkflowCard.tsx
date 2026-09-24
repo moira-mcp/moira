@@ -1,11 +1,12 @@
 /**
- * Admin Workflow Card Component
- * Displays workflow info for admin list: owner, name, visibility, version, node count, dates
+ * A workflow in the administrator's list, as a CardShell item: its name and version as the title,
+ * its description, a badge only when it is invalid or not yet checked, and owner, visibility, size
+ * in nodes and last change as the meta line.
  */
 
 import React from "react";
 import { useTranslation } from "react-i18next";
-import { GitBranch, Clock, Eye, EyeOff, CheckCircle2, XCircle, HelpCircle } from "lucide-react";
+import { GitBranch, Clock, Globe, Lock, XCircle, HelpCircle } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { formatRelativeTime } from "./format-utils";
 import { CardShell } from "./CardShell";
@@ -34,84 +35,62 @@ interface AdminWorkflowCardProps {
   compact?: boolean;
 }
 
-const ValidationIcon: React.FC<{ status: string }> = ({ status }) => {
-  if (status === "valid") return <CheckCircle2 className="w-3.5 h-3.5 text-success" />;
-  if (status === "invalid") return <XCircle className="w-3.5 h-3.5 text-destructive" />;
-  return <HelpCircle className="w-3.5 h-3.5 text-muted-foreground" />;
-};
-
 export const AdminWorkflowCard: React.FC<AdminWorkflowCardProps> = ({
   workflow,
   compact = false,
 }) => {
   const { t } = useTranslation();
-
-  if (compact) {
-    return (
-      <CardShell compact testId="admin-workflow-card">
-        <div className="flex items-start justify-between gap-2">
-          <div className="flex items-center gap-2 min-w-0 flex-1">
-            <GitBranch className="w-4 h-4 text-muted-foreground flex-shrink-0" />
-            <span className="font-medium text-sm truncate">{workflow.name}</span>
-          </div>
-          <div className="flex items-center gap-1 flex-shrink-0">
-            {workflow.visibility === "public" ? (
-              <Eye className="w-3 h-3 text-muted-foreground" />
-            ) : (
-              <EyeOff className="w-3 h-3 text-muted-foreground" />
-            )}
-            <ValidationIcon status={workflow.validation.status} />
-          </div>
-        </div>
-
-        <div className="text-xs text-muted-foreground truncate">
-          @{workflow.ownerHandle} · v{workflow.version} · {workflow.nodeCount}{" "}
-          {t("admin.workflows.nodes")}
-        </div>
-
-        <div className="flex items-center gap-1 mt-auto">
-          <span className="text-[10px] text-muted-foreground flex items-center gap-0.5">
-            <Clock className="w-3 h-3" />
-            {formatRelativeTime(workflow.updatedAt)}
-          </span>
-        </div>
-      </CardShell>
-    );
-  }
+  const status = workflow.validation.status;
 
   return (
-    <CardShell testId="admin-workflow-card">
-      <div className="flex items-center gap-2 min-w-0 flex-1">
-        <GitBranch className="w-4 h-4 text-muted-foreground flex-shrink-0" />
-        <span className="font-medium text-sm truncate">{workflow.name}</span>
-        <Badge
-          variant="outline"
-          className={`text-[10px] px-1 py-0 h-4 flex-shrink-0 ${
-            workflow.visibility === "public"
-              ? "border-success/30 text-success"
-              : "border-muted-foreground/30 text-muted-foreground"
-          }`}
-        >
-          {workflow.visibility === "public"
-            ? t("admin.workflows.public")
-            : t("admin.workflows.private")}
-        </Badge>
-        <ValidationIcon status={workflow.validation.status} />
-      </div>
-
-      <span className="text-[11px] text-muted-foreground flex-shrink-0 hidden sm:block">
-        @{workflow.ownerHandle}
-      </span>
-
-      <span className="text-[11px] text-muted-foreground flex-shrink-0 hidden md:block">
-        v{workflow.version} · {workflow.nodeCount} {t("admin.workflows.nodes")}
-      </span>
-
-      <div className="flex items-center gap-1 flex-shrink-0">
-        <span className="text-[10px] text-muted-foreground">
-          {formatRelativeTime(workflow.updatedAt)}
-        </span>
-      </div>
-    </CardShell>
+    <CardShell
+      compact={compact}
+      testId="admin-workflow-card"
+      icon={<GitBranch aria-hidden="true" />}
+      title={workflow.name}
+      titleAside={`v${workflow.version}`}
+      description={workflow.description || undefined}
+      badges={
+        status !== "valid" && (
+          <Badge
+            variant="outline"
+            className={
+              status === "invalid"
+                ? "h-5 gap-1 border-destructive/30 px-1.5 text-[11px] text-destructive"
+                : "h-5 gap-1 px-1.5 text-[11px] text-muted-foreground"
+            }
+          >
+            {status === "invalid" ? (
+              <XCircle className="size-3" aria-hidden="true" />
+            ) : (
+              <HelpCircle className="size-3" aria-hidden="true" />
+            )}
+            {t(`components.workflowCard.${status}`)}
+          </Badge>
+        )
+      }
+      meta={
+        <>
+          <span className="font-mono">@{workflow.ownerHandle}</span>
+          <span className="inline-flex items-center gap-1">
+            {workflow.visibility === "public" ? (
+              <Globe className="size-3" aria-hidden="true" />
+            ) : (
+              <Lock className="size-3" aria-hidden="true" />
+            )}
+            {workflow.visibility === "public"
+              ? t("admin.workflows.public")
+              : t("admin.workflows.private")}
+          </span>
+          <span>
+            {workflow.nodeCount} {t("admin.workflows.nodes")}
+          </span>
+          <span className="inline-flex items-center gap-1">
+            <Clock className="size-3" aria-hidden="true" />
+            {formatRelativeTime(workflow.updatedAt)}
+          </span>
+        </>
+      }
+    />
   );
 };

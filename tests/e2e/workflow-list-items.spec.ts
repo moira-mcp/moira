@@ -80,7 +80,9 @@ test.describe("Flow list items", () => {
   test("a recommended universal flow says when to pick it; another flow does not", async ({
     page,
   }) => {
-    await page.getByPlaceholder(/Search workflows|Поиск воркфлоу/).fill("Quick Task");
+    // By slug: the name also appears in other universal flows' descriptions, and a page may hold
+    // fewer items than those matches
+    await page.getByPlaceholder(/Search workflows|Поиск воркфлоу/).fill("quick-task");
     const quickTask = page
       .locator('[data-testid="workflow-card"]')
       .filter({ has: page.locator('[data-slot="card-title"]', { hasText: /^Quick Task$/ }) });
@@ -159,22 +161,71 @@ test.describe("Flow list items", () => {
     expect(catalogOwners.some((owner) => owner.trim() === myHandle)).toBe(false);
   });
 
-  test("under name sort, page 2 continues page 1 in order", async ({ page }) => {
+  test("the scope tabs control the flow list; the status filter names never-checked flows", async ({
+    page,
+  }) => {
+    const tab = page.getByTestId("workflow-scope-mine");
+    const controlled = await tab.getAttribute("aria-controls");
+    expect(controlled).toBeTruthy();
+    const list = page.locator(`[id="${controlled}"]`);
+    await expect(list).toHaveCount(1);
+    await expect(list.locator('[data-testid="workflow-card"]').first()).toBeVisible();
+
+    await page.getByTestId("filters-toggle").click();
+    await page.getByTestId("status-filter").click();
+    await expect(page.getByRole("option")).toHaveText(["All", "Valid", "Invalid", "Not checked"]);
+  });
+
+  test("under name sort, page 2 continues page 1: no flow repeats and none is skipped", async ({
+    page,
+  }) => {
+    // What each answer held, in the order the answers arrived: names repeat among fixtures, so
+    // identity comes from the flow ids
+    type Answer = { offset: number; ids: string[]; names: string[] };
+    const answers: Array<Promise<Answer>> = [];
+    page.on("response", (response) => {
+      const url = new URL(response.url());
+      if (url.pathname !== "/api/workflows" || url.searchParams.get("sort") !== "name") return;
+      answers.push(
+        response
+          .json()
+          .then(
+            (body: { data: { workflows: Array<{ id: string; metadata: { name: string } }> } }) => ({
+              offset: Number(url.searchParams.get("offset")),
+              ids: body.data.workflows.map((w) => w.id),
+              names: body.data.workflows.map((w) => w.metadata.name),
+            }),
+          ),
+      );
+    });
     await page.getByTestId("filters-toggle").click();
     await page.getByTestId("sort-select").click();
     await page.getByRole("option", { name: /(Name|Название).*↑/ }).click();
     const titles = page.locator('[data-testid="workflow-card"] [data-slot="card-title"]');
     await expect(titles.first()).toBeVisible();
-    const firstPage = await titles.allTextContents();
-    expect(firstPage.length).toBeGreaterThan(1);
+    await page.waitForLoadState("networkidle");
+    const first = await answers[answers.length - 1];
+    expect(first.offset).toBe(0);
+    expect(first.ids.length).toBeGreaterThan(1);
+    await expect(titles).toHaveText(first.names);
 
+    const nextAnswer = page.waitForResponse((response) => {
+      const url = new URL(response.url());
+      return (
+        url.pathname === "/api/workflows" &&
+        url.searchParams.get("sort") === "name" &&
+        url.searchParams.get("offset") !== "0"
+      );
+    });
     await page.getByTestId("pagination-next").click();
-    await expect(titles.first()).not.toHaveText(firstPage[0]);
-    const secondPage = await titles.allTextContents();
-    expect(secondPage.length).toBeGreaterThan(0);
-
-    const both = [...firstPage, ...secondPage];
-    expect(new Set(both).size).toBe(both.length);
+    await nextAnswer;
+    await page.waitForLoadState("networkidle");
+    const second = await answers[answers.length - 1];
+    // Page 2 starts where page 1 ended, shares no flow with it, and is what the list shows
+    expect(second.offset).toBe(first.ids.length);
+    expect(second.ids.some((id) => first.ids.includes(id))).toBe(false);
+    await expect(titles).toHaveText(second.names);
+    const both = [...first.names, ...second.names];
     for (let index = 1; index < both.length; index += 1) {
       expect(both[index - 1] <= both[index]).toBe(true);
     }

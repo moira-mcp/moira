@@ -9,7 +9,8 @@ import { useTranslation } from "react-i18next";
 import { Users } from "lucide-react";
 import { apiClient } from "../services/api-client";
 import { ROUTES } from "../constants/routes";
-import { useDynamicPageSize } from "../hooks/useDynamicPageSize";
+import { useListPageSize } from "../hooks/useListPageSize";
+import { useLatestRequest } from "../hooks/useLatestRequest";
 import { useDebounce } from "../hooks/useDebounce";
 import { useFeatures } from "../hooks/useFeatures";
 import { Button } from "@/components/ui/button";
@@ -67,14 +68,16 @@ export const UserManagement: React.FC = () => {
     isAdmin: false,
   });
 
-  const { pageSize, containerRef } = useDynamicPageSize();
+  const { pageSize, containerRef, onViewModeChange } = useListPageSize(() => setCurrentPage(1));
 
   // Reset page when filters change
   useEffect(() => {
     setCurrentPage(1);
   }, [debouncedSearch]);
 
+  const beginRequest = useLatestRequest();
   const loadUsers = useCallback(async () => {
+    const isCurrent = beginRequest();
     setLoading(true);
     try {
       const offset = (currentPage - 1) * pageSize;
@@ -83,16 +86,18 @@ export const UserManagement: React.FC = () => {
         limit: pageSize,
         offset,
       });
+      if (!isCurrent()) return;
       setUsers(usersData.users);
       setTotal(usersData.total);
       setError(null);
     } catch (err: unknown) {
+      if (!isCurrent()) return;
       const message = err instanceof Error ? err.message : t("common.errors.failedToLoad");
       setError(message);
     } finally {
-      setLoading(false);
+      if (isCurrent()) setLoading(false);
     }
-  }, [currentPage, pageSize, debouncedSearch, t]);
+  }, [beginRequest, currentPage, pageSize, debouncedSearch, t]);
 
   useEffect(() => {
     loadUsers();
@@ -183,6 +188,7 @@ export const UserManagement: React.FC = () => {
       />
 
       <DataListView
+        onViewModeChange={onViewModeChange}
         items={users}
         renderCard={(user, viewMode) => (
           <UserCard

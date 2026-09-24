@@ -8,12 +8,13 @@
  * - `description` — up to two lines of readable text saying what the item is;
  * - `note` — one short emphasised line under the description (when to pick a flow, a warning);
  * - `meta` — a quiet line of facts (owner, time, size, tags);
- * - `badges` — states that matter at a glance (invalid, shared, failed), on the title line;
- * - `actions` — icon buttons, shown on hover or focus in the list view.
+ * - `badges` — states that need attention (invalid, shared, failed), on the title line;
+ * - `actions` — icon buttons, shown on hover or focus.
  *
  * In the list view an item is a comfortable row of up to four lines; in the grid view the same
- * slots stack in a card. Items that still pass free-form `children` get the single-line row; they
- * move to the slots page by page.
+ * slots stack in a card. An item that opens on click opens from anywhere on it with the pointer, and
+ * from the keyboard through its title, which is then a button. Anything interactive inside a slot
+ * (an action, a tag filter, a toggle) stops its click from reaching the item.
  */
 
 import React from "react";
@@ -35,30 +36,22 @@ export interface CardAction {
  */
 export const LIST_ITEM_HEIGHT = 112;
 
-/**
- * The same for the grid view, per item: a card is 120 to 170 pixels tall with its gap depending on
- * its description, and a row holds up to three.
- */
-export const GRID_ITEM_HEIGHT = Math.round(150 / 3);
+/** The height of one row of grid cards with the gap between rows. */
+export const GRID_ROW_HEIGHT = 180;
 
-interface CardShellSlots {
-  icon?: React.ReactNode;
-  title?: React.ReactNode;
-  titleAside?: React.ReactNode;
-  description?: React.ReactNode;
-  note?: React.ReactNode;
-  meta?: React.ReactNode;
-  badges?: React.ReactNode;
-}
-
-interface CardShellProps extends CardShellSlots {
+export interface CardShellProps {
   compact?: boolean;
   onClick?: () => void;
   actions?: CardAction[];
   className?: string;
   testId?: string;
-  /** Free-form content of an item not yet on the slots: drawn in the single-line row. */
-  children?: React.ReactNode;
+  icon?: React.ReactNode;
+  title: React.ReactNode;
+  titleAside?: React.ReactNode;
+  description?: React.ReactNode;
+  note?: React.ReactNode;
+  meta?: React.ReactNode;
+  badges?: React.ReactNode;
 }
 
 const actionVariantClasses: Record<string, string> = {
@@ -70,12 +63,11 @@ const actionVariantClasses: Record<string, string> = {
 const ActionsGroup: React.FC<{
   actions: CardAction[];
   className?: string;
-  alwaysVisible?: boolean;
-}> = ({ actions, className, alwaysVisible }) => (
+}> = ({ actions, className }) => (
   <div
     className={cn(
       "flex items-center gap-0.5 transition-opacity flex-shrink-0",
-      !alwaysVisible && "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100",
+      "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100",
       className,
     )}
   >
@@ -90,6 +82,7 @@ const ActionsGroup: React.FC<{
           action.onClick();
         }}
         aria-label={action.label}
+        data-hint={action.label}
         data-testid={action.testId}
       >
         {action.icon}
@@ -98,13 +91,10 @@ const ActionsGroup: React.FC<{
   </div>
 );
 
-function hasSlots(props: CardShellSlots): boolean {
-  return props.title !== undefined;
-}
-
 /** The slots, laid out for either view. */
 function SlottedBody({
   compact,
+  onClick,
   icon,
   title,
   titleAside,
@@ -112,7 +102,10 @@ function SlottedBody({
   note,
   meta,
   badges,
-}: CardShellSlots & { compact: boolean }): React.JSX.Element {
+}: Omit<CardShellProps, "actions" | "className" | "testId"> & {
+  compact: boolean;
+}): React.JSX.Element {
+  const titleClass = "min-w-0 truncate text-[15px] font-medium leading-5 text-foreground";
   return (
     <div className="flex min-w-0 flex-1 gap-3">
       {icon && (
@@ -123,12 +116,27 @@ function SlottedBody({
       <div className={cn("flex min-w-0 flex-1 flex-col", compact ? "gap-2" : "gap-1")}>
         <div className="flex min-w-0 items-start justify-between gap-2">
           <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5">
-            <span
-              className="min-w-0 truncate text-[15px] font-medium leading-5 text-foreground"
-              data-slot="card-title"
-            >
-              {title}
-            </span>
+            {onClick ? (
+              <button
+                type="button"
+                onClick={(event) => {
+                  // The item itself opens on a pointer click; the title only adds the keyboard.
+                  event.stopPropagation();
+                  onClick();
+                }}
+                className={cn(
+                  titleClass,
+                  "rounded-sm text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                )}
+                data-slot="card-title"
+              >
+                {title}
+              </button>
+            ) : (
+              <span className={titleClass} data-slot="card-title">
+                {title}
+              </span>
+            )}
             {titleAside && (
               <span className="shrink-0 text-xs text-muted-foreground tabular-nums">
                 {titleAside}
@@ -177,70 +185,32 @@ export const CardShell: React.FC<CardShellProps> = ({
   actions,
   className,
   testId,
-  children,
   ...slots
 }) => {
-  const slotted = hasSlots(slots);
-
-  if (compact) {
-    return (
-      <Card
-        className={cn(
-          "cursor-pointer transition-all duration-200 hover:shadow-md hover:-translate-y-0.5 group h-full",
-          "border border-border bg-card hover:border-primary/50",
-          className,
-        )}
-        onClick={onClick}
-        data-testid={testId}
-      >
-        <div
-          className={cn("flex h-full flex-col gap-2 relative", slotted ? "p-4" : "p-3")}
-          data-slotted={slotted ? "true" : undefined}
-        >
-          {actions && actions.length > 0 && (
-            <ActionsGroup actions={actions} className="absolute top-2 right-2" />
-          )}
-          {slotted ? <SlottedBody compact {...slots} /> : children}
-        </div>
-      </Card>
-    );
-  }
-
-  if (slotted) {
-    return (
-      <Card
-        className={cn(
-          "mb-2 cursor-pointer transition-colors duration-150 group",
-          "border border-border bg-card hover:border-primary/50 hover:bg-accent/30",
-          className,
-        )}
-        onClick={onClick}
-        data-testid={testId}
-      >
-        <div className="flex items-start gap-3 px-4 py-3" data-slotted="true">
-          <SlottedBody compact={false} {...slots} />
-          {actions && actions.length > 0 && <ActionsGroup actions={actions} />}
-        </div>
-      </Card>
-    );
-  }
-
+  const hasActions = actions !== undefined && actions.length > 0;
   return (
     <Card
       className={cn(
-        "mb-1.5 cursor-pointer transition-all duration-200 hover:shadow-md hover:-translate-y-0.5 group",
-        "border border-border bg-card hover:border-primary/50",
+        "group border border-border bg-card transition-colors duration-150",
+        onClick && "cursor-pointer hover:border-primary/50 hover:bg-accent/30",
+        compact ? "h-full" : "mb-2",
         className,
       )}
       onClick={onClick}
       data-testid={testId}
+      data-slotted="true"
     >
-      <div className="flex items-center h-10 px-3 gap-3">
-        {children}
-        {actions && actions.length > 0 && <ActionsGroup actions={actions} alwaysVisible />}
-      </div>
+      {compact ? (
+        <div className="relative flex h-full flex-col gap-2 p-4">
+          {hasActions && <ActionsGroup actions={actions} className="absolute top-2 right-2" />}
+          <SlottedBody compact onClick={onClick} {...slots} />
+        </div>
+      ) : (
+        <div className="flex items-start gap-3 px-4 py-3">
+          <SlottedBody compact={false} onClick={onClick} {...slots} />
+          {hasActions && <ActionsGroup actions={actions} />}
+        </div>
+      )}
     </Card>
   );
 };
-
-export { ActionsGroup as CardActions };

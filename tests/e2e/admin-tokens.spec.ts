@@ -140,6 +140,10 @@ test.describe("Admin Token Management", () => {
     const revokeButton = page.getByTestId(`revoke-token-${createdTokenId}`);
     await expect(revokeButton).toBeVisible({ timeout: 10000 });
 
+    // A working token is the normal state and carries no status badge
+    const tokenRow = page.locator(`[data-testid="token-row-${createdTokenId}"]`);
+    await expect(tokenRow.getByText(/^(Active|Revoked|Expired)$/)).toHaveCount(0);
+
     // Click revoke
     await revokeButton.click();
 
@@ -152,7 +156,6 @@ test.describe("Admin Token Management", () => {
     await dialog.locator('button:has-text("Revoke")').click();
 
     // Token should now show Revoked badge
-    const tokenRow = page.locator(`[data-testid="token-row-${createdTokenId}"]`);
     await expect(tokenRow.locator("text=Revoked")).toBeVisible({ timeout: 5000 });
 
     // Revoke button should no longer be visible

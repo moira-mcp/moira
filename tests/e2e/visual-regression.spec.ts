@@ -113,8 +113,9 @@ const PAGES: VisualPage[] = [
     fullContent: true,
     // The admin's own data and the shared state other tests leave behind: the signed-in devices,
     // the Telegram configuration, connected apps and API tokens get a fixed height and are masked,
-    // and the extension-defined settings other tests create are left out; the headings and the
-    // rest of the page stay compared whatever the database holds.
+    // and the extension-defined settings other tests create are left out, together with the
+    // spacing the card before them keeps while they exist (it would lengthen the page); the
+    // headings and the rest of the page stay compared whatever the database holds.
     volatile: (page) => [
       page.getByTestId("profile-name-input"),
       page.getByTestId("settings-section-sessions").locator(":scope > :last-child"),
@@ -129,7 +130,8 @@ const PAGES: VisualPage[] = [
         height: 360px !important; overflow: hidden !important; }
       [data-settings-section="notifications"] > :last-child {
         height: 640px !important; overflow: hidden !important; }
-      [data-testid="settings-section-other"] { display: none !important; }`,
+      [data-testid="settings-section-other"] { display: none !important; }
+      :has(+ [data-testid="settings-section-other"]) { margin-block-end: 0 !important; }`,
   },
   {
     name: "admin-dashboard",

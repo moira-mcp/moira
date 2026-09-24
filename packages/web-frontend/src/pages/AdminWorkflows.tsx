@@ -7,7 +7,8 @@ import React, { useState, useEffect, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { GitBranch } from "lucide-react";
 import { apiClient } from "../services/api-client";
-import { useDynamicPageSize } from "../hooks/useDynamicPageSize";
+import { useListPageSize } from "../hooks/useListPageSize";
+import { useLatestRequest } from "../hooks/useLatestRequest";
 import { useDebounce } from "../hooks/useDebounce";
 import {
   Select,
@@ -49,14 +50,16 @@ export const AdminWorkflows: React.FC = () => {
   const [toDate, setToDate] = useState<string>("");
   const debouncedSearch = useDebounce(searchQuery, 300);
 
-  const { pageSize, containerRef } = useDynamicPageSize();
+  const { pageSize, containerRef, onViewModeChange } = useListPageSize(() => setCurrentPage(1));
 
   // Reset page when filters change
   useEffect(() => {
     setCurrentPage(1);
   }, [selectedUserId, selectedVisibility, selectedValidation, debouncedSearch, fromDate, toDate]);
 
+  const beginRequest = useLatestRequest();
   const loadData = useCallback(async () => {
+    const isCurrent = beginRequest();
     try {
       setLoading(true);
       const offset = (currentPage - 1) * pageSize;
@@ -83,17 +86,20 @@ export const AdminWorkflows: React.FC = () => {
         apiClient.getAdminUsers({ limit: 100 }),
       ]);
 
+      if (!isCurrent()) return;
       setWorkflows(workflowsData.workflows);
       setTotal(workflowsData.total);
       setUsers(usersData.users.map((u) => ({ id: u.id, email: u.email, name: u.name })));
       setError(null);
     } catch (err: unknown) {
+      if (!isCurrent()) return;
       const message = err instanceof Error ? err.message : t("common.errors.failedToLoad");
       setError(message);
     } finally {
-      setLoading(false);
+      if (isCurrent()) setLoading(false);
     }
   }, [
+    beginRequest,
     selectedUserId,
     selectedVisibility,
     selectedValidation,
@@ -231,6 +237,7 @@ export const AdminWorkflows: React.FC = () => {
       />
 
       <DataListView
+        onViewModeChange={onViewModeChange}
         items={workflows}
         renderCard={(workflow, viewMode) => (
           <AdminWorkflowCard workflow={workflow} compact={viewMode === "grid"} />

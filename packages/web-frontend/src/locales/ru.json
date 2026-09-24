@@ -2679,7 +2679,7 @@
     "workflowCard": {
       "valid": "Валидный",
       "invalid": "Невалидный",
-      "unknown": "Неизвестно",
+      "unknown": "Не проверен",
       "public": "Публичный",
       "private": "Приватный",
       "sharedWithYou": "Общий",
@@ -2693,7 +2693,7 @@
       "all": "Все",
       "valid": "Валидные",
       "invalid": "Невалидные",
-      "unknown": "Не проверен",
+      "unknown": "Не проверенные",
       "visibility": "Видимость",
       "visibilityLabel": "Видимость",
       "public": "Публичные",
@@ -2902,6 +2902,10 @@
         "connections": "Связи",
         "materialize": "Materialize"
       }
+    },
+    "artifactCard": {
+      "expiresOn": "Истекает {{date}}",
+      "createdOn": "Создан {{date}}"
     }
   },
   "common": {
@@ -2919,7 +2923,7 @@
       "waiting": "Ожидает",
       "pending": "В очереди",
       "cancelled": "Отменён",
-      "locked": "Заблокирован"
+      "locked": "Под блокировкой"
     },
     "errors": {
       "failedToLoad": "Не удалось загрузить данные",
@@ -2990,7 +2994,20 @@
       "AUTH_GRANT_REVOCATION_REQUIRED": "Отзовите доступ Moira на GitHub, затем подтвердите здесь.",
       "CREDENTIAL_UNREADABLE": "Сохранённый доступ к GitHub не читается. Переподключите GitHub.",
       "AUTHORIZATION_FAILED": "Не удалось авторизоваться в GitHub. Повторите попытку."
-    }
+    },
+    "locked": "Под блокировкой",
+    "deleted": "Удалён",
+    "expired": "Истёк",
+    "restore": "Восстановить",
+    "permanentDelete": "Удалить навсегда",
+    "admin": "Администратор",
+    "verified": "Подтверждён",
+    "unverified": "Не подтверждён",
+    "blocked": "Заблокирован",
+    "copyUrl": "Скопировать ссылку",
+    "open": "Открыть",
+    "view": "Открыть",
+    "history": "История"
   },
   "lockedWidget": {
     "title": "{{count}} заблокированных выполнений",

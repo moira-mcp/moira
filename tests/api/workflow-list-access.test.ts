@@ -31,7 +31,8 @@ async function freshUser(label: string): Promise<{ cookie: string }> {
   return { cookie: formatSessionCookie(BASE_URL, await signInUser(BASE_URL, email, PASSWORD)) };
 }
 
-async function createFlow(cookie: string, name: string): Promise<string> {
+/** A flow from start to end; with `target`, start leads to that node instead, which may not exist. */
+async function createFlow(cookie: string, name: string, target = "end"): Promise<string> {
   const response = await fetch(`${BASE_URL}/api/workflows`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Cookie: cookie },
@@ -40,7 +41,7 @@ async function createFlow(cookie: string, name: string): Promise<string> {
       workflow: {
         metadata: { name, version: "1.0.0", description: `${name} for the list tabs` },
         nodes: [
-          { type: "start", id: "start", connections: { default: "end" } },
+          { type: "start", id: "start", connections: { default: target } },
           { type: "end", id: "end" },
         ],
       },
@@ -161,12 +162,21 @@ describe("GET /api/workflows?access=", () => {
     expect(searched.totalWorkflows).toBe(1);
   });
 
-  test.each(["valid", "invalid", "unknown"])(
-    "the %s status filter holds on the page and in the total",
-    async (status) => {
-      const page = await list(reader.cookie, `validationStatus=${status}&limit=100`);
-      expect(page.workflows.every((w) => w.validation.status === status)).toBe(true);
-      expect(page.totalWorkflows).toBe(page.workflows.length);
-    },
-  );
+  test("the status filter holds on the page and in the total, with a real invalid flow", async () => {
+    const brokenId = await createFlow(reader.cookie, "Tab Broken", "missing-node");
+    cleanup.push({ id: brokenId, cookie: reader.cookie });
+
+    const invalid = await list(reader.cookie, "access=mine&validationStatus=invalid&limit=50");
+    expect(invalid.workflows.map((w) => w.id)).toEqual([brokenId]);
+    expect(invalid.workflows[0].validation.status).toBe("invalid");
+    expect(invalid.totalWorkflows).toBe(1);
+
+    const valid = await list(reader.cookie, "access=mine&validationStatus=valid&limit=50");
+    expect(valid.workflows.map((w) => w.id).sort()).toEqual([...mine].sort());
+    expect(valid.totalWorkflows).toBe(3);
+
+    const unknown = await list(reader.cookie, "access=mine&validationStatus=unknown&limit=50");
+    expect(unknown.workflows).toEqual([]);
+    expect(unknown.totalWorkflows).toBe(0);
+  });
 });
