@@ -347,7 +347,8 @@ export interface WorkflowFileInfo {
   accessType?: "owner" | "shared" | "public";
   filePath: string;
   metadata: WorkflowMetadata;
-  validation: ValidationResult;
+  /** The cached result; `status` tells a flow never validated (`unknown`) from an invalid one. */
+  validation: ValidationResult & { status?: "valid" | "invalid" | "unknown" };
   lastModified: number;
   /** Definition revision; every stored write of the graph advances it. Saves send it back as `expectedRevision`. */
   revision: number;

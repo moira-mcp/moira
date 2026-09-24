@@ -16,8 +16,8 @@ test.describe("i18n Stage 3 - Core Application Pages Translations", () => {
 
       // Check dashboard content
       await expect(page.locator('h1:has-text("Dashboard")')).toBeVisible({ timeout: 5000 });
-      await expect(page.locator("text=Recent Workflows")).toBeVisible();
-      await expect(page.locator("text=Total Workflows")).toBeVisible();
+      // The work area's heading reads in English whether the admin has runs or not
+      await expect(page.getByRole("heading", { name: "Your work" })).toBeVisible();
     });
 
     test("Workflows page shows English content", async ({ page }) => {
@@ -28,7 +28,8 @@ test.describe("i18n Stage 3 - Core Application Pages Translations", () => {
 
       // Check workflows explorer content
       await expect(page.locator("text=Workflows").first()).toBeVisible({ timeout: 5000 });
-      // Check FilterBar filter dropdowns (migrated from labeled dropdowns to inline Selects)
+      // The optional filters sit behind the FilterBar's "Filters" fold
+      await page.getByTestId("filters-toggle").click();
       await expect(page.locator('[data-testid="status-filter"]')).toBeVisible();
       await expect(page.locator('[data-testid="visibility-filter"]')).toBeVisible();
     });
@@ -71,8 +72,7 @@ test.describe("i18n Stage 3 - Core Application Pages Translations", () => {
 
       // Check dashboard content in Russian
       await expect(page.locator('h1:has-text("Панель управления")')).toBeVisible({ timeout: 5000 });
-      await expect(page.locator("text=Недавние воркфлоу")).toBeVisible();
-      await expect(page.locator("text=Всего воркфлоу")).toBeVisible();
+      await expect(page.getByRole("heading", { name: "Ваша работа" })).toBeVisible();
     });
 
     test("Workflows page shows Russian content", async ({ page }) => {
@@ -83,7 +83,9 @@ test.describe("i18n Stage 3 - Core Application Pages Translations", () => {
 
       // Check workflows explorer content in Russian
       await expect(page.locator("text=Воркфлоу").first()).toBeVisible({ timeout: 5000 });
-      // Check FilterBar filter dropdowns (migrated from labeled dropdowns to inline Selects)
+      // The optional filters sit behind the FilterBar's "Filters" fold, labelled in Russian
+      await expect(page.getByTestId("filters-toggle")).toContainText("Фильтры");
+      await page.getByTestId("filters-toggle").click();
       await expect(page.locator('[data-testid="status-filter"]')).toBeVisible();
       await expect(page.locator('[data-testid="visibility-filter"]')).toBeVisible();
     });

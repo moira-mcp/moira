@@ -1,6 +1,6 @@
 /**
- * Note Card Component
- * Displays note info in list (compact) or grid mode using CardShell
+ * A note as a CardShell item: its key as the title, the beginning of its text as the description,
+ * and its tags (a click filters by one), size, version and last change as the meta line.
  */
 
 import React, { useMemo } from "react";
@@ -31,6 +31,9 @@ interface NoteCardProps {
   onTagClick?: (tag: string) => void;
   compact?: boolean;
 }
+
+/** At most this many tags are shown; the rest are counted. */
+const MAX_TAGS = 3;
 
 export const NoteCard: React.FC<NoteCardProps> = ({
   note,
@@ -70,88 +73,52 @@ export const NoteCard: React.FC<NoteCardProps> = ({
     return list;
   }, [onEdit, onHistory, onDelete, note, t, compact]);
 
-  if (compact) {
-    return (
-      <CardShell compact onClick={() => onClick?.(note)} actions={actions} testId="note-card">
-        <div className="flex items-start justify-between gap-2">
-          <div className="flex items-center gap-2 min-w-0 flex-1">
-            <StickyNote className="w-4 h-4 text-primary flex-shrink-0" />
-            <span className="font-medium text-sm text-foreground truncate font-mono">
-              {note.key}
+  return (
+    <CardShell
+      compact={compact}
+      onClick={onClick ? () => onClick(note) : undefined}
+      actions={actions}
+      testId={compact ? "note-card" : `note-row-${note.key}`}
+      icon={<StickyNote aria-hidden="true" />}
+      title={<span className="font-mono">{note.key}</span>}
+      description={note.preview || undefined}
+      meta={
+        <>
+          {note.tags.length > 0 && (
+            <span className="inline-flex flex-wrap items-center gap-1">
+              {note.tags.slice(0, MAX_TAGS).map((tag) => (
+                <Badge
+                  key={tag}
+                  variant="outline"
+                  className={cn(
+                    "h-5 gap-0.5 px-1.5 text-[11px]",
+                    onTagClick && "cursor-pointer hover:bg-accent",
+                  )}
+                  data-testid={`tag-${tag}`}
+                  onClick={
+                    onTagClick
+                      ? (e) => {
+                          e.stopPropagation();
+                          onTagClick(tag);
+                        }
+                      : undefined
+                  }
+                >
+                  <Tag className="size-2.5" aria-hidden="true" />
+                  {tag}
+                </Badge>
+              ))}
+              {note.tags.length > MAX_TAGS && (
+                <span className="text-[11px]">+{note.tags.length - MAX_TAGS}</span>
+              )}
             </span>
-          </div>
-        </div>
-
-        {note.preview && (
-          <p className="text-xs text-muted-foreground line-clamp-2">{note.preview}</p>
-        )}
-
-        <div className="flex items-center gap-1 mt-auto flex-wrap">
-          {note.tags.slice(0, 3).map((tag) => (
-            <Badge key={tag} variant="outline" className="text-[10px] px-1 py-0 h-4">
-              <Tag className="w-2.5 h-2.5 mr-0.5" />
-              {tag}
-            </Badge>
-          ))}
-          {note.tags.length > 3 && (
-            <Badge variant="outline" className="text-[10px] px-1 py-0 h-4">
-              +{note.tags.length - 3}
-            </Badge>
           )}
-          <span className="text-[10px] text-muted-foreground ml-auto">
+          <span>
             {formatSize(note.size)} · v{note.currentVersion}
           </span>
-        </div>
-      </CardShell>
-    );
-  }
-
-  return (
-    <CardShell onClick={() => onClick?.(note)} testId={`note-row-${note.key}`} actions={actions}>
-      <div className="flex items-center gap-2 min-w-0 flex-1">
-        <StickyNote className="w-4 h-4 text-primary flex-shrink-0" />
-        <span className="font-medium text-sm text-foreground truncate font-mono">{note.key}</span>
-        {note.tags.length > 0 && (
-          <div className="flex items-center gap-1 hidden sm:flex">
-            {note.tags.slice(0, 2).map((tag) => (
-              <Badge
-                key={tag}
-                variant="outline"
-                className={cn(
-                  "text-[10px] px-1 py-0 h-4",
-                  onTagClick && "cursor-pointer hover:bg-accent",
-                )}
-                data-testid={`tag-${tag}`}
-                onClick={
-                  onTagClick
-                    ? (e) => {
-                        e.stopPropagation();
-                        onTagClick(tag);
-                      }
-                    : undefined
-                }
-              >
-                {tag}
-              </Badge>
-            ))}
-            {note.tags.length > 2 && (
-              <Badge variant="outline" className="text-[10px] px-1 py-0 h-4">
-                +{note.tags.length - 2}
-              </Badge>
-            )}
-          </div>
-        )}
-      </div>
-
-      <span className="text-[11px] text-muted-foreground flex-shrink-0 hidden sm:block">
-        {formatSize(note.size)} · v{note.currentVersion}
-      </span>
-
-      <div className="flex items-center gap-1 flex-shrink-0">
-        <span className="text-[10px] text-muted-foreground">
-          {formatRelativeTime(note.updatedAt)}
-        </span>
-      </div>
-    </CardShell>
+          <span>{formatRelativeTime(note.updatedAt)}</span>
+        </>
+      }
+    />
   );
 };

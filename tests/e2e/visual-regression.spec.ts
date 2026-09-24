@@ -69,14 +69,16 @@ const PAGES: VisualPage[] = [
   {
     name: "dashboard",
     path: "/",
-    waitFor: '[data-testid="stat-card"]',
-    volatile: (page) => [
-      page.getByTestId("stat-card"),
-      page.getByTestId("dashboard-recent-workflows"),
-      page.getByTestId("dashboard-recent-executions"),
-    ],
-    captureStyle: `[data-testid="dashboard-recent-workflows"], [data-testid="dashboard-recent-executions"] {
-      height: 480px !important; overflow: hidden !important; }`,
+    waitFor: '[data-testid="work-area"]',
+    // The beginner panels are left out of the capture so the work area is in it. The area lists the
+    // admin's own runs and flows, which other tests keep changing: its heading is compared, its
+    // content gets a fixed height and is masked.
+    volatile: (page) => [page.getByTestId("work-area").locator(":scope > :last-child")],
+    captureStyle: `
+      [data-testid="home-how-it-works"], [data-testid="quick-start-card"],
+      [data-testid="recommended-flows"] { display: none !important; }
+      [data-testid="work-area"] > :last-child {
+        height: 520px !important; overflow: hidden !important; }`,
   },
   {
     name: "workflows",
@@ -113,8 +115,9 @@ const PAGES: VisualPage[] = [
     fullContent: true,
     // The admin's own data and the shared state other tests leave behind: the signed-in devices,
     // the Telegram configuration, connected apps and API tokens get a fixed height and are masked,
-    // and the extension-defined settings other tests create are left out; the headings and the
-    // rest of the page stay compared whatever the database holds.
+    // and the extension-defined settings other tests create are left out, together with the
+    // spacing the card before them keeps while they exist (it would lengthen the page); the
+    // headings and the rest of the page stay compared whatever the database holds.
     volatile: (page) => [
       page.getByTestId("profile-name-input"),
       page.getByTestId("settings-section-sessions").locator(":scope > :last-child"),
@@ -129,7 +132,8 @@ const PAGES: VisualPage[] = [
         height: 360px !important; overflow: hidden !important; }
       [data-settings-section="notifications"] > :last-child {
         height: 640px !important; overflow: hidden !important; }
-      [data-testid="settings-section-other"] { display: none !important; }`,
+      [data-testid="settings-section-other"] { display: none !important; }
+      :has(+ [data-testid="settings-section-other"]) { margin-block-end: 0 !important; }`,
   },
   {
     name: "admin-dashboard",

@@ -253,6 +253,15 @@ export interface IDataRepository {
   ): Promise<{ count: number; lastCompletedAt: number | null; unstamped: number }>;
 
   /**
+   * The workflows one user runs most: each one's run count and the start of its latest run, most
+   * runs first and then the most recent, at most `limit` of them.
+   */
+  countRunsByWorkflow(
+    userId: string,
+    limit: number,
+  ): Promise<Array<{ workflowId: string; runs: number; lastRunAt: number }>>;
+
+  /**
    * Delete execution
    */
   deleteExecution(executionId: string): Promise<void>;

@@ -1,6 +1,10 @@
 /* Starlight customization for Moira Documentation */
 
-:root {
+/* Starlight's own palette sits in a cascade layer, which any unlayered rule overrides regardless of
+   specificity. The dark palette is therefore scoped to the dark theme, so the light theme keeps
+   Starlight's light grays. */
+:root:not([data-theme="light"]),
+:root:not([data-theme="light"]) ::backdrop {
   --sl-color-accent-low: #1e3a5f;
   --sl-color-accent: #3b82f6;
   --sl-color-accent-high: #93c5fd;

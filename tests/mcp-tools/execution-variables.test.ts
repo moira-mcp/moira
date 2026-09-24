@@ -1162,5 +1162,33 @@ describe("runtime execution variables", () => {
       executionId: sdfExecutionId,
     });
     expect(currentStep).not.toContain(reminderText);
+
+    // The reminders revision read before the add is now stale. The rejection changes nothing and
+    // tells the agent to re-read and retry on its own instead of waiting for the user.
+    const followUpText = "Push the branch after SDF completion";
+    const staleAdd = await callMCPToolRaw(client, "session", {
+      action: "add-reminder",
+      executionId: sdfExecutionId,
+      reminderText: followUpText,
+      idempotencyKey: "sdf-authorized-push",
+      expectedRevision: reminderState.revision,
+      expectedRemindersRevision: reminderState.remindersRevision,
+    });
+    expect(staleAdd).toContain("reload before changing reminders");
+    expect(staleAdd).toContain("Re-read that state for its current revisions");
+    expect(staleAdd).not.toContain("WAIT for user guidance");
+    const reread = await callMCPTool<any>(client, "session", {
+      action: "reminders",
+      executionId: sdfExecutionId,
+    });
+    const retried = await callMCPTool<any>(client, "session", {
+      action: "add-reminder",
+      executionId: sdfExecutionId,
+      reminderText: followUpText,
+      idempotencyKey: "sdf-authorized-push",
+      expectedRevision: reread.revision,
+      expectedRemindersRevision: reread.remindersRevision,
+    });
+    expect(retried).toMatchObject({ changed: true, reminder: { text: followUpText } });
   });
 });

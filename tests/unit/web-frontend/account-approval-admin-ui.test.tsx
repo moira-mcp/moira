@@ -161,6 +161,27 @@ describe("administrator account-approval presentation", () => {
 
     expect(screen.getByTestId("approval-status-pending")).toBeInTheDocument();
     expect(screen.getByTestId("approve-user-action")).toBeInTheDocument();
+    // Pending approval needs attention: a badge on the title line, not a quiet fact
+    expect(
+      screen.getByTestId("approval-status-pending").closest('[data-slot="card-meta"]'),
+    ).toBeNull();
+  });
+
+  test("self-host list card shows an approved account as a quiet fact, not a badge", () => {
+    render(
+      translated(
+        <UserCard
+          user={{ ...pendingUser, approvedAt: "2026-08-22T00:00:00.000Z" }}
+          accountApprovalEnabled
+          onApprove={jest.fn()}
+        />,
+      ),
+    );
+
+    const approved = screen.getByTestId("approval-status-approved");
+    expect(approved.closest('[data-slot="card-meta"]')).not.toBeNull();
+    expect(approved.closest('[data-testid="approval-list-focus-target"]')).not.toBeNull();
+    expect(screen.queryByTestId("approve-user-action")).not.toBeInTheDocument();
   });
 
   test("SaaS detail page hides approval status, metadata, and action for a null timestamp", async () => {

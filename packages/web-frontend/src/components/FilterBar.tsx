@@ -2,10 +2,13 @@
  * FilterBar — standardized filter toolbar for data pages.
  * Provides consistent layout for search input + filter controls + reset + action buttons.
  * Wraps the repeating pattern: search with icon + labeled filters + reset + spacer + actions.
+ * With `foldFilters` the filter controls and the reset sit behind a "Filters" button that counts
+ * the filters in effect, so a page whose filters are optional shows only its search until asked;
+ * the controls open by themselves while any filter is in effect.
  */
 
-import React from "react";
-import { Search, RotateCcw } from "lucide-react";
+import React, { useState } from "react";
+import { Search, RotateCcw, SlidersHorizontal } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -28,6 +31,8 @@ interface FilterBarProps {
   className?: string;
   /** Callback to reset all filters. When provided, a Reset button is shown. */
   onReset?: () => void;
+  /** Fold the filters and the reset behind a button that shows how many are in effect. */
+  foldFilters?: { activeCount: number };
 }
 
 export const FilterBar: React.FC<FilterBarProps> = ({
@@ -39,8 +44,11 @@ export const FilterBar: React.FC<FilterBarProps> = ({
   actions,
   className,
   onReset,
+  foldFilters,
 }) => {
   const { t } = useTranslation();
+  const [unfolded, setUnfolded] = useState(false);
+  const folded = foldFilters !== undefined && !unfolded && foldFilters.activeCount === 0;
 
   return (
     <div className={cn("mb-6 flex flex-wrap gap-4 items-end", className)}>
@@ -62,8 +70,26 @@ export const FilterBar: React.FC<FilterBarProps> = ({
           </div>
         </div>
       )}
-      {filters}
-      {onReset && (
+      {foldFilters && (
+        <Button
+          variant={folded ? "outline" : "secondary"}
+          size="sm"
+          onClick={() => setUnfolded((open) => !open)}
+          aria-expanded={!folded}
+          className="h-9 self-end gap-1.5"
+          data-testid="filters-toggle"
+        >
+          <SlidersHorizontal className="h-3.5 w-3.5" />
+          {t("common.filters.more", "Filters")}
+          {foldFilters.activeCount > 0 && (
+            <span className="rounded-full bg-primary px-1.5 text-[10px] leading-4 text-primary-foreground">
+              {foldFilters.activeCount}
+            </span>
+          )}
+        </Button>
+      )}
+      {!folded && filters}
+      {!folded && onReset && (
         <Button
           variant="ghost"
           size="sm"

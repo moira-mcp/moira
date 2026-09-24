@@ -46,6 +46,17 @@ const TEMPLATE = /\{\{\s*([A-Za-z_][\w.-]*)(?:\[[^\]]*\])?[^}]*\}\}/g;
 const IDENT = /[A-Za-z_][\w.-]*/g;
 const KEYWORDS = new Set(["true", "false", "null", "and", "or", "not"]);
 
+/** `current_task` → "current task", `review.outcome` → "outcome": a variable as plain words. */
+export function humanizeVariable(name: string): string {
+  const leaf = name.split(".").pop() ?? name;
+  return leaf
+    .replace(/\[[^\]]*\]/g, "")
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/[_-]+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
 /** The registry name a reference resolves to: `node.field` reads the node-local part. */
 function rootOf(name: string): string {
   return name.split(".")[0];
@@ -134,25 +145,134 @@ export function VariableRef({
 }
 
 /**
- * A directive or message: `{{…}}` references become tokens that keep their braces, the rest
- * stays text; `compact` is for titles, where a pill would break the line.
+ * A reference read as words inside a sentence: the variable's name in plain words, marked only by
+ * a dotted underline, with the registry's explanation on hover.
  */
-export function TemplateText({
-  text,
-  compact = false,
-}: {
-  text: string;
-  compact?: boolean;
-}): React.JSX.Element {
+function InlineVariable({ name }: { name: string }): React.JSX.Element {
+  const { registry } = useVariables();
+  const root = rootOf(name);
+  const description = (registry[root] ?? registry[name])?.description;
+  const words = humanizeVariable(name);
+  const token = (
+    <span className="underline decoration-dotted underline-offset-2" data-variable-inline={root}>
+      {words}
+    </span>
+  );
+  return description ? <Hint content={description}>{token}</Hint> : token;
+}
+
+/**
+ * A template's block helpers and loop words, as the engine supports them: `{{#if x}}`,
+ * `{{#unless x}}`, `{{#eq x 'v'}}`, `{{#neq x 'v'}}`, `{{#each x}}`, `{{else}}`, their closing tags,
+ * and `{{this}}` / `{{@index}}` inside a loop.
+ */
+const BLOCK =
+  /\{\{\s*(?:#(if|unless|eq|neq|each)\s+([A-Za-z_][\w.-]*)(?:\s+(['"])(.*?)\3)?|(else)|(this)|(@index)|\/(?:if|unless|eq|neq|each))\s*\}\}/g;
+
+/** The references of a stretch of text with no block helpers, as tokens or as words. */
+function references(
+  text: string,
+  key: string,
+  compact: boolean,
+  inline: boolean,
+): React.ReactNode[] {
   const parts: React.ReactNode[] = [];
   let last = 0;
   for (const match of text.matchAll(TEMPLATE)) {
     const index = match.index ?? 0;
     if (index > last) parts.push(text.slice(last, index));
-    parts.push(<VariableRef key={`${index}`} name={match[1]} braces compact={compact} />);
+    parts.push(
+      inline ? (
+        <InlineVariable key={`${key}.${index}`} name={match[1]} />
+      ) : (
+        <VariableRef key={`${key}.${index}`} name={match[1]} braces compact={compact} />
+      ),
+    );
     last = index + match[0].length;
   }
   if (last < text.length) parts.push(text.slice(last));
+  return parts;
+}
+
+/**
+ * A directive or message: `{{…}}` references become tokens that keep their braces, the rest
+ * stays text; `compact` is for titles, where a pill would break the line. `inline` reads every
+ * reference as plain words instead, so the text is a sentence and not a template — block helpers
+ * included: `{{#if x}}` reads "(if x)", `{{#unless x}}` "(unless x)", `{{#eq x 'v'}}` "(if x is
+ * 'v')", `{{#neq x 'v'}}` "(if x is not 'v')", `{{#each x}}` "(for each x)", `{{else}}`
+ * "(otherwise)", `{{this}}` "(the item)", `{{@index}}` "(its number)"; closing tags disappear.
+ */
+export function TemplateText({
+  text,
+  compact = false,
+  inline = false,
+}: {
+  text: string;
+  compact?: boolean;
+  inline?: boolean;
+}): React.JSX.Element {
+  const { t } = useTranslation();
+  if (!inline) return <>{references(text, "t", compact, false)}</>;
+  const parts: React.ReactNode[] = [];
+  let last = 0;
+  let blockEnd = -1;
+  for (const match of text.matchAll(BLOCK)) {
+    const index = match.index ?? 0;
+    if (index > last) parts.push(...references(text.slice(last, index), `${index}`, compact, true));
+    const [, helper, name, , value, otherwise, item, position] = match;
+    // A condition read into a sentence keeps a space from the word before it (a block right
+    // before it already ends with one)
+    const lead = index > 0 && index !== blockEnd && !/\s/.test(text[index - 1]) ? " " : "";
+    const word = (content: React.ReactNode, kind: string) => (
+      <span key={`b${index}`} className="text-muted-foreground" data-template-block={kind}>
+        {lead}({content}){" "}
+      </span>
+    );
+    if (helper === "each") {
+      parts.push(
+        word(
+          <>
+            {t("components.diagram.template.each")} <InlineVariable name={name} />
+          </>,
+          helper,
+        ),
+      );
+    } else if (helper) {
+      const negated = helper === "unless" || helper === "neq";
+      const compared = (helper === "eq" || helper === "neq") && value !== undefined;
+      parts.push(
+        word(
+          <>
+            {t(
+              helper === "unless"
+                ? "components.diagram.template.unless"
+                : "components.diagram.template.if",
+            )}{" "}
+            <InlineVariable name={name} />
+            {compared && (
+              <>
+                {" "}
+                {t(
+                  negated ? "components.diagram.template.isNot" : "components.diagram.template.is",
+                )}{" "}
+                {`'${value}'`}
+              </>
+            )}
+          </>,
+          helper,
+        ),
+      );
+    } else if (otherwise) {
+      parts.push(word(t("components.diagram.template.otherwise"), "else"));
+    } else if (item) {
+      parts.push(word(t("components.diagram.template.item"), "this"));
+    } else if (position) {
+      parts.push(word(t("components.diagram.template.index"), "index"));
+    }
+    last = index + match[0].length;
+    blockEnd = last;
+  }
+  if (last < text.length) parts.push(...references(text.slice(last), "end", compact, true));
   return <>{parts}</>;
 }
 

@@ -225,7 +225,9 @@ export const VALIDATION_HELP = {
 
 /**
  * Agent instructions embedded in error messages to make the safe recovery boundary explicit.
- * Deterministically rejected stale attempts recover automatically; ambiguous effects stop.
+ * An agent is told to stop only where resolving the condition needs a person: a permission, a
+ * reconnection, a workflow the user must choose instead of, or an effect that may already have
+ * happened. Every condition the agent can resolve on its own says how to resolve it.
  */
 export const AGENT_INSTRUCTIONS = {
   stale_attempt: `
@@ -263,6 +265,15 @@ AGENT INSTRUCTIONS:
 3. Call session({ action: 'recover', executionId: '<Process ID>', nodeId: '<node to resume from>', variableValues: { ... } }) again with what the refusal says is missing — unless the refusal says this run is already over, in which case there is nothing to retry
 Recovery only touches a run that is trying to continue and cannot. A run the diagnosis reports continuable is refused on purpose: continue it with session current_step and step instead. A completed or cancelled run is refused too and stays finished: start a new run rather than retrying. Otherwise the refusal changed nothing, so retrying it costs nothing; ask the user only for a value you cannot determine yourself.`,
 
+  // Optimistic concurrency: the call was rejected before any write because the state it was based
+  // on changed; re-reading that state and retrying resolves it.
+  stale_state: `
+AGENT INSTRUCTIONS:
+1. Nothing was changed: the state this call was based on changed after you read it
+2. Re-read that state for its current revisions: session({ action: 'reminders' | 'variables' | 'execution_context', executionId: '<Process ID>' }), or the workflow itself for a workflow revision
+3. Re-apply the intended change to the state you just read and retry with its current revisions
+No user guidance is required unless the re-read state shows a conflicting change that needs a user decision.`,
+
   outcome_unknown: `
 AGENT INSTRUCTIONS:
 1. STOP before retrying this workflow mutation because its effects may already have occurred
@@ -281,19 +292,18 @@ Do NOT continue independently. Do NOT guess alternative workflows.`,
   // Process/execution not found or expired
   process_not_found: `
 AGENT INSTRUCTIONS:
-1. Use session({ action: 'executions' }) to list your active executions
-2. If the execution expired, you may need to restart the workflow with start()
-3. If unable to recover - STOP and report to user with the error details
-Do NOT continue independently. Do NOT ignore this error.`,
+1. Use session({ action: 'executions' }) to list your executions and their state
+2. If the execution you meant is listed, continue it from session({ action: 'current_step', executionId: '<Process ID>' })
+3. If it has ended or expired and the task still needs the workflow, start a new run with start()
+Do NOT guess execution IDs. Tell the user only if an execution they gave you cannot be found or restarted.`,
 
   // Validation failed - agent should check schema and fix input
   validation_failed: `
 AGENT INSTRUCTIONS:
-1. Review the inputSchema from the previous directive response
-2. Check that your input matches the required structure exactly
-3. Fix the validation error and retry with corrected input
-4. If unclear how to fix - STOP and ask user for guidance
-Do NOT continue independently. Do NOT skip validation.`,
+1. Review what the call expects: for a workflow step, the inputSchema of the current directive (session({ action: 'current_step', executionId: '<Process ID>' }) returns it again); for any other tool, its parameters and the error details above
+2. Correct your input so it matches the required structure exactly
+3. Retry with the corrected input
+Ask the user only when a required value is a fact or decision only the user can provide. Do NOT skip validation or submit placeholder values.`,
 
   // Authentication required - agent should reconnect
   auth_required: `
@@ -319,13 +329,13 @@ AGENT INSTRUCTIONS:
 3. User may need to adjust permissions or use different credentials
 Do NOT continue independently. Do NOT attempt workarounds.`,
 
-  // Generic unrecoverable error
-  unrecoverable: `
+  // Any error no other category recognises
+  unclassified: `
 AGENT INSTRUCTIONS:
-1. This error cannot be automatically recovered
-2. STOP and report the full error details to user
-3. WAIT for user guidance before proceeding
-Do NOT continue independently. Do NOT ignore this error.`,
+1. Read the error message above: it usually names what went wrong and what to do next
+2. Diagnose with the available tools: help() for usage, session({ action: 'diagnose' | 'current_step' | 'execution_context', executionId: '<Process ID>' }) for a run, list() for workflows
+3. Fix what lies within your task and authority, then retry the call
+Ask the user only for a decision, permission, credential or fact you cannot obtain yourself, and then include the full error details. Do NOT repeat an unchanged failing call.`,
 } as const;
 
 /**
@@ -337,6 +347,7 @@ export type ErrorCategory =
   | "processing_attempt"
   | "conflicting_attempt"
   | "invalid_step_attempt"
+  | "stale_state"
   | "outcome_unknown"
   | "workflow_not_found"
   | "process_not_found"
@@ -344,7 +355,7 @@ export type ErrorCategory =
   | "auth_required"
   | "connection_error"
   | "access_denied"
-  | "unrecoverable";
+  | "unclassified";
 
 // ============================================
 // UI Labels and Prompts
@@ -412,7 +423,11 @@ export function formatErrorWithAgentInstructions(message: string): string {
   let helpCategory: keyof typeof VALIDATION_HELP | undefined;
   let agentCategory: ErrorCategory | undefined;
 
-  if (lowerMessage.includes("attempt_outcome_unknown")) {
+  if (
+    lowerMessage.includes("attempt_outcome_unknown") ||
+    // Raised after the step's handlers ran: the attempt is recorded as outcome-unknown.
+    lowerMessage.includes("retry from current state")
+  ) {
     agentCategory = "outcome_unknown";
   } else if (lowerMessage.includes("attempt_processing")) {
     agentCategory = "processing_attempt";
@@ -425,6 +440,13 @@ export function formatErrorWithAgentInstructions(message: string): string {
     agentCategory = "invalid_step_attempt";
   } else if (lowerMessage.includes("attempt_stale")) {
     agentCategory = "stale_attempt";
+  } else if (
+    // Matched before the not-found rules: these messages name an execution or a workflow too.
+    /\breload\b/.test(lowerMessage) ||
+    lowerMessage.includes("revision conflict") ||
+    lowerMessage.includes(" is stale")
+  ) {
+    agentCategory = "stale_state";
   } else if (lowerMessage.includes("workflow") && lowerMessage.includes("not found")) {
     helpCategory = "workflow_troubleshooting";
     agentCategory = "workflow_not_found";
@@ -471,8 +493,7 @@ export function formatErrorWithAgentInstructions(message: string): string {
     helpCategory = "connection_troubleshooting";
     agentCategory = "connection_error";
   } else {
-    // Default to unrecoverable for unknown errors
-    agentCategory = "unrecoverable";
+    agentCategory = "unclassified";
   }
 
   return formatError(message, helpCategory, agentCategory);
@@ -619,6 +640,5 @@ export function formatDomainError(error: unknown): string {
     return formatError(message, undefined, "access_denied");
   }
 
-  // Default to unrecoverable for other domain errors
-  return formatError(`${message}\n\nError code: ${domainError.code}`, undefined, "unrecoverable");
+  return formatError(`${message}\n\nError code: ${domainError.code}`, undefined, "unclassified");
 }

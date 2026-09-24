@@ -1,0 +1,197 @@
+{
+  "id": "7c2f3b8e-1a4d-4e6b-9c1f-5d8a2e3b4c04",
+  "slug": "example-one-choice-ru",
+  "owner": "system-moira",
+  "visibility": "public",
+  "metadata": {
+    "name": "Пример 2: Одна развилка",
+    "version": "1.0.0",
+    "description": "Учебный пример с одной развилкой: агент выполняет задачу и отвечает на один вопрос «да или нет» — полностью ли результат соответствует запросу? «Да» ведёт к отчёту, «нет» — к честному объяснению, чего не хватает. Без циклов и без переменных. Для настоящей работы опишите задачу своему агенту — он сам выберет готовый флоу или создаст новый.",
+    "tags": [
+      "пример",
+      "новичок",
+      "развилка"
+    ],
+    "schemaVersion": 1
+  },
+  "progress": {
+    "title": "Одна развилка",
+    "goal": "Выполнить задачу и честно сказать, полностью ли она соответствует запросу.",
+    "nodes": [
+      {
+        "id": "work",
+        "label": "Сделать",
+        "content": {
+          "summary": "Выполнить задачу"
+        }
+      },
+      {
+        "id": "check",
+        "label": "Проверить",
+        "content": {
+          "summary": "Ответить «да» или «нет»: результат совпадает?"
+        }
+      },
+      {
+        "id": "report",
+        "label": "Отчитаться",
+        "content": {
+          "summary": "Рассказать пользователю, что сделано"
+        }
+      },
+      {
+        "id": "gap",
+        "label": "Объяснить пробел",
+        "content": {
+          "summary": "Рассказать пользователю, чего не хватает"
+        }
+      }
+    ]
+  },
+  "nodes": [
+    {
+      "id": "start",
+      "type": "start",
+      "connections": {
+        "default": "do-task"
+      },
+      "initialData": {
+        "variables": {}
+      },
+      "progressNodeId": "work"
+    },
+    {
+      "id": "do-task",
+      "type": "agent-directive",
+      "directive": "Выполните задачу, о которой просил пользователь.",
+      "completionCondition": "Задача выполнена.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "result": {
+            "type": "string",
+            "description": "Что вы сделали, одним предложением",
+            "minLength": 1,
+            "maxLength": 1000
+          }
+        },
+        "required": [
+          "result"
+        ]
+      },
+      "connections": {
+        "success": "check-result"
+      },
+      "progressNodeId": "work",
+      "connectionLabels": {
+        "success": "работа сделана"
+      }
+    },
+    {
+      "id": "check-result",
+      "type": "agent-directive",
+      "directive": "Проверьте результат по запросу. Ответьте yes, если он полностью совпадает, или no, если чего-то не хватает.",
+      "completionCondition": "Вы честно ответили yes или no.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "matches": {
+            "type": "string",
+            "enum": [
+              "yes",
+              "no"
+            ],
+            "description": "Результат полностью соответствует запросу? yes или no"
+          }
+        },
+        "required": [
+          "matches"
+        ]
+      },
+      "connections": {
+        "success": "report",
+        "no": "explain-gap"
+      },
+      "progressNodeId": "check",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "check-result.matches"
+            },
+            "right": "no"
+          },
+          "output": "no"
+        }
+      ],
+      "connectionLabels": {
+        "success": "да — совпадает",
+        "no": "нет — чего-то не хватает"
+      }
+    },
+    {
+      "id": "report",
+      "type": "agent-directive",
+      "directive": "Расскажите пользователю в нескольких предложениях, что вы сделали.",
+      "completionCondition": "Пользователь получил короткий отчёт.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "report": {
+            "type": "string",
+            "description": "Отчёт, который вы дали пользователю",
+            "minLength": 1,
+            "maxLength": 1000
+          }
+        },
+        "required": [
+          "report"
+        ]
+      },
+      "connections": {
+        "success": "end-done"
+      },
+      "progressNodeId": "report"
+    },
+    {
+      "id": "end-done",
+      "type": "end",
+      "progressNodeId": "report"
+    },
+    {
+      "id": "explain-gap",
+      "type": "agent-directive",
+      "directive": "Расскажите пользователю, чего не хватает и почему, и предложите, что делать дальше. Не начинайте задачу заново в этом флоу.",
+      "completionCondition": "Пользователь знает, чего не хватает и что делать дальше.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "report": {
+            "type": "string",
+            "description": "Что вы сказали пользователю",
+            "minLength": 1,
+            "maxLength": 1000
+          }
+        },
+        "required": [
+          "report"
+        ]
+      },
+      "connections": {
+        "success": "end-gap"
+      },
+      "progressNodeId": "gap"
+    },
+    {
+      "id": "end-gap",
+      "type": "end",
+      "progressNodeId": "gap"
+    }
+  ],
+  "variableRegistry": {}
+}

@@ -49,7 +49,8 @@ PROHIBITED:
 
 MANDATORY:
 
-- Stop when something is unclear — ask for clarification
+- When something is unclear, resolve it from the directive, the repository and your tools; ask the
+  user only for a decision or a fact you cannot obtain yourself
 - When passing input data, pass as SERIALIZED JSON. There is currently a BUG IN CURSOR, which passes objects as [Object object]. To avoid it CONSTRUCT JSON YOURSELF. IF YOU SEE STEP FAILING DUE TO VALIDATION, LOOK AT WHATEVER YOU'RE PASSING AS INPUT.
 
 SESSION ARCHIVING:
@@ -61,6 +62,8 @@ SESSION ARCHIVING:
   - MCP server (e.g. moira, moira-local)
   - current workflow step
 
-CRITICAL: If inputSchema.required contains fields that need user input:
-→ STOP. DO NOT CALL step() UNTIL USER HAS PROVIDED THAT INPUT.
-→ Display the directive, wait for user response, THEN call step().
+CRITICAL: Fill every required field you can produce yourself from the directive, the repository
+and your own work. Only when the directive asks for a user decision, or for a fact only the user
+has:
+→ Display the directive, wait for the user's response, THEN call step().
+→ Never invent the user's answer.

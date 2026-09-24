@@ -22,7 +22,8 @@ import {
 } from "../components/ui/select";
 import { SearchableSelect } from "../components/SearchableSelect";
 import { useDebounce } from "../hooks/useDebounce";
-import { useDynamicPageSize } from "../hooks/useDynamicPageSize";
+import { useListPageSize } from "../hooks/useListPageSize";
+import { useLatestRequest } from "../hooks/useLatestRequest";
 import { ExecutionCard, normalizeExecution } from "../components/cards";
 import { DataListView } from "../components/DataListView";
 import { LockedExecutionsWidget } from "../components/LockedExecutionsWidget";
@@ -50,7 +51,7 @@ interface WorkflowInfo {
 export const Executions: React.FC = () => {
   const navigate = useNavigate();
   const { t } = useTranslation();
-  const { pageSize, containerRef } = useDynamicPageSize();
+  const { pageSize, containerRef, onViewModeChange } = useListPageSize(() => setCurrentPage(1));
 
   // Data state
   const [executions, setExecutions] = useState<ExecutionListItem[]>([]);
@@ -110,7 +111,9 @@ export const Executions: React.FC = () => {
     loadWorkflows();
   }, []);
 
+  const beginRequest = useLatestRequest();
   const loadExecutions = useCallback(async () => {
+    const isCurrent = beginRequest();
     try {
       setLoading(true);
 
@@ -129,16 +132,28 @@ export const Executions: React.FC = () => {
         offset: (currentPage - 1) * pageSize,
       });
 
+      if (!isCurrent()) return;
       setExecutions(result.executions);
       setTotal(result.total);
       setError(null);
     } catch (err: unknown) {
+      if (!isCurrent()) return;
       const message = err instanceof Error ? err.message : t("common.errors.failedToLoad");
       setError(message);
     } finally {
-      setLoading(false);
+      if (isCurrent()) setLoading(false);
     }
-  }, [statusFilter, workflowFilter, debouncedSearch, sortBy, sortOrder, currentPage, pageSize, t]);
+  }, [
+    beginRequest,
+    statusFilter,
+    workflowFilter,
+    debouncedSearch,
+    sortBy,
+    sortOrder,
+    currentPage,
+    pageSize,
+    t,
+  ]);
 
   useEffect(() => {
     loadExecutions();
@@ -255,6 +270,7 @@ export const Executions: React.FC = () => {
       <LockedExecutionsWidget />
 
       <DataListView
+        onViewModeChange={onViewModeChange}
         items={executions}
         renderCard={(execution, viewMode) => (
           <ExecutionCard

@@ -240,7 +240,11 @@ export function RegistryPanel({
   const validName = /^[A-Za-z_][A-Za-z0-9_]*$/.test(newName) && !names.includes(newName);
   return (
     <div className="space-y-3 p-3" data-testid="registry-panel" ref={panelRef}>
-      <GuidanceCallout title={t("pages.flowPage.registry.guideTitle")} testId="guidance-registry">
+      <GuidanceCallout
+        title={t("pages.flowPage.registry.guideTitle")}
+        testId="guidance-registry"
+        panel="registry-guide"
+      >
         {t("pages.flowPage.registry.guideBody")}
       </GuidanceCallout>
       {names.length === 0 ? (

@@ -10,27 +10,41 @@ import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { usePanelVisible, type BeginnerPanel } from "../onboarding/beginnerPanels";
+import { hidePanelWithUndo } from "../onboarding/HidePanelButton";
 
 /**
- * Inline callout: a title, one or two sentences, dismissible per page load. On a phone the body
- * is folded behind the title so the picture keeps the height; a tap unfolds it.
+ * Inline callout: a title, one or two sentences. On a phone the body is folded behind the title so
+ * the picture keeps the height; a tap unfolds it. A callout that is a beginner panel (`panel`) is
+ * closed for the account — gone on every device until Settings shows it again — with a notice to
+ * undo; any other callout closes for this page load.
  */
 export function GuidanceCallout({
   title,
   children,
   className,
   testId,
+  panel,
 }: {
   title: string;
   children: React.ReactNode;
   className?: string;
   testId?: string;
+  panel?: BeginnerPanel;
 }): React.JSX.Element | null {
   const { t } = useTranslation();
   const mobile = useIsMobile();
   const [open, setOpen] = React.useState(true);
   const [unfolded, setUnfolded] = React.useState(false);
-  if (!open) return null;
+  const shownForAccount = usePanelVisible(panel);
+  if (!open || !shownForAccount) return null;
+  const close = () => {
+    if (!panel) {
+      setOpen(false);
+      return;
+    }
+    hidePanelWithUndo(panel, t);
+  };
   const folded = mobile && !unfolded;
   return (
     <aside
@@ -61,9 +75,15 @@ export function GuidanceCallout({
       </div>
       <button
         type="button"
-        onClick={() => setOpen(false)}
+        onClick={close}
         className="absolute right-2 top-2 rounded-md p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        aria-label={t("pages.runPage.guidance.dismiss")}
+        aria-label={
+          panel
+            ? t("onboarding.panels.hideLabel", { name: t(`onboarding.panels.names.${panel}`) })
+            : t("pages.runPage.guidance.dismiss")
+        }
+        data-testid={panel ? "hide-panel" : undefined}
+        data-panel={panel}
       >
         <X className="size-3.5" aria-hidden="true" />
       </button>

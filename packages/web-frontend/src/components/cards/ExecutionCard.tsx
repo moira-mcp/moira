@@ -1,12 +1,12 @@
 /**
- * Execution Card Component
- * Displays execution info in list (compact) or grid mode using CardShell
- * Handles 3 data interfaces via normalizeExecution()
+ * An execution as a CardShell item: the workflow it runs as the title, its note as the
+ * description, the status and anything wrong (a lock, errors) as badges, and who started it, when
+ * and its short id as the meta line. Handles 3 data interfaces via normalizeExecution().
  */
 
 import React from "react";
 import { useTranslation } from "react-i18next";
-import { Play, AlertTriangle, Clock, StickyNote, Lock } from "lucide-react";
+import { Play, AlertTriangle, Clock, Lock } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { StatusBadge, type ExecutionStatus } from "@/components/status-badge";
 import { type NormalizedExecution } from "./normalize-execution";
@@ -29,107 +29,54 @@ export const ExecutionCard: React.FC<ExecutionCardProps> = ({
   const { t } = useTranslation();
   const isValidStatus = validStatuses.includes(execution.status as ExecutionStatus);
 
-  if (compact) {
-    return (
-      <CardShell compact onClick={() => onClick?.(execution)} testId="execution-card">
-        <div className="flex items-start justify-between gap-2">
-          <div className="flex items-center gap-2 min-w-0 flex-1">
-            <Play className="w-4 h-4 text-primary flex-shrink-0" />
-            <span className="font-medium text-sm text-foreground truncate">
-              {execution.workflowName || execution.workflowId}
-            </span>
-          </div>
-          {isValidStatus && <StatusBadge status={execution.status as ExecutionStatus} />}
+  return (
+    <CardShell
+      compact={compact}
+      onClick={onClick ? () => onClick(execution) : undefined}
+      testId="execution-card"
+      icon={<Play aria-hidden="true" />}
+      title={execution.workflowName || execution.workflowId}
+      description={execution.note || undefined}
+      badges={
+        <>
           {execution.hasActiveLock && (
             <Badge
               variant="outline"
-              className="text-[10px] px-1 py-0 h-4 border-yellow-500/50 text-yellow-600 dark:text-yellow-400"
+              className="h-5 gap-1 border-yellow-500/50 px-1.5 text-[11px] text-yellow-600 dark:text-yellow-400"
             >
-              <Lock className="w-3 h-3 mr-0.5" />
-              Locked
+              <Lock className="size-3" aria-hidden="true" />
+              {t("common.locked", { defaultValue: "Locked" })}
             </Badge>
           )}
-        </div>
-
-        {execution.note && (
-          <p className="text-xs text-muted-foreground line-clamp-2">
-            <StickyNote className="w-3 h-3 inline mr-1" />
-            {execution.note}
-          </p>
-        )}
-
-        <div className="flex items-center gap-2 mt-auto flex-wrap">
           {execution.errorCount != null && execution.errorCount > 0 && (
             <Badge
               variant="outline"
-              className="text-[10px] px-1 py-0 h-4 border-destructive/30 text-destructive"
+              className="h-5 gap-1 border-destructive/30 px-1.5 text-[11px] text-destructive"
             >
-              <AlertTriangle className="w-3 h-3 mr-0.5" />
+              <AlertTriangle className="size-3" aria-hidden="true" />
               {execution.errorCount} {t("common.errorsLabel", { defaultValue: "errors" })}
             </Badge>
           )}
-          {execution.userDisplay !== undefined && (
-            <span className="text-[10px] text-muted-foreground font-mono">
-              {execution.userDisplay ?? t("common.unknownUser")}
-            </span>
+          {isValidStatus && (
+            <StatusBadge
+              status={execution.status as ExecutionStatus}
+              className="h-5 px-1.5 text-[11px]"
+            />
           )}
-          <span className="text-[10px] text-muted-foreground ml-auto">
-            <Clock className="w-3 h-3 inline mr-0.5" />
+        </>
+      }
+      meta={
+        <>
+          <span className="inline-flex items-center gap-1">
+            <Clock className="size-3" aria-hidden="true" />
             {formatRelativeTime(execution.createdAt)}
           </span>
-        </div>
-      </CardShell>
-    );
-  }
-
-  return (
-    <CardShell onClick={() => onClick?.(execution)} testId="execution-card">
-      <div className="flex items-center gap-2 min-w-0 flex-1">
-        <Play className="w-4 h-4 text-primary flex-shrink-0" />
-        <span className="font-medium text-sm text-foreground truncate">
-          {execution.workflowName || execution.workflowId}
-        </span>
-        {execution.note && (
-          <span className="text-xs text-muted-foreground truncate hidden sm:inline">
-            {execution.note}
-          </span>
-        )}
-      </div>
-
-      <div className="flex items-center gap-2 flex-shrink-0">
-        <span className="text-[10px] text-muted-foreground font-mono hidden md:inline">
-          {execution.id.slice(0, 8)}
-        </span>
-        {execution.userDisplay !== undefined && (
-          <span className="text-[11px] text-muted-foreground font-mono hidden sm:block">
-            {execution.userDisplay ?? t("common.unknownUser")}
-          </span>
-        )}
-      </div>
-
-      <div className="flex items-center gap-1.5 flex-shrink-0">
-        {execution.hasActiveLock && (
-          <Badge
-            variant="outline"
-            className="text-[10px] px-1 py-0 h-4 border-yellow-500/50 text-yellow-600 dark:text-yellow-400"
-          >
-            <Lock className="w-3 h-3 mr-0.5" />
-          </Badge>
-        )}
-        {execution.errorCount != null && execution.errorCount > 0 && (
-          <Badge
-            variant="outline"
-            className="text-[10px] px-1 py-0 h-4 border-destructive/30 text-destructive"
-          >
-            <AlertTriangle className="w-3 h-3 mr-0.5" />
-            {execution.errorCount}
-          </Badge>
-        )}
-        {isValidStatus && <StatusBadge status={execution.status as ExecutionStatus} />}
-        <span className="text-[10px] text-muted-foreground">
-          {formatRelativeTime(execution.createdAt)}
-        </span>
-      </div>
-    </CardShell>
+          {execution.userDisplay !== undefined && (
+            <span className="font-mono">{execution.userDisplay ?? t("common.unknownUser")}</span>
+          )}
+          <span className="font-mono">{execution.id.slice(0, 8)}</span>
+        </>
+      }
+    />
   );
 };

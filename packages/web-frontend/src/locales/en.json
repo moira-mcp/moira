@@ -115,16 +115,9 @@
       "error": "Failed to load dashboard data",
       "failedToLoad": "Failed to load data",
       "retry": "Retry",
-      "stats": {
-        "totalWorkflows": "Total Workflows",
-        "executions": "Executions",
-        "notes": "Notes",
-        "clickToView": "Click to view all →",
-        "clickToConfigure": "Click to configure →"
-      },
       "quickStart": {
-        "title": "Quick Start",
-        "description": "Add MCP Moira to your AI assistant. Choose your client below:",
+        "title": "Connect your agent",
+        "description": "Add Moira to your AI assistant once. Choose your client below:",
         "copy": "Copy",
         "copied": "Copied!",
         "learnMore": "Need help?",
@@ -169,27 +162,62 @@
           "gemini-cli": {}
         }
       },
-      "recentWorkflows": {
-        "title": "Recent Workflows",
-        "empty": "No workflows yet. Create your first workflow to get started!"
+      "how": {
+        "title": "Your agent does the work. Moira keeps it on track.",
+        "subtitle": "Moira gives your agent one clear step at a time and checks each result before it moves on. You don't have to learn how flows work to use it.",
+        "steps": {
+          "connect": {
+            "title": "Connect your agent",
+            "body": "Add Moira to Claude, ChatGPT, Cursor or another MCP client once — the setup is just below."
+          },
+          "describe": {
+            "title": "Describe the task",
+            "body": "Say what you need in plain words, the way you would tell a colleague."
+          },
+          "agent": {
+            "title": "Your agent picks the flow",
+            "body": "It runs a ready flow that fits, or creates a new one for your task through the Workflow Management Flow — simple or complex, whatever the task needs."
+          }
+        },
+        "tryTitle": "Try it — say to your agent:",
+        "tryPrompt": "“Use Moira to run Example 1: Simple Steps for this task: …”",
+        "optional": "Diagrams, variables and editing are here for when you are curious. None of it is required."
       },
-      "recentExecutions": {
-        "title": "Recent Executions",
-        "empty": "No executions yet. Run a workflow to see execution history!",
-        "execution": "Execution",
-        "workflow": "Workflow"
-      },
-      "time": {
-        "justNow": "Just now",
-        "minutesAgo": "{{count}}m ago",
-        "hoursAgo": "{{count}}h ago",
-        "daysAgo": "{{count}}d ago",
-        "running": "Running..."
+      "work": {
+        "title": "Your work",
+        "inProgress": {
+          "title": "In progress",
+          "empty": "Nothing is running right now.",
+          "atStep": "At: {{step}}",
+          "open": "Open the run",
+          "copyResume": "Copy a prompt to continue",
+          "resumePrompt": "Continue the Moira run {{id}} from where it stopped."
+        },
+        "recent": {
+          "title": "Recently finished",
+          "empty": "No finished runs yet."
+        },
+        "flows": {
+          "title": "Your flows",
+          "empty": "The flows you run will be listed here.",
+          "runs_one": "{{count}} run",
+          "runs_other": "{{count}} runs",
+          "lastRun": "last {{when}}",
+          "copyPrompt": "Copy the prompt",
+          "prompt": "Use Moira to run {{name}} for this task: …"
+        },
+        "copied": "Copied — paste it to your agent",
+        "empty": {
+          "title": "Your runs will appear here",
+          "body": "When your agent runs a Moira flow, you will see here where it is, what ran recently and the flows you use most. To start, say to your agent:",
+          "recommended": "Or pick one of the recommended flows above.",
+          "browse": "Or browse the ready flows in the flow list."
+        }
       }
     },
     "workflows": {
       "title": "Workflows",
-      "subtitle": "Browse and manage your workflows",
+      "subtitle": "Start with a recommended flow, or browse every flow you can use",
       "explorer": {
         "title": "Workflow Explorer",
         "workflows": "Workflows",
@@ -215,7 +243,14 @@
         "yesterday": "Yesterday",
         "daysAgo": "{{count}} days ago"
       },
-      "confirmDelete": "Delete workflow \"{{name}}\"?"
+      "confirmDelete": "Delete workflow \"{{name}}\"?",
+      "allFlows": "All flows",
+      "scopes": {
+        "all": "All",
+        "mine": "Mine",
+        "shared": "Shared with me",
+        "catalog": "Catalog"
+      }
     },
     "workflowDetail": {
       "backToWorkflows": "Back to Workflows",
@@ -1263,7 +1298,13 @@
           "system": "System"
         },
         "language": "Language",
-        "languageDescription": "The language of the website's interface."
+        "languageDescription": "The language of the website's interface.",
+        "beginnerPanels": {
+          "title": "Hints for beginners",
+          "description": "Panels that help you get started. Hide the ones you no longer need; turn them back on here.",
+          "shown": "Shown",
+          "hidden": "Hidden"
+        }
       },
       "definitions": {
         "telegram": {
@@ -1512,7 +1553,8 @@
       "diagnostics": "Process diagnostics",
       "modes": {
         "map": "Map",
-        "graph": "Graph"
+        "graph": "Graph",
+        "steps": "Steps"
       },
       "tabs": {
         "block": "Block",
@@ -1603,13 +1645,52 @@
           },
           "explore": {
             "title": "Explore the same process your way",
-            "body": "The highlighted toolbar holds everything that changes what you see. The Map / Graph switch picks the view: the Map is the process the workflow declares, the Graph is every step of the definition. The layout presets beside it re-lay both diagrams — rows, compact, balanced branches, top to bottom — and bring the camera back to the block you were reading. The magnifier finds a step by id or text, and the compass opens the note about the view that is open. Your selection and the camera survive a switch."
+            "body": "The highlighted toolbar holds everything that changes what you see. The Steps / Map / Graph switch picks the view: Steps is what the agent is told, the Map is the process the workflow declares, the Graph is every step of the definition. On the Map and the Graph, the layout presets re-lay the diagram — rows, compact, balanced branches, top to bottom — and bring the camera back to the block you were reading, the magnifier finds a step by id or text, and the compass opens the note about the view that is open. On Steps, the switch beside the view tabs reads variables as plain words. Your selection and the camera survive a switch."
+          },
+          "intro": {
+            "title": "You don't have to build flows",
+            "body": "Moira is made for agents. Describe your task to your agent in plain words: it picks a ready flow or creates one for you through the Workflow Management Flow — simple or complex, whatever fits. This page is for looking inside a flow when you are curious; nothing here is required."
+          },
+          "steps": {
+            "title": "Read it as plain steps",
+            "body": "The Steps view shows the flow as what the agent is told: numbered instructions joined by arrows. Where the agent's answer decides the way on, the arrows fork and name the answer. With “Variables as words” on, every variable reads as ordinary words, so the whole flow reads like a list of instructions."
           }
         }
       },
       "panel": {
         "collapse": "Collapse the panel",
         "expand": "Expand the panel"
+      },
+      "steps": {
+        "start": "Start",
+        "finish": "Finish",
+        "check": "Moira checks a condition",
+        "step": "Step {{number}}",
+        "backTo": "back to step {{number}}",
+        "back": "back",
+        "inline": "Variables as words",
+        "inlineHint": "Read every variable in the instructions as plain words instead of template tokens",
+        "empty": "This flow has no start step to read from.",
+        "loading": "Laying out the steps…",
+        "system": {
+          "expression": "Moira computes values",
+          "materialize": "Moira writes files for the agent",
+          "read-note": "Moira reads a note",
+          "write-note": "Moira saves a note",
+          "upsert-note": "Moira updates a note",
+          "lock": "Moira takes a lock",
+          "subgraph": "Moira runs another flow",
+          "user-notification": "Moira notifies you",
+          "telegram-notification": "Moira notifies you in Telegram",
+          "other": "Moira does this step itself"
+        },
+        "layoutFailed": "The steps could not be laid out. Reload the page, or open the map or the graph.",
+        "list": {
+          "next": "Next:",
+          "placed": "{{name}}, before step {{number}}",
+          "backToPlace": "back to: {{place}}",
+          "nth": "{{name}} (#{{n}})"
+        }
       }
     },
     "playbooks": {
@@ -2585,7 +2666,7 @@
     "workflowCard": {
       "valid": "Valid",
       "invalid": "Invalid",
-      "unknown": "Unknown",
+      "unknown": "Not checked",
       "public": "Public",
       "private": "Private",
       "sharedWithYou": "Shared",
@@ -2599,7 +2680,7 @@
       "all": "All",
       "valid": "Valid",
       "invalid": "Invalid",
-      "warning": "Warning",
+      "unknown": "Not checked",
       "visibility": "Visibility",
       "visibilityLabel": "Visibility",
       "public": "Public",
@@ -2792,6 +2873,16 @@
         "case": "case",
         "controlOutput": "control output",
         "fallback": "taken when no case holds"
+      },
+      "template": {
+        "if": "if",
+        "unless": "unless",
+        "is": "is",
+        "isNot": "is not",
+        "otherwise": "otherwise",
+        "each": "for each",
+        "item": "the item",
+        "index": "its number"
       }
     },
     "nodePanel": {
@@ -2808,6 +2899,10 @@
         "connections": "Connections",
         "materialize": "Materialize"
       }
+    },
+    "artifactCard": {
+      "expiresOn": "Expires {{date}}",
+      "createdOn": "Created {{date}}"
     }
   },
   "common": {
@@ -2864,7 +2959,8 @@
       "action": "Action",
       "source": "Source",
       "dateFrom": "From",
-      "dateTo": "To"
+      "dateTo": "To",
+      "more": "Filters"
     },
     "edit": "Edit",
     "close": "Close",
@@ -2895,6 +2991,25 @@
       "AUTH_GRANT_REVOCATION_REQUIRED": "Revoke Moira's access on GitHub, then confirm here.",
       "CREDENTIAL_UNREADABLE": "The stored GitHub access cannot be read. Reconnect GitHub.",
       "AUTHORIZATION_FAILED": "GitHub authorization failed. Try again."
+    },
+    "locked": "Locked",
+    "deleted": "Deleted",
+    "expired": "Expired",
+    "restore": "Restore",
+    "permanentDelete": "Delete permanently",
+    "admin": "Admin",
+    "verified": "Verified",
+    "unverified": "Not verified",
+    "blocked": "Blocked",
+    "copyUrl": "Copy link",
+    "open": "Open",
+    "view": "View",
+    "history": "History",
+    "relativeTime": {
+      "justNow": "just now",
+      "minutesAgo": "{{count}}m ago",
+      "hoursAgo": "{{count}}h ago",
+      "daysAgo": "{{count}}d ago"
     }
   },
   "lockedWidget": {
@@ -2924,5 +3039,67 @@
     "public": "Public",
     "private": "Private",
     "toggleHint": "Publishing shares the content with everyone signed in; only you can change it."
+  },
+  "onboarding": {
+    "title": "Recommended for getting started",
+    "agentFirst": "You don't have to choose or build a flow yourself. Describe the task to your agent in plain words — it picks one of these or creates a new flow for you with the Workflow Management Flow. Everything here is optional: open a flow to see how it works.",
+    "hide": "Collapse",
+    "show": "Expand",
+    "open": "Open",
+    "whenLabel": "Pick it when",
+    "examplesTitle": "Learn how Moira works",
+    "examplesSubtitle": "Three tiny example flows, from the simplest to a few paths. Ask your agent to run one on any small task.",
+    "universalTitle": "Ready flows for everyday tasks",
+    "universalSubtitle": "Universal flows for clear tasks without special logic.",
+    "examples": {
+      "simpleSteps": {
+        "title": "Example 1: Simple Steps",
+        "description": "Four steps in a row: understand the task, do it, check the result, report. No choices."
+      },
+      "oneChoice": {
+        "title": "Example 2: One Choice",
+        "description": "Do the task, then one yes-or-no answer decides what happens next."
+      },
+      "severalPaths": {
+        "title": "Example 3: Several Paths",
+        "description": "A question, a bug or an idea: each answer takes its own short path."
+      }
+    },
+    "universal": {
+      "quickTask": {
+        "title": "Quick Task",
+        "description": "Plans the work, does it with evidence and gets an independent review before handing over the result.",
+        "when": "a clear, bounded task that is not software development: a document, a piece of research, a set of changes you want checked.",
+        "prompt": "Use Moira's Quick Task for this: …"
+      },
+      "robustTask": {
+        "title": "Robust Task",
+        "description": "The same idea built for long or critical work: retries, recovery after interruptions, replanning when the facts change, honest partial results.",
+        "when": "the task is large or important, or likely to run into problems along the way.",
+        "prompt": "Run this through Moira's Robust Task: …"
+      },
+      "todoList": {
+        "title": "Todo List",
+        "description": "Works through a checklist one item at a time — the one you give it, or one it writes once from your goal — with a short proof for each.",
+        "when": "the steps are clear and just need doing in order.",
+        "prompt": "Use Moira's Todo List to work through these items: …"
+      }
+    },
+    "panels": {
+      "hide": "Hide",
+      "hideLabel": "Hide “{{name}}” for good",
+      "hidden": "“{{name}}” is hidden",
+      "hiddenHint": "Bring it back any time in Settings → Preferences.",
+      "undo": "Undo",
+      "failed": "Could not save. Try again.",
+      "names": {
+        "home-intro": "Home page introduction",
+        "quick-start": "Connect your agent",
+        "home-recommended": "Recommended flows on the home page",
+        "workflows-recommended": "Recommended flows on the flow list",
+        "run-variables-guide": "Hint on a run's variables",
+        "registry-guide": "Hint on a flow's declared variables"
+      }
+    }
   }
 }

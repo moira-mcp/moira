@@ -9,6 +9,8 @@ import { createTestUser, login, loginAsAdmin } from "./helpers/auth-helper.js";
 
 const BASE_URL = getTestBaseUrl();
 const ADMIN_HANDLE = "admin"; // Admin user handle for handle/slug URLs
+// The actions-menu item that toggles visibility on a narrow screen
+const VISIBILITY_MENU_ITEM = "Click to toggle workflow visibility";
 
 test.describe("Workflow Visibility Toggle UI", () => {
   test("Owner sees visibility toggle button for own workflow", async ({ page }) => {
@@ -51,11 +53,14 @@ test.describe("Workflow Visibility Toggle UI", () => {
     // Wait for page to load
     await page.waitForTimeout(1000);
 
-    // Verify visibility toggle button is visible (shows Private or Public)
-    const toggleButton = page.locator('button:has-text("Private"), button:has-text("Public")');
-
-    // Should be visible since admin owns this workflow
-    await expect(toggleButton.first()).toBeVisible({ timeout: 5000 });
+    // The owner sees the visibility toggle (the same test id the non-owner test checks is absent)
+    await expect(page.getByTestId("workflow-visibility-toggle")).toBeVisible();
+    // …and, on a narrow screen, the same action in the actions menu
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.getByRole("button", { name: "Actions" }).click();
+    await expect(
+      page.getByRole("menu").getByRole("menuitem", { name: VISIBILITY_MENU_ITEM }),
+    ).toBeVisible();
 
     // Cleanup - delete test workflow using UUID
     await page.request.delete(`${BASE_URL}/api/workflows/${workflowId}`);
@@ -113,33 +118,27 @@ test.describe("Workflow Visibility Toggle UI", () => {
   });
 
   test("Non-owner does not see visibility toggle for system workflows", async ({ page }) => {
-    // Create regular user via HTTP
     const email = `test-visibility-${Date.now()}@example.com`;
     const password = "TestPassword123!";
     const result = await createTestUser(email, password, "Test User", true);
     expect(result.success).toBe(true);
-
-    // Login as the regular user
     await login(page, email, password);
 
-    // Navigate to a system workflow (owned by system-admin)
-    await page.goto(`${BASE_URL}/workflows`);
-    await page.waitForLoadState("domcontentloaded");
+    // A system workflow, opened by its address
+    await page.goto(`${BASE_URL}/workflows/moira/quick-task`);
+    // The flow page is shown for that workflow before anything is checked for absence, so a
+    // non-owner who never reaches it cannot pass
+    await expect(page.getByTestId("flow-page")).toBeVisible();
+    await expect(page.getByTestId("page-title")).toHaveText("Quick Task");
 
-    // Click on first public workflow (system-owned)
-    const workflowCard = page.locator("[class*='cursor-pointer']").first();
-    await workflowCard.click();
-    await page.waitForLoadState("domcontentloaded");
-    await page.waitForTimeout(1000);
+    await expect(page.getByTestId("workflow-visibility-toggle")).toHaveCount(0);
 
-    // Regular user should NOT see visibility toggle for system workflow
-    // The toggle button shows "Private" or "Public" text - should NOT be visible for non-owners
-    const privateButton = page.locator('button:has-text("Private")');
-    const publicButton = page.locator('button:has-text("Public")');
-
-    // Neither Private nor Public toggle should be visible (non-owner can't toggle)
-    await expect(privateButton).toHaveCount(0);
-    await expect(publicButton).toHaveCount(0);
+    // On a narrow screen the actions move to a menu; it has no visibility item either
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.getByRole("button", { name: "Actions" }).click();
+    const menu = page.getByRole("menu");
+    await expect(menu).toBeVisible();
+    await expect(menu.getByRole("menuitem", { name: VISIBILITY_MENU_ITEM })).toHaveCount(0);
   });
 
   test("Toggle button shows loading state during update", async ({ page }) => {

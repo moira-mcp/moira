@@ -3,7 +3,7 @@
  * Drizzle ORM queries for execution operations
  */
 
-import { eq, ne, and, or, like, inArray, isNotNull, isNull, sql } from "drizzle-orm";
+import { eq, ne, and, or, like, inArray, isNotNull, isNull, sql, desc } from "drizzle-orm";
 import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
 import { workflowExecution } from "../schema.js";
 import type { WorkflowExecution } from "@mcp-moira/workflow-engine";
@@ -269,6 +269,30 @@ export class ExecutionRepository {
         stamped?.last === null || stamped?.last === undefined ? null : Number(stamped.last),
       unstamped: Number(unstamped?.count ?? 0),
     };
+  }
+
+  /**
+   * The workflows one user runs most: how many runs each has and when the latest started, most
+   * runs first and then the most recent. Counted in SQL, so no execution is loaded.
+   */
+  async countRunsByWorkflow(
+    userId: string,
+    limit: number,
+  ): Promise<Array<{ workflowId: string; runs: number; lastRunAt: number }>> {
+    const runs = sql<number>`count(*)`;
+    const lastRunAt = sql<number>`max(${workflowExecution.createdAt})`;
+    const rows = await this.db
+      .select({ workflowId: workflowExecution.workflowId, runs, lastRunAt })
+      .from(workflowExecution)
+      .where(eq(workflowExecution.userId, userId))
+      .groupBy(workflowExecution.workflowId)
+      .orderBy(desc(runs), desc(lastRunAt))
+      .limit(limit);
+    return rows.map((row) => ({
+      workflowId: row.workflowId,
+      runs: Number(row.runs),
+      lastRunAt: Number(row.lastRunAt),
+    }));
   }
 
   async listByUser(userId: string): Promise<WorkflowExecution[]> {

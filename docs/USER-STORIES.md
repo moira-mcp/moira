@@ -20,7 +20,10 @@ End-to-end user journeys, from first contact to a working workflow.
 - Lands on the Moira site
 - Sees the Hero section: "MCP Moira" + a subtitle with a typing effect
 - **User question:** "What is this?"
-- **What they see:** A short description plus "Get Started" and "View GitHub" buttons
+- **What they see:** A short description plus "Get Started" and "View GitHub" buttons, then
+  "You don't need to learn to build workflows" (connect the agent, describe the task, the agent
+  picks or builds the workflow) and "What a workflow looks like" (the three learning workflows,
+  step by step, with a link to the docs tutorial)
 - **Transition:** Scrolls down or clicks "Get Started"
 
 **Transition check:** ✅ The "Get Started" button scrolls to the #quick-start section
@@ -71,7 +74,8 @@ End-to-end user journeys, from first contact to a working workflow.
 - Clicks the verification link
 - **What happens:** Redirect to /app/ (Dashboard)
 
-**Transition check:** ✅ After verification the user is logged in and on the Dashboard
+**Transition check:** ✅ After verification the user is logged in and on the home page, which
+opens with the three agent-first steps, the connection card and the recommended flows
 
 **Step 7: Back to the MCP client**
 
@@ -92,8 +96,10 @@ End-to-end user journeys, from first contact to a working workflow.
 
 **Step 9: Starting the first workflow**
 
-- Picks a workflow from the list
-- Calls `mcp__moira__start({ action: "prepare", workflowId: "...", parentExecutionId: "none" })`; this validates and reserves the start without creating an execution
+- Describes a task in plain words, or asks for the first learning example ("Use Moira to run
+  Example 1: Simple Steps for this task: …"); the agent picks the workflow — here
+  `moira/example-simple-steps`, or `moira/example-simple-steps-ru` for a Russian reader
+- The agent calls `mcp__moira__start({ action: "prepare", workflowId: "...", parentExecutionId: "none" })`; this validates and reserves the start without creating an execution
 - Calls `mcp__moira__start({ action: "execute", startAttemptId: "..." })` with the returned Start attempt ID
 - If execute returns `START_PRECONDITION_CHANGED` notification setup guidance, completes the setup and prepares again
 - After successful execution creation, receives a Process ID, Step attempt ID, and the first workflow directive

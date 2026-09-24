@@ -44,15 +44,19 @@ test.describe("Workflow List Performance", () => {
   }
 
   test("minimal API requests on page load", async ({ page }) => {
-    // Login as admin
+    // Login as admin, and let the home page it lands on finish its own requests (it shows the
+    // recommended flows too), so only the flow list's requests are counted below
     await loginAsAdmin(page);
+    await page.waitForLoadState("networkidle");
 
-    // Track API requests to /api/workflows
+    // Track the explorer's API requests to /api/workflows. The recommended section above the list
+    // asks once for its named flows (`slugs=`); that single lookup is counted on its own.
     const workflowRequests: string[] = [];
+    const recommendedRequests: string[] = [];
     page.on("request", (request) => {
       const url = request.url();
       if (url.includes("/api/workflows") && request.method() === "GET") {
-        workflowRequests.push(url);
+        (url.includes("slugs=") ? recommendedRequests : workflowRequests).push(url);
       }
     });
 
@@ -73,6 +77,7 @@ test.describe("Workflow List Performance", () => {
     expect(uniqueRequests.length).toBeLessThanOrEqual(3);
     // Must have at least 1 request
     expect(uniqueRequests.length).toBeGreaterThanOrEqual(1);
+    expect(recommendedRequests).toHaveLength(1);
   });
 
   test("single API request on search input", async ({ page }) => {
@@ -126,7 +131,8 @@ test.describe("Workflow List Performance", () => {
       }
     });
 
-    // Find the sort dropdown (it shows "Date ↓" by default)
+    // Open the optional filters, then find the sort dropdown (it shows "Date ↓" by default)
+    await page.getByTestId("filters-toggle").click();
     const sortTrigger = page.locator('[data-testid="sort-select"]');
     await sortTrigger.click();
 

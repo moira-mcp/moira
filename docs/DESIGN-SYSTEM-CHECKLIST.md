@@ -91,10 +91,10 @@ When creating a new data listing page:
 1. **Page wrapper**: Use `PageShell` with title, description, loading, error, onRetry props
 2. **Filters**: Use `FilterBar` with search, filters slot, actions slot, reset
 3. **Data list**: Use `DataListView<T>` with renderCard, pagination, ViewToggle (list/grid)
-4. **Cards**: Create a card component using `CardShell` (compact prop for grid mode)
+4. **Cards**: Create a card component that fills `CardShell`'s slots (title, description, meta, badges, actions; `compact` for grid mode)
 5. **Formatters**: Use shared `formatDate`, `formatRelativeTime`, `formatSize` from `@/components/cards/format-utils`
 6. **Debounce**: Use `useDebounce` hook for search inputs (300ms)
-7. **Page size**: Use `useDynamicPageSize` hook instead of hardcoded page sizes
+7. **Page size**: Use `useListPageSize` for a `DataListView` of cards (pass its `onViewModeChange` and reset to page 1 in its callback), `useDynamicPageSize` for a table; never a hardcoded page size; the list's loader drops stale answers with `useLatestRequest`
 
 General rules for all pages:
 

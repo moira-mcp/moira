@@ -455,7 +455,7 @@ test.describe("Web UI Lock Creation", () => {
     await statusFilter.click();
 
     // "Locked" option should be available
-    const lockedOption = page.locator('[role="option"]', { hasText: /Locked|Заблокирован/ });
+    const lockedOption = page.locator('[role="option"]', { hasText: /Locked|Под блокировкой/ });
     await expect(lockedOption).toBeVisible({ timeout: 3000 });
   });
 });

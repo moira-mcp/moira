@@ -61,7 +61,9 @@ Font: **Inter Variable** (`--font-sans`), monospace: `--font-mono`.
 | Empty state               | `EmptyState`         | `@/components/empty-state`     |
 | Confirmation dialog       | `ConfirmDialog`      | `@/components/confirm-dialog`  |
 | Debounced input value     | `useDebounce`        | `@/hooks/useDebounce`          |
-| Dynamic page sizing       | `useDynamicPageSize` | `@/hooks/useDynamicPageSize`   |
+| List page size            | `useListPageSize`    | `@/hooks/useListPageSize`      |
+| Drop stale list answers   | `useLatestRequest`   | `@/hooks/useLatestRequest`     |
+| Table page size (rows)    | `useDynamicPageSize` | `@/hooks/useDynamicPageSize`   |
 
 ### DO NOT use directly:
 
@@ -111,26 +113,103 @@ Consistent filter toolbar with search + filter controls + action buttons.
 />
 ```
 
+When a page's filters are optional, `foldFilters={{ activeCount }}` keeps only the search in view
+and puts the filters and the reset behind a "Filters" button (`filters-toggle`). The button counts
+the filters in effect, and the controls stay open while any is in effect. The flow list uses it.
+
 ### CardShell
 
-Universal card wrapper supporting list (default) and grid (`compact`) modes.
+The one list item, in the list view (default) and the grid view (`compact`). An item is given as
+slots and the shell owns the layout, so every list reads the same way.
 
 ```tsx
 <CardShell
   compact={isGrid}
   onClick={() => navigate(item.id)}
+  icon={<FileText />}
+  title={item.name}
+  titleAside={`v${item.version}`}
+  description={item.summary}
+  note={whenToPick}
+  meta={
+    <>
+      <span>@{item.owner}</span>
+      <span>{formatRelativeTime(item.updatedAt)}</span>
+    </>
+  }
+  badges={item.failed && <Badge variant="destructive">Failed</Badge>}
   actions={[
     { icon: <Edit />, label: "Edit", onClick: handleEdit },
     { icon: <Trash />, label: "Delete", onClick: handleDelete, variant: "destructive" },
   ]}
   testId="my-card"
->
-  {/* card content */}
-</CardShell>
+/>
 ```
 
-- **Compact mode**: vertical flex layout, actions float top-right
-- **List mode**: horizontal row (h-10), actions appended at end
+| Slot          | Shows                                                                   |
+| ------------- | ----------------------------------------------------------------------- |
+| `icon`        | A small leading mark of what the item is                                |
+| `title`       | What the reader scans for (`data-slot="card-title"`)                    |
+| `titleAside`  | A quiet fact beside the title: a version, a key                         |
+| `description` | What the item is, up to two lines in the list and three in the grid     |
+| `note`        | One short emphasised line under the description                         |
+| `meta`        | A quiet line of facts: owner, time, size, tags                          |
+| `badges`      | States that need attention (invalid, shared, failed), on the title line |
+| `actions`     | Icon buttons, shown on hover or focus                                   |
+
+- **List view**: a row of up to four lines with padding, actions at the end.
+- **Grid view**: the same slots stacked in a card, the meta line at the bottom.
+- `title` is required and there is no free-form content: every list item is drawn from the slots.
+- An item with `onClick` opens from anywhere on it with the pointer; its title is then a button, so
+  the item is reachable with Tab and opens with Enter or Space. Interactive pieces inside a slot (a
+  tag filter, a visibility toggle) stop their click from reaching the item.
+- Each action carries its label as `aria-label` and as the delegated hint (`data-hint`).
+- `LIST_ITEM_HEIGHT` (a list item) and `GRID_ROW_HEIGHT` (a row of grid cards) are the starting
+  heights `useListPageSize` sizes pages by before it measures the drawn items.
+
+### useListPageSize
+
+The page size of a list page drawn with `DataListView` and `CardShell` items:
+
+```tsx
+const { pageSize, containerRef, onViewModeChange } = useListPageSize(() => setCurrentPage(1));
+
+<DataListView containerRef={containerRef} onViewModeChange={onViewModeChange} … />;
+```
+
+- In the list view a page holds the list items that fit the box; in the grid view, the rows that
+  fit times the columns the grid shows at this width (3, 2 or 1). At least two rows.
+- It starts from `LIST_ITEM_HEIGHT` / `GRID_ROW_HEIGHT`, then measures the items a view draws first
+  (`data-slotted`) and sizes by their average height, so a page holds what fits instead of leaving
+  an empty band or cutting an item off. The last item's gap needs no room.
+- That measurement is taken once per view. The items of a later page never change the size, so
+  paging stays on the page the reader chose even when its items are taller or shorter.
+- It follows the container through the list's loader (the container mounts after it) and through
+  resizes, such as a banner or a quota bar loading above the list.
+- When the size changes — a view switch, a resize of the box, or a view's first measurement (which
+  happens on page 1 or right after a view switch) — the callback runs, so the page goes back to
+  page 1 instead of skipping items.
+- A size change refetches, so two requests can overlap. The page's loader drops an answer from an
+  older request with `useLatestRequest` (`@/hooks/useLatestRequest`):
+
+  ```tsx
+  const beginRequest = useLatestRequest();
+  const load = useCallback(async () => {
+    const isCurrent = beginRequest();
+    try {
+      const result = await apiClient.getItems({ limit: pageSize, offset });
+      if (!isCurrent()) return;
+      setItems(result.items);
+    } catch (err) {
+      if (!isCurrent()) return;
+      setError(message(err));
+    } finally {
+      if (isCurrent()) setLoading(false);
+    }
+  }, [beginRequest, pageSize, offset]);
+  ```
+
+- `useDynamicPageSize` is the measurement under it, for a paged table sized by its rows.
 
 ### useDebounce
 
@@ -157,21 +236,24 @@ const debouncedSearch = useDebounce(searchQuery, 300);
 
 All cards use `CardShell` and follow these patterns:
 
-- Badge height: `h-4` consistently (not h-5)
-- Icon size in cards: `w-4 h-4` for primary icons, `w-3 h-3` for inline metadata icons
-- Action buttons: `h-6 w-6` ghost icon buttons, hidden until hover
-- Timestamps: use `formatRelativeTime()` for recency, `formatDate()` for absolute dates
+- Give the item as slots; show a badge only for a state that needs attention, not for the normal
+  one (a valid flow has no "valid" badge)
+- Badges in a card: `h-5 px-1.5 text-[11px]` (outline or a state colour)
+- Icon size in cards: the `icon` slot draws `size-4`; inline icons in badges and meta are `size-3`
+- Action buttons: `h-7 w-7` ghost icon buttons, shown on hover or focus (CardShell draws them)
+- Timestamps: use `formatRelativeTime()` for recency, `formatDate()` for absolute dates; both read in
+  the interface language (`common.relativeTime.*`, the i18n language)
 - Card data-testid: descriptive (e.g., `note-card`, `execution-card`)
 
 ## Badge Consistency
 
-| Context             | Classes                                        |
-| ------------------- | ---------------------------------------------- |
-| Standard badge      | `text-[10px] px-1 py-0 h-4`                    |
-| Status/action badge | `text-[10px] px-1.5 py-0 h-4`                  |
-| Error count         | `border-destructive/30 text-destructive`       |
-| Success             | `border-success/30 text-success`               |
-| Warning             | `bg-warning/10 text-warning border-warning/30` |
+| Context          | Classes                                        |
+| ---------------- | ---------------------------------------------- |
+| Card badge       | `h-5 px-1.5 text-[11px]`                       |
+| Execution status | `StatusBadge` (translated `common.status.*`)   |
+| Error count      | `border-destructive/30 text-destructive`       |
+| Success          | `border-success/30 text-success`               |
+| Warning          | `bg-warning/10 text-warning border-warning/30` |
 
 ## Diagram design system
 
@@ -221,7 +303,7 @@ them off.
 | `DiagramToolbar` + `LayoutPresetButtons`                                                            | The page's functions: view modes, leading slot, the folded step finder, the presets, zoom/fit, the minimap switch, trailing slot. It wraps to a second row rather than cutting buttons off                                                                         |
 | `ContentsSidebar` / `ContentsRow` / `ContentsLayout`                                                | The process's table of contents and the layout that places it beside either diagram                                                                                                                                                                                |
 | `NodeFinder`                                                                                        | Search over the steps; a pick selects the owning block and, where the surface can, the step itself                                                                                                                                                                 |
-| `useHighlightTarget`                                                                                | Scrolls a named target into view and pulses it, so every "go to X" ends with X visibly marked                                                                                                                                                                      |
+| `useHighlightTarget`                                                                                | Scrolls a named target into view (instantly under reduced motion) and pulses it, so every "go to X" ends with X visibly marked (`data-highlighted`); with `focus` it also moves focus to the target, as the steps list does                                        |
 | `requestReveal` (`diagram/reveal.ts`)                                                               | Brings an element that sits inside a diagram into the camera: the mounted `DiagramViewport` fits its view to the node containing it, since `scrollIntoView` cannot reach a transformed canvas                                                                      |
 | `DiagramGuide` (`run/DiagramGuide.tsx`)                                                             | The compass note on how to read the open view, one per page and view, remembered per reader                                                                                                                                                                        |
 | `useStoredFlag`                                                                                     | A boolean the reader toggles and the browser remembers                                                                                                                                                                                                             |

@@ -79,6 +79,16 @@ export default defineConfig({
               slug: "docs/getting-started/quickstart",
             },
             {
+              label: "Tutorial: your first flows",
+              translations: { ru: "Туториал: первые флоу" },
+              slug: "docs/getting-started/tutorial",
+            },
+            {
+              label: "Which ready flow to use",
+              translations: { ru: "Какой готовый флоу выбрать" },
+              slug: "docs/getting-started/ready-flows",
+            },
+            {
               label: "Self-Hosting",
               translations: { ru: "Самостоятельный хостинг" },
               slug: "docs/getting-started/self-hosting",

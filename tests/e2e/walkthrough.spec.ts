@@ -26,7 +26,7 @@ const BASE_URL = getTestBaseUrl();
 
 /** The step ids each page's walkthrough runs through, in order. */
 const RUN_STEPS = ["process", "agent", "evidence", "loop", "route", "explore"];
-const FLOW_STEPS = ["process", "agent", "evidence", "loop", "edit", "explore"];
+const FLOW_STEPS = ["intro", "steps", "process", "agent", "evidence", "loop", "edit", "explore"];
 
 /**
  * Runs in the page: for an element inside a React Flow node, whether its box lies within the

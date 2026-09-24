@@ -1,7 +1,8 @@
 /**
- * Every "go to X" in the interface ends with X visibly marked: the target scrolls into view and
- * pulses for a moment. Pass the container and a selector for the target; a new `token` repeats
- * the highlight for the same target.
+ * Every "go to X" in the interface ends with X visibly marked: the target scrolls into view
+ * (instantly for a reader who asked for reduced motion) and pulses for a moment. Pass the
+ * container and a selector for the target; a new `token` repeats the highlight for the same
+ * target.
  */
 
 import { useEffect, type RefObject } from "react";
@@ -19,6 +20,11 @@ export interface HighlightOptions {
    * `start` suits a tall one, whose top would otherwise be scrolled out of view.
    */
   block?: ScrollLogicalPosition;
+  /**
+   * Move focus to the target too, so a keyboard or screen-reader reader continues from where the
+   * jump led. The target must be focusable (`tabIndex=-1` keeps it out of the tab order).
+   */
+  focus?: boolean;
 }
 
 export function useHighlightTarget(
@@ -29,11 +35,14 @@ export function useHighlightTarget(
   options: HighlightOptions = {},
 ): void {
   const block = options.block ?? "center";
+  const focus = options.focus ?? false;
   useEffect(() => {
     if (!request || !container.current) return;
     const target = container.current.querySelector<HTMLElement>(selectorFor(request.name));
     if (!target) return;
-    target.scrollIntoView({ block, behavior: "smooth" });
+    const still = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    target.scrollIntoView({ block, behavior: still ? "auto" : "smooth" });
+    if (focus) target.focus({ preventScroll: true });
     target.classList.add(...HIGHLIGHT_CLASSES);
     target.setAttribute("data-highlighted", "true");
     const clearHighlight = () => {
@@ -45,5 +54,5 @@ export function useHighlightTarget(
       clearTimeout(timer);
       clearHighlight();
     };
-  }, [request, container, selectorFor, durationMs, block]);
+  }, [request, container, selectorFor, durationMs, block, focus]);
 }

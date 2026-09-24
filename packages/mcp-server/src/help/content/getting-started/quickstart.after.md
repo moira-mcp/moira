@@ -22,24 +22,29 @@
 
     You should see a list of workflows you have access to.
 
-5.  **Start the user onboarding**
+5.  **Run your first flow**
 
-    Now simply type in the chat:
+    Ask your agent, in plain words, to run the first learning example on any small task:
 
     ```
-    Start user onboarding flow
+    Use Moira to run Example 1: Simple Steps for this task: rename the file notes.txt to todo.txt
     ```
 
-    The interactive onboarding:
+    The agent starts `moira/example-simple-steps` and goes through its four steps — understand the
+    task, do it, check the result, report — one at a time; Moira hands it each step and checks its
+    answer before the next. Open **Workflows** in the web app and choose the example to see the
+    same steps as a simple diagram.
 
-    - demonstrates directives, completion conditions, input schemas, and verified step progression;
-    - reads every page of your current authorized public workflow catalog instead of relying on a copied list;
-    - explains the boundaries between supplied checklists, plan-first tasks, item-by-item task decomposition and recovery, quick and recoverable tasks, full development, bounded verification, filesystem-first iterative research, portable filesystem-or-memory adaptive research, corpus-scale research, supplied-data analysis, test planning, product requirements, content work, and workflow authoring;
-    - records one exact qualified workflow identity such as `moira/test-planning`;
-    - asks you to explicitly start or defer; defer makes no external change, while start creates the selected workflow as a child execution linked to onboarding.
+    From here on you do not have to name flows at all. Describe what you need, and your agent picks
+    a ready flow or builds one for the task. The [tutorial](/docs/getting-started/tutorial/) walks
+    through all three learning examples; [Which ready flow to use](/docs/getting-started/ready-flows/)
+    explains the everyday ones.
 
-    Use onboarding for a first Moira orientation. If you already know the workflow you need,
-    start that workflow directly.
+    :::tip[Want a guided tour of the catalog?]
+    Say `Start user onboarding flow`. The interactive onboarding reads your current authorized
+    public catalog, explains how the flows differ, records one exact workflow such as
+    `moira/test-planning`, and starts it only if you choose to; deferring changes nothing.
+    :::
 
 ## Available MCP Tools
 
@@ -85,6 +90,8 @@ Moira: Process ID: 123e4567-e89b-42d3-a456-426614174000
 
 ## Next Steps
 
+- [Tutorial: your first flows](/docs/getting-started/tutorial/) - Three tiny learning flows
+- [Which ready flow to use](/docs/getting-started/ready-flows/) - Everyday tasks without building a flow
 - [Workflows](/docs/concepts/workflows/) - Understand workflow structure
 - [Claude Code Integration](/docs/integration/claude-code/) - Detailed Claude Code setup
 - [MCP Clients](/docs/integration/mcp-clients/) - Other MCP client integrations

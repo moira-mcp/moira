@@ -7,7 +7,8 @@ import React, { useState, useEffect, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { GitBranch } from "lucide-react";
 import { apiClient } from "../services/api-client";
-import { useDynamicPageSize } from "../hooks/useDynamicPageSize";
+import { useListPageSize } from "../hooks/useListPageSize";
+import { useLatestRequest } from "../hooks/useLatestRequest";
 import { useDebounce } from "../hooks/useDebounce";
 import { Input } from "@/components/ui/input";
 import { ConfirmDialog } from "@/components/confirm-dialog";
@@ -45,14 +46,16 @@ export const DeletedWorkflows: React.FC = () => {
   const [dateTo, setDateTo] = useState("");
   const [dialogState, setDialogState] = useState<DialogState>(initialDialogState);
 
-  const { pageSize, containerRef } = useDynamicPageSize();
+  const { pageSize, containerRef, onViewModeChange } = useListPageSize(() => setCurrentPage(1));
 
   // Reset page when filters change
   useEffect(() => {
     setCurrentPage(1);
   }, [debouncedSearch]);
 
+  const beginRequest = useLatestRequest();
   const loadDeletedWorkflows = useCallback(async () => {
+    const isCurrent = beginRequest();
     setLoading(true);
     try {
       const offset = (currentPage - 1) * pageSize;
@@ -61,16 +64,18 @@ export const DeletedWorkflows: React.FC = () => {
         limit: pageSize,
         offset,
       });
+      if (!isCurrent()) return;
       setWorkflows(data.workflows);
       setTotal(data.total);
       setError(null);
     } catch (err: unknown) {
+      if (!isCurrent()) return;
       const message = err instanceof Error ? err.message : t("common.errors.failedToLoad");
       setError(message);
     } finally {
-      setLoading(false);
+      if (isCurrent()) setLoading(false);
     }
-  }, [currentPage, pageSize, debouncedSearch, t]);
+  }, [beginRequest, currentPage, pageSize, debouncedSearch, t]);
 
   useEffect(() => {
     loadDeletedWorkflows();
@@ -187,6 +192,7 @@ export const DeletedWorkflows: React.FC = () => {
       />
 
       <DataListView
+        onViewModeChange={onViewModeChange}
         items={filteredWorkflows}
         renderCard={(workflow, viewMode) => (
           <DeletedWorkflowCard

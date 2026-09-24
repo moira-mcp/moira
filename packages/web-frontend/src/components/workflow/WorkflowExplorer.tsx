@@ -1,6 +1,10 @@
 /**
  * Workflow Explorer - workflow list with filtering, sorting, and pagination
- * Uses shared design system: FilterBar + DataListView for consistency with other pages
+ * Uses shared design system: FilterBar + DataListView for consistency with other pages.
+ * Tabs say whose flows are listed — all, mine, shared with me, the public catalog — each one
+ * server query, so sort and pages hold inside it. The search is always in view; status,
+ * visibility and sort are optional and fold behind the FilterBar's "Filters" button until the
+ * reader opens it or one of them is in effect.
  */
 
 import React, { useState, useMemo, useCallback, useEffect, useRef } from "react";
@@ -13,8 +17,9 @@ import { FilterBar } from "@/components/FilterBar";
 import { LabeledFilter } from "@/components/LabeledFilter";
 import { SortSelect, makeSortValue, parseSortValue } from "@/components/SortSelect";
 import { useDebounce } from "../../hooks/useDebounce";
-import { useDynamicPageSize } from "../../hooks/useDynamicPageSize";
+import { useListPageSize } from "../../hooks/useListPageSize";
 import { WorkflowCard } from "./WorkflowCard";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Select,
   SelectContent,
@@ -22,6 +27,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+
+/** Whose flows the list shows; each is one server query. */
+const SCOPES = ["all", "mine", "shared", "catalog"] as const;
+type Scope = (typeof SCOPES)[number];
 
 interface WorkflowExplorerProps {
   selectedWorkflowId?: string;
@@ -39,14 +48,15 @@ export const WorkflowExplorer: React.FC<WorkflowExplorerProps> = ({
   isAdmin,
 }) => {
   const { t } = useTranslation();
-  const { pageSize, containerRef } = useDynamicPageSize(48);
+  const { pageSize, containerRef, onViewModeChange } = useListPageSize(() => setCurrentPage(1));
   const { workflows, loading, error, loadWorkflows, isAuthenticated } = useWorkflowList();
 
   const hasLoadedOnce = useRef(false);
 
   // Filter state
   const [searchQuery, setSearchQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState<"all" | "valid" | "invalid" | "warning">("all");
+  const [access, setAccess] = useState<Scope>("all");
+  const [statusFilter, setStatusFilter] = useState<"all" | "valid" | "invalid" | "unknown">("all");
   const [visibilityFilter, setVisibilityFilter] = useState<"all" | "public" | "private">("all");
   const [sortBy, setSortBy] = useState<"createdAt" | "name">("createdAt");
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
@@ -70,24 +80,38 @@ export const WorkflowExplorer: React.FC<WorkflowExplorerProps> = ({
   };
 
   const debouncedSearch = useDebounce(searchQuery, 300);
+  const activeFilters =
+    (statusFilter !== "all" ? 1 : 0) +
+    (visibilityFilter !== "all" ? 1 : 0) +
+    (sortBy !== "createdAt" || sortOrder !== "desc" ? 1 : 0);
 
   // Reset page on filter changes
   useEffect(() => {
     setCurrentPage(1);
-  }, [debouncedSearch, statusFilter, visibilityFilter]);
+  }, [debouncedSearch, statusFilter, visibilityFilter, access]);
 
   // Build request params
   const requestParams = useMemo((): WorkflowListRequest => {
     return {
       search: debouncedSearch || undefined,
       visibility: visibilityFilter === "all" ? undefined : visibilityFilter,
+      access,
       validationStatus: statusFilter === "all" ? undefined : statusFilter,
       sort: sortBy,
       sortOrder,
       limit: pageSize,
       offset: (currentPage - 1) * pageSize,
     };
-  }, [debouncedSearch, visibilityFilter, statusFilter, sortBy, sortOrder, currentPage, pageSize]);
+  }, [
+    debouncedSearch,
+    visibilityFilter,
+    access,
+    statusFilter,
+    sortBy,
+    sortOrder,
+    currentPage,
+    pageSize,
+  ]);
 
   useEffect(() => {
     if (!isAuthenticated) return;
@@ -124,11 +148,26 @@ export const WorkflowExplorer: React.FC<WorkflowExplorerProps> = ({
 
   return (
     <div className="flex flex-col flex-1 min-h-0" data-testid="workflow-explorer">
+      <Tabs value={access} onValueChange={(value) => setAccess(value as Scope)} className="mb-3">
+        <TabsList data-testid="workflow-scopes">
+          {SCOPES.map((scope) => (
+            <TabsTrigger
+              key={scope}
+              value={scope}
+              aria-controls="workflow-list"
+              data-testid={`workflow-scope-${scope}`}
+            >
+              {t(`pages.workflows.scopes.${scope}`)}
+            </TabsTrigger>
+          ))}
+        </TabsList>
+      </Tabs>
       <FilterBar
         search={searchQuery}
         onSearchChange={setSearchQuery}
         searchPlaceholder={t("components.searchFilters.searchPlaceholder")}
         onReset={handleReset}
+        foldFilters={{ activeCount: activeFilters }}
         filters={
           <>
             <LabeledFilter label={t("common.filters.status")}>
@@ -143,7 +182,7 @@ export const WorkflowExplorer: React.FC<WorkflowExplorerProps> = ({
                   <SelectItem value="all">{t("components.searchFilters.all")}</SelectItem>
                   <SelectItem value="valid">{t("components.searchFilters.valid")}</SelectItem>
                   <SelectItem value="invalid">{t("components.searchFilters.invalid")}</SelectItem>
-                  <SelectItem value="warning">{t("components.searchFilters.warning")}</SelectItem>
+                  <SelectItem value="unknown">{t("components.searchFilters.unknown")}</SelectItem>
                 </SelectContent>
               </Select>
             </LabeledFilter>
@@ -192,39 +231,45 @@ export const WorkflowExplorer: React.FC<WorkflowExplorerProps> = ({
         }
       />
 
-      <DataListView
-        items={displayedWorkflows}
-        renderCard={(workflow, viewMode) => (
-          <WorkflowCard
-            workflow={workflow}
-            isSelected={selectedWorkflowId === workflow.id}
-            onClick={handleWorkflowSelect}
-            onDelete={onDelete}
-            currentUserHandle={currentUserHandle}
-            isAdmin={isAdmin}
-            compact={viewMode === "grid"}
-          />
-        )}
-        keyExtractor={(w) => w.id}
-        storageKey="workflows-view-mode"
-        loading={loading}
-        emptyIcon={Folder}
-        emptyTitle={
-          debouncedSearch || statusFilter !== "all" || visibilityFilter !== "all"
-            ? t("pages.workflows.explorer.noMatch")
-            : t("pages.workflows.explorer.noWorkflows")
-        }
-        containerRef={containerRef}
-        pagination={{
-          mode: "total",
-          currentPage,
-          totalPages,
-          totalItems: totalWorkflows,
-          pageSize,
-          onPageChange: setCurrentPage,
-        }}
-        className="flex-1 min-h-0 flex flex-col"
-      />
+      <div id="workflow-list" className="flex min-h-0 flex-1 flex-col">
+        <DataListView
+          items={displayedWorkflows}
+          renderCard={(workflow, viewMode) => (
+            <WorkflowCard
+              workflow={workflow}
+              isSelected={selectedWorkflowId === workflow.id}
+              onClick={handleWorkflowSelect}
+              onDelete={onDelete}
+              currentUserHandle={currentUserHandle}
+              isAdmin={isAdmin}
+              compact={viewMode === "grid"}
+            />
+          )}
+          keyExtractor={(w) => w.id}
+          storageKey="workflows-view-mode"
+          loading={loading}
+          emptyIcon={Folder}
+          emptyTitle={
+            debouncedSearch ||
+            statusFilter !== "all" ||
+            visibilityFilter !== "all" ||
+            access !== "all"
+              ? t("pages.workflows.explorer.noMatch")
+              : t("pages.workflows.explorer.noWorkflows")
+          }
+          containerRef={containerRef}
+          pagination={{
+            mode: "total",
+            currentPage,
+            totalPages,
+            totalItems: totalWorkflows,
+            pageSize,
+            onPageChange: setCurrentPage,
+          }}
+          className="flex-1 min-h-0 flex flex-col"
+          onViewModeChange={onViewModeChange}
+        />
+      </div>
     </div>
   );
 };

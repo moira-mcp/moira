@@ -12,6 +12,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiErrorUtils } from "../services/api-client";
+import { useLatestRequest } from "./useLatestRequest";
 
 export interface Resource<T> {
   /** The last successfully fetched value; undefined before the first success or after a null key. */
@@ -37,39 +38,43 @@ export function useResource<T>(
     pending: boolean;
     error: string | null;
   }>({ data: undefined, dataKey: null, pending: key !== null, error: null });
-  const requestRef = useRef(0);
+  const beginRequest = useLatestRequest();
   const fetcherRef = useRef(fetcher);
   fetcherRef.current = fetcher;
   const describeRef = useRef(describeError);
   describeRef.current = describeError;
 
-  const load = useCallback(async (target: string) => {
-    const request = ++requestRef.current;
-    setState((previous) => ({ ...previous, pending: true }));
-    try {
-      const value = await fetcherRef.current(target);
-      if (request !== requestRef.current) return;
-      setState({ data: value, dataKey: target, pending: false, error: null });
-    } catch (caught) {
-      if (request !== requestRef.current) return;
-      setState((previous) => ({
-        ...previous,
-        pending: false,
-        error: describeRef.current(caught),
-      }));
-    }
-  }, []);
+  const load = useCallback(
+    async (target: string) => {
+      const isCurrent = beginRequest();
+      setState((previous) => ({ ...previous, pending: true }));
+      try {
+        const value = await fetcherRef.current(target);
+        if (!isCurrent()) return;
+        setState({ data: value, dataKey: target, pending: false, error: null });
+      } catch (caught) {
+        if (!isCurrent()) return;
+        setState((previous) => ({
+          ...previous,
+          pending: false,
+          error: describeRef.current(caught),
+        }));
+      }
+    },
+    [beginRequest],
+  );
 
   const startedKeyRef = useRef<string | null>(null);
   useEffect(() => {
     startedKeyRef.current = key;
     if (key === null) {
-      requestRef.current += 1;
+      // A request still in flight for the previous key must not land
+      beginRequest();
       setState({ data: undefined, dataKey: null, pending: false, error: null });
       return;
     }
     void load(key);
-  }, [key, load]);
+  }, [key, load, beginRequest]);
 
   const refresh = useCallback(() => (key === null ? Promise.resolve() : load(key)), [key, load]);
 

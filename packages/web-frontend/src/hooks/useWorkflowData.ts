@@ -17,6 +17,7 @@ import {
 import { apiClient, ApiErrorUtils } from "../services/api-client";
 import { useSession } from "../auth/better-auth-client";
 import { useResource } from "./useResource";
+import { useLatestRequest } from "./useLatestRequest";
 
 /**
  * Hook for managing workflow list data with server-side filtering and pagination
@@ -34,6 +35,7 @@ export function useWorkflowList() {
 
   // Stable reference to session existence to avoid callback recreation
   const isAuthenticated = !!session;
+  const beginRequest = useLatestRequest();
 
   const loadWorkflows = useCallback(
     async (filters?: WorkflowListRequest) => {
@@ -42,22 +44,26 @@ export function useWorkflowList() {
         return;
       }
 
+      const isCurrent = beginRequest();
       setLoading(true);
       setError(null);
 
       try {
         const response = await apiClient.getWorkflows(filters);
+        // A newer query (a filter, a page, the page size settling) may have answered first
+        if (!isCurrent()) return;
         setWorkflows(response);
         setLastUpdated(Date.now());
       } catch (err) {
+        if (!isCurrent()) return;
         const message = ApiErrorUtils.getUserFriendlyMessage(err);
         setError(message);
         console.error("Failed to load workflows:", err);
       } finally {
-        setLoading(false);
+        if (isCurrent()) setLoading(false);
       }
     },
-    [isAuthenticated],
+    [isAuthenticated, beginRequest],
   );
 
   const refreshWorkflows = useCallback(

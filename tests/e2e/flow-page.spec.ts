@@ -184,10 +184,11 @@ test("a step in the block panel opens on the graph as the node level of the pane
   await expect(connections).not.toContainText("Decision");
 
   // The walkthrough lives in the URL; `walkthrough.spec.ts` runs every one of its steps through
-  // in both views and checks each anchor resolves.
+  // in both views and checks each anchor resolves. It opens on the agent-first message, anchored
+  // on the page header.
   await page.goto(`${BASE_URL}/workflows/moira/quick-task?guide=1`);
-  await expect(page.getByTestId("walkthrough")).toHaveAttribute("data-guide-step", "process");
-  await expect(page.locator('[data-guide-target="process"]')).toBeVisible();
+  await expect(page.getByTestId("walkthrough")).toHaveAttribute("data-guide-step", "intro");
+  await expect(page.locator('[data-guide-target="intro"]')).toBeVisible();
 });
 
 /** A ninety-character block name: the map card must clamp it rather than grow or overflow. */

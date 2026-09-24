@@ -21,7 +21,8 @@ import { FilterBar } from "../components/FilterBar";
 import { DataListView } from "../components/DataListView";
 import { ConfirmDialog } from "../components/confirm-dialog";
 import { useDebounce } from "../hooks/useDebounce";
-import { useDynamicPageSize } from "../hooks/useDynamicPageSize";
+import { useListPageSize } from "../hooks/useListPageSize";
+import { useLatestRequest } from "../hooks/useLatestRequest";
 import { PlaybookEditor } from "../components/playbooks/PlaybookEditor";
 import {
   RevisionHistoryDialog,
@@ -44,7 +45,7 @@ type LinkedPlaybook =
 
 export const Playbooks: React.FC = () => {
   const { t } = useTranslation();
-  const { pageSize, containerRef } = useDynamicPageSize();
+  const { pageSize, containerRef, onViewModeChange } = useListPageSize(() => setCurrentPage(1));
 
   const [playbooks, setPlaybooks] = useState<PlaybookSummary[]>([]);
   const [total, setTotal] = useState(0);
@@ -106,7 +107,9 @@ export const Playbooks: React.FC = () => {
     setEditing(slug);
   };
 
+  const beginRequest = useLatestRequest();
   const load = useCallback(async () => {
+    const isCurrent = beginRequest();
     try {
       setLoading(true);
       const result = await apiClient.getPlaybooks({
@@ -114,15 +117,17 @@ export const Playbooks: React.FC = () => {
         limit: pageSize,
         offset: (currentPage - 1) * pageSize,
       });
+      if (!isCurrent()) return;
       setPlaybooks(result.playbooks);
       setTotal(result.total);
       setError(null);
     } catch (err) {
+      if (!isCurrent()) return;
       setError(err instanceof Error ? err.message : t("common.errors.failedToLoad"));
     } finally {
-      setLoading(false);
+      if (isCurrent()) setLoading(false);
     }
-  }, [debouncedSearch, currentPage, pageSize, t]);
+  }, [beginRequest, debouncedSearch, currentPage, pageSize, t]);
 
   useEffect(() => {
     load();
@@ -272,6 +277,7 @@ export const Playbooks: React.FC = () => {
       )}
 
       <DataListView
+        onViewModeChange={onViewModeChange}
         items={playbooks}
         renderCard={(playbook, viewMode) =>
           editing === playbook.slug ? (

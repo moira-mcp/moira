@@ -1,0 +1,212 @@
+{
+  "id": "7c2f3b8e-1a4d-4e6b-9c1f-5d8a2e3b4c05",
+  "slug": "example-several-paths",
+  "owner": "system-moira",
+  "visibility": "public",
+  "metadata": {
+    "name": "Example 3: Several Paths",
+    "version": "1.0.0",
+    "description": "A learning example with a few branches: the agent decides whether the request is a question, a bug or a new idea, and each answer leads to its own short path. No loops and no variables. For real work, describe the task to your agent and let it choose a ready flow or create one.",
+    "tags": [
+      "example",
+      "beginner",
+      "branches"
+    ],
+    "schemaVersion": 1
+  },
+  "progress": {
+    "title": "Several paths",
+    "goal": "Handle a request along the path that fits it.",
+    "nodes": [
+      {
+        "id": "sort",
+        "label": "Sort",
+        "content": {
+          "summary": "Decide what kind of request it is"
+        }
+      },
+      {
+        "id": "question",
+        "label": "Answer",
+        "content": {
+          "summary": "Answer the question"
+        }
+      },
+      {
+        "id": "bug",
+        "label": "Fix",
+        "content": {
+          "summary": "Fix the bug and show it is gone"
+        }
+      },
+      {
+        "id": "idea",
+        "label": "Plan",
+        "content": {
+          "summary": "Plan the idea and ask the user"
+        }
+      }
+    ]
+  },
+  "nodes": [
+    {
+      "id": "start",
+      "type": "start",
+      "connections": {
+        "default": "sort-request"
+      },
+      "initialData": {
+        "variables": {}
+      },
+      "progressNodeId": "sort"
+    },
+    {
+      "id": "sort-request",
+      "type": "agent-directive",
+      "directive": "Read the user's request and decide what it is: a question, a bug to fix, or a new idea.",
+      "completionCondition": "You chose question, bug or idea.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "question",
+              "bug",
+              "idea"
+            ],
+            "description": "What the request is: question, bug or idea"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "connections": {
+        "success": "answer-question",
+        "bug": "fix-bug",
+        "idea": "plan-idea"
+      },
+      "progressNodeId": "sort",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "sort-request.kind"
+            },
+            "right": "bug"
+          },
+          "output": "bug"
+        },
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "sort-request.kind"
+            },
+            "right": "idea"
+          },
+          "output": "idea"
+        }
+      ],
+      "connectionLabels": {
+        "success": "a question",
+        "bug": "a bug",
+        "idea": "an idea"
+      }
+    },
+    {
+      "id": "answer-question",
+      "type": "agent-directive",
+      "directive": "Answer the question briefly and say where the answer comes from.",
+      "completionCondition": "The user has a short answer with its source.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "answer": {
+            "type": "string",
+            "description": "The answer you gave",
+            "minLength": 1,
+            "maxLength": 1000
+          }
+        },
+        "required": [
+          "answer"
+        ]
+      },
+      "connections": {
+        "success": "end-answered"
+      },
+      "progressNodeId": "question"
+    },
+    {
+      "id": "end-answered",
+      "type": "end",
+      "progressNodeId": "question"
+    },
+    {
+      "id": "fix-bug",
+      "type": "agent-directive",
+      "directive": "Reproduce the bug, fix it, and show the user that it no longer happens.",
+      "completionCondition": "The bug is fixed and the user has seen the proof.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "fix": {
+            "type": "string",
+            "description": "What you fixed and how you showed it",
+            "minLength": 1,
+            "maxLength": 1000
+          }
+        },
+        "required": [
+          "fix"
+        ]
+      },
+      "connections": {
+        "success": "end-fixed"
+      },
+      "progressNodeId": "bug"
+    },
+    {
+      "id": "end-fixed",
+      "type": "end",
+      "progressNodeId": "bug"
+    },
+    {
+      "id": "plan-idea",
+      "type": "agent-directive",
+      "directive": "Write a short plan for the idea, at most five steps, and ask the user whether to go ahead.",
+      "completionCondition": "The user has a short plan and was asked whether to go ahead.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "plan": {
+            "type": "string",
+            "description": "The plan you gave the user",
+            "minLength": 1,
+            "maxLength": 1000
+          }
+        },
+        "required": [
+          "plan"
+        ]
+      },
+      "connections": {
+        "success": "end-planned"
+      },
+      "progressNodeId": "idea"
+    },
+    {
+      "id": "end-planned",
+      "type": "end",
+      "progressNodeId": "idea"
+    }
+  ],
+  "variableRegistry": {}
+}

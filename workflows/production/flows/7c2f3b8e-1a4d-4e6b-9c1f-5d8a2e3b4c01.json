@@ -1,0 +1,179 @@
+{
+  "id": "7c2f3b8e-1a4d-4e6b-9c1f-5d8a2e3b4c01",
+  "slug": "example-simple-steps",
+  "owner": "system-moira",
+  "visibility": "public",
+  "metadata": {
+    "name": "Example 1: Simple Steps",
+    "version": "1.0.0",
+    "description": "A learning example for people new to Moira: the agent goes through four plain steps in order — understand the task, do it, check the result, report. No branches and no variables. Start it with any small task to see how Moira gives an agent one step at a time. For real work, describe the task to your agent and let it choose a ready flow or create one.",
+    "tags": [
+      "example",
+      "beginner",
+      "steps"
+    ],
+    "schemaVersion": 1
+  },
+  "progress": {
+    "title": "Simple steps",
+    "goal": "Do a small task in four clear steps.",
+    "nodes": [
+      {
+        "id": "understand",
+        "label": "Understand",
+        "content": {
+          "summary": "Restate the task in one sentence"
+        }
+      },
+      {
+        "id": "work",
+        "label": "Do",
+        "content": {
+          "summary": "Do the task"
+        }
+      },
+      {
+        "id": "check",
+        "label": "Check",
+        "content": {
+          "summary": "Compare the result with the request"
+        }
+      },
+      {
+        "id": "report",
+        "label": "Report",
+        "content": {
+          "summary": "Tell the user what was done"
+        }
+      }
+    ]
+  },
+  "nodes": [
+    {
+      "id": "start",
+      "type": "start",
+      "connections": {
+        "default": "understand-task"
+      },
+      "initialData": {
+        "variables": {}
+      },
+      "progressNodeId": "understand"
+    },
+    {
+      "id": "understand-task",
+      "type": "agent-directive",
+      "directive": "Read the user's request and restate the task in one sentence. If something important is unclear, ask the user before you go on.",
+      "completionCondition": "The task is restated in one sentence and nothing important is unclear.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "task": {
+            "type": "string",
+            "description": "The task in one sentence",
+            "minLength": 1,
+            "maxLength": 1000
+          }
+        },
+        "required": [
+          "task"
+        ]
+      },
+      "connections": {
+        "success": "do-task"
+      },
+      "progressNodeId": "understand",
+      "connectionLabels": {
+        "success": "task understood"
+      }
+    },
+    {
+      "id": "do-task",
+      "type": "agent-directive",
+      "directive": "Do the task. Keep to what the user asked for and do not add extra work.",
+      "completionCondition": "The task is done.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "result": {
+            "type": "string",
+            "description": "What you did, in one sentence",
+            "minLength": 1,
+            "maxLength": 1000
+          }
+        },
+        "required": [
+          "result"
+        ]
+      },
+      "connections": {
+        "success": "check-result"
+      },
+      "progressNodeId": "work",
+      "connectionLabels": {
+        "success": "work done"
+      }
+    },
+    {
+      "id": "check-result",
+      "type": "agent-directive",
+      "directive": "Compare the result with the request. Fix anything that does not match before you go on.",
+      "completionCondition": "The result matches the request.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "check": {
+            "type": "string",
+            "description": "How you checked the result",
+            "minLength": 1,
+            "maxLength": 1000
+          }
+        },
+        "required": [
+          "check"
+        ]
+      },
+      "connections": {
+        "success": "report"
+      },
+      "progressNodeId": "check",
+      "connectionLabels": {
+        "success": "result checked"
+      }
+    },
+    {
+      "id": "report",
+      "type": "agent-directive",
+      "directive": "Tell the user in a few sentences what you did and how you checked it.",
+      "completionCondition": "The user has a short report.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "report": {
+            "type": "string",
+            "description": "The report you gave the user",
+            "minLength": 1,
+            "maxLength": 1000
+          }
+        },
+        "required": [
+          "report"
+        ]
+      },
+      "connections": {
+        "success": "end"
+      },
+      "progressNodeId": "report"
+    },
+    {
+      "id": "end",
+      "type": "end",
+      "progressNodeId": "report"
+    }
+  ],
+  "variableRegistry": {}
+}

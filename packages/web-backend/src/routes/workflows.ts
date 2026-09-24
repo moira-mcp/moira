@@ -37,6 +37,7 @@ import {
   ConflictError,
   getWorkflowService,
   queryWorkflowVariables,
+  normalizeSlug,
   validateSlug,
 } from "@mcp-moira/shared";
 
@@ -155,6 +156,9 @@ async function resolveWorkflowId(identifier: string, userId: string): Promise<st
   return null;
 }
 
+/** Most exact slugs one list request may name. */
+const MAX_LIST_SLUGS = 50;
+
 /**
  * GET /api/workflows - List all workflows with filtering, sorting, and pagination
  */
@@ -166,7 +170,22 @@ router.get(
 
     // Parse query parameters
     const search = query.search as string | undefined;
+    // Exact slugs, comma-separated, read by the same rule every workflow slug is written under;
+    // anything that cannot be a slug is ignored (so a list of nothing but such values matches
+    // nothing), and a caller asks for a bounded handful at a time.
+    const slugs =
+      typeof query.slugs === "string"
+        ? query.slugs
+            .split(",")
+            .map(normalizeSlug)
+            .filter((slug) => validateSlug(slug).valid)
+            .slice(0, MAX_LIST_SLUGS)
+        : undefined;
     const visibility = query.visibility as "public" | "private" | "all" | undefined;
+    const access = (["mine", "shared", "catalog"] as const).find((scope) => scope === query.access);
+    const validationStatus = (["valid", "invalid", "unknown"] as const).find(
+      (status) => status === query.validationStatus,
+    );
     const sort = (query.sort as "createdAt" | "name") || "createdAt";
     const sortOrder = (query.sortOrder as "asc" | "desc") || "desc";
     const limit = Math.min(Math.max(1, parseInt(query.limit as string) || 20), 100);
@@ -176,7 +195,10 @@ router.get(
     const result = await repository.listWorkflowsWithFilters({
       userId,
       search,
+      slugs,
       visibility,
+      access,
+      validationStatus,
       sort,
       sortOrder,
       limit,
@@ -202,15 +224,8 @@ router.get(
       fileSize: w.size,
     }));
 
-    // Apply validation status filter if provided
-    let filteredWorkflows = convertedWorkflows;
-
-    if (query.validationStatus && query.validationStatus !== "all") {
-      filteredWorkflows = filteredWorkflows.filter((workflow) => {
-        // Use cached status directly (supports "unknown" status)
-        return workflow.validation.status === query.validationStatus;
-      });
-    }
+    // The status filter is part of the query, so the page and the total already honour it.
+    const filteredWorkflows = convertedWorkflows;
 
     // Calculate totals
     const totalWorkflows = result.total;

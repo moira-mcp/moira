@@ -29,6 +29,9 @@ test.describe("Workflow Explorer Toolbar", () => {
   });
 
   test("should display filter dropdowns", async ({ page }) => {
+    // The filters are optional: folded behind "Filters" until opened
+    await expect(page.locator('[data-testid="status-filter"]')).toHaveCount(0);
+    await page.getByTestId("filters-toggle").click();
     // FilterBar uses inline Select components with data-testid attributes
     await expect(page.locator('[data-testid="status-filter"]')).toBeVisible();
     await expect(page.locator('[data-testid="visibility-filter"]')).toBeVisible();
@@ -58,7 +61,8 @@ test.describe("Workflow Explorer Toolbar", () => {
   });
 
   test("should reset pagination when filter changes", async ({ page }) => {
-    // Open status filter dropdown
+    // Open the filters, then the status filter dropdown
+    await page.getByTestId("filters-toggle").click();
     const statusFilter = page.locator('[data-testid="status-filter"]');
     await statusFilter.click();
 

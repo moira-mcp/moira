@@ -50,6 +50,46 @@ describe("authored text with its variable references", () => {
     expect(document.body.textContent).toBe("Try {{attempts}} of {{limit}} now");
   });
 
+  test("as words, a template's block helpers read as plain conditions and leave no braces", () => {
+    view(
+      <VariableProvider value={{ registry: REGISTRY }}>
+        <TemplateText
+          inline
+          text="Report. {{#if review.review_file}}Read {{review.review_file}}.{{else}}Say none.{{/if}} {{#eq delivery_mode 'filesystem'}}Write files.{{/eq}}"
+        />
+      </VariableProvider>,
+    );
+    const text = document.body.textContent ?? "";
+    expect(text).not.toContain("{{");
+    expect(text).toBe(
+      "Report. (if review file) Read review file. (otherwise) Say none. (if delivery mode is 'filesystem') Write files.",
+    );
+  });
+
+  test.each([
+    ["{{#unless ready}}Wait.{{else}}Go.{{/unless}}", "(unless ready) Wait. (otherwise) Go."],
+    ["{{#neq mode 'dry'}}Apply.{{/neq}}", "(if mode is not 'dry') Apply."],
+    ["{{#each tasks}}{{@index}}: {{this}}{{/each}}", "(for each tasks) (its number) : (the item) "],
+  ])("as words, %s reads without braces", (text, words) => {
+    view(<TemplateText inline text={text} />);
+    expect(document.body.textContent).toBe(words);
+  });
+
+  test("the condition words follow the interface language", async () => {
+    await i18n.changeLanguage("ru");
+    try {
+      view(<TemplateText inline text="{{#unless ready}}Ждать.{{else}}Идти.{{/unless}}" />);
+      expect(document.body.textContent).toBe("(если не ready) Ждать. (иначе) Идти.");
+    } finally {
+      await i18n.changeLanguage("en");
+    }
+  });
+
+  test("without words, block helpers stay as the workflow wrote them", () => {
+    view(<TemplateText text="{{#if ready}}Go{{/if}}" />);
+    expect(document.body.textContent).toBe("{{#if ready}}Go{{/if}}");
+  });
+
   test("marks a reference the workflow's registry does not declare", () => {
     view(
       <VariableProvider value={{ registry: REGISTRY }}>

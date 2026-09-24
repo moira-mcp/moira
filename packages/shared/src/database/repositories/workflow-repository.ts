@@ -8,7 +8,7 @@
  * - Global reference: handle/slug (resolved at service layer)
  */
 
-import { eq, and, or, isNull, inArray, like, desc, asc, sql } from "drizzle-orm";
+import { eq, ne, and, or, isNull, inArray, like, desc, asc, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
 import { workflow, user, accessGrant, principalGroupMember } from "../schema.js";
@@ -68,7 +68,16 @@ export const MAX_WORKFLOW_SIZE_BYTES = 5 * 1024 * 1024;
 export interface WorkflowFilter {
   userId: string;
   search?: string; // Search in name, description, and slug
+  slugs?: string[]; // Only workflows whose slug is one of these; an empty list matches nothing
   visibility?: "public" | "private" | "all";
+  /**
+   * Whose workflows: `mine` (owned by the user), `shared` (reached by an explicit grant to the user
+   * or one of their groups, not owned), `catalog` (public, not owned); `all` or absent is every
+   * workflow the user can read. Combined with every other filter.
+   */
+  access?: "all" | "mine" | "shared" | "catalog";
+  /** The cached validation status: valid, invalid, or unknown (not validated yet). */
+  validationStatus?: "valid" | "invalid" | "unknown";
   sort?: "createdAt" | "name";
   sortOrder?: "asc" | "desc";
   limit?: number;
@@ -484,7 +493,10 @@ export class WorkflowRepository {
     const {
       userId,
       search,
+      slugs,
       visibility,
+      access,
+      validationStatus,
       sort = "createdAt",
       sortOrder = "desc",
       limit = 20,
@@ -494,7 +506,10 @@ export class WorkflowRepository {
     this.logger.info("listWithFilters() called", {
       userId,
       search,
+      slugs,
       visibility,
+      access,
+      validationStatus,
       sort,
       sortOrder,
       limit,
@@ -537,6 +552,26 @@ export class WorkflowRepository {
       );
     }
 
+    // Whose workflows, within what the user can read
+    if (access === "mine") {
+      conditions.push(eq(workflow.userId, userId));
+    } else if (access === "shared") {
+      conditions.push(
+        and(ne(workflow.userId, userId), sql`${workflow.id} IN (${sharedAccessSubquery})`),
+      );
+    } else if (access === "catalog") {
+      conditions.push(and(ne(workflow.userId, userId), eq(workflow.visibility, "public")));
+    }
+
+    // Cached validation status, in the query so pages and the total agree with the filter
+    if (validationStatus === "valid") {
+      conditions.push(eq(workflow.isValid, true));
+    } else if (validationStatus === "invalid") {
+      conditions.push(eq(workflow.isValid, false));
+    } else if (validationStatus === "unknown") {
+      conditions.push(isNull(workflow.isValid));
+    }
+
     // Exclude deleted workflows
     conditions.push(or(eq(workflow.deleted, false), isNull(workflow.deleted)));
 
@@ -549,6 +584,11 @@ export class WorkflowRepository {
           like(workflow.description, `%${search}%`),
         ),
       );
+    }
+
+    // Exact slugs: a caller that knows which catalog entries it wants fetches them in one request
+    if (slugs) {
+      conditions.push(slugs.length > 0 ? inArray(workflow.slug, slugs) : sql`0 = 1`);
     }
 
     const whereClause = and(...conditions)!; // Non-null assertion: conditions always has at least 2 elements

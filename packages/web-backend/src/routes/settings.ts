@@ -250,8 +250,11 @@ router.put(
     // which the bulk endpoint accepts and this one refused. Where the definition came from is read
     // off the definition itself, which carries it, rather than asked of the registry a second time.
     const declaredByExtension = definition.source === "extension";
+    // A built-in `json` setting is checked against its full schema by the repository below, after
+    // text is parsed; this shallow `typeof` check would refuse every list or object it declares.
+    const structural = definition.type === "json";
 
-    if (definition.validation && !declaredByExtension) {
+    if (definition.validation && !declaredByExtension && !structural) {
       try {
         const schema = JSON.parse(definition.validation);
 

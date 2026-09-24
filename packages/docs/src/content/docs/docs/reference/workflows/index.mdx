@@ -7,6 +7,43 @@ import { Card, CardGrid, LinkCard } from '@astrojs/starlight/components';
 
 Production-ready workflows you can use immediately. Each workflow provides explicit completion conditions and its own proportionate planning, evidence, review, validation, authority, and failure contract.
 
+## Learning Examples
+
+Three small flows for getting to know Moira: a straight sequence of steps, one fork, and a few paths. Each has an English and a Russian version. They are for learning; for real work, describe the task to your agent and it chooses a ready flow or creates one.
+
+<CardGrid>
+  <LinkCard
+    title="Example 1: Simple Steps"
+    description="A learning example for people new to Moira: the agent goes through four plain steps in order — understand the task, do it, check the result, report"
+    href="./example-simple-steps/"
+  />
+  <LinkCard
+    title="Пример 1: Простые шаги"
+    description="Russian-language version: the same process, every text in Russian"
+    href="./example-simple-steps-ru/"
+  />
+  <LinkCard
+    title="Example 2: One Choice"
+    description="A learning example with one fork: the agent does the task, then answers one yes-or-no question — does the result fully match the request? Yes leads to a report; no leads to an honest note about what is missing"
+    href="./example-one-choice/"
+  />
+  <LinkCard
+    title="Пример 2: Одна развилка"
+    description="Russian-language version: the same process, every text in Russian"
+    href="./example-one-choice-ru/"
+  />
+  <LinkCard
+    title="Example 3: Several Paths"
+    description="A learning example with a few branches: the agent decides whether the request is a question, a bug or a new idea, and each answer leads to its own short path"
+    href="./example-several-paths/"
+  />
+  <LinkCard
+    title="Пример 3: Несколько путей"
+    description="Russian-language version: the same process, every text in Russian"
+    href="./example-several-paths-ru/"
+  />
+</CardGrid>
+
 ## Software Development
 
 <CardGrid>
@@ -22,7 +59,7 @@ Production-ready workflows you can use immediately. Each workflow provides expli
 <CardGrid>
   <LinkCard
     title="Quick Task (Recommended)"
-    description="Bounded non-development plan, evidence-backed execution, independent review, and user acceptance"
+    description="Bounded non-development plan, evidence-backed execution and independent review; approval and acceptance in interactive mode"
     href="./quick-task/"
   />
   <LinkCard

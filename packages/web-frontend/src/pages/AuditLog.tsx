@@ -11,7 +11,8 @@ import { FilterBar } from "@/components/FilterBar";
 import { LabeledFilter } from "@/components/LabeledFilter";
 import { SortSelect } from "@/components/SortSelect";
 import { useDebounce } from "@/hooks/useDebounce";
-import { useDynamicPageSize } from "@/hooks/useDynamicPageSize";
+import { useListPageSize } from "@/hooks/useListPageSize";
+import { useLatestRequest } from "@/hooks/useLatestRequest";
 import { formatDate } from "@/components/cards/format-utils";
 import { AuditLogCard } from "@/components/cards/AuditLogCard";
 import type { AuditLogCardData } from "@/components/cards/AuditLogCard";
@@ -72,7 +73,11 @@ const getActionBadgeClasses = (action: string) => {
 
 export const AuditLog: React.FC = () => {
   const { t } = useTranslation();
-  const { pageSize: itemsPerPage, containerRef } = useDynamicPageSize();
+  const {
+    pageSize: itemsPerPage,
+    containerRef,
+    onViewModeChange,
+  } = useListPageSize(() => setCurrentPage(1));
   const [entries, setEntries] = useState<AuditLogCardData[]>([]);
   const [users, setUsers] = useState<{ id: string; email: string; name: string | null }[]>([]);
   const [auditActions, setAuditActions] = useState<string[]>([]);
@@ -125,7 +130,9 @@ export const AuditLog: React.FC = () => {
     loadAuditActions();
   }, []);
 
+  const beginRequest = useLatestRequest();
   const loadData = useCallback(async () => {
+    const isCurrent = beginRequest();
     try {
       setLoading(true);
 
@@ -164,17 +171,20 @@ export const AuditLog: React.FC = () => {
         apiClient.getAdminUsers(),
       ]);
 
+      if (!isCurrent()) return;
       setEntries(auditData.entries);
       setTotal(auditData.total);
       setUsers(usersData.users.map((u) => ({ id: u.id, email: u.email, name: u.name })));
       setError(null);
     } catch (err: unknown) {
+      if (!isCurrent()) return;
       const message = err instanceof Error ? err.message : "Failed to load audit log";
       setError(message);
     } finally {
-      setLoading(false);
+      if (isCurrent()) setLoading(false);
     }
   }, [
+    beginRequest,
     debouncedUserId,
     debouncedActions,
     debouncedResource,
@@ -419,6 +429,7 @@ export const AuditLog: React.FC = () => {
 
       {/* Entries */}
       <DataListView
+        onViewModeChange={onViewModeChange}
         items={entries}
         renderCard={(entry, viewMode) => (
           <AuditLogCard entry={entry} compact={viewMode === "grid"} onClick={handleEntryClick} />

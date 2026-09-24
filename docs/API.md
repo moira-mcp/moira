@@ -286,6 +286,7 @@ Behavior:
 - Names unknown, unauthorized, schema-invalid and out-of-range keys in `refused` without undoing values already listed in `saved`
 - Refuses a built-in number setting whose value is below its declared `minimum` or above its declared `maximum`, whether sent as a number or as numeric text
 - Enforces the manifest's declared primitive type and then its optional complete JSON Schema; editable JSON text is parsed before validation, and structured input must round-trip through JSON without omitted or transformed values
+- Holds a built-in `json` setting (for example `ui.hidden_panels`, the list of beginner panels the user has hidden) to its declared JSON Schema the same way; a value outside it is listed in `refused` and nothing is stored
 - Registers the Telegram webhook only when `telegram.bot_token` is present in `saved`, never when that key was refused
 
 Authentication: Required
@@ -492,7 +493,7 @@ Validation:
 - String length (minLength, maxLength)
 - Numeric bounds (`minimum`, `maximum`) of a built-in number setting; a number or numeric text outside them returns 400
 - Required field check
-- Installed-extension settings are validated against the complete JSON Schema from the active manifest; JSON settings accept either losslessly JSON-serializable structured values or JSON text
+- Installed-extension settings and built-in `json` settings are validated against their complete declared JSON Schema; JSON settings accept either losslessly JSON-serializable structured values or JSON text, and the shallow type check above does not apply to them
 
 Response:
 
@@ -789,6 +790,63 @@ Authentication: Required
 
 See `docs/CODESPACES.md` for configuration, encryption, refresh and recovery
 contracts.
+
+## Stats API
+
+### GET /api/stats/summary
+
+The home page's work area for the signed-in user. Requires a session.
+
+```typescript
+{
+  success: true,
+  data: {
+    activeRuns: Array<{
+      executionId: string;
+      workflowId: string;
+      workflowName: string | null;
+      note: string | null;
+      status: "running" | "locked"; // the store keeps running and completed; a held lock reads locked
+      hasActiveLock: boolean;
+      errorCount: number;          // refusals, as on the executions list
+      stepId: string | null;       // the node the run waits at, else its current node
+      stepName: string | null;     // null when the step has no name to show
+      createdAt: number;
+      updatedAt: number;
+    }>;
+    recentRuns: Array<{            // finished runs only
+      executionId: string;
+      workflowId: string;
+      workflowName: string | null;
+      note?: string;
+      status: string;
+      hasActiveLock: boolean;
+      errorCount: number;
+      createdAt: number;
+      completedAt?: number;
+    }>;
+    topFlows: Array<{              // the flows the user runs most
+      id: string;
+      ownerHandle: string | null;
+      slug: string;
+      name: string;
+      description: string | null;
+      runs: number;
+      lastRunAt: number;
+    }>;
+  };
+}
+```
+
+- `activeRuns`: runs not finished, latest activity first, at most 5.
+- `recentRuns`: finished runs, latest first, at most 5. No run is in both lists.
+- `topFlows`: most runs first, then the latest run, at most 4. A deleted flow is left out.
+- `stepName` is picked in the run page's order:
+  1. the node's `progressActiveLabel` when it is plain text (not a template);
+  2. else its `metadata.displayName`;
+  3. else the label of its progress block.
+- A user with no runs gets three empty lists.
+- Runs are read through the filtered execution query and counted per flow in SQL, so the endpoint does not load the user's executions.
 
 ## Notes API
 
@@ -2275,9 +2333,18 @@ List workflows with filtering, sorting, and pagination.
 
 Query parameters:
 
-- `search`: Search in name and description
+- `search`: Substring search in slug, name and description
+- `slugs`: Comma-separated exact slugs; only workflows with one of them are listed. Each value is
+  read by the shared slug rule (`normalizeSlug`, `validateSlug`) and one that cannot be a slug is
+  dropped, so a list of nothing but such values lists nothing. At most 50 are honoured. The app's
+  recommended section looks up its flows with it.
 - `visibility`: Filter (public, private, all). Default: all
-- `validationStatus`: Filter by validation status (valid, invalid, unknown, all). Default: all
+- `access`: Whose workflows (all, mine, shared, catalog). `mine` is owned by the user; `shared` is
+  reached by an explicit grant to the user or one of their groups and not owned; `catalog` is
+  public and not owned. Default: all readable workflows. Combined with every other filter; the
+  total counts the scope
+- `validationStatus`: Filter by the cached validation status (valid, invalid, unknown, all), applied
+  in the query so the page and the total agree with it. Default: all
 - `sort`: Sort field (createdAt, name). Default: createdAt
 - `sortOrder`: Sort direction (asc, desc). Default: desc
 - `limit`: Results per page (1-100). Default: 20

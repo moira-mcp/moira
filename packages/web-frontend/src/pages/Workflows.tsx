@@ -1,6 +1,7 @@
 /**
  * Workflows Page
- * Workflow list and explorer - click workflow to navigate to /workflows/:handle/:slug
+ * The recommended flows for getting started, then the workflow list and explorer — click a
+ * workflow to navigate to /workflows/:handle/:slug
  */
 
 import React, { useState, useEffect, useCallback } from "react";
@@ -8,6 +9,7 @@ import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { WorkflowFileInfo } from "types";
 import { WorkflowExplorer } from "../components/workflow/WorkflowExplorer";
+import { RecommendedFlows } from "../components/onboarding/RecommendedFlows";
 import { apiClient } from "../services/api-client";
 import { ROUTES } from "../constants/routes";
 import { ConfirmDialog } from "../components/confirm-dialog";
@@ -58,14 +60,26 @@ export const Workflows: React.FC = () => {
   };
 
   return (
-    <PageShell title={t("pages.workflows.title")} description={t("pages.workflows.subtitle")}>
-      <WorkflowExplorer
-        key={refreshKey}
-        onWorkflowSelect={handleWorkflowSelect}
-        onDelete={handleDeleteWorkflow}
-        currentUserHandle={currentUserHandle}
-        isAdmin={isAdmin}
-      />
+    <PageShell
+      title={t("pages.workflows.title")}
+      description={t("pages.workflows.subtitle")}
+      // The page scrolls as a whole: the recommended section sits above the list, and the list
+      // keeps a readable height of its own below it instead of being squeezed into what is left.
+      className="h-full flex flex-col overflow-y-auto p-6 md:p-8"
+    >
+      <RecommendedFlows />
+      <h2 className="mb-3 text-sm font-semibold" data-testid="all-flows-title">
+        {t("pages.workflows.allFlows")}
+      </h2>
+      <div className="flex min-h-[560px] flex-1 flex-col">
+        <WorkflowExplorer
+          key={refreshKey}
+          onWorkflowSelect={handleWorkflowSelect}
+          onDelete={handleDeleteWorkflow}
+          currentUserHandle={currentUserHandle}
+          isAdmin={isAdmin}
+        />
+      </div>
       <ConfirmDialog
         open={!!deleteTarget}
         onOpenChange={(open) => !open && setDeleteTarget(null)}

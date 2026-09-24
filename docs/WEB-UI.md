@@ -53,9 +53,16 @@ frontend/src/
 │   │   ├── reveal.ts                                                       # `requestReveal`: bring an element inside a diagram into the camera
 │   │   └── layoutPreset.ts / interactive.ts / useHighlightTarget.ts / useStoredFlag.ts / useRequest.ts
 │   ├── flow/                    # Flow page: the definition as a process, edited in place (`guideSteps.ts`: its walkthrough)
-│   │   ├── editing.tsx / model.ts / modes.ts        # Edit set (apply, export diff), run-less projection, the two views
+│   │   ├── editing.tsx / model.ts / modes.ts        # Edit set (apply, export diff), run-less projection, the three views
+│   │   ├── StepsView.tsx / stepsModel.ts            # The steps view: what the agent is told, drawn as numbered cards joined by arrows
+│   │   ├── StepsList.tsx                            # The steps view of a large flow: the same cards as a reading list with jump links
 │   │   ├── RegistryPanel.tsx                        # The variable registry (panel tab)
 │   │   └── EditControls.tsx                         # In-place editors (block text, transitions, owner, node text)
+│   ├── onboarding/              # What is recommended to newcomers
+│   │   ├── recommended.ts                           # The registry: learning examples per language, universal flows, which open on the steps view
+│   │   ├── RecommendedFlows.tsx                     # The recommended section (flow list: full; home: compact), one catalog lookup per page
+│   │   ├── beginnerPanels.ts                        # The beginner panels and the account's hidden set (user setting ui.hidden_panels)
+│   │   └── HidePanelButton.tsx                      # The one "Hide" control every beginner panel carries
 │   ├── run/                     # Run page: the execution as a process
 │   │   ├── MapView.tsx / CanvasView.tsx                                     # The map view (contents beside the diagram); its ported-card diagram
 │   │   ├── ContentsSidebar.tsx                                              # Contents rows, their fold state, `ContentsLayout` beside either diagram
@@ -70,14 +77,14 @@ frontend/src/
 │   │   ├── duration.ts / waiting.ts                                         # The engine's duration split worded in the interface language, clock formatting; who-is-waited-for wording
 │   │   └── modes.ts / nodeTypeStyle.tsx
 │   └── workflow/                # Workflow management
-│       ├── WorkflowExplorer.tsx # Workflow list with FilterBar + DataListView + useDebounce
+│       ├── WorkflowExplorer.tsx # Workflow list with FilterBar (filters folded) + DataListView + useDebounce
 │       ├── WorkflowGraph.tsx    # React Flow visualization with its diagram toolbar
-│       ├── WorkflowCard.tsx     # Compact single-row workflow card (icon + name left, owner center, badges right)
+│       ├── WorkflowCard.tsx     # A flow as a CardShell item: name and version, two-line description, when to pick it, owner/visibility/tags, attention badges
 │       ├── NodeDetailSheet.tsx  # Node detail panel (legacy, used in execution views)
 │       ├── WorkflowHeader.tsx   # Workflow metadata display
 │       ├── WorkflowVariablesPanel.tsx # Collapsible variables sidebar
 │       └── WorkflowVisualizationPage.tsx # Container component
-│   ├── QuickStartCard.tsx       # Per-client QuickStart tabs with setup instructions
+│   ├── QuickStartCard.tsx       # "Connect your agent": per-client setup tabs
 │   ├── notes/                   # Notes management components
 │   │   ├── NoteInlineEditor.tsx # Inline expandable card editor (create/edit)
 │   │   └── NoteHistoryDialog.tsx # Notes' source for the shared history dialog
@@ -88,8 +95,8 @@ frontend/src/
 │   └── playbooks/
 │       └── PlaybookEditor.tsx   # Inline playbook editor with the live-runs warning
 ├── pages/
-│   ├── Dashboard.tsx            # Home page with stat cards, Quick Start, recent ExecutionCards
-│   ├── Workflows.tsx            # Workflow explorer + viewer
+│   ├── Dashboard.tsx            # Home page: agent-first steps, connection card, recommended flows, the work area (components/home/WorkArea)
+│   ├── Workflows.tsx            # Recommended flows, then the workflow explorer
 │   ├── FlowPage.tsx             # Flow page: the workflow definition as a process, edit mode for owners
 │   ├── Executions.tsx           # Execution history (ExecutionCard list/grid)
 │   ├── Playbooks.tsx            # Playbooks page (PlaybookCard list/grid, editor, shared history)
@@ -107,7 +114,7 @@ frontend/src/
 │   │   ├── CodespaceLimitsPanel.tsx # Your limits card
 │   │   ├── OAuthSettings.tsx    # Connected apps (OAuth consents): search, paging, revoke
 │   │   ├── ApiTokensSettings.tsx # API token management (create, list, revoke)
-│   │   ├── PreferencesSettings.tsx # Theme and interface language
+│   │   ├── PreferencesSettings.tsx # Theme, interface language, and the beginner-panel switches
 │   │   └── settingsTours.ts     # Page, GitHub & Codespaces and Telegram tours
 │   ├── Admin.tsx                # Admin panel entry
 │   ├── AdminDashboard.tsx       # Admin dashboard with stats + merged analytics
@@ -186,36 +193,40 @@ refuses one and `diagram-interaction.spec.ts` sweeps both pages' DOM for them.
 
 Higher-level composable components in `src/components/`:
 
-| Component             | File                                | Purpose                                                                                                                                                               |
-| --------------------- | ----------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| PageHeader            | `page-header.tsx`                   | Page title, description, action slot, SidebarTrigger                                                                                                                  |
-| StatCard              | `stat-card.tsx`                     | KPI card with label, value, icon, optional Tremor SparkAreaChart sparkline                                                                                            |
-| StatusBadge           | `status-badge.tsx`                  | Execution status → semantic color mapping (running/waiting/completed/failed)                                                                                          |
-| DataListView          | `DataListView.tsx`                  | Universal data list wrapper: ViewToggle, grid/list layout, ServerPagination, PageLoader, EmptyState                                                                   |
-| DataTable             | `data-table/`                       | @tanstack/react-table wrapper with sorting, filtering, pagination                                                                                                     |
-| CardShell             | `cards/CardShell.tsx`               | Universal card wrapper: dual-mode (compact/list), action buttons, `alwaysVisible` for list mode                                                                       |
-| Card Components       | `cards/`                            | Reusable card components (ExecutionCard, NoteCard, ArtifactCard, etc.) built on CardShell                                                                             |
-| PageShell             | `PageShell.tsx`                     | Page layout wrapper: title, description, loading (skeleton), error states, action slot                                                                                |
-| FilterBar             | `FilterBar.tsx`                     | Standardized filter toolbar: search input, filters slot, actions slot, reset button                                                                                   |
-| LabeledFilter         | `LabeledFilter.tsx`                 | Wrapper adding visible label above any filter control                                                                                                                 |
-| SortSelect            | `SortSelect.tsx`                    | Combined sort field+direction dropdown (e.g., "Created ↓")                                                                                                            |
-| SearchableSelect      | `SearchableSelect.tsx`              | Combobox with text search for dynamic option lists (absolute dropdown + cmdk)                                                                                         |
-| TopWorkflowsTable     | `TopWorkflowsTable.tsx`             | Shared DataTable for admin top workflows (AdminDashboard, AdminAnalytics)                                                                                             |
-| ServerPagination      | `ServerPagination.tsx`              | Server-side pagination (total-based or cursor-based), matches DataTable style                                                                                         |
-| EmptyState            | `empty-state.tsx`                   | Centered icon + title + description + action CTA                                                                                                                      |
-| InlineError           | `inline-error.tsx`                  | Alert destructive with optional retry                                                                                                                                 |
-| PageLoader            | `page-loader.tsx`                   | Skeleton stat cards + table rows placeholder; only before a page's first data                                                                                         |
-| RouteSkeleton         | `route-skeleton.tsx`                | In-layout skeleton while a lazily loaded page's code arrives                                                                                                          |
-| DiagramSkeleton       | `route-skeleton.tsx`                | Quiet surface while the technical graph chunk arrives (flow and run pages)                                                                                            |
-| ConfirmDialog         | `confirm-dialog.tsx`                | AlertDialog wrapper with async onConfirm, loading state, ReactNode description                                                                                        |
-| RevisionHistoryDialog | `history/RevisionHistoryDialog.tsx` | Version history for anything the shared revision store versions; driven by a `RevisionHistorySource` (list, read revision, read current, restore); exports `DiffView` |
-| VisibilityToggle      | `access/VisibilityToggle.tsx`       | A resource's visibility as a badge (read-only) or a button that flips it; used by the flow page and playbooks                                                         |
+| Component             | File                                | Purpose                                                                                                                                                                 |
+| --------------------- | ----------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| PageHeader            | `page-header.tsx`                   | Page title, description, action slot, SidebarTrigger                                                                                                                    |
+| StatCard              | `stat-card.tsx`                     | KPI card with label, value, icon, optional Tremor SparkAreaChart sparkline                                                                                              |
+| StatusBadge           | `status-badge.tsx`                  | Execution status in the reader's language (`common.status.*`) with its semantic colour (running/waiting/completed/failed/locked)                                        |
+| DataListView          | `DataListView.tsx`                  | Universal data list wrapper: ViewToggle, grid/list layout, ServerPagination, PageLoader, EmptyState                                                                     |
+| DataTable             | `data-table/`                       | @tanstack/react-table wrapper with sorting, filtering, pagination                                                                                                       |
+| CardShell             | `cards/CardShell.tsx`               | The one list item: slots (icon, title, titleAside, description, note, meta, badges, actions) in list and grid views                                                     |
+| Card Components       | `cards/`                            | One card per list: ExecutionCard, NoteCard, ArtifactCard, PlaybookCard, DeletedWorkflowCard, AdminWorkflowCard, AuditLogCard, UserCard, TokenCard; pages only wire them |
+| PageShell             | `PageShell.tsx`                     | Page layout wrapper: title, description, loading (skeleton), error states, action slot                                                                                  |
+| FilterBar             | `FilterBar.tsx`                     | Standardized filter toolbar: search input, filters slot, actions slot, reset button; `foldFilters` puts filters and reset behind a counted "Filters" button             |
+| LabeledFilter         | `LabeledFilter.tsx`                 | Wrapper adding visible label above any filter control                                                                                                                   |
+| SortSelect            | `SortSelect.tsx`                    | Combined sort field+direction dropdown (e.g., "Created ↓")                                                                                                              |
+| SearchableSelect      | `SearchableSelect.tsx`              | Combobox with text search for dynamic option lists (absolute dropdown + cmdk)                                                                                           |
+| TopWorkflowsTable     | `TopWorkflowsTable.tsx`             | Shared DataTable for admin top workflows (AdminDashboard, AdminAnalytics)                                                                                               |
+| ServerPagination      | `ServerPagination.tsx`              | Server-side pagination (total-based or cursor-based), matches DataTable style                                                                                           |
+| EmptyState            | `empty-state.tsx`                   | Centered icon + title + description + action CTA                                                                                                                        |
+| InlineError           | `inline-error.tsx`                  | Alert destructive with optional retry                                                                                                                                   |
+| PageLoader            | `page-loader.tsx`                   | Skeleton stat cards + table rows placeholder; only before a page's first data                                                                                           |
+| RouteSkeleton         | `route-skeleton.tsx`                | In-layout skeleton while a lazily loaded page's code arrives                                                                                                            |
+| DiagramSkeleton       | `route-skeleton.tsx`                | Quiet surface while the technical graph chunk arrives (flow and run pages)                                                                                              |
+| ConfirmDialog         | `confirm-dialog.tsx`                | AlertDialog wrapper with async onConfirm, loading state, ReactNode description                                                                                          |
+| RevisionHistoryDialog | `history/RevisionHistoryDialog.tsx` | Version history for anything the shared revision store versions; driven by a `RevisionHistorySource` (list, read revision, read current, restore); exports `DiffView`   |
+| VisibilityToggle      | `access/VisibilityToggle.tsx`       | A resource's visibility as a badge (read-only) or a button that flips it; used by the flow page and playbooks                                                           |
 
 DataTable subcomponents: `column-header.tsx` (sortable headers), `pagination.tsx` (page nav + i18n props + aria-labels), `toolbar.tsx` (search + reset).
 
 ServerPagination: used on pages with server-side pagination (Executions, Notes, Artifacts, AdminArtifacts, AdminExecutions, AdminTokens, DeletedWorkflows, UserManagement, AuditLog). Rendered outside the scroll container (sticky at bottom). With the opt-in `embedded` prop it renders instead as a static footer inside a card (top rule, wraps on narrow screens, no separate "page X of Y" counter); the Settings page's Active sessions and Connected apps lists use it that way. Supports total-based mode (shows page X of Y, first/prev/next/last) and cursor-based mode (prev/next only). Uses `common.pagination` i18n keys.
 
-`useDynamicPageSize` hook (`hooks/useDynamicPageSize.ts`): calculates optimal page size from container height. Returns `{ pageSize, containerRef }`. Attach `containerRef` to the scrollable container div. Uses ResizeObserver with 500ms debounce. All list/table pages use this hook instead of hardcoded page sizes.
+`useListPageSize` hook (`hooks/useListPageSize.ts`): the page size of a card list — the list items, or the grid rows times the grid's columns, that fit the container, starting from `LIST_ITEM_HEIGHT` / `GRID_ROW_HEIGHT` and then sizing by the height of the items a view draws first, measured once per view so a later page's items never change the size and paging stays where the reader went; it follows a container that mounts after the list's loader and recomputes on resize. Returns `{ pageSize, containerRef, onViewModeChange }`; pass both to `DataListView`, and give the hook a callback that resets to page 1 when the size changes. Every `DataListView` page (the list pages above, AdminWorkflows, Playbooks and the flow list) uses it.
+
+`useLatestRequest` hook (`hooks/useLatestRequest.ts`): `beginRequest()` marks a new request and returns `isCurrent()`, true only until the next request begins. While a list's page size settles, two list requests can be in flight and the older may answer last, so every list loader (each list page and `useWorkflowList`) begins its request with it, drops a response or an error whose request is no longer current, and clears `loading` only for the current request. `useResource` uses the same hook; a list loader keeps no counter of its own (`tests/unit/web-frontend/list-latest-request.test.ts`).
+
+`useDynamicPageSize` hook (`hooks/useDynamicPageSize.ts`): the general measurement under it — page size from container height, a row height, and optional items per row, minimum rows and header overhead. Returns `{ pageSize, containerRef }`; ResizeObserver with 500ms debounce. No page calls it directly today; a paged table sized by its rows would.
 
 `useDebounce<T>` hook (`hooks/useDebounce.ts`): generic debounce for any value. Returns debounced value after specified delay (default 300ms). Used in Executions, Notes, AuditLog, AdminArtifacts, AdminTokens for search/filter inputs.
 
@@ -294,9 +305,101 @@ Sidebar navigation:
 
 Active route highlighting via NavLink isActive.
 
-### Quick Start Card
+### Home page
 
-Dashboard displays per-client Quick Start card with tabbed interface:
+The home page (`pages/Dashboard.tsx`, route `/`) leads with how Moira is meant to be used
+(`home-how-it-works`). It shows three numbered steps (`home-steps`):
+
+1. connect your agent;
+2. describe the task in plain words;
+3. the agent picks a ready flow or builds one through the Workflow Management Flow.
+
+A prompt to try follows (`home-try`), then the note that diagrams, variables and editing are
+optional (`home-optional`). Below come the connection card (`QuickStartCard`, titled "Connect your
+agent") and the compact recommended section (`RecommendedFlows variant="compact"`). All three are
+beginner panels the reader can hide.
+
+The work area follows (`components/home/WorkArea.tsx`, `work-area`), titled "Your work", from
+`GET /api/stats/summary`. Every item is a `CardShell` item.
+
+- **In progress** (`work-in-progress`): the runs not finished, each with its flow, the step it is on
+  ("At: …", named in the run page's order), its note, time and short id. It opens the run on a
+  click. A copy action (`work-resume-<id>`) puts "Continue the Moira run `<id>` from where it
+  stopped." on the clipboard: the agent continues a run, not the reader. A badge shows only for a
+  lock or errors.
+- **Recently finished** (`work-recent`): finished runs as `ExecutionCard` items; no run appears in
+  both lists.
+- **Your flows** (`work-flows`): the flows run most, with the description, the run count and last
+  run, and a copyable ready-to-say prompt (`work-flow-prompt`).
+  - Quick Task, Robust Task and Todo List of the system owner use their authored prompt
+    (`onboarding.universal.<key>.prompt`, looked up by `promptKey` in
+    `components/onboarding/recommended.ts`).
+  - Any other flow gets "Use Moira to run `<name>` for this task: …".
+- A section with nothing in it shows one line saying so.
+- A user with no runs sees one empty state instead (`work-empty`): what will appear, the try
+  prompt, and a pointer to the recommended flows above, or to the flow list once the reader has
+  hidden that panel (`work-empty-next`).
+- A step with no name to show reads as words from its node id ("Get task"), not the raw id.
+
+### Beginner panels
+
+The panels for newcomers:
+
+| Panel                                                    | Id                      | Where                      |
+| -------------------------------------------------------- | ----------------------- | -------------------------- |
+| How it works (`home-how-it-works`)                       | `home-intro`            | home page                  |
+| Connect your agent (`quick-start-card`)                  | `quick-start`           | home page                  |
+| Recommended flows, compact                               | `home-recommended`      | home page                  |
+| Recommended flows, full, with the agent-first note       | `workflows-recommended` | flow list                  |
+| The run's variables hint (`guidance-variables`)          | `run-variables-guide`   | run page, variables panel  |
+| The flow's declared-variables hint (`guidance-registry`) | `registry-guide`        | flow page, variables panel |
+
+The first four carry the same "Hide" control (`HidePanelButton`, `hide-panel` with `data-panel`); the
+two hints are `GuidanceCallout`s given a panel id, whose close button then hides them for the account
+(a callout without an id still closes for the page load, as the block panel's empty state does). One
+click hides the panel; a notice says where to bring it back and offers Undo (`hidePanelWithUndo`).
+A hidden panel renders nothing.
+
+Which panels are hidden belongs to the account: the user setting `ui.hidden_panels` (category
+`ui`, type `json`, a list of panel ids, default empty), seeded like every built-in definition and
+written with the bulk `PUT /api/settings`. `components/onboarding/beginnerPanels.ts` holds the ids and
+one in-page copy of the set, keyed by the signed-in account, that every panel and the Settings
+switches read (`usePanelVisible`, `useBeginnerPanels`, `setPanelHidden`). A panel is drawn only once
+the set is known. A change shows at once; saves run one after another and each applies its change to
+the list re-read from the server, so quick successive hides are all kept and another device's change
+is never undone. A save the server refuses is taken back and reported. Ids the build does not know
+are ignored. The server holds the setting to its declared schema (a list of unique strings) on every
+write path.
+
+Settings → Preferences lists every beginner panel with shown/hidden switches
+(`preferences-beginner-panels`, `beginner-panel-switch`); it is where a hidden panel comes back.
+
+### Recommended flows
+
+`components/onboarding/recommended.ts` is the one place that knows what is recommended to
+newcomers:
+
+- the three learning examples (`example-simple-steps`, `example-one-choice`,
+  `example-several-paths`), offered as their `-ru` twins when the interface language is Russian;
+- the universal flows Quick Task, Robust Task and Todo List.
+
+All of them are system flows addressed as `moira/<slug>`. Their titles, what each does and, for the
+universal flows, when to pick it are interface text (`onboarding.*`). `preferredFlowView` makes
+the learning examples open on the steps view.
+
+`RecommendedFlows` looks the slugs up once per page with `GET /api/workflows?slugs=…&visibility=public`,
+and offers only the system-owned flows the answer contains. A second mount, or the other page,
+reuses the lookup; a failed lookup is retried on the next mount. With nothing to offer, the section
+is not drawn.
+
+On the flow list the section is full and foldable (`recommended-toggle`, "Collapse" / "Expand"; the
+fold is remembered in `localStorage` under `moira.workflows.recommendedCollapsed`) and shows when to
+pick each universal flow. On the home page it is compact. Both are beginner panels: the fold is this
+browser's quick one, while "Hide" removes the section for the account.
+
+### Connection card
+
+The home page's connection card ("Connect your agent", `QuickStartCard`) has a tabbed interface:
 
 - Tabs for 11 MCP clients: Claude Code, Copilot CLI, Cursor, Claude Desktop, VS Code, Claude Web, ChatGPT, Perplexity, Continue, Zed, Gemini CLI
 - Setup instructions rendered by `setupType`: `gui` (description with `whitespace-pre-line`), `config` (JSON code block), `cli` (primary + auth + alternative commands), `deeplink` (button + auth + alternative)
@@ -334,15 +437,15 @@ One page at `/settings` whose sections are all always mounted. `Settings.tsx` do
 **Sections** (each a `SettingsSection`: icon, heading, one-sentence description, optional
 `HelpPopover` and actions; the anchor is the section `id`):
 
-| Anchor                | Section             | `data-testid`                   | Content                                                                                                                                                                                                                                                  |
-| --------------------- | ------------------- | ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `account`             | Account             | `settings-section-profile`      | `ProfileSettings`: name, email with verification badge, handle with a help popover on why changing it breaks links and a confirmation                                                                                                                    |
-| `security`            | Security & sign-in  | `settings-section-security`     | `SecuritySettings`: the change-password form, or for an account that signs in only through a social provider, how it signs in and a set-password form; an Active Sessions subsection (`settings-section-sessions`, help popover) with `SessionsSettings` |
-| `notifications`       | Notifications       | `settings-section-dynamic`      | One `CommunicationChannelCard` per channel, a help popover, the **Telegram setup** tour button when Telegram is present, an empty state without channels                                                                                                 |
-| `integrations-github` | GitHub & Codespaces | `settings-section-integrations` | Help popover, **Setup guide** tour, and the connection, Cloud codespaces, Automatic pause and Your limits cards under one `GitHubCodespacesProvider`                                                                                                     |
-| `connected-apps`      | Connected apps      | `settings-section-oauth`        | `OAuthSettings` with a help popover                                                                                                                                                                                                                      |
-| `api-tokens`          | API tokens          | `settings-section-api-tokens`   | `ApiTokensSettings` with a help popover on when a token is needed, the Bearer header and the one-time display                                                                                                                                            |
-| `preferences`         | Preferences         | `settings-section-preferences`  | `PreferencesSettings` theme (Light/Dark/System, via `useTheme`) and interface language, both kept in this browser; then the generic editor for remaining definitions (`settings-section-other`)                                                          |
+| Anchor                | Section             | `data-testid`                   | Content                                                                                                                                                                                                                                                         |
+| --------------------- | ------------------- | ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `account`             | Account             | `settings-section-profile`      | `ProfileSettings`: name, email with verification badge, handle with a help popover on why changing it breaks links and a confirmation                                                                                                                           |
+| `security`            | Security & sign-in  | `settings-section-security`     | `SecuritySettings`: the change-password form, or for an account that signs in only through a social provider, how it signs in and a set-password form; an Active Sessions subsection (`settings-section-sessions`, help popover) with `SessionsSettings`        |
+| `notifications`       | Notifications       | `settings-section-dynamic`      | One `CommunicationChannelCard` per channel, a help popover, the **Telegram setup** tour button when Telegram is present, an empty state without channels                                                                                                        |
+| `integrations-github` | GitHub & Codespaces | `settings-section-integrations` | Help popover, **Setup guide** tour, and the connection, Cloud codespaces, Automatic pause and Your limits cards under one `GitHubCodespacesProvider`                                                                                                            |
+| `connected-apps`      | Connected apps      | `settings-section-oauth`        | `OAuthSettings` with a help popover                                                                                                                                                                                                                             |
+| `api-tokens`          | API tokens          | `settings-section-api-tokens`   | `ApiTokensSettings` with a help popover on when a token is needed, the Bearer header and the one-time display                                                                                                                                                   |
+| `preferences`         | Preferences         | `settings-section-preferences`  | `PreferencesSettings` theme (Light/Dark/System, via `useTheme`) and interface language, both kept in this browser; the beginner-panel switches (the account's `ui.hidden_panels`); then the generic editor for remaining definitions (`settings-section-other`) |
 
 **Tours:** `settingsTours.ts` defines the page tour, the GitHub & Codespaces setup tour and the
 Telegram setup tour, run by the shared `Walkthrough` and addressed by `?tour=<id>&guide=<step>`, so a
@@ -423,8 +526,8 @@ global/provider kill switches with a reason field and confirmed stop/resume.
   stored settings for the authenticated user and the common communication service.
 - Saving a mapped setting refreshes descriptor state from the server. Definitions not mapped to a
   communication channel render in Preferences, except categories another section owns (`profile`,
-  `security`, `oauth`, `sessions`, `api-tokens`, and `codespaces`, which the Automatic pause card
-  edits). The theme is a browser preference (the Preferences theme control), not a user setting.
+  `security`, `oauth`, `sessions`, `api-tokens`, `codespaces`, which the Automatic pause card
+  edits, and `ui`, which the beginner-panel switches edit). The theme is a browser preference (the Preferences theme control), not a user setting.
 - Channel fields and test controls have accessible names; capability and state labels remain visible
   without hover.
 
@@ -529,9 +632,16 @@ notes disappear, and the map reads its guidance from `pages.flowPage.modeGuide`.
 diagnostics are also shown on the offending block or step (`DiagnosticBadge`), and the registry
 panel edits a whole declaration as JSON Schema besides its type, description and default.
 
-**URL state:** `view` (`map | graph`, default map, registry `components/flow/modes.ts`; any other
-value resolves to `map`; `graph` is the only view of a workflow without `progress`), `block`,
-`guide` (walkthrough step), `edit` (`1` turns on edit mode; ignored for non-owners).
+**URL state:**
+
+- `view` (`steps | map | graph`, registry `components/flow/modes.ts`): the default is `steps` for
+  the learning examples (`preferredFlowView`) and `map` otherwise; any other value resolves to that
+  default; a workflow without `progress` has no map and shows the graph in its place.
+- `block`.
+- `guide` (walkthrough step).
+- `edit` (`1` turns on edit mode; ignored for non-owners).
+- `inline` (`1` or `0`: variables as words on the steps view; without it the reader's stored
+  choice, `moira.flow.inlineVariables`, default on).
 
 **Layout:** the `PageHeader` (`flow-header`) carries the page's text and its own actions — back,
 the workflow name (`flow-title`), `v<version>` as the meta, the description as the header line,
@@ -558,8 +668,46 @@ selected step, which is where a node's details live — including the validation
 catalog configuration sections. The panel is therefore mounted for the graph view and for a
 workflow without `progress` as well; its block level then shows the empty-state callout.
 
-Only the view the tab names is mounted (`flow-view`, `data-view`): the map is `MapView`, and the
-graph is `WorkflowGraph` inside a `ContentsLayout`, so the contents sidebar sits beside both — a
+Only the view the tab names is mounted (`flow-view`, `data-view`). The steps view is `StepsView`,
+and the page's panel is not mounted beside it:
+
+- `stepsModel` walks the definition from its start node in authored order. Agent steps become
+  numbered instruction cards; a condition is a check Moira makes; the engine's other nodes are
+  small system cards; ends are finish markers.
+- Only a node with more than one way out labels its edges. A connection to a node the walk is
+  still inside is a dashed return labelled "back to step N". Nodes reached only by teleport are
+  left out.
+- ELK lays the cards out top to bottom, with card heights measured on a canvas. The shared
+  `DiagramViewport`, the `DiagramToolbar` (without presets; with the **Variables as words** switch,
+  `steps-inline-toggle`) and `useOpeningPlacement` provide the rest.
+- `TemplateText inline` reads each `{{name}}` as `humanizeVariable(name)`, with the registry
+  description in a `Hint`.
+- If the layout engine cannot be loaded or rejects the graph, the view shows an error line
+  (`steps-layout-failed`) instead of the loading state.
+- `stepsPresentation` picks the presentation by size: at most `DIAGRAM_MAX_CARDS` (12) walked
+  cards are drawn as above. Any larger flow is a reading list (`StepsList`, `steps-list`): no
+  layout, no zoom (the toolbar's zoom handlers are optional). Its parts:
+  - the cards in walk order in a centred column, at normal size with the whole text;
+  - each card ending with its way on ("Next:" with a link, labelled choices with links, "back to
+    step N");
+  - links as anchors (`#step-<id>`) that go to the card through the shared `useHighlightTarget`
+    with `focus`: it scrolls into view (instantly under reduced motion), takes focus (cards are
+    `tabIndex=-1`) and is marked (`data-highlighted`); the same hash, on load or
+    set on the open page (`hashchange`), opens the list at that card and is then dropped from the
+    address, so a later model change does not pull the reader back;
+  - "Step N" as an `h2` on each instruction card (the number badge is `aria-hidden`);
+  - checks and system nodes as compact rows; a link to one names its place ("…, before step N"),
+    with its order ("(#2)") where two would read alike, and a return to one reads "back to: …".
+
+  The view carries `data-presentation`. Cards keep `steps-card` with `data-step-kind` and
+  `data-node-id`, so the walkthrough's anchor holds on both.
+
+- With words on, `TemplateText` also reads the engine's template blocks: `#if`, `#unless`, `#eq`,
+  `#neq`, `#each`, `else`, `this` and `@index` become short words in parentheses
+  (`components.diagram.template.*`), and closing tags are dropped. With words off, the text is
+  shown as authored.
+
+The map is `MapView`, and the graph is `WorkflowGraph` inside a `ContentsLayout`, so the contents sidebar sits beside both — a
 workflow without `progress` has no blocks to list and shows the graph alone. The
 graph receives `focusRequest` (a chosen node brought into view), `selectedBlockId` (the block's
 group is ringed and pulses on arrival) and the page's toolbar slots, and it takes its contents
@@ -578,8 +726,9 @@ are applied). The save calls
 `apiClient.updateWorkflow(id, edited, fileInfo.revision)` (`PUT /api/workflows/:id`); a 409 shows
 the conflict text and a 400 the server's message, both keeping the edits; a success clears them and
 reloads the detail and then the process for the new revision, the previous picture staying mounted
-through both. The walkthrough (`Walkthrough`, generic over the page's views) explains block,
-step, evidence, loop, editing and the views.
+through both. The walkthrough (`Walkthrough`, generic over the page's views) opens on
+the agent-first message (anchored on the page header), then the steps view (an instruction card, or
+the **Steps** tab on the map and the graph), then block, step, evidence, loop, editing and the views.
 
 ### Run page (ExecutionInspector component)
 
@@ -1099,27 +1248,36 @@ WorkflowCard and FlowPage show "Shared" badge when `accessType === "shared"`:
 
 ### Workflow Card Layout
 
-WorkflowCard displays workflows in a compact single-row format:
+`WorkflowCard` draws a flow through the `CardShell` slots:
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
-│ [icon] Name v1.0.0          @owner         [✓] [🌐] [🗑]        │
+│ [icon] Name  v1.0.0                              [Invalid] [🗑]  │
+│        What the flow does, in up to two readable lines…          │
+│        Pick it when … (recommended universal flows only)         │
+│        @owner  🌐 Public  tag  tag  tag +2                       │
 └──────────────────────────────────────────────────────────────────┘
 ```
 
-**Layout Sections:**
+- **Title line:** the name, the version beside it, and badges only for what needs attention: not
+  valid (`workflow-card-invalid`), not yet validated (`workflow-card-unknown`, from the cached
+  `validation.status`), shared with you (`shared-with-you-badge`).
+- **Description** (`workflow-card-description`): two lines in the list, three in the grid; the whole
+  text in a tooltip on hover over it.
+- **When to pick it** (`workflow-card-when`): the authored onboarding text, for the recommended
+  universal flows only (`whenToPickKey` in `onboarding/recommended.ts`).
+- **Meta:** owner handle (`workflow-card-owner`), visibility in words, up to three tags and a count
+  of the rest.
+- **Delete** (`workflow-card-delete`): on the reader's own flows or for an administrator, shown on
+  hover or focus.
 
-- Left: GitBranch icon + workflow name (truncated) + version badge
-- Center: Owner handle (@username) - hidden on mobile
-- Right: Validation badge (icon) + Visibility badge + Delete button (on hover)
+### Flow list scopes
 
-**Responsive Behavior:**
-
-- Owner handle: `hidden sm:block`
-- Badge text: `hidden md:inline` (icons always visible)
-- Delete button: `opacity-0 group-hover:opacity-100`
-
-**Tooltip:** Description appears on hover (300ms delay) via Radix UI Tooltip
+Tabs above the list (`workflow-scopes`, `workflow-scope-<scope>`) say whose flows are listed:
+All, Mine, Shared with me, Catalog. Each is one `GET /api/workflows?access=…` query, so sort and
+pages hold inside it, and switching resets to the first page. The status filter offers valid,
+invalid and not checked, and is part of the same query. The page size follows the view mode that
+`DataListView` reports (`onViewModeChange`).
 
 ### Playbooks Page
 
@@ -1411,7 +1569,11 @@ interface WorkflowExplorerProps {
 
 ### Workflow Explorer Toolbar
 
-WorkflowExplorer uses `FilterBar` with inline Select controls:
+The flow list page (`pages/Workflows.tsx`) scrolls as a whole: the recommended section, then "All
+flows" and the explorer, which keeps a readable height of its own. WorkflowExplorer uses `FilterBar`
+with `foldFilters`: the search is always shown; status, visibility, sort and reset open from the
+"Filters" button (`filters-toggle`), which counts the filters in effect and keeps them open while
+any is. Opened:
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -1806,12 +1968,20 @@ i18n
     resources: { en: { translation: en }, ru: { translation: ru } },
     supportedLngs: SUPPORTED_LANGUAGE_CODES,
     fallbackLng: ["en"],
+    // React escapes what it renders; no translation is rendered as raw HTML
+    interpolation: { escapeValue: false },
     detection: {
-      order: ["localStorage", "navigator"],
+      order: ["querystring", "localStorage", "navigator"], // ?lang=ru|en first
+      lookupQuerystring: "lang",
       caches: ["localStorage"],
     },
   });
 ```
+
+Interpolated values are not HTML-escaped by i18n, so a name with an apostrophe reads as written;
+React escapes the rendered text. The shared card formatters (`formatRelativeTime`, `formatDate` in
+`components/cards/format-utils.ts`) read the interface language: relative times come from
+`common.relativeTime.*`.
 
 The diagram, run and flow components carry no translation fallbacks — no `defaultValue`, no
 second-argument default — so a key missing from one language surfaces in the parity test rather
@@ -1855,6 +2025,7 @@ src/
   "pages": {
     "dashboard": {
       "title", "loading", "error", "retry",
+      "how": { "title", "subtitle", "steps": { "connect", "describe", "agent" }, "tryTitle", "tryPrompt", "optional" },
       "stats": { "totalWorkflows", "executions", "settings", "clickToView", "clickToConfigure" },
       "quickStart": { "title", "description", "configLabel", "copy", "copied", "learnMore", "documentation" },
       "recentWorkflows": { "title", "empty" },
@@ -1862,6 +2033,7 @@ src/
       "time": { "justNow", "minutesAgo", "hoursAgo", "daysAgo", "running" }
     },
     "workflows": {
+      "title", "subtitle", "allFlows",
       "explorer": { "title", "workflows", "loading", "failedToLoad", "retry", "noWorkflows", "noMatch", "statistics", "valid", "invalid", "of" },
       "time": { "today", "yesterday", "daysAgo" }
     },
@@ -1891,6 +2063,12 @@ src/
       "quota": { "storage", "artifacts" },
       "pagination": { "showing", "page", "previous", "next" }
     }
+  },
+  "onboarding": {
+    "title", "agentFirst", "hide", "show", "open", "whenLabel",
+    "examplesTitle", "examplesSubtitle", "universalTitle", "universalSubtitle",
+    "examples": { "simpleSteps", "oneChoice", "severalPaths" },   // each { "title", "description" }
+    "universal": { "quickTask", "robustTask", "todoList" }        // each { "title", "description", "when" }
   },
   "admin": {
     "dashboard": { "title", "failedToLoad", "stats", "systemHealth", "recentActivity", "quickLinks" },
@@ -2247,7 +2425,7 @@ export const MyPage: React.FC = () => {
 
 ### Adding a New Card Component
 
-Cards live in `components/cards/`. Each card has a `compact` prop for grid vs list layout:
+Cards live in `components/cards/`. Each fills `CardShell`'s slots; the shell lays them out for the list view and, with `compact`, the grid view:
 
 ```tsx
 import { CardShell } from "./CardShell";
@@ -2259,15 +2437,15 @@ interface MyCardProps {
 }
 
 export const MyCard: React.FC<MyCardProps> = ({ data, compact, onClick }) => (
-  <CardShell compact={compact} onClick={onClick}>
-    {compact ? (
-      // Vertical layout for grid view
-      <div className="space-y-1">...</div>
-    ) : (
-      // Horizontal layout for list view
-      <div className="flex items-center gap-3">...</div>
-    )}
-  </CardShell>
+  <CardShell
+    compact={compact}
+    onClick={onClick}
+    icon={<FileText />}
+    title={data.name}
+    description={data.summary}
+    meta={<span>{formatRelativeTime(data.updatedAt)}</span>}
+    testId="my-card"
+  />
 );
 ```
 
@@ -2314,4 +2492,4 @@ Use `LabeledFilter` for visible labels, `SearchableSelect` for dynamic lists, pl
 
 ### Server-Side Pagination Pattern
 
-Backend returns `{ data: { items: [...], total, limit, offset } }`. Frontend uses `DataListView` with `mode: "total"` pagination. Use `useDynamicPageSize()` for responsive page sizes.
+Backend returns `{ data: { items: [...], total, limit, offset } }`. Frontend uses `DataListView` with `mode: "total"` pagination. Use `useListPageSize()` for responsive page sizes.

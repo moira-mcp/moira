@@ -105,6 +105,7 @@ export class InMemoryRepository implements IDataRepository {
     const {
       userId,
       search,
+      slugs,
       visibility,
       sort = "createdAt",
       sortOrder = "desc",
@@ -143,6 +144,11 @@ export class InMemoryRepository implements IDataRepository {
         // In-memory uses unknown validation status (not cached)
         validation: { status: "unknown", errors: [], validatedAt: null },
       });
+    }
+
+    // Exact slugs (in-memory uses the ID as the slug)
+    if (slugs) {
+      workflows = workflows.filter((w) => slugs.includes(w.slug));
     }
 
     // Search filter
@@ -397,6 +403,27 @@ export class InMemoryRepository implements IDataRepository {
       lastCompletedAt: stamped.length ? Math.max(...stamped.map(completedAt)) : null,
       unstamped: completed.filter((e) => !e.workflowVersion).length,
     };
+  }
+
+  async countRunsByWorkflow(
+    userId: string,
+    limit: number,
+  ): Promise<Array<{ workflowId: string; runs: number; lastRunAt: number }>> {
+    const byWorkflow = new Map<string, { workflowId: string; runs: number; lastRunAt: number }>();
+    for (const e of this.executions.values()) {
+      if (e.userId !== userId) continue;
+      const entry = byWorkflow.get(e.workflowId) ?? {
+        workflowId: e.workflowId,
+        runs: 0,
+        lastRunAt: 0,
+      };
+      entry.runs += 1;
+      entry.lastRunAt = Math.max(entry.lastRunAt, e.createdAt);
+      byWorkflow.set(e.workflowId, entry);
+    }
+    return Array.from(byWorkflow.values())
+      .sort((a, b) => b.runs - a.runs || b.lastRunAt - a.lastRunAt)
+      .slice(0, limit);
   }
 
   async listExecutionsWithFilters(filter: ExecutionFilter): Promise<ExecutionListResult> {

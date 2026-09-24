@@ -14,7 +14,8 @@ import { Button } from "../components/ui/button";
 import { Progress } from "../components/ui/progress";
 import { PageShell } from "../components/PageShell";
 import { FilterBar } from "../components/FilterBar";
-import { useDynamicPageSize } from "../hooks/useDynamicPageSize";
+import { useListPageSize } from "../hooks/useListPageSize";
+import { useLatestRequest } from "../hooks/useLatestRequest";
 import { ArtifactCard } from "../components/cards";
 import { formatSize } from "../components/cards/format-utils";
 import type { ArtifactCardData } from "../components/cards";
@@ -55,7 +56,7 @@ interface ArtifactStats {
 
 export const Artifacts: React.FC = () => {
   const { t } = useTranslation();
-  const { pageSize, containerRef } = useDynamicPageSize();
+  const { pageSize, containerRef, onViewModeChange } = useListPageSize(() => setCurrentPage(1));
 
   // Data state
   const [artifacts, setArtifacts] = useState<ArtifactListItem[]>([]);
@@ -97,7 +98,9 @@ export const Artifacts: React.FC = () => {
   }, []);
 
   // Load artifacts
+  const beginRequest = useLatestRequest();
   const loadArtifacts = useCallback(async () => {
+    const isCurrent = beginRequest();
     try {
       setLoading(true);
 
@@ -106,16 +109,18 @@ export const Artifacts: React.FC = () => {
         offset: (currentPage - 1) * pageSize,
       });
 
+      if (!isCurrent()) return;
       setArtifacts(result.artifacts);
       setTotal(result.total);
       setError(null);
     } catch (err: unknown) {
+      if (!isCurrent()) return;
       const message = err instanceof Error ? err.message : t("common.errors.failedToLoad");
       setError(message);
     } finally {
-      setLoading(false);
+      if (isCurrent()) setLoading(false);
     }
-  }, [currentPage, pageSize, t]);
+  }, [beginRequest, currentPage, pageSize, t]);
 
   useEffect(() => {
     loadArtifacts();
@@ -285,6 +290,7 @@ export const Artifacts: React.FC = () => {
       />
 
       <DataListView
+        onViewModeChange={onViewModeChange}
         items={artifacts}
         renderCard={(artifact, viewMode) => (
           <ArtifactCard

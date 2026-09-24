@@ -3,7 +3,7 @@ title: Moira Documentation
 description: Agent Workflow Engine - Complete documentation
 template: splash
 hero:
-  tagline: Build structured workflows for AI agents with clear directives and success criteria
+  tagline: Your agent follows a clear process, one checked step at a time. You describe the task; the agent picks a ready flow or builds one.
   actions:
     - text: Get Started
       link: ./getting-started/introduction/
@@ -16,29 +16,30 @@ hero:
 
 import { Card, CardGrid } from "@astrojs/starlight/components";
 
-## Core Features
+## How it works
 
 <CardGrid>
-  <Card title="Workflow Execution" icon="setting">
-    Define multi-step processes with node graphs. Each node contains a directive (what to do) and
-    completion condition (when done).
+  <Card title="Describe the task" icon="pencil">
+    Tell your agent what you need in plain words. You do not have to learn how flows are built.
   </Card>
-  <Card title="MCP Protocol" icon="puzzle">
-    Standard Model Context Protocol integration. Works with Claude Code, Cursor, and any
-    MCP-compatible client.
+  <Card title="The agent picks the flow" icon="rocket">
+    It runs a ready flow that fits, or creates a new one for your task through the Workflow
+    Management Flow — as simple or as complex as the task needs.
   </Card>
-  <Card title="Template Engine" icon="document">
-    Dynamic content with variable interpolation. Access execution context, results, and metadata in
-    your workflows.
+  <Card title="Every step is checked" icon="approve-check">
+    Moira hands the agent one instruction at a time and validates its evidence before the process
+    moves on, so nothing is skipped.
   </Card>
-  <Card title="Multi-Language" icon="translate">
-    Full i18n support. Create workflows and documentation in multiple languages.
+  <Card title="Look inside when you want" icon="open-book">
+    The web app shows any flow as plain numbered steps, as a process map or as the full graph. All
+    of it is optional.
   </Card>
 </CardGrid>
 
-## Quick Links
+## Start here
 
-- [Introduction](/docs/getting-started/introduction/) - What is Moira and why use it
-- [Quick Start](/docs/getting-started/quickstart/) - Connect Moira to your AI client
-- [Workflows](/docs/concepts/workflows/) - Understanding workflow structure
-- [Nodes](/docs/concepts/nodes/) - Node types and configuration
+1. [Introduction](/docs/getting-started/introduction/) - What Moira does and why you do not need to build flows
+2. [Quick Start](/docs/getting-started/quickstart/) - Connect Moira to your AI client and run a first flow
+3. [Tutorial: your first flows](/docs/getting-started/tutorial/) - Three tiny learning flows
+4. [Which ready flow to use](/docs/getting-started/ready-flows/) - Quick Task, Robust Task and Todo List
+5. [Workflows](/docs/concepts/workflows/) and [Nodes](/docs/concepts/nodes/) - How flows are built, when you want to go deeper
