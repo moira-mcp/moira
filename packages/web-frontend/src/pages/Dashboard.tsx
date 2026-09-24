@@ -3,30 +3,22 @@
  * Dashboard Page — the home page.
  * Leads with how Moira is meant to be used: connect your agent, describe the task in plain words,
  * and let the agent pick a ready flow or build one — learning flows is optional. Then the agent
- * connection (per-client setup), a prompt to try, the recommended flows, and the overview: stat
- * cards, recent workflows and recent executions.
+ * connection (per-client setup), a prompt to try, the recommended flows, and the work area: the
+ * runs in progress with their step, the latest runs and the flows the user runs most.
  *
  * Note: console.error used for browser debugging of API errors
  */
 
 import React, { useState, useEffect, useCallback } from "react";
-import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { Workflow, Play, StickyNote, Plug, MessageSquareText, Route } from "lucide-react";
-import apiClient from "../services/api-client";
-import { ROUTES } from "../constants/routes";
+import { Plug, MessageSquareText, Route } from "lucide-react";
+import apiClient, { type WorkSummary } from "../services/api-client";
 import { HidePanelButton } from "../components/onboarding/HidePanelButton";
 import { usePanelVisible } from "../components/onboarding/beginnerPanels";
 import { QuickStartCard } from "../components/QuickStartCard";
 import { RecommendedFlows } from "../components/onboarding/RecommendedFlows";
 import { PageShell } from "../components/PageShell";
-import { StatCard } from "../components/stat-card";
-import { EmptyState } from "../components/empty-state";
-import { formatRelativeTime } from "../components/cards/format-utils";
-import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
-import { Badge } from "../components/ui/badge";
-import { ExecutionCard } from "../components/cards/ExecutionCard";
-import { normalizeExecution } from "../components/cards/normalize-execution";
+import { WorkArea } from "../components/home/WorkArea";
 
 const HOW_IT_WORKS = [
   { key: "connect", icon: Plug },
@@ -85,43 +77,11 @@ function HowItWorks(): React.JSX.Element | null {
   );
 }
 
-interface DashboardStats {
-  workflowsCount: number;
-  executionsCount: number;
-  notesCount: number;
-}
-
-interface RecentWorkflow {
-  id: string;
-  name: string;
-  description?: string;
-  visibility: string;
-  createdAt?: string;
-}
-
-interface RecentExecution {
-  id: string;
-  workflowId: string;
-  workflowName?: string | null;
-  note?: string | null;
-  status: string;
-  startTime: string;
-  endTime?: string;
-  duration: number | null;
-}
-
-interface StatsData {
-  stats: DashboardStats;
-  recentWorkflows: RecentWorkflow[];
-  recentExecutions: RecentExecution[];
-}
-
 export const Dashboard: React.FC = () => {
-  const navigate = useNavigate();
   const { t } = useTranslation();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [data, setData] = useState<StatsData | null>(null);
+  const [data, setData] = useState<WorkSummary | null>(null);
 
   const loadDashboardData = useCallback(async () => {
     try {
@@ -165,92 +125,7 @@ export const Dashboard: React.FC = () => {
 
       <RecommendedFlows variant="compact" />
 
-      {/* Stat Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
-        <StatCard
-          label={t("pages.dashboard.stats.totalWorkflows")}
-          value={data.stats.workflowsCount}
-          icon={Workflow}
-          className="cursor-pointer hover:bg-muted/50 transition-colors"
-          onClick={() => navigate(ROUTES.WORKFLOWS)}
-        />
-        <StatCard
-          label={t("pages.dashboard.stats.executions")}
-          value={data.stats.executionsCount}
-          icon={Play}
-          className="cursor-pointer hover:bg-muted/50 transition-colors"
-          onClick={() => navigate(ROUTES.EXECUTIONS)}
-        />
-        <StatCard
-          label={t("pages.dashboard.stats.notes")}
-          value={data.stats.notesCount}
-          icon={StickyNote}
-          className="cursor-pointer hover:bg-muted/50 transition-colors"
-          onClick={() => navigate(ROUTES.NOTES)}
-        />
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Recent Workflows */}
-        <Card>
-          <CardHeader>
-            <CardTitle>{t("pages.dashboard.recentWorkflows.title")}</CardTitle>
-          </CardHeader>
-          <CardContent data-testid="dashboard-recent-workflows">
-            {data.recentWorkflows.length === 0 ? (
-              <EmptyState icon={Workflow} title={t("pages.dashboard.recentWorkflows.empty")} />
-            ) : (
-              <div className="space-y-3">
-                {data.recentWorkflows.map((workflow) => (
-                  <div
-                    key={workflow.id}
-                    className="p-3 border border-border rounded-lg hover:bg-muted/50 transition-colors cursor-pointer"
-                    onClick={() => navigate(`${ROUTES.WORKFLOWS}/${workflow.id}`)}
-                  >
-                    <div className="font-medium truncate">{workflow.name}</div>
-                    {workflow.description && (
-                      <div className="text-sm text-muted-foreground mt-1 line-clamp-2">
-                        {workflow.description}
-                      </div>
-                    )}
-                    <div className="flex items-center gap-2 mt-2">
-                      <Badge variant="secondary">{workflow.visibility}</Badge>
-                      {workflow.createdAt && (
-                        <span className="text-xs text-muted-foreground">
-                          {formatRelativeTime(workflow.createdAt)}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        {/* Recent Executions */}
-        <Card>
-          <CardHeader>
-            <CardTitle>{t("pages.dashboard.recentExecutions.title")}</CardTitle>
-          </CardHeader>
-          <CardContent data-testid="dashboard-recent-executions">
-            {data.recentExecutions.length === 0 ? (
-              <EmptyState icon={Play} title={t("pages.dashboard.recentExecutions.empty")} />
-            ) : (
-              <div className="space-y-2">
-                {data.recentExecutions.map((execution) => (
-                  <ExecutionCard
-                    key={execution.id}
-                    execution={normalizeExecution(execution)}
-                    compact
-                    onClick={() => navigate(`${ROUTES.EXECUTIONS}/${execution.id}`)}
-                  />
-                ))}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      </div>
+      <WorkArea summary={data} />
     </PageShell>
   );
 };

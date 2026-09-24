@@ -5,7 +5,7 @@
 
 import { test, expect } from "./fixtures.js";
 import { loginAsAdmin } from "./helpers/auth-helper.js";
-import { getTestBaseUrl, getTestFetchUrl } from "../utils/test-config.js";
+import { getTestBaseUrl } from "../utils/test-config.js";
 
 test.describe("Step 24: Navigation, Dashboard, Card Fixes", () => {
   test.beforeEach(async ({ page }) => {
@@ -36,58 +36,6 @@ test.describe("Step 24: Navigation, Dashboard, Card Fixes", () => {
     // Admin should not be in dropdown
     const adminMenuItem = page.locator('[role="menuitem"]:has-text("Admin")');
     await expect(adminMenuItem).toHaveCount(0);
-  });
-
-  test("4. Stats API returns notesCount", async ({ page }) => {
-    const cookies = await page.context().cookies();
-    const cookieHeader = cookies.map((c) => `${c.name}=${c.value}`).join("; ");
-    const response = await page.request.get(`${getTestFetchUrl()}/api/stats/summary`, {
-      headers: { Cookie: cookieHeader },
-    });
-    expect(response.ok()).toBeTruthy();
-    const body = await response.json();
-    expect(body.success).toBe(true);
-    expect(body.data.stats).toHaveProperty("notesCount");
-    expect(typeof body.data.stats.notesCount).toBe("number");
-    // settingsCount should NOT be present
-    expect(body.data.stats).not.toHaveProperty("settingsCount");
-  });
-
-  test("5. Dashboard shows Notes stat card", async ({ page }) => {
-    await page.goto(`${getTestBaseUrl()}/`);
-    await page.waitForSelector("text=Notes");
-    // The stat card should be present
-    const notesCard = page.locator("text=Notes").first();
-    await expect(notesCard).toBeVisible();
-  });
-
-  test("6. Recent executions have workflowName and note in API", async ({ page }) => {
-    const cookies = await page.context().cookies();
-    const cookieHeader = cookies.map((c) => `${c.name}=${c.value}`).join("; ");
-    const response = await page.request.get(`${getTestFetchUrl()}/api/stats/summary`, {
-      headers: { Cookie: cookieHeader },
-    });
-    const body = await response.json();
-    // If there are executions, check they have workflowName field
-    if (body.data.recentExecutions.length > 0) {
-      const exec = body.data.recentExecutions[0];
-      expect(exec).toHaveProperty("workflowName");
-      expect(exec).toHaveProperty("note");
-    }
-  });
-
-  test("7. ExecutionCard in compact mode shows workflow name", async ({ page }) => {
-    await page.goto(`${getTestBaseUrl()}/`);
-    await page.waitForLoadState("networkidle");
-    // Dashboard has recent executions section
-    const executionCards = page.locator('[data-testid="execution-card"]');
-    const count = await executionCards.count();
-    if (count > 0) {
-      // Card should have text content (workflow name)
-      const firstCard = executionCards.first();
-      const text = await firstCard.textContent();
-      expect(text!.length).toBeGreaterThan(0);
-    }
   });
 
   test("8. ExecutionCard full mode shows UUID", async ({ page }) => {
@@ -151,22 +99,5 @@ test.describe("Step 24: Navigation, Dashboard, Card Fixes", () => {
     // Page should load without errors
     const heading = page.locator("h1, h2").first();
     await expect(heading).toBeVisible();
-  });
-
-  test("13. Stats API endpoint is valid", async ({ page }) => {
-    const cookies = await page.context().cookies();
-    const cookieHeader = cookies.map((c) => `${c.name}=${c.value}`).join("; ");
-    const response = await page.request.get(`${getTestFetchUrl()}/api/stats/summary`, {
-      headers: { Cookie: cookieHeader },
-    });
-    expect(response.status()).toBe(200);
-    const body = await response.json();
-    expect(body.success).toBe(true);
-    expect(body.data).toHaveProperty("stats");
-    expect(body.data).toHaveProperty("recentWorkflows");
-    expect(body.data).toHaveProperty("recentExecutions");
-    expect(body.data.stats).toHaveProperty("workflowsCount");
-    expect(body.data.stats).toHaveProperty("executionsCount");
-    expect(body.data.stats).toHaveProperty("notesCount");
   });
 });

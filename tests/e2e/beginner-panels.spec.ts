@@ -64,13 +64,13 @@ test.describe("Beginner panels", () => {
     await expect(page.getByTestId("recommended-flows")).toHaveCount(0);
 
     await page.reload();
-    await expect(page.getByTestId("dashboard-recent-workflows")).toBeVisible();
+    await expect(page.getByTestId("work-area")).toBeVisible();
     await expect(page.getByTestId("home-how-it-works")).toHaveCount(0);
     await expect(page.getByTestId("quick-start-card")).toHaveCount(0);
     await expect(page.getByTestId("recommended-flows")).toHaveCount(0);
 
     const other = await inNewBrowser(browser, email);
-    await expect(other.getByTestId("dashboard-recent-workflows")).toBeVisible();
+    await expect(other.getByTestId("work-area")).toBeVisible();
     await expect(other.getByTestId("home-how-it-works")).toHaveCount(0);
     await expect(other.getByTestId("quick-start-card")).toHaveCount(0);
     await other.context().close();

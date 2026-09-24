@@ -115,13 +115,6 @@
       "error": "Failed to load dashboard data",
       "failedToLoad": "Failed to load data",
       "retry": "Retry",
-      "stats": {
-        "totalWorkflows": "Total Workflows",
-        "executions": "Executions",
-        "notes": "Notes",
-        "clickToView": "Click to view all →",
-        "clickToConfigure": "Click to configure →"
-      },
       "quickStart": {
         "title": "Connect your agent",
         "description": "Add Moira to your AI assistant once. Choose your client below:",
@@ -169,23 +162,6 @@
           "gemini-cli": {}
         }
       },
-      "recentWorkflows": {
-        "title": "Recent Workflows",
-        "empty": "No workflows yet. Create your first workflow to get started!"
-      },
-      "recentExecutions": {
-        "title": "Recent Executions",
-        "empty": "No executions yet. Run a workflow to see execution history!",
-        "execution": "Execution",
-        "workflow": "Workflow"
-      },
-      "time": {
-        "justNow": "Just now",
-        "minutesAgo": "{{count}}m ago",
-        "hoursAgo": "{{count}}h ago",
-        "daysAgo": "{{count}}d ago",
-        "running": "Running..."
-      },
       "how": {
         "title": "Your agent does the work. Moira keeps it on track.",
         "subtitle": "Moira gives your agent one clear step at a time and checks each result before it moves on. You don't have to learn how flows work to use it.",
@@ -206,6 +182,37 @@
         "tryTitle": "Try it — say to your agent:",
         "tryPrompt": "“Use Moira to run Example 1: Simple Steps for this task: …”",
         "optional": "Diagrams, variables and editing are here for when you are curious. None of it is required."
+      },
+      "work": {
+        "title": "Your work",
+        "inProgress": {
+          "title": "In progress",
+          "empty": "Nothing is running right now.",
+          "atStep": "At: {{step}}",
+          "open": "Open the run",
+          "copyResume": "Copy a prompt to continue",
+          "resumePrompt": "Continue the Moira run {{id}} from where it stopped."
+        },
+        "recent": {
+          "title": "Recently finished",
+          "empty": "No finished runs yet."
+        },
+        "flows": {
+          "title": "Your flows",
+          "empty": "The flows you run will be listed here.",
+          "runs_one": "{{count}} run",
+          "runs_other": "{{count}} runs",
+          "lastRun": "last {{when}}",
+          "copyPrompt": "Copy the prompt",
+          "prompt": "Use Moira to run {{name}} for this task: …"
+        },
+        "copied": "Copied — paste it to your agent",
+        "empty": {
+          "title": "Your runs will appear here",
+          "body": "When your agent runs a Moira flow, you will see here where it is, what ran recently and the flows you use most. To start, say to your agent:",
+          "recommended": "Or pick one of the recommended flows above.",
+          "browse": "Or browse the ready flows in the flow list."
+        }
       }
     },
     "workflows": {
@@ -2981,7 +2988,13 @@
     "copyUrl": "Copy link",
     "open": "Open",
     "view": "View",
-    "history": "History"
+    "history": "History",
+    "relativeTime": {
+      "justNow": "just now",
+      "minutesAgo": "{{count}}m ago",
+      "hoursAgo": "{{count}}h ago",
+      "daysAgo": "{{count}}d ago"
+    }
   },
   "lockedWidget": {
     "title": "{{count}} locked execution(s)",
@@ -3040,17 +3053,20 @@
       "quickTask": {
         "title": "Quick Task",
         "description": "Plans the work, does it with evidence, gets an independent review and asks you to accept the result.",
-        "when": "a clear, bounded task that is not software development: a document, a piece of research, a set of changes you want checked."
+        "when": "a clear, bounded task that is not software development: a document, a piece of research, a set of changes you want checked.",
+        "prompt": "Use Moira's Quick Task for this: …"
       },
       "robustTask": {
         "title": "Robust Task",
         "description": "The same idea built for long or critical work: retries, recovery after interruptions, replanning when the facts change, honest partial results.",
-        "when": "the task is large or important, or likely to run into problems along the way."
+        "when": "the task is large or important, or likely to run into problems along the way.",
+        "prompt": "Run this through Moira's Robust Task: …"
       },
       "todoList": {
         "title": "Todo List",
         "description": "Works through a checklist one item at a time — the one you give it, or one it writes once from your goal — with a short proof for each.",
-        "when": "the steps are clear and just need doing in order."
+        "when": "the steps are clear and just need doing in order.",
+        "prompt": "Use Moira's Todo List to work through these items: …"
       }
     },
     "panels": {

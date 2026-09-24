@@ -89,3 +89,16 @@ export function whenToPickKey(
   const entry = UNIVERSAL.find((flow) => flow.slug === slug);
   return entry ? `onboarding.universal.${entry.key}.when` : null;
 }
+
+/**
+ * The interface text of the ready-to-say prompt for a flow that has an authored one (the universal
+ * flows of the system owner); null for every other flow, whose prompt is built from its name.
+ */
+export function promptKey(
+  ownerHandle: string | null | undefined,
+  slug: string | undefined,
+): string | null {
+  if (ownerHandle !== SYSTEM_HANDLE || !slug) return null;
+  const entry = UNIVERSAL.find((flow) => flow.slug === slug);
+  return entry ? `onboarding.universal.${entry.key}.prompt` : null;
+}

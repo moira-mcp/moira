@@ -791,6 +791,63 @@ Authentication: Required
 See `docs/CODESPACES.md` for configuration, encryption, refresh and recovery
 contracts.
 
+## Stats API
+
+### GET /api/stats/summary
+
+The home page's work area for the signed-in user. Requires a session.
+
+```typescript
+{
+  success: true,
+  data: {
+    activeRuns: Array<{
+      executionId: string;
+      workflowId: string;
+      workflowName: string | null;
+      note: string | null;
+      status: "running" | "locked"; // the store keeps running and completed; a held lock reads locked
+      hasActiveLock: boolean;
+      errorCount: number;          // refusals, as on the executions list
+      stepId: string | null;       // the node the run waits at, else its current node
+      stepName: string | null;     // null when the step has no name to show
+      createdAt: number;
+      updatedAt: number;
+    }>;
+    recentRuns: Array<{            // finished runs only
+      executionId: string;
+      workflowId: string;
+      workflowName: string | null;
+      note?: string;
+      status: string;
+      hasActiveLock: boolean;
+      errorCount: number;
+      createdAt: number;
+      completedAt?: number;
+    }>;
+    topFlows: Array<{              // the flows the user runs most
+      id: string;
+      ownerHandle: string | null;
+      slug: string;
+      name: string;
+      description: string | null;
+      runs: number;
+      lastRunAt: number;
+    }>;
+  };
+}
+```
+
+- `activeRuns`: runs not finished, latest activity first, at most 5.
+- `recentRuns`: finished runs, latest first, at most 5. No run is in both lists.
+- `topFlows`: most runs first, then the latest run, at most 4. A deleted flow is left out.
+- `stepName` is picked in the run page's order:
+  1. the node's `progressActiveLabel` when it is plain text (not a template);
+  2. else its `metadata.displayName`;
+  3. else the label of its progress block.
+- A user with no runs gets three empty lists.
+- Runs are read through the filtered execution query and counted per flow in SQL, so the endpoint does not load the user's executions.
+
 ## Notes API
 
 User notes management with authentication. All operations scoped to authenticated user.

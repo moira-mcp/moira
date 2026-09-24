@@ -1,6 +1,6 @@
 /**
  * Execution normalizer
- * Maps 3 different execution interfaces to a single normalized shape
+ * Maps the user and admin execution list items to a single normalized shape
  */
 
 export interface NormalizedExecution {
@@ -48,41 +48,13 @@ interface AdminExecution {
   hasActiveLock?: boolean;
 }
 
-interface RecentExecution {
-  id: string;
-  workflowId: string;
-  workflowName?: string | null;
-  note?: string | null;
-  status: string;
-  startTime: string;
-  endTime?: string;
-  duration: number | null;
-}
-
-type AnyExecution = ExecutionListItem | AdminExecution | RecentExecution;
-
-function isRecentExecution(e: AnyExecution): e is RecentExecution {
-  return "startTime" in e && "id" in e && !("executionId" in e);
-}
+type AnyExecution = ExecutionListItem | AdminExecution;
 
 function isAdminExecution(e: AnyExecution): e is AdminExecution {
   return "userEmail" in e;
 }
 
 export function normalizeExecution(execution: AnyExecution): NormalizedExecution {
-  if (isRecentExecution(execution)) {
-    return {
-      id: execution.id,
-      workflowId: execution.workflowId,
-      workflowName: execution.workflowName,
-      note: execution.note ?? undefined,
-      status: execution.status,
-      createdAt: new Date(execution.startTime).getTime(),
-      completedAt: execution.endTime ? new Date(execution.endTime).getTime() : undefined,
-      duration: execution.duration,
-    };
-  }
-
   if (isAdminExecution(execution)) {
     return {
       id: execution.executionId,

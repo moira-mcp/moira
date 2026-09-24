@@ -18,6 +18,7 @@ import { Button } from "../ui/button";
 import { ScrollArea } from "../ui/scroll-area";
 import { Badge } from "../ui/badge";
 import { Tabs, TabsList, TabsTrigger } from "../ui/tabs";
+import { formatRelativeTime } from "../cards/format-utils";
 
 /** One revision as the list on the left shows it. */
 export interface RevisionEntry {
@@ -42,20 +43,6 @@ export interface RevisionHistorySource {
   /** Content in force right now. */
   readCurrent(): Promise<string | null>;
   restore(revision: number): Promise<void>;
-}
-
-function formatRelativeTime(timestamp: number): string {
-  const diff = Date.now() - timestamp;
-  const seconds = Math.floor(diff / 1000);
-  const minutes = Math.floor(seconds / 60);
-  const hours = Math.floor(minutes / 60);
-  const days = Math.floor(hours / 24);
-
-  if (days > 7) return new Date(timestamp).toLocaleDateString();
-  if (days > 0) return `${days}d ago`;
-  if (hours > 0) return `${hours}h ago`;
-  if (minutes > 0) return `${minutes}m ago`;
-  return "just now";
 }
 
 function formatSize(bytes: number): string {

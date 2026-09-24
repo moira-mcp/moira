@@ -405,6 +405,27 @@ export class InMemoryRepository implements IDataRepository {
     };
   }
 
+  async countRunsByWorkflow(
+    userId: string,
+    limit: number,
+  ): Promise<Array<{ workflowId: string; runs: number; lastRunAt: number }>> {
+    const byWorkflow = new Map<string, { workflowId: string; runs: number; lastRunAt: number }>();
+    for (const e of this.executions.values()) {
+      if (e.userId !== userId) continue;
+      const entry = byWorkflow.get(e.workflowId) ?? {
+        workflowId: e.workflowId,
+        runs: 0,
+        lastRunAt: 0,
+      };
+      entry.runs += 1;
+      entry.lastRunAt = Math.max(entry.lastRunAt, e.createdAt);
+      byWorkflow.set(e.workflowId, entry);
+    }
+    return Array.from(byWorkflow.values())
+      .sort((a, b) => b.runs - a.runs || b.lastRunAt - a.lastRunAt)
+      .slice(0, limit);
+  }
+
   async listExecutionsWithFilters(filter: ExecutionFilter): Promise<ExecutionListResult> {
     const {
       userId,

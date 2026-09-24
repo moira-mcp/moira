@@ -39,6 +39,9 @@ i18n
     },
     supportedLngs: SUPPORTED_LANGUAGE_CODES,
     fallbackLng: ["en"],
+    // React escapes what it renders; escaping here as well shows names with an apostrophe as
+    // `&#39;`. No translation is rendered as raw HTML.
+    interpolation: { escapeValue: false },
     detection: {
       // Priority: URL param > localStorage > browser
       // querystring detects ?lang=ru/en parameter

@@ -120,6 +120,45 @@ const isPublicAuthEndpoint = (url?: string): boolean => {
  * API Client Error for frontend error handling
  */
 /** One revision as a history listing shows it: metadata plus a short preview. */
+/** A run of the signed-in user, as the home page's work area lists it. */
+export interface WorkRun {
+  executionId: string;
+  workflowId: string;
+  workflowName: string | null;
+  note?: string | null;
+  status: string;
+  hasActiveLock: boolean;
+  errorCount: number;
+  createdAt: number;
+  updatedAt?: number;
+  completedAt?: number;
+}
+
+/** A run in progress, with the step it is on. */
+export interface ActiveWorkRun extends WorkRun {
+  stepId: string | null;
+  /** The step's authored display name; null when the node has none. */
+  stepName: string | null;
+  updatedAt: number;
+}
+
+/** One of the flows the user runs most. */
+export interface TopFlow {
+  id: string;
+  ownerHandle: string | null;
+  slug: string;
+  name: string;
+  description: string | null;
+  runs: number;
+  lastRunAt: number;
+}
+
+export interface WorkSummary {
+  activeRuns: ActiveWorkRun[];
+  recentRuns: WorkRun[];
+  topFlows: TopFlow[];
+}
+
 export interface RevisionSummary {
   revision: number;
   size: number;
@@ -898,58 +937,12 @@ export class MoiraApiClient {
   }
 
   /**
-   * Get dashboard statistics summary
+   * The home page's work area: runs in progress with their step, the latest runs, and the flows
+   * the user runs most
    */
-  async getStatsSummary(): Promise<{
-    stats: {
-      workflowsCount: number;
-      executionsCount: number;
-      notesCount: number;
-    };
-    recentWorkflows: Array<{
-      id: string;
-      name: string;
-      description?: string;
-      visibility: string;
-      createdAt?: string;
-    }>;
-    recentExecutions: Array<{
-      id: string;
-      workflowId: string;
-      workflowName?: string | null;
-      note?: string | null;
-      status: string;
-      startTime: string;
-      endTime?: string;
-      duration: number | null;
-    }>;
-  }> {
+  async getStatsSummary(): Promise<WorkSummary> {
     try {
-      type StatsSummaryResponse = {
-        stats: {
-          workflowsCount: number;
-          executionsCount: number;
-          notesCount: number;
-        };
-        recentWorkflows: Array<{
-          id: string;
-          name: string;
-          description?: string;
-          visibility: string;
-          createdAt?: string;
-        }>;
-        recentExecutions: Array<{
-          id: string;
-          workflowId: string;
-          workflowName?: string | null;
-          note?: string | null;
-          status: string;
-          startTime: string;
-          endTime?: string;
-          duration: number | null;
-        }>;
-      };
-      const response = await this.client.get<ApiResponse<StatsSummaryResponse>>("/stats/summary");
+      const response = await this.client.get<ApiResponse<WorkSummary>>("/stats/summary");
       return response.data.data!;
     } catch (error) {
       if (error instanceof ApiClientError) {

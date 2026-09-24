@@ -69,14 +69,16 @@ const PAGES: VisualPage[] = [
   {
     name: "dashboard",
     path: "/",
-    waitFor: '[data-testid="stat-card"]',
-    volatile: (page) => [
-      page.getByTestId("stat-card"),
-      page.getByTestId("dashboard-recent-workflows"),
-      page.getByTestId("dashboard-recent-executions"),
-    ],
-    captureStyle: `[data-testid="dashboard-recent-workflows"], [data-testid="dashboard-recent-executions"] {
-      height: 480px !important; overflow: hidden !important; }`,
+    waitFor: '[data-testid="work-area"]',
+    // The beginner panels are left out of the capture so the work area is in it. The area lists the
+    // admin's own runs and flows, which other tests keep changing: its heading is compared, its
+    // content gets a fixed height and is masked.
+    volatile: (page) => [page.getByTestId("work-area").locator(":scope > :last-child")],
+    captureStyle: `
+      [data-testid="home-how-it-works"], [data-testid="quick-start-card"],
+      [data-testid="recommended-flows"] { display: none !important; }
+      [data-testid="work-area"] > :last-child {
+        height: 520px !important; overflow: hidden !important; }`,
   },
   {
     name: "workflows",

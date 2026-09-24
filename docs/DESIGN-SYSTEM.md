@@ -241,7 +241,8 @@ All cards use `CardShell` and follow these patterns:
 - Badges in a card: `h-5 px-1.5 text-[11px]` (outline or a state colour)
 - Icon size in cards: the `icon` slot draws `size-4`; inline icons in badges and meta are `size-3`
 - Action buttons: `h-7 w-7` ghost icon buttons, shown on hover or focus (CardShell draws them)
-- Timestamps: use `formatRelativeTime()` for recency, `formatDate()` for absolute dates
+- Timestamps: use `formatRelativeTime()` for recency, `formatDate()` for absolute dates; both read in
+  the interface language (`common.relativeTime.*`, the i18n language)
 - Card data-testid: descriptive (e.g., `note-card`, `execution-card`)
 
 ## Badge Consistency

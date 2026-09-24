@@ -94,7 +94,7 @@ frontend/src/
 │   └── playbooks/
 │       └── PlaybookEditor.tsx   # Inline playbook editor with the live-runs warning
 ├── pages/
-│   ├── Dashboard.tsx            # Home page: agent-first steps, connection card, recommended flows, stat cards, recent items
+│   ├── Dashboard.tsx            # Home page: agent-first steps, connection card, recommended flows, the work area (components/home/WorkArea)
 │   ├── Workflows.tsx            # Recommended flows, then the workflow explorer
 │   ├── FlowPage.tsx             # Flow page: the workflow definition as a process, edit mode for owners
 │   ├── Executions.tsx           # Execution history (ExecutionCard list/grid)
@@ -315,8 +315,30 @@ The home page (`pages/Dashboard.tsx`, route `/`) leads with how Moira is meant t
 
 A prompt to try follows (`home-try`), then the note that diagrams, variables and editing are
 optional (`home-optional`). Below come the connection card (`QuickStartCard`, titled "Connect your
-agent"), the compact recommended section (`RecommendedFlows variant="compact"`), the stat cards and
-the recent workflows and executions.
+agent") and the compact recommended section (`RecommendedFlows variant="compact"`). All three are
+beginner panels the reader can hide.
+
+The work area follows (`components/home/WorkArea.tsx`, `work-area`), titled "Your work", from
+`GET /api/stats/summary`. Every item is a `CardShell` item.
+
+- **In progress** (`work-in-progress`): the runs not finished, each with its flow, the step it is on
+  ("At: …", named in the run page's order), its note, time and short id. It opens the run on a
+  click. A copy action (`work-resume-<id>`) puts "Continue the Moira run `<id>` from where it
+  stopped." on the clipboard: the agent continues a run, not the reader. A badge shows only for a
+  lock or errors.
+- **Recently finished** (`work-recent`): finished runs as `ExecutionCard` items; no run appears in
+  both lists.
+- **Your flows** (`work-flows`): the flows run most, with the description, the run count and last
+  run, and a copyable ready-to-say prompt (`work-flow-prompt`).
+  - Quick Task, Robust Task and Todo List of the system owner use their authored prompt
+    (`onboarding.universal.<key>.prompt`, looked up by `promptKey` in
+    `components/onboarding/recommended.ts`).
+  - Any other flow gets "Use Moira to run `<name>` for this task: …".
+- A section with nothing in it shows one line saying so.
+- A user with no runs sees one empty state instead (`work-empty`): what will appear, the try
+  prompt, and a pointer to the recommended flows above, or to the flow list once the reader has
+  hidden that panel (`work-empty-next`).
+- A step with no name to show reads as words from its node id ("Get task"), not the raw id.
 
 ### Beginner panels
 
@@ -1923,12 +1945,20 @@ i18n
     resources: { en: { translation: en }, ru: { translation: ru } },
     supportedLngs: SUPPORTED_LANGUAGE_CODES,
     fallbackLng: ["en"],
+    // React escapes what it renders; no translation is rendered as raw HTML
+    interpolation: { escapeValue: false },
     detection: {
-      order: ["localStorage", "navigator"],
+      order: ["querystring", "localStorage", "navigator"], // ?lang=ru|en first
+      lookupQuerystring: "lang",
       caches: ["localStorage"],
     },
   });
 ```
+
+Interpolated values are not HTML-escaped by i18n, so a name with an apostrophe reads as written;
+React escapes the rendered text. The shared card formatters (`formatRelativeTime`, `formatDate` in
+`components/cards/format-utils.ts`) read the interface language: relative times come from
+`common.relativeTime.*`.
 
 The diagram, run and flow components carry no translation fallbacks — no `defaultValue`, no
 second-argument default — so a key missing from one language surfaces in the parity test rather

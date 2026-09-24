@@ -39,7 +39,7 @@ test("the home page leads with the agent-first steps, then connection and recomm
   await expect(recommended.getByTestId("recommended-flow")).toHaveCount(6);
   // The home page shows the compact section: nothing to fold, no "when to pick" lines.
   await expect(recommended.getByTestId("recommended-toggle")).toHaveCount(0);
-  await expect(page.getByTestId("dashboard-recent-workflows")).toBeVisible();
+  await expect(page.getByTestId("work-area")).toBeVisible();
 
   await page.goto(`${BASE_URL}/?lang=ru`);
   await expect(page.getByTestId("home-how-it-works")).toContainText("Агент сам выберет флоу");

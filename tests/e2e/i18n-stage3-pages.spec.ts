@@ -16,8 +16,8 @@ test.describe("i18n Stage 3 - Core Application Pages Translations", () => {
 
       // Check dashboard content
       await expect(page.locator('h1:has-text("Dashboard")')).toBeVisible({ timeout: 5000 });
-      await expect(page.locator("text=Recent Workflows")).toBeVisible();
-      await expect(page.locator("text=Total Workflows")).toBeVisible();
+      // The work area's heading reads in English whether the admin has runs or not
+      await expect(page.getByRole("heading", { name: "Your work" })).toBeVisible();
     });
 
     test("Workflows page shows English content", async ({ page }) => {
@@ -72,8 +72,7 @@ test.describe("i18n Stage 3 - Core Application Pages Translations", () => {
 
       // Check dashboard content in Russian
       await expect(page.locator('h1:has-text("Панель управления")')).toBeVisible({ timeout: 5000 });
-      await expect(page.locator("text=Недавние воркфлоу")).toBeVisible();
-      await expect(page.locator("text=Всего воркфлоу")).toBeVisible();
+      await expect(page.getByRole("heading", { name: "Ваша работа" })).toBeVisible();
     });
 
     test("Workflows page shows Russian content", async ({ page }) => {
