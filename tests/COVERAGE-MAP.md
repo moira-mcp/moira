@@ -976,7 +976,7 @@ level headings classify the tracked test paths listed beneath them.
 
 **unit**
 
-- `tests/unit/config/nginx-sensitive-logging.test.ts` — both shipped nginx modes suppress path grants from access logs and route bounded authenticated communication uploads to MCP without JSON MIME rewriting
+- `tests/unit/config/nginx-sensitive-logging.test.ts` — both shipped nginx modes suppress path grants from access logs and route bounded authenticated communication uploads to MCP without JSON MIME rewriting; landing mode answers unknown root paths with a real 404 and the landing 404 page while root mode keeps the Web UI index fallback
 - `tests/unit/shared/logging/express-middleware.test.ts` — materialize grant redaction with routing/query preservation and unrelated-URL non-regression
 - `tests/unit/web-backend/execution-materialize.test.ts` — current-definition fetch, execution binding, repeated concurrent tar responses, late authorization, render-overflow handling, and expected-4xx versus unexpected-boundary error mapping
 - `tests/unit/mcp-server/deliver-materialize.test.ts` — context delivery of rendered bodies for the caller's current presentation, fallback-specific counting that leaves the archive series untouched, refusal without partial data for a missing grant or an oversized set, and a single indistinguishable refusal message across conditions
