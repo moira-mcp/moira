@@ -139,6 +139,25 @@ Edit mode also changes the process's structure:
 - **Add or delete a block.** Use the contents list: "Add block" takes an id, a name, a description
   and the block it follows, and a block's delete control works only while the block owns no step.
 
+The **Graph** view is the same editor drawn as the node graph. In edit mode:
+
+- **Right-click a step** to rename it, insert a step after it (on its main output) or delete it.
+- **Right-click a connection** — its line or its output port — to insert a step on it, lead it to
+  another step, or remove it. The main output can't be removed.
+- **Right-click the empty canvas inside a block's group** to add a step to that block.
+- **Drag an output by the dot at its right end onto another card** to lead that output there
+  (clicking the port itself still travels along it). Drag from a card's **+ output** port to create
+  a new output: you name it, and it leads to the card you dropped on. Drop anywhere on the card.
+- **Drop a dragged output on the empty canvas** to create a step there that the output leads to.
+  The step joins the block you dropped it in, or its source's block.
+
+Each of these is one edit, like the same change made in the block panel. The graph keeps the step
+you changed in view, and the layout stays automatic, so cards can't be moved by hand.
+
+A workflow without a process view (no `progress`) is edited in the Graph view too. Its owner can
+turn on **Edit flow**; everything above works except the block operations, and a new step belongs
+to no block.
+
 A change to the structure re-derives the whole process, so a problem can appear on a transition you
 did not touch — for example a return created by leading a step back to an earlier block, which
 needs its cause and exit before the save. If you rename or delete a step that one of your paused

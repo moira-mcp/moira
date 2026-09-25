@@ -57,6 +57,7 @@ frontend/src/
 │   │   ├── issues.ts / useDraftValidation.ts        # Problem placement and the save gate; the server's dry run of the draft
 │   │   ├── EditBar.tsx / IssueList.tsx              # The edit bar with the problem list; a compact inline problem list
 │   │   ├── structure.ts / StructureControls.tsx     # What a structural action would do; the rename, delete, connection, step and block controls
+│   │   ├── canvas.ts / CanvasEditing.tsx            # What a graph gesture means; the graph's editing host (menus at the pointer, drag dialogs)
 │   │   ├── model.ts / modes.ts                      # Run-less projection, the three views
 │   │   ├── StepsView.tsx / stepsModel.ts            # The steps view: what the agent is told, drawn as numbered cards joined by arrows
 │   │   ├── StepsList.tsx                            # The steps view of a large flow: the same cards as a reading list with jump links
@@ -722,7 +723,10 @@ graph receives `focusRequest` (a chosen node brought into view), `selectedBlockI
 group is ringed and pulses on arrival) and the page's toolbar slots, and it takes its contents
 fold button through `ContentsToggleProvider` / `ContentsToggleSlot`. Selection lives in the URL and
 the graph re-centres on its focus request, so a switch loses nothing; the graph's lazy chunk is
-fetched when its view is first shown, behind `DiagramSkeleton`.
+fetched when its view is first shown, behind `DiagramSkeleton`. The camera follows one step
+through relayouts: the step the reader last travelled to inside the graph (the finder, a port, an
+arrival chip), or else the page's latest focus request, or else the run's current step. A new
+request, or the run moving to another step, replaces the travelled step.
 
 **Editing.**
 
@@ -769,6 +773,30 @@ fetched when its view is first shown, behind `DiagramSkeleton`.
     `flow-edit-run-warnings`.
 
   The editing context carries the draft and its blocks for these controls.
+
+- **Graph editing** (`components/flow/CanvasEditing.tsx`, `components/flow/canvas.ts`), only in edit
+  mode. `CanvasEditingHost` wraps the page's `WorkflowGraph` and hands it an `editing` interface.
+  Without it the graph is read-only, which is how the run page uses it.
+  - **Menus at the pointer:**
+    - a step: rename, insert after (`insertAfterEdge`, the primary output's edge), delete;
+    - a connection, from its line or its output port (`[data-port="out"][data-transition]`):
+      insert on it, lead elsewhere, remove (disabled for a primary output);
+    - the empty canvas: add a step in the block whose group is under the pointer. Groups take no
+      pointer events, so `blockAtPoint` compares the pointer with the groups' boxes.
+  - **Ports.** Each card that can have outputs carries a `+ output` port (`out:new`), and every card
+    carries a drop port (`in:new`), with a 40 px connection radius.
+  - **`connectIntent`.** A drag from an output port to a card retargets it (`set-connection`); a
+    drag from `out:new` opens the output-name dialog. React Flow reports a target only near a
+    handle, so `releaseAt` resolves the release: anywhere on a card (the `[data-graph-node]` under
+    the pointer) still connects to that step, while a release on the card the drag started from, or
+    outside the graph, does nothing.
+  - **`dropOnCanvasIntent`.** A drop on the empty canvas opens the add-step dialog for a step the
+    output leads to, which is one `add-connected-node` operation. A new output is named in the same
+    dialog.
+  - **Camera.** After a canvas action the page focuses the changed step; cancelling a dialog
+    leaves the camera where it is.
+  - **Workflows without `progress`.** The owner gets edit mode, the edit bar and every operation
+    except the block ones, and a new step joins no block.
 
 - **Editors** (`components/flow/EditControls.tsx`) all sit in the block panel: `BlockNameEditor` /
   `BlockSummaryEditor` on the block header, `TransitionEditor` on each transition, `OwnerSelect`

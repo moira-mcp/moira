@@ -1762,7 +1762,12 @@
           "type": "Type",
           "confirm": "Add step",
           "jsonHint": "Written as JSON; the check of the draft tells you whether it fits the type.",
-          "invalidJson": "This is not valid JSON."
+          "invalidJson": "This is not valid JSON.",
+          "insertTitle": "Insert a step on {{edge}}",
+          "insertBody": "The new step takes this connection's place: the connection leads to it, and it continues to where the connection led. A block boundary's label moves with the part that still crosses it.",
+          "fromTitle": "Create a step for {{edge}}",
+          "fromBody": "The connection you dropped here will lead to the new step. It joins the block it was dropped in (or its source's block).",
+          "outputName": "Name of the new output from {{source}}"
         },
         "block": {
           "add": "Add block",
@@ -1776,6 +1781,24 @@
           "addConfirm": "Add block",
           "delete": "Delete block {{name}}",
           "notEmpty": "Move or delete its steps first: only an empty block can be deleted."
+        }
+      },
+      "canvas": {
+        "newOutput": "output",
+        "insertAfter": "Insert a step after…",
+        "noOutput": "This step has no output to continue through.",
+        "insertOnEdge": "Insert a step on this connection…",
+        "addHere": "Add a step here…",
+        "insideBlock": "In a flow with blocks, right-click inside a block's group to add a step to it.",
+        "nameOutput": {
+          "title": "New output from {{source}} to {{target}}",
+          "body": "Name the output; a case of the step can then select it. Letters, digits, '_' and '-'."
+        },
+        "retarget": {
+          "action": "Lead elsewhere…",
+          "title": "Lead {{edge}} elsewhere",
+          "body": "Choose the step this connection should lead to.",
+          "confirm": "Lead there"
         }
       }
     },

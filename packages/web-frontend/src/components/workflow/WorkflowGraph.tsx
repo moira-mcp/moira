@@ -57,6 +57,7 @@ import type { PortInfo } from "../diagram/PortedCard";
 import type { RunBlock } from "../run/model";
 import { NodeDetailSheet } from "./NodeDetailSheet";
 import { NO_ISSUES, type IssuePlacement } from "../flow/issues";
+import { DROP_HANDLE, NEW_OUTPUT_HANDLE } from "../flow/canvas";
 
 import { useTheme } from "../../hooks/useTheme";
 import { useIsMobile } from "@/hooks/use-mobile";
@@ -97,6 +98,34 @@ const nodeTypes = {
 
 const edgeTypes = { graph: GraphEdgeView };
 
+/**
+ * The block whose group lies under a screen point. Groups take no pointer events (edges must reach
+ * through them), so hit-testing cannot find them; their boxes are compared instead.
+ */
+function blockAtPoint(x: number, y: number): string | null {
+  for (const group of document.querySelectorAll<HTMLElement>("[data-graph-group]")) {
+    const box = group.getBoundingClientRect();
+    if (x >= box.left && x <= box.right && y >= box.top && y <= box.bottom) {
+      return group.getAttribute("data-block-id");
+    }
+  }
+  return null;
+}
+
+/**
+ * Where a dragged connection was released: on a step card, on the empty canvas, or outside the
+ * graph (over a panel beside it). React Flow reports a target only near one of a card's handles; a
+ * release anywhere else on the card still means that step.
+ */
+function releaseAt(x: number, y: number): { node: string } | "canvas" | "outside" {
+  if (!document.elementFromPoint(x, y)?.closest(".react-flow")) return "outside";
+  for (const element of document.elementsFromPoint(x, y)) {
+    const card = element.closest("[data-graph-node]");
+    if (card) return { node: card.getAttribute("data-graph-node")! };
+  }
+  return "canvas";
+}
+
 /** Output ports whose connection has a problem carry it, so the port is marked and explains it. */
 function withProblems(ports: PortInfo[] | undefined, issues: IssuePlacement): PortInfo[] {
   if (!ports) return [];
@@ -121,6 +150,23 @@ export interface ReactFlowInstance {
   getEdges: () => Edge[];
 }
 
+/** What the graph reports while it is edited; the page decides what each gesture means. */
+export interface GraphEditing {
+  /** The label of the port that starts a new connection. */
+  newOutputLabel: string;
+  onConnect: (gesture: { source: string; sourceHandle: string | null; target: string }) => void;
+  /** A card was right-clicked; `linkId` is set when it was on one of its output ports. */
+  onNodeMenu: (event: React.MouseEvent, nodeId: string, linkId: string | null) => void;
+  onEdgeMenu: (event: React.MouseEvent, linkId: string) => void;
+  /** The empty canvas was right-clicked, inside a block's group or outside any. */
+  onPaneMenu: (event: React.MouseEvent, blockId: string | null) => void;
+  /** A connection dragged from an output was dropped on the empty canvas. */
+  onDropOnCanvas: (
+    gesture: { source: string; sourceHandle: string | null },
+    blockId: string | null,
+  ) => void;
+}
+
 export interface WorkflowGraphProps {
   /** Raw workflow data - will be transformed internally */
   workflow: WorkflowGraphType;
@@ -131,6 +177,11 @@ export interface WorkflowGraphProps {
    * output port and its line.
    */
   issues?: IssuePlacement;
+  /**
+   * The graph as a structural canvas (the flow page's edit mode): cards take new connections by
+   * drag, and nodes, edges and the empty canvas open their menus. Absent, the graph is read-only.
+   */
+  editing?: GraphEditing;
   /** Current node ID for execution highlighting */
   currentNodeId?: string | null;
   /** The block the page has selected on the map: its frame is highlighted on the graph. */
@@ -210,6 +261,7 @@ export const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
   workflow,
   validation,
   issues = NO_ISSUES,
+  editing,
   currentNodeId,
   selectedBlockId = null,
   errorNodeIds = EMPTY_ERROR_NODE_IDS,
@@ -281,12 +333,20 @@ export const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
   const [laidPreset, setLaidPreset] = useState<string | null>(null);
   // The room the current layout left before the first group; the opening view keeps a third of it.
   const marginRef = useRef<number>(GRAPH_MARGIN);
+  // A step the reader travelled to inside the graph (the finder, a port, an arrival chip) is what
+  // the camera follows from then on, until the page asks for another: a relayout — after an edit, or
+  // the pass with measured heights — must bring back the step the reader last went to, not the one
+  // the page requested before. A new request, or the run moving to another step, takes over again.
+  const [travelled, setTravelled] = useState<{ nodeId: string; count: number } | null>(null);
+  useEffect(() => setTravelled(null), [focusRequest, currentNodeId]);
   const placementKey = `${layoutGeneration}|${
-    focusRequest
-      ? `node:${focusRequest.token}:${focusRequest.nodeId}`
-      : currentNodeId
-        ? `node:current:${currentNodeId}`
-        : "first"
+    travelled
+      ? `node:t${travelled.count}:${travelled.nodeId}`
+      : focusRequest
+        ? `node:${focusRequest.token}:${focusRequest.nodeId}`
+        : currentNodeId
+          ? `node:current:${currentNodeId}`
+          : "first"
   }`;
   // Resolves once the camera has arrived, which is when the placement counts as done.
   const placeViewport = useCallback(
@@ -334,14 +394,12 @@ export const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
     onMoveEnd: placementMoveEnd,
     placed,
   } = useOpeningPlacement<Node, Edge, string>(placeViewport, placementKey);
-  /** Brings a step into view: what an arrival chip does when the reader clicks the far end. */
+  /**
+   * Brings a step into view: what an arrival chip does when the reader clicks the far end. The
+   * placement moves the camera, and keeps following that step through later relayouts.
+   */
   const focusStep = useCallback((id: string) => {
-    void instanceRef.current?.fitView({
-      nodes: [{ id }],
-      padding: 0.25,
-      maxZoom: 1,
-      duration: 400,
-    });
+    setTravelled((previous) => ({ nodeId: id, count: (previous?.count ?? 0) + 1 }));
   }, []);
   // The focus store lives inside the provider mounted below; a bridge hands it up for `goTo`.
   const focusRef = useRef<TransitionFocusHandle | null>(null);
@@ -464,6 +522,16 @@ export const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
               arrived: arrival?.nodeId === node.id,
               visited: visitedSet.has(node.id) && node.id !== currentNodeId,
               problems: issues.nodes.get(node.id),
+              connect: editing
+                ? {
+                    newOutputLabel:
+                      (node.data as StepNodeData).graph.step.type === "end"
+                        ? null
+                        : editing.newOutputLabel,
+                    dropHandle: DROP_HANDLE,
+                    newOutputHandle: NEW_OUTPUT_HANDLE,
+                  }
+                : undefined,
               outputs: withProblems((node.data as StepNodeData).outputs, issues),
               selfLoops: withProblems((node.data as StepNodeData).selfLoops, issues),
             },
@@ -482,6 +550,7 @@ export const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
     visitedNodeIds,
     onWorkflowNavigate,
     issues,
+    editing,
   ]);
   const shownEdges = useMemo<Edge[]>(
     () =>
@@ -911,6 +980,78 @@ export const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
               controlsPosition="top-right"
               nodes={nodes}
               edges={shownEdges}
+              {...(editing
+                ? {
+                    nodesConnectable: true,
+                    // A drop near a card's drop port still lands on it: the port is small, and
+                    // the canvas pans under the pointer while a connection is dragged.
+                    connectionRadius: 40,
+                    onConnect: (connection: {
+                      source: string;
+                      sourceHandle?: string | null;
+                      target: string;
+                    }) =>
+                      editing.onConnect({
+                        source: connection.source,
+                        sourceHandle: connection.sourceHandle ?? null,
+                        target: connection.target,
+                      }),
+                    onConnectEnd: (
+                      event: MouseEvent | TouchEvent,
+                      state: {
+                        isValid: boolean | null;
+                        toNode: Node | null;
+                        fromNode: Node | null;
+                        fromHandle: { id?: string | null; type?: string } | null;
+                      },
+                    ) => {
+                      // A valid drop on a handle has already gone to `onConnect`.
+                      if (state.isValid || !state.fromNode || state.fromHandle?.type !== "source")
+                        return;
+                      const point = "changedTouches" in event ? event.changedTouches[0] : event;
+                      const gesture = {
+                        source: state.fromNode.id,
+                        sourceHandle: state.fromHandle.id ?? null,
+                      };
+                      // Released on a card, away from its ports: a connection to that step. A
+                      // release on the card it started from, or outside the graph, is a drag
+                      // that went nowhere.
+                      const at = state.toNode
+                        ? { node: state.toNode.id }
+                        : releaseAt(point.clientX, point.clientY);
+                      if (at === "outside") return;
+                      if (at === "canvas") {
+                        editing.onDropOnCanvas(gesture, blockAtPoint(point.clientX, point.clientY));
+                        return;
+                      }
+                      if (at.node !== gesture.source)
+                        editing.onConnect({ ...gesture, target: at.node });
+                    },
+                    onNodeContextMenu: (event: React.MouseEvent, node: Node) => {
+                      if (node.type === "block-group") return;
+                      event.preventDefault();
+                      const port = (event.target as Element).closest?.(
+                        '[data-port="out"][data-transition]',
+                      );
+                      editing.onNodeMenu(
+                        event,
+                        node.id,
+                        port?.getAttribute("data-transition") ?? null,
+                      );
+                    },
+                    onEdgeContextMenu: (event: React.MouseEvent, edge: Edge) => {
+                      event.preventDefault();
+                      editing.onEdgeMenu(event, edge.id);
+                    },
+                    onPaneContextMenu: (event: React.MouseEvent | MouseEvent) => {
+                      event.preventDefault();
+                      editing.onPaneMenu(
+                        event as React.MouseEvent,
+                        blockAtPoint(event.clientX, event.clientY),
+                      );
+                    },
+                  }
+                : {})}
               // Disable change handlers for read-only view - major performance win
               onNodesChange={undefined}
               onEdgesChange={undefined}

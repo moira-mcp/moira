@@ -97,6 +97,7 @@ import { exportDiff } from "../components/flow/operations";
 import { NO_ISSUES, placeIssues, saveGate } from "../components/flow/issues";
 import { useDraftValidation } from "../components/flow/useDraftValidation";
 import { EditBar, ProblemList } from "../components/flow/EditBar";
+import { CanvasEditingHost } from "../components/flow/CanvasEditing";
 import { pausedRunWarnings } from "../components/flow/structure";
 import type { WorkflowValidationStatus } from "../types/react-flow-types";
 
@@ -440,6 +441,9 @@ export const FlowPage: React.FC = () => {
     [applyEdit],
   );
 
+  // A step changed on the graph stays in view while the graph relays itself out.
+  const focusOnGraph = useCallback((nodeId: string) => requestFocus({ nodeId }), [requestFocus]);
+
   const focusNode = useCallback(
     (nodeId: string) => {
       update({ [VIEW_PARAM]: "graph" });
@@ -569,30 +573,35 @@ export const FlowPage: React.FC = () => {
     <div className="flex h-full min-h-0">
       <div className="flex-1 min-w-0">
         <Suspense fallback={<DiagramSkeleton />}>
-          <TechnicalGraph
-            workflow={edited}
-            validation={validation}
-            issues={issues}
-            blocks={blocks}
-            selectedBlockId={selectedBlockId}
-            onWorkflowNavigate={handleNavigate}
-            onNodeSelect={handleNodeSelect}
-            showNodeDetails={false}
-            showControls={true}
-            toolbarModes={flowModes}
-            toolbarLeading={<ContentsToggleSlot />}
-            toolbarTrailing={
-              <>
-                <DiagramGuide mode="graph" />
-                {flowTrailing}
-              </>
-            }
-            showMinimap
-            focusRequest={focusRequest}
-            selectedNodeId={focusRequest?.nodeId ?? null}
-            onVariableSelect={goToVariable}
-            selectedVariable={variableHighlight?.name ?? null}
-          />
+          <CanvasEditingHost onFocusNode={focusOnGraph}>
+            {(canvasEditing) => (
+              <TechnicalGraph
+                editing={canvasEditing}
+                workflow={edited}
+                validation={validation}
+                issues={issues}
+                blocks={blocks}
+                selectedBlockId={selectedBlockId}
+                onWorkflowNavigate={handleNavigate}
+                onNodeSelect={handleNodeSelect}
+                showNodeDetails={false}
+                showControls={true}
+                toolbarModes={flowModes}
+                toolbarLeading={<ContentsToggleSlot />}
+                toolbarTrailing={
+                  <>
+                    <DiagramGuide mode="graph" />
+                    {flowTrailing}
+                  </>
+                }
+                showMinimap
+                focusRequest={focusRequest}
+                selectedNodeId={focusRequest?.nodeId ?? null}
+                onVariableSelect={goToVariable}
+                selectedVariable={variableHighlight?.name ?? null}
+              />
+            )}
+          </CanvasEditingHost>
         </Suspense>
       </div>
     </div>
@@ -645,7 +654,7 @@ export const FlowPage: React.FC = () => {
           actions={
             <>
               <div className="hidden md:flex items-center gap-2">
-                {isOwner && process && (
+                {isOwner && (
                   <>
                     <button
                       type="button"
@@ -678,7 +687,7 @@ export const FlowPage: React.FC = () => {
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end">
-                    {isOwner && process && (
+                    {isOwner && (
                       <DropdownMenuItem
                         onClick={() => update({ [EDIT_PARAM]: editing ? null : "1" })}
                       >
@@ -766,7 +775,7 @@ export const FlowPage: React.FC = () => {
                 </div>
               )}
 
-              {editing && process && (
+              {editing && (
                 <EditBar
                   diff={diff}
                   canUndo={hasEdits}

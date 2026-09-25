@@ -7,7 +7,8 @@
  * step's block, a step's authored text, a registry entry) are applied as typed, so a half-typed
  * value stays in the draft and the process derivation reports it; consecutive edits of the same
  * field coalesce into one operation, so undo steps over whole edits rather than keystrokes.
- * Structural operations (add, insert, remove and rename a node, set or remove a connection, add
+ * Structural operations (add — alone or as the target of an output —, insert, remove and rename a
+ * node, set or remove a connection, add
  * or remove a block) go through the engine's authoring functions: `appendOperation` applies one
  * to the current draft first, so a refused operation throws its `AuthoringError` and never enters
  * the log. `exportDiff` compares the saved definition with the draft, following node ids through
@@ -48,6 +49,14 @@ export type ContentOperation =
 
 export type StructuralOperation =
   | { kind: "add-node"; node: WorkflowNode; blockId?: string }
+  /** A new step that the output `<source>.<key>` leads to (created, or retargeted, with it). */
+  | {
+      kind: "add-connected-node";
+      node: WorkflowNode;
+      blockId?: string;
+      source: string;
+      key: string;
+    }
   | { kind: "insert-on-edge"; source: string; key: string; node: WorkflowNode; blockId?: string }
   /** Every incoming edge `<source>.<key>` decided: a node to lead to instead, or null to drop it. */
   | { kind: "remove-node"; nodeId: string; decisions: Record<string, IncomingDecision> }
@@ -135,6 +144,10 @@ function applyStructural(workflow: WorkflowGraph, op: StructuralOperation): Appl
   switch (op.kind) {
     case "add-node":
       return { workflow: fromEngine(addNode(graph, engineNode(op.node), block(op.blockId))) };
+    case "add-connected-node": {
+      const added = addNode(graph, engineNode(op.node), block(op.blockId));
+      return { workflow: fromEngine(setConnection(added, op.source, op.key, op.node.id)) };
+    }
     case "insert-on-edge":
       return {
         workflow: fromEngine(
@@ -290,7 +303,8 @@ function lineageOf(saved: WorkflowGraph, ops: readonly Operation[]): Lineage {
     }
     const applied = applyStructural(draft, op);
     draft = applied.workflow;
-    if (op.kind === "add-node" || op.kind === "insert-on-edge") origin.set(op.node.id, null);
+    if (op.kind === "add-node" || op.kind === "add-connected-node" || op.kind === "insert-on-edge")
+      origin.set(op.node.id, null);
     if (op.kind === "remove-node") origin.delete(op.nodeId);
     if (op.kind !== "rename-node") continue;
     const source = origin.get(op.from) ?? null;

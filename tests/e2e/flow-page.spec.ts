@@ -18,7 +18,14 @@ import { test, expect, type Page } from "./fixtures.js";
 import { getTestBaseUrl } from "../utils/test-config.js";
 import { loginAsAdmin } from "./helpers/auth-helper.js";
 import { createAuthenticatedMCPClient, startWorkflowExecutionState } from "../utils/mcp-auth.js";
-import { GRAPH, MAP, graphOverview, openPanelSection, settledCamera } from "./helpers/diagram.js";
+import {
+  GRAPH,
+  MAP,
+  graphOverview,
+  openPanelSection,
+  restingCamera,
+  settledCamera,
+} from "./helpers/diagram.js";
 
 const BASE_URL = getTestBaseUrl();
 
@@ -728,6 +735,312 @@ test("a stale save with structural edits is refused and keeps the whole log; a p
     expect((await detailOf(page, id)).workflow.nodes.map((n: any) => n.id)).toContain("get-task");
   } finally {
     await authenticated.cleanup();
+    await page.request.delete(`${BASE_URL}/api/workflows/${id}`);
+  }
+});
+
+/** An element's box once it has stopped moving: two consecutive reads agree. */
+async function restingBox(page: Page, selector: string) {
+  let last = "";
+  let box: { x: number; y: number; width: number; height: number } | null = null;
+  await expect
+    .poll(async () => {
+      box = await page.locator(selector).first().boundingBox();
+      const now = JSON.stringify(box);
+      const resting = box !== null && now === last;
+      last = now;
+      return resting;
+    })
+    .toBe(true);
+  return box!;
+}
+
+/** Right-click an element of the graph and choose one action of the menu that opens. */
+async function canvasAction(page: Page, target: string, menu: string, action: string) {
+  // The camera may still be moving (a focus, a fit); act on the element once it is at rest.
+  await restingBox(page, target);
+  await page.locator(target).first().click({ button: "right" });
+  await expect(page.getByTestId(`canvas-menu-${menu}`)).toBeVisible();
+  await page.getByTestId(`canvas-${action}`).click();
+}
+
+/**
+ * A real mouse drag from a port, released where `to` says once the camera is at rest. The
+ * connection line must be drawn before the release: a drag that never started would pass every
+ * "nothing happened" check.
+ */
+async function dragPort(
+  page: Page,
+  port: string,
+  to: (pane: Box) => Promise<{ x: number; y: number }>,
+): Promise<void> {
+  await restingCamera(page, GRAPH);
+  const from = await restingBox(page, port);
+  const pane = (await page.locator(`${GRAPH} .react-flow`).boundingBox())!;
+  const target = await to(pane);
+  await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(from.x + from.width / 2 + 30, from.y + from.height / 2 + 30, { steps: 4 });
+  await expect(page.locator(`${GRAPH} .react-flow__connectionline`)).toBeVisible();
+  await page.mouse.move(target.x, target.y, { steps: 12 });
+  await page.mouse.up();
+}
+
+type Box = { x: number; y: number; width: number; height: number };
+
+/** The middle of the part of a card inside the graph's pane: away from its ports, not under a panel. */
+async function visibleMiddle(page: Page, card: string, pane: Box) {
+  const box = await restingBox(page, card);
+  const left = Math.max(box.x, pane.x);
+  const right = Math.min(box.x + box.width, pane.x + pane.width);
+  const top = Math.max(box.y, pane.y);
+  const bottom = Math.min(box.y + box.height, pane.y + pane.height);
+  expect(right - left).toBeGreaterThan(40);
+  expect(bottom - top).toBeGreaterThan(40);
+  return { x: (left + right) / 2, y: (top + bottom) / 2 };
+}
+
+async function fillAgentStep(page: Page, id: string): Promise<void> {
+  await page.getByTestId("add-step-id").fill(id);
+  await page.getByTestId("add-step-field-directive").fill(`Do ${id}.`);
+  await page.getByTestId("add-step-field-completionCondition").fill("Done.");
+  await page.getByTestId("add-step-confirm").click();
+  await expect(page.getByTestId("add-step-dialog")).toHaveCount(0);
+}
+
+test("the graph view edits the structure: a step inserted on a boundary edge keeps its label, and a drag creates a connection", async ({
+  page,
+}) => {
+  await loginAsAdmin(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const id = await copyQuickTask(page);
+  try {
+    // Outside edit mode the graph offers no new-output ports and no drop targets.
+    await page.goto(`${BASE_URL}/workflows/${id}?view=graph`);
+    await settledCamera(page, GRAPH);
+    await expect(page.locator(`${GRAPH} [data-new-output]`)).toHaveCount(0);
+
+    await page.goto(`${BASE_URL}/workflows/${id}?view=graph&edit=1`);
+    await expect(page.getByTestId("flow-edit-panel")).toBeVisible();
+    await settledCamera(page, GRAPH);
+    // Insert on the intake's labelled hand-off to planning, from its output port.
+    await canvasAction(
+      page,
+      `${GRAPH} [data-graph-node="get-task"] [data-port="out"][data-transition="get-task.success"]`,
+      "edge",
+      "insert-on-edge",
+    );
+    await fillAgentStep(page, "clarify");
+    // The graph relays itself out and keeps the new step in view.
+    await expect(page.locator(`${GRAPH} [data-graph-node="clarify"]`)).toBeInViewport();
+
+    // The new step sits in the intake's block, and the boundary label moved to its output.
+    await page.getByTestId("flow-modes").locator('[data-mode="map"]').click();
+    await openBlock(page, "scope");
+    await openSteps(page);
+    await expect(page.locator('[data-node-id="clarify"][data-step-card]')).toBeVisible();
+    await expect(page.locator('[data-edges="clarify.success"]')).toBeAttached();
+
+    // Drag from a step's new-output port onto the middle of another step's card, away from its
+    // ports: the output is named and connected.
+    await page.getByTestId("flow-modes").locator('[data-mode="graph"]').click();
+    await settledCamera(page, GRAPH);
+    // The graph opens on its first blocks: the start card and the planning card are both in view.
+    await dragPort(page, `${GRAPH} [data-graph-node="start"] [data-new-output]`, (pane) =>
+      visibleMiddle(page, `${GRAPH} [data-graph-node="create-plan"]`, pane),
+    );
+    await expect(page.getByTestId("name-output-dialog")).toBeVisible();
+    await page.getByTestId("name-output-key").fill("skip-intake");
+    await page.getByTestId("name-output-confirm").click();
+    await page.getByTestId("flow-edit-export-toggle").click();
+    await expect(
+      page.locator('[data-export-path="nodes[start].connections.skip-intake"]'),
+    ).toContainText("create-plan");
+    await page.getByTestId("flow-edit-export-toggle").click();
+
+    // Dragging an existing output by its handle onto another card leads it there.
+    await dragPort(
+      page,
+      `${GRAPH} [data-graph-node="start"] [data-handleid="out:start.default"]`,
+      (pane) => visibleMiddle(page, `${GRAPH} [data-graph-node="create-plan"]`, pane),
+    );
+    await page.getByTestId("flow-edit-export-toggle").click();
+    await expect(
+      page.locator('[data-export-path="nodes[start].connections.default"]'),
+    ).toContainText("create-plan");
+    await page.getByTestId("flow-edit-export-toggle").click();
+    await page.getByTestId("flow-edit-undo").click(); // the retarget
+
+    // Dropping an output on the empty canvas offers to create a step there that it leads to.
+    await dragPort(page, `${GRAPH} [data-graph-node="start"] [data-new-output]`, async () => {
+      const card = await restingBox(page, `${GRAPH} [data-graph-node="start"]`);
+      return { x: card.x + 40, y: card.y + card.height + 18 };
+    });
+    await expect(page.getByTestId("add-step-dialog")).toBeVisible();
+    await page.getByTestId("add-step-output-key").fill("fast-lane");
+    await fillAgentStep(page, "triage");
+    await page.getByTestId("flow-edit-export-toggle").click();
+    await expect(
+      page.locator('[data-export-entry="add-node"]').filter({ hasText: "+ node triage" }),
+    ).toHaveCount(1);
+    await expect(
+      page.locator('[data-export-path="nodes[start].connections.fast-lane"]'),
+    ).toContainText("triage");
+    await page.getByTestId("flow-edit-export-toggle").click();
+
+    // The connection menu: a primary output cannot be removed; the drawn output can, and it goes.
+    await page.getByTestId("flow-edit-undo").click(); // the dropped step
+    await canvasAction(
+      page,
+      `${GRAPH} [data-graph-node="create-plan"] [data-port="out"][data-transition="create-plan.success"]`,
+      "edge",
+      "retarget",
+    );
+    await pickStep(page, "retarget-target", "get-task");
+    await page.getByTestId("retarget-confirm").click();
+    await page.getByTestId("flow-edit-export-toggle").click();
+    await expect(
+      page.locator('[data-export-path="nodes[create-plan].connections.success"]'),
+    ).toContainText("get-task");
+    await page.getByTestId("flow-edit-export-toggle").click();
+    await page.getByTestId("flow-edit-undo").click(); // the retarget
+    await page
+      .locator(
+        `${GRAPH} [data-graph-node="start"] [data-port="out"][data-transition="start.default"]`,
+      )
+      .click({ button: "right" });
+    await expect(page.getByTestId("canvas-remove-connection")).toBeDisabled();
+    await page.keyboard.press("Escape");
+    await canvasAction(
+      page,
+      `${GRAPH} [data-graph-node="start"] [data-port="out"][data-transition="start.skip-intake"]`,
+      "edge",
+      "remove-connection",
+    );
+    await expect(page.locator(`${GRAPH} [data-transition="start.skip-intake"]`)).toHaveCount(0);
+
+    // The canvas menu: a step added inside a block's group joins that block.
+    const scope = await restingBox(page, `${GRAPH} [data-graph-group][data-block-id="scope"]`);
+    await page.mouse.click(scope.x + 12, scope.y + scope.height - 12, { button: "right" });
+    await expect(page.getByTestId("canvas-menu-pane")).toBeVisible();
+    await page.getByTestId("canvas-add-step").click();
+    await fillAgentStep(page, "note-it");
+    await page.getByTestId("flow-modes").locator('[data-mode="map"]').click();
+    await openBlock(page, "scope");
+    await openSteps(page);
+    await expect(page.locator('[data-node-id="note-it"][data-step-card]')).toBeVisible();
+    await page.getByTestId("flow-edit-undo").click(); // the added step
+
+    // Released outside the graph, over the panel beside it, a drag changes nothing. Last, because
+    // a drag towards the pane's edge pans the canvas.
+    await page.getByTestId("flow-modes").locator('[data-mode="graph"]').click();
+    await dragPort(page, `${GRAPH} [data-graph-node="start"] [data-new-output]`, async (pane) => ({
+      x: pane.x + pane.width + 80,
+      y: pane.y + pane.height / 2,
+    }));
+    await expect(page.getByTestId("add-step-dialog")).toHaveCount(0);
+    await expect(page.getByTestId("name-output-dialog")).toHaveCount(0);
+
+    // What remains is the insert, the drawn output and its removal: the insert alone saves.
+    await saveWhenChecked(page);
+    const saved = (await detailOf(page, id)).workflow;
+    const clarify = saved.nodes.find((n: any) => n.id === "clarify");
+    expect(clarify).toMatchObject({
+      progressNodeId: "scope",
+      connections: { success: "create-plan" },
+      connectionLabels: { success: "task contract written" },
+    });
+    expect(saved.nodes.find((n: any) => n.id === "get-task").connections.success).toBe("clarify");
+  } finally {
+    await page.request.delete(`${BASE_URL}/api/workflows/${id}`);
+  }
+});
+
+test("an owner edits a workflow without a process view on the graph: insert, rename and delete, then save", async ({
+  page,
+}) => {
+  await loginAsAdmin(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const created = await (
+    await page.request.post(`${BASE_URL}/api/workflows`, {
+      headers: { "Content-Type": "application/json" },
+      data: {
+        visibility: "private",
+        workflow: {
+          metadata: {
+            name: `No process view ${Date.now()}`,
+            version: "1.0.0",
+            description: "Two steps and no blocks.",
+          },
+          nodes: [
+            { type: "start", id: "start", connections: { default: "step-a" } },
+            {
+              type: "agent-directive",
+              id: "step-a",
+              directive: "Do the first thing.",
+              completionCondition: "Done.",
+              connections: { success: "end" },
+            },
+            { type: "end", id: "end" },
+          ],
+        },
+      },
+    })
+  ).json();
+  const id = created.data.workflowId as string;
+  const graph = '[data-testid="flow-view"]';
+  try {
+    await page.goto(`${BASE_URL}/workflows/${id}`);
+    await expect(page.getByTestId("flow-no-process")).toBeVisible();
+    await page.getByTestId("flow-edit-toggle").click();
+    await expect(page.getByTestId("flow-edit-panel")).toBeVisible();
+    await settledCamera(page, graph);
+
+    await canvasAction(
+      page,
+      `${graph} [data-graph-node="step-a"] [data-step-title]`,
+      "node",
+      "insert-after",
+    );
+    await fillAgentStep(page, "step-b");
+    await expect(page.locator(`${graph} [data-graph-node="step-b"]`)).toBeVisible();
+
+    await canvasAction(
+      page,
+      `${graph} [data-graph-node="step-b"] [data-step-title]`,
+      "node",
+      "rename",
+    );
+    await page.getByTestId("rename-input").fill("step-c");
+    await page.getByTestId("rename-confirm").click();
+
+    // Each change keeps the changed step in view once the graph has relaid itself out; the finder
+    // then takes the camera to another step.
+    await settledCamera(page, graph);
+    await page.getByTestId("graph-toolbar").getByTestId("toolbar-finder").click();
+    await page.getByTestId("graph-node-finder").fill("step-a");
+    await page.locator('[data-node-match="step-a"]').click();
+    // The finder's field stays open over the canvas until dismissed.
+    await page.keyboard.press("Escape");
+    await canvasAction(
+      page,
+      `${graph} [data-graph-node="step-a"] [data-step-title]`,
+      "node",
+      "delete",
+    );
+    await expect(page.getByTestId("delete-decision-start.default")).toContainText("step-c");
+    await page.getByTestId("delete-confirm").click();
+
+    await saveWhenChecked(page);
+    const saved = (await detailOf(page, id)).workflow;
+    expect(saved.nodes.map((n: any) => n.id)).toEqual(["start", "end", "step-c"]);
+    expect(saved.nodes.find((n: any) => n.id === "start").connections).toEqual({
+      default: "step-c",
+    });
+    expect(saved.nodes.find((n: any) => n.id === "step-c").connections).toEqual({
+      success: "end",
+    });
+  } finally {
     await page.request.delete(`${BASE_URL}/api/workflows/${id}`);
   }
 });

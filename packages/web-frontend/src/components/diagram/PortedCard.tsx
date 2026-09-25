@@ -92,6 +92,12 @@ export interface PortedCardProps {
   allLinkIds: readonly string[];
   children?: React.ReactNode;
   dataAttributes?: Record<string, string | undefined>;
+  /**
+   * The card accepts new connections (the flow page's edit mode): a port that starts one,
+   * labelled with this text (absent for a card that can have no outputs), and a handle that takes
+   * one dropped on the card.
+   */
+  connect?: { newOutputLabel: string | null; dropHandle: string; newOutputHandle: string };
 }
 
 /** Height of one port row plus its gap; the card's minimum height follows the longer column. */
@@ -264,8 +270,10 @@ export function PortedCard({
   allLinkIds,
   children,
   dataAttributes,
+  connect,
 }: PortedCardProps): React.JSX.Element {
-  const rows = Math.max(inputs.length, outputs.length, 1);
+  const newOutput = connect?.newOutputLabel ?? null;
+  const rows = Math.max(inputs.length, outputs.length + (newOutput ? 1 : 0), 1);
   const minHeight =
     PORTED_TITLE_BAND +
     Math.max(PORTED_HEADER, rows * PORT_ROW + 24) +
@@ -301,6 +309,24 @@ export function PortedCard({
           />
         </div>
       ))}
+      {side === "out" && newOutput && connect && (
+        <div className="relative min-w-0">
+          <Handle
+            type="source"
+            position={Position.Right}
+            id={connect.newOutputHandle}
+            className="!size-3 !border-2 !border-dashed !border-primary !bg-card"
+            style={{ top: "50%", right: -9 }}
+            data-new-output=""
+          />
+          <div
+            className="flex items-center gap-1.5 rounded-full border border-dashed border-primary/60 px-2 py-0.5 font-mono text-[11px] leading-5 text-primary"
+            data-port="new-output"
+          >
+            + {newOutput}
+          </div>
+        </div>
+      )}
     </div>
   );
   return (
@@ -326,6 +352,16 @@ export function PortedCard({
       data-tone={tone}
       {...dataAttributes}
     >
+      {connect && (
+        <Handle
+          type="target"
+          position={Position.Left}
+          id={connect.dropHandle}
+          className="!size-3 !border-2 !border-dashed !border-primary !bg-card"
+          style={{ top: 24, left: -7 }}
+          data-drop-target=""
+        />
+      )}
       <div
         className={cn(
           "flex items-center gap-2 rounded-t-xl border-b-2 px-3 py-2",
@@ -360,7 +396,7 @@ export function PortedCard({
           gridTemplateColumns: [
             inputs.length > 0 ? "minmax(190px,1fr)" : null,
             "minmax(0,1.35fr)",
-            outputs.length > 0 ? "minmax(190px,1fr)" : null,
+            outputs.length > 0 || newOutput ? "minmax(190px,1fr)" : null,
           ]
             .filter(Boolean)
             .join(" "),
@@ -408,7 +444,7 @@ export function PortedCard({
           )}
           {children}
         </div>
-        {outputs.length > 0 && column(outputs, "out")}
+        {(outputs.length > 0 || newOutput) && column(outputs, "out")}
       </div>
       {selfLoops.length > 0 && (
         <div

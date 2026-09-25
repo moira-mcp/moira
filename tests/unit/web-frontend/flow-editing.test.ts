@@ -250,6 +250,27 @@ describe("flow edit export", () => {
     ]);
   });
 
+  test("a step created where an output was dropped is one operation: the step and the output to it", () => {
+    const saved = quickTask();
+    const log = logOf(saved, [
+      {
+        kind: "add-connected-node",
+        node: step("escalate"),
+        blockId: "plan-review",
+        source: "plan-review",
+        key: "escalate",
+      },
+    ]);
+    expect(log).toHaveLength(1);
+    const draft = foldOperations(saved, log);
+    expect(node(draft, "escalate")!.progressNodeId).toBe("plan-review");
+    expect(targets(draft, "plan-review").escalate).toBe("escalate");
+    expect(exportDiff(saved, log).map(exportLine)).toEqual([
+      "+ node escalate",
+      'nodes[plan-review].connections.escalate: undefined → "escalate"',
+    ]);
+  });
+
   test("an edit typed back to the saved value and a rename undone by another are not changes", () => {
     const saved = quickTask();
     const directive = node(saved, "create-plan")!.directive as string;

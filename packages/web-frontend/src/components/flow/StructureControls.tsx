@@ -57,7 +57,7 @@ import {
 const DROP = "__drop__";
 
 /** Commit one operation; a refusal from the authoring functions becomes a message, not a crash. */
-function useCommit(): {
+export function useCommit(): {
   error: string | null;
   commit: (op: Operation) => boolean;
   clear: () => void;
@@ -81,7 +81,7 @@ function useCommit(): {
   };
 }
 
-function ErrorLine({ message, testId }: { message: string | null; testId: string }) {
+export function ErrorLine({ message, testId }: { message: string | null; testId: string }) {
   if (!message) return null;
   return (
     <p
@@ -96,7 +96,7 @@ function ErrorLine({ message, testId }: { message: string | null; testId: string
 }
 
 /** A step picker grouped by block, with optional extra choices (dropping an edge). */
-function TargetSelect({
+export function TargetSelect({
   value,
   onChange,
   exclude,
@@ -175,14 +175,17 @@ function idProblemText(problem: RenameProblem, t: (key: string) => string): stri
 
 // --- Rename
 
-function RenameDialog({
+export function RenameDialog({
   nodeId,
   open,
   onOpenChange,
+  onRenamed,
 }: {
   nodeId: string;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** After the rename is committed, with the new id. */
+  onRenamed?: (id: string) => void;
 }): React.JSX.Element | null {
   const { t } = useTranslation();
   const { draft } = useEditing();
@@ -191,7 +194,10 @@ function RenameDialog({
   if (!draft) return null;
   const preview = renamePreview(draft, nodeId, next);
   const confirm = () => {
-    if (commit({ kind: "rename-node", from: nodeId, to: next })) onOpenChange(false);
+    if (commit({ kind: "rename-node", from: nodeId, to: next })) {
+      onOpenChange(false);
+      onRenamed?.(next);
+    }
   };
   return (
     <Dialog
@@ -256,7 +262,7 @@ function RenameDialog({
 
 // --- Delete
 
-function DeleteDialog({
+export function DeleteDialog({
   nodeId,
   open,
   onOpenChange,
@@ -512,37 +518,19 @@ export function ConnectionsEditor({ nodeId }: { nodeId: string }): React.JSX.Ele
 
 // --- New step
 
+/** Where a new step goes: into a block (or into a workflow without blocks), or onto an edge. */
+export type StepPlacement =
+  | { blockId?: string }
+  | { edge: { source: string; key: string } }
+  /** Where an output was dropped: the new step is what it leads to; a new output is named here. */
+  | { from: { source: string; key: string | null }; blockId?: string };
+
 /** "Add step" under a block's step list: a node of a chosen type, with its required fields. */
 export function AddStep({ blockId }: { blockId: string }): React.JSX.Element | null {
   const { t } = useTranslation();
   const { enabled, draft } = useEditing();
-  const { catalog } = useNodeTypes();
-  const types = useMemo(() => creatableTypes(catalog?.nodeTypes ?? []), [catalog]);
   const [open, setOpen] = useState(false);
-  const [type, setType] = useState("agent-directive");
-  const [id, setId] = useState("");
-  const [values, setValues] = useState<Record<string, string>>({});
-  const { error, commit, clear } = useCommit();
   if (!enabled || !draft) return null;
-  const chosen = types.find((candidate) => candidate.type === type) ?? types[0];
-  const problem = newIdProblem(draft, id);
-  // A structured field starts from its empty shape, so the author edits JSON rather than types it.
-  const valueOf = (field: CreatableField) => values[field.name] ?? field.initial ?? "";
-  const problems = Object.fromEntries(
-    (chosen?.fields ?? []).map((field) => [field.name, fieldProblem(field, valueOf(field))]),
-  );
-  const incomplete = Object.values(problems).some((p) => p !== null);
-  const close = () => {
-    setOpen(false);
-    setId("");
-    setValues({});
-    clear();
-  };
-  const confirm = () => {
-    if (!chosen) return;
-    const typed = Object.fromEntries(chosen.fields.map((field) => [field.name, valueOf(field)]));
-    if (commit({ kind: "add-node", node: newNode(chosen, id, typed), blockId })) close();
-  };
   return (
     <>
       <Button
@@ -555,12 +543,121 @@ export function AddStep({ blockId }: { blockId: string }): React.JSX.Element | n
         <Plus className="size-3.5" aria-hidden="true" />
         {t("pages.flowPage.structure.addStep.action")}
       </Button>
-      <Dialog open={open} onOpenChange={(value) => (value ? setOpen(true) : close())}>
+      {open && <AddStepDialog placement={{ blockId }} onClose={() => setOpen(false)} />}
+    </>
+  );
+}
+
+/**
+ * The new-step dialog: a node of any catalog type with the fields it requires, added into a block
+ * or inserted on an edge (it then continues to where the edge led; see `insertNodeOnEdge`).
+ */
+export function AddStepDialog({
+  placement,
+  onClose,
+  onAdded,
+}: {
+  placement: StepPlacement;
+  onClose: () => void;
+  /** After the step is committed, with its id. */
+  onAdded?: (id: string) => void;
+}): React.JSX.Element | null {
+  const { t } = useTranslation();
+  const { draft } = useEditing();
+  const { catalog } = useNodeTypes();
+  const types = useMemo(() => creatableTypes(catalog?.nodeTypes ?? []), [catalog]);
+  const [type, setType] = useState("agent-directive");
+  const [id, setId] = useState("");
+  const [values, setValues] = useState<Record<string, string>>({});
+  const [outputKey, setOutputKey] = useState("");
+  const { error, commit } = useCommit();
+  if (!draft) return null;
+  const chosen = types.find((candidate) => candidate.type === type) ?? types[0];
+  const problem = newIdProblem(draft, id);
+  // A structured field starts from its empty shape, so the author edits JSON rather than types it.
+  const valueOf = (field: CreatableField) => values[field.name] ?? field.initial ?? "";
+  const problems = Object.fromEntries(
+    (chosen?.fields ?? []).map((field) => [field.name, fieldProblem(field, valueOf(field))]),
+  );
+  const incomplete = Object.values(problems).some((p) => p !== null);
+  const onEdge = "edge" in placement ? placement.edge : null;
+  const from = "from" in placement ? placement.from : null;
+  const blockId = "blockId" in placement ? placement.blockId : undefined;
+  // A new output dropped on the canvas is named together with the step it will lead to.
+  const naming = from !== null && from.key === null;
+  const sourceNode = from ? draft.nodes.find((n) => n.id === from.source) : undefined;
+  const keyProblem = !naming
+    ? null
+    : !outputKey
+      ? "missing"
+      : !isValidConnectionKey(outputKey)
+        ? t("pages.flowPage.structure.connections.invalidKey")
+        : Object.hasOwn(sourceNode?.connections ?? {}, outputKey)
+          ? t("pages.flowPage.structure.connections.keyExists")
+          : null;
+  const confirm = () => {
+    if (!chosen) return;
+    const typed = Object.fromEntries(chosen.fields.map((field) => [field.name, valueOf(field)]));
+    const node = newNode(chosen, id, typed);
+    const op: Operation = onEdge
+      ? { kind: "insert-on-edge", source: onEdge.source, key: onEdge.key, node }
+      : from
+        ? {
+            kind: "add-connected-node",
+            node,
+            source: from.source,
+            key: from.key ?? outputKey,
+            ...(blockId ? { blockId } : {}),
+          }
+        : { kind: "add-node", node, ...(blockId ? { blockId } : {}) };
+    if (commit(op)) {
+      onClose();
+      onAdded?.(id);
+    }
+  };
+  return (
+    <>
+      <Dialog open onOpenChange={(value) => !value && onClose()}>
         <DialogContent className="max-w-lg" data-testid="add-step-dialog">
           <DialogHeader>
-            <DialogTitle>{t("pages.flowPage.structure.addStep.title")}</DialogTitle>
-            <DialogDescription>{t("pages.flowPage.structure.addStep.body")}</DialogDescription>
+            <DialogTitle>
+              {onEdge
+                ? t("pages.flowPage.structure.addStep.insertTitle", {
+                    edge: `${onEdge.source}.${onEdge.key}`,
+                  })
+                : from
+                  ? t("pages.flowPage.structure.addStep.fromTitle", {
+                      edge: `${from.source}.${from.key ?? "…"}`,
+                    })
+                  : t("pages.flowPage.structure.addStep.title")}
+            </DialogTitle>
+            <DialogDescription>
+              {onEdge
+                ? t("pages.flowPage.structure.addStep.insertBody")
+                : from
+                  ? t("pages.flowPage.structure.addStep.fromBody")
+                  : t("pages.flowPage.structure.addStep.body")}
+            </DialogDescription>
           </DialogHeader>
+          {naming && (
+            <label className="block space-y-1">
+              <span className="text-xs font-medium">
+                {t("pages.flowPage.structure.addStep.outputName", { source: from?.source })}
+              </span>
+              <Input
+                value={outputKey}
+                onChange={(e) => setOutputKey(e.target.value)}
+                placeholder={t("pages.flowPage.structure.connections.newKey")}
+                className="font-mono"
+                aria-invalid={outputKey.length > 0 && keyProblem !== null}
+                data-testid="add-step-output-key"
+                autoFocus
+              />
+              {outputKey.length > 0 && keyProblem && keyProblem !== "missing" && (
+                <ErrorLine message={keyProblem} testId="add-step-output-key-problem" />
+              )}
+            </label>
+          )}
           <label className="block space-y-1">
             <span className="text-xs font-medium">
               {t("pages.flowPage.structure.addStep.type")}
@@ -630,12 +727,12 @@ export function AddStep({ blockId }: { blockId: string }): React.JSX.Element | n
           ))}
           <ErrorLine message={error} testId="add-step-error" />
           <DialogFooter>
-            <Button variant="ghost" onClick={close}>
+            <Button variant="ghost" onClick={onClose}>
               {t("common.cancel")}
             </Button>
             <Button
               onClick={confirm}
-              disabled={!chosen || problem !== null || incomplete}
+              disabled={!chosen || problem !== null || incomplete || keyProblem !== null}
               data-testid="add-step-confirm"
             >
               {t("pages.flowPage.structure.addStep.confirm")}
