@@ -68,6 +68,7 @@ export {
   getNodeEnv,
   isRateLimitDisabled,
   getRateLimitWhitelist,
+  getTrustProxy,
   isTestEnvironment,
   // CORS / trusted origins
   getExtraTrustedOrigins,
@@ -109,3 +110,6 @@ export {
   bootstrapSelfHostSecrets,
   type GeneratedSecret,
 } from "./secrets-bootstrap.js";
+
+// Proxy trust for client-address resolution (TRUST_PROXY)
+export { parseTrustProxy, DEFAULT_TRUST_PROXY, type TrustProxySetting } from "./trust-proxy.js";

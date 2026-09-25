@@ -19,9 +19,6 @@ import {
 
 const logger = createLogger({ component: "mcp-rate-limit" });
 
-// Disable rate limiting in test environment or when explicitly disabled via env
-const skipRateLimit = isTestEnvironment() || isRateLimitDisabled();
-
 // Load test header name (unified for both auth and rate limit bypass)
 const LOAD_TEST_HEADER = "x-load-test";
 
@@ -49,15 +46,24 @@ function hasValidLoadTestHeader(req: Request): boolean {
 }
 
 /**
- * MCP endpoints rate limiter: 1000 requests per minute
+ * MCP endpoints rate limiter: 1000 requests per minute per client address
  * High limit to support parallel test execution and legitimate heavy use
  * Still protects against DoS (16 req/sec burst)
+ *
+ * Keyed by req.ip, which the server resolves through the trusted proxies (TRUST_PROXY). The server
+ * uses the instance exported below; tests build the same limiter with the limit turned on.
  */
-export const mcpLimiter = rateLimit({
-  windowMs: 60 * 1000, // 1 minute
-  max: 1000,
-  skip: (req) => skipRateLimit || hasValidLoadTestHeader(req),
-  message: "Too many MCP requests, please try again later",
-  standardHeaders: true,
-  legacyHeaders: false,
+export function createMcpLimiter({ skipLimits }: { skipLimits: boolean }) {
+  return rateLimit({
+    windowMs: 60 * 1000, // 1 minute
+    max: 1000,
+    skip: (req) => skipLimits || hasValidLoadTestHeader(req),
+    message: "Too many MCP requests, please try again later",
+    standardHeaders: true,
+    legacyHeaders: false,
+  });
+}
+
+export const mcpLimiter = createMcpLimiter({
+  skipLimits: isTestEnvironment() || isRateLimitDisabled(),
 });

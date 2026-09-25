@@ -588,7 +588,7 @@ level headings classify the tracked test paths listed beneath them.
 
 **unit**
 
-- `tests/unit/shared/metrics.test.ts`
+- `tests/unit/shared/metrics.test.ts` — HTTP metrics `route` label taken from the Express route that handled the request: one constant for every unknown path, one series per parameterised template whatever the letter case of the mount path, the full mounted template on a 500 from the app error handler, and never the raw path when a matched route falls through to a catch-all
 
 ### node-handlers
 
@@ -720,11 +720,13 @@ level headings classify the tracked test paths listed beneath them.
 
 **integration**
 
-- `tests/integration/cors-rate-limit-middleware.test.ts` — CORS origin allowlist: allowlisted/localhost reflected, disallowed/no-origin; rate-limit IPv6 key fallback via ipKeyGenerator avoids ERR_ERL_KEY_GEN_IPV6
+- `tests/integration/client-ip-trust.test.ts` — client address resolved only through TRUST_PROXY: spoofed X-Forwarded-For entries share one limiter budget and cannot claim a whitelisted address (default nginx-only trust, private-network client, `TRUST_PROXY=2` behind an outer proxy, MCP limiter), audit context and the Better Auth client-address header equal req.ip, and a Better Auth sign-up records the server-written address for the session and the audit entry
+- `tests/integration/cors-rate-limit-middleware.test.ts` — CORS origin allowlist: allowlisted/localhost reflected, disallowed/no-origin; rate-limit IPv6 key fallback via ipKeyGenerator avoids ERR_ERL_KEY_GEN_IPV6 on the shipped artifact-view limiter with limits on
 
 **unit**
 
 - `tests/unit/web-backend/rate-limit-bypass.test.ts`
+- `tests/unit/shared/trust-proxy.test.ts` — TRUST_PROXY parsing: loopback-only default, hop counts and address/subnet/named-range lists accepted, "true" and malformed values refused
 
 ### security
 
@@ -974,7 +976,7 @@ level headings classify the tracked test paths listed beneath them.
 
 **unit**
 
-- `tests/unit/config/nginx-sensitive-logging.test.ts` — both shipped nginx modes suppress path grants from access logs and route bounded authenticated communication uploads to MCP without JSON MIME rewriting
+- `tests/unit/config/nginx-sensitive-logging.test.ts` — both shipped nginx modes suppress path grants from access logs and route bounded authenticated communication uploads to MCP without JSON MIME rewriting; landing mode answers unknown root paths with a real 404 and the landing 404 page while root mode keeps the Web UI index fallback
 - `tests/unit/shared/logging/express-middleware.test.ts` — materialize grant redaction with routing/query preservation and unrelated-URL non-regression
 - `tests/unit/web-backend/execution-materialize.test.ts` — current-definition fetch, execution binding, repeated concurrent tar responses, late authorization, render-overflow handling, and expected-4xx versus unexpected-boundary error mapping
 - `tests/unit/mcp-server/deliver-materialize.test.ts` — context delivery of rendered bodies for the caller's current presentation, fallback-specific counting that leaves the archive series untouched, refusal without partial data for a missing grant or an oversized set, and a single indistinguishable refusal message across conditions

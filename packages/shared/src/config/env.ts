@@ -16,6 +16,7 @@ import dotenv from "dotenv";
 import path from "path";
 import type { CodespaceResourcePolicy } from "../codespaces/resource-types.js";
 import { evaluateCodespaceResourcePolicy } from "../codespaces/resource-policy.js";
+import { parseTrustProxy, type TrustProxySetting } from "./trust-proxy.js";
 
 const logger = createLogger({ component: "config" });
 
@@ -470,6 +471,12 @@ class ConfigSingleton {
     return whitelist.split(",").map((ip) => ip.trim());
   }
 
+  /** Proxies trusted to report the client address; see trust-proxy.ts. Throws on an invalid value. */
+  getTrustProxy(): TrustProxySetting {
+    this.ensureInitialized();
+    return parseTrustProxy(process.env.TRUST_PROXY);
+  }
+
   isTestEnvironment(): boolean {
     this.ensureInitialized();
     return (
@@ -773,6 +780,9 @@ export function isRateLimitDisabled(): boolean {
 }
 export function getRateLimitWhitelist(): string[] {
   return config.getRateLimitWhitelist();
+}
+export function getTrustProxy(): TrustProxySetting {
+  return config.getTrustProxy();
 }
 export function isTestEnvironment(): boolean {
   return config.isTestEnvironment();

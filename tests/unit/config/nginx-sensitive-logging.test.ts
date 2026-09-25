@@ -49,4 +49,22 @@ describe("nginx configuration", () => {
       expect(location.split("}", 1)[0]).not.toContain('Content-Type "application/json"');
     },
   );
+
+  test("nginx-app.conf answers an unknown landing path with 404 and the landing 404 page", () => {
+    const source = readFileSync(resolve(process.cwd(), "config", "nginx-app.conf"), "utf8");
+    const location = source.match(/\n {4}location \/ \{\s*root \/var\/www\/html;([^}]+)\}/)?.[1];
+
+    expect(location).toBeDefined();
+    expect(location).toContain("try_files $uri $uri/ =404;");
+    expect(location).toContain("error_page 404 /404.html;");
+    expect(location).not.toContain("/index.html;");
+  });
+
+  test("nginx-root.conf keeps the Web UI's client-side routes on its index page", () => {
+    const source = readFileSync(resolve(process.cwd(), "config", "nginx-root.conf"), "utf8");
+    const location = source.match(/\n {4}location \/ \{\s*root \/var\/www\/html;([^}]+)\}/)?.[1];
+
+    expect(location).toBeDefined();
+    expect(location).toContain("try_files $uri $uri/ /index.html;");
+  });
 });

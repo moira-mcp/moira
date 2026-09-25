@@ -1036,9 +1036,11 @@ GET /api/admin/audit-log
 
 **IP Detection:**
 
-- Express configured with `trust proxy: true`
-- Extracts real client IP from `x-forwarded-for` header
-- Falls back to `req.ip` and `req.socket.remoteAddress`
+- The client IP is `req.ip`, which Express derives from `X-Forwarded-For` only through the proxies
+  named in `TRUST_PROXY` (default: the in-container nginx); falls back to `req.socket.remoteAddress`
+- Better Auth hooks (sign-in/sign-up audit, session country) and Better Auth's own `session.ipAddress`
+  read the same address from the `x-moira-client-ip` header that web-backend writes from `req.ip`
+  before the auth handler, replacing any client-sent value
 - GeoIP lookup for country code
 
 ### Testing

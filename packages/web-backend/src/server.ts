@@ -31,6 +31,8 @@ import {
   createMetricsServer,
   getMetricsPort,
   getExecutionRetentionService,
+  applyTrustProxy,
+  clientIpHeaderMiddleware,
 } from "@mcp-moira/shared";
 
 // Set global service for this process (MUST be first thing after imports)
@@ -143,11 +145,14 @@ class MoiraApiServer {
    * Setup middleware that must run BEFORE Better Auth routes
    */
   private setupMiddlewareBeforeAuth(): void {
-    // Trust proxy for correct IP detection (nginx reverse proxy)
-    this.app.set("trust proxy", true);
+    // Derive req.ip only through the proxies TRUST_PROXY names (the in-container nginx by default)
+    applyTrustProxy(this.app);
 
     // Prometheus metrics middleware FIRST (before any logging)
     this.app.use(metricsMiddleware());
+
+    // Better Auth hooks see only headers: hand them req.ip under a server-written header
+    this.app.use(clientIpHeaderMiddleware());
 
     // Request context middleware - creates AsyncLocalStorage context for request tracing
     // Must be early to capture requestId for all logs

@@ -19,6 +19,7 @@ import {
   portableHelpRemarkPlugin,
 } from "./src/utils/frontmatter";
 import {
+  getBaseUrl,
   getMcpUrl,
   setHost,
   getContactEmail,
@@ -45,6 +46,8 @@ setStaticArtifactsDomain(STATIC_ARTIFACTS_DOMAIN);
 
 export default defineConfig({
   output: "static",
+  // Public origin of the deployment: absolute URLs in the sitemap and canonical links.
+  site: getBaseUrl(),
 
   integrations: [
     mermaid(),
@@ -370,7 +373,8 @@ export default defineConfig({
       customCss: ["./src/styles/starlight.css"],
       disable404Route: true,
     }),
-    sitemap(),
+    // Written under docs/ so the composed web root keeps the landing's own root sitemap files.
+    sitemap({ filenameBase: "docs/sitemap" }),
     mdx(),
     icon({
       include: {

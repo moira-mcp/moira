@@ -27,6 +27,7 @@ import {
   getLogLevelEnv,
   getMcpPort,
   metricsMiddleware,
+  applyTrustProxy,
   setLogLevel,
   getMcpServerVersion,
   updateContext,
@@ -463,6 +464,8 @@ async function handleAuthenticatedMcpRequest(
 
 // Express app setup
 const app = express();
+// Derive req.ip only through the proxies TRUST_PROXY names (the in-container nginx by default)
+applyTrustProxy(app);
 
 const attachmentGrantService = new CommunicationAttachmentGrantService();
 const attachmentInflight = new CommunicationAttachmentInflightLimiter();

@@ -1,132 +1,129 @@
 /**
- * Unit tests for metrics module
- * Tests normalizeRoute function for route path normalization
+ * Unit tests for the HTTP metrics middleware: the `route` label must come from the Express route
+ * that handled the request, so the label set stays bounded no matter which paths clients request.
  */
 
-import { describe, it, expect } from "@jest/globals";
-import { normalizeRoute } from "@mcp-moira/shared";
+import { describe, it, expect, beforeEach } from "@jest/globals";
+import express, { type NextFunction, type Request, type Response } from "express";
+import request from "supertest";
+import {
+  httpRequestDurationSeconds,
+  httpRequestsTotal,
+  metricsMiddleware,
+  UNMATCHED_ROUTE,
+} from "@mcp-moira/shared";
+import { asyncHandler } from "../../../packages/web-backend/src/middleware/error-middleware.js";
 
-describe("Metrics - normalizeRoute", () => {
-  describe("UUID patterns", () => {
-    it("should normalize UUID v4 patterns to :id", () => {
-      expect(normalizeRoute("/api/workflows/550e8400-e29b-41d4-a716-446655440000")).toBe(
-        "/api/workflows/:id",
-      );
-    });
+async function recordedRoutes(): Promise<string[]> {
+  const { values } = await httpRequestsTotal.get();
+  return values.map((value) => String(value.labels.route));
+}
 
-    it("should normalize multiple UUIDs in path", () => {
-      expect(
-        normalizeRoute(
-          "/api/workflows/550e8400-e29b-41d4-a716-446655440000/steps/a1b2c3d4-e5f6-7890-abcd-ef1234567890",
-        ),
-      ).toBe("/api/workflows/:id/steps/:id");
-    });
+async function recordedSeries(): Promise<Array<Record<string, string | number>>> {
+  const { values } = await httpRequestsTotal.get();
+  return values.map((value) => ({ ...value.labels }));
+}
 
-    it("should handle uppercase UUIDs", () => {
-      expect(normalizeRoute("/api/users/A1B2C3D4-E5F6-7890-ABCD-EF1234567890")).toBe(
-        "/api/users/:id",
-      );
-    });
+async function histogramRoutes(): Promise<Set<string>> {
+  const { values } = await httpRequestDurationSeconds.get();
+  return new Set(values.map((value) => String(value.labels.route)));
+}
+
+function makeApp() {
+  const app = express();
+  app.use(metricsMiddleware());
+
+  const workflows = express.Router();
+  workflows.get("/", (_req, res) => res.json([]));
+  workflows.get("/:id", (req, res) => res.json({ id: req.params.id }));
+  workflows.get(
+    "/:id/boom",
+    asyncHandler(async () => {
+      throw new Error("handler failed");
+    }),
+  );
+  workflows.get("/:id/fall", (_req, _res, next) => next());
+  app.use("/api/workflows", workflows);
+
+  app.use("/api/*apiPath", (_req, res) => {
+    res.status(404).json({ error: "ENDPOINT_NOT_FOUND" });
+  });
+  app.use((_req, res) => {
+    res.status(404).send("not found");
+  });
+  app.use((_err: Error, _req: Request, res: Response, _next: NextFunction) => {
+    res.status(500).json({ error: "INTERNAL" });
+  });
+  return app;
+}
+
+describe("HTTP metrics route label", () => {
+  beforeEach(() => {
+    httpRequestsTotal.reset();
+    httpRequestDurationSeconds.reset();
   });
 
-  describe("alphanumeric ID patterns (20+ chars)", () => {
-    it("should normalize long alphanumeric IDs to :id", () => {
-      expect(normalizeRoute("/api/admin/users/Z0d6YnYHXwf2ieBe9q72GLyv4OSMJQSb")).toBe(
-        "/api/admin/users/:id",
-      );
-    });
+  it("records every unknown path under one constant, so scanners cannot add series", async () => {
+    const app = makeApp();
+    const scannerPaths = [
+      "/.well-known/about.php",
+      "/api/.aws.7z",
+      "/api/.aws.bz2",
+      "/.well-known/pki-validation/index.php",
+      "/wp-login.php",
+      "/api/v1/users/12345",
+    ];
+    for (const path of scannerPaths) {
+      const res = await request(app).get(path);
+      expect(res.status).toBe(404);
+    }
 
-    it("should normalize session IDs", () => {
-      expect(normalizeRoute("/api/sessions/abc123def456ghi789jkl012mno345")).toBe(
-        "/api/sessions/:id",
-      );
-    });
-
-    it("should not normalize short alphanumeric strings", () => {
-      expect(normalizeRoute("/api/workflows/short")).toBe("/api/workflows/short");
-    });
+    expect(await recordedRoutes()).toEqual([UNMATCHED_ROUTE]);
+    expect(await histogramRoutes()).toEqual(new Set([UNMATCHED_ROUTE]));
   });
 
-  describe("numeric ID patterns", () => {
-    it("should normalize numeric IDs to :id", () => {
-      expect(normalizeRoute("/api/items/12345")).toBe("/api/items/:id");
-    });
+  it("records a parameterised route as its template, one series for every id", async () => {
+    const app = makeApp();
+    for (const id of ["1", "550e8400-e29b-41d4-a716-446655440000", "short", "Z0d6YnYHXwf2ieBe"]) {
+      await request(app).get(`/api/workflows/${id}`).expect(200);
+    }
 
-    it("should normalize multiple numeric IDs", () => {
-      expect(normalizeRoute("/api/users/123/posts/456")).toBe("/api/users/:id/posts/:id");
-    });
-
-    it("should normalize single digit IDs", () => {
-      expect(normalizeRoute("/api/page/1")).toBe("/api/page/:id");
-    });
+    expect(await recordedSeries()).toEqual([
+      { method: "GET", route: "/api/workflows/:id", status_code: "200" },
+    ]);
   });
 
-  describe("token patterns (32+ chars with base64url)", () => {
-    it("should normalize base64url tokens with underscores and dashes to :token", () => {
-      // Token pattern requires 32+ chars with base64url chars (including - and _)
-      expect(normalizeRoute("/api/tokens/abc123_def456-ghi789_jkl012-mno345pqr")).toBe(
-        "/api/tokens/:token",
-      );
-    });
+  it("records one template whatever letter case the client sends in the mount path", async () => {
+    const app = makeApp();
+    for (const path of ["/api/workflows/1", "/API/Workflows/1", "/api/WORKFLOWS/1"]) {
+      await request(app).get(path).expect(200);
+    }
 
-    it("should normalize long tokens with mixed chars", () => {
-      // Long alphanumeric without special chars gets normalized by alphanumeric pattern first
-      // Token pattern specifically targets base64url with - or _ chars
-      expect(normalizeRoute("/api/verify/aBc123-XyZ789_token-value_here-now")).toBe(
-        "/api/verify/:token",
-      );
-    });
+    expect(await recordedRoutes()).toEqual(["/api/workflows/:id"]);
   });
 
-  describe("edge cases", () => {
-    it('should return "unknown" for empty path', () => {
-      expect(normalizeRoute("")).toBe("unknown");
-    });
+  it("records a router's root route as the mount path", async () => {
+    await request(makeApp()).get("/api/workflows").expect(200);
 
-    it("should handle root path", () => {
-      expect(normalizeRoute("/")).toBe("/");
-    });
-
-    it("should preserve static paths without IDs", () => {
-      expect(normalizeRoute("/api/health")).toBe("/api/health");
-      expect(normalizeRoute("/api/workflows")).toBe("/api/workflows");
-      expect(normalizeRoute("/api/auth/sign-in/email")).toBe("/api/auth/sign-in/email");
-    });
-
-    it("should handle paths with query strings (path only, no query)", () => {
-      // normalizeRoute only receives path, not query string
-      expect(normalizeRoute("/api/users/123")).toBe("/api/users/:id");
-    });
-
-    it("should handle mixed patterns", () => {
-      // Alphanumeric 20+ chars gets :id, numeric gets :id
-      expect(normalizeRoute("/api/users/123/tokens/abcdefghijklmnopqrstuvwxyz123456")).toBe(
-        "/api/users/:id/tokens/:id",
-      );
-    });
+    expect(await recordedRoutes()).toEqual(["/api/workflows"]);
   });
 
-  describe("real-world routes", () => {
-    it("should normalize admin user routes", () => {
-      expect(normalizeRoute("/api/admin/users/uLokEFR28kjnwkVZI9SAHz6gw55rnDxE/sessions")).toBe(
-        "/api/admin/users/:id/sessions",
-      );
-    });
+  it("keeps the full mounted template when the handler fails and the app error handler responds", async () => {
+    await request(makeApp()).get("/api/workflows/draft-7/boom").expect(500);
 
-    it("should normalize workflow execution routes", () => {
-      expect(normalizeRoute("/api/executions/c816f4d1-40a1-4e01-8228-8d12c5f62615")).toBe(
-        "/api/executions/:id",
-      );
-    });
+    expect(await recordedSeries()).toEqual([
+      { method: "GET", route: "/api/workflows/:id/boom", status_code: "500" },
+    ]);
+  });
 
-    it("should normalize OAuth routes", () => {
-      expect(normalizeRoute("/api/auth/mcp/authorize")).toBe("/api/auth/mcp/authorize");
-    });
+  it("never records the raw path when a matched route passes the request on to a catch-all", async () => {
+    const app = makeApp();
+    for (const id of ["alpha", "beta", "gamma"]) {
+      await request(app).get(`/api/workflows/${id}/fall`).expect(404);
+    }
 
-    it("should normalize settings routes", () => {
-      expect(normalizeRoute("/api/settings/telegram.enabled")).toBe(
-        "/api/settings/telegram.enabled",
-      );
-    });
+    expect(await recordedSeries()).toEqual([
+      { method: "GET", route: "/api/workflows/:id/fall", status_code: "404" },
+    ]);
   });
 });

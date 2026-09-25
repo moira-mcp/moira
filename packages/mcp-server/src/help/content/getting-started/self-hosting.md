@@ -170,6 +170,26 @@ STATIC_ARTIFACTS_DOMAIN=static.example.com
 
 > **caution:** `STATIC_ARTIFACTS_DOMAIN` is required — startup aborts if it is empty.
 
+### Behind a reverse proxy
+
+Moira keys rate limits, the `RATE_LIMIT_WHITELIST` exemption, audit records and session addresses on
+the client address. It takes that address from `X-Forwarded-For` only through the proxies named in
+`TRUST_PROXY`; entries a client writes itself are never used.
+
+- Unset (the default) trusts only the nginx inside the container. Use it when clients connect to the
+  container's published port directly.
+- Behind one more reverse proxy — Traefik, Caddy, a load balancer — set the number of proxy hops, or
+  that proxy's address or subnet:
+
+```bash
+TRUST_PROXY=2                            # your proxy, then the nginx inside the container
+TRUST_PROXY=loopback,172.18.0.0/16       # or: loopback plus the proxy's Docker network
+```
+
+Without it, every client behind your proxy shares the proxy's address and one rate-limit budget.
+`TRUST_PROXY=true` is refused, and an invalid value stops startup with an error that lists the
+accepted forms.
+
 ### Auto-generated secrets
 
 In self-host mode these are generated on first start and persisted to
