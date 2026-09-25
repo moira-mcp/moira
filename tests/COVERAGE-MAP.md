@@ -588,7 +588,7 @@ level headings classify the tracked test paths listed beneath them.
 
 **unit**
 
-- `tests/unit/shared/metrics.test.ts`
+- `tests/unit/shared/metrics.test.ts` — HTTP metrics `route` label taken from the Express route that handled the request: one constant for every unknown path, one series per parameterised template whatever the letter case of the mount path, the full mounted template on a 500 from the app error handler, and never the raw path when a matched route falls through to a catch-all
 
 ### node-handlers
 

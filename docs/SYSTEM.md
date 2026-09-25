@@ -1288,9 +1288,10 @@ import { Registry, Counter, Histogram, Gauge, collectDefaultMetrics } from "prom
 // Singleton registry for all metrics
 export const metricsRegistry = new Registry();
 
-// Pre-configured HTTP metrics
-export const httpRequestsTotal: Counter; // http_requests_total{method, route, status}
-export const httpRequestDuration: Histogram; // http_request_duration_seconds{method, route}
+// Pre-configured HTTP metrics, recorded by metricsMiddleware()
+export const httpRequestsTotal: Counter; // moira_http_requests_total{method, route, status_code}
+export const httpRequestDurationSeconds: Histogram; // moira_http_request_duration_seconds{method, route, status_code}
+export const UNMATCHED_ROUTE = "<unmatched>";
 
 // Factory functions for custom metrics
 export function createCounter(name: string, help: string, labels?: string[]): Counter;
@@ -1303,17 +1304,24 @@ export function createHistogram(
 ): Histogram;
 ```
 
-### Route Normalization
+### The `route` label
 
-```typescript
-// Prevents high-cardinality labels in metrics
-export function normalizeRoute(path: string): string;
+`metricsMiddleware()` labels each request with the template of the Express route that handled it —
+the router's mount path followed by the route pattern — never with the requested path:
 
-// Examples:
-// /api/users/550e8400-e29b-41d4-a716-446655440000 → /api/users/:id
-// /api/items/12345 → /api/items/:id
-// /api/tokens/abc123_def456-ghi789_jkl012-mno345pqr → /api/tokens/:token
+```text
+GET /api/workflows/550e8400-e29b-41d4-a716-446655440000  → route="/api/workflows/:id"
+GET /api/auth/get-session                                  → route="/api/auth/*authPath"
+GET /api/.aws.7z   (no route matched, 404)                 → route="<unmatched>"
 ```
+
+Every request that no route handled — unknown paths, scanners, responses written by middleware alone,
+such as an authentication rejection before routing — shares `UNMATCHED_ROUTE`, so the number of series
+is bounded by the registered routes. The template is recorded when Express dispatches the route, so a
+handler error answered by the application's error handler keeps the full template. This relies on
+router mount paths being static lowercase strings: Express matches them regardless of letter case, and
+the label folds the matched mount path to lower case; mounting a router under a path with parameters
+would put request values into the label.
 
 ### Metrics Server
 

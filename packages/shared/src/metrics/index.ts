@@ -5,6 +5,7 @@
 
 import * as promClient from "prom-client";
 import { createServer, IncomingMessage, ServerResponse } from "http";
+import express from "express";
 import type { Request, Response, NextFunction } from "express";
 
 // Create a single registry for all metrics
@@ -42,23 +43,52 @@ export const httpRequestDurationSeconds = new promClient.Histogram({
 });
 
 /**
- * Normalize route path by replacing dynamic segments with placeholders
- * e.g., /api/workflows/abc123 -> /api/workflows/:id
+ * `route` label of a request that no Express route handled: 404s, scanners, and responses written
+ * by middleware alone. Every such request shares this one value, so an unknown path can never add
+ * a series.
  */
-export function normalizeRoute(path: string): string {
-  if (!path) return "unknown";
+export const UNMATCHED_ROUTE = "<unmatched>";
 
-  return (
-    path
-      // UUID-like patterns (e.g., workflow IDs, execution IDs)
-      .replace(/\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, "/:id")
-      // Generic alphanumeric IDs (20+ chars, likely IDs)
-      .replace(/\/[a-zA-Z0-9]{20,}/g, "/:id")
-      // Numeric IDs
-      .replace(/\/\d+/g, "/:id")
-      // Token-like patterns (base64url encoded)
-      .replace(/\/[a-zA-Z0-9_-]{32,}/g, "/:token")
-  );
+const routeTemplateKey = Symbol.for("moira.metrics.routeTemplate");
+
+type RouteTemplateRequest = Request & { [routeTemplateKey]?: string };
+
+interface DispatchableRoute {
+  path: unknown;
+  dispatch(req: RouteTemplateRequest, res: Response, done: NextFunction): void;
+}
+
+let routeDispatchRecorded = false;
+
+/**
+ * Record the route template when an Express route takes a request: the mount path in effect at
+ * that moment followed by the route's own pattern, e.g. `/api/workflows` + `/:id`.
+ *
+ * The template has to be taken at dispatch. By the time the response finishes, Express has
+ * restored `req.baseUrl` if the router exited through `next(err)`, and a later wildcard mount may
+ * have replaced it with the raw path. Mount paths are static lowercase strings, and Express matches
+ * them case-insensitively while keeping the request's casing in `req.baseUrl`; folding it to lower
+ * case makes the mount part equal its pattern. A mount path with parameters would put request
+ * values into the label and must not be added. The last route that took the request wins.
+ */
+function recordRouteTemplates(): void {
+  if (routeDispatchRecorded) return;
+  routeDispatchRecorded = true;
+
+  // Express exports Route at runtime; its type definitions do not declare it.
+  const { Route } = express as unknown as { Route: { prototype: DispatchableRoute } };
+  const route = Route.prototype;
+  const dispatch = route.dispatch;
+  route.dispatch = function dispatchWithTemplate(this: DispatchableRoute, req, res, done) {
+    req[routeTemplateKey] = routeTemplate(req.baseUrl.toLowerCase(), this.path);
+    return dispatch.call(this, req, res, done);
+  };
+}
+
+function routeTemplate(mountPath: string, routePath: unknown): string {
+  const pattern = typeof routePath === "string" ? routePath : String(routePath);
+  if (mountPath && pattern === "/") return mountPath;
+  return `${mountPath}${pattern}`;
 }
 
 /**
@@ -75,10 +105,13 @@ function shouldExclude(path: string): boolean {
 
 /**
  * Express middleware for collecting HTTP metrics
- * Records request count and duration for all requests
+ * Records request count and duration for all requests, labelled by the route template that
+ * handled the request, or UNMATCHED_ROUTE
  */
 export function metricsMiddleware() {
-  return (req: Request, res: Response, next: NextFunction): void => {
+  recordRouteTemplates();
+
+  return (req: RouteTemplateRequest, res: Response, next: NextFunction): void => {
     const path = req.path || req.url || "";
 
     // Skip metrics collection for excluded paths
@@ -96,7 +129,7 @@ export function metricsMiddleware() {
       const durationSeconds = durationNs / 1e9;
 
       const method = req.method || "UNKNOWN";
-      const route = normalizeRoute(path);
+      const route = req[routeTemplateKey] ?? UNMATCHED_ROUTE;
       const statusCode = res.statusCode.toString();
 
       // Increment request counter
