@@ -661,7 +661,9 @@ in place when you want to read and edit the current shape.
 **All Nodes:**
 
 - `type` - One of: start, agent-directive, condition, expression, subgraph, user-notification, deprecated telegram-notification, teleport, lock, materialize, read-note, write-note, upsert-note, end
-- `id` - Unique within workflow
+- `id` - Unique within the workflow and kebab-case: lower-case letters and digits separated by hyphens
+  (`^[a-z0-9][a-z0-9-]*$`). The schema refuses any other id, because a dot or an upper-case letter
+  would make `<node>.<key>` edge ids and `{{<node>.<name>}}` references ambiguous
 - `connections` - Required (except end nodes)
 
 ## Node Specifications
@@ -1215,11 +1217,11 @@ Then in directive: `Execute step {{current_step}}: {{steps[current_step].action}
 
 ### Variable Naming
 
-Variable and node ID names support multiple conventions:
+Variable names support multiple conventions; node ids are always kebab-case:
 
-- **camelCase**: `{{projectName}}`, `{{userInput}}`
-- **snake_case**: `{{project_name}}`, `{{user_input}}`
-- **kebab-case**: `{{my-project}}`, `{{setup-workspace}}`
+- **camelCase** variables: `{{projectName}}`, `{{userInput}}`
+- **snake_case** variables: `{{project_name}}`, `{{user_input}}`
+- **kebab-case** variables and node ids: `{{my-project}}`, `{{setup-workspace.path}}`
 
 Kebab-case is supported in the first segment:
 

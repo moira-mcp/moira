@@ -17,11 +17,12 @@ Variables are resolved at runtime from the execution context.
 
 ## Variable Naming
 
-Variable and node ID names support:
+Variable names support three conventions; node ids are always kebab-case (lower-case letters and
+digits separated by hyphens), because the schema refuses any other node id:
 
-- **camelCase**: `{{projectName}}`, `{{userInput}}`
-- **snake_case**: `{{project_name}}`, `{{user_input}}`
-- **kebab-case**: `{{my-project}}`, `{{user-input}}`
+- **camelCase** variables: `{{projectName}}`, `{{userInput}}`
+- **snake_case** variables: `{{project_name}}`, `{{user_input}}`
+- **kebab-case** variables and node ids: `{{my-project}}`, `{{setup-workspace.path}}`
 
 Kebab-case is supported in the first segment of variable references:
 

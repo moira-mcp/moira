@@ -44,7 +44,8 @@ moira-workflow flow.json variables [--usage]
 moira-workflow flow.json update <node-id> --directive "text"
 moira-workflow flow.json update <node-id> --completion-condition "text"
 moira-workflow flow.json clone <node-id> <new-id>
-moira-workflow flow.json delete <node-id>
+moira-workflow flow.json rename <node-id> <new-id>          # rewrites every reference
+moira-workflow flow.json delete <node-id> [--retarget <source.key>=<target>] [--drop <source.key>]
 moira-workflow flow.json move <node-id> --after <target-id>
 moira-workflow flow.json add <nodes.json>
 moira-workflow flow.json replace <node-id> <node.json>

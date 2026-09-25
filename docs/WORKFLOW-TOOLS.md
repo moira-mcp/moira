@@ -71,6 +71,39 @@ replaces the node's expressions. Both apply to `condition` and `agent-directive`
 condition node, `success` on an agent-directive node) and other than the reserved control outputs
 `error` and `timeout` — run `validate` after the edit to see the routing diagnostics.
 
+### rename - Rename a node and every reference to it
+
+```bash
+moira-workflow ./workflows/production/flows/<flow>.json rename review-plan independent-plan-review
+```
+
+Gives a node a new id and rewrites every reference to it: connection targets, `{{node.name}}`
+templates and block-helper arguments in any template text, routing case `contextPath` operands,
+progress list bindings, subgraph mappings, end `finalOutput`, batch write-note sources, expression
+identifiers and `runtimePolicy` write allowances. Connection keys, case outputs and block ids are
+not node references and stay as they are, and so does prose that mentions the id outside a
+reference. The command prints each rewritten location with its count. It refuses an unknown node,
+an id that already exists and an id that is not kebab-case (`^[a-z0-9][a-z0-9-]*$`), leaving the
+file unchanged.
+
+### delete - Delete a node
+
+```bash
+# Refused while another node still leads to the node; the error names every such edge
+moira-workflow ./workflows/production/flows/<flow>.json delete legacy-check
+
+# Decide each incoming edge: point it at another node, or drop a non-primary output
+moira-workflow ./workflows/production/flows/<flow>.json delete legacy-check \
+  --retarget review.success=deliver --drop review.skip
+```
+
+Removes the node with its own outputs and labels, and removes it from `runtimePolicy` write
+allowances. Every incoming edge needs a decision, given by its edge id `<source>.<key>`:
+`--retarget` points it at another node, `--drop` removes that connection and its label. A node's
+primary output (`success`, `default` or `unlocked`, by type) cannot be dropped — retarget it. The
+start node cannot be deleted. Template references to the deleted node's outputs are left for
+`validate` to report. Both flags may be repeated.
+
 ### clone - Clone a node
 
 ```bash
@@ -421,9 +454,6 @@ Removes a declared global variable from the `variableRegistry`. Creates a backup
 # Add nodes from a JSON file
 moira-workflow ./workflows/production/flows/<flow>.json add new-nodes.json
 
-# Delete a node
-moira-workflow ./workflows/production/flows/<flow>.json delete node-id
-
 # Set the workflow version
 moira-workflow ./workflows/production/flows/<flow>.json set-version 8.0.0
 
@@ -569,6 +599,7 @@ Available for all modifying commands:
 - `update`
 - `add`
 - `delete`
+- `rename`
 - `clone`
 - `move`
 - `set-variable`

@@ -40,8 +40,8 @@ export const MCP_TEST_DATA = {
   EXPECTED_VALUES: {
     INITIAL_NODE: "step1",
     END_NODE: "end",
-    TRUE_PATH_NODE: "path_true",
-    FALSE_PATH_NODE: "path_false",
+    TRUE_PATH_NODE: "path-true",
+    FALSE_PATH_NODE: "path-false",
     INITIAL_CONTEXT_VALUE: "initial",
     SHARED_VALUE_FROM_START: "from_start",
   },

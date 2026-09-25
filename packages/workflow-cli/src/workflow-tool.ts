@@ -12,7 +12,9 @@
  * Commands:
  *   get <node-id>                    Get node by ID
  *   update <node-id> [options]       Update node
- *   delete <node-id>                 Delete node
+ *   delete <node-id> [--retarget <source.key>=<target>] [--drop <source.key>]
+ *                                    Delete node, deciding every incoming edge
+ *   rename <node-id> <new-id>        Rename node and every reference to it
  *   clone <node-id> <new-id>         Clone node with new ID
  *   export-node <node-id> <path>     Export node to JSON file
  *   replace <node-id> <node-file>    Replace node in place from JSON
@@ -49,10 +51,13 @@ import {
   addBlock,
   clearConnectionLabel,
   editBlock,
+  removeNode,
+  renameNode,
   setConnectionLabel,
   setNodeBlock,
-  parseListBinding,
-} from "./workflow-process-authoring.js";
+  type IncomingDecision,
+} from "@mcp-moira/workflow-engine/authoring";
+import { parseListBinding } from "./workflow-process-authoring.js";
 import { deriveProcess } from "@mcp-moira/workflow-engine/process";
 import { SYSTEM_OWNER_IDS, isSystemOwner } from "@mcp-moira/shared/services/workflow-catalog";
 // Import GraphValidator directly to avoid auth dependencies from shared index
@@ -252,33 +257,6 @@ function cmdGetNode(workflow: WorkflowGraph, nodeId: string): void {
   console.log(c("dim", "─".repeat(80)));
   console.log(JSON.stringify(node, null, 2));
   console.log("");
-}
-
-// === DELETE COMMAND ===
-function deleteNode(workflow: WorkflowGraph, nodeId: string): WorkflowGraph {
-  const nodeIndex = workflow.nodes.findIndex((n) => n.id === nodeId);
-
-  if (nodeIndex === -1) {
-    console.error(c("red", `ERROR: Node not found: ${nodeId}`));
-    process.exit(1);
-  }
-
-  const deletedNode = workflow.nodes.splice(nodeIndex, 1)[0];
-
-  console.log("");
-  console.log(c("red", `✓ Deleted node: ${nodeId}`));
-  console.log(c("dim", "─".repeat(80)));
-  console.log(JSON.stringify(deletedNode, null, 2));
-  console.log("");
-  console.log(
-    c(
-      "yellow",
-      "⚠ Warning: Connections pointing to this node still exist and will cause validation errors",
-    ),
-  );
-  console.log("");
-
-  return workflow;
 }
 
 // === CLONE COMMAND ===
@@ -1695,7 +1673,9 @@ ${c("cyan", "Usage:")}
 ${c("cyan", "Commands:")}
   get <node-id>                    Get node by ID
   update <node-id> [options]       Update node
-  delete <node-id>                 Delete node
+  delete <node-id> [--retarget <source.key>=<target>]... [--drop <source.key>]...
+                                   Delete a node; every incoming edge must be retargeted or dropped
+  rename <node-id> <new-id>        Rename a node (kebab-case) and every reference to it
   clone <node-id> <new-id>         Clone node with new ID
   export-node <node-id> <path>     Export node to JSON file
   replace <node-id> <node-file>    Replace node in place from JSON
@@ -1959,15 +1939,6 @@ async function main(): Promise<void> {
       );
       break;
 
-    case "delete":
-      if (!config.nodeId) {
-        console.error(c("red", "ERROR: Missing node-id for delete command"));
-        process.exit(1);
-      }
-      createBackup(config.file);
-      saveWorkflow(config.file, deleteNode(workflow, config.nodeId), originalWorkflow, saveOptions);
-      break;
-
     case "clone":
       if (!config.nodeId) {
         console.error(c("red", "ERROR: Missing source node-id for clone command"));
@@ -2091,7 +2062,9 @@ async function main(): Promise<void> {
     case "clear-label":
     case "set-block":
     case "add-block":
-    case "edit-block": {
+    case "edit-block":
+    case "delete":
+    case "rename": {
       const positional = args.slice(2).filter((argument, index, all) => {
         if (argument.startsWith("--")) return false;
         const previous = all[index - 1];
@@ -2101,9 +2074,44 @@ async function main(): Promise<void> {
         const index = args.indexOf(flag);
         return index === -1 ? undefined : args[index + 1];
       };
+      const options = (flag: string): string[] =>
+        args.flatMap((argument, index) =>
+          argument === flag && args[index + 1] !== undefined ? [args[index + 1]] : [],
+        );
       let mutated: WorkflowGraph;
       try {
         switch (config.command) {
+          case "delete": {
+            const [nodeId] = positional;
+            if (!nodeId) {
+              throw new Error(
+                "Usage: delete <node> [--retarget <source.key>=<target>]... [--drop <source.key>]...",
+              );
+            }
+            const decisions: Record<string, IncomingDecision> = {};
+            for (const entry of options("--retarget")) {
+              const separator = entry.indexOf("=");
+              if (separator <= 0 || separator === entry.length - 1) {
+                throw new Error(`--retarget expects <source.key>=<target>, got '${entry}'`);
+              }
+              decisions[entry.slice(0, separator)] = entry.slice(separator + 1);
+            }
+            for (const edge of options("--drop")) decisions[edge] = null;
+            mutated = removeNode(workflow, nodeId, decisions);
+            console.log(c("red", `✓ Deleted node: ${nodeId}`));
+            break;
+          }
+          case "rename": {
+            const [from, to] = positional;
+            if (!from || !to) throw new Error("Usage: rename <node> <new-id>");
+            const result = renameNode(workflow, from, to);
+            mutated = result.workflow;
+            console.log(c("green", `✓ Renamed node: ${from} → ${to}`));
+            for (const location of result.rewritten) {
+              console.log(c("dim", `  ${location.path}: ${location.count}`));
+            }
+            break;
+          }
           case "set-label": {
             const [nodeId, key, ...text] = positional;
             if (!nodeId || !key || text.length === 0) {
@@ -2185,7 +2193,9 @@ async function main(): Promise<void> {
       createBackup(config.file);
       saveWorkflow(config.file, mutated, originalWorkflow, saveOptions);
       const remaining = deriveProcess(mutated)?.diagnostics ?? [];
-      if (remaining.length > 0) {
+      if (!mutated.progress) {
+        // No process view: there is no block contract to report on.
+      } else if (remaining.length > 0) {
         console.log(
           c(
             "yellow",

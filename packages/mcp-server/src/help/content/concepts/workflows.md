@@ -175,6 +175,9 @@ Globals are referenced by bare name (`{{project_name}}`); a node writes a global
 ### Nodes Array
 
 Nodes are the steps in your workflow. Each node has an `id` and a `type` that determines its behavior.
+The `id` is unique in the workflow and kebab-case — lower-case letters and digits separated by
+hyphens, such as `review-plan` — because edges are addressed as `<node>.<key>` and a node's outputs
+as `{{<node>.<name>}}`.
 
 ## Workflow Execution
 

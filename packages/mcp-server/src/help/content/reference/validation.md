@@ -15,6 +15,8 @@ Workflows are validated against a JSON Schema definition:
 
 - Structure validation against workflow schema
 - Required field checking (id, metadata, nodes)
+- Node ids are kebab-case (`^[a-z0-9][a-z0-9-]*$`); an id with a dot, an upper-case letter or an
+  underscore is a schema error on that node
 - Type validation for all properties
 - Built-in node schema branches and the namespaced extension-node form
 

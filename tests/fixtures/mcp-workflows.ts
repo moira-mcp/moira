@@ -112,13 +112,13 @@ export const MCP_TEST_WORKFLOWS = {
             },
           ],
           connections: {
-            true: "path_true",
-            default: "path_false",
+            true: "path-true",
+            default: "path-false",
           },
         },
         {
           type: "agent-directive",
-          id: "path_true",
+          id: "path-true",
           directive: "True path execution",
           completionCondition: "True path completed",
           connections: { success: "end" },
@@ -132,7 +132,7 @@ export const MCP_TEST_WORKFLOWS = {
         },
         {
           type: "agent-directive",
-          id: "path_false",
+          id: "path-false",
           directive: "False path execution",
           completionCondition: "False path completed",
           connections: { success: "end" },
@@ -254,11 +254,11 @@ export const MCP_TEST_WORKFLOWS = {
         {
           type: "start",
           id: "start",
-          connections: { default: "strict_input" },
+          connections: { default: "strict-input" },
         },
         {
           type: "agent-directive",
-          id: "strict_input",
+          id: "strict-input",
           directive: "Provide data matching strict schema",
           completionCondition: "Schema validated",
           connections: { success: "end" },
