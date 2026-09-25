@@ -74,14 +74,17 @@ describe("CORS origin allowlist", () => {
 describe("rate-limit IPv6 key generation", () => {
   it("serves an IPv6 client without ERR_ERL_KEY_GEN_IPV6", async () => {
     const mod = await import("../../packages/web-backend/src/middleware/rate-limit-middleware.js");
+    // Build the shipped limiter with limits on: the exported instance skips every request under Jest.
+    const { artifactViewLimiter } = mod.createRateLimiters({ skipLimits: false, whitelist: [] });
 
     const app = express();
     app.set("trust proxy", true);
-    app.use(mod.artifactViewLimiter);
+    app.use(artifactViewLimiter);
     app.get("/", (req, res) => res.json({ ip: req.ip }));
 
     const res = await request(app).get("/").set("X-Forwarded-For", IPV6_CLIENT);
     expect(res.status).toBe(200);
     expect(res.body.ip).toBe(IPV6_CLIENT);
+    expect(res.headers["ratelimit-remaining"]).toBe("119");
   });
 });

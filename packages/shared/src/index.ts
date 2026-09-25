@@ -72,6 +72,9 @@ export * from "./config/index.js";
 // Metrics
 export * from "./metrics/index.js";
 
+// Client address resolution behind trusted proxies
+export * from "./http/client-ip.js";
+
 // Version utilities
 export * from "./utils/version-utils.js";
 

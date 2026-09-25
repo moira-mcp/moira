@@ -17,6 +17,7 @@ import { AuditAction } from "../audit/actions.js";
 import { user, oauthAccessToken } from "../database/schema.js";
 import { and, eq } from "drizzle-orm";
 import { getBaseUrl, getAuthUrl, getMcpUrl, isProduction } from "../config/urls.js";
+import { CLIENT_IP_HEADER, clientIpFromHeaders } from "../http/client-ip.js";
 import {
   getAppPrefix,
   getBetterAuthSecret,
@@ -292,6 +293,10 @@ const baseConfig = {
 
   advanced: {
     useSecureCookies: isProduction(),
+    // Session addresses come from the header web-backend writes from the trusted-proxy req.ip
+    ipAddress: {
+      ipAddressHeaders: [CLIENT_IP_HEADER],
+    },
   },
 
   emailAndPassword: {
@@ -470,10 +475,7 @@ const baseConfig = {
           if (denial === "blocked") {
             // Log blocked login attempt
             const auditRepo = new AuditRepository(db);
-            const ip =
-              (ctx.headers?.get("x-forwarded-for") || ctx.headers?.get("x-real-ip") || "")
-                .split(",")[0]
-                .trim() || undefined;
+            const ip = clientIpFromHeaders(ctx.headers);
             const geo = ip ? geoip.lookup(ip) : null;
             const country = geo?.country || undefined;
             const userAgent = ctx.headers?.get("user-agent") || undefined;
@@ -503,9 +505,7 @@ const baseConfig = {
           }
 
           // Extract IP and perform GeoIP lookup
-          const ip = (ctx.headers?.get("x-forwarded-for") || ctx.headers?.get("x-real-ip") || "")
-            .split(",")[0]
-            .trim();
+          const ip = clientIpFromHeaders(ctx.headers);
           const geo = ip ? geoip.lookup(ip) : null;
           const country = geo?.country || null;
 
@@ -540,10 +540,7 @@ const baseConfig = {
           if (denial === "blocked") {
             // Log blocked OAuth token creation attempt
             const auditRepo = new AuditRepository(db);
-            const ip =
-              (ctx.headers?.get("x-forwarded-for") || ctx.headers?.get("x-real-ip") || "")
-                .split(",")[0]
-                .trim() || undefined;
+            const ip = clientIpFromHeaders(ctx.headers);
             const geo = ip ? geoip.lookup(ip) : null;
             const country = geo?.country || undefined;
             const userAgent = ctx.headers?.get("user-agent") || undefined;
@@ -778,10 +775,7 @@ const baseConfig = {
         const db = getDatabase();
 
         // Extract request metadata for audit logging
-        const ip =
-          (ctx.headers?.get("x-forwarded-for") || ctx.headers?.get("x-real-ip") || "")
-            .split(",")[0]
-            .trim() || undefined;
+        const ip = clientIpFromHeaders(ctx.headers);
         const geo = ip ? geoip.lookup(ip) : null;
         const country = geo?.country || undefined;
         const userAgent = ctx.headers?.get("user-agent") || undefined;

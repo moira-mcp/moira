@@ -720,11 +720,13 @@ level headings classify the tracked test paths listed beneath them.
 
 **integration**
 
-- `tests/integration/cors-rate-limit-middleware.test.ts` — CORS origin allowlist: allowlisted/localhost reflected, disallowed/no-origin; rate-limit IPv6 key fallback via ipKeyGenerator avoids ERR_ERL_KEY_GEN_IPV6
+- `tests/integration/client-ip-trust.test.ts` — client address resolved only through TRUST_PROXY: spoofed X-Forwarded-For entries share one limiter budget and cannot claim a whitelisted address (default nginx-only trust, private-network client, `TRUST_PROXY=2` behind an outer proxy, MCP limiter), audit context and the Better Auth client-address header equal req.ip, and a Better Auth sign-up records the server-written address for the session and the audit entry
+- `tests/integration/cors-rate-limit-middleware.test.ts` — CORS origin allowlist: allowlisted/localhost reflected, disallowed/no-origin; rate-limit IPv6 key fallback via ipKeyGenerator avoids ERR_ERL_KEY_GEN_IPV6 on the shipped artifact-view limiter with limits on
 
 **unit**
 
 - `tests/unit/web-backend/rate-limit-bypass.test.ts`
+- `tests/unit/shared/trust-proxy.test.ts` — TRUST_PROXY parsing: loopback-only default, hop counts and address/subnet/named-range lists accepted, "true" and malformed values refused
 
 ### security
 

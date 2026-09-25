@@ -63,6 +63,18 @@ An exception for the config module itself is configured in `.eslintrc.json` over
 
 - DISABLE_RATE_LIMIT=true - disables rate limiting (used in Docker for tests)
 
+**CLIENT ADDRESS AND RATE LIMITS:**
+
+- `TRUST_PROXY` - proxies trusted to report the client address through `X-Forwarded-For`, passed to
+  Express `trust proxy` in web-backend and mcp-server. Unset → `loopback` (the in-container nginx
+  only). A non-negative integer is a hop count (`2` = one outer proxy such as Traefik, then nginx);
+  otherwise a comma-separated list of IP addresses, CIDR subnets and `loopback` / `linklocal` /
+  `uniquelocal`. `true` and malformed values → start error. Getter: `getTrustProxy()`; parser
+  `parseTrustProxy()` (`packages/shared/src/config/trust-proxy.ts`); applied by `applyTrustProxy()`
+  (`packages/shared/src/http/client-ip.ts`).
+- `RATE_LIMIT_WHITELIST` - comma-separated client addresses exempt from the web-backend rate limits,
+  compared with the address resolved through `TRUST_PROXY`.
+
 **DEPLOYMENT MODE:**
 
 - `DEPLOYMENT_MODE` - deployment mode: `self-host` | `saas`. Fallback: `self-host`. An invalid value → start error (fail-fast). Getter: `getDeploymentMode()`; predicates `isSelfHost()` / `isSaas()` (`packages/shared/src/config/env.ts`).

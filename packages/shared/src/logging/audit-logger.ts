@@ -35,11 +35,8 @@ export interface AuditRequestContext {
 }
 
 export function getAuditRequestContext(req: Request): AuditRequestContext {
-  const ip =
-    req.ip ||
-    req.get("x-forwarded-for")?.split(",")[0].trim() ||
-    req.socket.remoteAddress ||
-    undefined;
+  // req.ip is resolved through the trusted proxies (TRUST_PROXY); X-Forwarded-For itself is not trusted.
+  const ip = req.ip || req.socket.remoteAddress || undefined;
   const geo = ip ? geoip.lookup(ip) : null;
 
   return {
