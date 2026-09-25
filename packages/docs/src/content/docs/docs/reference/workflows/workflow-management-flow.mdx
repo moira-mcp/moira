@@ -31,6 +31,18 @@ can reach that node and rejects stale counters, wrong scope, and progress-owned 
 
 Artifact-owned findings repair the workflow and repeat stale gates. Invalid criteria or upstream process defects replan. The final report describes exact starts, teleports, terminals, routes, cycles, reachability, coverage, data flow, and every frozen semantic guarantee.
 
+## The requirements conversation
+
+The person asking for a workflow usually knows their work, not Moira. Both requirements owners — for create and for edit — read the materialized `reference/conversation.md` and talk in the person's terms: what the workflow is for, how they will tell that a run went well, and any real decision put as a question about their work rather than about nodes or conditions. They offer the options with their cost in plain words — simpler is faster and shorter; more thorough takes longer and gives a bigger process with higher quality; a process can always be improved later — and agree one of three levels:
+
+- **simple** — steps in order, possibly one choice or one approval;
+- **standard** — real branches, a review-and-redo loop, approvals, durable files or effects that need the person's authority;
+- **complex** — several interacting loops, sub-processes, jumps between parts, locks, a multi-stage progress view, publication or other high-authority effects, or any workflow the person wants taken through the full path.
+
+An interactive run confirms the level with the person; an autonomous run decides it and records why. A request that already says how thorough it should be sets the level without a question. The requirements file records the level, its reason and any chosen starting shape.
+
+The workspace also carries three starting shapes in `reference/templates/`, each a valid workflow to build from with the official CLI: a checklist (`checklist.json`), do–check–redo (`do-check-redo.json`, a review-and-redo loop and therefore standard) and an approval gate (`approval-gate.json`). The pattern and antipattern references are grouped by level: each entry sits in the lowest level where it applies, so the simple section holds only what a short flow of steps can get wrong, and review, repair, evidence and validator machinery sits in the standard and complex sections.
+
 ## Publication and local synchronization
 
 Server upload is a separate decision: standard, copy-new, or explicitly authorized admin override. Autonomous mode never invents upload authority. Repository synchronization preserves the resolved target identity and writes no unrelated path. WMF authors the workflow definition; it does not execute the downstream task that workflow will later perform.
