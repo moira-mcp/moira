@@ -86,7 +86,8 @@ handles that structure; you describe the task.
 - [Which ready flow to use](/docs/getting-started/ready-flows/) — Quick Task, Robust Task and Todo
   List for everyday tasks.
 - To get a flow of your own, say to your agent: "Create a Moira flow for …". It builds one through
-  the Workflow Management Flow, and you can open it on the Steps view like the examples.
+  the Workflow Management Flow, as simple or as thorough as you agree with it, and you can open it
+  on the Steps view like the examples.
 - [Concepts](/docs/concepts/workflows/) — how flows are built, when you want to read or shape one
   yourself.
 

@@ -1,8 +1,11 @@
 /** Behavioral scenarios for workflow-management-flow. */
 
 import {
+  blockStatuses,
+  deriveProcess,
   GraphExecutionEngine,
   MaterializeHandler,
+  type ExecutionVisit,
   type WorkflowGraph,
 } from "@mcp-moira/workflow-engine";
 import { calculateCoverage } from "../../helpers/coverage-calculator.js";
@@ -39,7 +42,7 @@ function createInputs(name: string): Record<string, MockInput> {
       operating_mode: "interactive",
       workspace_path: workspace,
     },
-    "gather-workflow-requirements": {},
+    "gather-workflow-requirements": { complexity_tier: "standard" },
     "design-workflow-structure": {},
     "review-workflow-design": { design_review_outcome: "pass" },
     "fix-create-design": {
@@ -206,15 +209,29 @@ function scenario(
   mockInputs: Record<string, MockInput>,
   reaches: string[] = [],
   avoids: string[] = [],
-  options: Pick<TestScenario, "teleportAfter"> = {},
+  options: Pick<TestScenario, "teleportAfter"> & { contextContains?: Record<string, unknown> } = {},
 ): TestScenario {
+  const { contextContains, ...rest } = options;
   return {
     name,
     mockInputs,
-    ...options,
-    expect: { status: "completed", reaches, avoids, maxSteps: 120 },
+    ...rest,
+    expect: { status: "completed", reaches, avoids, maxSteps: 120, contextContains },
   };
 }
+
+/** A create run at the simple level: requirements go straight to the build and the light review. */
+function simpleInputs(name: string): Record<string, MockInput> {
+  return {
+    ...createInputs(name),
+    "gather-workflow-requirements": { complexity_tier: "simple" },
+    "review-workflow-minimum": { light_review_outcome: "pass" },
+    "fix-light-review-findings": { repair_outcome: "changed" },
+  };
+}
+
+/** The design responsibilities the simple level skips on create. */
+const DESIGN_PATH = ["design-workflow-structure", "review-workflow-design", "approve-structure"];
 
 function routeVisits(result: ScenarioResult): string[] {
   return result.visitedNodes.filter(
@@ -223,6 +240,135 @@ function routeVisits(result: ScenarioResult): string[] {
 }
 
 const scenarios: TestScenario[] = [
+  scenario(
+    "simple create, interactive: build, light review and final review without design",
+    simpleInputs("simple-interactive"),
+    [
+      "gather-workflow-requirements",
+      "create-workflow-json",
+      "review-workflow-minimum",
+      "user-final-review",
+      "end",
+    ],
+    [...DESIGN_PATH, "review-workflow-quality"],
+    { contextContains: { complexity_tier: "simple" } },
+  ),
+  scenario(
+    "simple create, autonomous: the light review leads to the final report",
+    autonomous(simpleInputs("simple-autonomous")),
+    ["create-workflow-json", "review-workflow-minimum", "report-final-result", "end"],
+    [...DESIGN_PATH, "user-final-review", "review-workflow-quality"],
+    { contextContains: { complexity_tier: "simple" } },
+  ),
+  scenario(
+    "complex create runs structure design, design review and approval",
+    {
+      ...createInputs("complex-create"),
+      "gather-workflow-requirements": { complexity_tier: "complex" },
+    },
+    [...DESIGN_PATH, "create-workflow-json", "review-workflow-quality", "end"],
+    ["review-workflow-minimum"],
+    { contextContains: { complexity_tier: "complex" } },
+  ),
+  scenario(
+    "a simple run whose light review needs more is raised into design without new requirements",
+    {
+      ...simpleInputs("simple-escalation"),
+      "review-workflow-minimum": {
+        light_review_outcome: "escalate",
+        complexity_tier: "standard",
+        escalation_reason:
+          "The check must be redone until it passes, which is a review-and-redo loop",
+      },
+    },
+    [
+      "review-workflow-minimum",
+      "route-action-after-reassessment",
+      ...DESIGN_PATH,
+      "review-workflow-quality",
+      "end",
+    ],
+    ["fix-light-review-findings"],
+    {
+      contextContains: {
+        complexity_tier: "standard",
+        escalation_reason:
+          "The check must be redone until it passes, which is a review-and-redo loop",
+      },
+    },
+  ),
+  scenario(
+    "a simple repair that shows the flow needs more raises the level from the repair",
+    {
+      ...simpleInputs("simple-repair-escalation"),
+      "review-workflow-minimum": [
+        { light_review_outcome: "repair" },
+        { light_review_outcome: "repair" },
+      ],
+      "fix-light-review-findings": [
+        { repair_outcome: "changed" },
+        {
+          repair_outcome: "escalate",
+          complexity_tier: "complex",
+          escalation_reason: "The flow has to call a sub-process",
+        },
+      ],
+    },
+    ["fix-light-review-findings", "design-workflow-structure", "review-workflow-quality", "end"],
+    [],
+    { contextContains: { complexity_tier: "complex" } },
+  ),
+  scenario(
+    "a standard workflow the quality review finds needs the complex level is designed again",
+    {
+      ...createInputs("standard-escalation"),
+      "review-workflow-quality": [
+        {
+          quality_review_outcome: "escalate",
+          complexity_tier: "complex",
+          escalation_reason: "Two review loops now interact",
+        },
+        { quality_review_outcome: "pass" },
+      ],
+    },
+    [
+      "review-workflow-quality",
+      "route-action-after-reassessment",
+      "design-workflow-structure",
+      "end",
+    ],
+    ["review-workflow-minimum"],
+    { contextContains: { complexity_tier: "complex" } },
+  ),
+  scenario(
+    "a rejected simple result is revised and rebuilt without design",
+    {
+      ...simpleInputs("simple-revision"),
+      "user-final-review": [
+        { work_approved: "no", final_feedback: "Add a step that tells the teammate who to ask" },
+        { work_approved: "yes" },
+      ],
+    },
+    ["revise-create-requirements", "create-workflow-json", "review-workflow-minimum", "end"],
+    [...DESIGN_PATH, "review-workflow-quality"],
+    { contextContains: { complexity_tier: "simple" } },
+  ),
+  scenario(
+    "a process revision during a simple create rebuilds from the corrected requirements without design",
+    { ...simpleInputs("simple-process-revision"), "teleport-revise-process": {} },
+    [
+      "create-workflow-json",
+      "teleport-revise-process",
+      "route-action-after-reassessment",
+      "review-workflow-minimum",
+      "end",
+    ],
+    [...DESIGN_PATH, "review-workflow-quality"],
+    {
+      teleportAfter: { afterNode: "create-workflow-json", teleportTo: "teleport-revise-process" },
+      contextContains: { complexity_tier: "simple" },
+    },
+  ),
   scenario(
     "create without upload",
     createInputs("create-no-upload"),
@@ -459,7 +605,7 @@ describe("workflow-management-flow", () => {
   });
 
   test("keeps shared gates and routes each local answer on its owning directive", () => {
-    expect(workflow.metadata.version).toBe("6.12.0");
+    expect(workflow.metadata.version).toBe("6.13.0");
     expect(
       workflow.nodes.filter((node) => node.type === "condition").map((node) => node.id),
     ).toEqual([
@@ -479,6 +625,38 @@ describe("workflow-management-flow", () => {
       output,
     });
     const routes: Array<[string, unknown[], Record<string, string>]> = [
+      [
+        "gather-workflow-requirements",
+        [eq("gather-workflow-requirements.complexity_tier", "simple", "simple")],
+        { success: "design-workflow-structure", simple: "create-workflow-json" },
+      ],
+      [
+        "create-workflow-json",
+        [eq("complexity_tier", "simple", "simple")],
+        { success: "review-workflow-quality", simple: "review-workflow-minimum" },
+      ],
+      [
+        "revise-create-requirements",
+        [eq("complexity_tier", "simple", "simple")],
+        { success: "design-workflow-structure", simple: "create-workflow-json" },
+      ],
+      [
+        "review-workflow-minimum",
+        [
+          eq("review-workflow-minimum.light_review_outcome", "pass", "pass"),
+          eq("review-workflow-minimum.light_review_outcome", "escalate", "escalate"),
+        ],
+        {
+          success: "fix-light-review-findings",
+          pass: "route-operating-mode-final",
+          escalate: "route-action-after-reassessment",
+        },
+      ],
+      [
+        "fix-light-review-findings",
+        [eq("fix-light-review-findings.repair_outcome", "escalate", "escalate")],
+        { success: "review-workflow-minimum", escalate: "route-action-after-reassessment" },
+      ],
       [
         "ask-full-antipattern-audit",
         [eq("ask-full-antipattern-audit.full_antipattern_audit", "yes", "audit")],
@@ -521,11 +699,13 @@ describe("workflow-management-flow", () => {
         [
           eq("review-workflow-quality.quality_review_outcome", "pass", "pass"),
           eq("review-workflow-quality.quality_review_outcome", "replan", "replan"),
+          eq("review-workflow-quality.quality_review_outcome", "escalate", "escalate"),
         ],
         {
           success: "fix-quality-issues",
           pass: "route-operating-mode-final",
           replan: "reassess-design-contract",
+          escalate: "route-action-after-reassessment",
         },
       ],
       [
@@ -574,10 +754,35 @@ describe("workflow-management-flow", () => {
         connections,
       });
     }
+    // The shared reassessment router: a revised simple create builds again, any other create is
+    // designed again, and an edit is planned again.
+    expect(
+      workflow.nodes.find((node) => node.id === "route-action-after-reassessment"),
+    ).toMatchObject({
+      type: "condition",
+      cases: [
+        {
+          when: {
+            operator: "and",
+            conditions: [
+              eq("get-action-type.action_type", "create", "").when,
+              eq("complexity_tier", "simple", "").when,
+            ],
+          },
+          output: "simple",
+        },
+        eq("get-action-type.action_type", "create", "true"),
+      ],
+      connections: {
+        true: "design-workflow-structure",
+        simple: "create-workflow-json",
+        default: "create-edit-plan",
+      },
+    });
   });
 
   test("all create edit audit publication and recovery routes are covered", async () => {
-    const results = [];
+    const results: ScenarioResult[] = [];
     for (const item of scenarios) {
       results.push(await runScenario(workflow, item, { engineSetup: useScenarioMaterializeGrant }));
     }
@@ -619,6 +824,54 @@ describe("workflow-management-flow", () => {
         visits.some((node, index) => node === transition[0] && visits[index + 1] === transition[1]),
       ).toBe(true);
     }
+    const revised = routeVisits(
+      results.find(
+        (result) =>
+          result.scenario ===
+          "a process revision during a simple create rebuilds from the corrected requirements without design",
+      )!,
+    );
+    expect(revised.slice(revised.indexOf("teleport-revise-process"))).toEqual(
+      expect.arrayContaining(["create-workflow-json", "review-workflow-minimum"]),
+    );
+
+    // A raise continues from the current requirements: the requirements owner runs once.
+    for (const name of [
+      "a simple run whose light review needs more is raised into design without new requirements",
+      "a simple repair that shows the flow needs more raises the level from the repair",
+    ]) {
+      const visits = routeVisits(results.find((result) => result.scenario === name)!);
+      expect(visits.filter((node) => node === "gather-workflow-requirements")).toHaveLength(1);
+    }
+
+    // The process view stays truthful: on the simple path the design block reads skipped and the
+    // light review is review work; once raised, the design block is visited.
+    const statusesOf = (name: string) => {
+      const result = results.find((candidate) => candidate.scenario === name)!;
+      const visits: ExecutionVisit[] = routeVisits(result).map((nodeId, seq) => ({
+        seq,
+        nodeId,
+        exitKey: "done",
+        changes: {},
+      }));
+      return blockStatuses(
+        deriveProcess(workflow)!,
+        new Map(workflow.nodes.map((node) => [node.id, node.type])),
+        { status: "completed", currentNodeId: "end", waitingForInputNodeId: null },
+        visits,
+      );
+    };
+    const simple = statusesOf(
+      "simple create, interactive: build, light review and final review without design",
+    );
+    expect(simple.get("design")?.status).toBe("skipped");
+    expect(simple.get("review")?.status).toBe("done");
+    const raised = statusesOf(
+      "a simple run whose light review needs more is raised into design without new requirements",
+    );
+    expect(raised.get("design")?.status).not.toBe("skipped");
+    expect(raised.get("design")?.visits).toBeGreaterThan(0);
+
     const coverage = calculateCoverage(workflow, results, { includeGapAnalysis: true });
     expect(coverage.unvisitedNodes).toEqual([]);
     expect(coverage.uncoveredBranches).toEqual([]);

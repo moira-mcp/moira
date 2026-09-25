@@ -17,7 +17,9 @@ plain words. The agent does the rest:
    repository.
 2. **Or it builds a new flow for your task** through the Workflow Management Flow, Moira's own flow
    for creating and editing flows. A flow can be as simple as a few steps in a row or as complex as
-   a process with reviews and repair loops; the agent works out the structure the task needs.
+   a process with reviews and repair loops. The agent first agrees with you how thorough the flow
+   should be: a simple one is built quickly and gets a light check, a larger one goes through
+   design and independent review. A flow can always be made more thorough later.
 
 Everything else — the diagrams in the web app, variables, node types, editing a flow by hand — is
 optional. It is there for when you want to look inside a flow, not something you must learn first.

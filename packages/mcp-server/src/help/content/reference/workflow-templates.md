@@ -66,6 +66,6 @@ reached.
 
 ## Create or edit a workflow
 
-If no current workflow fits, use `moira/workflow-management-flow`. It resolves source identity and provenance, derives and independently reviews a design contract, edits the complete JSON through official tooling, validates and structurally projects the current artifact, performs independent whole-artifact review, and separates repository synchronization from explicitly authorized server publication.
+If no current workflow fits, use `moira/workflow-management-flow`. It agrees the level of thoroughness with the person (simple, standard or complex), resolves source identity and provenance, edits the complete JSON through official tooling, validates and structurally projects the current artifact, and separates repository synchronization from explicitly authorized server publication. On the standard and complex levels and on every edit it derives and independently reviews a design contract and performs independent whole-artifact review; a simple create is built from the requirements and takes a light review.
 
 [See Workflow Management Flow details →](/docs/reference/workflows/workflow-management-flow/)
