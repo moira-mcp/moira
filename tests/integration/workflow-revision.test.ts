@@ -112,4 +112,32 @@ describe("workflow definition revision", () => {
     expect((await repo.getFullInfo(id, OWNER))?.revision).toBe(2);
     expect((await repo.list(OWNER)).find((w) => w.id === id)?.revision).toBe(2);
   });
+
+  test("a save against a stale expected revision changes nothing and reports the current revision", async () => {
+    const { id } = await repo.save({ graph: graph("Guarded"), userId: OWNER });
+    const stored = await repo.get(id, OWNER);
+    await repo.save({
+      graph: { ...stored!, ...graph("Guarded", "First writer") },
+      userId: OWNER,
+      expectedRevision: 0,
+    });
+
+    await expect(
+      repo.save({
+        graph: { ...stored!, ...graph("Guarded", "Second writer") },
+        userId: OWNER,
+        expectedRevision: 0,
+      }),
+    ).rejects.toMatchObject({
+      name: "WorkflowRevisionConflictError",
+      expectedRevision: 0,
+      currentRevision: 1,
+    });
+
+    const after = await repo.getFullInfo(id, OWNER);
+    expect(after?.revision).toBe(1);
+    expect(
+      (after?.workflow.nodes.find((n) => n.id === "step") as { directive: string }).directive,
+    ).toBe("First writer");
+  });
 });

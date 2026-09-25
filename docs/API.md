@@ -2195,11 +2195,14 @@ Request body:
 }
 ```
 
-Order of refusals: workflow not found (404), caller not the owner (403), `expectedRevision` other
-than the stored revision (409 `CONFLICT`, `details.currentRevision`), the definition invalid under
-the same validation `manage edit` runs — block-contract diagnostics included (400
-`VALIDATION_FAILED`, `details.validation`); nothing is saved on a refusal. The save keeps the
-workflow's visibility and slug, advances its revision and is audited as a workflow edit.
+Order of refusals: workflow not found (404), caller not the owner (403), the definition invalid
+under the same validation `manage edit` runs — block-contract diagnostics and `{{playbook:…}}`
+references the caller cannot resolve included (400 `VALIDATION_FAILED`, `details.validation` with
+its `issues`), `expectedRevision` other than the stored revision (409 `CONFLICT`,
+`details.currentRevision`); nothing is saved on a refusal. The revision is checked by the write
+itself, in the same statement that advances it, so of several saves sent against one revision
+exactly one lands and the others receive 409. The save keeps the workflow's visibility and slug,
+advances its revision and is audited as a workflow edit.
 
 Response:
 
@@ -2226,9 +2229,46 @@ with `overwrite`, every `manage` mutation that stores a graph, upload, copy) and
 repository's apply (bundled-catalog install and reconciliation bundles). Writes that do not touch
 the graph — visibility, slug, validation cache — leave it alone. `GET /api/workflows/:id`, the
 handle/slug form and `manage get` return it as `fileInfo.revision` / `revision`; `manage edit`
-accepts an optional `expectedRevision` with the same refusal. This is unrelated to the
+accepts an optional `expectedRevision` with the same refusal, checked by the same write. This is unrelated to the
 reconciliation subsystem's string "revision" of conflict records and to an execution's step
 revision.
+
+### POST /api/workflows/:id/validate
+
+Validate a workflow. `id` is a UUID or the caller's slug. With an empty body the stored definition
+is validated; with `{ workflowData: WorkflowGraph }` the given, unsaved definition is validated as
+the caller's save of it would be — engine validation plus the `{{playbook:…}}` references the
+caller cannot resolve — which makes it the dry run an editor calls before saving. Nothing is
+stored.
+
+Response `data`:
+
+```typescript
+{
+  validation: WorkflowValidationStatus;
+  details: { isValid: boolean; errors: string[]; warnings: string[] }; // plus visualization checks
+  nodeValidations: Record<string, { isValid: boolean; errors: string[]; warnings: string[]; suggestions: string[] }>;
+}
+
+interface WorkflowValidationStatus {
+  isValid: boolean;
+  nodeValidation: Record<string, { isValid: boolean; errors: string[]; warnings: string[] }>;
+  globalErrors: string[];
+  globalWarnings: string[];
+  issues: ValidationIssue[]; // every issue, located; the lists above summarise it
+}
+
+interface ValidationIssue {
+  type: "schema" | "structure" | "node" | "connection";
+  severity: "error" | "warning";
+  nodeId?: string; // the node the issue belongs to
+  field?: string; // e.g. "connections.retry", "cases[0].output", "connectionLabels.approved"
+  message: string;
+}
+```
+
+A playbook-reference issue carries the `nodeId` of the first node whose text contains the
+reference and no `field`. The PUT route's 400 carries the same `validation` object.
 
 ### POST /api/workflows/:id/copy
 

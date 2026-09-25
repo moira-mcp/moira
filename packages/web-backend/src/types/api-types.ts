@@ -79,6 +79,20 @@ export interface WorkflowValidationStatus {
   >;
   globalErrors: string[];
   globalWarnings: string[];
+  /**
+   * Every issue as the engine reports it, with the node and the field it concerns. The per-node
+   * and global lists above are summaries of this list; an editor places issues from it.
+   */
+  issues: ValidationIssue[];
+}
+
+/** One validation issue: `nodeId` and `field` locate it when it belongs to a node. */
+export interface ValidationIssue {
+  type: "schema" | "structure" | "node" | "connection";
+  severity: "error" | "warning";
+  nodeId?: string;
+  field?: string;
+  message: string;
 }
 
 // Workflow list item (for list endpoint with cached validation)

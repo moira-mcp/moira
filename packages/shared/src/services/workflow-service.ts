@@ -47,6 +47,8 @@ export interface SaveWorkflowOptions {
    * IMPORTANT: Caller MUST verify admin role before setting this flag
    */
   adminBypass?: boolean;
+  /** Revision the caller read; the write is refused if it moved on (see the repository). */
+  expectedRevision?: number;
 }
 
 /**
@@ -173,7 +175,15 @@ export class WorkflowService {
    * while preserving detailed audit logging with change detection
    */
   async save(options: SaveWorkflowOptions): Promise<SaveWorkflowResult> {
-    const { graph, userId, slug, visibility = "private", isUpdate, adminBypass } = options;
+    const {
+      graph,
+      userId,
+      slug,
+      visibility = "private",
+      isUpdate,
+      adminBypass,
+      expectedRevision,
+    } = options;
 
     // Get existing workflow for change detection (needed for audit)
     const existing =
@@ -209,6 +219,7 @@ export class WorkflowService {
         slug,
         visibility,
         adminBypass,
+        expectedRevision,
         skipAudit: true, // We handle audit here with change detection
       });
 
@@ -238,6 +249,7 @@ export class WorkflowService {
       slug,
       visibility,
       adminBypass,
+      expectedRevision,
     });
 
     // Perform detailed audit logging

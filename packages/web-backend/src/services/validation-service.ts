@@ -8,6 +8,8 @@ import path from "path";
 import { fileURLToPath } from "url";
 
 import { WorkflowGraph, WorkflowValidationStatus } from "../types/index.js";
+import type { ValidationIssue } from "../types/api-types.js";
+import { getWorkflowMutationService } from "@mcp-moira/shared";
 
 // Import unified validation system
 import {
@@ -22,6 +24,17 @@ import type { UnifiedValidationResult } from "@mcp-moira/workflow-engine";
 // ES module compatibility
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+/** The status of a validation that could not run: one global error, nothing else. */
+function failedStatus(message: string): WorkflowValidationStatus {
+  return {
+    isValid: false,
+    nodeValidation: {},
+    globalErrors: [message],
+    globalWarnings: [],
+    issues: [{ type: "structure", severity: "error", message }],
+  };
+}
 
 /**
  * Service for validating workflows using existing MCP validation system
@@ -57,15 +70,52 @@ export class WorkflowValidationService {
 
       return this.convertUnifiedToStatus(result, workflow);
     } catch (error) {
-      return {
-        isValid: false,
-        nodeValidation: {},
-        globalErrors: [
-          `Validation error: ${error instanceof Error ? error.message : "Unknown error"}`,
-        ],
-        globalWarnings: [],
-      };
+      return failedStatus(
+        `Validation error: ${error instanceof Error ? error.message : "Unknown error"}`,
+      );
     }
+  }
+
+  /**
+   * Validate a definition as its author would save it: the engine's validation plus the
+   * `{{playbook:…}}` references this user cannot resolve, which `manage edit` refuses too. Each
+   * such reference is attached to the first node whose text contains it.
+   */
+  async validateForAuthor(
+    workflow: WorkflowGraph,
+    userId: string,
+  ): Promise<WorkflowValidationStatus> {
+    const status = await this.validateWorkflow(workflow);
+    const missing = await getWorkflowMutationService().missingPlaybookReferences(workflow, userId);
+    if (missing.length === 0) return status;
+    const references = missing.map(({ reference, message }) => {
+      const written = `{{playbook:${reference}}}`;
+      const node = workflow.nodes.find((n) => JSON.stringify(n).includes(written));
+      return { message, nodeId: node?.id };
+    });
+    const issues: ValidationIssue[] = [
+      ...status.issues,
+      ...references.map(({ message, nodeId }) => ({
+        type: "node" as const,
+        severity: "error" as const,
+        ...(nodeId ? { nodeId } : {}),
+        message,
+      })),
+    ];
+    const nodeValidation = { ...status.nodeValidation };
+    const globalErrors = [...status.globalErrors];
+    for (const { message, nodeId } of references) {
+      if (nodeId && nodeValidation[nodeId]) {
+        nodeValidation[nodeId] = {
+          ...nodeValidation[nodeId],
+          isValid: false,
+          errors: [...nodeValidation[nodeId].errors, message],
+        };
+      } else {
+        globalErrors.push(message);
+      }
+    }
+    return { ...status, isValid: false, nodeValidation, globalErrors, issues };
   }
 
   /**
@@ -79,14 +129,9 @@ export class WorkflowValidationService {
 
       return await this.validateWorkflow(workflow);
     } catch (error) {
-      return {
-        isValid: false,
-        nodeValidation: {},
-        globalErrors: [
-          `File validation error: ${error instanceof Error ? error.message : "Unknown error"}`,
-        ],
-        globalWarnings: [],
-      };
+      return failedStatus(
+        `File validation error: ${error instanceof Error ? error.message : "Unknown error"}`,
+      );
     }
   }
 
@@ -129,14 +174,9 @@ export class WorkflowValidationService {
         results.push({
           folder,
           id,
-          validation: {
-            isValid: false,
-            nodeValidation: {},
-            globalErrors: [
-              `Validation failed: ${error instanceof Error ? error.message : "Unknown error"}`,
-            ],
-            globalWarnings: [],
-          },
+          validation: failedStatus(
+            `Validation failed: ${error instanceof Error ? error.message : "Unknown error"}`,
+          ),
           error: error instanceof Error ? error.message : "Unknown error",
         });
       }
@@ -290,6 +330,7 @@ export class WorkflowValidationService {
       nodeValidation,
       globalErrors,
       globalWarnings,
+      issues: result.issues.map((issue) => ({ ...issue })),
     };
   }
 

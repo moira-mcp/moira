@@ -146,4 +146,97 @@ describe("PUT /api/workflows/:id", () => {
     expect(after.fileInfo.revision).toBe(current.fileInfo.revision);
     expect(after.workflow.nodes.find((n: any) => n.id === "work").directive).toBe("Second wording");
   });
+
+  test("a definition only the server can reject is refused with its issues located on the node and field", async () => {
+    const current = await get();
+    const broken = {
+      ...current.workflow,
+      nodes: current.workflow.nodes.map((n: any) =>
+        n.id === "work"
+          ? {
+              ...n,
+              connections: { success: "end", retry: "nowhere" },
+              cases: [
+                {
+                  when: { operator: "eq", left: { contextPath: "work.done" }, right: true },
+                  output: "missing",
+                },
+              ],
+            }
+          : n,
+      ),
+    };
+
+    const dryRun = await fetch(`${BASE_URL}/api/workflows/${workflowId}/validate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: authCookie },
+      body: JSON.stringify({ workflowData: broken }),
+    });
+    expect(dryRun.status).toBe(200);
+    const issues = ((await dryRun.json()) as any).data.validation.issues as Array<any>;
+    const onWork = issues.filter((i) => i.severity === "error" && i.nodeId === "work");
+    expect(onWork.some((i) => i.field === "connections.retry")).toBe(true);
+    expect(onWork.some((i) => i.field === "cases[0].output")).toBe(true);
+
+    const refused = await put({ workflow: broken, expectedRevision: current.fileInfo.revision });
+    expect(refused.status).toBe(400);
+    expect(refused.json.error.details.validation.issues).toEqual(issues);
+    expect((await get()).fileInfo.revision).toBe(current.fileInfo.revision);
+  });
+
+  test("a playbook reference the author cannot resolve is refused, as manage edit refuses it", async () => {
+    const current = await get();
+    const referencing = {
+      ...current.workflow,
+      nodes: current.workflow.nodes.map((n: any) =>
+        n.id === "work" ? { ...n, directive: "Follow {{playbook:no-such-playbook-anywhere}}" } : n,
+      ),
+    };
+    const dryRun = await fetch(`${BASE_URL}/api/workflows/${workflowId}/validate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: authCookie },
+      body: JSON.stringify({ workflowData: referencing }),
+    });
+    const dryIssues = ((await dryRun.json()) as any).data.validation.issues as Array<any>;
+    expect(dryIssues.find((i) => /no-such-playbook-anywhere/.test(i.message))).toMatchObject({
+      severity: "error",
+      nodeId: "work",
+    });
+
+    const refused = await put({
+      workflow: referencing,
+      expectedRevision: current.fileInfo.revision,
+    });
+    expect(refused.status).toBe(400);
+    const issue = refused.json.error.details.validation.issues.find((i: any) =>
+      /no-such-playbook-anywhere/.test(i.message),
+    );
+    expect(issue).toMatchObject({ severity: "error", nodeId: "work" });
+    const after = await get();
+    expect(after.fileInfo.revision).toBe(current.fileInfo.revision);
+    expect(after.workflow.nodes.find((n: any) => n.id === "work").directive).not.toMatch(
+      /playbook/,
+    );
+  });
+
+  test("two saves racing on the same revision: exactly one wins and the revision advances once", async () => {
+    const current = await get();
+    const racers = await Promise.all(
+      ["Racer A", "Racer B", "Racer C", "Racer D"].map((wording) =>
+        put({
+          workflow: { ...current.workflow, ...definition(wording) },
+          expectedRevision: current.fileInfo.revision,
+        }),
+      ),
+    );
+    const statuses = racers.map((r) => r.status).sort();
+    expect(statuses).toEqual([200, 409, 409, 409]);
+    const winner = racers.find((r) => r.status === 200)!;
+    expect(winner.json.data.revision).toBe(current.fileInfo.revision + 1);
+    for (const loser of racers.filter((r) => r.status === 409)) {
+      expect(loser.json.error.details.currentRevision).toBe(current.fileInfo.revision + 1);
+    }
+    const after = await get();
+    expect(after.fileInfo.revision).toBe(current.fileInfo.revision + 1);
+  });
 });

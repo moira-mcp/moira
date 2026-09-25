@@ -639,4 +639,19 @@ export interface WorkflowValidationStatus {
   >;
   globalErrors: string[];
   globalWarnings: string[];
+  /**
+   * Every issue as the engine reports it; `nodeId` and `field` locate it on the definition.
+   * Workflow validation responses carry it (the workflow read, the dry run and a refused save);
+   * statuses embedded in other responses may not.
+   */
+  issues?: ValidationIssue[];
+}
+
+/** One validation issue as the server reports it. */
+export interface ValidationIssue {
+  type: "schema" | "structure" | "node" | "connection";
+  severity: "error" | "warning";
+  nodeId?: string;
+  field?: string;
+  message: string;
 }
