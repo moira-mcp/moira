@@ -138,8 +138,21 @@ describe("MCP server limiter", () => {
 });
 
 describe("Better Auth session and audit address", () => {
+  const originalMode = process.env.DEPLOYMENT_MODE;
+
+  afterEach(async () => {
+    if (originalMode === undefined) delete process.env.DEPLOYMENT_MODE;
+    else process.env.DEPLOYMENT_MODE = originalMode;
+    const { resetFeatureResolver } = await import("@mcp-moira/shared");
+    resetFeatureResolver();
+  });
+
   it("records the server-written client address, not a forged X-Forwarded-For", async () => {
-    const { getDatabase, user, session, auditLog, AuditAction } = await import("@mcp-moira/shared");
+    // Self-host sign-up needs no legal consents; the address recording is the same in both modes.
+    process.env.DEPLOYMENT_MODE = "self-host";
+    const { getDatabase, user, session, auditLog, AuditAction, resetFeatureResolver } =
+      await import("@mcp-moira/shared");
+    resetFeatureResolver();
     const { auth } = await import("../../packages/web-backend/src/auth.js");
     const email = `client-ip-${randomUUID()}@example.com`;
     const db = getDatabase();
