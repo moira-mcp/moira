@@ -11,10 +11,13 @@
 
 import React, { createContext, useCallback, useContext, useMemo, useRef, useState } from "react";
 import type { ConnectionLabel, RegistryVariable, WorkflowGraph } from "../../types/workflow-types";
+import type { RunBlock } from "../run/model";
 import { NO_ISSUES, type IssuePlacement } from "./issues";
-import { appendOperation, foldOperations, type NodeTextField, type Operation } from "./operations";
+import { appendOperation, applyOperation, type NodeTextField, type Operation } from "./operations";
 
 export type { NodeTextField } from "./operations";
+
+const NO_BLOCKS: readonly RunBlock[] = [];
 
 interface EditingContextValue {
   enabled: boolean;
@@ -22,6 +25,9 @@ interface EditingContextValue {
   definition: boolean;
   /** Where the current problems sit: shown inline on the offending block, step or edge. */
   issues: IssuePlacement;
+  /** The definition as edited, and its blocks: what the structural dialogs read. */
+  draft?: WorkflowGraph;
+  blocks: readonly RunBlock[];
   setBlock: (blockId: string, patch: { label?: string; summary?: string }) => void;
   setLabel: (edgeIds: string[], value: ConnectionLabel) => void;
   setOwner: (nodeId: string, blockId: string) => void;
@@ -35,6 +41,7 @@ const EditingContext = createContext<EditingContextValue>({
   enabled: false,
   definition: false,
   issues: NO_ISSUES,
+  blocks: [],
   setBlock: () => {},
   setLabel: () => {},
   setOwner: () => {},
@@ -58,12 +65,16 @@ export function EditingProvider({
   enabled,
   definition = true,
   issues = NO_ISSUES,
+  draft,
+  blocks = NO_BLOCKS,
   apply,
   children,
 }: {
   enabled: boolean;
   definition?: boolean;
   issues?: IssuePlacement;
+  draft?: WorkflowGraph;
+  blocks?: readonly RunBlock[];
   apply: (op: Operation) => void;
   children: React.ReactNode;
 }): React.JSX.Element {
@@ -72,6 +83,8 @@ export function EditingProvider({
       enabled,
       definition,
       issues,
+      draft,
+      blocks,
       apply,
       setBlock: (blockId, patch) => {
         if (patch.label !== undefined)
@@ -85,7 +98,7 @@ export function EditingProvider({
         apply({ kind: "node-text", nodeId, field, value: fieldValue }),
       setRegistry: (name, entry) => apply({ kind: "registry", name, entry }),
     }),
-    [enabled, definition, issues, apply],
+    [enabled, definition, issues, draft, blocks, apply],
   );
   return <EditingContext.Provider value={value}>{children}</EditingContext.Provider>;
 }
@@ -103,19 +116,53 @@ export function useEditLog(saved: WorkflowGraph | undefined): {
   reset: () => void;
 } {
   const [ops, setOps] = useState<Operation[]>([]);
-  const draft = useMemo(() => (saved ? foldOperations(saved, ops) : undefined), [saved, ops]);
+  // The drafts after each operation, reused while the log only grows or its last entry is replaced
+  // (a keystroke): a structural operation clones the graph, so refolding the whole log on every
+  // change would clone it once per operation per keystroke.
+  const folds = useRef<{
+    saved: WorkflowGraph | undefined;
+    ops: Operation[];
+    drafts: WorkflowGraph[];
+  }>({ saved: undefined, ops: [], drafts: [] });
+  const fold = useCallback((base: WorkflowGraph, log: readonly Operation[]): WorkflowGraph => {
+    const cache = folds.current;
+    let shared = 0;
+    if (cache.saved === base) {
+      while (shared < log.length && shared < cache.ops.length && cache.ops[shared] === log[shared])
+        shared++;
+    }
+    const drafts = cache.saved === base ? cache.drafts.slice(0, shared) : [];
+    let draft = shared === 0 ? base : drafts[shared - 1];
+    for (let i = shared; i < log.length; i++) {
+      draft = applyOperation(draft, log[i]);
+      drafts.push(draft);
+    }
+    folds.current = { saved: base, ops: [...log], drafts };
+    return draft;
+  }, []);
+  const draft = useMemo(() => (saved ? fold(saved, ops) : undefined), [saved, ops, fold]);
   // Two operations can arrive before the page renders again (a block's name and description in
   // one call): each is appended to the log as the previous one left it, not as the last render saw.
   const latest = useRef({ saved, ops });
   latest.current = { saved, ops };
-  const apply = useCallback((op: Operation) => {
-    const { saved: base, ops: log } = latest.current;
-    if (!base) return;
-    const next = appendOperation(foldOperations(base, log), log, op);
-    latest.current = { saved: base, ops: next };
+  const apply = useCallback(
+    (op: Operation) => {
+      const { saved: base, ops: log } = latest.current;
+      if (!base) return;
+      const next = appendOperation(fold(base, log), log, op);
+      latest.current = { saved: base, ops: next };
+      setOps(next);
+    },
+    [fold],
+  );
+  const undo = useCallback(() => {
+    const next = latest.current.ops.slice(0, -1);
+    latest.current = { ...latest.current, ops: next };
     setOps(next);
   }, []);
-  const undo = useCallback(() => setOps((current) => current.slice(0, -1)), []);
-  const reset = useCallback(() => setOps([]), []);
+  const reset = useCallback(() => {
+    latest.current = { ...latest.current, ops: [] };
+    setOps([]);
+  }, []);
   return { ops, draft, apply, undo, reset };
 }

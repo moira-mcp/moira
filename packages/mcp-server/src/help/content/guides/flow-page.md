@@ -113,6 +113,38 @@ definition itself and never a run:
   expressions (on the step's card in the block panel);
 - the variable registry — declarations, types, descriptions and defaults (Variables tab).
 
+Edit mode also changes the process's structure:
+
+- **Rename or delete a step.** Use the step card's menu (…) in the block panel.
+  - A new id is lower-case letters, digits and hyphens, starting with a letter or digit; a dot or an
+    upper-case letter is refused in the dialog.
+  - The rename preview lists every place the rename rewrites: the connections that lead to the
+    step, its values in templates, routing paths and expressions. It also lists texts that only
+    mention the id and stay as they are.
+  - A teleport step warns that agents jump to it by its id.
+  - Deleting asks where each connection that led to the step should lead instead. By default it
+    continues to where the deleted step led. A step's main output can be redirected but not
+    removed, and the start step cannot be deleted.
+  - The dialog lists the references to the step's values that will be left without a source, and
+    the check then reports them on the steps that read them.
+- **Change a step's connections.** Use the step card: lead an output to another step (grouped by
+  block), add an output, or remove one other than the main output. Removing an output that a case
+  names is allowed; the check then reports the case on that step.
+- **Add a step.** Use "Add step" under a block's steps. Choose any node type from the catalog
+  (every type but the start), give its id and the fields the type requires. Texts are typed as
+  text and lists of lines as lines. A structure — a condition's cases, a subgraph's mappings,
+  files to write, an extension's configuration — is written as JSON, starting from its empty
+  shape, and the check of the draft tells you whether it fits the type. The step joins the block
+  unconnected; connect it from its own card and from the step before it.
+- **Add or delete a block.** Use the contents list: "Add block" takes an id, a name, a description
+  and the block it follows, and a block's delete control works only while the block owns no step.
+
+A change to the structure re-derives the whole process, so a problem can appear on a transition you
+did not touch — for example a return created by leading a step back to an earlier block, which
+needs its cause and exit before the save. If you rename or delete a step that one of your paused
+runs is waiting on, the edit bar names the run before you save: after the save that run no longer
+finds its step, so move it on with `session recover`.
+
 Every edit goes into the page's edit log. **Undo** takes back the last one — typing into one field
 counts as one edit — and **Discard edits** drops them all. The views re-derive as you type.
 

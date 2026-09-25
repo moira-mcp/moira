@@ -17,6 +17,7 @@
 import { test, expect, type Page } from "./fixtures.js";
 import { getTestBaseUrl } from "../utils/test-config.js";
 import { loginAsAdmin } from "./helpers/auth-helper.js";
+import { createAuthenticatedMCPClient, startWorkflowExecutionState } from "../utils/mcp-auth.js";
 import { GRAPH, MAP, graphOverview, openPanelSection, settledCamera } from "./helpers/diagram.js";
 
 const BASE_URL = getTestBaseUrl();
@@ -446,6 +447,287 @@ test("an edit only the server can reject is shown on its step before any save, a
     await expect(page.getByTestId("edit-node-create-plan-directive")).toHaveValue(saved);
     expect((await detailOf(page, id)).fileInfo.revision).toBe(0);
   } finally {
+    await page.request.delete(`${BASE_URL}/api/workflows/${id}`);
+  }
+});
+
+/** Pick a step in one of the page's step pickers (a Radix select). */
+async function pickStep(page: Page, triggerTestId: string, stepId: string): Promise<void> {
+  await page.getByTestId(triggerTestId).click();
+  await page.locator(`[role="option"][data-target="${stepId}"]`).click();
+}
+
+/** Open a step's structural menu in the block panel and choose one of its actions. */
+async function stepAction(page: Page, nodeId: string, action: "rename" | "delete"): Promise<void> {
+  await page.getByTestId(`step-actions-${nodeId}`).click();
+  await page.getByTestId(`step-${action}-${nodeId}`).click();
+}
+
+async function saveWhenChecked(page: Page): Promise<void> {
+  await expect(page.getByTestId("flow-edit-gate")).toHaveAttribute("data-gate", "ready");
+  await page.getByTestId("flow-edit-save").click();
+  await expect(page.getByTestId("flow-edit-count")).toContainText("0");
+}
+
+test("a step is renamed with every reference and deleted with its incoming edges decided, from the block panel", async ({
+  page,
+}) => {
+  await loginAsAdmin(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const id = await copyQuickTask(page);
+  try {
+    await openEditing(page, id);
+    await openBlock(page, "plan-review");
+    await openSteps(page);
+
+    // The id rule is checked in the dialog: a dotted or upper-case id is refused there.
+    await stepAction(page, "plan-review", "rename");
+    const input = page.getByTestId("rename-input");
+    for (const bad of ["plan.review", "Plan-Review"]) {
+      await input.fill(bad);
+      await expect(page.getByTestId("rename-problem")).toBeVisible();
+      await expect(page.getByTestId("rename-confirm")).toBeDisabled();
+    }
+    // A step that templates read and that a return re-enters: the preview lists the references.
+    await input.fill("plan-check");
+    await expect(page.getByTestId("rename-references")).toContainText(
+      "nodes[repair-plan].connections",
+    );
+    await expect(page.getByTestId("rename-references")).toContainText(
+      "nodes[repair-plan].directive",
+    );
+    await page.getByTestId("rename-confirm").click();
+    await expect(page.getByTestId("rename-dialog")).toHaveCount(0);
+    await expect(page.locator('[data-node-id="plan-check"][data-step-card]')).toBeVisible();
+
+    // Delete: every incoming edge is decided before anything changes; dismissing changes nothing.
+    await openBlock(page, "plan-approval");
+    await openSteps(page);
+    await stepAction(page, "revise-plan", "delete");
+    await expect(page.getByTestId("delete-decision-present-plan.success")).toContainText(
+      "plan-check",
+    );
+    await expect(page.getByTestId("delete-decision-teleport-replan.success")).toContainText(
+      "plan-check",
+    );
+    await page.keyboard.press("Escape");
+    await expect(page.getByTestId("delete-dialog")).toHaveCount(0);
+    await expect(page.locator('[data-node-id="revise-plan"][data-step-card]')).toBeVisible();
+
+    // Deleting a step whose value another step reads leaves that reference without a source: the
+    // server's check reports it on the reading step before any save, and Save stays closed.
+    await openBlock(page, "deliver");
+    await openSteps(page);
+    await stepAction(page, "present-to-user", "delete");
+    await expect(page.getByTestId("delete-dangling")).toContainText("nodes[rework].directive");
+    await page.getByTestId("delete-confirm").click();
+    await expect(page.getByTestId("flow-edit-gate")).toHaveAttribute("data-gate", "invalid");
+    await expect(
+      page.locator('[data-node-id="rework"] [data-testid="inline-diagnostic"]'),
+    ).toContainText("present-to-user");
+    await expect(page.getByTestId("flow-edit-save")).toBeDisabled();
+    await page.getByTestId("flow-edit-undo").click();
+
+    // The rename saves; after a reload no connection, template or path names the old id.
+    await saveWhenChecked(page);
+    const saved = (await detailOf(page, id)).workflow;
+    expect(saved.nodes.map((n: any) => n.id)).not.toContain("plan-review");
+    expect(saved.nodes.map((n: any) => n.id)).toContain("present-to-user");
+    const targets = saved.nodes.flatMap((n: any) => Object.values(n.connections ?? {}));
+    expect(targets).not.toContain("plan-review");
+    expect(saved.nodes.find((n: any) => n.id === "repair-plan").connections.success).toBe(
+      "plan-check",
+    );
+    expect(JSON.stringify(saved.nodes)).not.toContain("plan-review.");
+  } finally {
+    await page.request.delete(`${BASE_URL}/api/workflows/${id}`);
+  }
+});
+
+test("a reconnection into a return is explained before it saves, and connections obey the step's rules", async ({
+  page,
+}) => {
+  await loginAsAdmin(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const id = await copyQuickTask(page);
+  try {
+    await openEditing(page, id);
+    await openBlock(page, "plan");
+    await openSteps(page);
+
+    // The main output cannot be removed; it is retargeted instead.
+    await expect(page.getByTestId("connection-remove-create-plan-success")).toBeDisabled();
+    // Leading the plan back to the task intake makes a return the process must explain.
+    await pickStep(page, "connection-target-create-plan-success", "get-task");
+    await expect(
+      page.locator('[data-node-id="create-plan"] [data-testid="inline-diagnostic"]'),
+    ).toHaveAttribute("data-diagnostic", /unexplained-cycle/);
+    await expect(page.getByTestId("flow-edit-save")).toBeDisabled();
+    await page.locator('[data-edges="create-plan.success"]').click();
+    await page.getByTestId("edit-transition-cause").fill("The plan showed the task was misread.");
+    await page.getByTestId("edit-transition-exit").fill("The task contract is confirmed.");
+    await page.keyboard.press("Escape");
+    await expect(page.getByTestId("flow-diagnostics")).toHaveCount(0);
+    await saveWhenChecked(page);
+    const saved = (await detailOf(page, id)).workflow;
+    const plan = saved.nodes.find((n: any) => n.id === "create-plan");
+    expect(plan.connections.success).toBe("get-task");
+    expect(plan.connectionLabels.success.cycle).toEqual({
+      cause: "The plan showed the task was misread.",
+      exit: "The task contract is confirmed.",
+    });
+    await page.goto(`${BASE_URL}/workflows/${id}?block=plan`);
+    await expect(
+      page.getByTestId("block-detail").locator('[data-transition-kind="cycle"]'),
+    ).toContainText("Understand the task");
+    // …and the map draws it as a return port on the plan block's card.
+    await expect(
+      page.locator(`${MAP} [data-block-id="plan"] [data-port-kind="return"]`).first(),
+    ).toBeAttached();
+
+    // Removing an output that a case names is allowed; the server reports the case inline.
+    await openEditing(page, id);
+    await openBlock(page, "plan-review");
+    await openSteps(page);
+    await page
+      .getByTestId("connection-remove-plan-review-route-operating-mode-plan-approval")
+      .click();
+    await expect(page.getByTestId("flow-edit-gate")).toHaveAttribute(
+      "data-gate",
+      /invalid|diagnostics/,
+    );
+    await expect(
+      page.locator('[data-node-id="plan-review"] [data-testid="inline-diagnostic"]'),
+    ).toContainText("route-operating-mode-plan-approval");
+    await expect(page.getByTestId("flow-edit-save")).toBeDisabled();
+  } finally {
+    await page.request.delete(`${BASE_URL}/api/workflows/${id}`);
+  }
+});
+
+test("a block is added with a connected step in it, and only an empty block can be deleted", async ({
+  page,
+}) => {
+  await loginAsAdmin(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const id = await copyQuickTask(page);
+  try {
+    await openEditing(page, id);
+    await expect(page.getByTestId("block-delete-plan")).toBeDisabled();
+
+    await page.getByTestId("block-add").click();
+    await page.getByTestId("add-block-id").fill("triage");
+    await page.getByTestId("add-block-label").fill("Triage the task");
+    await page.getByTestId("add-block-summary").fill("Decide how much work the task needs.");
+    await page.getByTestId("add-block-after").click();
+    await page.getByRole("option", { name: /Understand the task/ }).click();
+    await page.getByTestId("add-block-confirm").click();
+    // A new block owns nothing yet: it can be deleted again, and added back.
+    await page.getByTestId("block-delete-triage").click();
+    await expect(page.getByTestId("map-contents-triage")).toHaveCount(0);
+    await page.getByTestId("block-add").click();
+    await page.getByTestId("add-block-id").fill("triage");
+    await page.getByTestId("add-block-label").fill("Triage the task");
+    await page.getByTestId("add-block-summary").fill("Decide how much work the task needs.");
+    await page.getByTestId("add-block-after").click();
+    await page.getByRole("option", { name: /Understand the task/ }).click();
+    await page.getByTestId("add-block-confirm").click();
+    await expect(page.getByTestId("block-delete-triage")).toBeEnabled();
+
+    await openBlock(page, "triage");
+    await openSteps(page);
+    await page.getByTestId("block-add-step-triage").click();
+    // Any catalog type can be chosen; a structure is written as JSON from its empty shape.
+    await page.getByTestId("add-step-type").click();
+    await page.getByRole("option", { name: "Condition", exact: true }).click();
+    await expect(page.getByTestId("add-step-field-cases")).toHaveValue("[]");
+    await page.getByTestId("add-step-field-cases").fill("[{");
+    await expect(page.getByTestId("add-step-field-cases-problem")).toBeVisible();
+    await expect(page.getByTestId("add-step-confirm")).toBeDisabled();
+    await page.getByTestId("add-step-type").click();
+    await page.getByRole("option", { name: "Agent Task", exact: true }).click();
+    await page.getByTestId("add-step-id").fill("Sort.Task");
+    await expect(page.getByTestId("add-step-id-problem")).toBeVisible();
+    await page.getByTestId("add-step-id").fill("sort-task");
+    await page.getByTestId("add-step-field-directive").fill("Decide whether the task is small.");
+    await page.getByTestId("add-step-field-completionCondition").fill("The size is recorded.");
+    await page.getByTestId("add-step-confirm").click();
+    await expect(page.getByTestId("block-delete-triage")).toBeDisabled();
+
+    // Wire it in: the intake leads into triage, triage leads on to planning, both labelled.
+    await pickStep(page, "connection-new-target-sort-task", "create-plan");
+    await page.getByTestId("connection-new-key-sort-task").fill("success");
+    await page.getByTestId("connection-add-sort-task").click();
+    await openBlock(page, "scope");
+    await openSteps(page);
+    await pickStep(page, "connection-target-get-task-success", "sort-task");
+    await page.locator('[data-edges="get-task.success"]').click();
+    await page.getByTestId("edit-transition-label").fill("task contract written");
+    await page.keyboard.press("Escape");
+    await openBlock(page, "triage");
+    await page.locator('[data-edges="sort-task.success"]').click();
+    await page.getByTestId("edit-transition-label").fill("size decided");
+    await page.keyboard.press("Escape");
+    await saveWhenChecked(page);
+
+    const saved = (await detailOf(page, id)).workflow;
+    expect(saved.progress.nodes.map((b: any) => b.id).slice(0, 2)).toEqual(["scope", "triage"]);
+    const sort = saved.nodes.find((n: any) => n.id === "sort-task");
+    expect(sort).toMatchObject({
+      type: "agent-directive",
+      progressNodeId: "triage",
+      connections: { success: "create-plan" },
+      connectionLabels: { success: "size decided" },
+    });
+    expect(saved.nodes.find((n: any) => n.id === "get-task").connections.success).toBe("sort-task");
+  } finally {
+    await page.request.delete(`${BASE_URL}/api/workflows/${id}`);
+  }
+});
+
+test("a stale save with structural edits is refused and keeps the whole log; a paused run on a renamed step is named first", async ({
+  page,
+}) => {
+  await loginAsAdmin(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const id = await copyQuickTask(page);
+  const authenticated = await createAuthenticatedMCPClient();
+  try {
+    // A real run of this copy, paused on its first agent step.
+    await startWorkflowExecutionState(authenticated.client, id, { skipTelegramCheck: true });
+    await openEditing(page, id);
+    await openBlock(page, "scope");
+    await openSteps(page);
+    await stepAction(page, "get-task", "rename");
+    await page.getByTestId("rename-input").fill("take-task");
+    await page.getByTestId("rename-confirm").click();
+    const warning = page.getByTestId("flow-edit-run-warnings");
+    await expect(warning).toContainText("get-task");
+    await expect(warning).toContainText("session recover");
+
+    // Another writer advances the workflow; the save is refused and the rename stays in the log.
+    const current = await detailOf(page, id);
+    const elsewhere = await page.request.put(`${BASE_URL}/api/workflows/${id}`, {
+      data: {
+        workflow: {
+          ...current.workflow,
+          metadata: { ...current.workflow.metadata, description: "moved on" },
+        },
+        expectedRevision: 0,
+      },
+    });
+    expect(elsewhere.status()).toBe(200);
+    await expect(page.getByTestId("flow-edit-gate")).toHaveAttribute("data-gate", "ready");
+    await page.getByTestId("flow-edit-save").click();
+    await expect(page.getByTestId("flow-save-error")).toContainText(/reload|перезагрузите/i);
+    await expect(page.locator('[data-node-id="take-task"][data-step-card]')).toBeVisible();
+    await page.getByTestId("flow-edit-export-toggle").click();
+    await expect(page.locator('[data-export-entry="rename-node"]')).toContainText(
+      "node get-task → take-task",
+    );
+    expect((await detailOf(page, id)).workflow.nodes.map((n: any) => n.id)).toContain("get-task");
+  } finally {
+    await authenticated.cleanup();
     await page.request.delete(`${BASE_URL}/api/workflows/${id}`);
   }
 });

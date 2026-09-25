@@ -56,6 +56,7 @@ frontend/src/
 │   │   ├── operations.ts / editing.tsx              # The edit log (operations, fold, export diff); its page state and editing context
 │   │   ├── issues.ts / useDraftValidation.ts        # Problem placement and the save gate; the server's dry run of the draft
 │   │   ├── EditBar.tsx / IssueList.tsx              # The edit bar with the problem list; a compact inline problem list
+│   │   ├── structure.ts / StructureControls.tsx     # What a structural action would do; the rename, delete, connection, step and block controls
 │   │   ├── model.ts / modes.ts                      # Run-less projection, the three views
 │   │   ├── StepsView.tsx / stepsModel.ts            # The steps view: what the agent is told, drawn as numbered cards joined by arrows
 │   │   ├── StepsList.tsx                            # The steps view of a large flow: the same cards as a reading list with jump links
@@ -620,7 +621,10 @@ declares (`pages/FlowPage.tsx`).
 **Data:** the workflow detail (`apiClient.getWorkflow`, whose `fileInfo.revision` is the
 definition revision the page saves against) and the saved definition's derived process
 (`apiClient.getWorkflowProcess`), both held in `useResource` stores (the detail through
-`useWorkflowDetail`, the process keyed by workflow id and refreshed when the revision changes): a
+`useWorkflowDetail`, the process keyed by workflow id and refreshed when the revision changes;
+each projection carries the revision it was asked for, and until the refetch for a new revision
+lands the page derives that revision's process in the browser rather than pairing the new
+definition with the old projection): a
 refetch keeps the current value on screen with a "Refreshing…" indicator (`flow-pending`, in the
 header row or the no-process bar), the page loader appears only before the first data of a
 workflow (a move to another workflow through breadcrumbs or a subgraph link is a first load and
@@ -737,9 +741,35 @@ fetched when its view is first shown, behind `DiagramSkeleton`.
     renamed node — a rename with the references it rewrote, per location — or per added or
     removed block.
 - **Page state** (`components/flow/editing.tsx`). `useEditLog` holds the log, the draft, `apply`,
-  `undo` and `reset`; the log is dropped when the page moves to another workflow.
+  `undo` and `reset`. It keeps the draft after each operation and reuses those drafts while the log
+  only grows or its last entry is replaced, so a keystroke does not refold (and re-clone) the whole
+  log. The log is dropped when the page moves to another workflow.
   `EditingProvider` gives the views the setters (each appends one operation), the generic
   `apply`, and the problem placement.
+- **Structural editing** (`components/flow/StructureControls.tsx`), shown only in edit mode:
+  - a step card's menu (`StepActions`) opens the rename and delete dialogs;
+  - `ConnectionsEditor` on each step card retargets, adds and removes outputs;
+  - `AddStep` sits under a block's steps;
+  - `DeleteBlock` on each contents row and `AddBlock` under the contents list.
+
+  Each commits one operation through `apply` and shows an `AuthoringError` inline. The dialogs read
+  the consequence from the draft first (`components/flow/structure.ts`):
+  - `renamePreview`: the id problem, every rewritten location including incoming connections,
+    prose mentions, and the teleport flag;
+  - `deletePlan`: incoming edges keyed by the engine's `edgeId`, each proposed to lead to the
+    deleted step's primary target and marked protected when it is its source's primary output;
+    the start refusal; and references left dangling;
+  - `targetGroups`: steps by block;
+  - `creatableTypes`: every catalog type but `start`, each with its required fields. A text or a
+    list of texts is typed as such, any other structure as JSON starting from `[]` or `{}`, and an
+    extension's `config` as JSON, required when its schema requires a key. `fieldProblem` marks a
+    missing field or invalid JSON, and `newNode` parses what was typed;
+  - `pausedRunWarnings`: the owner's running executions (`getExecutions`, fetched once the export
+    has a rename or removal) paused on a renamed or removed step, shown in the edit bar as
+    `flow-edit-run-warnings`.
+
+  The editing context carries the draft and its blocks for these controls.
+
 - **Editors** (`components/flow/EditControls.tsx`) all sit in the block panel: `BlockNameEditor` /
   `BlockSummaryEditor` on the block header, `TransitionEditor` on each transition, `OwnerSelect`
   and `NodeTextEditor` on each step card, and `RegistryPanel` in the variables tab (a default and
@@ -892,7 +922,9 @@ live URL so a duplicate change pushes no history entry.
   it would pass through a block on an intermediate row (`crossesBlock`, `SKIP_GAP_INSET` /
   `RETURN_GAP_INSET`), and adjacent forward elbows turn in the gap after the source's column; the
   gap between ranks is at least `MIN_RANK_SEP` and widens with the longest adjacent transition
-  label, capped at `LABEL_MAX_WIDTH` (`rankSeparation`, `labelPillWidth`).
+  label, capped at `LABEL_MAX_WIDTH` (`rankSeparation`, `labelPillWidth`). While a new layout is computed the previous one stays on screen; only its blocks that
+  the current process still has are drawn, with the edges between them, so a changed set of blocks
+  (one added or removed by an edit or a save) never reaches a block that no longer exists.
 - Each block is a `PortedCard`: a title band with the block's `IndexBadge`, its name, its status
   chip and its pass count; a column of input ports on the left, one per transition arriving (named
   by its source block, with the transition label as the detail) and a column of output ports on the

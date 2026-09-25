@@ -1628,6 +1628,13 @@
           "completionCondition": "Completion condition",
           "message": "Message",
           "expressions": "Expressions (one per line)"
+        },
+        "pausedRuns": {
+          "title": "Your paused runs wait on steps this save renames or removes",
+          "item": "Run {{id}} waits on {{node}}, which is {{change}}.",
+          "renamed": "renamed to {{to}}",
+          "removed": "removed",
+          "hint": "A run reads the saved definition at its next step and will not find that step; after saving, move it with `session recover`."
         }
       },
       "guide": {
@@ -1705,6 +1712,70 @@
           "placed": "{{name}}, before step {{number}}",
           "backToPlace": "back to: {{place}}",
           "nth": "{{name}} (#{{n}})"
+        }
+      },
+      "structure": {
+        "stepActions": "Step actions",
+        "newId": "Step id",
+        "teleport": "Agents jump to this step by its id; a jump that names the old id will no longer find it.",
+        "idProblem": {
+          "empty": "Enter an id.",
+          "invalid": "An id uses lower-case letters, digits and hyphens, and starts with a letter or digit (no dots).",
+          "exists": "Another step already has this id.",
+          "unchanged": "The id is unchanged."
+        },
+        "rename": {
+          "action": "Rename…",
+          "title": "Rename step {{id}}",
+          "body": "Every reference to the step is rewritten with it: the connections that lead to it, its values in templates, routing paths and expressions.",
+          "rewritten": "References that will be rewritten",
+          "prose": "Mentions in text that stay as they are",
+          "confirm": "Rename"
+        },
+        "delete": {
+          "action": "Delete…",
+          "title": "Delete step {{id}}",
+          "body": "Choose where each connection that leads to this step should lead instead. By default it continues to where this step led.",
+          "bodyNoIncoming": "No connection leads to this step.",
+          "onlyStart": "The start step cannot be deleted.",
+          "protected": "main output — retarget it",
+          "drop": "Remove this connection",
+          "choose": "Choose a step",
+          "dangling": "References to this step's values that will be left without a source",
+          "confirm": "Delete",
+          "bodyNoDefault": "Choose where each connection that leads to this step should lead instead."
+        },
+        "connections": {
+          "title": "Connections",
+          "remove": "Remove connection {{key}}",
+          "protected": "The step's main output cannot be removed; lead it to another step instead.",
+          "newKey": "output",
+          "newTarget": "leads to…",
+          "add": "Add connection",
+          "invalidKey": "An output name uses letters, digits, '_' and '-' only.",
+          "keyExists": "This output already exists."
+        },
+        "addStep": {
+          "action": "Add step",
+          "title": "Add a step to this block",
+          "body": "The step joins this block unconnected: connect it from another step's card, or give it connections on its own card. Fields the type needs as a structure (a condition's cases, a subgraph's mappings, an extension's configuration) are written as JSON.",
+          "type": "Type",
+          "confirm": "Add step",
+          "jsonHint": "Written as JSON; the check of the draft tells you whether it fits the type.",
+          "invalidJson": "This is not valid JSON."
+        },
+        "block": {
+          "add": "Add block",
+          "addTitle": "Add a block",
+          "addBody": "A block is one stage of the process: a name, a description, and the steps that belong to it.",
+          "id": "Block id",
+          "idTaken": "Another block already has this id.",
+          "name": "Name",
+          "summary": "Description",
+          "after": "Place after",
+          "addConfirm": "Add block",
+          "delete": "Delete block {{name}}",
+          "notEmpty": "Move or delete its steps first: only an empty block can be deleted."
         }
       }
     },

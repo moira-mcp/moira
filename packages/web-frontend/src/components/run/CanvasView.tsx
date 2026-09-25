@@ -587,8 +587,11 @@ function CanvasInner({
       transition.cycle
         ? `\n${transition.cycle.cause}\n${t("pages.runPage.map.endsWhen")} ${transition.cycle.exit}`
         : "";
-    return layout.blocks.map((laid) => {
-      const block = byId.get(laid.id)!;
+    // A layout outlives the process it was computed for until the next one lands (the map never
+    // blanks while it relays); a block that process had and this one no longer has is not drawn.
+    return layout.blocks.flatMap((laid): BlockNode[] => {
+      const block = byId.get(laid.id);
+      if (!block) return [];
       const inputs: PortInfo[] = [];
       for (const other of blocks) {
         if (other.id === block.id) continue;
@@ -621,31 +624,33 @@ function CanvasInner({
         };
         (transition.to === block.id ? selfLoops : outputs).push(port);
       }
-      return {
-        id: laid.id,
-        type: "block",
-        position: { x: laid.x, y: laid.y },
-        width: laid.width,
-        height: laid.height,
-        draggable: false,
-        selectable: false,
-        data: {
-          block,
-          selected: selectedBlockId === block.id,
-          isHub: layout.hubIds.includes(block.id),
-          inputs,
-          outputs,
-          selfLoops,
-          waitingFor: progress.waitingFor,
-          onSelect: onSelectBlock,
-          vertical: Boolean(layout.transposed),
-          steps: stepsOf(workflow, orderNodeIds(workflow, block.nodeIds)),
-          onFocusNode,
-          onGoTo: goTo,
-          arrived: arrival?.blockId === block.id,
-          onSelectListItem,
+      return [
+        {
+          id: laid.id,
+          type: "block",
+          position: { x: laid.x, y: laid.y },
+          width: laid.width,
+          height: laid.height,
+          draggable: false,
+          selectable: false,
+          data: {
+            block,
+            selected: selectedBlockId === block.id,
+            isHub: layout.hubIds.includes(block.id),
+            inputs,
+            outputs,
+            selfLoops,
+            waitingFor: progress.waitingFor,
+            onSelect: onSelectBlock,
+            vertical: Boolean(layout.transposed),
+            steps: stepsOf(workflow, orderNodeIds(workflow, block.nodeIds)),
+            onFocusNode,
+            onGoTo: goTo,
+            arrived: arrival?.blockId === block.id,
+            onSelectListItem,
+          },
         },
-      };
+      ];
     });
   }, [
     layout,
@@ -674,8 +679,9 @@ function CanvasInner({
     // lane above and from a lane below get disjoint column ranges; inside a range the port whose
     // horizontal is furthest from the lane takes the outermost column, so no vertical crosses
     // another port's horizontal on that side.
-    const ranks = portRanks(layout.edges, ports, blockY);
-    return layout.edges.map((laid) => {
+    const drawn = layout.edges.filter((laid) => ports.has(laid.from) && ports.has(laid.to));
+    const ranks = portRanks(drawn, ports, blockY);
+    return drawn.map((laid) => {
       const key = transitionKey(laid.from, laid.transition);
       return {
         id: laid.id,

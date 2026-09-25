@@ -157,23 +157,21 @@ describe("save gate", () => {
     ),
   );
 
+  const reasons: Record<string, string> = {
+    pending: "checking",
+    stale: "stale",
+    "current with errors": "invalid",
+    "current, check failed": "check-failed",
+    "current clean": "ready",
+  };
+
   test.each(cases)(
     "changed=%s, process diagnostics=%s, dry run %s",
     (changed, diagnostics, dryRun) => {
       const gate = saveGate({ changed, diagnostics, draft, dryRun: states[dryRun] });
-      const expected = changed && diagnostics === 0 && dryRun === "current clean";
-      expect(gate.enabled).toBe(expected);
-      if (changed && diagnostics === 0) {
-        expect(gate.reason).toBe(
-          {
-            pending: "checking",
-            stale: "stale",
-            "current with errors": "invalid",
-            "current, check failed": "check-failed",
-            "current clean": "ready",
-          }[dryRun],
-        );
-      }
+      // An unchanged draft reads as unchanged, then diagnostics come first, then the dry run.
+      const reason = !changed ? "unchanged" : diagnostics > 0 ? "diagnostics" : reasons[dryRun];
+      expect(gate).toEqual({ enabled: reason === "ready", reason });
     },
   );
 });

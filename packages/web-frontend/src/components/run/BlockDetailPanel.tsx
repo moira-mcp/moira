@@ -37,6 +37,7 @@ import {
   TransitionEditor,
 } from "../flow/EditControls";
 import { IssueList } from "../flow/IssueList";
+import { AddStep, ConnectionsEditor, StepActions } from "../flow/StructureControls";
 import { connectionIssuesOf } from "../flow/issues";
 import { orderedNodeIds } from "../flow/model";
 import type { WorkflowGraph } from "../../types/workflow-types";
@@ -139,17 +140,28 @@ function EditableSteps({
             onConnection={(connection) =>
               connection.targetBlockId && onSelectBlock(connection.targetBlockId)
             }
-            afterTitle={<OwnerSelect nodeId={step.id} currentBlockId={block.id} blocks={blocks} />}
+            afterTitle={
+              <>
+                <OwnerSelect nodeId={step.id} currentBlockId={block.id} blocks={blocks} />
+                <StepActions nodeId={step.id} />
+              </>
+            }
             beforeSummary={<DiagnosticBadge nodeId={step.id} className="mt-1" />}
             connectionProblems={problemsOf(step.id)}
             footer={
               node ? (
-                <NodeTextEditor step={step} node={node as unknown as Record<string, unknown>} />
+                <>
+                  <ConnectionsEditor nodeId={step.id} />
+                  <NodeTextEditor step={step} node={node as unknown as Record<string, unknown>} />
+                </>
               ) : undefined
             }
           />
         );
       })}
+      <li className="list-none">
+        <AddStep blockId={block.id} />
+      </li>
     </StepCardList>
   );
 }

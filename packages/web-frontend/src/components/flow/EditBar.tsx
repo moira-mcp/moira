@@ -23,6 +23,7 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import type { PlacedIssue, SaveGate } from "./issues";
+import type { PausedRunWarning } from "./structure";
 import { exportLine, type ExportEntry } from "./operations";
 
 function GateStatus({
@@ -126,6 +127,7 @@ export function EditBar({
   onSave,
   revision,
   saveError,
+  runWarnings = [],
 }: {
   diff: readonly ExportEntry[];
   canUndo: boolean;
@@ -139,6 +141,8 @@ export function EditBar({
   onSave: () => void;
   revision: number;
   saveError: string | null;
+  /** The owner's paused runs on nodes this draft renames or removes. */
+  runWarnings?: readonly PausedRunWarning[];
 }): React.JSX.Element {
   const { t } = useTranslation();
   const count = diff.length;
@@ -228,6 +232,33 @@ export function EditBar({
             </Button>
           </span>
         </div>
+        {runWarnings.length > 0 && (
+          <div
+            className="mt-1.5 rounded-md border border-warning/60 bg-warning/10 px-2.5 py-1.5 text-xs"
+            role="alert"
+            data-testid="flow-edit-run-warnings"
+          >
+            <p className="flex items-center gap-1.5 font-medium">
+              <AlertTriangle className="size-3.5 shrink-0" aria-hidden="true" />
+              {t("pages.flowPage.edit.pausedRuns.title")}
+            </p>
+            <ul className="mt-1 space-y-0.5 pl-5">
+              {runWarnings.map((warning) => (
+                <li key={warning.executionId} data-run-warning={warning.executionId}>
+                  {t("pages.flowPage.edit.pausedRuns.item", {
+                    id: warning.note ?? warning.executionId.slice(0, 8),
+                    node: warning.nodeId,
+                    change:
+                      warning.change === "renamed"
+                        ? t("pages.flowPage.edit.pausedRuns.renamed", { to: warning.to })
+                        : t("pages.flowPage.edit.pausedRuns.removed"),
+                  })}
+                </li>
+              ))}
+            </ul>
+            <p className="mt-1 text-muted-foreground">{t("pages.flowPage.edit.pausedRuns.hint")}</p>
+          </div>
+        )}
         {saveError && (
           <p className="mt-1 text-xs text-destructive" role="alert" data-testid="flow-save-error">
             {saveError}
@@ -278,7 +309,7 @@ export function ProblemList({
       <ul className="scrollbar-thin max-h-[20vh] space-y-1 overflow-auto">
         {issues.map((issue, index) => {
           const place = locationOf(issue);
-          const node = issue.nodeId ?? issue.edge?.slice(0, issue.edge.indexOf("."));
+          const node = issue.nodeId;
           return (
             <li
               key={index}

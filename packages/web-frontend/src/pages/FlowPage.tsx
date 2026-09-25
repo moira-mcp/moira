@@ -97,6 +97,7 @@ import { exportDiff } from "../components/flow/operations";
 import { NO_ISSUES, placeIssues, saveGate } from "../components/flow/issues";
 import { useDraftValidation } from "../components/flow/useDraftValidation";
 import { EditBar, ProblemList } from "../components/flow/EditBar";
+import { pausedRunWarnings } from "../components/flow/structure";
 import type { WorkflowValidationStatus } from "../types/react-flow-types";
 
 // Lazy chunk, requested on mount so the first switch to the graph view downloads nothing.
@@ -178,11 +179,22 @@ export const FlowPage: React.FC = () => {
   // another workflow (breadcrumbs, a subgraph link) fetches afresh and shows nothing of the old one.
   const workflowId = fileInfo?.id;
   const revision = fileInfo?.revision;
-  const savedProcess = useResource<ProcessProjection | null>(workflowId ?? null, () =>
-    workflowId
-      ? apiClient.getWorkflowProcess(workflowId).then((r) => r.process)
-      : Promise.resolve(null),
-  );
+  // Each projection remembers the revision it was asked for: until the refetch for a new revision
+  // arrives, the page derives the new definition's process itself rather than pairing the new
+  // definition with the old projection (a block or step the save added would have no place in it).
+  const revisionRef = useRef(revision);
+  revisionRef.current = revision;
+  const savedProcess = useResource<{
+    revision: number | undefined;
+    process: ProcessProjection | null;
+  }>(workflowId ?? null, () => {
+    const asked = revisionRef.current;
+    return workflowId
+      ? apiClient
+          .getWorkflowProcess(workflowId)
+          .then((r) => ({ revision: asked, process: r.process }))
+      : Promise.resolve({ revision: asked, process: null });
+  });
   const refreshProcess = savedProcess.refresh;
   const seenRef = useRef<{ id: string; revision: number } | null>(null);
   useEffect(() => {
@@ -191,7 +203,9 @@ export const FlowPage: React.FC = () => {
     seenRef.current = { id: workflowId, revision };
     if (seen && seen.id === workflowId && seen.revision !== revision) void refreshProcess();
   }, [workflowId, revision, refreshProcess]);
-  const heldProcess = savedProcess.dataKey === workflowId ? savedProcess.data : undefined;
+  const held = savedProcess.dataKey === workflowId ? savedProcess.data : undefined;
+  const heldProcess = held?.process;
+  const heldIsCurrent = held !== undefined && held.revision === revision;
 
   // A refetch that fails while the page has content keeps the content and says so once.
   const detailError = workflowDetail.error;
@@ -233,15 +247,16 @@ export const FlowPage: React.FC = () => {
   const hasEdits = editLog.ops.length > 0;
   const process = useMemo<ProcessProjection | null>(() => {
     if (!edited) return null;
-    if (hasEdits) return deriveProcess(edited as unknown as Parameters<typeof deriveProcess>[0]);
+    if (hasEdits || (held !== undefined && !heldIsCurrent))
+      return deriveProcess(edited as unknown as Parameters<typeof deriveProcess>[0]);
     return heldProcess ?? null;
-  }, [edited, hasEdits, heldProcess]);
+  }, [edited, hasEdits, held, heldIsCurrent, heldProcess]);
   // Before the first projection of this workflow the page has nothing to show yet; a refetch for
   // a new revision keeps the previous projection and only marks the page pending.
-  const processLoading = !hasEdits && heldProcess === undefined && savedProcess.pending;
+  const processLoading = !hasEdits && held === undefined && savedProcess.pending;
   const refetching =
     (workflowDetail.pending && !workflowDetail.loading) ||
-    (savedProcess.pending && heldProcess !== undefined);
+    (savedProcess.pending && held !== undefined);
   const progress = useMemo(
     () => (edited && process ? definitionProgress(edited, process) : null),
     [edited, process],
@@ -274,6 +289,18 @@ export const FlowPage: React.FC = () => {
   const serverErrors = issues.all.filter(
     (i) => i.source === "server" && i.severity === "error",
   ).length;
+  // The owner's paused runs on a node the draft renames or removes: fetched once the draft first
+  // touches a node's identity, and named before the save.
+  const touchesIdentity = diff.some((e) => e.kind === "rename-node" || e.kind === "remove-node");
+  const runs = useResource(touchesIdentity && workflowId ? `${workflowId}:running` : null, () =>
+    apiClient
+      .getExecutions({ workflowId, status: ["running"], limit: 100 })
+      .then((r) => r.executions),
+  );
+  const runWarnings = useMemo(
+    () => (touchesIdentity ? pausedRunWarnings(runs.data ?? [], diff) : []),
+    [touchesIdentity, runs.data, diff],
+  );
   // The page lists every error; warnings only while the definition is being edited.
   const listedIssues = useMemo(
     () => issues.all.filter((i) => i.severity === "error" || editing || hasEdits),
@@ -572,7 +599,14 @@ export const FlowPage: React.FC = () => {
   );
 
   return (
-    <EditingProvider enabled={editing} definition issues={issues} apply={onEdit}>
+    <EditingProvider
+      enabled={editing}
+      definition
+      issues={issues}
+      draft={edited}
+      blocks={blocks}
+      apply={onEdit}
+    >
       <div className="h-full flex flex-col" data-testid="flow-page" data-view={mode}>
         <PageHeader
           back={{
@@ -752,6 +786,7 @@ export const FlowPage: React.FC = () => {
                   onSave={handleSave}
                   revision={fileInfo?.revision ?? 0}
                   saveError={saveError}
+                  runWarnings={runWarnings}
                 />
               )}
 

@@ -228,6 +228,28 @@ describe("flow edit export", () => {
     ]);
   });
 
+  test("names an added and a removed block, and a step moved out of the removed one", () => {
+    const saved = quickTask();
+    const log = logOf(saved, [
+      { kind: "node-block", nodeId: "create-plan", blockId: "scope" },
+      { kind: "remove-block", blockId: "plan" },
+      {
+        kind: "add-block",
+        block: { id: "wrap-up", label: "Wrap up", summary: "Close the task." },
+        after: "deliver",
+      },
+      { kind: "add-node", node: step("summarize"), blockId: "wrap-up" },
+    ]);
+    expect(exportDiff(saved, log).map(exportLine)).toEqual([
+      "+ node summarize",
+      "- block plan",
+      "+ block wrap-up",
+      // The scope block's authored hand-off to the removed block goes with it.
+      'progress.nodes[0].connections: {"default":"plan"} → undefined',
+      'nodes[create-plan].progressNodeId: "plan" → "scope"',
+    ]);
+  });
+
   test("an edit typed back to the saved value and a rename undone by another are not changes", () => {
     const saved = quickTask();
     const directive = node(saved, "create-plan")!.directive as string;
