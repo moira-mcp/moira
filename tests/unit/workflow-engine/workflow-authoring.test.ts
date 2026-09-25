@@ -263,6 +263,34 @@ describe("reference and prose lookup", () => {
     expect(prose).toEqual(expect.arrayContaining([{ path: "nodes[notify].message", count: 2 }]));
     expect(prose.map((p) => p.path)).not.toContain("nodes[route].cases");
   });
+
+  test("finds prose outside the nodes too, and never a reference there", () => {
+    const workflow = everyReferenceKind();
+    workflow.metadata.description = "Starts with ask";
+    workflow.variableRegistry!.note.description = "Set by ask";
+    workflow.progress!.goal = "Whatever ask decides";
+    const block = workflow.progress!.nodes[0];
+    block.content = { summary: "Runs after ask approves: {{ask.answer}}" };
+    workflow.systemReminder = "Never skip ask.";
+    // An item path that happens to spell the id is still a path, not prose.
+    block.list = { ...block.list!, title: "ask.label" };
+    const prose = findProseMentions(workflow, "ask");
+    expect(prose).toEqual(
+      expect.arrayContaining([
+        { path: "metadata.description", count: 1 },
+        { path: "variableRegistry.note.description", count: 1 },
+        { path: "progress.goal", count: 1 },
+        // One word mention; the template beside it is a reference the rename rewrites.
+        { path: "progress.nodes[0].content.summary", count: 1 },
+        { path: "systemReminder", count: 1 },
+      ]),
+    );
+    const paths = prose.map((p) => p.path);
+    expect(paths).not.toContain("progress.title");
+    expect(paths).not.toContain("variableRegistry.note.default");
+    // A list binding holds paths only, the title included (it is read inside one item).
+    expect(paths.some((path) => path.startsWith("progress.nodes[0].list"))).toBe(false);
+  });
 });
 
 /** Two blocks: `plan` (start, p) and `do` (d, end); p → d crosses and carries a label. */

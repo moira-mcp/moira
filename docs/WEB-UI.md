@@ -759,11 +759,17 @@ request, or the run moving to another step, replaces the travelled step.
   Each commits one operation through `apply` and shows an `AuthoringError` inline. The dialogs read
   the consequence from the draft first (`components/flow/structure.ts`):
   - `renamePreview`: the id problem, every rewritten location including incoming connections,
-    prose mentions, and the teleport flag;
+    prose mentions (the engine's `findProseMentions` reads every place a definition holds prose:
+    node fields, the process, block labels and content, the registry, the metadata and the
+    `systemReminder`; a block's list binding holds only paths), and the teleport flag;
   - `deletePlan`: incoming edges keyed by the engine's `edgeId`, each proposed to lead to the
     deleted step's primary target and marked protected when it is its source's primary output;
     the start refusal; and references left dangling;
   - `targetGroups`: steps by block;
+  - `insertBlockChoice`: the two blocks a step inserted on a connection may join, only for a
+    connection between blocks that `deriveProcess` does not report as a back-edge; `AddStepDialog`
+    passes the target's block as the `insert-on-edge` operation's `blockId`, and on a return it shows
+    why the step stays in the source's block;
   - `creatableTypes`: every catalog type but `start`, each with its required fields. A text or a
     list of texts is typed as such, any other structure as JSON starting from `[]` or `{}`, and an
     extension's `config` as JSON, required when its schema requires a key. `fieldProblem` marks a

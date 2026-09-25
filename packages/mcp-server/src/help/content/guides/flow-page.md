@@ -120,7 +120,9 @@ Edit mode also changes the process's structure:
     upper-case letter is refused in the dialog.
   - The rename preview lists every place the rename rewrites: the connections that lead to the
     step, its values in templates, routing paths and expressions. It also lists texts that only
-    mention the id and stay as they are.
+    mention the id and stay as they are: in steps, in the process's title, goal and facts, in block
+    names and summaries, in variable descriptions, in the flow's name and description, and in the
+    system reminder agents see at every step.
   - A teleport step warns that agents jump to it by its id.
   - Deleting asks where each connection that led to the step should lead instead. By default it
     continues to where the deleted step led. A step's main output can be redirected but not
@@ -144,6 +146,11 @@ The **Graph** view is the same editor drawn as the node graph. In edit mode:
 - **Right-click a step** to rename it, insert a step after it (on its main output) or delete it.
 - **Right-click a connection** — its line or its output port — to insert a step on it, lead it to
   another step, or remove it. The main output can't be removed.
+- **A step inserted on a connection that runs forward from one block into another** can join
+  either block. With the source's block, the boundary label moves to the new step's output. With
+  the block the connection leads into, the label stays on the connection. A connection that returns
+  to an earlier block always puts the new step in the source's block, whose output then carries the
+  label and the return's explanation.
 - **Right-click the empty canvas inside a block's group** to add a step to that block.
 - **Drag an output by the dot at its right end onto another card** to lead that output there
   (clicking the port itself still travels along it). Drag from a card's **+ output** port to create
@@ -183,18 +190,20 @@ it belongs:
 The edit bar says what stands between you and saving: no changes yet, process problems to fix,
 checking the draft, problems found by the server, or checked and ready to save. **Save** opens only
 for a changed draft that the server has checked, exactly as shown, without errors. **Export** lists
-exactly the flow-file entries the edits would change, as JSON path, value before and value after.
+exactly the flow-file entries the edits would change. A changed value is shown as its JSON path
+with the value before and after. A structural change has a line of its own: `+ node` and `- node`,
+`+ block` and `- block`, and `node old → new` for a rename, with the references it rewrote.
 
 **Save** sends the whole definition to the server against the revision the page loaded, and the
 server validates it once more, as `manage edit` does — including playbook references you cannot
-resolve — so the page and `manage edit` accept and refuse the same definitions. If it still refuses — something changed after the check, such as a
-playbook the draft names being deleted — nothing is saved, the draft stays, and the refusal is
-shown on the definition the same way. Every stored write of a definition — from this page, from
-`manage`, from a bundled-catalog sync — advances its **revision**. If someone else changed the
-workflow since the page loaded, the save is refused with a conflict and your edits stay on the
-page: reload and apply them again. A run reads the stored definition at every step, so a run that
-is already in progress follows the saved edits from its next step on; edit a workflow with paused
-runs deliberately.
+resolve — so the page and `manage edit` accept and refuse the same definitions. If it still refuses
+— something changed after the check, such as a playbook the draft names being deleted — nothing is
+saved, the draft stays, and the refusal is shown on the definition the same way. Every stored write
+of a definition — from this page, from `manage`, from a bundled-catalog sync — advances its
+**revision**. If someone else changed the workflow since the page loaded, the save is refused with a
+conflict and your edits stay on the page: reload and apply them again. A run reads the stored
+definition at every step, so a run that is already in progress follows the saved edits from its next
+step on; edit a workflow with paused runs deliberately.
 
 Shared and bundled workflows are shown without edit mode; copy a bundled flow ("Use as template")
 to get an editable one.

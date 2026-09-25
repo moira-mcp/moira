@@ -310,7 +310,13 @@ export function findNodeReferences(workflow: WorkflowGraph, id: string): Referen
   return rewriteGraph(workflow, id, id)[1];
 }
 
-/** Texts that mention `id` as a word outside any reference — prose a rename leaves as it is. */
+/**
+ * Texts that mention `id` as a word outside any reference — prose a rename leaves as it is. Every
+ * place a definition holds prose is read: node fields, the process's title, goal and facts, each
+ * block's label and content, the variable registry, the workflow's name and description, and the
+ * system reminder agents see at every step. A block's list binding holds only paths (its `title`
+ * is a path inside one item), so it is not prose.
+ */
 export function findProseMentions(workflow: WorkflowGraph, id: string): ReferenceLocation[] {
   const word = new RegExp(`(?<![A-Za-z0-9_-])${escape(id)}(?![A-Za-z0-9_-])`, "g");
   const found: ReferenceLocation[] = [];
@@ -334,5 +340,22 @@ export function findProseMentions(workflow: WorkflowGraph, id: string): Referenc
       visit(value, `${at}.${field}`);
     }
   }
+  const progress = stripped.progress;
+  if (progress) {
+    visit(progress.title, "progress.title");
+    visit(progress.goal, "progress.goal");
+    visit(progress.facts, "progress.facts");
+    progress.nodes.forEach((block, i) => {
+      const at = `progress.nodes[${i}]`;
+      visit(block.label, `${at}.label`);
+      visit(block.content, `${at}.content`);
+    });
+  }
+  for (const [name, entry] of Object.entries(stripped.variableRegistry ?? {})) {
+    visit(entry, `variableRegistry.${name}`);
+  }
+  visit(stripped.metadata?.name, "metadata.name");
+  visit(stripped.metadata?.description, "metadata.description");
+  visit(stripped.systemReminder, "systemReminder");
   return found;
 }

@@ -45,6 +45,7 @@ import {
   creatableTypes,
   deletePlan,
   fieldProblem,
+  insertBlockChoice,
   newIdProblem,
   newNode,
   protectedKey,
@@ -563,13 +564,15 @@ export function AddStepDialog({
   onAdded?: (id: string) => void;
 }): React.JSX.Element | null {
   const { t } = useTranslation();
-  const { draft } = useEditing();
+  const { draft, blocks } = useEditing();
   const { catalog } = useNodeTypes();
   const types = useMemo(() => creatableTypes(catalog?.nodeTypes ?? []), [catalog]);
   const [type, setType] = useState("agent-directive");
   const [id, setId] = useState("");
   const [values, setValues] = useState<Record<string, string>>({});
   const [outputKey, setOutputKey] = useState("");
+  // Inserted between two blocks, the step joins the source's block unless the owner picks the target's.
+  const [intoTarget, setIntoTarget] = useState(false);
   const { error, commit } = useCommit();
   if (!draft) return null;
   const chosen = types.find((candidate) => candidate.type === type) ?? types[0];
@@ -583,6 +586,17 @@ export function AddStepDialog({
   const onEdge = "edge" in placement ? placement.edge : null;
   const from = "from" in placement ? placement.from : null;
   const blockId = "blockId" in placement ? placement.blockId : undefined;
+  const choice = onEdge ? insertBlockChoice(draft, onEdge) : null;
+  const edgeSource = onEdge ? draft.nodes.find((n) => n.id === onEdge.source) : undefined;
+  const edgeTarget = onEdge
+    ? draft.nodes.find((n) => n.id === edgeSource?.connections?.[onEdge.key])
+    : undefined;
+  // A connection between two blocks that offers no choice is a return to an earlier block.
+  const returning =
+    !choice &&
+    Boolean(edgeSource?.progressNodeId && edgeTarget?.progressNodeId) &&
+    edgeSource?.progressNodeId !== edgeTarget?.progressNodeId;
+  const blockName = (id: string) => blocks.find((b) => b.id === id)?.name ?? id;
   // A new output dropped on the canvas is named together with the step it will lead to.
   const naming = from !== null && from.key === null;
   const sourceNode = from ? draft.nodes.find((n) => n.id === from.source) : undefined;
@@ -600,7 +614,13 @@ export function AddStepDialog({
     const typed = Object.fromEntries(chosen.fields.map((field) => [field.name, valueOf(field)]));
     const node = newNode(chosen, id, typed);
     const op: Operation = onEdge
-      ? { kind: "insert-on-edge", source: onEdge.source, key: onEdge.key, node }
+      ? {
+          kind: "insert-on-edge",
+          source: onEdge.source,
+          key: onEdge.key,
+          node,
+          ...(choice && intoTarget ? { blockId: choice.target } : {}),
+        }
       : from
         ? {
             kind: "add-connected-node",
@@ -639,6 +659,50 @@ export function AddStepDialog({
                   : t("pages.flowPage.structure.addStep.body")}
             </DialogDescription>
           </DialogHeader>
+          {choice && onEdge && (
+            <fieldset className="space-y-1" data-testid="add-step-block-choice">
+              <legend className="text-xs font-medium">
+                {t("pages.flowPage.structure.addStep.joins")}
+              </legend>
+              {[
+                {
+                  target: false,
+                  block: choice.source,
+                  hint: t("pages.flowPage.structure.addStep.joinsSource"),
+                },
+                {
+                  target: true,
+                  block: choice.target,
+                  hint: t("pages.flowPage.structure.addStep.joinsTarget", {
+                    edge: `${onEdge.source}.${onEdge.key}`,
+                  }),
+                },
+              ].map((option) => (
+                <label
+                  key={option.block}
+                  className="flex cursor-pointer items-start gap-2 rounded-md border px-2 py-1.5 text-xs has-[:checked]:border-primary"
+                >
+                  <input
+                    type="radio"
+                    name="add-step-block"
+                    className="mt-0.5"
+                    checked={intoTarget === option.target}
+                    onChange={() => setIntoTarget(option.target)}
+                    data-testid={`add-step-block-${option.block}`}
+                  />
+                  <span>
+                    <span className="font-medium">{blockName(option.block)}</span>
+                    <span className="block text-[11px] text-muted-foreground">{option.hint}</span>
+                  </span>
+                </label>
+              ))}
+            </fieldset>
+          )}
+          {returning && (
+            <p className="text-xs text-muted-foreground" data-testid="add-step-block-return">
+              {t("pages.flowPage.structure.addStep.joinsReturn")}
+            </p>
+          )}
           {naming && (
             <label className="block space-y-1">
               <span className="text-xs font-medium">

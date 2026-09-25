@@ -15,13 +15,17 @@ import {
   creatableTypes,
   deletePlan,
   fieldProblem,
+  insertBlockChoice,
   newNode,
   pausedRunWarnings,
   renamePreview,
   targetGroups,
   type RunOnNode,
 } from "../../../packages/web-frontend/src/components/flow/structure.js";
-import type { ExportEntry } from "../../../packages/web-frontend/src/components/flow/operations.js";
+import {
+  applyOperation,
+  type ExportEntry,
+} from "../../../packages/web-frontend/src/components/flow/operations.js";
 import { definitionProgress } from "../../../packages/web-frontend/src/components/flow/model.js";
 import { runBlocks } from "../../../packages/web-frontend/src/components/run/model.js";
 import type { NodeTypeDescriptor } from "../../../packages/web-frontend/src/types/node-type-catalog.js";
@@ -55,6 +59,72 @@ describe("rename preview", () => {
     ]);
     expect(preview.teleport).toBe(false);
     expect(renamePreview(graph, "teleport-replan", "replan").teleport).toBe(true);
+  });
+
+  test("lists prose outside the steps too: a block's summary mentioning the id", () => {
+    const graph = quickTask();
+    const block = graph.progress!.nodes.find((b) => b.id === "plan")!;
+    block.content = { ...block.content, summary: "Runs until plan-review approves." };
+    const index = graph.progress!.nodes.indexOf(block);
+    expect(renamePreview(graph, "plan-review", "plan-check").prose).toContainEqual({
+      path: `progress.nodes[${index}].content.summary`,
+      count: 1,
+    });
+  });
+});
+
+describe("the block of a step inserted on a connection", () => {
+  const derive = (graph: WorkflowGraph) => deriveProcess(graph as never)!;
+  const insert = (edge: { source: string; key: string }, blockId?: string) =>
+    applyOperation(quickTask(), {
+      kind: "insert-on-edge",
+      source: edge.source,
+      key: edge.key,
+      node: {
+        id: "check",
+        type: "agent-directive",
+        directive: "Check.",
+        completionCondition: "Checked.",
+      } as never,
+      ...(blockId ? { blockId } : {}),
+    });
+  const node = (graph: WorkflowGraph, id: string) => graph.nodes.find((n) => n.id === id)!;
+
+  test.each([
+    [
+      "a forward connection between two blocks offers both",
+      "get-task",
+      { source: "scope", target: "plan" },
+    ],
+    ["a return between two blocks offers none", "revise-plan", null],
+    ["a connection inside one block offers none", "repair-plan", null],
+  ])("%s", (_name, source, choice) => {
+    expect(insertBlockChoice(quickTask(), { source, key: "success" })).toEqual(choice);
+  });
+
+  test("in the target's block the label stays on the crossing connection; by default it moves", () => {
+    const edge = { source: "get-task", key: "success" };
+    const label = node(quickTask(), "get-task").connectionLabels!.success;
+    const intoTarget = insert(edge, "plan");
+    expect(node(intoTarget, "check").progressNodeId).toBe("plan");
+    expect(node(intoTarget, "get-task").connectionLabels?.success).toEqual(label);
+    expect(node(intoTarget, "check").connectionLabels).toBeUndefined();
+    expect(derive(intoTarget).diagnostics).toEqual([]);
+
+    const byDefault = insert(edge);
+    expect(node(byDefault, "check").progressNodeId).toBe("scope");
+    expect(node(byDefault, "get-task").connectionLabels?.success).toBeUndefined();
+    expect(node(byDefault, "check").connectionLabels?.success).toEqual(label);
+    expect(derive(byDefault).diagnostics).toEqual([]);
+  });
+
+  test("on a return the source's block keeps the process valid, and the target's would not", () => {
+    const edge = { source: "revise-plan", key: "success" };
+    expect(derive(insert(edge)).diagnostics).toEqual([]);
+    // Why the choice is withheld there: the step's connection would loop inside the target's block.
+    expect(derive(insert(edge, "plan-review")).diagnostics.map((d) => d.code)).toEqual(
+      expect.arrayContaining(["unexplained-cycle"]),
+    );
   });
 });
 

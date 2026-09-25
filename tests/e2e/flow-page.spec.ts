@@ -687,6 +687,21 @@ test("a block is added with a connected step in it, and only an empty block can 
       connectionLabels: { success: "size decided" },
     });
     expect(saved.nodes.find((n: any) => n.id === "get-task").connections.success).toBe("sort-task");
+
+    // Moving the block's last step out empties it (a problem until it goes); then it can be deleted.
+    await page.goto(`${BASE_URL}/workflows/${id}?edit=1`);
+    await openBlock(page, "triage");
+    await openSteps(page);
+    await expect(page.getByTestId("block-delete-triage")).toBeDisabled();
+    await page.getByTestId("edit-owner-sort-task").click();
+    await page.getByRole("option", { name: /Understand the task/ }).click();
+    await expect(page.getByTestId("block-delete-triage")).toBeEnabled();
+    await page.getByTestId("block-delete-triage").click();
+    await expect(page.getByTestId("map-contents-triage")).toHaveCount(0);
+    await saveWhenChecked(page);
+    const emptied = (await detailOf(page, id)).workflow;
+    expect(emptied.progress.nodes.map((b: any) => b.id)).not.toContain("triage");
+    expect(emptied.nodes.find((n: any) => n.id === "sort-task").progressNodeId).toBe("scope");
   } finally {
     await page.request.delete(`${BASE_URL}/api/workflows/${id}`);
   }
@@ -951,6 +966,41 @@ test("the graph view edits the structure: a step inserted on a boundary edge kee
       connectionLabels: { success: "task contract written" },
     });
     expect(saved.nodes.find((n: any) => n.id === "get-task").connections.success).toBe("clarify");
+  } finally {
+    await page.request.delete(`${BASE_URL}/api/workflows/${id}`);
+  }
+});
+
+test("a step inserted on a forward connection between two blocks can join the target's block", async ({
+  page,
+}) => {
+  await loginAsAdmin(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const id = await copyQuickTask(page);
+  try {
+    await page.goto(`${BASE_URL}/workflows/${id}?view=graph&edit=1`);
+    await settledCamera(page, GRAPH);
+    await canvasAction(
+      page,
+      `${GRAPH} [data-graph-node="get-task"] [data-port="out"][data-transition="get-task.success"]`,
+      "edge",
+      "insert-on-edge",
+    );
+    // The intake's hand-off crosses into planning: the step may join either block.
+    await expect(page.getByTestId("add-step-block-choice")).toBeVisible();
+    await expect(page.getByTestId("add-step-block-scope")).toBeChecked();
+    await page.getByTestId("add-step-block-plan").check();
+    await fillAgentStep(page, "check-scope");
+    await saveWhenChecked(page);
+
+    const saved = (await detailOf(page, id)).workflow;
+    const check = saved.nodes.find((n: any) => n.id === "check-scope");
+    expect(check.progressNodeId).toBe("plan");
+    expect(check.connections).toEqual({ success: "create-plan" });
+    expect(check.connectionLabels).toBeUndefined();
+    const intake = saved.nodes.find((n: any) => n.id === "get-task");
+    expect(intake.connections.success).toBe("check-scope");
+    expect(intake.connectionLabels.success).toBe("task contract written");
   } finally {
     await page.request.delete(`${BASE_URL}/api/workflows/${id}`);
   }

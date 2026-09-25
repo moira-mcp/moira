@@ -1767,7 +1767,11 @@
           "insertBody": "The new step takes this connection's place: the connection leads to it, and it continues to where the connection led. A block boundary's label moves with the part that still crosses it.",
           "fromTitle": "Create a step for {{edge}}",
           "fromBody": "The connection you dropped here will lead to the new step. It joins the block it was dropped in (or its source's block).",
-          "outputName": "Name of the new output from {{source}}"
+          "outputName": "Name of the new output from {{source}}",
+          "joins": "The new step joins",
+          "joinsSource": "the connection's source block; the boundary label moves to the new step's output",
+          "joinsTarget": "the block the connection leads into; the boundary label stays on {{edge}}",
+          "joinsReturn": "This connection returns to an earlier block, so the new step joins the source's block and its output takes over the label and the return's explanation. Placed in the other block, its connection would loop inside that block unexplained."
         },
         "block": {
           "add": "Add block",

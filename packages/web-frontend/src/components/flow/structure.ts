@@ -7,7 +7,8 @@
  * - a delete: every incoming edge with its default decision (its source leads on to where the
  *   deleted node led), whether it may be dropped, and the template references that will dangle;
  * - a connection: the keys a node may not lose, and the steps a connection may lead to, by block;
- * - a new step: the node types whose required fields the dialog can ask for;
+ * - a new step: the node types whose required fields the dialog can ask for, and — inserted on a
+ *   connection between two blocks — which of the two it may join;
  * - a save: the owner's paused runs sitting on a node the draft renames or removes.
  *
  * The rules themselves (id format, protected outputs, which references exist) are the engine's
@@ -24,6 +25,7 @@ import {
   primaryOutputOf,
   type ReferenceLocation,
 } from "@mcp-moira/workflow-engine/authoring";
+import { deriveProcess } from "@mcp-moira/workflow-engine/process";
 import type { NodeTypeDescriptor } from "../../types/node-type-catalog";
 import type { WorkflowGraph, WorkflowNode } from "../../types/workflow-types";
 import type { RunBlock } from "../run/model";
@@ -260,6 +262,29 @@ export function fieldProblem(
   } catch {
     return "json";
   }
+}
+
+/**
+ * The blocks a step inserted on `source.key` may join, or null when there is no choice. The step
+ * joins the source's block by default; the target's block is offered only on a forward connection
+ * between two blocks. On a return — an edge the process walk classifies as a back-edge, the same
+ * walk that asks for a return's label and explanation — the step always joins the source's block:
+ * there the label and explanation move to the step's output, which still leads back, whereas in
+ * the target's block the step's edge would loop inside that block unexplained.
+ */
+export function insertBlockChoice(
+  workflow: WorkflowGraph,
+  edge: { source: string; key: string },
+): { source: string; target: string } | null {
+  const node = workflow.nodes.find((n) => n.id === edge.source);
+  const targetId = node?.connections?.[edge.key];
+  const target = workflow.nodes.find((n) => n.id === targetId);
+  const from = node?.progressNodeId;
+  const to = target?.progressNodeId;
+  if (!from || !to || from === to) return null;
+  const process = deriveProcess(engine(workflow) as Parameters<typeof deriveProcess>[0]);
+  if (!process || process.backEdges.includes(edgeId(edge.source, edge.key))) return null;
+  return { source: from, target: to };
 }
 
 /**
