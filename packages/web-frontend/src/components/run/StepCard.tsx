@@ -58,6 +58,7 @@ export function StepCard({
   afterTitle,
   beforeSummary,
   footer,
+  connectionProblems,
   id,
 }: {
   step: StepInfo;
@@ -80,6 +81,8 @@ export function StepCard({
   afterTitle?: React.ReactNode;
   beforeSummary?: React.ReactNode;
   footer?: React.ReactNode;
+  /** Connections with a problem, by output key: the chip is marked and explains it. */
+  connectionProblems?: Readonly<Record<string, string>>;
   id?: string;
 }): React.JSX.Element {
   const { t } = useTranslation();
@@ -194,6 +197,7 @@ export function StepCard({
             <div className="mt-1.5 flex flex-wrap gap-1" data-step-connections="">
               {connections.map((connection) => {
                 const Chip: "button" | "span" = onConnection ? "button" : "span";
+                const problem = connectionProblems?.[connection.label];
                 return (
                   <Chip
                     key={`${connection.label}-${connection.target}`}
@@ -208,7 +212,10 @@ export function StepCard({
                       : {})}
                     data-edge-kind={connection.internal ? "internal" : "external"}
                     data-connection={connection.label}
-                    data-hint={connection.targetName}
+                    data-issue={problem ? "true" : undefined}
+                    data-hint={
+                      problem ? `${connection.targetName} — ${problem}` : connection.targetName
+                    }
                     onMouseEnter={
                       onConnectionHover ? () => onConnectionHover(connection) : undefined
                     }
@@ -222,6 +229,7 @@ export function StepCard({
                         : "border-primary/40 bg-primary/5 text-primary",
                       onConnection &&
                         (connection.internal ? "hover:bg-accent" : "hover:bg-primary/10"),
+                      problem && "border-destructive/60 bg-destructive/10 text-destructive",
                     )}
                   >
                     {connection.internal ? (

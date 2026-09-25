@@ -7,9 +7,11 @@
  * a private copy — a block renamed to ninety characters (the map card clamps it, the facts stay
  * inside the card), a relabelled return, a moved routing node reported as a diagnostic before any
  * save, an edited directive and registry default, the export diff, a save that persists and
- * advances the revision, a save refused on a stale revision (409) and on an invalid definition
- * (400) with the edits kept — a node drawn from the server's node-type catalog read in the node
- * panel, and the page usable on a phone.
+ * advances the revision, a save refused on a stale revision (409) and by the server (400) with the
+ * draft kept and the refusal placed on its step, an edit only the server's dry run rejects shown on
+ * the step, the graph card and the node panel before any save and taken back by undo — a node
+ * drawn from the server's node-type catalog read in the node panel, and the page usable on a
+ * phone.
  */
 
 import { test, expect, type Page } from "./fixtures.js";
@@ -265,6 +267,17 @@ test("an owner edits the definition in place; the save persists and advances the
     await expect(
       page.locator('[data-node-id="plan-review"] [data-testid="inline-diagnostic"]'),
     ).toHaveAttribute("data-diagnostic", /unlabeled-edge/);
+    // The offending connection itself is marked: its chip on the step card, and on the graph
+    // the step's output port for that edge.
+    await expect(
+      page.locator('[data-node-id="plan-review"] [data-connection][data-issue="true"]').first(),
+    ).toBeVisible();
+    await page.getByTestId("flow-modes").locator('[data-mode="graph"]').click();
+    await expect(
+      page.locator('[data-graph-node="plan-review"] [data-port="out"][data-issue="true"]').first(),
+    ).toBeAttached();
+    await page.getByTestId("flow-modes").locator('[data-mode="map"]').click();
+    await openSteps(page);
     await page.getByTestId("edit-owner-plan-review").click();
     await page.getByRole("option", { name: "Independent plan review" }).click();
     await expect(page.getByTestId("flow-diagnostics")).toHaveCount(0);
@@ -289,7 +302,7 @@ test("an owner edits the definition in place; the save persists and advances the
     await page
       .getByTestId("registry-total_steps-schema")
       .fill('{"type":"number","description":"Steps in the plan","default":4,"minimum":1}');
-    await page.getByTestId("flow-edit-export").getByRole("button").click();
+    await page.getByTestId("flow-edit-export-toggle").click();
     await expect(page.locator("[data-export-path]")).toHaveCount(5);
     await expect(
       page.locator('[data-export-path="nodes[close-completed-step].expressions"]'),
@@ -328,12 +341,13 @@ test("an owner edits the definition in place; the save persists and advances the
   }
 });
 
-test("a save against a stale revision or with an invalid definition is refused and the edits stay", async ({
+test("a save against a stale revision or refused by the server keeps the draft, and the refusal is shown where it occurs", async ({
   page,
 }) => {
   await loginAsAdmin(page);
   await page.setViewportSize({ width: 1440, height: 900 });
   const id = await copyQuickTask(page);
+  const playbook = `flow-page-race-${Date.now()}`;
   try {
     // Stale revision: another writer advanced the workflow after this page loaded.
     await openEditing(page, id);
@@ -349,6 +363,7 @@ test("a save against a stale revision or with an invalid definition is refused a
     });
     expect(elsewhere.status()).toBe(200);
     await page.getByTestId("edit-block-label-scope").fill("Understand the task (stale)");
+    await expect(page.getByTestId("flow-edit-gate")).toHaveAttribute("data-gate", "ready");
     await page.getByTestId("flow-edit-save").click();
     await expect(page.getByTestId("flow-save-error")).toContainText(/reload|перезагрузите/i);
     await expect(page.getByTestId("flow-edit-count")).toContainText("1");
@@ -357,14 +372,79 @@ test("a save against a stale revision or with an invalid definition is refused a
     );
     expect((await detailOf(page, id)).fileInfo.revision).toBe(1);
 
-    // Invalid definition: a default that does not match its declared type is refused (400).
+    // Refused at save: the draft passed its dry run, then the playbook it names was deleted, so
+    // the server refuses the save (400). Its issue lands on the step, as a dry run's would.
+    expect(
+      (
+        await page.request.put(`${BASE_URL}/api/playbooks/${playbook}`, {
+          data: { content: "Read the diff.", title: "Race" },
+        })
+      ).status(),
+    ).toBe(200);
     await openEditing(page, id);
-    await page.getByRole("tab", { name: /Variables|Переменные/ }).click();
-    await page.getByTestId("registry-total_steps-default").fill('"four"');
+    await openBlock(page, "plan");
+    await openSteps(page);
+    await page
+      .getByTestId("edit-node-create-plan-directive")
+      .fill(`Write the plan following {{playbook:${playbook}}}.`);
+    await expect(page.getByTestId("flow-edit-gate")).toHaveAttribute("data-gate", "ready");
+    expect((await page.request.delete(`${BASE_URL}/api/playbooks/${playbook}`)).ok()).toBe(true);
     await page.getByTestId("flow-edit-save").click();
     await expect(page.getByTestId("flow-save-error")).toBeVisible();
+    const refusal = page.locator('[data-node-id="create-plan"] [data-testid="inline-diagnostic"]');
+    await expect(refusal).toHaveAttribute("data-source", "server");
+    await expect(refusal).toContainText(playbook);
+    await expect(page.getByTestId("flow-edit-gate")).toHaveAttribute("data-gate", "invalid");
+    await expect(page.getByTestId("flow-edit-save")).toBeDisabled();
     await expect(page.getByTestId("flow-edit-count")).toContainText("1");
     expect((await detailOf(page, id)).fileInfo.revision).toBe(1);
+  } finally {
+    await page.request.delete(`${BASE_URL}/api/playbooks/${playbook}`);
+    await page.request.delete(`${BASE_URL}/api/workflows/${id}`);
+  }
+});
+
+test("an edit only the server can reject is shown on its step before any save, and undo takes it back", async ({
+  page,
+}) => {
+  await loginAsAdmin(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const id = await copyQuickTask(page);
+  try {
+    await openEditing(page, id);
+    await openBlock(page, "plan");
+    await openSteps(page);
+    const directive = page.getByTestId("edit-node-create-plan-directive");
+    const saved = await directive.inputValue();
+    // The process derivation has no objection to a reference to a node that does not exist;
+    // the server's dry run does.
+    await directive.fill("Write the plan from {{ghost-node.value}}.");
+    await expect(page.getByTestId("flow-diagnostics")).toContainText("ghost-node");
+    await expect(page.getByTestId("flow-edit-gate")).toHaveAttribute("data-gate", "invalid");
+    await expect(page.getByTestId("flow-edit-save")).toBeDisabled();
+    const onStep = page.locator('[data-node-id="create-plan"] [data-testid="inline-diagnostic"]');
+    await expect(onStep).toHaveAttribute("data-source", "server");
+    await expect(onStep).toContainText("ghost-node");
+
+    // The graph marks the same step, and its node panel lists the draft's issue.
+    await page.getByTestId("flow-modes").locator('[data-mode="graph"]').click();
+    const card = page.locator('[data-graph-node="create-plan"]');
+    await expect(card).toHaveAttribute("data-issue", "true");
+    await settledCamera(page, GRAPH);
+    await card.click();
+    await expect(page.getByTestId("node-panel-validation")).toContainText("ghost-node");
+
+    // Undo returns the directive as saved; nothing is left to save or to report.
+    await page.getByTestId("flow-edit-undo").click();
+    await expect(page.getByTestId("flow-edit-gate")).toHaveAttribute("data-gate", "unchanged");
+    await expect(page.getByTestId("flow-diagnostics")).toHaveCount(0);
+    await expect(card).not.toHaveAttribute("data-issue", "true");
+    await page.getByTestId("node-panel-back").click();
+    await page.getByTestId("flow-modes").locator('[data-mode="map"]').click();
+    await openBlock(page, "plan");
+    await openSteps(page);
+    await expect(page.getByTestId("edit-node-create-plan-directive")).toHaveValue(saved);
+    expect((await detailOf(page, id)).fileInfo.revision).toBe(0);
   } finally {
     await page.request.delete(`${BASE_URL}/api/workflows/${id}`);
   }

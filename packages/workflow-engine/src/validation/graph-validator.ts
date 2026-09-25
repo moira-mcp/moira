@@ -38,7 +38,7 @@ import type { ExtensionRegistry } from "../extensions/extension-registry.js";
 import { getActiveExtensionRegistry } from "../extensions/extension-registry-provider.js";
 import { canonicalJson, DECLARED_SCHEMA_AJV_OPTIONS } from "../extensions/declared-schema.js";
 import { isExtensionNodeType } from "../extensions/extension-contract.js";
-import { deriveProcess } from "../utils/process-derivation.js";
+import { deriveProcess, processDiagnosticMessage } from "../utils/process-derivation.js";
 import { migrateWorkflowGraph } from "../migration/workflow-migration.js";
 import {
   classifyNodeType,
@@ -781,7 +781,7 @@ export class GraphValidator {
         severity: "error",
         nodeId: diagnostic.nodeId,
         field,
-        message: `[${diagnostic.code}] ${diagnostic.message}`,
+        message: processDiagnosticMessage(diagnostic),
       });
     }
 

@@ -56,6 +56,7 @@ import { outputTip } from "./graphNodes";
 import type { PortInfo } from "../diagram/PortedCard";
 import type { RunBlock } from "../run/model";
 import { NodeDetailSheet } from "./NodeDetailSheet";
+import { NO_ISSUES, type IssuePlacement } from "../flow/issues";
 
 import { useTheme } from "../../hooks/useTheme";
 import { useIsMobile } from "@/hooks/use-mobile";
@@ -96,6 +97,16 @@ const nodeTypes = {
 
 const edgeTypes = { graph: GraphEdgeView };
 
+/** Output ports whose connection has a problem carry it, so the port is marked and explains it. */
+function withProblems(ports: PortInfo[] | undefined, issues: IssuePlacement): PortInfo[] {
+  if (!ports) return [];
+  if (issues.edges.size === 0) return ports;
+  return ports.map((port) => {
+    const found = issues.edges.get(port.id);
+    return found ? { ...port, problem: found.map((i) => i.message).join("\n") } : port;
+  });
+}
+
 // Empty array constant to avoid creating new array on each render
 const EMPTY_ERROR_NODE_IDS: string[] = [];
 const noopEdgeClick = (): void => {};
@@ -115,6 +126,11 @@ export interface WorkflowGraphProps {
   workflow: WorkflowGraphType;
   /** Optional validation status */
   validation?: WorkflowValidationStatus;
+  /**
+   * Where the definition's current problems sit: a step's own on its card, a connection's on its
+   * output port and its line.
+   */
+  issues?: IssuePlacement;
   /** Current node ID for execution highlighting */
   currentNodeId?: string | null;
   /** The block the page has selected on the map: its frame is highlighted on the graph. */
@@ -193,6 +209,7 @@ export interface WorkflowGraphProps {
 export const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
   workflow,
   validation,
+  issues = NO_ISSUES,
   currentNodeId,
   selectedBlockId = null,
   errorNodeIds = EMPTY_ERROR_NODE_IDS,
@@ -446,6 +463,9 @@ export const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
               error: errorNodeIdSet.has(node.id),
               arrived: arrival?.nodeId === node.id,
               visited: visitedSet.has(node.id) && node.id !== currentNodeId,
+              problems: issues.nodes.get(node.id),
+              outputs: withProblems((node.data as StepNodeData).outputs, issues),
+              selfLoops: withProblems((node.data as StepNodeData).selfLoops, issues),
             },
             selected:
               node.id === currentNodeId || node.id === selectedNodeId || node.id === finderStep,
@@ -461,7 +481,17 @@ export const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
     errorNodeIds,
     visitedNodeIds,
     onWorkflowNavigate,
+    issues,
   ]);
+  const shownEdges = useMemo<Edge[]>(
+    () =>
+      issues.edges.size === 0
+        ? edges
+        : edges.map((edge) =>
+            issues.edges.has(edge.id) ? { ...edge, data: { ...edge.data, problem: true } } : edge,
+          ),
+    [edges, issues],
+  );
   const [currentLayoutOptions, setCurrentLayoutOptions] = useState(layoutOptions);
   // Node detail sheet state
   const [detailSheetOpen, setDetailSheetOpen] = useState(false);
@@ -880,7 +910,7 @@ export const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
               kind="graph"
               controlsPosition="top-right"
               nodes={nodes}
-              edges={edges}
+              edges={shownEdges}
               // Disable change handlers for read-only view - major performance win
               onNodesChange={undefined}
               onEdgesChange={undefined}

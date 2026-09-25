@@ -53,7 +53,10 @@ frontend/src/
 │   │   ├── reveal.ts                                                       # `requestReveal`: bring an element inside a diagram into the camera
 │   │   └── layoutPreset.ts / interactive.ts / useHighlightTarget.ts / useStoredFlag.ts / useRequest.ts
 │   ├── flow/                    # Flow page: the definition as a process, edited in place (`guideSteps.ts`: its walkthrough)
-│   │   ├── editing.tsx / model.ts / modes.ts        # Edit set (apply, export diff), run-less projection, the three views
+│   │   ├── operations.ts / editing.tsx              # The edit log (operations, fold, export diff); its page state and editing context
+│   │   ├── issues.ts / useDraftValidation.ts        # Problem placement and the save gate; the server's dry run of the draft
+│   │   ├── EditBar.tsx / IssueList.tsx              # The edit bar with the problem list; a compact inline problem list
+│   │   ├── model.ts / modes.ts                      # Run-less projection, the three views
 │   │   ├── StepsView.tsx / stepsModel.ts            # The steps view: what the agent is told, drawn as numbered cards joined by arrows
 │   │   ├── StepsList.tsx                            # The steps view of a large flow: the same cards as a reading list with jump links
 │   │   ├── RegistryPanel.tsx                        # The variable registry (panel tab)
@@ -624,13 +627,15 @@ workflow (a move to another workflow through breadcrumbs or a subgraph link is a
 shows nothing of the previous one), and a failed refetch keeps the content and reports once
 through a toast. While the page holds unsaved edits it re-derives the process in
 the browser with the engine's `deriveProcess` (the `@mcp-moira/workflow-engine/process` subpath),
-so the diagnostics it shows are the ones the server's validation would raise. The map renders a
+so the diagnostics it shows are the ones the server's validation would raise, and it has the
+server validate the draft itself (see **Editing** below). The map renders a
 run-less projection (`components/flow/model.ts`: every block pending, no route, no cursor, no run
 title) through the run page's `MapView`; the page's context (`EditingProvider` with
 `definition`) makes the shared status chips and icons, the run's no-content sentences and the run
-notes disappear, and the map reads its guidance from `pages.flowPage.modeGuide`. Derivation
-diagnostics are also shown on the offending block or step (`DiagnosticBadge`), and the registry
-panel edits a whole declaration as JSON Schema besides its type, description and default.
+notes disappear, and the map reads its guidance from `pages.flowPage.modeGuide`. The context also
+carries where each current problem sits, so a block, a step and a connection show their own, and
+the registry panel edits a whole declaration as JSON Schema besides its type, description and
+default.
 
 **URL state:**
 
@@ -653,10 +658,10 @@ tabs (`flow-modes`) as the toolbar's `modes` slot, the contents fold button, the
 finder, the layout presets, zoom/fit, the minimap switch, and trailing the refresh indicator and
 "Explain this page" (`guide-open`).
 
-Then, in order: the edit panel while editing (the edit count, which is the export diff's entry
-count so a value typed back to what is stored is not an edit; discard, which clears every recorded
-edit; save; the loaded revision; the export diff as flow-file path / before / after; the server's
-refusal message); the process diagnostics inline; the active view filling the main area; and the
+Then, in order: the edit bar while editing (`EditBar`, `flow-edit-panel`); the problem list
+(`ProblemList`, `flow-diagnostics`: every error, and while editing every warning too, each with its
+place — an edge, a step or a block — whose button brings the step into view); the active view
+filling the main area; and the
 panel beside it (under it on a phone, foldable through `flow-panel-collapse` / `flow-panel-expand`)
 with the **Block** tab and the **Variables** tab (`RegistryPanel`: the registry on the shared
 variable rows — name, type badge and default in the row, description and the whole declaration as
@@ -715,20 +720,69 @@ fold button through `ContentsToggleProvider` / `ContentsToggleSlot`. Selection l
 the graph re-centres on its focus request, so a switch loses nothing; the graph's lazy chunk is
 fetched when its view is first shown, behind `DiagramSkeleton`.
 
-**Editing** (`components/flow/editing.tsx`): the edit set covers block label and summary,
-connection labels with a loop's cause and exit, node ownership, node text (directive, completion
-condition, message, expressions) and registry entries; `applyEdits` yields the edited definition,
-`exportDiff` the changed flow-file entries. Editors (`components/flow/EditControls.tsx`), all in
-the block panel: `BlockNameEditor` / `BlockSummaryEditor` on the block header, `TransitionEditor`
-on each transition, `OwnerSelect` and `NodeTextEditor` on each step card; `RegistryPanel`
-(variables tab; a default and a whole declaration are parsed as JSON before they
-are applied). The save calls
-`apiClient.updateWorkflow(id, edited, fileInfo.revision)` (`PUT /api/workflows/:id`); a 409 shows
-the conflict text and a 400 the server's message, both keeping the edits; a success clears them and
-reloads the detail and then the process for the new revision, the previous picture staying mounted
-through both. The walkthrough (`Walkthrough`, generic over the page's views) opens on
-the agent-first message (anchored on the page header), then the steps view (an instruction card, or
-the **Steps** tab on the map and the graph), then block, step, evidence, loop, editing and the views.
+**Editing.**
+
+- **The edit log** (`components/flow/operations.ts`) is an ordered list of operations over the
+  saved definition, and the draft the page shows, derives, validates and saves is its fold. The
+  saved graph is never mutated.
+  - Content operations are applied as typed: block label and summary, a connection label with a
+    loop's cause and exit, a node's block, node text (directive, completion condition, message,
+    expressions) and a registry entry. Consecutive edits of one field merge into one operation.
+  - Structural operations go through the engine's authoring functions
+    (`@mcp-moira/workflow-engine/authoring`): add, insert on an edge, remove, rename, set or remove
+    a connection, add or remove a block. `appendOperation` applies one to the current draft first,
+    so a refused operation throws its `AuthoringError` and never enters the log.
+  - `exportDiff` compares the saved definition with the draft, following node ids through renames.
+    It yields `change` entries (flow-file path, before, after) and one entry per added, removed or
+    renamed node — a rename with the references it rewrote, per location — or per added or
+    removed block.
+- **Page state** (`components/flow/editing.tsx`). `useEditLog` holds the log, the draft, `apply`,
+  `undo` and `reset`; the log is dropped when the page moves to another workflow.
+  `EditingProvider` gives the views the setters (each appends one operation), the generic
+  `apply`, and the problem placement.
+- **Editors** (`components/flow/EditControls.tsx`) all sit in the block panel: `BlockNameEditor` /
+  `BlockSummaryEditor` on the block header, `TransitionEditor` on each transition, `OwnerSelect`
+  and `NodeTextEditor` on each step card, and `RegistryPanel` in the variables tab (a default and
+  a whole declaration are parsed as JSON before they are applied).
+- **Draft validation.**
+  - `useDraftValidation` sends the draft to `POST /api/workflows/:id/validate` (`workflowData`)
+    once it has been unchanged for `DRY_RUN_DELAY_MS`. It keeps an answer only while the draft
+    that answer judged is still the current one, and it exposes the session's `latest` answer,
+    which the page shows while the next check is pending.
+  - `placeIssues` (`components/flow/issues.ts`) merges the browser's process diagnostics with the
+    server's located issues. An issue goes on an edge (`<node>.<key>` from a diagnostic's edge, or
+    an issue field `connections.<key>` / `connectionLabels.<key>` of an existing connection), on
+    a node, on a block, or on the page. The server's restatements of process diagnostics
+    (`isProcessDiagnosticMessage`) are skipped, because the browser's layer already placed them.
+  - Where problems show:
+    - the step card's `DiagnosticBadge`, with its connection chip marked through
+      `connectionIssuesOf`;
+    - a transition in the block panel;
+    - a graph card's badge, and a problem connection's output port and line (`WorkflowGraph`
+      `issues`);
+    - `NodePanel`'s validation, which reads the draft's validation;
+    - `ProblemList`.
+- **The edit bar** shows:
+  - the change count (the export's entry count, so a value typed back is not a change);
+  - Undo and Discard;
+  - the export toggle (`flow-edit-export-toggle`);
+  - the gate state (`flow-edit-gate`, `data-gate`), with Retry after a failed check;
+  - the loaded revision;
+  - Save.
+- **The save gate.** `saveGate` enables Save only for a changed draft with no process diagnostics
+  whose dry run is done, judged this very draft object, and found no error.
+- **Saving.** The save calls `apiClient.updateWorkflow(id, draft, fileInfo.revision)`
+  (`PUT /api/workflows/:id`).
+  - A 409 shows the conflict text.
+  - A 400 hands its `details.validation` to the dry run as the answer for that draft, so the
+    refusal is placed like a check.
+  - Both keep the draft.
+  - A success clears the log and reloads the detail and then the process for the new revision,
+    the previous picture staying mounted through both.
+
+The walkthrough (`Walkthrough`, generic over the page's views) opens on the agent-first message
+(anchored on the page header), then the steps view (an instruction card, or the **Steps** tab on
+the map and the graph), then block, step, evidence, loop, editing and the views.
 
 ### Run page (ExecutionInspector component)
 

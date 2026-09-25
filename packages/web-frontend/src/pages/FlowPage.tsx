@@ -13,10 +13,13 @@
  * typically takes over the viewer's completed runs of this version — and the variable registry.
  * Owners can turn on edit mode: block names and
  * descriptions, transition labels and loop explanations, which block a step belongs to, a step's
- * directive, message or expressions, and the registry are edited in place; the views re-derive at
- * once, the derivation's diagnostics appear inline, the export lists the flow-file entries that
- * would change, and the save sends the whole definition against the revision the page loaded.
- * A stale revision or an invalid graph is refused by the server and the edits stay on the page.
+ * directive, message or expressions, and the registry are edited in place. Every edit is an
+ * operation in the page's edit log (undo takes the last one back); the views re-derive the draft at
+ * once, the server's dry run judges it a moment later, and both layers' problems appear where they
+ * occur and in one list. The export lists the flow-file entries that would change, and Save —
+ * open only for a changed draft both layers passed as shown — sends the whole definition against
+ * the revision the page loaded. A stale revision or a definition the server still refuses keeps
+ * the draft on the page, the refusal placed like a dry run's.
  * State is deep-linkable: `view`, `block`, `guide`, `edit`, `inline`. A workflow without a process
  * view has the steps view and the node graph, and opens on the graph.
  */
@@ -25,7 +28,6 @@ import React, { Suspense, useCallback, useEffect, useMemo, useRef, useState } fr
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import {
-  AlertTriangle,
   Boxes,
   Compass,
   Copy,
@@ -34,8 +36,6 @@ import {
   Lock,
   MoreHorizontal,
   PencilLine,
-  RotateCcw,
-  Save,
   Share2,
   Trash2,
   Users,
@@ -48,7 +48,6 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -93,14 +92,12 @@ import { runBlocks } from "../components/run/model";
 import { RegistryPanel } from "../components/flow/RegistryPanel";
 import { FLOW_MODES, resolveFlowMode, type FlowViewMode } from "../components/flow/modes";
 import { definitionProgress } from "../components/flow/model";
-import {
-  EMPTY_EDITS,
-  EditingProvider,
-  applyEdits,
-  countEdits,
-  exportDiff,
-  useFlowEdits,
-} from "../components/flow/editing";
+import { EditingProvider, useEditLog } from "../components/flow/editing";
+import { exportDiff } from "../components/flow/operations";
+import { NO_ISSUES, placeIssues, saveGate } from "../components/flow/issues";
+import { useDraftValidation } from "../components/flow/useDraftValidation";
+import { EditBar, ProblemList } from "../components/flow/EditBar";
+import type { WorkflowValidationStatus } from "../types/react-flow-types";
 
 // Lazy chunk, requested on mount so the first switch to the graph view downloads nothing.
 const importWorkflowGraph = () => import("../components/workflow/WorkflowGraph");
@@ -155,7 +152,6 @@ export const FlowPage: React.FC = () => {
     },
     [requestVariableHighlight],
   );
-  const [edits, setEdits] = useFlowEdits();
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
@@ -175,6 +171,7 @@ export const FlowPage: React.FC = () => {
   const fileInfo = detail?.fileInfo;
   const savedWorkflow = detail?.workflow;
   const isOwner = fileInfo?.accessType === "owner";
+  const editLog = useEditLog(savedWorkflow);
 
   // The saved definition's process comes from the server, held per workflow: a new revision of
   // the same workflow refreshes it while the previous projection stays on screen; a move to
@@ -220,18 +217,20 @@ export const FlowPage: React.FC = () => {
   );
 
   // --- The definition as edited, its process and the run-less projection.
-  const edited = useMemo(
-    () => (savedWorkflow ? applyEdits(savedWorkflow, edits) : undefined),
-    [savedWorkflow, edits],
-  );
-  // The count shown (and what enables Save) is the number of flow-file entries that actually
-  // change; an edit typed back to the stored value is not a change.
+  // An edit log belongs to the workflow it was made on: moving to another one starts afresh.
+  const resetEdits = editLog.reset;
+  useEffect(() => {
+    resetEdits();
+    setSaveError(null);
+  }, [workflowId, resetEdits]);
+  const edited = editLog.draft;
+  // The count shown is the number of flow-file entries that actually change; an edit typed back
+  // to the stored value is not a change.
   const diff = useMemo(
-    () => (savedWorkflow ? exportDiff(savedWorkflow, edits) : []),
-    [savedWorkflow, edits],
+    () => (savedWorkflow ? exportDiff(savedWorkflow, editLog.ops) : []),
+    [savedWorkflow, editLog.ops],
   );
-  const editCount = diff.length;
-  const hasEdits = countEdits(edits) > 0;
+  const hasEdits = editLog.ops.length > 0;
   const process = useMemo<ProcessProjection | null>(() => {
     if (!edited) return null;
     if (hasEdits) return deriveProcess(edited as unknown as Parameters<typeof deriveProcess>[0]);
@@ -246,6 +245,39 @@ export const FlowPage: React.FC = () => {
   const progress = useMemo(
     () => (edited && process ? definitionProgress(edited, process) : null),
     [edited, process],
+  );
+
+  // The server's dry run of the draft. While it runs, the page keeps showing the last answer it
+  // had for this editing session; the save gate trusts only an answer for the very draft shown.
+  const validateDraft = useCallback(
+    (draft: WorkflowGraph) =>
+      apiClient
+        .validateWorkflow(workflowId ?? "", { workflowData: draft })
+        .then((response) => response.validation),
+    [workflowId],
+  );
+  const {
+    dryRun,
+    latest: latestJudgement,
+    accept: acceptJudgement,
+    retry: retryDryRun,
+  } = useDraftValidation(validateDraft, hasEdits ? edited : undefined);
+  const validation = hasEdits ? (latestJudgement ?? detail?.validation) : detail?.validation;
+  const diagnostics = useMemo(() => process?.diagnostics ?? [], [process]);
+  const issues = useMemo(
+    () => (edited ? placeIssues(edited, diagnostics, validation) : NO_ISSUES),
+    [edited, diagnostics, validation],
+  );
+  const gate = edited
+    ? saveGate({ changed: diff.length > 0, diagnostics: diagnostics.length, draft: edited, dryRun })
+    : ({ enabled: false, reason: "unchanged" } as const);
+  const serverErrors = issues.all.filter(
+    (i) => i.source === "server" && i.severity === "error",
+  ).length;
+  // The page lists every error; warnings only while the definition is being edited.
+  const listedIssues = useMemo(
+    () => issues.all.filter((i) => i.severity === "error" || editing || hasEdits),
+    [issues, editing, hasEdits],
   );
   // Typical durations of the saved version, over the viewer's own completed runs. They are held
   // per workflow and version; a workflow nobody has finished yet simply has an empty sample.
@@ -340,22 +372,31 @@ export const FlowPage: React.FC = () => {
     setSaveError(null);
     try {
       const result = await apiClient.updateWorkflow(fileInfo.id, edited, fileInfo.revision);
-      setEdits(EMPTY_EDITS);
+      resetEdits();
       toast.success(t("pages.flowPage.edit.saved", { revision: result.revision }));
       workflowDetail.refreshWorkflow();
     } catch (err: unknown) {
+      // A refused definition comes back with the server's issues for exactly this draft: they
+      // are placed on the definition like a dry run's.
+      const refused =
+        err instanceof ApiClientError && err.status === 400
+          ? (err.details?.validation as WorkflowValidationStatus | undefined)
+          : undefined;
+      if (refused) acceptJudgement(edited, refused);
       const message =
         err instanceof ApiClientError && err.status === 409
           ? t("pages.flowPage.edit.conflict")
-          : err instanceof Error
-            ? err.message
-            : t("common.errors.failedToUpdate");
+          : refused
+            ? t("pages.flowPage.edit.refused")
+            : err instanceof Error
+              ? err.message
+              : t("common.errors.failedToUpdate");
       setSaveError(message);
       toast.error(message);
     } finally {
       setSaving(false);
     }
-  }, [fileInfo, edited, setEdits, workflowDetail, t]);
+  }, [fileInfo, edited, resetEdits, acceptJudgement, workflowDetail, t]);
 
   const toggleInline = useCallback(() => {
     const next = !inline;
@@ -363,12 +404,13 @@ export const FlowPage: React.FC = () => {
     if (next !== inlineStored) toggleInlineStored();
   }, [inline, inlineStored, toggleInlineStored, update]);
 
-  const onEditsChange = useCallback(
-    (next: Parameters<typeof setEdits>[0]) => {
+  const applyEdit = editLog.apply;
+  const onEdit = useCallback(
+    (op: Parameters<typeof applyEdit>[0]) => {
+      applyEdit(op);
       setSaveError(null);
-      setEdits(next);
     },
-    [setEdits],
+    [applyEdit],
   );
 
   const focusNode = useCallback(
@@ -502,7 +544,8 @@ export const FlowPage: React.FC = () => {
         <Suspense fallback={<DiagramSkeleton />}>
           <TechnicalGraph
             workflow={edited}
-            validation={detail?.validation}
+            validation={validation}
+            issues={issues}
             blocks={blocks}
             selectedBlockId={selectedBlockId}
             onWorkflowNavigate={handleNavigate}
@@ -529,13 +572,7 @@ export const FlowPage: React.FC = () => {
   );
 
   return (
-    <EditingProvider
-      enabled={editing}
-      definition
-      edits={edits}
-      diagnostics={process?.diagnostics ?? []}
-      onChange={onEditsChange}
-    >
+    <EditingProvider enabled={editing} definition issues={issues} apply={onEdit}>
       <div className="h-full flex flex-col" data-testid="flow-page" data-view={mode}>
         <PageHeader
           back={{
@@ -696,93 +733,29 @@ export const FlowPage: React.FC = () => {
               )}
 
               {editing && process && (
-                <div
-                  className="space-y-1 border-b border-warning/50 bg-warning/5 px-3 py-1.5"
-                  data-testid="flow-edit-panel"
-                >
-                  <div className="flex flex-wrap items-center gap-2 text-sm">
-                    <span data-testid="flow-edit-count">
-                      {t("pages.flowPage.edit.count", { count: editCount })}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => onEditsChange(EMPTY_EDITS)}
-                      disabled={!hasEdits}
-                      className="inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-xs hover:bg-accent disabled:opacity-40"
-                      data-testid="flow-edit-reset"
-                    >
-                      <RotateCcw className="size-3" aria-hidden="true" />
-                      {t("pages.flowPage.edit.reset")}
-                    </button>
-                    <Button
-                      size="sm"
-                      onClick={handleSave}
-                      disabled={editCount === 0 || saving || process.diagnostics.length > 0}
-                      className="h-7 gap-1 text-xs"
-                      data-testid="flow-edit-save"
-                    >
-                      {saving ? (
-                        <Loader2 className="size-3 animate-spin" aria-hidden="true" />
-                      ) : (
-                        <Save className="size-3" aria-hidden="true" />
-                      )}
-                      {t("pages.flowPage.edit.save")}
-                    </Button>
-                    <span className="text-xs text-muted-foreground">
-                      {t("pages.flowPage.edit.revision", { revision: fileInfo?.revision ?? 0 })}
-                    </span>
-                    {saveError && (
-                      <span
-                        className="basis-full text-xs text-destructive"
-                        role="alert"
-                        data-testid="flow-save-error"
-                      >
-                        {saveError}
-                      </span>
-                    )}
-                  </div>
-                  <Collapsible data-testid="flow-edit-export">
-                    <CollapsibleTrigger className="inline-flex items-center gap-1.5 rounded-md px-1 text-sm text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-                      {t("pages.flowPage.edit.export", { count: diff.length })}
-                    </CollapsibleTrigger>
-                    <CollapsibleContent>
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        {t("pages.flowPage.edit.exportHint")}
-                      </p>
-                      <ul className="scrollbar-thin mt-2 max-h-[30vh] space-y-1 overflow-auto font-mono text-[11px]">
-                        {diff.map((entry) => (
-                          <li
-                            key={entry.path}
-                            className="rounded-md bg-card p-2"
-                            data-export-path={entry.path}
-                          >
-                            <p className="font-semibold">{entry.path}</p>
-                            <p className="text-destructive">- {JSON.stringify(entry.before)}</p>
-                            <p className="text-success">+ {JSON.stringify(entry.after)}</p>
-                          </li>
-                        ))}
-                      </ul>
-                    </CollapsibleContent>
-                  </Collapsible>
-                </div>
+                <EditBar
+                  diff={diff}
+                  canUndo={hasEdits}
+                  onUndo={() => {
+                    editLog.undo();
+                    setSaveError(null);
+                  }}
+                  onReset={() => {
+                    resetEdits();
+                    setSaveError(null);
+                  }}
+                  gate={gate}
+                  processProblems={diagnostics.length}
+                  serverErrors={serverErrors}
+                  onRetry={retryDryRun}
+                  saving={saving}
+                  onSave={handleSave}
+                  revision={fileInfo?.revision ?? 0}
+                  saveError={saveError}
+                />
               )}
 
-              {process && process.diagnostics.length > 0 && (
-                <ul
-                  className="border-b bg-destructive/5 px-4 py-2 text-xs text-destructive"
-                  data-testid="flow-diagnostics"
-                  aria-label={t("pages.flowPage.diagnostics")}
-                >
-                  {process.diagnostics.map((d, i) => (
-                    <li key={i} className="flex gap-2">
-                      <AlertTriangle className="mt-0.5 size-3 shrink-0" aria-hidden="true" />
-                      <span>
-                        <span className="font-mono">{d.code}</span>: {d.message}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              )}
+              <ProblemList issues={listedIssues} onFocusNode={focusNode} />
 
               {/* Only the shown view is mounted: the selection lives in the URL and the graph
                   re-centres on its focus request, so a switch loses nothing. */}
@@ -905,7 +878,7 @@ export const FlowPage: React.FC = () => {
                           onBack={handleClearSelection}
                           onFocusNode={focusNode}
                           onSelectVariable={goToVariable}
-                          validation={detail?.validation ?? null}
+                          validation={validation ?? null}
                           nodeTypes={nodeTypeIndex}
                         />
                       ) : (

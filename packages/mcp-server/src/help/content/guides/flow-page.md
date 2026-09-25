@@ -113,19 +113,37 @@ definition itself and never a run:
   expressions (on the step's card in the block panel);
 - the variable registry — declarations, types, descriptions and defaults (Variables tab).
 
-The views re-derive as you type. A change that would make the process unreadable — a step in a
-block that leaves an edge without a label, an empty block — appears at once as a diagnostic with
-the same code the server's validation uses, and the save stays disabled until it is fixed.
-**Export** lists exactly the flow-file entries the edits would change, as JSON path, value before
-and value after.
+Every edit goes into the page's edit log. **Undo** takes back the last one — typing into one field
+counts as one edit — and **Discard edits** drops them all. The views re-derive as you type.
 
-**Save** sends the whole definition to the server against the revision the page loaded. The
-server validates it as `manage edit` does and refuses an invalid definition (nothing is saved).
-Every stored write of a definition — from this page, from `manage`, from a bundled-catalog sync —
-advances its **revision**; if someone else changed the workflow since the page loaded, the save is
-refused with a conflict and your edits stay on the page: reload and apply them again. A run reads
-the stored definition at every step, so a run that is already in progress follows the saved
-edits from its next step on; edit a workflow with paused runs deliberately.
+The draft is checked in two layers. The process rules run in the browser on every change: a step
+in a block that leaves an edge without a label, a return without its cause and exit, or an empty
+block appears at once, with the same code the server's validation uses. A moment after you stop
+typing, the server checks the whole draft the way it checks a save — a reference to a value no
+step or variable provides, for example, or a playbook you cannot use. Each problem is shown where
+it belongs:
+
+- on the step's card in the block panel, with its connection chip or transition marked when the
+  problem is about one connection;
+- on the step's card on the graph, where a problem connection's output port and line turn red;
+- in the node panel's validation section;
+- in the list under the edit bar, where a problem's place brings its step into view.
+
+The edit bar says what stands between you and saving: no changes yet, process problems to fix,
+checking the draft, problems found by the server, or checked and ready to save. **Save** opens only
+for a changed draft that the server has checked, exactly as shown, without errors. **Export** lists
+exactly the flow-file entries the edits would change, as JSON path, value before and value after.
+
+**Save** sends the whole definition to the server against the revision the page loaded, and the
+server validates it once more, as `manage edit` does — including playbook references you cannot
+resolve — so the page and `manage edit` accept and refuse the same definitions. If it still refuses — something changed after the check, such as a
+playbook the draft names being deleted — nothing is saved, the draft stays, and the refusal is
+shown on the definition the same way. Every stored write of a definition — from this page, from
+`manage`, from a bundled-catalog sync — advances its **revision**. If someone else changed the
+workflow since the page loaded, the save is refused with a conflict and your edits stay on the
+page: reload and apply them again. A run reads the stored definition at every step, so a run that
+is already in progress follows the saved edits from its next step on; edit a workflow with paused
+runs deliberately.
 
 Shared and bundled workflows are shown without edit mode; copy a bundled flow ("Use as template")
 to get an editable one.

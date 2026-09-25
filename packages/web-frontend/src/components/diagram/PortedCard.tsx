@@ -34,6 +34,8 @@ export interface PortInfo {
   tip?: React.ReactNode;
   /** The card at the far end of the port's edge; clicking the port goes there. */
   peer?: string;
+  /** What is wrong with the port's connection; the port is marked and its tooltip says it. */
+  problem?: string;
 }
 
 export interface FactChip {
@@ -165,6 +167,7 @@ function Port({
         PORT_TONE[port.kind],
         clickable ? INTERACTIVE.clickable : INTERACTIVE.hoverOnly,
         lit && "border-primary bg-primary/10",
+        port.problem && "border-destructive bg-destructive/10 text-destructive",
       )}
       role={clickable ? "button" : undefined}
       tabIndex={clickable ? 0 : undefined}
@@ -194,6 +197,7 @@ function Port({
       data-transition={port.id}
       data-peer={port.peer}
       data-lit={lit ? "true" : undefined}
+      data-issue={port.problem ? "true" : undefined}
     >
       {port.kind === "return" && <RotateCcw className="size-3 shrink-0" aria-hidden="true" />}
       <span className="shrink-0 truncate" style={{ maxWidth: "70%" }}>
@@ -206,10 +210,23 @@ function Port({
       )}
     </div>
   );
-  if (!port.tip) return row;
+  const tip = port.problem ? (
+    <>
+      <b>{port.problem}</b>
+      {port.tip && (
+        <>
+          {"\n\n"}
+          {port.tip}
+        </>
+      )}
+    </>
+  ) : (
+    port.tip
+  );
+  if (!tip) return row;
   return (
     <Hint
-      content={port.tip}
+      content={tip}
       mono
       width="lg"
       side={side === "in" ? "left" : side === "out" ? "right" : "bottom"}
