@@ -17,7 +17,11 @@ import {
   type ExecutionContext,
   type MaterializeNode,
 } from "@mcp-moira/workflow-engine";
-import { SchemaValidator } from "../../../packages/workflow-engine/src/utils/schema-validator.js";
+import AjvModule from "ajv";
+import {
+  SchemaValidator,
+  registerWorkflowSchemaKeywords,
+} from "../../../packages/workflow-engine/src/utils/schema-validator.js";
 import { systemCatalogGraph } from "../../helpers/catalog-graphs.js";
 
 const wmf = systemCatalogGraph("workflow-management-flow", "public");
@@ -173,8 +177,17 @@ function acceptsAnswer(nodeId: string, answer: Record<string, unknown>): boolean
   const node = wmf.nodes.find((candidate) => candidate.id === nodeId)!;
   const schema = (inlineGlobalInputs(node, wmf.variableRegistry) as AgentDirectiveNode)
     .inputSchema as Record<string, unknown>;
-  return SchemaValidator.validate(answer, schema).isValid;
+  return SchemaValidator.validate({ ...PENDING_BY_NODE[nodeId], ...answer }, schema).isValid;
 }
+
+/**
+ * The value the light review's handshake requires from each side, filled in when a check is about
+ * something else; the handshake's own test passes the field explicitly.
+ */
+const PENDING_BY_NODE: Record<string, Record<string, string>> = {
+  "review-workflow-minimum": { light_repair_pending: "" },
+  "fix-light-review-findings": { light_repair_pending: "yes" },
+};
 
 describe("the level only rises during a create run", () => {
   test("the requirements owner sets any level", () => {
@@ -535,4 +548,194 @@ describe("the person can ask for a simpler process where they are present", () =
       expect(directive(id)).toMatch(/workflow as it now stands/u);
     },
   );
+});
+
+describe("the flow's own texts agree with its routes on every level", () => {
+  const condition = (id: string): string =>
+    (wmf.nodes.find((node) => node.id === id) as { completionCondition: string })
+      .completionCondition;
+  const render = (id: string, variables: Record<string, unknown>): string =>
+    new GraphTemplateProcessor().processDirective(directive(id), {
+      executionId: "wmf-tier-check",
+      workflowId: wmf.id ?? "workflow-management-flow",
+      userId: "tier-check",
+      variables: { workspace_path: "./moira-ws/tier-check", ...variables },
+      nodeStates: {},
+    });
+
+  test.each([
+    ["audit-complete-workflow", "the workflow as it now stands"],
+    ["review-workflow-quality", "escalate"],
+    ["create-workflow-json", "exactly one `complexity:` tag"],
+    ["create-workflow-json", "no unreachable node"],
+    ["apply-workflow-changes", "exactly one `complexity:` tag"],
+    ["apply-workflow-changes", "no unreachable node"],
+    ["gather-workflow-requirements", "the agreed level and its reason"],
+    ["gather-edit-requirements", "the agreed level and its reason"],
+    ["approve-structure", "lowering request"],
+    ["present-edit-plan", "lowering request"],
+    ["user-final-review", "lowering request"],
+    ["fix-light-review-findings", "not reproduced"],
+  ])("the completion condition of %s names %s", (id, obligation) => {
+    expect(condition(id)).toContain(obligation);
+  });
+
+  test("no completion condition calls a raised workflow the original or a simple build approved", () => {
+    expect(condition("audit-complete-workflow")).not.toMatch(/complete original workflow/u);
+    expect(condition("create-workflow-json")).not.toMatch(/^The approved workflow/u);
+    expect(condition("apply-workflow-changes")).not.toMatch(/^The approved changes/u);
+  });
+
+  test("every input schema compiles under strict types, so validation logs no warning", () => {
+    for (const node of wmf.nodes) {
+      const schema = (node as { inputSchema?: Record<string, unknown> }).inputSchema;
+      if (!schema) continue;
+      const { globalInputs: _globals, ...jsonSchema } = schema;
+
+      const ajv = new ((AjvModule as any).default ?? AjvModule)({
+        allErrors: true,
+        strictTypes: true,
+      });
+      registerWorkflowSchemaKeywords(ajv);
+      expect({
+        id: node.id,
+        compiles: (() => {
+          try {
+            ajv.compile(jsonSchema);
+            return true;
+          } catch (error) {
+            return String(error);
+          }
+        })(),
+      }).toEqual({ id: node.id, compiles: true });
+    }
+  });
+
+  test("the process view names design, review and their simple-level counterparts, never one unconditionally", () => {
+    const progress = wmf.progress!;
+    const block = (id: string) => progress.nodes.find((node) => node.id === id)!;
+    expect(progress.goal).not.toMatch(/through reconciled sources, reviewed semantic design/u);
+    expect(progress.goal).toContain("a design or edit plan when the level calls for one");
+    expect(progress.goal).toContain("the light or full review the level calls for");
+    expect(block("requirements").content?.next).toBe(
+      "Design or plan, or on the simple level the build",
+    );
+    expect(block("review").content?.summary).toBe(
+      "Review the complete resulting workflow: the full quality review, or on the simple level the light review",
+    );
+  });
+
+  test("the description names what the flow materializes without a count", () => {
+    expect(wmf.metadata.description).not.toMatch(/\b(nine|ten|eleven|\d+) canonical/u);
+    expect(wmf.metadata.description).toContain("canonical thematic authoring references");
+  });
+
+  test.each(["user-final-review", "report-final-result"])(
+    "on a standard edit, %s names the full antipattern audit only when it did not run",
+    (id) => {
+      const standardEdit = (answer: string) =>
+        render(id, {
+          action_type: "edit",
+          complexity_tier: "standard",
+          "ask-full-antipattern-audit": { full_antipattern_audit: answer },
+        });
+      expect(standardEdit("no")).toContain(
+        "the full antipattern audit of the whole workflow did not run",
+      );
+      expect(standardEdit("yes")).not.toContain(
+        "full antipattern audit of the whole workflow did not run",
+      );
+    },
+  );
+
+  test.each(["user-final-review", "report-final-result"])(
+    "%s names any open point the light review carried to the person",
+    (id) => {
+      expect(directive(id)).toContain(
+        "name every open point recorded in `{{workspace_path}}/workflow-light-review.md`",
+      );
+    },
+  );
+
+  test("after a repair that could not reproduce a finding, the light review weighs it and the dispute ends", () => {
+    const afterRepair = (repair_outcome: string, light_repair_pending = "yes") =>
+      render("review-workflow-minimum", {
+        workflow_artifact_path: "./moira-ws/tier-check/workflow.json",
+        action_type: "create",
+        light_repair_pending,
+        "fix-light-review-findings": { repair_outcome },
+      });
+    const disputed = afterRepair("not_reproduced");
+    expect(disputed).not.toContain("check the changed workflow again");
+    expect(disputed).toContain(
+      "either withdraw the finding or restate it with exact reproduction steps",
+    );
+    expect(disputed).toContain(
+      "when the same finding comes back not reproduced a second time, stop sending it to repair: record it as an open point",
+    );
+    expect(afterRepair("changed")).toContain("check the changed workflow again from the start");
+    // A repair answer the light review already weighed stays in the run's context. After a rebuild
+    // the light review reviews a new workflow, so an old dispute or change is not mentioned.
+    for (const stale of ["not_reproduced", "changed"]) {
+      const rebuilt = afterRepair(stale, "");
+      expect(rebuilt).not.toContain("could not reproduce");
+      expect(rebuilt).not.toContain("check the changed workflow again");
+    }
+  });
+
+  test("a repair answer is pending for the light review exactly until the light review answers", () => {
+    expect(
+      acceptsAnswer("review-workflow-minimum", {
+        light_review_outcome: "pass",
+        progress_review_outcome: "Passed",
+        light_repair_pending: "",
+      }),
+    ).toBe(true);
+    expect(
+      acceptsAnswer("fix-light-review-findings", {
+        repair_outcome: "changed",
+        progress_review_outcome: "Fixed",
+        light_repair_pending: "yes",
+      }),
+    ).toBe(true);
+    expect(
+      acceptsAnswer("review-workflow-minimum", {
+        light_review_outcome: "pass",
+        progress_review_outcome: "Passed",
+        light_repair_pending: "yes",
+      }),
+    ).toBe(false);
+    expect(
+      acceptsAnswer("fix-light-review-findings", {
+        repair_outcome: "changed",
+        progress_review_outcome: "Fixed",
+        light_repair_pending: "",
+      }),
+    ).toBe(false);
+  });
+
+  test("the light repair leaves findings already recorded as open points alone", () => {
+    expect(directive("fix-light-review-findings")).toContain(
+      "Leave findings the light review recorded as open points for the person alone",
+    );
+  });
+
+  test("the light repair reports a finding it cannot reproduce with its reason, never with a level", () => {
+    const answer = {
+      repair_outcome: "not_reproduced",
+      progress_review_outcome: "Finding not reproduced",
+    };
+    expect(acceptsAnswer("fix-light-review-findings", answer)).toBe(false);
+    const withReason = {
+      ...answer,
+      not_reproduced_reason: "The route ends at `end`; traced on the schema",
+    };
+    expect(acceptsAnswer("fix-light-review-findings", withReason)).toBe(true);
+    expect(
+      acceptsAnswer("fix-light-review-findings", { ...withReason, complexity_tier: "complex" }),
+    ).toBe(false);
+    expect(
+      acceptsAnswer("fix-light-review-findings", { ...withReason, escalation_reason: "It grew" }),
+    ).toBe(false);
+  });
 });

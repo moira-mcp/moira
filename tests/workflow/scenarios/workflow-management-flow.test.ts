@@ -225,8 +225,8 @@ function simpleInputs(name: string): Record<string, MockInput> {
   return {
     ...createInputs(name),
     "gather-workflow-requirements": { complexity_tier: "simple" },
-    "review-workflow-minimum": { light_review_outcome: "pass" },
-    "fix-light-review-findings": { repair_outcome: "changed" },
+    "review-workflow-minimum": { light_repair_pending: "", light_review_outcome: "pass" },
+    "fix-light-review-findings": { repair_outcome: "changed", light_repair_pending: "yes" },
   };
 }
 
@@ -235,8 +235,8 @@ function simpleEditInputs(name: string): Record<string, MockInput> {
   return {
     ...editInputs(name),
     "gather-edit-requirements": { recorded_tier: "simple", complexity_tier: "simple" },
-    "review-workflow-minimum": { light_review_outcome: "pass" },
-    "fix-light-review-findings": { repair_outcome: "changed" },
+    "review-workflow-minimum": { light_repair_pending: "", light_review_outcome: "pass" },
+    "fix-light-review-findings": { repair_outcome: "changed", light_repair_pending: "yes" },
   };
 }
 
@@ -300,6 +300,7 @@ const scenarios: TestScenario[] = [
     {
       ...simpleInputs("simple-escalation"),
       "review-workflow-minimum": {
+        light_repair_pending: "",
         light_review_outcome: "escalate",
         complexity_tier: "standard",
         escalation_reason:
@@ -327,12 +328,13 @@ const scenarios: TestScenario[] = [
     {
       ...simpleInputs("simple-repair-escalation"),
       "review-workflow-minimum": [
-        { light_review_outcome: "repair" },
-        { light_review_outcome: "repair" },
+        { light_repair_pending: "", light_review_outcome: "repair" },
+        { light_repair_pending: "", light_review_outcome: "repair" },
       ],
       "fix-light-review-findings": [
-        { repair_outcome: "changed" },
+        { repair_outcome: "changed", light_repair_pending: "yes" },
         {
+          light_repair_pending: "yes",
           repair_outcome: "escalate",
           complexity_tier: "complex",
           escalation_reason: "The flow has to call a sub-process",
@@ -430,6 +432,7 @@ const scenarios: TestScenario[] = [
     {
       ...simpleEditInputs("simple-edit-escalation"),
       "review-workflow-minimum": {
+        light_repair_pending: "",
         light_review_outcome: "escalate",
         complexity_tier: "standard",
         escalation_reason: "The change adds a review-and-redo loop",
@@ -452,8 +455,9 @@ const scenarios: TestScenario[] = [
     "a simple edit raised to complex runs the full antipattern audit before the edit plan",
     {
       ...simpleEditInputs("simple-edit-raised-complex"),
-      "review-workflow-minimum": [{ light_review_outcome: "repair" }],
+      "review-workflow-minimum": [{ light_repair_pending: "", light_review_outcome: "repair" }],
       "fix-light-review-findings": {
+        light_repair_pending: "yes",
         repair_outcome: "escalate",
         complexity_tier: "complex",
         escalation_reason: "The change needs a sub-process and a lock",
@@ -491,7 +495,7 @@ const scenarios: TestScenario[] = [
       ...createInputs("lowered-at-approval"),
       "gather-workflow-requirements": { complexity_tier: "complex" },
       "approve-structure": { structure_approved: "yes", ...LOWER_TO_SIMPLE },
-      "review-workflow-minimum": { light_review_outcome: "pass" },
+      "review-workflow-minimum": { light_repair_pending: "", light_review_outcome: "pass" },
     },
     ["approve-structure", "create-workflow-json", "review-workflow-minimum", "end"],
     ["review-workflow-quality", "refine-structure"],
@@ -506,7 +510,7 @@ const scenarios: TestScenario[] = [
         user_feedback: "This is too much for a small change",
         ...LOWER_TO_SIMPLE,
       },
-      "review-workflow-minimum": { light_review_outcome: "pass" },
+      "review-workflow-minimum": { light_repair_pending: "", light_review_outcome: "pass" },
     },
     ["present-edit-plan", "apply-workflow-changes", "review-workflow-minimum", "end"],
     ["revise-edit-plan", "review-workflow-quality"],
@@ -520,11 +524,37 @@ const scenarios: TestScenario[] = [
         { work_approved: "no", final_feedback: "Drop the extra checks", ...LOWER_TO_SIMPLE },
         { work_approved: "yes" },
       ],
-      "review-workflow-minimum": { light_review_outcome: "pass" },
+      "review-workflow-minimum": { light_repair_pending: "", light_review_outcome: "pass" },
     },
     ["revise-edit-requirements", "review-workflow-minimum", "end"],
     [],
     { contextContains: { complexity_tier: "simple" } },
+  ),
+  scenario(
+    "a light-review finding the repair cannot reproduce twice ends as an open point, not a loop",
+    {
+      ...simpleInputs("simple-disputed-finding"),
+      "review-workflow-minimum": [
+        { light_repair_pending: "", light_review_outcome: "repair" },
+        { light_repair_pending: "", light_review_outcome: "repair" },
+        { light_repair_pending: "", light_review_outcome: "pass" },
+      ],
+      "fix-light-review-findings": [
+        {
+          light_repair_pending: "yes",
+          repair_outcome: "not_reproduced",
+          not_reproduced_reason: "Every route from start reaches end in the schema output",
+        },
+        {
+          light_repair_pending: "yes",
+          repair_outcome: "not_reproduced",
+          not_reproduced_reason: "The restated steps also reach end",
+        },
+      ],
+    },
+    ["fix-light-review-findings", "review-workflow-minimum", "user-final-review", "end"],
+    ["route-after-level-raise", ...DESIGN_PATH],
+    { contextContains: { complexity_tier: "simple", light_repair_pending: "" } },
   ),
   scenario(
     "create without upload",
@@ -762,7 +792,7 @@ describe("workflow-management-flow", () => {
   });
 
   test("keeps shared gates and routes each local answer on its owning directive", () => {
-    expect(workflow.metadata.version).toBe("6.14.0");
+    expect(workflow.metadata.version).toBe("6.15.0");
     expect(
       workflow.nodes.filter((node) => node.type === "condition").map((node) => node.id),
     ).toEqual([
@@ -1110,6 +1140,17 @@ describe("workflow-management-flow", () => {
         });
       }
     }
+
+    // A disputed finding goes to repair twice and then ends in the light review's pass.
+    const disputed = routeVisits(
+      results.find(
+        (result) =>
+          result.scenario ===
+          "a light-review finding the repair cannot reproduce twice ends as an open point, not a loop",
+      )!,
+    );
+    expect(disputed.filter((node) => node === "fix-light-review-findings")).toHaveLength(2);
+    expect(disputed.filter((node) => node === "review-workflow-minimum")).toHaveLength(3);
 
     // A raise continues from the current requirements: the requirements owner runs once.
     for (const name of [
