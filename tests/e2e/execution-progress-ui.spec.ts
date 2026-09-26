@@ -298,6 +298,7 @@ test("answering the waiting step from the page continues the run and records the
     await page.getByTestId("answer-field-execution_file").fill(`${workspace}/execution.md`);
     await page.getByTestId("answer-field-operating_mode").selectOption("autonomous");
     await page.getByTestId("answer-field-progress_scope_outcome").fill("Captured from the page");
+    await page.getByTestId("answer-field-execution_note").fill("Task named on the page");
     // A schema-invalid answer is refused with the step's message and changes nothing.
     await page.getByTestId("answer-field-task_file").fill("nope");
     await page.getByTestId("answer-submit").click();
@@ -359,6 +360,7 @@ test("answering the waiting step from the page continues the run and records the
       execution_file: `${workspace}/execution.md`,
       operating_mode: "autonomous",
       progress_scope_outcome: "from the agent",
+      execution_note: "Task named by the agent",
     });
     expect(stale).toContain("ATTEMPT_STALE");
   } finally {
@@ -396,6 +398,7 @@ test("the graph follows the run to its next step after the reader travelled else
       execution_file: `${workspace}/execution.md`,
       operating_mode: "autonomous",
       progress_scope_outcome: "from the agent",
+      execution_note: "Task named by the agent",
     });
     await page.locator("button:has(svg.lucide-refresh-cw)").first().click();
     await expect(card("create-plan")).toHaveAttribute("data-current", "true");

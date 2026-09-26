@@ -28,10 +28,11 @@ export async function quickTaskWithRepairLoop(
     execution_file: `${workspace}/execution.md`,
     operating_mode: "autonomous",
     progress_scope_outcome: "Task contract captured",
+    execution_note: "Show the repair loop",
   });
   await advanceWorkflowExecution(client, run, {
     current_plan_file: `${workspace}/plans/001/plan.md`,
-    total_steps: 3,
+    plan_steps: [{ title: "Parse" }, { title: "Build" }, { title: "Verify" }],
     progress_plan_outcome: "Three-unit plan ready for review",
   });
   await advanceWorkflowExecution(client, run, {
@@ -41,7 +42,7 @@ export async function quickTaskWithRepairLoop(
   });
   await advanceWorkflowExecution(client, run, {
     current_plan_file: `${workspace}/plans/002/plan.md`,
-    total_steps: 3,
+    plan_steps: [{ title: "Parse" }, { title: "Build" }, { title: "Verify" }],
     progress_plan_outcome: "Corrected plan replaced the rejected revision",
   });
   return run;

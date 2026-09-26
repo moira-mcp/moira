@@ -55,6 +55,7 @@ const suppliedTasks = [
 const intake = (tasks: typeof suppliedTasks) => ({
   tasks,
   progress_checklist_outcome: `${tasks.length} ordered tasks ready`,
+  execution_note: "Work the checklist",
 });
 
 const completedTask = (evidence: string) => ({
@@ -150,7 +151,8 @@ describe("todo-list minimal sequential checklist", () => {
     expect(obtain.directive).not.toContain("Content and order are separate responsibilities");
     expect(obtain.completionCondition).toContain("guide-compliant");
     expect(obtain.expressions).toEqual(["total_tasks = tasks.length", "current_task = 1"]);
-    expect(obtain.connections).toEqual({ success: "check-tasks-remaining" });
+    // The checklist is announced before work starts; the finish is announced before the end.
+    expect(obtain.connections).toEqual({ success: "notify-checklist-ready" });
 
     const execute = workflow.nodes.find((node) => node.id === "execute-task");
     expect(execute?.type).toBe("agent-directive");
@@ -181,7 +183,8 @@ describe("todo-list minimal sequential checklist", () => {
         exit: "No tasks remain on the checklist.",
       },
     });
-    expect(workflow.nodes).toHaveLength(9);
+    // Nine working and routing nodes, plus the two notifications (checklist ready, all done).
+    expect(workflow.nodes).toHaveLength(11);
 
     // The checklist may be replaced mid-run, but only through a jump target: no node routes into
     // it, so a revision is always a deliberate agent decision, never a step the flow walks into.

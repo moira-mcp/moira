@@ -91,6 +91,10 @@ describe("public workflow selection surfaces", () => {
           `${leftSlug}/${leftId}`.localeCompare(`${rightSlug}/${rightId}`),
         ),
     ).toEqual([
+      ["quick-task", "notify-finished"],
+      ["quick-task", "notify-plan-approval"],
+      ["quick-task", "notify-result-ready"],
+      ["quick-task", "notify-work-started"],
       ["robust-task", "notify-completion"],
       ["robust-task", "notify-escalation"],
       ["robust-task", "notify-plan-ready"],
@@ -102,6 +106,8 @@ describe("public workflow selection surfaces", () => {
       ["software-development-flow", "notify-workflow-complete"],
       ["software-development-flow", "notify-workflow-finished-without-finalization"],
       ["software-development-flow", "notify-workflow-stopped"],
+      ["todo-list", "notify-checklist-ready"],
+      ["todo-list", "notify-finished"],
       ["verified-research", "notify-result-ready"],
     ]);
     for (const node of genericNodes) {

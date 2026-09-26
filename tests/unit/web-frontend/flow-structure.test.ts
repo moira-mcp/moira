@@ -159,7 +159,8 @@ describe("delete plan", () => {
         source: "plan-review",
         key: "route-operating-mode-plan-approval",
         protected: false,
-        proposed: "present-plan",
+        // The condition's default leads to the plan-ready notification before the approval.
+        proposed: "notify-plan-approval",
       },
     ]);
     const referenced = deletePlan(quickTask(), "present-to-user");

@@ -5,7 +5,7 @@ description: Filesystem-backed bounded non-development planning, execution and i
 
 import { Aside } from '@astrojs/starlight/components';
 
-Quick Task runs a bounded multi-step non-development task as Plan → Approve → Execute → Review → Accept; in autonomous mode the approval and acceptance steps are skipped (see [Operating mode](#operating-mode)). It keeps complete task, plan, review, decision, change, and evidence records in an execution-specific filesystem workspace. Workflow context carries only bounded file references, the approved plan length, the execution cursor, and short values used for routing.
+Quick Task runs a bounded multi-step non-development task as Plan → Approve → Execute → Review → Accept; in autonomous mode the approval and acceptance steps are skipped (see [Operating mode](#operating-mode)). It keeps complete task, plan, review, decision, change, and evidence records in an execution-specific filesystem workspace. Workflow context carries only bounded file references, the plan's unit titles and length, the execution cursor, a one-line result, and short values used for routing.
 
 <Aside type="tip">
 Use Quick Task when an agent has filesystem access and bounded non-development work fits a plan of at most ten meaningful units. For software implementation, bug fixing, refactoring, migrations, or rollout, use [Software Development Flow](./software-development-flow/); its plan scales the lifecycle to the actual change. Use [Robust Task](/docs/reference/workflows/robust-task/) when a complex general task needs a stronger recovery policy for partial execution or operational failures.
@@ -68,7 +68,7 @@ Returned paths are constrained by JSON Schema for shape and length. File existen
 
 ## Planning and approval
 
-The planner writes between one and ten meaningful ordered work units. Each unit states its action, expected result, and a verification method appropriate to the work, and fixes that outcome rather than carrying the deliverable itself: after the plan is approved, work an intelligent executor still has to do remains. The rule matters most where the result is prose — a document, briefs for other agents, an investigation's answer — because there plan and result share a medium. The repair node that precedes approval answers for the whole plan; the revision node, which also runs mid-flight, answers for the units it shapes, because already executed units stay at their positions as they were executed. The plan body stays in `plan.md`; the workflow receives only its bounded path and exact item count.
+The planner writes between one and ten meaningful ordered work units. Each unit states its action, expected result, and a verification method appropriate to the work, and fixes that outcome rather than carrying the deliverable itself: after the plan is approved, work an intelligent executor still has to do remains. The rule matters most where the result is prose — a document, briefs for other agents, an investigation's answer — because there plan and result share a medium. The repair node that precedes approval answers for the whole plan; the revision node, which also runs mid-flight, answers for the units it shapes, because already executed units stay at their positions as they were executed. The plan body stays in `plan.md`; the workflow receives its bounded path and `plan_steps` — one short title per unit, in plan order — from which it derives the unit count. The titles are the plan list people see in notifications and on the run page.
 
 An independent reviewer reads `task.md` and the current `plan.md` directly. It writes the complete reproducible blocking finding set to `review.md` and returns the report path and `issues_count` together with the bounded current planning-progress outcome required by the response schema. A nonzero count routes to a separate repair node, which writes a new immutable plan iteration before returning to the same reviewer. Zero findings is valid and reaches the approval gate.
 
@@ -80,6 +80,9 @@ The plan length becomes authoritative for execution only after the current plan 
 
 The first step resolves `operating_mode` as `autonomous` or `interactive`. The agent reuses a mode you already stated, infers an unambiguous one — including a run started by an already autonomous parent process — and asks once only when the mode is neither stated nor derivable.
 
+The same step returns `execution_note`, the task in a few words (at most 120 characters, the
+caller's note when one was given); it heads every notification of the run.
+
 In `interactive` mode nothing changes. In `autonomous` mode the plan-approval gate is bypassed and the final step presents the result without asking for acceptance. Both independent reviews and their repair loops are identical in either mode, and the delivery stays honest: unfinished or unverified work is reported as such rather than silently accepted.
 
 ## Execution progress
@@ -88,7 +91,7 @@ The execution card and exported progress image use the same seven-block process:
 
 Each stage shows its stable purpose, the exact current role, the latest confirmed outcome, and the next meaningful action. The node that owns a semantic result writes one bounded outcome: intake summarizes the resolved contract, planning roles replace the current plan synopsis, execution replaces the latest completed-unit outcome, review roles replace the current review disposition, and presentation or rework replaces the result disposition. Writers replace the value instead of appending history.
 
-The Execute plan steps block binds the plan's counters — `current_step` as the step in progress, counted from `0`, and `total_steps` as the total — so the run reports how far through the plan it is.
+The Execute plan steps block binds the plan itself — `plan_steps` as the items with each `title`, `current_step` as the unit in progress, counted from `0`, and `total_steps` as the total — so the run and its notifications show every unit, which ones are done and which one is in progress.
 
 Active labels and summaries describe work currently in progress without hiding the last confirmed outcome. If plan repair or mid-execution replanning creates a new plan revision, its synopsis atomically replaces obsolete current and future plan meaning while retaining only still-valid completed outcomes. These progress values are render-only: conditions, connections, the plan cursor, approvals, and authority continue to come from the primary workflow state.
 
@@ -112,11 +115,28 @@ The jump states why the plan no longer fits; the same plan revision responsibili
 
 ## Result review and acceptance
 
-After all approved units, an independent reviewer reads the task, approved plan, plan decision, execution evidence, and actual artifacts. Each result state receives an immutable numeric review record. The reviewer writes all current blocking defects to `review.md` and returns its path and `issues_count` together with the bounded current review-progress outcome required by the response schema.
+After all approved units, an independent reviewer reads the task, approved plan, plan decision, execution evidence, and actual artifacts. Each result state receives an immutable numeric review record. The reviewer writes all current blocking defects to `review.md` and returns its path and `issues_count` together with the bounded current review-progress outcome required by the response schema, and `result_summary`: the result as it stands, in one sentence a person reads in a notification.
 
 A nonzero count routes to a separate fix node. The fix reads the complete report, reproduces and corrects confirmed defects, and writes `change.md`; the changed result then returns through the same independent review. A clean review reaches user presentation.
 
 The user's exact acceptance or rework request is written to `decision.md`. Rework reads that file, changes the result, writes `change.md`, and returns through independent review. Only explicit acceptance reaches End.
+
+## Notifications
+
+Quick Task notifies through the user's configured channels. Every message is headed by the flow
+name and the run's task, linked to the run page; none carries a file path or an image.
+
+| When | Interactive | Autonomous |
+| --- | --- | --- |
+| The reviewed plan is ready | "Plan ready for your approval" with the whole plan and the choices: approve it and the work goes ahead, or reject it with feedback to have it revised | "Plan approved — the work goes ahead" with the whole plan |
+| The reviewed result is ready | "Result ready for your review": the result in one line; accept to finish, or ask for rework | — |
+| The run finishes | "Finished": the result in one line and every unit marked `✓` | the same |
+
+A rejected plan, and a plan revised mid-run after a replan, is announced again in its revised form
+with the units already done kept as done; a rework is followed by a new result message. The
+messages are in English. Nothing sent in an autonomous run asks for a decision. Because the flow notifies, starting
+it for a user with no configured channel is refused with an instruction; an agent that wants to run
+without notifications prepares the start again with `skipNotificationCheck: true`.
 
 ## Guarantees and limits
 

@@ -39,6 +39,9 @@ const progressOutcome = {
   result: "Reviewed result presented and accepted",
 };
 
+const units = (count: number) =>
+  Array.from({ length: count }, (_, index) => ({ title: `Unit ${index + 1}` }));
+
 const exclusiveResponseShape =
   /(?:^|[\n.!?]\s+)Return only\b|(?:^|[\n.!?]\s+)Return [^.\n]+ only\.(?:\s|$)/i;
 
@@ -46,13 +49,14 @@ function successfulInputs(stepCount = 1) {
   return {
     "get-task": {
       task_file: taskFile,
+      execution_note: "Ship the quick task",
       execution_file: executionFile,
       operating_mode: "interactive",
       progress_scope_outcome: progressOutcome.scope,
     },
     "create-plan": {
       current_plan_file: planFile(1),
-      total_steps: stepCount,
+      plan_steps: units(stepCount),
       progress_plan_outcome: `${stepCount}-unit current plan ready for review`,
     },
     "plan-review": {
@@ -70,6 +74,7 @@ function successfulInputs(stepCount = 1) {
     })),
     "final-review": {
       review_file: resultReviewFile(1),
+      result_summary: "The requested change works",
       issues_count: 0,
       progress_review_outcome: progressOutcome.review,
     },
@@ -107,6 +112,7 @@ describe("quick-task scenarios", () => {
           ...successfulInputs(1),
           "get-task": {
             task_file: taskFile,
+            execution_note: "Ship the quick task",
             execution_file: executionFile,
             operating_mode: "autonomous",
             progress_scope_outcome: "Task contract captured with autonomous mode",
@@ -149,7 +155,7 @@ describe("quick-task scenarios", () => {
           avoids: ["repair-plan", "revise-plan", "fix-issues", "rework"],
           contextContains: {
             current_plan_file: planFile(1),
-            total_steps: 2,
+            plan_steps: units(2),
             current_step: 2,
           },
         },
@@ -159,13 +165,14 @@ describe("quick-task scenarios", () => {
         mockInputs: {
           "get-task": {
             task_file: taskFile,
+            execution_note: "Ship the quick task",
             execution_file: executionFile,
             operating_mode: "interactive",
             progress_scope_outcome: progressOutcome.scope,
           },
           "create-plan": {
             current_plan_file: planFile(1),
-            total_steps: 2,
+            plan_steps: units(2),
             progress_plan_outcome: "Initial two-unit plan ready for review",
           },
           "plan-review": [
@@ -187,7 +194,7 @@ describe("quick-task scenarios", () => {
           ],
           "repair-plan": {
             current_plan_file: planFile(2),
-            total_steps: 2,
+            plan_steps: units(2),
             progress_plan_outcome: "Corrected two-unit plan replaced the rejected revision",
           },
           "present-plan": [
@@ -204,7 +211,7 @@ describe("quick-task scenarios", () => {
           ],
           "revise-plan": {
             current_plan_file: planFile(3),
-            total_steps: 2,
+            plan_steps: units(2),
             progress_plan_outcome: "Revised two-unit plan incorporated exact user feedback",
           },
           "execute-step": [
@@ -214,16 +221,19 @@ describe("quick-task scenarios", () => {
           "final-review": [
             {
               review_file: resultReviewFile(1),
+              result_summary: "The requested change works",
               issues_count: 1,
               progress_review_outcome: "Independent result review found one blocking defect",
             },
             {
               review_file: resultReviewFile(2),
+              result_summary: "The requested change works",
               issues_count: 0,
               progress_review_outcome: "Corrected result independently reviewed clean",
             },
             {
               review_file: resultReviewFile(3),
+              result_summary: "The requested change works",
               issues_count: 0,
               progress_review_outcome: "Reworked result independently reviewed clean",
             },
@@ -261,7 +271,7 @@ describe("quick-task scenarios", () => {
           ],
           contextContains: {
             current_plan_file: planFile(3),
-            total_steps: 2,
+            plan_steps: units(2),
             current_step: 2,
           },
         },
@@ -274,13 +284,14 @@ describe("quick-task scenarios", () => {
         mockInputs: {
           "get-task": {
             task_file: taskFile,
+            execution_note: "Ship the quick task",
             execution_file: executionFile,
             operating_mode: "interactive",
             progress_scope_outcome: progressOutcome.scope,
           },
           "create-plan": {
             current_plan_file: planFile(1),
-            total_steps: 2,
+            plan_steps: units(2),
             progress_plan_outcome: "Initial two-unit plan ready for review",
           },
           "plan-review": [
@@ -313,7 +324,7 @@ describe("quick-task scenarios", () => {
           },
           "revise-plan": {
             current_plan_file: planFile(2),
-            total_steps: 2,
+            plan_steps: units(2),
             progress_plan_outcome:
               "Replacement two-unit plan preserves the completed prefix and revises the remainder",
           },
@@ -323,6 +334,7 @@ describe("quick-task scenarios", () => {
           ],
           "final-review": {
             review_file: resultReviewFile(1),
+            result_summary: "The requested change works",
             issues_count: 0,
             progress_review_outcome: progressOutcome.review,
           },
@@ -339,7 +351,7 @@ describe("quick-task scenarios", () => {
           avoids: ["repair-plan", "fix-issues", "rework"],
           contextContains: {
             current_plan_file: planFile(2),
-            total_steps: 2,
+            plan_steps: units(2),
             current_step: 2,
           },
         },
