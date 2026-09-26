@@ -120,8 +120,8 @@ describe("the starting templates", () => {
 
 describe("the catalogues split by tier", () => {
   test.each([
-    ["reference/patterns.md", 5],
-    ["reference/antipatterns.md", 47],
+    ["reference/patterns.md", 6],
+    ["reference/antipatterns.md", 48],
   ])("every entry of %s belongs to exactly one tier", async (path, entries) => {
     const text = (await materialized()).get(path)!;
     const sections = tierSections(text);
@@ -142,6 +142,7 @@ describe("the catalogues split by tier", () => {
         "Straight-line default",
         "Routing on the answer",
         "Verifiable completion conditions",
+        "Questions that explain and argue",
       ]),
     );
     expect(antipatterns.simple).toEqual(
@@ -149,6 +150,7 @@ describe("the catalogues split by tier", () => {
         "State without a consumer",
         "Decorative flags, statuses, result codes, and evidence",
         "Unauthorized side effects",
+        "A bare question or an unargued proposal",
       ]),
     );
     for (const machinery of [
@@ -295,11 +297,14 @@ describe("the create owners carry the level", () => {
     },
   );
 
-  test("the light review asks the two questions", () => {
+  test("the light review asks its three questions", () => {
     const text = directive("review-workflow-minimum");
     expect(text).toContain("does the workflow do what the person asked");
     expect(text).toContain(
       "does every completion condition name an observable result rather than an intention",
+    );
+    expect(text).toContain(
+      "does every step that asks the person explain the options and what follows from each, with the agent's recommendation argued",
     );
   });
 
@@ -737,5 +742,67 @@ describe("the flow's own texts agree with its routes on every level", () => {
     expect(
       acceptsAnswer("fix-light-review-findings", { ...withReason, escalation_reason: "It grew" }),
     ).toBe(false);
+  });
+});
+
+describe("a workflow's agent explains the options and argues its recommendation when it asks the person", () => {
+  test("the simple-tier pattern recommends it and the simple-tier antipattern flags its absence", async () => {
+    const files = await materialized();
+    const patterns = files.get("reference/patterns.md")!;
+    const antipatterns = files.get("reference/antipatterns.md")!;
+    const section = (text: string, title: string) => {
+      const start = text.indexOf(`### ${title}`);
+      expect(start).toBeGreaterThan(-1);
+      const next = text.indexOf("\n### ", start + 4);
+      return text.slice(start, next === -1 ? undefined : next).replace(/\s+/gu, " ");
+    };
+    const pattern = section(patterns, "Questions that explain and argue");
+    expect(pattern).toContain("what each option means and what follows from choosing it");
+    expect(pattern).toContain("which one it recommends and why");
+    const antipattern = section(antipatterns, "A bare question or an unargued proposal");
+    expect(antipattern).toContain("without telling the agent to explain the options");
+    expect(antipattern).toContain("a recommendation without its reasons");
+  });
+
+  test("the approval-gate starting shape explains both answers and argues a recommendation", async () => {
+    const template = JSON.parse(
+      (await materialized()).get("reference/templates/approval-gate.json")!,
+    ) as { nodes: Array<{ id: string; directive?: string }> };
+    const ask = template.nodes.find((node) => node.id === "ask-approval")!.directive!;
+    expect(ask).toContain("Explain what each answer leads to");
+    expect(ask).toContain("Say which answer you recommend and why");
+  });
+
+  test.each([
+    ["ask-upload", "Say which you recommend and why"],
+    [
+      "approve-structure",
+      "Say whether you recommend approving it and why, and what declining leads to",
+    ],
+    [
+      "present-edit-plan",
+      "Say whether you recommend approving it and why, and what declining leads to",
+    ],
+  ])("WMF's own gate %s explains the options and argues its recommendation", (id, text) => {
+    expect(directive(id)).toContain(text);
+    const condition = (wmf.nodes.find((node) => node.id === id) as { completionCondition: string })
+      .completionCondition;
+    expect(condition).toMatch(/recommends/u);
+  });
+
+  test("the upload question tells the truth about standard: it replaces the person's workflow with the same id", () => {
+    expect(directive("ask-upload")).toContain(
+      "replaces the person's existing workflow when one with that id exists, which is the case in an edit",
+    );
+    expect(directive("ask-upload")).not.toContain("as a new workflow of the person's");
+  });
+
+  test("WMF's own requirements conversation explains options and gives the reasons for its recommendation", async () => {
+    const conversation = (await materialized())
+      .get("reference/conversation.md")!
+      .replace(/\s+/gu, " ");
+    expect(conversation).toContain(
+      "explain the options in their terms — what each means and what follows from it — and give the reasons for your recommendation",
+    );
   });
 });
