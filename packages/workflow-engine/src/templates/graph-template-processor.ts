@@ -80,9 +80,10 @@ export class GraphTemplateProcessor {
   }
 
   /**
-   * The value of a system template variable — `executionId`, `workflowId`, `runUrl` (the run's
-   * page in the web app) and, where the caller includes it, `userId` — or undefined for any other
-   * name. System values are the engine's own and are never encoded.
+   * The value of a system template variable (`SYSTEM_TEMPLATE_VARIABLES`) — `executionId`,
+   * `workflowId`, `runUrl` (the run's page in the web app) and, where the caller includes it,
+   * `userId` — or undefined for any other name. System values are the engine's own and are never
+   * encoded.
    */
   static systemValue(
     name: string,

@@ -869,6 +869,10 @@ The text is fitted to the channel's limit (the plan takes the room left; an over
 cut at a line with `…`), so delivery never fails for length. The lock node's PIN message opens with
 the same heading in plain text.
 
+The validator warns (never blocks) when a notification's `message` would show the reader a file or
+path, a bare counter with nothing naming what it counts, or a step's raw output; see the
+notification content warning in the public Validation reference.
+
 `telegram-notification` is deprecated but remains executable for existing Telegram-specific
 workflows. Its explicit `chatId`, `parseMode`, and `replyMarkup` keep their original meanings and
 never fan out to other channels.
