@@ -30,7 +30,8 @@ During container startup, workflows reconcile from the filesystem catalog into t
 
 ```
 workflows/production/
-└── flows/      → one JSON file per owner-aware catalog entry
+├── flows/      → one JSON file per owner-aware catalog entry
+└── playbooks/  → one JSON file per bundled playbook
 ```
 
 ### Migration Script
@@ -128,6 +129,37 @@ Process:
    checked"
 8. Verifies captured workflow and baseline inputs, then applies a conflict-free immutable plan and
    all baseline changes in one transaction
+
+### Bundled Playbooks
+
+A playbook file (`workflows/production/playbooks/<uuid>.json`) carries `owner`, `slug`, `name`,
+`description`, `visibility`, `version` and `content`. Its identity is (owner, slug), the identity a
+node's `{{playbook:@owner/slug}}` reference resolves by, and its slug follows the playbook service's
+own name rule (`PLAYBOOK_SLUG_PATTERN`). `readPlaybookCatalogs()` merges the catalog directories
+like the flow catalog, and a malformed file fails loudly.
+
+`installPlaybookCatalog()` runs in the same startup script, before the flows, because a bundled
+flow may name a bundled playbook and a reference that does not resolve refuses the flow's save. Each
+playbook is reconciled three-way with the shared `reconcileManagedResource()` against its baseline in
+`managedPlaybookBaseline`, comparing content, name, description and visibility:
+
+- a file carries a semantic version (a malformed one fails the file); a catalog older than the one
+  whose version the baseline records is skipped, never rolled back;
+- new content under an unchanged version is kept out and reported like a conflict;
+- a first install creates it under its owner with the catalog's visibility;
+- an upstream-only change writes a new revision, so the playbook history keeps the old text;
+- a local edit or removal is kept while the catalog is unchanged;
+- a missing owner is skipped and reported;
+- a change on both sides keeps the local text, leaves the baseline where it is and is reported on
+  every start until the two match. Unlike a flow conflict it does not block startup: a playbook is
+  prose a node quotes, not the route a run executes. Nothing in the product edits a playbook of the
+  system owner, so a local change of one comes only from a direct database write;
+- a playbook dropped from the catalog stays in place, unlike a dropped flow: flows and their copies
+  may still name it, and removing it would make them unsavable and unstartable.
+
+A bundled flow may name only a public playbook the catalog ships under the system owner, written with
+its owner (`@moira/<slug>`), so the reference resolves for every user;
+`tests/workflow/engine/playbook-references.test.ts` enforces this.
 
 ### Execution
 

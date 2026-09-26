@@ -31,7 +31,7 @@ import type { AuthorizationService } from "../authorization/authorization-servic
 import type { UserRepository } from "../database/repositories/user-repository.js";
 
 /** Machine names are what a workflow node references, so they stay simple and predictable. */
-const SLUG_PATTERN = /^[a-z0-9][a-z0-9-]{2,79}$/;
+export const PLAYBOOK_SLUG_PATTERN = /^[a-z0-9][a-z0-9-]{2,79}$/;
 
 export class PlaybookService {
   private logger = createLogger({ component: "PlaybookService" });
@@ -97,7 +97,7 @@ export class PlaybookService {
     },
   ): Promise<{ id: string; revision: number; created: boolean }> {
     const ownerId = options.ownerId ?? userId;
-    if (!SLUG_PATTERN.test(options.slug)) {
+    if (!PLAYBOOK_SLUG_PATTERN.test(options.slug)) {
       throw new ValidationError(
         "A playbook name uses lower-case letters, digits and hyphens, 3 to 80 characters, and starts with a letter or digit",
       );

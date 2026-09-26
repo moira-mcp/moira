@@ -36,6 +36,8 @@ import {
   initializeWorkflowValidationCache,
   upgradeStoredWorkflowDefinitions,
   readWorkflowCatalogs,
+  readPlaybookCatalogs,
+  installPlaybookCatalog,
   getWorkflowsDirs,
   installCatalogEntries,
   CatalogReconciliationError,
@@ -130,6 +132,21 @@ async function migrate(): Promise<void> {
   }
 
   const dirs = getWorkflowsDirs();
+
+  // Playbooks first: a bundled flow may reference a bundled playbook, and a reference that does not
+  // resolve refuses the flow's save.
+  const playbookEntries = readPlaybookCatalogs(dirs);
+  if (playbookEntries.length > 0) {
+    const playbooks = await installPlaybookCatalog(playbookEntries, db, (msg) => console.log(msg));
+    const counts = new Map<string, number>();
+    for (const outcome of playbooks.outcomes) {
+      counts.set(outcome.classification, (counts.get(outcome.classification) ?? 0) + 1);
+    }
+    console.log(
+      `📘 Playbooks: ${[...counts].map(([classification, count]) => `${classification} ${count}`).join(", ")}`,
+    );
+  }
+
   const entries = readWorkflowCatalogs(dirs);
   console.log(
     `\nCatalog: ${entries.length} flows from ${dirs.length} director${dirs.length === 1 ? "y" : "ies"} (${dirs.join(", ")})`,

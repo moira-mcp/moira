@@ -5,7 +5,7 @@
   "visibility": "public",
   "metadata": {
     "name": "Example 1: Simple Steps",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "description": "A learning example for people new to Moira: the agent goes through four plain steps in order — understand the task, do it, check the result, report. No branches and no variables. Start it with any small task to see how Moira gives an agent one step at a time. For real work, describe the task to your agent and let it choose a ready flow or create one.",
     "tags": [
       "example",
@@ -148,7 +148,7 @@
       "id": "report",
       "type": "agent-directive",
       "directive": "Tell the user in a few sentences what you did and how you checked it.",
-      "completionCondition": "The user has a short report.",
+      "completionCondition": "The user has a short report. {{playbook:@moira/clear-report}}",
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,

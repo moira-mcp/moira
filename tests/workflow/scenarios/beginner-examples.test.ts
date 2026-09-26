@@ -2,13 +2,15 @@
  * The beginner example flows: three levels, each shipped in English and in Russian.
  *
  * They exist to be read at a glance, so their simplicity is a contract, not a style: no template
- * reference in any text the agent receives, no loop anywhere in the graph, no global variable, and
- * every fork decided by one answer of the step that asks. The two language versions of a level are
+ * reference in any text the agent receives — the one exception is Example 1's reference to the
+ * report playbook of its own language, written with its owner so it resolves for everyone — no loop
+ * anywhere in the graph, no global variable, and every fork decided by one answer of the step that
+ * asks. The two language versions of a level are
  * the same process: same steps, same routing, same answer schema — only the words differ. Every
  * branch of every flow runs to its own end through the real engine.
  */
 
-import { findCatalogEntryBySlug } from "@mcp-moira/shared";
+import { findCatalogEntryBySlug, getWorkflowsDirs, readPlaybookCatalogs } from "@mcp-moira/shared";
 import { GraphValidator, type WorkflowGraph } from "@mcp-moira/workflow-engine";
 import { deriveProcess, findBackEdges } from "@mcp-moira/workflow-engine/process";
 import { runScenario } from "../../helpers/scenario-runner.js";
@@ -22,6 +24,26 @@ function load(slug: string): WorkflowGraph {
   const entry = findCatalogEntryBySlug(slug);
   expect(entry).toBeDefined();
   return structuredClone(entry!.graph) as unknown as WorkflowGraph;
+}
+
+/** Public playbooks the system owner ships in the bundled catalog, by machine name. */
+const BUNDLED_PLAYBOOKS = new Set(
+  readPlaybookCatalogs(getWorkflowsDirs())
+    .filter((entry) => entry.owner === "system-moira" && entry.visibility === "public")
+    .map((entry) => entry.slug),
+);
+
+/** The one template the examples may carry: Example 1's report playbook, in its own language. */
+const REPORT_PLAYBOOK: Record<string, string> = {
+  "example-simple-steps": "clear-report",
+  "example-simple-steps-ru": "clear-report-ru",
+};
+
+/** A completion condition with the one allowed reference removed; anything else stays visible. */
+function withoutAllowedReference(slug: string, node: AnyNode, text: string): string {
+  const playbook = REPORT_PLAYBOOK[slug];
+  if (!playbook || node.id !== "report") return text;
+  return text.replace(`{{playbook:@moira/${playbook}}}`, "");
 }
 
 function nodesOf(workflow: WorkflowGraph): AnyNode[] {
@@ -67,7 +89,9 @@ describe("beginner example flows", () => {
     const workflow = load(slug);
     const texts = nodesOf(workflow).flatMap((node) => [
       node.directive,
-      node.completionCondition,
+      typeof node.completionCondition === "string"
+        ? withoutAllowedReference(slug, node, node.completionCondition)
+        : node.completionCondition,
       ...Object.values(node.connectionLabels ?? {}),
     ]);
     expect(texts.filter((text) => typeof text === "string" && text.includes("{{"))).toEqual([]);
@@ -85,6 +109,15 @@ describe("beginner example flows", () => {
         ]);
       }
     }
+  });
+
+  test.each([
+    ["example-simple-steps", "clear-report"],
+    ["example-simple-steps-ru", "clear-report-ru"],
+  ])("%s names the bundled report playbook in its own language", (slug, playbook) => {
+    const report = nodesOf(load(slug)).find((node) => node.id === "report")!;
+    expect(report.completionCondition).toContain(`{{playbook:@moira/${playbook}}}`);
+    expect(BUNDLED_PLAYBOOKS.has(playbook)).toBe(true);
   });
 
   test.each(LEVELS)("%s has the same process in English and in Russian", (slug) => {

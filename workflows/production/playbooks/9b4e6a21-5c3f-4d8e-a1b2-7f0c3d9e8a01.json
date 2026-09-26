@@ -1,0 +1,9 @@
+{
+  "owner": "system-moira",
+  "slug": "clear-report",
+  "visibility": "public",
+  "version": "1.0.0",
+  "name": "Clear report",
+  "description": "What a short report of finished work contains. Referenced by the learning example \"Simple steps\".",
+  "content": "A clear report is a few sentences the user can act on:\n\n- what was asked, in the user's own words;\n- what was done;\n- how the result was checked, and what the check showed;\n- what is still open, if anything.\n\nIt names things the user can see or open, and leaves out how the work was organised."
+}
