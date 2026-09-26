@@ -420,7 +420,7 @@ choose a provider, recipient, or credential:
 | `message`             | Yes      | Notification text with template support                     |
 | `format`              | No       | Portable format: `plain`, `markdown`, or `html`             |
 | `silent`              | No       | Request silent delivery where the provider supports it      |
-| `attachProgressImage` | No       | Attach the current bounded workflow-progress PNG            |
+| `attachProgressImage` | No       | Attach the run's steps as a phone-width PNG                 |
 | `planList`            | No       | Plan lines: `progress` (default), `full`, or `none`         |
 | `attachment`          | No       | One bounded base64 `image` or `document` with name and MIME |
 | `connections.default` | Yes      | Full, partial, or no-eligible-channel continuation          |

@@ -17,10 +17,6 @@ import { IGraphExecutionEngine } from "../interfaces/graph-execution-engine.js";
 import { AgentMessageQueue } from "../services/agent-message-queue.js";
 import { getTelegramClient } from "../services/telegram-client-factory.js";
 import {
-  ProgressStatisticsService,
-  statisticsForRun,
-} from "../services/progress-statistics-service.js";
-import {
   TELEGRAM_CAPTION_MAX_LENGTH,
   TELEGRAM_TEXT_MAX_LENGTH,
   TelegramError,
@@ -29,7 +25,7 @@ import {
 } from "../types/telegram-types.js";
 import { GraphTemplateProcessor } from "../templates/graph-template-processor.js";
 import { createLogger, WorkflowLogger, InternalError } from "@mcp-moira/shared";
-import { renderExecutionProgressImage } from "../utils/execution-progress-image.js";
+import { renderExecutionProgressStepsImage } from "../utils/execution-progress-steps.js";
 import { withInFlightPause } from "../utils/execution-visits.js";
 import { textEscaper, type NotificationFormat } from "../utils/notification-text.js";
 import { frameNotification, resolveNotificationFrame } from "../services/notification-frame.js";
@@ -47,7 +43,7 @@ export class TelegramNotificationHandler implements INodeHandler {
   private logger: WorkflowLogger;
 
   constructor(
-    private readonly progressImageRenderer: typeof renderExecutionProgressImage = renderExecutionProgressImage,
+    private readonly progressImageRenderer: typeof renderExecutionProgressStepsImage = renderExecutionProgressStepsImage,
   ) {
     this.templateProcessor = new GraphTemplateProcessor();
     this.logger = createLogger({ component: "TelegramNotificationHandler" });
@@ -239,18 +235,10 @@ export class TelegramNotificationHandler implements INodeHandler {
           TelegramErrorType.TEMPLATE_ERROR,
           "Workflow has no progress graph",
         );
-      // The picture shows the run as of this node, and carries the typical durations of the run's
-      // version over its owner's runs.
-      const statistics = await statisticsForRun(
-        new ProgressStatisticsService(repository),
-        graph,
-        run,
-      );
+      // The phone steps picture of the run as of this node.
       const rendered = await this.progressImageRenderer(
         graph,
         withInFlightPause(graph, run, node.id),
-        {},
-        statistics,
       );
       if (!rendered)
         throw this.createTelegramError(

@@ -13,12 +13,8 @@ import { isUserNotificationNode } from "../types/index.js";
 import { NodeResultBuilder, type NodeExecutionResult } from "../types/node-execution.js";
 import type { AgentMessageQueue } from "../services/agent-message-queue.js";
 import { getActiveUserCommunicationService } from "../services/user-communication-provider.js";
-import {
-  ProgressStatisticsService,
-  statisticsForRun,
-} from "../services/progress-statistics-service.js";
 import type { UserCommunicationService } from "../services/user-communication.js";
-import { renderExecutionProgressImage } from "../utils/execution-progress-image.js";
+import { renderExecutionProgressStepsImage } from "../utils/execution-progress-steps.js";
 import { withInFlightPause } from "../utils/execution-visits.js";
 import { textEscaper } from "../utils/notification-text.js";
 import {
@@ -34,7 +30,7 @@ export class UserNotificationHandler implements INodeHandler {
 
   constructor(
     private readonly communication: UserCommunicationService = getActiveUserCommunicationService(),
-    private readonly progressImageRenderer: typeof renderExecutionProgressImage = renderExecutionProgressImage,
+    private readonly progressImageRenderer: typeof renderExecutionProgressStepsImage = renderExecutionProgressStepsImage,
   ) {}
 
   getNodeType(): string {
@@ -70,7 +66,7 @@ export class UserNotificationHandler implements INodeHandler {
       });
       let attachment;
       if (node.attachProgressImage) {
-        attachment = await this.renderProgressAttachment(node, repository, frame);
+        attachment = await this.renderProgressAttachment(node, frame);
       } else if (node.attachment) {
         const encoded = this.templateProcessor.processDirective(node.attachment.data, context);
         if (encoded.length % 4 !== 0 || !/^[A-Za-z0-9+/]*={0,2}$/.test(encoded))
@@ -148,25 +144,13 @@ export class UserNotificationHandler implements INodeHandler {
     return processor;
   }
 
-  private async renderProgressAttachment(
-    node: UserNotificationNode,
-    repository: IDataRepository,
-    frame: NotificationFrame,
-  ) {
+  private async renderProgressAttachment(node: UserNotificationNode, frame: NotificationFrame) {
     const { graph, run } = frame;
     if (!graph?.progress || !run) throw new Error("progress_unavailable");
-    // The picture shows the run as of this node, and carries the typical durations of the run's
-    // version over its owner's runs.
-    const statistics = await statisticsForRun(
-      new ProgressStatisticsService(repository),
-      graph,
-      run,
-    );
+    // The phone steps picture of the run as of this node.
     const rendered = await this.progressImageRenderer(
       graph,
       withInFlightPause(graph, run, node.id),
-      {},
-      statistics,
     );
     if (!rendered) throw new Error("progress_unavailable");
     return {

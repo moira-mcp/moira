@@ -369,8 +369,10 @@ guidance, preventing a result from an earlier revision or unit from appearing cu
 
 Within the engine, `renderExecutionProgressImage(workflow, execution, options?)` is the supported
 workflow/execution-level image API; it projects the execution's recorded route, so a caller that
-renders mid-cycle (the notification handlers) passes `withInFlightVisit(execution, nodeId)`, an
-unpersisted copy with an open visit of the node being rendered. It returns `null` for a workflow without progress and otherwise
+renders mid-cycle passes `withInFlightVisit(execution, nodeId)`, an unpersisted copy with an open
+visit of the node being rendered. The notification handlers attach the phone steps picture
+instead: `renderExecutionProgressStepsImage(workflow, execution)` over the handler's live run
+projected with `withInFlightPause`. It returns `null` for a workflow without progress and otherwise
 returns the PNG buffer, `image/png`, dimensions, workflow version, step revision, and context
 revision. Failures
 remain errors rather than an empty image. `progressActiveLabel` may replace only the active

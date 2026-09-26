@@ -1183,6 +1183,9 @@ interface ValidationError {
   titles and block labels are escaped for the format. The text is fitted to the communication
   service's `maxTextLength`: the plan takes the room left, and an over-long message is cut at a
   line with `…`, so delivery never fails for length
+- **Progress picture** - `attachProgressImage` attaches the run's phone steps picture
+  (`renderExecutionProgressStepsImage`: 390 px wide at the phone type scale, never scaled, 3×
+  density), not the map; no statistics are read for it
 - **Run as of the node** - the frame and an attached image read the handler's `liveRun()` — the
   persisted run with the current cycle's visits, variables and note folded in as the executor will
   save them — projected with the node in flight (`withInFlightPause`); without a live run (an inline

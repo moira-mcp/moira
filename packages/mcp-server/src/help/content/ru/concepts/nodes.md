@@ -423,7 +423,7 @@ Expression node может завершиться с ошибкой в двух 
 | `message`             | Да          | Текст уведомления с поддержкой шаблонов                               |
 | `format`              | Нет         | Переносимый формат: `plain`, `markdown` или `html`                    |
 | `silent`              | Нет         | Запрос тихой доставки, если provider её поддерживает                  |
-| `attachProgressImage` | Нет         | Приложить текущий ограниченный PNG прогресса workflow                 |
+| `attachProgressImage` | Нет         | Приложить шаги запуска как PNG шириной телефона                       |
 | `planList`            | Нет         | Строки плана: `progress` (по умолчанию), `full` или `none`            |
 | `attachment`          | Нет         | Одно bounded base64-вложение `image` или `document` с именем/MIME     |
 | `connections.default` | Да          | Путь при полной, частичной доставке или отсутствии подходящих каналов |

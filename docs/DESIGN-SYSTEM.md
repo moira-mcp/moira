@@ -313,7 +313,8 @@ Organisms compose them: the map (`run/CanvasView.tsx`), the technical graph
 (`workflow/WorkflowGraph.tsx`), the contents sidebar, and the right panel's block level
 (`run/BlockDetailPanel.tsx`) and node level (`run/NodePanel.tsx`). The progress picture
 (`packages/workflow-engine/src/utils/execution-progress-renderer.ts`, the PNG behind `session
-progress-image-token` and the notification attachment) draws the same ported cards, ports and edge
+progress-image-token`; a notification attaches the phone steps picture of
+`execution-progress-steps.ts` instead) draws the same ported cards, ports and edge
 kinds as SVG without a browser: the map's layout (`process-layout.ts`), port geometry
 (`process-geometry.ts`) and facts wording (`progress-facts.ts`) live in the engine's
 `progress-visual` entry and the map imports them, so the picture and the map are one drawing of

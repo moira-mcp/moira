@@ -10,10 +10,10 @@ import {
   TelegramErrorType,
   UserCommunicationService,
   UserNotificationHandler,
-  buildExecutionProgressVisualModel,
+  buildProgressStepsModel,
+  renderProgressStepsSvg,
   builtinNodeTypeDescriptors,
   projectExecutionRun,
-  renderProgressVisualSvg,
   runPageUrl,
   getActiveCommunicationChannelRegistry,
   getActiveUserCommunicationService,
@@ -882,14 +882,12 @@ describe("UserNotificationHandler", () => {
       lastVisitNode?: string;
     }> = [];
     const pictures: string[] = [];
-    const statisticsReceived: unknown[] = [];
     const handler = new UserNotificationHandler(
       { deliver, maxTextLength: 4096 } as unknown as UserCommunicationService,
-      async (workflow, execution, _options, statistics) => {
-        statisticsReceived.push(statistics ?? null);
+      async (workflow, execution) => {
         pictures.push(
-          renderProgressVisualSvg(
-            await buildExecutionProgressVisualModel(projectExecutionRun(workflow, execution)!),
+          renderProgressStepsSvg(
+            buildProgressStepsModel(projectExecutionRun(workflow, execution)!),
           ),
         );
         renderedFor.push({
@@ -966,49 +964,6 @@ describe("UserNotificationHandler", () => {
     expect(renderedFor).toEqual([
       { currentNodeId: "notify", waitingOn: null, lastVisitNode: "notify" },
     ]);
-    // An unstamped run's picture is drawn without statistics.
-    expect(statisticsReceived).toEqual([null]);
-
-    // A version-stamped run's picture carries the statistics of that version over the owner's
-    // completed runs, so the cards show their typical durations.
-    statisticsReceived.length = 0;
-    const stamped = {
-      ...repo,
-      getExecution: async () => ({
-        ...(await repo.getExecution("12345678-rest")),
-        executionId: "12345678-rest",
-        workflowId: "workflow-id",
-        userId: "user-1",
-        workflowVersion: "1.0.0",
-      }),
-      summarizeExecutionsByWorkflowVersion: async () => ({
-        count: 0,
-        lastCompletedAt: null,
-        unstamped: 0,
-      }),
-      listExecutionsByWorkflowVersion: async () => [],
-    } as unknown as IDataRepository;
-    await handler.execute(
-      node,
-      {
-        variables: { status: "success" },
-        nodeStates: {},
-        executionId: "12345678-rest",
-        workflowId: "workflow-id",
-        userId: "user-1",
-      },
-      new AgentMessageQueue(),
-      stamped,
-      {} as IGraphExecutionEngine,
-    );
-    expect(statisticsReceived).toEqual([
-      expect.objectContaining({
-        workflowId: "workflow-id",
-        workflowVersion: "1.0.0",
-        sampledRuns: 0,
-      }),
-    ]);
-
     // A notification that leads to a lock gate renders its image from the same copy the message
     // describes: the run waiting on the gate.
     renderedFor.length = 0;

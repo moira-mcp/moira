@@ -49,7 +49,7 @@ moira-workflow ./workflows/production/flows/<flow>.json update analyze-and-plan 
 # Override the block's label only while this node is current (or clear with none)
 moira-workflow ./workflows/production/flows/<flow>.json update analyze-and-plan --progress-active-label "Implement {{unit}}/{{total}}"
 
-# Attach/clear the shared progress PNG on a notification node
+# Attach/clear the run's steps picture on a notification node
 moira-workflow ./workflows/production/flows/<flow>.json update notify-plan-ready --progress-node-id plan --attach-progress-image true
 
 # Replace all connections
