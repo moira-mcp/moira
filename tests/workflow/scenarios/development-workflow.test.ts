@@ -1085,9 +1085,6 @@ describe("software-development-flow", () => {
     expect(
       inputSchemaOf(presentingNode(workflow, "review-unit-completeness")).globalInputs,
     ).toContain("progress_checkpoint_outcome");
-    expect(workflow.nodes.find((node) => node.id === "notify-workflow-stopped")).not.toHaveProperty(
-      "attachProgressImage",
-    );
 
     const approval = inputSchemaOf(presentingNode(workflow, "approve-plan"));
     expect(approval.globalInputs).toEqual(["progress_plan_outcome"]);

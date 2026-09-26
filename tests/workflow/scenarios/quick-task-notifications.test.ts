@@ -98,9 +98,11 @@ describe("Quick Task notifications", () => {
     expect(revised).toContain(
       "📝 0/3\n▶ 1. Add the setting\n○ 2. Wire the toggle\n○ 3. Document the toggle",
     );
-    // The result waits for the reader: one line and the choices.
+    // The result waits for the reader: one line, the choices, and where the run stands.
     expect(result).toContain("The settings page has a working dark\\_mode toggle");
-    expect(result).toContain("Accept it to finish, or ask for rework");
+    expect(result).toContain(
+      "Accept it to finish, or ask for rework and say what to change.\n\n📝 3/3\n\n",
+    );
     // The finish: the result and every unit done.
     expect(finished).toContain("Finished");
     expect(finished).toContain(

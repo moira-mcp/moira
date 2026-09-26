@@ -532,14 +532,9 @@ describe("Software Development Flow notifications", () => {
     ).rejects.toThrow(new RegExp(`The answer for ${nodeId} \\(visit 1\\) was rejected`, "u"));
   });
 
-  test("the flow validates without a notification content warning, and no notification attaches a picture", async () => {
+  test("the flow validates without a notification content warning", async () => {
     const result = await new GraphValidator().validateUnified(workflow);
     expect(result.valid).toBe(true);
     expect(result.issues.filter((issue) => issue.message.startsWith("Notification "))).toEqual([]);
-    expect(
-      workflow.nodes.filter(
-        (node) => (node as { attachProgressImage?: boolean }).attachProgressImage,
-      ),
-    ).toEqual([]);
   });
 });
