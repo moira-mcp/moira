@@ -281,9 +281,15 @@ describe("recorded route of real runs", () => {
       operating_mode: "autonomous",
       visual_validation_preference: "disabled",
       progress_intake_outcome: "Task captured",
+      execution_note: "Route the development run",
+      goal_summary: "The run's route is recorded",
     });
     await run.step();
-    await run.step({ health_outcome: "external_blocker", progress_intake_outcome: "Blocked" });
+    await run.step({
+      health_outcome: "external_blocker",
+      blocker_summary: "The package registry is unreachable",
+      progress_intake_outcome: "Blocked",
+    });
     // Ending the whole run is an explicit decision of its own in this flow; aborting a step is not
     // one of its values.
     await run.step({ blocker_decision: "end_workflow", progress_intake_outcome: "Ended" });

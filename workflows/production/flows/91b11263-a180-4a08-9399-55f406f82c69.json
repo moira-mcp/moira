@@ -2,7 +2,7 @@
   "id": "91b11263-a180-4a08-9399-55f406f82c69",
   "metadata": {
     "name": "Software Development Flow",
-    "version": "16.0.0",
+    "version": "16.1.0",
     "description": "Implements one complete repository change through source-grounded requirements, independently reviewed planning, vertical units, staged validation, post-validation permanent-documentation updates, independent unit completeness, and one numeric final semantic/requirements review. Reports stay semantic and diff-first; HTML reports prefer agentic-report@latest and preserve Artifact/user-communication delivery. Authorized unit checkpoints are commit-or-no-op without receipt files or automatic repair branches. A fifteen-block process view derived from the graph, cause-aware replan, user gates, external-blocker recovery, local VCS authority, and caller-owned delivery boundaries remain intact.",
     "author": "mcp-moira-team",
     "tags": [
@@ -31,23 +31,33 @@
     {
       "id": "capture-task-and-context",
       "type": "agent-directive",
-      "directive": "Capture the user's development task and authority before repository mutation. Read all standing project instructions. Create `./moira-ws/software-development-flow-{task-name}-{YYYYMMDD}-{HHMM}/`, write this execution ID to `process-id.txt`, and keep `task-requirements.md` as the single canonical requirements source. Resolve every explicitly assigned source completely through project-native mechanisms; preserve its identity and content in durable source files, and stop on an unavailable required source.\n\nInspect project-native VCS read-only and record the baseline, current branch/bookmark and unrelated work to preserve in `vcs-baseline.md`. Write a concise `project-context.md` containing only task-relevant entry points, contracts, dependencies, tests, documentation, generated/runtime/UI surfaces, applicable project commands and material constraints. Do not include a searched-file/action inventory, activity totals, timings, hashes, copied command output or a permanent guide; do not mutate the repository.\n\nResolve `operating_mode` and `visual_validation_preference` in this same turn from existing user intent when unambiguous, otherwise ask once. Preserve authorized caller-owned follow-ups as execution reminders without adding them to development units or granting new authority. Return `workspace_path`, the two policy values and a concise current `progress_intake_outcome`.\n",
+      "directive": "Capture the user's development task and authority before repository mutation. Read all standing project instructions. Create `./moira-ws/software-development-flow-{task-name}-{YYYYMMDD}-{HHMM}/`, write this execution ID to `process-id.txt`, and keep `task-requirements.md` as the single canonical requirements source. Resolve every explicitly assigned source completely through project-native mechanisms; preserve its identity and content in durable source files, and stop on an unavailable required source.\n\nInspect project-native VCS read-only and record the baseline, current branch/bookmark and unrelated work to preserve in `vcs-baseline.md`. Write a concise `project-context.md` containing only task-relevant entry points, contracts, dependencies, tests, documentation, generated/runtime/UI surfaces, applicable project commands and material constraints. Do not include a searched-file/action inventory, activity totals, timings, hashes, copied command output or a permanent guide; do not mutate the repository.\n\nResolve `operating_mode` and `visual_validation_preference` in this same turn from existing user intent when unambiguous, otherwise ask once. Preserve authorized caller-owned follow-ups as execution reminders without adding them to development units or granting new authority. Return `workspace_path`, the two policy values and a concise current `progress_intake_outcome`.\n\n\nReturn `execution_note`: the task in a few words, as a person would name it — it heads every notification of this run; reuse the caller's note when one was given. Return `goal_summary`: the goal of the task in one sentence a person understands without the workspace — no file names, no internal values — the plan messages show it.",
       "completionCondition": "Task, authority, assigned sources, canonical requirements, read-only VCS baseline, operating mode, visual preference, correlated workspace, and relevant project context are durably captured before mutation; every already-authorized caller-owned follow-up is stored as an active execution reminder without becoming development work or authority",
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,
-        "properties": {},
+        "properties": {
+          "execution_note": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120,
+            "description": "The run's task in a few words, shown as the heading of every notification of this run; the caller's note when one was given"
+          }
+        },
         "required": [
-          "workspace_path",
+          "execution_note",
+          "goal_summary",
           "operating_mode",
+          "progress_intake_outcome",
           "visual_validation_preference",
-          "progress_intake_outcome"
+          "workspace_path"
         ],
         "globalInputs": [
-          "workspace_path",
+          "goal_summary",
           "operating_mode",
+          "progress_intake_outcome",
           "visual_validation_preference",
-          "progress_intake_outcome"
+          "workspace_path"
         ]
       },
       "connections": {
@@ -176,15 +186,17 @@
     {
       "id": "revise-requirements",
       "type": "agent-directive",
-      "directive": "Use the verbatim feedback in {{workspace_path}}/requirements-feedback.md to update {{workspace_path}}/task-requirements.md. Preserve every unaffected requirement and authority boundary, resolve conflicts with the user when necessary, and keep one canonical requirements source. Do not create a parallel summary.\n\nProgress outcome ownership: Return a concise truthful current result in progress_intake_outcome for this responsibility and its actual disposition. Replace the prior value; do not append history, predict a branch that has not resolved, or claim an effect before success.",
+      "directive": "Use the verbatim feedback in {{workspace_path}}/requirements-feedback.md to update {{workspace_path}}/task-requirements.md. Preserve every unaffected requirement and authority boundary, resolve conflicts with the user when necessary, and keep one canonical requirements source. Do not create a parallel summary.\n\nReturn `goal_summary`: the goal of the task as the revised requirements now state it, in one sentence a person understands without the workspace — no file names, no internal values — the plan messages show it.\n\nProgress outcome ownership: Return a concise truthful current result in progress_intake_outcome for this responsibility and its actual disposition. Replace the prior value; do not append history, predict a branch that has not resolved, or claim an effect before success.",
       "completionCondition": "Canonical requirements incorporate the feedback without losing unaffected requirements",
       "inputSchema": {
         "type": "object",
         "properties": {},
         "required": [
+          "goal_summary",
           "progress_intake_outcome"
         ],
         "globalInputs": [
+          "goal_summary",
           "progress_intake_outcome"
         ]
       },
@@ -211,7 +223,7 @@
     {
       "id": "assess-project-health",
       "type": "agent-directive",
-      "directive": "Before assessment, read `{{workspace_path}}/standards/review.md`. Decide from project instructions and `project-context.md` whether initial project-health evidence applies to this task; when it does, run the smallest startup or baseline checks that establish the starting state. Replace `{{workspace_path}}/project-health.md` with the check identity and reason, semantic outcome, material evidence or minimal reproducible diagnostic, and limitations. Return `health_outcome=pass|not_applicable|unrelated_failure|repository_failure|external_blocker` and the current `progress_intake_outcome`.",
+      "directive": "Before assessment, read `{{workspace_path}}/standards/review.md`. Decide from project instructions and `project-context.md` whether initial project-health evidence applies to this task; when it does, run the smallest startup or baseline checks that establish the starting state. Replace `{{workspace_path}}/project-health.md` with the check identity and reason, semantic outcome, material evidence or minimal reproducible diagnostic, and limitations. Return `health_outcome=pass|not_applicable|unrelated_failure|repository_failure|external_blocker` and the current `progress_intake_outcome`.\n\nWhen you return `health_outcome=external_blocker`, also return `blocker_summary`: the external blocker, in one sentence a person understands without the workspace — no file names, no internal values — it is sent to people with their choices.",
       "completionCondition": "Applicable baseline evidence and a truthful classified outcome exist in project-health.md",
       "inputSchema": {
         "type": "object",
@@ -232,12 +244,32 @@
           "progress_intake_outcome"
         ],
         "globalInputs": [
+          "blocker_summary",
           "progress_intake_outcome"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "health_outcome": {
+                  "const": "external_blocker"
+                }
+              },
+              "required": [
+                "health_outcome"
+              ]
+            },
+            "then": {
+              "required": [
+                "blocker_summary"
+              ]
+            }
+          }
         ]
       },
       "connections": {
         "success": "create-plan",
-        "wait-for-health-state-change": "wait-for-health-state-change"
+        "wait-for-health-state-change": "notify-health-blocker"
       },
       "progressNodeId": "health",
       "progressActiveContent": {
@@ -323,15 +355,17 @@
     {
       "id": "create-plan",
       "type": "agent-directive",
-      "directive": "Before planning, read `{{workspace_path}}/standards/planning.md`. Create `{{workspace_path}}/plans/{{plan_revision}}/plan.md` from canonical requirements, assigned primary sources, task-relevant repository evidence and VCS baseline.\n\nDefine independently completable outcome-oriented units with responsibilities, boundaries, dependencies and ordering, contracts, invariants, observable acceptance evidence, applicable tests, permanent-documentation outcome, material runtime/security/performance/UI obligations, risks and unresolved decisions. Do not prescribe an exhaustive file/symbol list, commands, microsteps or pseudocode. Each unit has exactly one `visualMode` and `userApproval`; autonomous mode makes every approval false. Record only development-owned work and authorized project-native local commit policy. Keep push, pull request, publication, release and deployment as caller-owned reminders rather than plan units.\n\nReturn a concise current `progress_plan_outcome`.\n",
+      "directive": "Before planning, read `{{workspace_path}}/standards/planning.md`. Create `{{workspace_path}}/plans/{{plan_revision}}/plan.md` from canonical requirements, assigned primary sources, task-relevant repository evidence and VCS baseline.\n\nDefine independently completable outcome-oriented units with responsibilities, boundaries, dependencies and ordering, contracts, invariants, observable acceptance evidence, applicable tests, permanent-documentation outcome, material runtime/security/performance/UI obligations, risks and unresolved decisions. Do not prescribe an exhaustive file/symbol list, commands, microsteps or pseudocode. Each unit has exactly one `visualMode` and `userApproval`; autonomous mode makes every approval false. Record only development-owned work and authorized project-native local commit policy. Keep push, pull request, publication, release and deployment as caller-owned reminders rather than plan units.\n\nReturn a concise current `progress_plan_outcome`.\n\n\nReturn `plan_units`: the plan's units, one short title each in plan order, as a person reads them — it is the plan list people see at plan approval, while the work runs and at the finish. Replace the whole list.",
       "completionCondition": "A complete outcome-oriented current development plan exists; every unit has valid visualMode and userApproval, discriminating evidence, producer-owned code/tests/documentation completeness, dependencies, and stable closed-unit origins; push, PR, publication, release, and deployment are excluded from units and every already-authorized caller-owned follow-up remains an active execution reminder",
       "inputSchema": {
         "type": "object",
         "properties": {},
         "required": [
+          "plan_units",
           "progress_plan_outcome"
         ],
         "globalInputs": [
+          "plan_units",
           "progress_plan_outcome"
         ]
       },
@@ -409,12 +443,15 @@
       "connectionLabels": {
         "success": "review clean",
         "replan": "plan itself is wrong"
-      }
+      },
+      "expressions": [
+        "total_steps = plan_units.length"
+      ]
     },
     {
       "id": "repair-plan",
       "type": "agent-directive",
-      "directive": "Before repair, read `{{workspace_path}}/standards/planning.md` and `{{workspace_path}}/standards/review.md`. Read `{{workspace_path}}/plans/{{plan_revision}}/plan.md` and its exact `{{workspace_path}}/plans/{{plan_revision}}/review.md`. Correct every plan-owned blocker in the same plan while preserving the original goal, valid decisions, executor freedom, and completed units at their originating revision and index.\n\nReturn `repair_outcome=changed` after a coherent plan repair. When the defect requires a material revision or touching a closed unit, leave the plan unchanged, write the route-current diagnosis to `{{workspace_path}}/plans/{{plan_revision}}/repair.md`, and return `repair_outcome=replan`. Return the current `progress_plan_outcome`.",
+      "directive": "Before repair, read `{{workspace_path}}/standards/planning.md` and `{{workspace_path}}/standards/review.md`. Read `{{workspace_path}}/plans/{{plan_revision}}/plan.md` and its exact `{{workspace_path}}/plans/{{plan_revision}}/review.md`. Correct every plan-owned blocker in the same plan while preserving the original goal, valid decisions, executor freedom, and completed units at their originating revision and index.\n\nReturn `repair_outcome=changed` after a coherent plan repair. When the defect requires a material revision or touching a closed unit, leave the plan unchanged, write the route-current diagnosis to `{{workspace_path}}/plans/{{plan_revision}}/repair.md`, and return `repair_outcome=replan`. Return the current `progress_plan_outcome`.\n\nWhen the repair is `changed`, also return `plan_units`: the plan's units, one short title each in plan order, as a person reads them — it is the plan list people see at plan approval, while the work runs and at the finish. Replace the whole list.",
       "completionCondition": "Plan findings are reproduced and cause-classified; the plan either changed coherently or replan was selected before invalid mutation, and closed units keep both their content and the index they were closed at, and every unit it shapes fixes what must become true, the evidence that would accept it, and what it depends on rather than carrying the deliverable",
       "inputSchema": {
         "type": "object",
@@ -433,7 +470,27 @@
           "progress_plan_outcome"
         ],
         "globalInputs": [
+          "plan_units",
           "progress_plan_outcome"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "repair_outcome": {
+                  "const": "changed"
+                }
+              },
+              "required": [
+                "repair_outcome"
+              ]
+            },
+            "then": {
+              "required": [
+                "plan_units"
+              ]
+            }
+          }
         ]
       },
       "connections": {
@@ -524,7 +581,7 @@
         "approved": "activate-reviewed-plan"
       },
       "progressNodeId": "plan-approval",
-      "progressActiveLabel": "Approve plan r{{plan_revision}}",
+      "progressActiveLabel": "Plan approval",
       "progressActiveContent": {
         "summary": "Ask whether the reviewed development plan is accepted",
         "outcome": "Current responsibility in progress",
@@ -546,15 +603,17 @@
     {
       "id": "revise-plan-after-rejection",
       "type": "agent-directive",
-      "directive": "Before this responsibility, read `{{workspace_path}}/standards/planning.md`.\n\nWrite the material plan revision {{plan_revision}} to {{workspace_path}}/plans/{{plan_revision}}/plan.md, from the rejected plan at {{workspace_path}}/plans/{{previous_plan_revision}}/plan.md and the verbatim rejection at {{workspace_path}}/plans/{{previous_plan_revision}}/user-feedback.md. The engine has already advanced the revision number; do not renumber it. Preserve the rejected revision where it stands, carry forward unaffected requirements and completed work, and do not create a summary relay. For every accepted completed outcome carried forward, record its exact originating plan revision and originating unit index and cite evidence beneath that origin; never relabel it as evidence of its new array position.\n\nProgress outcome ownership: Return a concise truthful current result in progress_plan_outcome for this responsibility and its actual disposition. Replace the prior value; do not append history, predict a branch that has not resolved, or claim an effect before success.",
+      "directive": "Before this responsibility, read `{{workspace_path}}/standards/planning.md`.\n\nWrite the material plan revision {{plan_revision}} to {{workspace_path}}/plans/{{plan_revision}}/plan.md, from the rejected plan at {{workspace_path}}/plans/{{previous_plan_revision}}/plan.md and the verbatim rejection at {{workspace_path}}/plans/{{previous_plan_revision}}/user-feedback.md. The engine has already advanced the revision number; do not renumber it. Preserve the rejected revision where it stands, carry forward unaffected requirements and completed work, and do not create a summary relay. For every accepted completed outcome carried forward, record its exact originating plan revision and originating unit index and cite evidence beneath that origin; never relabel it as evidence of its new array position.\n\nReturn `plan_units`: the plan's units, one short title each in plan order, as a person reads them — it is the plan list people see at plan approval, while the work runs and at the finish. Replace the whole list.\n\nProgress outcome ownership: Return a concise truthful current result in progress_plan_outcome for this responsibility and its actual disposition. Replace the prior value; do not append history, predict a branch that has not resolved, or claim an effect before success.",
       "completionCondition": "A new material plan revision incorporates the user's rejection feedback, and closed units keep both their content and the index they were closed at, and every unit it shapes fixes what must become true, the evidence that would accept it, and what it depends on rather than carrying the deliverable",
       "inputSchema": {
         "type": "object",
         "properties": {},
         "required": [
+          "plan_units",
           "progress_plan_outcome"
         ],
         "globalInputs": [
+          "plan_units",
           "progress_plan_outcome"
         ]
       },
@@ -652,7 +711,7 @@
     {
       "id": "repair-cheap-validation",
       "type": "agent-directive",
-      "directive": "Before repair, read `{{workspace_path}}/standards/engineering.md`, `{{workspace_path}}/standards/tests.md`, and `{{workspace_path}}/standards/review.md`. Read `{{workspace_path}}/plans/{{plan_revision}}/step-{{current_step_index}}/iteration-{{current_iteration}}/cheap-validation.md`, the approved unit in `{{workspace_path}}/plans/{{plan_revision}}/plan.md`, actual repository state, and `{{workspace_path}}/plans/{{plan_revision}}/step-{{current_step_index}}/unit-report.md`. Repair every confirmed in-plan repository defect owned by this gate. Permanent project documentation is not owned here and remains deferred to `update-unit-documentation`.\n\nFor a changed repair, update `{{workspace_path}}/plans/{{plan_revision}}/step-{{current_step_index}}/iteration-{{current_iteration}}/repair.md` and `{{workspace_path}}/plans/{{plan_revision}}/step-{{current_step_index}}/unit-report.md`, and return the actual `mutation_scope` defined by the review standard. If the gate does not own the defect, write its diagnosis and `replan` disposition to that exact iteration repair file without mutation and return `repair_outcome=replan`. Return the current `progress_tests_outcome`.",
+      "directive": "Before repair, read `{{workspace_path}}/standards/engineering.md`, `{{workspace_path}}/standards/tests.md`, and `{{workspace_path}}/standards/review.md`. Read `{{workspace_path}}/plans/{{plan_revision}}/step-{{current_step_index}}/iteration-{{current_iteration}}/cheap-validation.md`, the approved unit in `{{workspace_path}}/plans/{{plan_revision}}/plan.md`, actual repository state, and `{{workspace_path}}/plans/{{plan_revision}}/step-{{current_step_index}}/unit-report.md`. Repair every confirmed in-plan repository defect owned by this gate. Permanent project documentation is not owned here and remains deferred to `update-unit-documentation`.\n\nFor a changed repair, update `{{workspace_path}}/plans/{{plan_revision}}/step-{{current_step_index}}/iteration-{{current_iteration}}/repair.md` and `{{workspace_path}}/plans/{{plan_revision}}/step-{{current_step_index}}/unit-report.md`, and return the actual `mutation_scope` defined by the review standard. If the gate does not own the defect, write its diagnosis and `replan` disposition to that exact iteration repair file without mutation and return `repair_outcome=replan`. Return the current `progress_tests_outcome`.\n\nWhen you return `repair_outcome=replan`, also return `blocker_summary`: why the plan must change, in one sentence a person understands without the workspace — no file names, no internal values — it is sent to people with their choices.",
       "completionCondition": "Cheap-validation defects are reproduced and cause-classified; changed repair states actual verification-only or product scope, or replans before invalid mutation",
       "inputSchema": {
         "type": "object",
@@ -694,16 +753,34 @@
                 "mutation_scope"
               ]
             }
+          },
+          {
+            "if": {
+              "properties": {
+                "repair_outcome": {
+                  "const": "replan"
+                }
+              },
+              "required": [
+                "repair_outcome"
+              ]
+            },
+            "then": {
+              "required": [
+                "blocker_summary"
+              ]
+            }
           }
         ],
         "globalInputs": [
+          "blocker_summary",
           "progress_tests_outcome"
         ]
       },
       "connections": {
         "success": "advance-evidence-iteration",
-        "approve-current-unit-closure": "approve-current-unit-closure",
-        "mark-verification-only-iteration": "mark-verification-only-iteration"
+        "mark-verification-only-iteration": "mark-verification-only-iteration",
+        "approve-current-unit-closure": "route-closure-mode"
       },
       "progressNodeId": "unit-validation",
       "progressActiveLabel": "Repair validation · {{current_step_index}}/{{total_steps}} · i{{current_iteration}}",
@@ -755,7 +832,7 @@
     {
       "id": "review-test-adequacy",
       "type": "agent-directive",
-      "directive": "Before review, read `{{workspace_path}}/standards/tests.md` and `{{workspace_path}}/standards/review.md`. Judge the current unit's test adequacy locally from its approved contract, actual current behavior and tests, and current validation evidence. Overwrite the iteration-qualified test-adequacy report. Return `review_outcome=pass|repair|replan` and the current `progress_tests_outcome`. The later completeness review owns independent unit review.",
+      "directive": "Before review, read `{{workspace_path}}/standards/tests.md` and `{{workspace_path}}/standards/review.md`. Judge the current unit's test adequacy locally from its approved contract, actual current behavior and tests, and current validation evidence. Overwrite the iteration-qualified test-adequacy report. Return `review_outcome=pass|repair|replan` and the current `progress_tests_outcome`. The later completeness review owns independent unit review.\n\nWhen you return `review_outcome=replan`, also return `blocker_summary`: why the plan must change, in one sentence a person understands without the workspace — no file names, no internal values — it is sent to people with their choices.",
       "completionCondition": "Current unit test adequacy is judged from primary tests and current evidence; causes are classified and review_outcome routes artifact repair or replan correctly",
       "inputSchema": {
         "type": "object",
@@ -775,13 +852,33 @@
           "progress_tests_outcome"
         ],
         "globalInputs": [
+          "blocker_summary",
           "progress_tests_outcome"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "review_outcome": {
+                  "const": "replan"
+                }
+              },
+              "required": [
+                "review_outcome"
+              ]
+            },
+            "then": {
+              "required": [
+                "blocker_summary"
+              ]
+            }
+          }
         ]
       },
       "connections": {
         "success": "route-current-verification-only",
-        "approve-current-unit-closure": "approve-current-unit-closure",
-        "repair-test-adequacy": "repair-test-adequacy"
+        "repair-test-adequacy": "repair-test-adequacy",
+        "approve-current-unit-closure": "route-closure-mode"
       },
       "progressNodeId": "unit-validation",
       "progressActiveLabel": "Review tests · {{current_step_index}}/{{total_steps}} · i{{current_iteration}}",
@@ -819,7 +916,7 @@
     {
       "id": "repair-test-adequacy",
       "type": "agent-directive",
-      "directive": "Before repair, read `{{workspace_path}}/standards/tests.md` and `{{workspace_path}}/standards/review.md`. Read `{{workspace_path}}/plans/{{plan_revision}}/step-{{current_step_index}}/iteration-{{current_iteration}}/test-adequacy-review.md`, the approved unit in `{{workspace_path}}/plans/{{plan_revision}}/plan.md`, actual repository state, and `{{workspace_path}}/plans/{{plan_revision}}/step-{{current_step_index}}/unit-report.md`. Repair every confirmed in-plan behavior or test defect owned by this gate. Permanent project documentation is not owned here and remains deferred to `update-unit-documentation`.\n\nFor a changed repair, update `{{workspace_path}}/plans/{{plan_revision}}/step-{{current_step_index}}/iteration-{{current_iteration}}/repair.md` and `{{workspace_path}}/plans/{{plan_revision}}/step-{{current_step_index}}/unit-report.md`, and return the actual `mutation_scope` defined by the review standard. If the gate does not own the defect, write its diagnosis and `replan` disposition to that exact iteration repair file without mutation and return `repair_outcome=replan`. Return the current `progress_tests_outcome`.",
+      "directive": "Before repair, read `{{workspace_path}}/standards/tests.md` and `{{workspace_path}}/standards/review.md`. Read `{{workspace_path}}/plans/{{plan_revision}}/step-{{current_step_index}}/iteration-{{current_iteration}}/test-adequacy-review.md`, the approved unit in `{{workspace_path}}/plans/{{plan_revision}}/plan.md`, actual repository state, and `{{workspace_path}}/plans/{{plan_revision}}/step-{{current_step_index}}/unit-report.md`. Repair every confirmed in-plan behavior or test defect owned by this gate. Permanent project documentation is not owned here and remains deferred to `update-unit-documentation`.\n\nFor a changed repair, update `{{workspace_path}}/plans/{{plan_revision}}/step-{{current_step_index}}/iteration-{{current_iteration}}/repair.md` and `{{workspace_path}}/plans/{{plan_revision}}/step-{{current_step_index}}/unit-report.md`, and return the actual `mutation_scope` defined by the review standard. If the gate does not own the defect, write its diagnosis and `replan` disposition to that exact iteration repair file without mutation and return `repair_outcome=replan`. Return the current `progress_tests_outcome`.\n\nWhen you return `repair_outcome=replan`, also return `blocker_summary`: why the plan must change, in one sentence a person understands without the workspace — no file names, no internal values — it is sent to people with their choices.",
       "completionCondition": "Test-adequacy findings are reproduced and cause-classified; changed repair states actual verification-only or product scope, or replans before invalid mutation",
       "inputSchema": {
         "type": "object",
@@ -861,16 +958,34 @@
                 "mutation_scope"
               ]
             }
+          },
+          {
+            "if": {
+              "properties": {
+                "repair_outcome": {
+                  "const": "replan"
+                }
+              },
+              "required": [
+                "repair_outcome"
+              ]
+            },
+            "then": {
+              "required": [
+                "blocker_summary"
+              ]
+            }
           }
         ],
         "globalInputs": [
+          "blocker_summary",
           "progress_tests_outcome"
         ]
       },
       "connections": {
         "success": "advance-evidence-iteration",
-        "approve-current-unit-closure": "approve-current-unit-closure",
-        "mark-verification-only-iteration": "mark-verification-only-iteration"
+        "mark-verification-only-iteration": "mark-verification-only-iteration",
+        "approve-current-unit-closure": "route-closure-mode"
       },
       "progressNodeId": "unit-validation",
       "progressActiveLabel": "Repair tests · {{current_step_index}}/{{total_steps}} · i{{current_iteration}}",
@@ -922,7 +1037,7 @@
     {
       "id": "review-architecture",
       "type": "agent-directive",
-      "directive": "Before review, read `{{workspace_path}}/standards/engineering.md` and `{{workspace_path}}/standards/review.md`. Judge the architecture of current unit {{current_step_index}} locally against its baseline at `{{workspace_path}}/plans/{{plan_revision}}/step-{{current_step_index}}/unit-report.md`, requirements, approved `{{workspace_path}}/plans/{{plan_revision}}/plan.md`, assigned architectural sources, surrounding project code, actual implementation, and current behavior/test evidence. Overwrite `{{workspace_path}}/plans/{{plan_revision}}/step-{{current_step_index}}/iteration-{{current_iteration}}/architecture-review.md`. Return `review_outcome=pass|repair|replan` and the current `progress_review_outcome`. The later completeness review owns independent unit review.",
+      "directive": "Before review, read `{{workspace_path}}/standards/engineering.md` and `{{workspace_path}}/standards/review.md`. Judge the architecture of current unit {{current_step_index}} locally against its baseline at `{{workspace_path}}/plans/{{plan_revision}}/step-{{current_step_index}}/unit-report.md`, requirements, approved `{{workspace_path}}/plans/{{plan_revision}}/plan.md`, assigned architectural sources, surrounding project code, actual implementation, and current behavior/test evidence. Overwrite `{{workspace_path}}/plans/{{plan_revision}}/step-{{current_step_index}}/iteration-{{current_iteration}}/architecture-review.md`. Return `review_outcome=pass|repair|replan` and the current `progress_review_outcome`. The later completeness review owns independent unit review.\n\nWhen you return `review_outcome=replan`, also return `blocker_summary`: why the plan must change, in one sentence a person understands without the workspace — no file names, no internal values — it is sent to people with their choices.",
       "completionCondition": "Current unit architecture is judged from primary implementation and context; causes are classified and review_outcome routes repair or replan without widening the task",
       "inputSchema": {
         "type": "object",
@@ -942,13 +1057,33 @@
           "progress_review_outcome"
         ],
         "globalInputs": [
+          "blocker_summary",
           "progress_review_outcome"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "review_outcome": {
+                  "const": "replan"
+                }
+              },
+              "required": [
+                "review_outcome"
+              ]
+            },
+            "then": {
+              "required": [
+                "blocker_summary"
+              ]
+            }
+          }
         ]
       },
       "connections": {
         "success": "mark-product-review-current",
-        "approve-current-unit-closure": "approve-current-unit-closure",
-        "repair-architecture": "repair-architecture"
+        "repair-architecture": "repair-architecture",
+        "approve-current-unit-closure": "route-closure-mode"
       },
       "progressNodeId": "unit-validation",
       "progressActiveLabel": "{{current_step_index}}/{{total_steps}} i{{current_iteration}} · Arch review",
@@ -986,7 +1121,7 @@
     {
       "id": "repair-architecture",
       "type": "agent-directive",
-      "directive": "Before repair, read `{{workspace_path}}/standards/engineering.md` and `{{workspace_path}}/standards/review.md`. Read `{{workspace_path}}/plans/{{plan_revision}}/step-{{current_step_index}}/iteration-{{current_iteration}}/architecture-review.md`, applicable closure feedback, the approved unit in `{{workspace_path}}/plans/{{plan_revision}}/plan.md`, actual repository state, and `{{workspace_path}}/plans/{{plan_revision}}/step-{{current_step_index}}/unit-report.md`. Repair every confirmed in-plan code or test design defect owned by this gate. Permanent project documentation is not owned here and remains deferred to `update-unit-documentation`.\n\nUpdate `{{workspace_path}}/plans/{{plan_revision}}/step-{{current_step_index}}/iteration-{{current_iteration}}/repair.md` and `{{workspace_path}}/plans/{{plan_revision}}/step-{{current_step_index}}/unit-report.md`, and return the actual `mutation_scope` defined by the review standard. This gate offers `gate_local` only when the correction cannot affect behavior, contracts, test intent, or existing evidence. If the gate does not own the defect, write its diagnosis and `replan` disposition to that exact iteration repair file without mutation and return `repair_outcome=replan`. Return the current `progress_review_outcome`.",
+      "directive": "Before repair, read `{{workspace_path}}/standards/engineering.md` and `{{workspace_path}}/standards/review.md`. Read `{{workspace_path}}/plans/{{plan_revision}}/step-{{current_step_index}}/iteration-{{current_iteration}}/architecture-review.md`, applicable closure feedback, the approved unit in `{{workspace_path}}/plans/{{plan_revision}}/plan.md`, actual repository state, and `{{workspace_path}}/plans/{{plan_revision}}/step-{{current_step_index}}/unit-report.md`. Repair every confirmed in-plan code or test design defect owned by this gate. Permanent project documentation is not owned here and remains deferred to `update-unit-documentation`.\n\nUpdate `{{workspace_path}}/plans/{{plan_revision}}/step-{{current_step_index}}/iteration-{{current_iteration}}/repair.md` and `{{workspace_path}}/plans/{{plan_revision}}/step-{{current_step_index}}/unit-report.md`, and return the actual `mutation_scope` defined by the review standard. This gate offers `gate_local` only when the correction cannot affect behavior, contracts, test intent, or existing evidence. If the gate does not own the defect, write its diagnosis and `replan` disposition to that exact iteration repair file without mutation and return `repair_outcome=replan`. Return the current `progress_review_outcome`.\n\nWhen you return `repair_outcome=replan`, also return `blocker_summary`: why the plan must change, in one sentence a person understands without the workspace — no file names, no internal values — it is sent to people with their choices.",
       "completionCondition": "Architecture findings are reproduced and cause-classified; changed repair states gate-local or product scope, or replans before invalid mutation",
       "inputSchema": {
         "type": "object",
@@ -1028,16 +1163,34 @@
                 "mutation_scope"
               ]
             }
+          },
+          {
+            "if": {
+              "properties": {
+                "repair_outcome": {
+                  "const": "replan"
+                }
+              },
+              "required": [
+                "repair_outcome"
+              ]
+            },
+            "then": {
+              "required": [
+                "blocker_summary"
+              ]
+            }
           }
         ],
         "globalInputs": [
+          "blocker_summary",
           "progress_review_outcome"
         ]
       },
       "connections": {
         "success": "advance-evidence-iteration",
-        "approve-current-unit-closure": "approve-current-unit-closure",
-        "review-architecture": "review-architecture"
+        "review-architecture": "review-architecture",
+        "approve-current-unit-closure": "route-closure-mode"
       },
       "progressNodeId": "unit-validation",
       "progressActiveLabel": "Repair architecture · {{current_step_index}}/{{total_steps}} · i{{current_iteration}}",
@@ -1115,7 +1268,7 @@
         "advance-plan-revision-for-replan": "advance-plan-revision-for-replan"
       },
       "progressNodeId": "replan",
-      "progressActiveLabel": "Replan decision · r{{plan_revision}}",
+      "progressActiveLabel": "Replan decision",
       "progressActiveContent": {
         "summary": "Decide whether the current unit may close for a material replan",
         "outcome": "Current responsibility in progress",
@@ -1140,15 +1293,17 @@
     {
       "id": "revise-plan-for-replan",
       "type": "agent-directive",
-      "directive": "Before revising, read `{{workspace_path}}/standards/planning.md`. Write plan revision {{plan_revision}} from the previous revision, actual completed work, approved closure where applicable, and exactly one route-current cause. Preserve original requirements and authority, still-valid completed outcomes with their originating revision/unit, unfinished obligations, and closed-unit indices.\n\nUse the source selected by the route: current plan review/repair; implementation preparation; producer or documentation `unit-report.md`; iteration-qualified test, architecture, completeness or repair report; feature validation/repair; {{#if review-final-semantics.review_file}}`{{review-final-semantics.review_file}}` for direct final replan; {{/if}}{{#if repair-final-semantics.result_file}}`{{repair-final-semantics.result_file}}` for repair-side final replan; {{/if}}finalization repair; or final user feedback. Removed documentation-reconciliation, separate requirements-coverage and legacy fixed final-review sources are not valid. Never scan for a latest file.\n\nLate repair work becomes an explicit new unit before executable or permanent-documentation mutation. Return a concise current `progress_plan_outcome`.",
+      "directive": "Before revising, read `{{workspace_path}}/standards/planning.md`. Write plan revision {{plan_revision}} from the previous revision, actual completed work, approved closure where applicable, and exactly one route-current cause. Preserve original requirements and authority, still-valid completed outcomes with their originating revision/unit, unfinished obligations, and closed-unit indices.\n\nUse the source selected by the route: current plan review/repair; implementation preparation; producer or documentation `unit-report.md`; iteration-qualified test, architecture, completeness or repair report; feature validation/repair; {{#if review-final-semantics.review_file}}`{{review-final-semantics.review_file}}` for direct final replan; {{/if}}{{#if repair-final-semantics.result_file}}`{{repair-final-semantics.result_file}}` for repair-side final replan; {{/if}}finalization repair; or final user feedback. Removed documentation-reconciliation, separate requirements-coverage and legacy fixed final-review sources are not valid. Never scan for a latest file.\n\nLate repair work becomes an explicit new unit before executable or permanent-documentation mutation. Return a concise current `progress_plan_outcome`.\n\nReturn `plan_units`: the plan's units, one short title each in plan order, as a person reads them — it is the plan list people see at plan approval, while the work runs and at the finish. Replace the whole list.",
       "completionCondition": "A new material plan revision consumes exactly the route-current source, preserves valid completed outcomes, and carries every unfinished or newly required repair outcome, and closed units keep both their content and the index they were closed at, and every unit it shapes fixes what must become true, the evidence that would accept it, and what it depends on rather than carrying the deliverable",
       "inputSchema": {
         "type": "object",
         "properties": {},
         "required": [
+          "plan_units",
           "progress_plan_outcome"
         ],
         "globalInputs": [
+          "plan_units",
           "progress_plan_outcome"
         ]
       },
@@ -1175,7 +1330,7 @@
     {
       "id": "validate-runtime",
       "type": "agent-directive",
-      "directive": "Before runtime validation, read `{{workspace_path}}/standards/review.md`. Derive applicability from requirements, the current unit in `{{workspace_path}}/plans/{{plan_revision}}/plan.md`, actual diff, primary artifacts, project policy, and the unit's current `visual_mode`. Run the applicable runtime, browser, security, performance, or checklist evidence and replace `{{workspace_path}}/plans/{{plan_revision}}/step-{{current_step_index}}/iteration-{{current_iteration}}/runtime-validation.md`. For screenshots, create and inspect one set; HTML reporting reuses that exact set. Return `validation_outcome=pass|not_applicable|repository_failure|external_blocker` and the current `progress_review_outcome`.",
+      "directive": "Before runtime validation, read `{{workspace_path}}/standards/review.md`. Derive applicability from requirements, the current unit in `{{workspace_path}}/plans/{{plan_revision}}/plan.md`, actual diff, primary artifacts, project policy, and the unit's current `visual_mode`. Run the applicable runtime, browser, security, performance, or checklist evidence and replace `{{workspace_path}}/plans/{{plan_revision}}/step-{{current_step_index}}/iteration-{{current_iteration}}/runtime-validation.md`. For screenshots, create and inspect one set; HTML reporting reuses that exact set. Return `validation_outcome=pass|not_applicable|repository_failure|external_blocker` and the current `progress_review_outcome`.\n\nWhen you return `validation_outcome=external_blocker`, also return `blocker_summary`: the external blocker, in one sentence a person understands without the workspace — no file names, no internal values — it is sent to people with their choices.",
       "completionCondition": "All applicable runtime and checklist work is complete; screenshots were captured and actually inspected exactly when current visual_mode requires them, with one current capture set and truthful classification",
       "inputSchema": {
         "type": "object",
@@ -1195,13 +1350,33 @@
           "progress_review_outcome"
         ],
         "globalInputs": [
+          "blocker_summary",
           "progress_review_outcome"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "validation_outcome": {
+                  "const": "external_blocker"
+                }
+              },
+              "required": [
+                "validation_outcome"
+              ]
+            },
+            "then": {
+              "required": [
+                "blocker_summary"
+              ]
+            }
+          }
         ]
       },
       "connections": {
         "success": "validate-expensive",
-        "wait-for-runtime-state-change": "wait-for-runtime-state-change",
-        "repair-runtime": "repair-runtime"
+        "repair-runtime": "repair-runtime",
+        "wait-for-runtime-state-change": "notify-runtime-blocker"
       },
       "progressNodeId": "unit-validation",
       "progressActiveLabel": "Runtime validation · {{current_step_index}}/{{total_steps}} · i{{current_iteration}}",
@@ -1239,7 +1414,7 @@
     {
       "id": "repair-runtime",
       "type": "agent-directive",
-      "directive": "Before repair, read `{{workspace_path}}/standards/engineering.md`, `{{workspace_path}}/standards/tests.md`, and `{{workspace_path}}/standards/review.md`. Read `{{workspace_path}}/plans/{{plan_revision}}/step-{{current_step_index}}/iteration-{{current_iteration}}/runtime-validation.md`, the approved unit in `{{workspace_path}}/plans/{{plan_revision}}/plan.md`, actual repository state, and `{{workspace_path}}/plans/{{plan_revision}}/step-{{current_step_index}}/unit-report.md`. Repair every confirmed in-plan runtime, specialized-check, product, test, or capture-tool defect owned by this gate. Permanent project documentation is not owned here and remains deferred to `update-unit-documentation`.\n\nFor a changed repair, update `{{workspace_path}}/plans/{{plan_revision}}/step-{{current_step_index}}/iteration-{{current_iteration}}/repair.md` and `{{workspace_path}}/plans/{{plan_revision}}/step-{{current_step_index}}/unit-report.md`, and return the actual `mutation_scope` defined by the review standard. If the gate does not own the defect, write its diagnosis and `replan` disposition to that exact iteration repair file without mutation and return `repair_outcome=replan`. Return the current `progress_review_outcome`.",
+      "directive": "Before repair, read `{{workspace_path}}/standards/engineering.md`, `{{workspace_path}}/standards/tests.md`, and `{{workspace_path}}/standards/review.md`. Read `{{workspace_path}}/plans/{{plan_revision}}/step-{{current_step_index}}/iteration-{{current_iteration}}/runtime-validation.md`, the approved unit in `{{workspace_path}}/plans/{{plan_revision}}/plan.md`, actual repository state, and `{{workspace_path}}/plans/{{plan_revision}}/step-{{current_step_index}}/unit-report.md`. Repair every confirmed in-plan runtime, specialized-check, product, test, or capture-tool defect owned by this gate. Permanent project documentation is not owned here and remains deferred to `update-unit-documentation`.\n\nFor a changed repair, update `{{workspace_path}}/plans/{{plan_revision}}/step-{{current_step_index}}/iteration-{{current_iteration}}/repair.md` and `{{workspace_path}}/plans/{{plan_revision}}/step-{{current_step_index}}/unit-report.md`, and return the actual `mutation_scope` defined by the review standard. If the gate does not own the defect, write its diagnosis and `replan` disposition to that exact iteration repair file without mutation and return `repair_outcome=replan`. Return the current `progress_review_outcome`.\n\nWhen you return `repair_outcome=replan`, also return `blocker_summary`: why the plan must change, in one sentence a person understands without the workspace — no file names, no internal values — it is sent to people with their choices.",
       "completionCondition": "Runtime findings are reproduced and cause-classified; changed repair states actual verification-only or product scope, or replans before invalid mutation",
       "inputSchema": {
         "type": "object",
@@ -1281,16 +1456,34 @@
                 "mutation_scope"
               ]
             }
+          },
+          {
+            "if": {
+              "properties": {
+                "repair_outcome": {
+                  "const": "replan"
+                }
+              },
+              "required": [
+                "repair_outcome"
+              ]
+            },
+            "then": {
+              "required": [
+                "blocker_summary"
+              ]
+            }
           }
         ],
         "globalInputs": [
+          "blocker_summary",
           "progress_review_outcome"
         ]
       },
       "connections": {
         "success": "advance-evidence-iteration",
-        "approve-current-unit-closure": "approve-current-unit-closure",
-        "mark-verification-only-iteration": "mark-verification-only-iteration"
+        "mark-verification-only-iteration": "mark-verification-only-iteration",
+        "approve-current-unit-closure": "route-closure-mode"
       },
       "progressNodeId": "unit-validation",
       "progressActiveLabel": "Repair runtime · {{current_step_index}}/{{total_steps}} · i{{current_iteration}}",
@@ -1400,7 +1593,7 @@
     {
       "id": "validate-expensive",
       "type": "agent-directive",
-      "directive": "Before broad validation, read `{{workspace_path}}/standards/review.md`. From the complete current unit in `{{workspace_path}}/plans/{{plan_revision}}/plan.md`, baseline, actual diff, primary artifacts, current evidence, and project policy, decide whether broad build, test, integration, runtime, or packaging evidence is required after cheaper gates converge. Reuse only evidence that later mutations could not affect, replace `{{workspace_path}}/plans/{{plan_revision}}/step-{{current_step_index}}/iteration-{{current_iteration}}/expensive-validation.md`, and return `validation_outcome=pass|not_applicable|repository_failure|external_blocker` plus the current `progress_review_outcome`.",
+      "directive": "Before broad validation, read `{{workspace_path}}/standards/review.md`. From the complete current unit in `{{workspace_path}}/plans/{{plan_revision}}/plan.md`, baseline, actual diff, primary artifacts, current evidence, and project policy, decide whether broad build, test, integration, runtime, or packaging evidence is required after cheaper gates converge. Reuse only evidence that later mutations could not affect, replace `{{workspace_path}}/plans/{{plan_revision}}/step-{{current_step_index}}/iteration-{{current_iteration}}/expensive-validation.md`, and return `validation_outcome=pass|not_applicable|repository_failure|external_blocker` plus the current `progress_review_outcome`.\n\nWhen you return `validation_outcome=external_blocker`, also return `blocker_summary`: the external blocker, in one sentence a person understands without the workspace — no file names, no internal values — it is sent to people with their choices.",
       "completionCondition": "Applicable non-stale expensive evidence or justified inapplicability exists with truthful classification",
       "inputSchema": {
         "type": "object",
@@ -1420,13 +1613,33 @@
           "progress_review_outcome"
         ],
         "globalInputs": [
+          "blocker_summary",
           "progress_review_outcome"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "validation_outcome": {
+                  "const": "external_blocker"
+                }
+              },
+              "required": [
+                "validation_outcome"
+              ]
+            },
+            "then": {
+              "required": [
+                "blocker_summary"
+              ]
+            }
+          }
         ]
       },
       "connections": {
         "success": "update-unit-documentation",
-        "wait-for-expensive-state-change": "wait-for-expensive-state-change",
-        "repair-expensive": "repair-expensive"
+        "repair-expensive": "repair-expensive",
+        "wait-for-expensive-state-change": "notify-expensive-blocker"
       },
       "progressNodeId": "broad-validation",
       "progressActiveLabel": "Broad validation · {{current_step_index}}/{{total_steps}} · i{{current_iteration}}",
@@ -1461,7 +1674,7 @@
     {
       "id": "update-unit-documentation",
       "type": "agent-directive",
-      "directive": "Before changing permanent documentation, read `{{workspace_path}}/standards/documentation.md`. Read the complete current plan unit at `{{workspace_path}}/plans/{{plan_revision}}/plan.md`, canonical requirements, project documentation rules, the actual task-owned repository diff against its baseline, primary artifacts, and the current `{{workspace_path}}/plans/{{plan_revision}}/step-{{current_step_index}}/unit-report.md`.\n\nDiscover every permanent project document made stale or incomplete by the current unit and update only those current-state sections. Do not mutate product code, tests, schemas, configuration, generated behavior, or unrelated documentation. Do not create a documentation report or affected-path inventory.\n\nReturn `documentation_outcome=ready` when documentation is current. If the documentation pass exposes a product, test, schema, configuration, generated-behavior, or other executable defect that must be repaired before documentation can become true, record the concise cause and `product_repair` disposition in the current `unit-report.md` and return `product_repair` without making that mutation. If it exposes an invalid requirement, plan, architecture decision, criterion, evidence model, or process contract, record the concise cause and `replan` disposition in the same unit report and return `replan`. Return a concise current `progress_review_outcome`, replacing its prior value.",
+      "directive": "Before changing permanent documentation, read `{{workspace_path}}/standards/documentation.md`. Read the complete current plan unit at `{{workspace_path}}/plans/{{plan_revision}}/plan.md`, canonical requirements, project documentation rules, the actual task-owned repository diff against its baseline, primary artifacts, and the current `{{workspace_path}}/plans/{{plan_revision}}/step-{{current_step_index}}/unit-report.md`.\n\nDiscover every permanent project document made stale or incomplete by the current unit and update only those current-state sections. Do not mutate product code, tests, schemas, configuration, generated behavior, or unrelated documentation. Do not create a documentation report or affected-path inventory.\n\nReturn `documentation_outcome=ready` when documentation is current. If the documentation pass exposes a product, test, schema, configuration, generated-behavior, or other executable defect that must be repaired before documentation can become true, record the concise cause and `product_repair` disposition in the current `unit-report.md` and return `product_repair` without making that mutation. If it exposes an invalid requirement, plan, architecture decision, criterion, evidence model, or process contract, record the concise cause and `replan` disposition in the same unit report and return `replan`. Return a concise current `progress_review_outcome`, replacing its prior value.\n\nWhen you return `documentation_outcome=replan`, also return `blocker_summary`: why the plan must change, in one sentence a person understands without the workspace — no file names, no internal values — it is sent to people with their choices.",
       "completionCondition": "Every task-affected permanent document is current, or the exact product-repair or replan cause is recorded in the existing unit report without unauthorized mutation or a new report",
       "inputSchema": {
         "type": "object",
@@ -1481,13 +1694,33 @@
           "progress_review_outcome"
         ],
         "globalInputs": [
+          "blocker_summary",
           "progress_review_outcome"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "documentation_outcome": {
+                  "const": "replan"
+                }
+              },
+              "required": [
+                "documentation_outcome"
+              ]
+            },
+            "then": {
+              "required": [
+                "blocker_summary"
+              ]
+            }
+          }
         ]
       },
       "connections": {
         "success": "review-unit-completeness",
-        "approve-current-unit-closure": "approve-current-unit-closure",
-        "advance-evidence-iteration": "advance-evidence-iteration"
+        "advance-evidence-iteration": "advance-evidence-iteration",
+        "approve-current-unit-closure": "route-closure-mode"
       },
       "progressNodeId": "broad-validation",
       "progressActiveLabel": "Documentation · {{current_step_index}}/{{total_steps}} · i{{current_iteration}}",
@@ -1533,7 +1766,7 @@
     {
       "id": "repair-expensive",
       "type": "agent-directive",
-      "directive": "Before repair, read `{{workspace_path}}/standards/engineering.md`, `{{workspace_path}}/standards/tests.md`, and `{{workspace_path}}/standards/review.md`. Read `{{workspace_path}}/plans/{{plan_revision}}/step-{{current_step_index}}/iteration-{{current_iteration}}/expensive-validation.md`, the approved unit in `{{workspace_path}}/plans/{{plan_revision}}/plan.md`, actual repository state, and `{{workspace_path}}/plans/{{plan_revision}}/step-{{current_step_index}}/unit-report.md`. Repair every confirmed in-plan repository defect owned by this gate. Permanent project documentation is not owned here and remains deferred to `update-unit-documentation`.\n\nFor a changed repair, update `{{workspace_path}}/plans/{{plan_revision}}/step-{{current_step_index}}/iteration-{{current_iteration}}/repair.md` and `{{workspace_path}}/plans/{{plan_revision}}/step-{{current_step_index}}/unit-report.md`, and return the actual `mutation_scope` defined by the review standard. If the gate does not own the defect, write its diagnosis and `replan` disposition to that exact iteration repair file without mutation and return `repair_outcome=replan`. Return the current `progress_review_outcome`.",
+      "directive": "Before repair, read `{{workspace_path}}/standards/engineering.md`, `{{workspace_path}}/standards/tests.md`, and `{{workspace_path}}/standards/review.md`. Read `{{workspace_path}}/plans/{{plan_revision}}/step-{{current_step_index}}/iteration-{{current_iteration}}/expensive-validation.md`, the approved unit in `{{workspace_path}}/plans/{{plan_revision}}/plan.md`, actual repository state, and `{{workspace_path}}/plans/{{plan_revision}}/step-{{current_step_index}}/unit-report.md`. Repair every confirmed in-plan repository defect owned by this gate. Permanent project documentation is not owned here and remains deferred to `update-unit-documentation`.\n\nFor a changed repair, update `{{workspace_path}}/plans/{{plan_revision}}/step-{{current_step_index}}/iteration-{{current_iteration}}/repair.md` and `{{workspace_path}}/plans/{{plan_revision}}/step-{{current_step_index}}/unit-report.md`, and return the actual `mutation_scope` defined by the review standard. If the gate does not own the defect, write its diagnosis and `replan` disposition to that exact iteration repair file without mutation and return `repair_outcome=replan`. Return the current `progress_review_outcome`.\n\nWhen you return `repair_outcome=replan`, also return `blocker_summary`: why the plan must change, in one sentence a person understands without the workspace — no file names, no internal values — it is sent to people with their choices.",
       "completionCondition": "Expensive-validation findings are reproduced and cause-classified; changed repair states actual verification-only or product scope, or replans before invalid mutation",
       "inputSchema": {
         "type": "object",
@@ -1575,16 +1808,34 @@
                 "mutation_scope"
               ]
             }
+          },
+          {
+            "if": {
+              "properties": {
+                "repair_outcome": {
+                  "const": "replan"
+                }
+              },
+              "required": [
+                "repair_outcome"
+              ]
+            },
+            "then": {
+              "required": [
+                "blocker_summary"
+              ]
+            }
           }
         ],
         "globalInputs": [
+          "blocker_summary",
           "progress_review_outcome"
         ]
       },
       "connections": {
         "success": "advance-evidence-iteration",
-        "approve-current-unit-closure": "approve-current-unit-closure",
-        "mark-verification-only-iteration": "mark-verification-only-iteration"
+        "mark-verification-only-iteration": "mark-verification-only-iteration",
+        "approve-current-unit-closure": "route-closure-mode"
       },
       "progressNodeId": "broad-validation",
       "progressActiveLabel": "Repair broad checks · {{current_step_index}}/{{total_steps}} · i{{current_iteration}}",
@@ -1939,7 +2190,10 @@
       },
       "connectionLabels": {
         "true": "last unit closed"
-      }
+      },
+      "expressions": [
+        "completed_units = current_step_index"
+      ]
     },
     {
       "id": "advance-plan-unit",
@@ -1967,7 +2221,7 @@
     {
       "id": "validate-feature-wide",
       "type": "agent-directive",
-      "directive": "Before this responsibility, read `{{workspace_path}}/standards/review.md`.\n\nAt the final stable boundary, decide whether project policy or the complete change risk requires feature-wide compilation, tests, integration, runtime, or other broad evidence not already current. Run only applicable project-native checks and write {{workspace_path}}/feature-validation.md with exact outcomes or a concrete inapplicability reason. Classify repository failures separately from external blockers; do not run expensive multi-trial agent evals.\n\nProgress outcome ownership: Return a concise truthful current result in progress_finalize_outcome for this responsibility and its actual disposition. Replace the prior value; do not append history, predict a branch that has not resolved, or claim an effect before success.",
+      "directive": "Before this responsibility, read `{{workspace_path}}/standards/review.md`.\n\nAt the final stable boundary, decide whether project policy or the complete change risk requires feature-wide compilation, tests, integration, runtime, or other broad evidence not already current. Run only applicable project-native checks and write {{workspace_path}}/feature-validation.md with exact outcomes or a concrete inapplicability reason. Classify repository failures separately from external blockers; do not run expensive multi-trial agent evals.\n\nWhen you return `validation_outcome=external_blocker`, also return `blocker_summary`: the external blocker, in one sentence a person understands without the workspace — no file names, no internal values — it is sent to people with their choices.\n\nProgress outcome ownership: Return a concise truthful current result in progress_finalize_outcome for this responsibility and its actual disposition. Replace the prior value; do not append history, predict a branch that has not resolved, or claim an effect before success.",
       "completionCondition": "Applicable feature-wide evidence or justified inapplicability exists with truthful classification",
       "inputSchema": {
         "type": "object",
@@ -1987,13 +2241,33 @@
           "progress_finalize_outcome"
         ],
         "globalInputs": [
+          "blocker_summary",
           "progress_finalize_outcome"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "validation_outcome": {
+                  "const": "external_blocker"
+                }
+              },
+              "required": [
+                "validation_outcome"
+              ]
+            },
+            "then": {
+              "required": [
+                "blocker_summary"
+              ]
+            }
+          }
         ]
       },
       "connections": {
         "success": "review-final-semantics",
-        "wait-for-feature-state-change": "wait-for-feature-state-change",
-        "repair-feature-validation": "repair-feature-validation"
+        "repair-feature-validation": "repair-feature-validation",
+        "wait-for-feature-state-change": "notify-feature-blocker"
       },
       "progressNodeId": "feature-validation",
       "progressActiveLabel": "Feature validation",
@@ -2425,15 +2699,17 @@
     {
       "id": "revise-plan-after-feedback",
       "type": "agent-directive",
-      "directive": "Before this responsibility, read `{{workspace_path}}/standards/planning.md`.\n\nUpdate the canonical requirements from {{workspace_path}}/final-user-feedback.md without duplicating or contradicting unaffected requirements. Then write the material plan revision {{plan_revision}} to {{workspace_path}}/plans/{{plan_revision}}/plan.md, from the approved plan at {{workspace_path}}/plans/{{previous_plan_revision}}/plan.md. The engine has already advanced the revision number; do not renumber it. Preserve prior revisions and completed work, and add the outcomes needed to address the concrete dissatisfaction with tests, documentation and evidence. For every accepted completed outcome carried forward, record its exact originating plan revision and originating unit index and cite evidence beneath that origin; never relabel it as evidence of its new array position. Keep executor tactics open.\n\nProgress outcome ownership: Return a concise truthful current result in progress_plan_outcome for this responsibility and its actual disposition. Replace the prior value; do not append history, predict a branch that has not resolved, or claim an effect before success.",
+      "directive": "Before this responsibility, read `{{workspace_path}}/standards/planning.md`.\n\nUpdate the canonical requirements from {{workspace_path}}/final-user-feedback.md without duplicating or contradicting unaffected requirements. Then write the material plan revision {{plan_revision}} to {{workspace_path}}/plans/{{plan_revision}}/plan.md, from the approved plan at {{workspace_path}}/plans/{{previous_plan_revision}}/plan.md. The engine has already advanced the revision number; do not renumber it. Preserve prior revisions and completed work, and add the outcomes needed to address the concrete dissatisfaction with tests, documentation and evidence. For every accepted completed outcome carried forward, record its exact originating plan revision and originating unit index and cite evidence beneath that origin; never relabel it as evidence of its new array position. Keep executor tactics open.\n\nReturn `plan_units`: the plan's units, one short title each in plan order, as a person reads them — it is the plan list people see at plan approval, while the work runs and at the finish. Replace the whole list.\n\nProgress outcome ownership: Return a concise truthful current result in progress_plan_outcome for this responsibility and its actual disposition. Replace the prior value; do not append history, predict a branch that has not resolved, or claim an effect before success.",
       "completionCondition": "Requirements and a new material plan revision incorporate the user's final rejection feedback, and closed units keep both their content and the index they were closed at, and every unit it shapes fixes what must become true, the evidence that would accept it, and what it depends on rather than carrying the deliverable",
       "inputSchema": {
         "type": "object",
         "properties": {},
         "required": [
+          "plan_units",
           "progress_plan_outcome"
         ],
         "globalInputs": [
+          "plan_units",
           "progress_plan_outcome"
         ]
       },
@@ -2468,7 +2744,7 @@
     {
       "id": "finalize-feature",
       "type": "agent-directive",
-      "directive": "Within the already authorized project-native commit boundary, reconcile only remaining task-owned changes created after or deliberately excluded from the last unit checkpoint. Read `vcs-baseline.md`, the accepted result and actual diff. Preserve checkpoint history and unrelated work; do not stash, reset, clean, squash, amend, rebase, rewrite history, push or publish.\n\nCreate a final commit when required or verify a true no-op. Replace `finalization.md` with the semantic remaining scope, actual outcome, material limitation or blocker, and real revision identifier when one was created. Do not copy status, diff, log, command output, changed-file inventory, totals, timings or hashes. Return `finalization_outcome=pass|repository_failure|external_blocker` and the current `progress_finalize_outcome`.\n",
+      "directive": "Within the already authorized project-native commit boundary, reconcile only remaining task-owned changes created after or deliberately excluded from the last unit checkpoint. Read `vcs-baseline.md`, the accepted result and actual diff. Preserve checkpoint history and unrelated work; do not stash, reset, clean, squash, amend, rebase, rewrite history, push or publish.\n\nCreate a final commit when required or verify a true no-op. Replace `finalization.md` with the semantic remaining scope, actual outcome, material limitation or blocker, and real revision identifier when one was created. Do not copy status, diff, log, command output, changed-file inventory, totals, timings or hashes. Return `finalization_outcome=pass|repository_failure|external_blocker` and the current `progress_finalize_outcome`.\n\n\nWhen you return `finalization_outcome=external_blocker`, also return `blocker_summary`: the external blocker, in one sentence a person understands without the workspace — no file names, no internal values — it is sent to people with their choices.",
       "completionCondition": "Authorized final reconciliation succeeded or no-op, or a concrete current blocker with exact coordinates is durably classified",
       "inputSchema": {
         "type": "object",
@@ -2487,13 +2763,33 @@
           "progress_finalize_outcome"
         ],
         "globalInputs": [
+          "blocker_summary",
           "progress_finalize_outcome"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "finalization_outcome": {
+                  "const": "external_blocker"
+                }
+              },
+              "required": [
+                "finalization_outcome"
+              ]
+            },
+            "then": {
+              "required": [
+                "blocker_summary"
+              ]
+            }
+          }
         ]
       },
       "connections": {
-        "success": "resolve-finalization-blocker",
         "notify-workflow-complete": "notify-workflow-complete",
-        "repair-finalization-repository": "repair-finalization-repository"
+        "repair-finalization-repository": "repair-finalization-repository",
+        "success": "notify-finalization-blocker"
       },
       "progressNodeId": "finalize",
       "progressActiveLabel": "Finalize repository",
@@ -2665,7 +2961,7 @@
     {
       "id": "review-unit-completeness",
       "type": "agent-directive",
-      "directive": "Before independent review, read `{{workspace_path}}/standards/engineering.md`, `{{workspace_path}}/standards/tests.md`, `{{workspace_path}}/standards/documentation.md`, and `{{workspace_path}}/standards/review.md`. Delegate to a genuinely independent context when the host supports one and disclose fallback self-review otherwise.\n\nReview the complete current unit against canonical requirements and its approved contract using its baseline, actual task-owned diff, primary code and tests, permanent documentation, current `unit-report.md`, applicable preceding repair record, and current validation evidence. Overwrite `completeness-review.md`. Return `review_outcome=pass|repair|replan`, the current `progress_review_outcome`, and the existing truthful `progress_checkpoint_outcome`.",
+      "directive": "Before independent review, read `{{workspace_path}}/standards/engineering.md`, `{{workspace_path}}/standards/tests.md`, `{{workspace_path}}/standards/documentation.md`, and `{{workspace_path}}/standards/review.md`. Delegate to a genuinely independent context when the host supports one and disclose fallback self-review otherwise.\n\nReview the complete current unit against canonical requirements and its approved contract using its baseline, actual task-owned diff, primary code and tests, permanent documentation, current `unit-report.md`, applicable preceding repair record, and current validation evidence. Overwrite `completeness-review.md`. Return `review_outcome=pass|repair|replan`, the current `progress_review_outcome`, and the existing truthful `progress_checkpoint_outcome`.\n\nOn `pass`, also return `unit_result_summary`: what the unit delivered, in one sentence a person understands without the workspace — no file names, no internal values — it is sent to people with the unit's report or approval.\n\nWhen you return `review_outcome=replan`, also return `blocker_summary`: why the plan must change, in one sentence a person understands without the workspace — no file names, no internal values — it is sent to people with their choices.",
       "completionCondition": "Independent current-unit completeness review covers current code, tests, permanent documentation, and evidence without rerunning mechanical checks, records current documentation coverage, and returns the exact cause-classified outcome",
       "inputSchema": {
         "type": "object",
@@ -2678,6 +2974,12 @@
               "repair",
               "replan"
             ]
+          },
+          "unit_result_summary": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 300,
+            "description": "What the unit delivered, in one sentence a person understands without the workspace — no file names, no internal values; sent to people with the unit's report or approval"
           }
         },
         "required": [
@@ -2686,14 +2988,51 @@
           "progress_checkpoint_outcome"
         ],
         "globalInputs": [
-          "progress_review_outcome",
-          "progress_checkpoint_outcome"
+          "blocker_summary",
+          "progress_checkpoint_outcome",
+          "progress_review_outcome"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "review_outcome": {
+                  "const": "pass"
+                }
+              },
+              "required": [
+                "review_outcome"
+              ]
+            },
+            "then": {
+              "required": [
+                "unit_result_summary"
+              ]
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "review_outcome": {
+                  "const": "replan"
+                }
+              },
+              "required": [
+                "review_outcome"
+              ]
+            },
+            "then": {
+              "required": [
+                "blocker_summary"
+              ]
+            }
+          }
         ]
       },
       "connections": {
         "success": "route-unit-html-report",
-        "approve-current-unit-closure": "approve-current-unit-closure",
-        "repair-unit-completeness": "repair-unit-completeness"
+        "repair-unit-completeness": "repair-unit-completeness",
+        "approve-current-unit-closure": "route-closure-mode"
       },
       "progressNodeId": "completeness",
       "progressActiveLabel": "Independent review · {{current_step_index}}/{{total_steps}} · i{{current_iteration}}",
@@ -2732,7 +3071,7 @@
     {
       "id": "repair-unit-completeness",
       "type": "agent-directive",
-      "directive": "Before repair, read `{{workspace_path}}/standards/engineering.md`, `{{workspace_path}}/standards/tests.md`, `{{workspace_path}}/standards/documentation.md`, and `{{workspace_path}}/standards/review.md`. Read the current completeness review, approved unit, baseline, actual diff, primary artifacts, current evidence, and unit account. Repair every confirmed in-scope defect owned by this paired repair, then update the current iteration `repair.md` and `unit-report.md`.\n\nFor `repair_outcome=changed`, return the actual `mutation_scope` defined by the review standard. This paired repair offers `gate_local` only for non-executable documentation, links, or evidence projection. For a defect outside this responsibility, leave the repository unchanged and return `repair_outcome=replan`. Return the current `progress_review_outcome`.",
+      "directive": "Before repair, read `{{workspace_path}}/standards/engineering.md`, `{{workspace_path}}/standards/tests.md`, `{{workspace_path}}/standards/documentation.md`, and `{{workspace_path}}/standards/review.md`. Read the current completeness review, approved unit, baseline, actual diff, primary artifacts, current evidence, and unit account. Repair every confirmed in-scope defect owned by this paired repair, then update the current iteration `repair.md` and `unit-report.md`.\n\nFor `repair_outcome=changed`, return the actual `mutation_scope` defined by the review standard. This paired repair offers `gate_local` only for non-executable documentation, links, or evidence projection. For a defect outside this responsibility, leave the repository unchanged and return `repair_outcome=replan`. Return the current `progress_review_outcome`.\n\nWhen you return `repair_outcome=replan`, also return `blocker_summary`: why the plan must change, in one sentence a person understands without the workspace — no file names, no internal values — it is sent to people with their choices.",
       "completionCondition": "Completeness findings are reproduced, bounded by confirmed cause, and return gate-local, verification-only, product, or replan without surrogate machinery",
       "inputSchema": {
         "type": "object",
@@ -2775,17 +3114,35 @@
                 "mutation_scope"
               ]
             }
+          },
+          {
+            "if": {
+              "properties": {
+                "repair_outcome": {
+                  "const": "replan"
+                }
+              },
+              "required": [
+                "repair_outcome"
+              ]
+            },
+            "then": {
+              "required": [
+                "blocker_summary"
+              ]
+            }
           }
         ],
         "globalInputs": [
+          "blocker_summary",
           "progress_review_outcome"
         ]
       },
       "connections": {
         "success": "advance-evidence-iteration",
-        "approve-current-unit-closure": "approve-current-unit-closure",
         "mark-current-evidence-iteration": "mark-current-evidence-iteration",
-        "mark-verification-only-iteration": "mark-verification-only-iteration"
+        "mark-verification-only-iteration": "mark-verification-only-iteration",
+        "approve-current-unit-closure": "route-closure-mode"
       },
       "progressNodeId": "completeness",
       "progressActiveLabel": "Repair completeness · {{current_step_index}}/{{total_steps}} · i{{current_iteration}}",
@@ -2901,15 +3258,17 @@
     {
       "id": "revise-plan-for-teleport",
       "type": "agent-directive",
-      "directive": "Before this responsibility, read `{{workspace_path}}/standards/planning.md`.\n\nWrite material plan revision {{plan_revision}} to {{workspace_path}}/plans/{{plan_revision}}/plan.md from {{workspace_path}}/plans/{{previous_plan_revision}}/plan.md, actual completed work, and the bounded teleport rationale `{{teleport-replan.replan_rationale}}`. The engine has already advanced the revision number; do not renumber it. Preserve prior revisions, the original user outcome and authority, every still-valid completed outcome, and all unfinished obligations. For every accepted completed outcome carried forward, record its exact originating plan revision and unit index and cite evidence beneath that origin; never relabel it as evidence of its new array position. Keep executor tactics open.\n\nThis route is entered only from `teleport-replan`; the rationale is its sole transition source and needs no review report or closure feedback. State explicitly how the plan-invalidating fact changes, adds, removes, or reorders units while preserving completed outcomes and unfinished obligations. A late replan after completed units must add an explicit new repair unit before any product, permanent-documentation, contract, schema, executable/generated-behavior, configuration or test-intent mutation. A change to the original task boundary still requires the user.\nClosed units stay as they were closed and keep the index they were closed at: a unit report lives at a path addressed by that index, so a revision that shifts a closed unit makes a later executor overwrite another unit's account.\n\nProgress outcome ownership: Return a concise truthful current result in progress_plan_outcome for this responsibility and its actual disposition. Replace the prior value; do not append history, predict a branch that has not resolved, or claim an effect before success.",
+      "directive": "Before this responsibility, read `{{workspace_path}}/standards/planning.md`.\n\nWrite material plan revision {{plan_revision}} to {{workspace_path}}/plans/{{plan_revision}}/plan.md from {{workspace_path}}/plans/{{previous_plan_revision}}/plan.md, actual completed work, and the bounded teleport rationale `{{teleport-replan.replan_rationale}}`. The engine has already advanced the revision number; do not renumber it. Preserve prior revisions, the original user outcome and authority, every still-valid completed outcome, and all unfinished obligations. For every accepted completed outcome carried forward, record its exact originating plan revision and unit index and cite evidence beneath that origin; never relabel it as evidence of its new array position. Keep executor tactics open.\n\nThis route is entered only from `teleport-replan`; the rationale is its sole transition source and needs no review report or closure feedback. State explicitly how the plan-invalidating fact changes, adds, removes, or reorders units while preserving completed outcomes and unfinished obligations. A late replan after completed units must add an explicit new repair unit before any product, permanent-documentation, contract, schema, executable/generated-behavior, configuration or test-intent mutation. A change to the original task boundary still requires the user.\nClosed units stay as they were closed and keep the index they were closed at: a unit report lives at a path addressed by that index, so a revision that shifts a closed unit makes a later executor overwrite another unit's account.\n\nReturn `plan_units`: the plan's units, one short title each in plan order, as a person reads them — it is the plan list people see at plan approval, while the work runs and at the finish. Replace the whole list.\n\nProgress outcome ownership: Return a concise truthful current result in progress_plan_outcome for this responsibility and its actual disposition. Replace the prior value; do not append history, predict a branch that has not resolved, or claim an effect before success.",
       "completionCondition": "A new material plan revision consumes the bounded teleport rationale, preserves valid completed outcomes, and carries every unfinished or newly required repair outcome, and closed units keep both their content and the index they were closed at, and every unit it shapes fixes what must become true, the evidence that would accept it, and what it depends on rather than carrying the deliverable",
       "inputSchema": {
         "type": "object",
         "properties": {},
         "required": [
+          "plan_units",
           "progress_plan_outcome"
         ],
         "globalInputs": [
+          "plan_units",
           "progress_plan_outcome"
         ]
       },
@@ -3067,7 +3426,7 @@
     {
       "id": "prepare-plan-unit-implementation",
       "type": "agent-directive",
-      "directive": "Before this responsibility, read `{{workspace_path}}/standards/planning.md`.\n\nPrepare approved plan unit {{current_step_index}} of {{total_steps}} against the repository as it actually stands. Read the complete current unit from {{workspace_path}}/plans/{{plan_revision}}/plan.md, standing instructions, primary sources, dependencies, consumers, contracts, and acceptance evidence. Write {{workspace_path}}/plans/{{plan_revision}}/step-{{current_step_index}}/implementation-preparation.md with repository-grounded contracts, integration boundaries, risks, and evidence facts. Do not copy the plan into microsteps, prescribe an exhaustive file list, mutate product artifacts, revise the plan, infer policy from the intake preference, or create validation machinery.\n\nReturn ready only when the outcome, architecture fixed by the plan, criterion, evidence model, task boundary, visualMode, and userApproval remain sound. With ready, return visual_mode and approval_required exactly from this unit; in autonomous mode approval_required must be false. Return replan before mutation when a primary source proves an upstream assumption or current unit policy materially invalid, recording the cause and repository evidence in preparation. Do not return policy fields on replan.\n\nProgress outcome ownership: Return a concise truthful current result in progress_implementation_outcome for this responsibility and its actual disposition. Replace the prior value; do not append history, predict a branch that has not resolved, or claim an effect before success.",
+      "directive": "Before this responsibility, read `{{workspace_path}}/standards/planning.md`.\n\nPrepare approved plan unit {{current_step_index}} of {{total_steps}} against the repository as it actually stands. Read the complete current unit from {{workspace_path}}/plans/{{plan_revision}}/plan.md, standing instructions, primary sources, dependencies, consumers, contracts, and acceptance evidence. Write {{workspace_path}}/plans/{{plan_revision}}/step-{{current_step_index}}/implementation-preparation.md with repository-grounded contracts, integration boundaries, risks, and evidence facts. Do not copy the plan into microsteps, prescribe an exhaustive file list, mutate product artifacts, revise the plan, infer policy from the intake preference, or create validation machinery.\n\nReturn ready only when the outcome, architecture fixed by the plan, criterion, evidence model, task boundary, visualMode, and userApproval remain sound. With ready, return visual_mode and approval_required exactly from this unit; in autonomous mode approval_required must be false. Return replan before mutation when a primary source proves an upstream assumption or current unit policy materially invalid, recording the cause and repository evidence in preparation. Do not return policy fields on replan.\n\nWhen you return `preparation_outcome=replan`, also return `blocker_summary`: why the plan must change, in one sentence a person understands without the workspace — no file names, no internal values — it is sent to people with their choices.\n\nProgress outcome ownership: Return a concise truthful current result in progress_implementation_outcome for this responsibility and its actual disposition. Replace the prior value; do not append history, predict a branch that has not resolved, or claim an effect before success.",
       "completionCondition": "The exact current unit is repository-grounded and either ready with visual_mode and approval_required derived from the plan, or has a concrete pre-mutation replan diagnosis",
       "inputSchema": {
         "type": "object",
@@ -3114,15 +3473,33 @@
                 "approval_required"
               ]
             }
+          },
+          {
+            "if": {
+              "properties": {
+                "preparation_outcome": {
+                  "const": "replan"
+                }
+              },
+              "required": [
+                "preparation_outcome"
+              ]
+            },
+            "then": {
+              "required": [
+                "blocker_summary"
+              ]
+            }
           }
         ],
         "globalInputs": [
+          "blocker_summary",
           "progress_implementation_outcome"
         ]
       },
       "connections": {
-        "success": "approve-current-unit-closure",
-        "implement-plan-unit": "implement-plan-unit"
+        "implement-plan-unit": "implement-plan-unit",
+        "success": "route-closure-mode"
       },
       "progressNodeId": "implement",
       "progressActiveLabel": "Prepare · {{current_step_index}}/{{total_steps}}",
@@ -3145,12 +3522,16 @@
       ],
       "connectionLabels": {
         "success": "preparation found the plan invalid"
-      }
+      },
+      "expressions": [
+        "unit_index = current_step_index - 1",
+        "current_unit_title = plan_units[unit_index].title"
+      ]
     },
     {
       "id": "complete-plan-unit",
       "type": "agent-directive",
-      "directive": "Before producer completion, read `{{workspace_path}}/standards/engineering.md` and `{{workspace_path}}/standards/tests.md`. Read the complete current unit, `implementation-preparation.md`, actual diff and primary artifacts, standing instructions and current `unit-report.md`.\n\nOn initial completion `previous_iteration=0`. After an ordinary product repair, read the exact `iteration-{{previous_iteration}}/repair.md`. When this node was reached because `update-unit-documentation.documentation_outcome=product_repair`, instead read the documentation cause in the current `unit-report.md`; no iteration repair file exists for that transition.\n\nFinish every reproducible producer-owned executable omission in the approved unit, rerun useful focused checks and replace `unit-report.md` with current semantic truth. Do not mutate permanent project documentation or create another account. Return `completion_outcome=ready` when no producer-owned omission remains. For an invalid upstream plan, criterion, evidence model or process contract, record the concrete cause and `replan` in `unit-report.md` and return `replan`. Return the current `progress_implementation_outcome`.\n",
+      "directive": "Before producer completion, read `{{workspace_path}}/standards/engineering.md` and `{{workspace_path}}/standards/tests.md`. Read the complete current unit, `implementation-preparation.md`, actual diff and primary artifacts, standing instructions and current `unit-report.md`.\n\nOn initial completion `previous_iteration=0`. After an ordinary product repair, read the exact `iteration-{{previous_iteration}}/repair.md`. When this node was reached because `update-unit-documentation.documentation_outcome=product_repair`, instead read the documentation cause in the current `unit-report.md`; no iteration repair file exists for that transition.\n\nFinish every reproducible producer-owned executable omission in the approved unit, rerun useful focused checks and replace `unit-report.md` with current semantic truth. Do not mutate permanent project documentation or create another account. Return `completion_outcome=ready` when no producer-owned omission remains. For an invalid upstream plan, criterion, evidence model or process contract, record the concrete cause and `replan` in `unit-report.md` and return `replan`. Return the current `progress_implementation_outcome`.\n\n\nWhen you return `completion_outcome=replan`, also return `blocker_summary`: why the plan must change, in one sentence a person understands without the workspace — no file names, no internal values — it is sent to people with their choices.",
       "completionCondition": "The complete approved vertical unit, its truthful current account, applicable tests, and focused evidence exist before staged validation; permanent project documentation remains intentionally deferred to the post-validation documentation pass",
       "inputSchema": {
         "type": "object",
@@ -3169,12 +3550,32 @@
           "progress_implementation_outcome"
         ],
         "globalInputs": [
+          "blocker_summary",
           "progress_implementation_outcome"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "completion_outcome": {
+                  "const": "replan"
+                }
+              },
+              "required": [
+                "completion_outcome"
+              ]
+            },
+            "then": {
+              "required": [
+                "blocker_summary"
+              ]
+            }
+          }
         ]
       },
       "connections": {
-        "success": "approve-current-unit-closure",
-        "validate-cheap": "validate-cheap"
+        "validate-cheap": "validate-cheap",
+        "success": "route-closure-mode"
       },
       "progressNodeId": "implement",
       "progressActiveLabel": "Complete unit · {{current_step_index}}/{{total_steps}}",
@@ -3218,24 +3619,24 @@
       ],
       "connections": {
         "true": "notify-plan-approval",
-        "default": "activate-reviewed-plan"
+        "default": "notify-implementation-started"
       }
     },
     {
       "id": "notify-plan-approval",
       "type": "user-notification",
-      "message": "📋 *Plan approval required*\n\nReviewed development plan revision {{plan_revision}} is ready for your decision.",
+      "message": "📋 *Plan ready for your approval*\n\n🎯 Goal: {{goal_summary}}\n\nApprove it and the work goes ahead on this plan, or reject it with feedback and the plan is revised.",
       "format": "markdown",
       "connections": {
         "default": "approve-plan"
       },
       "progressNodeId": "plan-approval",
-      "attachProgressImage": true
+      "planList": "full"
     },
     {
       "id": "activate-reviewed-plan",
       "type": "agent-directive",
-      "directive": "Activate the exact independently reviewed current plan revision at {{workspace_path}}/plans/{{plan_revision}}/plan.md without asking for or emitting approval. Read the complete plan when its exact current content is not already available or may have changed. Derive the next uncompleted 1-based unit index and total executable unit count from this revision, respecting accepted carry-forward records and their originating revision/index. Read {{workspace_path}}/vcs-baseline.md and set VCS authority strictly from the originating task authority recorded there; plan approval cannot grant, revoke, or transport it. Return current_step_index, total_steps, and vcs_commits_authorized as the functional activation fields in the same response as the required progress output. Do not edit the plan, requirements, authority record, repository, or VCS.\n\nProgress outcome ownership: Return progress_plan_outcome as the bounded semantic synopsis of the accepted plan you just read: name plan revision {{plan_revision}}, the exact executable unit count returned in total_steps, and concise unit outcomes or titles sufficient to understand the decomposition. Do not return only a generic approval status. When every title cannot fit 500 characters, return the exact count plus a truthful shorter semantic synopsis; never truncate text or enlarge the bound.",
+      "directive": "Activate the exact independently reviewed current plan revision at {{workspace_path}}/plans/{{plan_revision}}/plan.md without asking for or emitting approval. Read the complete plan when its exact current content is not already available or may have changed. Derive the next uncompleted 1-based unit index from this revision (the unit count, {{total_steps}}, follows the plan's `plan_units`), respecting accepted carry-forward records and their originating revision/index. Read {{workspace_path}}/vcs-baseline.md and set VCS authority strictly from the originating task authority recorded there; plan approval cannot grant, revoke, or transport it. Return current_step_index and vcs_commits_authorized as the functional activation fields in the same response as the required progress output. Do not edit the plan, requirements, authority record, repository, or VCS.\n\nProgress outcome ownership: Return progress_plan_outcome as the bounded semantic synopsis of the accepted plan you just read: name plan revision {{plan_revision}}, the exact executable unit count ({{total_steps}}), and concise unit outcomes or titles sufficient to understand the decomposition. Do not return only a generic approval status. When every title cannot fit 500 characters, return the exact count plus a truthful shorter semantic synopsis; never truncate text or enlarge the bound.",
       "completionCondition": "The exact reviewed plan is activated with a correct cursor, unit bound, and task-start VCS authority without any approval decision",
       "inputSchema": {
         "type": "object",
@@ -3243,13 +3644,11 @@
         "properties": {},
         "required": [
           "current_step_index",
-          "total_steps",
           "vcs_commits_authorized",
           "progress_plan_outcome"
         ],
         "globalInputs": [
           "current_step_index",
-          "total_steps",
           "vcs_commits_authorized",
           "progress_plan_outcome"
         ]
@@ -3258,7 +3657,7 @@
         "success": "prepare-plan-unit-implementation"
       },
       "progressNodeId": "plan-approval",
-      "progressActiveLabel": "Activate plan r{{plan_revision}}",
+      "progressActiveLabel": "Plan activation",
       "progressActiveContent": {
         "summary": "Activate plan r{{plan_revision}}",
         "outcome": "Current responsibility in progress",
@@ -3270,7 +3669,8 @@
       "expressions": [
         "current_iteration = 1",
         "previous_iteration = 0",
-        "product_review_iteration = 0"
+        "product_review_iteration = 0",
+        "completed_units = current_step_index - 1"
       ]
     },
     {
@@ -3297,7 +3697,7 @@
     {
       "id": "create-and-upload-step-report",
       "type": "agent-directive",
-      "directive": "Create the requested HTML report for unit {{current_step_index}} from the complete current unit, stabilized unit account, current validation evidence, accepted screenshot set and independent completeness review. Prefer npm package `agentic-report@latest` when available; choose the concrete commands from the package and project rather than embedding a package manual here.\n\nReuse the exact screenshots already captured and visually inspected by runtime validation. Do not capture again. Build the self-contained responsive `step-report.html` with the semantic unit result, affected behavior, material evidence, expected-versus-observed visual assessment, risks and limitations, but no changed-file/command inventories, activity totals, timings, hashes, copied logs or development history. Open and inspect the final HTML and embedded images, then upload that exact artifact through the supported Moira Artifact API linked to this execution.\n\nReturn the observed HTTPS URL as `report_url` and the current `progress_review_outcome`. On upload failure, expose the concrete external blocker and leave the node incomplete; do not notify or substitute a local path.\n",
+      "directive": "Create the requested HTML report for unit {{current_step_index}} from the complete current unit, stabilized unit account, current validation evidence, accepted screenshot set and independent completeness review. Prefer npm package `agentic-report@latest` when available; choose the concrete commands from the package and project rather than embedding a package manual here.\n\nReuse the exact screenshots already captured and visually inspected by runtime validation. Do not capture again. Build the self-contained responsive `step-report.html` with the semantic unit result, affected behavior, material evidence, expected-versus-observed visual assessment, risks and limitations, but no changed-file/command inventories, activity totals, timings, hashes, copied logs or development history. Open and inspect the final HTML and embedded images, then upload that exact artifact through the supported Moira Artifact API linked to this execution.\n\nReturn the observed artifact URL as `report_url` and the current `progress_review_outcome`. On upload failure, expose the concrete external blocker and leave the node incomplete; do not notify or substitute a local path.",
       "completionCondition": "The current accepted screenshots were reused once in an inspected self-contained HTML report and the exact report was uploaded as an execution-linked Moira artifact with an observed public URL",
       "inputSchema": {
         "type": "object",
@@ -3306,7 +3706,7 @@
           "report_url": {
             "type": "string",
             "minLength": 1,
-            "pattern": "^https://"
+            "pattern": "^https?://"
           }
         },
         "required": [
@@ -3318,7 +3718,8 @@
         ]
       },
       "connections": {
-        "success": "notify-report-ready"
+        "success": "notify-report-ready",
+        "approval": "notify-unit-approval-report"
       },
       "progressNodeId": "user-review",
       "progressActiveLabel": "Visual report · {{current_step_index}}/{{total_steps}}",
@@ -3326,18 +3727,44 @@
         "summary": "Visual report · {{current_step_index}}/{{total_steps}}",
         "outcome": "Current responsibility in progress",
         "next": "Continue through remaining review, repair, checkpoint policy, or final reconciliation"
-      }
+      },
+      "cases": [
+        {
+          "when": {
+            "operator": "and",
+            "conditions": [
+              {
+                "operator": "eq",
+                "left": {
+                  "contextPath": "prepare-plan-unit-implementation.approval_required"
+                },
+                "right": true
+              },
+              {
+                "operator": "eq",
+                "left": {
+                  "contextPath": "operating_mode"
+                },
+                "right": "interactive"
+              }
+            ]
+          },
+          "output": "approval"
+        }
+      ]
     },
     {
       "id": "notify-report-ready",
       "type": "user-notification",
-      "message": "🖼 *Visual report ready*\n\nPlan unit {{current_step_index}} report: {{create-and-upload-step-report.report_url}}",
+      "message": "🖼 *Unit {{current_step_index}} “{{current_unit_title}}” is done* — {{review-unit-completeness.unit_result_summary}}\n\nReport: {{create-and-upload-step-report.report_url}}",
       "format": "markdown",
       "connections": {
-        "default": "route-unit-approval-required"
+        "default": "route-checkpoint-authority"
       },
       "progressNodeId": "user-review",
-      "attachProgressImage": true
+      "connectionLabels": {
+        "default": "report sent, no approval needed"
+      }
     },
     {
       "id": "route-unit-approval-required",
@@ -3346,11 +3773,23 @@
       "cases": [
         {
           "when": {
-            "operator": "eq",
-            "left": {
-              "contextPath": "prepare-plan-unit-implementation.approval_required"
-            },
-            "right": true
+            "operator": "and",
+            "conditions": [
+              {
+                "operator": "eq",
+                "left": {
+                  "contextPath": "prepare-plan-unit-implementation.approval_required"
+                },
+                "right": true
+              },
+              {
+                "operator": "eq",
+                "left": {
+                  "contextPath": "operating_mode"
+                },
+                "right": "interactive"
+              }
+            ]
           },
           "output": "true"
         }
@@ -3366,45 +3805,66 @@
     {
       "id": "notify-unit-approval",
       "type": "user-notification",
-      "message": "👤 *Unit approval required*\n\nPlan unit {{current_step_index}} is ready and the workflow is waiting for your decision.",
+      "message": "👤 *Unit {{current_step_index}} “{{current_unit_title}}” is ready for your review* — {{review-unit-completeness.unit_result_summary}}\n\nChoose: accept it, or reject it with feedback and it is reworked.",
       "format": "markdown",
       "connections": {
         "default": "review-plan-unit-with-user"
       },
-      "progressNodeId": "user-review",
-      "attachProgressImage": true
+      "progressNodeId": "user-review"
     },
     {
       "id": "notify-workflow-complete",
       "type": "user-notification",
-      "message": "✅ *Software Development Flow finished*\n\nThe workflow reached its normal terminal result. Review the final report for exact outcomes, limitations, and follow-up delivery intent.",
+      "message": "🏁 *Finished* — {{create-final-report.outcome_summary}}\n\nLimitations and follow-ups: {{create-final-report.limitations_summary}}\n\n{{#if vcs_commits_authorized}}The work is committed locally.{{else}}No commits were made; the changes are in the working tree.{{/if}}\n\nFinal report: {{create-final-report.final_report_url}}",
       "format": "markdown",
       "connections": {
         "default": "end"
       },
       "progressNodeId": "finalize",
-      "attachProgressImage": true
+      "planList": "full"
     },
     {
       "id": "notify-workflow-stopped",
       "type": "user-notification",
-      "message": "⛔ *Software Development Flow stopped*\n\nYou explicitly chose to end the whole workflow before normal completion. The current repository and workspace state is preserved; review the active blocker or closure evidence for the exact incomplete work.",
+      "message": "⛔ *Stopped* — you ended the run. {{blocker_summary}}\n\nThe work done so far stays in the repository; nothing after this point was done.",
       "format": "markdown",
       "connections": {
         "default": "end-aborted"
       },
-      "progressNodeId": "stopped"
+      "progressNodeId": "stopped",
+      "planList": "full"
     },
     {
       "id": "create-final-report",
       "type": "agent-directive",
-      "directive": "Before reporting, read `{{workspace_path}}/standards/review.md`. Create `{{workspace_path}}/final-report.md` from current requirements, assigned sources, approved plan revisions, the actual final repository diff, revision-qualified unit evidence, feature validation, the exact numeric final review, and accepted report URLs. State the delivered user-visible result, material evidence, risks, limitations, exclusions, remaining caller-owned follow-ups, and necessary standalone locators. Do not mutate the repository. Return the current `progress_finalize_outcome`.",
-      "completionCondition": "A factual current final report covers the complete repository result, evidence, limitations, and caller or parent delivery follow-up without any approval decision or mutation",
+      "directive": "Before reporting, read `{{workspace_path}}/standards/review.md`. Create `{{workspace_path}}/final-report.md` from current requirements, assigned sources, approved plan revisions, the actual final repository diff, revision-qualified unit evidence, feature validation, the exact numeric final review, and accepted report URLs. State the delivered user-visible result, material evidence, risks, limitations, exclusions, remaining caller-owned follow-ups, and necessary standalone locators. Do not mutate the repository. Return the current `progress_finalize_outcome`.\n\nRender that exact `final-report.md` as a self-contained HTML page (artifacts are hosted as HTML), upload it through the supported Moira Artifact API linked to this execution, and return the observed artifact URL as `final_report_url`; on upload failure, expose the concrete external blocker and leave the node incomplete — do not substitute a local path. Also return `outcome_summary`, the delivered result, and `limitations_summary`, the limitations and remaining follow-ups or that there are none, each in one sentence a person understands without the workspace — no file names, no internal values — the final approval and finish messages show them.",
+      "completionCondition": "A factual current final report covers the complete repository result, evidence, limitations, and caller or parent delivery follow-up without any approval decision or mutation, and its self-contained HTML rendering was uploaded as an execution-linked Moira artifact with an observed URL",
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,
-        "properties": {},
+        "properties": {
+          "final_report_url": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^https?://"
+          },
+          "outcome_summary": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 300,
+            "description": "The delivered result, in one sentence a person understands without the workspace — no file names, no internal values"
+          },
+          "limitations_summary": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 300,
+            "description": "Limitations and remaining follow-ups, in one sentence a person understands without the workspace — no file names, no internal values, or that there are none"
+          }
+        },
         "required": [
+          "final_report_url",
+          "limitations_summary",
+          "outcome_summary",
           "progress_finalize_outcome"
         ],
         "globalInputs": [
@@ -3449,24 +3909,144 @@
     {
       "id": "notify-final-approval",
       "type": "user-notification",
-      "message": "👤 *Final result approval required*\n\nThe complete Software Development Flow report is ready and the workflow is waiting for your decision.",
+      "message": "✅ *The result is ready for your approval* — {{create-final-report.outcome_summary}}\n\nLimitations: {{create-final-report.limitations_summary}}\n\nFinal report: {{create-final-report.final_report_url}}\n\nChoose: accept it and the run finishes, or reject it with feedback and the plan is revised.",
       "format": "markdown",
       "connections": {
         "default": "report-and-accept-feature"
       },
       "progressNodeId": "final-review",
-      "attachProgressImage": true
+      "planList": "full"
     },
     {
       "id": "notify-workflow-finished-without-finalization",
       "type": "user-notification",
-      "message": "⚠️ *Software Development Flow closed without local finalization*\n\nYou explicitly chose to finish while the external finalization blocker remained. Verified repository content is preserved, but the already-authorized local finalization was not completed. Review `finalization.md` in the workflow workspace for the exact blocker and remaining local action.",
+      "message": "⚠️ *Finished without the final local commit* — {{blocker_summary}}\n\nThe verified work is kept; committing the remaining changes is left to you.",
       "format": "markdown",
       "connections": {
         "default": "end"
       },
       "progressNodeId": "finalize",
-      "attachProgressImage": true
+      "planList": "full"
+    },
+    {
+      "id": "notify-implementation-started",
+      "type": "user-notification",
+      "progressNodeId": "plan-approval",
+      "format": "markdown",
+      "planList": "full",
+      "message": "▶️ *Plan approved — the work goes ahead on this plan.*\n\n🎯 Goal: {{goal_summary}}",
+      "connections": {
+        "default": "activate-reviewed-plan"
+      }
+    },
+    {
+      "id": "notify-unit-approval-report",
+      "type": "user-notification",
+      "progressNodeId": "user-review",
+      "format": "markdown",
+      "planList": "progress",
+      "message": "👤 *Unit {{current_step_index}} “{{current_unit_title}}” is ready for your review* — {{review-unit-completeness.unit_result_summary}}\n\nReport: {{create-and-upload-step-report.report_url}}\n\nChoose: accept it, or reject it with feedback and it is reworked.",
+      "connections": {
+        "default": "review-plan-unit-with-user"
+      }
+    },
+    {
+      "id": "notify-health-blocker",
+      "type": "user-notification",
+      "progressNodeId": "health",
+      "format": "markdown",
+      "planList": "progress",
+      "message": "🚧 *Blocked before planning* — {{blocker_summary}}\n\nChoose: fix it and let the agent try again, or end the whole run — the work done so far stays.",
+      "connections": {
+        "default": "wait-for-health-state-change"
+      }
+    },
+    {
+      "id": "notify-runtime-blocker",
+      "type": "user-notification",
+      "progressNodeId": "unit-validation",
+      "format": "markdown",
+      "planList": "progress",
+      "message": "🚧 *Unit {{current_step_index}} “{{current_unit_title}}” is blocked* — {{blocker_summary}}\n\nChoose: fix it and let the agent try again, or end the whole run — the work done so far stays.",
+      "connections": {
+        "default": "wait-for-runtime-state-change"
+      }
+    },
+    {
+      "id": "notify-expensive-blocker",
+      "type": "user-notification",
+      "progressNodeId": "broad-validation",
+      "format": "markdown",
+      "planList": "progress",
+      "message": "🚧 *Unit {{current_step_index}} “{{current_unit_title}}” is blocked* — {{blocker_summary}}\n\nChoose: fix it and let the agent try again, or end the whole run — the work done so far stays.",
+      "connections": {
+        "default": "wait-for-expensive-state-change"
+      }
+    },
+    {
+      "id": "notify-feature-blocker",
+      "type": "user-notification",
+      "progressNodeId": "feature-validation",
+      "format": "markdown",
+      "planList": "progress",
+      "message": "🚧 *The final checks are blocked* — {{blocker_summary}}\n\nChoose: fix it and let the agent try again, or end the whole run — the work done so far stays.",
+      "connections": {
+        "default": "wait-for-feature-state-change"
+      }
+    },
+    {
+      "id": "notify-finalization-blocker",
+      "type": "user-notification",
+      "progressNodeId": "finalize",
+      "format": "markdown",
+      "planList": "progress",
+      "message": "🚧 *Finishing is blocked* — {{blocker_summary}}\n\nChoose: fix it and let the agent try again, finish without the final local commit (the verified work stays), or end the whole run.",
+      "connections": {
+        "default": "resolve-finalization-blocker"
+      }
+    },
+    {
+      "id": "route-closure-mode",
+      "type": "condition",
+      "progressNodeId": "replan",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "operating_mode"
+            },
+            "right": "interactive"
+          },
+          "output": "interactive"
+        }
+      ],
+      "connections": {
+        "interactive": "notify-unit-closure",
+        "default": "notify-unit-closure-agent"
+      }
+    },
+    {
+      "id": "notify-unit-closure",
+      "type": "user-notification",
+      "progressNodeId": "replan",
+      "format": "markdown",
+      "planList": "progress",
+      "message": "🔀 *Unit {{current_step_index}} “{{current_unit_title}}” needs a plan change* — {{blocker_summary}}\n\nChoose: approve closing this unit and revising the plan, or end the whole run — the work done so far stays.",
+      "connections": {
+        "default": "approve-current-unit-closure"
+      }
+    },
+    {
+      "id": "notify-unit-closure-agent",
+      "type": "user-notification",
+      "progressNodeId": "replan",
+      "format": "markdown",
+      "planList": "progress",
+      "message": "🔀 *Unit {{current_step_index}} “{{current_unit_title}}” needs a plan change* — {{blocker_summary}}\n\nWhen the reason holds, the agent closes this unit and revises the plan; otherwise it will ask you whether to end the run.",
+      "connections": {
+        "default": "approve-current-unit-closure"
+      }
     }
   ],
   "variableRegistry": {
@@ -3611,6 +4191,56 @@
       "default": "Pending",
       "minLength": 1,
       "maxLength": 500
+    },
+    "plan_units": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 40,
+      "description": "The approved plan's units, one short title each in plan order; the plan list people see in notifications and on the run page",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "title"
+        ],
+        "properties": {
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          }
+        }
+      }
+    },
+    "completed_units": {
+      "type": "integer",
+      "minimum": 0,
+      "default": 0,
+      "description": "How many plan units are closed: the units before the current one, and the current one once it closes"
+    },
+    "unit_index": {
+      "type": "integer",
+      "minimum": 0,
+      "default": 0,
+      "description": "Zero-based position of the current unit in the plan's units"
+    },
+    "current_unit_title": {
+      "type": "string",
+      "default": "",
+      "maxLength": 120,
+      "description": "The current unit's title as the plan names it"
+    },
+    "blocker_summary": {
+      "type": "string",
+      "default": "",
+      "maxLength": 300,
+      "description": "What blocks the run or the unit, in one sentence a person understands without the workspace — no file names, no internal values; sent to people with the choices"
+    },
+    "goal_summary": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 300,
+      "description": "The goal of the task, in one sentence a person understands without the workspace — no file names, no internal values; the plan messages show it"
     }
   },
   "progress": {
@@ -3677,7 +4307,10 @@
           "default": "unit-validation"
         },
         "list": {
+          "items": "plan_units",
+          "title": "title",
           "current": "current_step_index",
+          "done": "completed_units",
           "total": "total_steps"
         }
       },

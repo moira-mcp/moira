@@ -168,17 +168,86 @@ function progressOutputsFor(workflow: WorkflowGraph, nodeId: string): Record<str
   );
 }
 
+/** The approved plan's units: one by default; a scenario that needs more gives its writer a list. */
+const ONE_UNIT = [{ title: "Implement the requested change" }];
+const TWO_UNITS = [{ title: "Implement the requested change" }, { title: "Document the change" }];
+const PLAN_WRITERS = new Set([
+  "create-plan",
+  "repair-plan",
+  "revise-plan-after-rejection",
+  "revise-plan-for-replan",
+  "revise-plan-for-teleport",
+  "revise-plan-after-feedback",
+]);
+/** Each blocker source and the outcome that sends the run to a gate, where it must say why. */
+const BLOCKER_OUTCOMES: Record<string, [string, string]> = {
+  "assess-project-health": ["health_outcome", "external_blocker"],
+  "validate-runtime": ["validation_outcome", "external_blocker"],
+  "validate-expensive": ["validation_outcome", "external_blocker"],
+  "validate-feature-wide": ["validation_outcome", "external_blocker"],
+  "finalize-feature": ["finalization_outcome", "external_blocker"],
+  "prepare-plan-unit-implementation": ["preparation_outcome", "replan"],
+  "complete-plan-unit": ["completion_outcome", "replan"],
+  "repair-cheap-validation": ["repair_outcome", "replan"],
+  "review-test-adequacy": ["review_outcome", "replan"],
+  "repair-test-adequacy": ["repair_outcome", "replan"],
+  "review-architecture": ["review_outcome", "replan"],
+  "repair-architecture": ["repair_outcome", "replan"],
+  "repair-runtime": ["repair_outcome", "replan"],
+  "update-unit-documentation": ["documentation_outcome", "replan"],
+  "repair-expensive": ["repair_outcome", "replan"],
+  "review-unit-completeness": ["review_outcome", "replan"],
+  "repair-unit-completeness": ["repair_outcome", "replan"],
+};
+
+/** The fields a step writes for the person reading its notifications. */
+function readerOutputsFor(nodeId: string, input: Record<string, unknown>): Record<string, unknown> {
+  const blocker = BLOCKER_OUTCOMES[nodeId];
+  return {
+    ...(nodeId === "capture-task-and-context"
+      ? { execution_note: "Add the export button", goal_summary: "Users can export their data" }
+      : {}),
+    ...(nodeId === "revise-requirements" ? { goal_summary: "Users can export their data" } : {}),
+    ...(PLAN_WRITERS.has(nodeId) && input.repair_outcome !== "replan"
+      ? { plan_units: ONE_UNIT }
+      : {}),
+    ...(blocker && input[blocker[0]] === blocker[1]
+      ? { blocker_summary: "The service the change depends on is unavailable" }
+      : {}),
+    ...(nodeId === "review-unit-completeness" && input.review_outcome === "pass"
+      ? { unit_result_summary: "The unit is implemented and verified" }
+      : {}),
+    ...(nodeId === "create-final-report"
+      ? {
+          final_report_url: "https://final.static.report.example/",
+          outcome_summary: "The requested change is delivered",
+          limitations_summary: "None",
+        }
+      : {}),
+  };
+}
+
+function withOutputs(
+  workflow: WorkflowGraph,
+  nodeId: string,
+  item: Record<string, unknown>,
+): Record<string, unknown> {
+  const answer: Record<string, unknown> = {
+    ...progressOutputsFor(workflow, nodeId),
+    ...readerOutputsFor(nodeId, item),
+    ...item,
+  };
+  // The unit count now follows the plan's units; activation returns only the cursor.
+  if (nodeId === "activate-reviewed-plan") delete answer.total_steps;
+  return answer;
+}
+
 function addProgressOutputs(workflow: WorkflowGraph, nodeId: string, input: MockInput): MockInput {
-  if (Array.isArray(input)) {
-    return input.map((item) => ({ ...progressOutputsFor(workflow, nodeId), ...item }));
-  }
+  if (Array.isArray(input)) return input.map((item) => withOutputs(workflow, nodeId, item));
   if (typeof input === "function") {
-    return (context: MockInputContext) => ({
-      ...progressOutputsFor(workflow, nodeId),
-      ...input(context),
-    });
+    return (context: MockInputContext) => withOutputs(workflow, nodeId, input(context));
   }
-  return { ...progressOutputsFor(workflow, nodeId), ...input };
+  return withOutputs(workflow, nodeId, input);
 }
 
 async function runScenario(
@@ -321,11 +390,38 @@ const scenarios: TestScenario[] = [
       "route-unit-html-report",
       "create-and-upload-step-report",
       "notify-report-ready",
-      "route-unit-approval-required",
+      "route-checkpoint-authority",
       "create-final-report",
       "end",
     ],
-    ["notify-unit-approval", "review-plan-unit-with-user"],
+    ["route-unit-approval-required", "notify-unit-approval", "review-plan-unit-with-user"],
+  ),
+  flow(
+    "an autonomous replan closes the unit without asking and without a closure message",
+    autonomousInputs({
+      "review-architecture": [{ review_outcome: "replan" }, { review_outcome: "pass" }],
+      "revise-plan-for-replan": { plan_units: TWO_UNITS },
+      "activate-reviewed-plan": [activatedPlan, { ...activatedPlan, current_step_index: 2 }],
+    }),
+    ["route-closure-mode", "approve-current-unit-closure", "revise-plan-for-replan", "end"],
+    ["notify-unit-closure"],
+  ),
+  flow(
+    "a unit with both a report and an approval sends one message with the report link",
+    {
+      "prepare-plan-unit-implementation": {
+        preparation_outcome: "ready",
+        visual_mode: "html_report",
+        approval_required: true,
+      },
+    },
+    [
+      "create-and-upload-step-report",
+      "notify-unit-approval-report",
+      "review-plan-unit-with-user",
+      "end",
+    ],
+    ["notify-report-ready", "route-unit-approval-required", "notify-unit-approval"],
   ),
   flow(
     "screenshot validation runs without an HTML report or unit approval",
@@ -481,10 +577,8 @@ const scenarios: TestScenario[] = [
     "architecture replan requires approved closure and a new reviewed plan",
     {
       "review-architecture": [{ review_outcome: "replan" }, { review_outcome: "pass" }],
-      "activate-reviewed-plan": [
-        activatedPlan,
-        { ...activatedPlan, current_step_index: 2, total_steps: 2 },
-      ],
+      "revise-plan-for-replan": { plan_units: TWO_UNITS },
+      "activate-reviewed-plan": [activatedPlan, { ...activatedPlan, current_step_index: 2 }],
     },
     ["approve-current-unit-closure", "revise-plan-for-replan", "review-plan", "end"],
   ),
@@ -558,17 +652,15 @@ const scenarios: TestScenario[] = [
         { acceptance_decision: "accepted" },
       ],
       "repair-user-feedback": { resolution: "replan" },
-      "activate-reviewed-plan": [
-        activatedPlan,
-        { ...activatedPlan, current_step_index: 2, total_steps: 2 },
-      ],
+      "revise-plan-for-replan": { plan_units: TWO_UNITS },
+      "activate-reviewed-plan": [activatedPlan, { ...activatedPlan, current_step_index: 2 }],
     },
     ["repair-user-feedback", "advance-plan-revision-for-replan", "review-plan", "end"],
   ),
   flow(
     "multiple approved units advance without a report-only turn",
     {
-      "activate-reviewed-plan": { ...activatedPlan, total_steps: 2 },
+      "create-plan": { plan_units: TWO_UNITS },
     },
     ["advance-plan-unit", "update-unit-documentation", "end"],
   ),
@@ -694,10 +786,8 @@ const scenarios: TestScenario[] = [
         { feature_decision: "rejected", user_feedback: "One requirement remains" },
         { feature_decision: "accepted" },
       ],
-      "activate-reviewed-plan": [
-        activatedPlan,
-        { ...activatedPlan, current_step_index: 2, total_steps: 2 },
-      ],
+      "revise-plan-after-feedback": { plan_units: TWO_UNITS },
+      "activate-reviewed-plan": [activatedPlan, { ...activatedPlan, current_step_index: 2 }],
     },
     ["revise-plan-after-feedback", "review-plan", "end"],
   ),
@@ -1005,18 +1095,17 @@ describe("software-development-flow", () => {
     const activation = inputSchemaOf(presentingNode(workflow, "activate-reviewed-plan"));
     expect(activation.globalInputs).toEqual([
       "current_step_index",
-      "total_steps",
       "vcs_commits_authorized",
       "progress_plan_outcome",
     ]);
     expect(presentingNode(workflow, "activate-reviewed-plan").directive).toContain(
-      "exact executable unit count returned in total_steps",
+      "exact executable unit count ({{total_steps}})",
     );
     expect(
       workflow.nodes.find((node) => node.id === "route-plan-activation-mode")?.connections,
     ).toEqual({
       true: "notify-plan-approval",
-      default: "activate-reviewed-plan",
+      default: "notify-implementation-started",
     });
 
     const preparation = inputSchemaOf(presentingNode(workflow, "prepare-plan-unit-implementation"));
@@ -1231,7 +1320,7 @@ describe("software-development-flow", () => {
     expect(presentingNode(workflow, "validate-expensive")).toMatchObject({
       connections: {
         success: "update-unit-documentation",
-        "wait-for-expensive-state-change": "wait-for-expensive-state-change",
+        "wait-for-expensive-state-change": "notify-expensive-blocker",
         "repair-expensive": "repair-expensive",
       },
       cases: [
@@ -1256,7 +1345,7 @@ describe("software-development-flow", () => {
     expect(presentingNode(workflow, "update-unit-documentation")).toMatchObject({
       connections: {
         success: "review-unit-completeness",
-        "approve-current-unit-closure": "approve-current-unit-closure",
+        "approve-current-unit-closure": "route-closure-mode",
         "advance-evidence-iteration": "advance-evidence-iteration",
       },
       cases: [
@@ -1539,9 +1628,9 @@ describe("software-development-flow", () => {
       ["create-plan", "plan", "Plan r3"],
       ["review-plan", "plan", "Review plan r3"],
       ["repair-plan", "plan", "Repair plan r3"],
-      ["approve-plan", "plan-approval", "Approve plan r3"],
+      ["approve-plan", "plan-approval", "Plan approval"],
       ["revise-plan-after-rejection", "plan-approval", "Revise plan r3"],
-      ["activate-reviewed-plan", "plan-approval", "Activate plan r3"],
+      ["activate-reviewed-plan", "plan-approval", "Plan activation"],
       ["prepare-plan-unit-implementation", "implement", "Prepare · 2/5"],
       ["implement-plan-unit", "implement", "Implement · 2/5"],
       ["complete-plan-unit", "implement", "Complete unit · 2/5"],
@@ -1560,7 +1649,7 @@ describe("software-development-flow", () => {
       ["review-unit-completeness", "completeness", "Independent review · 2/5 · i4"],
       ["repair-unit-completeness", "completeness", "Repair completeness · 2/5 · i4"],
       ["checkpoint-plan-unit", "checkpoint", "Checkpoint · 2/5"],
-      ["approve-current-unit-closure", "replan", "Replan decision · r3"],
+      ["approve-current-unit-closure", "replan", "Replan decision"],
       ["revise-plan-for-replan", "replan", "Replan r3"],
       ["teleport-replan", "replan", "Replan · r3"],
       ["revise-plan-for-teleport", "replan", "Replan · r3"],
@@ -1786,7 +1875,7 @@ describe("software-development-flow", () => {
         name: "second unit gets a fresh architecture review",
         mockInputs: {
           ...ordinaryInputs(),
-          "activate-reviewed-plan": { ...activatedPlan, total_steps: 2 },
+          "create-plan": { plan_units: TWO_UNITS },
         },
         expect: { status: "completed", maxSteps: 220 },
       },

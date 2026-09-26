@@ -26,10 +26,8 @@ and Stopped. Every node belongs to one block, every edge that leaves a block is 
 every return explains its cause and exit, so transitions, loops and hub blocks are derived from
 the executable graph. The active block follows the current primary workflow node, so repair,
 replan, and the normal multi-unit checkpoint loop reopen the corresponding earlier block without
-separate status variables. The same projection renders the phone-width steps picture attached to existing
-authorized plan/report/approval/completion user notifications; stopped notifications remain text-only
-because a run that ends early has no truthful single phase. Progress never changes SDF routing or its
-authority boundary.
+separate status variables. Notifications attach no picture; they carry the plan as a text list (see
+[Notifications](#notifications)). Progress never changes SDF routing or its authority boundary.
 
 The stable inactive labels stay short. While an exact implementation, validation, independent
 review, repair, or checkpoint node is current, its active-only label adds the authoritative unit,
@@ -48,9 +46,43 @@ user channels: it completes; it ends early on the user's explicit confirmation; 
 development work while local finalization stays blocked, which is reported as such rather than as a
 complete run.
 
+## Notifications
+
+SDF notifies through the user's configured channels. Every message is headed by the flow name and
+the run's task (`execution_note`, set by the first step), linked to the run page, and carries no
+image. Every line written from the run's values comes from a one-sentence field the step writes for
+a person: the goal (`goal_summary`, rewritten when the requirements are revised), the unit titles (`plan_units`), a unit's result (`unit_result_summary`), a blocker
+(`blocker_summary`), and the final outcome and limitations. Report links stand as plain URLs. The
+messages are in English.
+
+| When | Interactive | Autonomous |
+| --- | --- | --- |
+| The reviewed plan is ready | "Plan ready for your approval": the goal, the full unit list, approve it and the work goes ahead on this plan, or reject it with feedback | "Plan approved — the work goes ahead on this plan": the goal, the full unit list |
+| A unit with a report and no approval | "Unit N “title” is done": its result and the report link | the same, also when the unit asked for approval |
+| A unit that needs approval | "Unit N “title” is ready for your review": its result, accept it or reject it with feedback — with the report link in the same message when the unit has one | — (autonomous runs never stop for unit approval) |
+| A blocker at the health check, runtime, broad or final checks | "Blocked": the blocker and the choices — fix it and let the agent try again, or end the whole run | the same |
+| Finalization is blocked | "Finishing is blocked": the blocker and the choices — retry, finish without the final local commit, or end the whole run | the same |
+| A unit needs a plan change | "Unit N “title” needs a plan change": why, approve closing it and revising the plan, or end the run | the same unit and reason, and that the agent closes the unit and revises the plan when the reason holds, or otherwise asks the person whether to end the run; the revised plan is announced |
+| The result is ready | "The result is ready for your approval": the outcome, limitations, the final report link, the choices, and every unit's state | — |
+| The run finishes | "Finished": the outcome, limitations and follow-ups, whether local commits were made, the final report link, the unit list | the same |
+| The run finishes without the final commit | "Finished without the final local commit": the blocker and what is left, the unit list | the same |
+| The person ends the run | "Stopped": why, that the work done so far stays and nothing after that point was done, the unit list when a plan exists | the same |
+
+Messages that ask are sent only before steps that wait for the person. The blocker gates wait for
+the person in autonomous runs too, so their messages give the choices in both modes. Every other
+autonomous message, the unit closure's included, states what happens rather than asking: at the
+closure it says what the agent does with the plan change.
+
+The final report is rendered as a self-contained HTML page and uploaded through the Artifact API,
+like a unit's report; either link may be `http` or `https`, as the instance serves artifacts. The
+last messages connect straight to the end of the run, so their lists show no unit still in
+progress. Because the flow notifies, starting it for a user with no configured channel is refused
+with an instruction; an agent that wants to run without notifications prepares the start again
+with `skipNotificationCheck: true`. A failed notification does not stop the run.
+
 ## Execution progress
 
-The run's progress map is derived from the executable graph: every node belongs to one stage, every stage-leaving edge is labelled, and every return explains its cause and exit. The implementation stage binds the plan's counters — `current_step_index` as the unit in progress and `total_steps` as the unit count — so the run's progress data (`session progress` and the execution progress API) reports how many plan units are done out of how many and how long each pass through the stage took.
+The run's progress map is derived from the executable graph: every node belongs to one stage, every stage-leaving edge is labelled, and every return explains its cause and exit. The implementation stage binds the plan itself — `plan_units` as the items with each `title`, `current_step_index` as the unit in progress, counted from `1`, `completed_units` as the units closed, and `total_steps` as the unit count — so the run's progress data (`session progress` and the execution progress API) and its notifications show every unit, which ones are done and which one is in progress, and how long each pass through the stage took. Every plan writer returns `plan_units`, one short title per unit in plan order; the plan review derives `total_steps` from it, and activation returns only where to resume.
 
 ## When to use it
 

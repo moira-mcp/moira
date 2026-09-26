@@ -14,7 +14,6 @@ import { describe, expect, test } from "@jest/globals";
 import { GraphValidator, type WorkflowGraph } from "@mcp-moira/workflow-engine";
 
 const FLOWS = path.join(process.cwd(), "workflows/production/flows");
-const SDF = path.join(FLOWS, "91b11263-a180-4a08-9399-55f406f82c69.json");
 
 function bundled(file: string): WorkflowGraph {
   return JSON.parse(fs.readFileSync(file, "utf8")) as WorkflowGraph;
@@ -77,17 +76,18 @@ function withMessage(
   } as unknown as WorkflowGraph;
 }
 
-describe("today's bundled messages that show internal values", () => {
-  test.each([[SDF, "notify-unit-approval", "{{current_step_index}}", "a bare number"]])(
-    "%#: %s warns on %s",
-    async (file, nodeId, reference, kind) => {
-      const { valid, messages } = await warnings(bundled(file), nodeId);
-      expect(valid).toBe(true);
-      expect(messages).toEqual(
-        expect.arrayContaining([
-          expect.stringMatching(new RegExp(`${reference.replace(/[{}]/gu, "\\$&")}, ${kind}`, "u")),
-        ]),
-      );
+describe("the bundled catalogue", () => {
+  // Every standard flow was rewritten to notify in words; a message that shows a path, a bare
+  // counter or a raw output again is a regression the warning names.
+  test.each(fs.readdirSync(FLOWS).filter((file) => file.endsWith(".json")))(
+    "%s has no notification that shows an internal value",
+    async (file) => {
+      const result = await new GraphValidator().validateUnified(bundled(path.join(FLOWS, file)));
+      expect(
+        result.issues
+          .filter((issue) => issue.field === "message" && issue.message.startsWith("Notification "))
+          .map((issue) => issue.message),
+      ).toEqual([]);
     },
   );
 });
