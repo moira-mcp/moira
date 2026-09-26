@@ -362,6 +362,7 @@ Variables processed in `directive`, `completionCondition`, and `message` fields:
 - `{{nested.path}}` - Object property access
 - `{{executionId}}` - System: current process ID
 - `{{workflowId}}` - System: current workflow ID
+- `{{runUrl}}` - System: the run's page in the web app
 
 ## MCP Tools
 

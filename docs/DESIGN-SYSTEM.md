@@ -365,7 +365,7 @@ The same state reads the same way on every surface.
 
 - A bound list's progress is rendered by `listProgressLabel` (the engine's `progress-facts.ts`,
   re-exported by `run/model.ts`) on the card, in the contents, in the panel, in the picture and in
-  the notification footer alike: a counter the binding did not resolve reads as `—`, never as `0`
+  a notification's plan lines alike: a counter the binding did not resolve reads as `—`, never as `0`
   and never as `?`.
 - Durations are split once by the engine's `splitDuration` and worded by `wordDuration`: in the
   interface language through `formatDuration` (`run/duration.ts`), in English in the picture;

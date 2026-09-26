@@ -7,6 +7,7 @@ import {
 import type { IDataRepository } from "../interfaces/data-repository.js";
 import { buildApproveKeyboard } from "../types/telegram-types.js";
 import { getTelegramClient } from "./telegram-client-factory.js";
+import { notificationHeading, runPageUrl } from "../utils/notification-text.js";
 import type { TelegramClient } from "./telegram-client.js";
 
 const logger = createLogger({ component: "TrustedLockDelivery" });
@@ -47,6 +48,10 @@ export interface CreateTrustedExecutionLockOptions {
   nodeId: string;
   reason: string;
   userId: string;
+  /** The run's task note as of the lock; read from the saved run when omitted. */
+  note?: string | null;
+  /** The top-level run page to link, for a lock inside an inline subgraph child. */
+  rootExecutionId?: string;
 }
 
 interface ResolvedTelegramDelivery {
@@ -131,6 +136,21 @@ export async function createTrustedExecutionLock(
   } catch {
     // The workflow identity is only presentation metadata for the trusted message.
   }
+  let note = options.note;
+  if (note === undefined) {
+    try {
+      note = (await repository.getExecution(options.executionId))?.note ?? null;
+    } catch {
+      note = null;
+    }
+  }
+  // Plain text, like the rest of the PIN message: the heading and the run page on its own line.
+  const heading = notificationHeading(
+    workflowName,
+    note,
+    runPageUrl({ executionId: options.executionId, _rootExecutionId: options.rootExecutionId }),
+    "plain",
+  );
 
   const lockService = dependencies.lockService ?? getLockService();
   try {
@@ -142,16 +162,12 @@ export async function createTrustedExecutionLock(
         lockedBy: options.userId,
       },
       async ({ lockId, pin }) => {
-        const message =
-          `🔒 Execution Lock\n\n` +
-          `Reason: ${options.reason}\n` +
-          `PIN: ${pin}\n\n` +
-          `---\n📋 Process: ${options.executionId.substring(0, 8)}\n` +
-          `🔄 Workflow: ${workflowName}\n🤖 via MCP Moira`;
+        const message = `🔒 ${heading}\n\nReason: ${options.reason}\nPIN: ${pin}`;
 
         await client.sendMessage({
           chatId,
           text: message,
+          disableLinkPreview: true,
           replyMarkup: buildApproveKeyboard(options.executionId, options.nodeId),
         });
 

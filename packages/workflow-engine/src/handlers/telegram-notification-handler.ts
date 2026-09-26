@@ -7,6 +7,7 @@ import {
   GraphNode,
   TelegramNotificationNode,
   ExecutionContext,
+  WorkflowExecution,
   isTelegramNotificationNode,
 } from "../types/index.js";
 import { NodeExecutionResult, NodeResultBuilder } from "../types/node-execution.js";
@@ -20,6 +21,8 @@ import {
   statisticsForRun,
 } from "../services/progress-statistics-service.js";
 import {
+  TELEGRAM_CAPTION_MAX_LENGTH,
+  TELEGRAM_TEXT_MAX_LENGTH,
   TelegramError,
   TelegramErrorType,
   getActionableTelegramErrorMessage,
@@ -27,9 +30,13 @@ import {
 import { GraphTemplateProcessor } from "../templates/graph-template-processor.js";
 import { createLogger, WorkflowLogger, InternalError } from "@mcp-moira/shared";
 import { renderExecutionProgressImage } from "../utils/execution-progress-image.js";
-import { progressFooterLines } from "../utils/execution-progress-lists.js";
-import { projectExecutionRun } from "../utils/execution-run-projection.js";
 import { withInFlightPause } from "../utils/execution-visits.js";
+import { textEscaper, type NotificationFormat } from "../utils/notification-text.js";
+import { frameNotification, resolveNotificationFrame } from "../services/notification-frame.js";
+
+function formatOf(parseMode: TelegramNotificationNode["parseMode"]): NotificationFormat {
+  return parseMode === "Markdown" ? "markdown" : parseMode === "HTML" ? "html" : "plain";
+}
 
 /**
  * Handler for telegram-notification nodes
@@ -63,6 +70,8 @@ export class TelegramNotificationHandler implements INodeHandler {
     repository: IDataRepository,
     _engine: IGraphExecutionEngine,
     _input?: unknown,
+    _variableRegistry?: unknown,
+    liveRun?: () => WorkflowExecution,
   ): Promise<NodeExecutionResult> {
     if (!isTelegramNotificationNode(node)) {
       throw new InternalError(
@@ -91,6 +100,7 @@ export class TelegramNotificationHandler implements INodeHandler {
         context,
         messageQueue,
         repository,
+        liveRun,
       );
 
       const executionTime = timer.elapsed();
@@ -133,6 +143,7 @@ export class TelegramNotificationHandler implements INodeHandler {
     context: ExecutionContext,
     messageQueue: AgentMessageQueue,
     repository: IDataRepository,
+    liveRun?: () => WorkflowExecution,
   ): Promise<boolean> {
     // Load telegram settings from repository (per-user)
     const userId = context.userId || "system";
@@ -182,16 +193,18 @@ export class TelegramNotificationHandler implements INodeHandler {
       return false;
     }
 
-    // Process message template with context variables
-    let processedMessage = this.templateProcessor.processDirective(node.message, context);
-
-    // Add automatic process info footer to every telegram message
-    processedMessage = await this.addProcessInfoFooter(
-      processedMessage,
-      context,
-      repository,
-      node.id,
-    );
+    // The message with its values written for the parse mode, framed like every notification.
+    const format = formatOf(node.parseMode);
+    const body = (
+      format === "plain"
+        ? this.templateProcessor
+        : new GraphTemplateProcessor(undefined, undefined, textEscaper(format))
+    ).processDirective(node.message, context);
+    const frame = await resolveNotificationFrame(repository, context, node.id, liveRun);
+    const processedMessage = frameNotification(frame, body, {
+      format,
+      limit: node.attachProgressImage ? TELEGRAM_CAPTION_MAX_LENGTH : TELEGRAM_TEXT_MAX_LENGTH,
+    });
 
     // Determine target chat ID (template or static)
     let targetChatId: string;
@@ -220,23 +233,22 @@ export class TelegramNotificationHandler implements INodeHandler {
 
     // Send message via HTTP client
     if (node.attachProgressImage) {
-      const graph = await repository.getWorkflowGraph(context.workflowId, userId);
-      const persisted = await repository.getExecution(context.executionId);
-      if (!graph?.progress || !persisted)
+      const { graph, run } = frame;
+      if (!graph?.progress || !run)
         throw this.createTelegramError(
           TelegramErrorType.TEMPLATE_ERROR,
           "Workflow has no progress graph",
         );
-      // The route persisted so far ends at the last pause; this node runs inside the current cycle.
-      // The picture carries the typical durations of the run's version over its owner's runs.
+      // The picture shows the run as of this node, and carries the typical durations of the run's
+      // version over its owner's runs.
       const statistics = await statisticsForRun(
         new ProgressStatisticsService(repository),
         graph,
-        persisted,
+        run,
       );
       const rendered = await this.progressImageRenderer(
         graph,
-        withInFlightPause(graph, persisted, node.id),
+        withInFlightPause(graph, run, node.id),
         {},
         statistics,
       );
@@ -261,6 +273,7 @@ export class TelegramNotificationHandler implements INodeHandler {
         text: processedMessage,
         parseMode: node.parseMode,
         disableNotification: node.disableNotification,
+        disableLinkPreview: true,
         replyMarkup: node.replyMarkup,
       });
     }
@@ -343,44 +356,5 @@ export class TelegramNotificationHandler implements INodeHandler {
     }
 
     return error;
-  }
-
-  /**
-   * Add automatic process information footer to telegram messages: the process, the workflow's
-   * name (falling back to workflowId), and the run's progress lines — the waiting actor while
-   * the run projected as of this node is paused, and the bound list nearest the run.
-   */
-  private async addProcessInfoFooter(
-    message: string,
-    context: ExecutionContext,
-    repository: IDataRepository,
-    nodeId: string,
-  ): Promise<string> {
-    const processId = context.executionId ? context.executionId.substring(0, 8) : "unknown";
-
-    // Resolve human-readable workflow name from repository
-    let workflowName = context.workflowId || "unknown";
-    let progressLines: string[] = [];
-    try {
-      const userId = context.userId || "system";
-      const workflow = await repository.getWorkflow(context.workflowId, userId);
-      if (workflow?.metadata?.name) {
-        workflowName = workflow.metadata.name;
-      }
-      const graph = await repository.getWorkflowGraph(context.workflowId, userId);
-      if (graph?.progress) {
-        const persisted = await repository.getExecution(context.executionId);
-        if (persisted) {
-          progressLines = progressFooterLines(
-            projectExecutionRun(graph, withInFlightPause(graph, persisted, nodeId)),
-          );
-        }
-      }
-    } catch {
-      // Fallback to raw workflowId if resolution fails
-    }
-
-    const lines = [`📋 Process: ${processId}`, `🔄 Workflow: ${workflowName}`, ...progressLines];
-    return `${message}\n\n---\n${lines.join("\n")}\n🤖 via MCP Moira`;
   }
 }

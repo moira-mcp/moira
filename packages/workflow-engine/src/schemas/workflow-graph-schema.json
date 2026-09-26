@@ -667,6 +667,10 @@
         "attachProgressImage": {
           "type": "boolean"
         },
+        "planList": {
+          "enum": ["full", "progress", "none"],
+          "description": "How much of the run's plan follows the message: every item with its state (full), the done/total line with the current item (progress, the default), or nothing (none)"
+        },
         "attachment": {
           "type": "object",
           "additionalProperties": false,

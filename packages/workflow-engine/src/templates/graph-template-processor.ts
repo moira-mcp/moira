@@ -10,6 +10,7 @@
  */
 
 import { ExecutionContext } from "../types/index.js";
+import { runPageUrl } from "../utils/notification-text.js";
 import {
   createLogger,
   getNoteService,
@@ -65,10 +66,42 @@ export class GraphTemplateProcessor {
   /**
    * @param noteService - Optional NoteService for testing. If not provided, will use singleton.
    * @param playbookService - Optional PlaybookService for testing.
+   * @param valueEncoder - Writes every substituted data value for the output's format (a
+   *   notification's Markdown or HTML), so a value cannot inject markup. Author-authored template
+   *   fragments, system values and the undefined placeholder pass unchanged.
    */
-  constructor(noteService?: NoteService, playbookService?: PlaybookService) {
+  constructor(
+    noteService?: NoteService,
+    playbookService?: PlaybookService,
+    private readonly valueEncoder?: (text: string) => string,
+  ) {
     this._noteService = noteService || null;
     this._playbookService = playbookService || null;
+  }
+
+  /**
+   * The value of a system template variable — `executionId`, `workflowId`, `runUrl` (the run's
+   * page in the web app) and, where the caller includes it, `userId` — or undefined for any other
+   * name. System values are the engine's own and are never encoded.
+   */
+  static systemValue(
+    name: string,
+    context: ExecutionContext,
+    includeUser = false,
+  ): string | undefined {
+    if (name === "executionId") return context.executionId;
+    if (name === "workflowId") return context.workflowId;
+    if (name === "runUrl") return runPageUrl(context);
+    if (includeUser && name === "userId") return context.userId;
+    return undefined;
+  }
+
+  /** A serialized data value as the output's format needs it (see `valueEncoder`). */
+  private encodeValue(serialized: string): string {
+    if (!this.valueEncoder || serialized === GraphTemplateProcessor.UNDEFINED_PLACEHOLDER) {
+      return serialized;
+    }
+    return this.valueEncoder(serialized);
   }
 
   private get playbookService(): PlaybookService {
@@ -995,13 +1028,15 @@ export class GraphTemplateProcessor {
       // Replace {{this}} with the current item
       if (typeof item === "object" && item !== null) {
         // For objects, serialize the whole object
-        itemResult = itemResult.replace(/\{\{this\}\}/g, this.safeSerialize(item));
+        itemResult = itemResult.replace(/\{\{this\}\}/g, () =>
+          this.encodeValue(this.safeSerialize(item)),
+        );
 
         // Replace {{this.fieldName}} and {{this.nested.path}} with item field access
         const thisFieldPattern = /\{\{this\.([a-zA-Z_][a-zA-Z0-9_.-]*)\}\}/g;
         itemResult = itemResult.replace(thisFieldPattern, (_match, fieldPath: string) => {
           const value = this.getNestedValue(item, fieldPath);
-          return this.safeSerialize(value);
+          return this.encodeValue(this.safeSerialize(value));
         });
 
         // Process conditionals with item context merged into variables
@@ -1042,13 +1077,15 @@ export class GraphTemplateProcessor {
 
           const fieldValue = (item as Record<string, unknown>)[fieldName];
           if (fieldValue !== undefined) {
-            return this.safeSerialize(fieldValue);
+            return this.encodeValue(this.safeSerialize(fieldValue));
           }
           return match; // Keep original if field not found in item
         });
       } else {
         // For primitives, this is the value itself
-        itemResult = itemResult.replace(/\{\{this\}\}/g, this.safeSerialize(item));
+        itemResult = itemResult.replace(/\{\{this\}\}/g, () =>
+          this.encodeValue(this.safeSerialize(item)),
+        );
       }
 
       results.push(itemResult);
@@ -1090,7 +1127,7 @@ export class GraphTemplateProcessor {
 
   /**
    * Process simple variable templates: {{variableName}}
-   * Includes both user variables and system context (executionId, workflowId)
+   * Includes both user variables and system context (executionId, workflowId, runUrl)
    * Excludes control flow keywords: else, if, unless, /if, /unless
    */
   private processVariableTemplates(directive: string, context: ExecutionContext): string {
@@ -1105,24 +1142,16 @@ export class GraphTemplateProcessor {
         return match; // Return unchanged
       }
       try {
-        let value: unknown;
-
-        // Check system context first (executionId, workflowId)
-        if (varName === "executionId") {
-          value = context.executionId;
-        } else if (varName === "workflowId") {
-          value = context.workflowId;
-        } else {
-          // Check user variables
-          value = context.variables[varName];
-        }
+        // System context first (executionId, workflowId, runUrl), then user variables.
+        const system = GraphTemplateProcessor.systemValue(varName, context);
+        if (system !== undefined) return system;
+        const value = context.variables[varName];
 
         const serialized = this.safeSerialize(value);
 
         this.logger.debug("Replaced simple variable template", {
           varName,
           found: value !== undefined,
-          isSystemVar: ["executionId", "workflowId"].includes(varName),
           serializedLength: serialized.length,
         });
 
@@ -1131,7 +1160,7 @@ export class GraphTemplateProcessor {
         // pass cannot execute "{{context.variables}}" / "{{#each}}" injected via data.
         return this.isTemplateFragmentVar(varName, context)
           ? serialized
-          : this.neutralizeValueBraces(serialized);
+          : this.neutralizeValueBraces(this.encodeValue(serialized));
       } catch (error) {
         this.logger.debug("Failed to process variable template", {
           varName,
@@ -1159,7 +1188,7 @@ export class GraphTemplateProcessor {
 
         // §14: the dumped variable bag is data — neutralize so embedded "{{…}}"
         // from variable values cannot be re-executed by a later pass.
-        return this.neutralizeValueBraces(serialized);
+        return this.neutralizeValueBraces(this.encodeValue(serialized));
       } catch (error) {
         this.logger.debug("Failed to process context template", { error });
         return "{}";
@@ -1193,14 +1222,9 @@ export class GraphTemplateProcessor {
         // A fragment substituted earlier in this same rendering pass may expose a
         // simple system template. Keep the second-pass lookup consistent with
         // processVariableTemplates instead of looking only in user variables.
-        const value =
-          path === "executionId"
-            ? context.executionId
-            : path === "workflowId"
-              ? context.workflowId
-              : path === "userId"
-                ? context.userId
-                : this.getNestedValue(context.variables, path, context.variables);
+        const system = GraphTemplateProcessor.systemValue(path, context, true);
+        if (system !== undefined) return system;
+        const value = this.getNestedValue(context.variables, path, context.variables);
         const serialized = this.safeSerialize(value);
 
         this.logger.debug("Replaced nested path template", {
@@ -1211,7 +1235,7 @@ export class GraphTemplateProcessor {
 
         // §14 injection protection: node-path values are data — neutralize so
         // an injected "{{context.variables}}"/"{{#each}}" cannot execute downstream.
-        return this.neutralizeValueBraces(serialized);
+        return this.neutralizeValueBraces(this.encodeValue(serialized));
       } catch (error) {
         this.logger.debug("Failed to process nested path template", {
           path,

@@ -39,10 +39,13 @@ Delegate to another workflow.
 ### User Notification
 
 Send a notification through every enabled communication channel configured by the current user.
+Each message is headed by the workflow's name and the run's task, linked to the run page, and can
+carry the run's plan.
 
 ### Telegram Notification (deprecated)
 
-Telegram-only compatibility node for existing provider-specific workflows.
+Telegram-only compatibility node for existing provider-specific workflows. Its messages carry the
+same heading, the `progress` plan line and the waiting line as `user-notification`.
 
 ### Teleport
 
@@ -50,7 +53,8 @@ Jump target reachable only via explicit teleport.
 
 ### Lock
 
-PIN-based execution gate with Telegram approval.
+PIN-based execution gate with Telegram approval. The PIN message opens with the same heading as a
+notification: the workflow's name and the run's task, with the run page on the next line.
 
 ### Materialize
 
@@ -417,14 +421,34 @@ choose a provider, recipient, or credential:
 | `format`              | No       | Portable format: `plain`, `markdown`, or `html`             |
 | `silent`              | No       | Request silent delivery where the provider supports it      |
 | `attachProgressImage` | No       | Attach the current bounded workflow-progress PNG            |
+| `planList`            | No       | Plan lines: `progress` (default), `full`, or `none`         |
 | `attachment`          | No       | One bounded base64 `image` or `document` with name and MIME |
 | `connections.default` | Yes      | Full, partial, or no-eligible-channel continuation          |
 | `connections.error`   | No       | Total attempted failure; otherwise it also uses `default`   |
 
-Every message carries a footer with the run's short id, the workflow's name and, when the node
-leads straight to a step the run pauses on, who is waited for there — `⏳ agent on the step:
-<block>` or `🙋 waiting for you: <block>` (a lock gate) — plus `📝 done/total: current item` for a
-bound list. `attachment` and an enabled `attachProgressImage` are mutually exclusive. Attachment filenames
+Every delivered message opens with a heading — the workflow's name and the run's task note (the
+note set with `execution_note`), linked to the run page — followed by `message`, the run's plan,
+and, when the node leads straight to a step the run pauses on, who is waited for there:
+`⏳ agent on the step: <block>` or `🙋 waiting for you: <block>` (a lock gate). A run without a note
+is headed by the workflow name alone, still linked. The plan comes from the bound list nearest the
+run as of this node, including what the current step has just written; `planList` chooses how much
+of it the message carries:
+
+- `progress` (the default) — one line, `📝 done/total: current item`;
+- `full` — `📝 done/total` and every item numbered with its state: `✓` done, `▶` in progress,
+  `○` pending; a plan too long for the channel folds around the item in progress into
+  `… N earlier` / `… N more`;
+- `none` — no plan.
+
+Before the run reaches the block that binds the plan, the first bound block whose items are
+written is used, so a "plan ready" message can show the plan. With `format: "markdown"` or
+`"html"`, every value substituted into the message is escaped for that format, so a value cannot
+add markup; the author's own markup is kept, and a value placed inside the author's link or code
+markup shows its escapes, so keep values outside it. The text is fitted to the channel's limit:
+the plan takes the room left, and an over-long message is cut at a line with `…`. On Telegram,
+link previews are off for every message.
+
+`attachment` and an enabled `attachProgressImage` are mutually exclusive. Attachment filenames
 use the safe portable allowlist and MIME types must have a valid `type/subtype` form. The service
 applies shared per-user/provider rate limits, per-user and provider concurrency, deadlines, text
 and byte limits before provider delivery. A configured Telegram channel supports text, PNG/JPEG

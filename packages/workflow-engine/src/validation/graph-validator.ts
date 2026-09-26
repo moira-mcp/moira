@@ -2309,7 +2309,7 @@ export class GraphValidator {
     const variablePattern = /\{\{([a-zA-Z_][a-zA-Z0-9_-]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)*)\}\}/g;
     const blockHelperPattern =
       /\{\{#(?:if|unless|each|eq|neq)\s+([a-zA-Z_][a-zA-Z0-9_-]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)*)/g;
-    const skip = new Set(["else", "this", "executionId", "workflowId", "userId"]);
+    const skip = new Set(["else", "this", "executionId", "workflowId", "userId", "runUrl"]);
     const add = (full: string): void => {
       const root = full.split(".")[0];
       if (!skip.has(root)) roots.add(root);
@@ -2509,6 +2509,7 @@ export class GraphValidator {
       "executionId",
       "workflowId",
       "userId", // System variables (injected into globalContext by the executor)
+      "runUrl",
     ]);
 
     const collect = (fullPath: string): void => {

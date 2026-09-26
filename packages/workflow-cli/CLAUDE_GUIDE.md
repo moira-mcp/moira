@@ -92,6 +92,7 @@ byte-for-byte unchanged.
 --progress-node-id <id|none>    # Set or clear the node's progress block
 --progress-active-label <text|none> # Set or clear its active-only block label
 --attach-progress-image <bool>  # Set true/false; notification nodes only
+--plan-list <full|progress|none> # Plan lines of a user-notification (progress = default)
 --connections '{"key":"target"}' # Update connections
 --add-connection <key> <target> # Add connection
 --remove-connection <key>       # Remove connection

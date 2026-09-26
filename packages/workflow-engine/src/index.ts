@@ -82,6 +82,8 @@ export * from "./utils/execution-variable-policy.js";
 export * from "./utils/execution-run-projection.js";
 export * from "./utils/execution-visits.js";
 export * from "./utils/execution-progress-lists.js";
+export * from "./utils/notification-text.js";
+export * from "./services/notification-frame.js";
 export * from "./utils/execution-statistics.js";
 export {
   ProgressStatisticsService,

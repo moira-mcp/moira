@@ -3,7 +3,12 @@ import type { INodeHandler } from "../interfaces/core-interfaces.js";
 import type { IDataRepository } from "../interfaces/data-repository.js";
 import type { IGraphExecutionEngine } from "../interfaces/graph-execution-engine.js";
 import { GraphTemplateProcessor } from "../templates/graph-template-processor.js";
-import type { ExecutionContext, GraphNode, UserNotificationNode } from "../types/index.js";
+import type {
+  ExecutionContext,
+  GraphNode,
+  UserNotificationNode,
+  WorkflowExecution,
+} from "../types/index.js";
 import { isUserNotificationNode } from "../types/index.js";
 import { NodeResultBuilder, type NodeExecutionResult } from "../types/node-execution.js";
 import type { AgentMessageQueue } from "../services/agent-message-queue.js";
@@ -14,12 +19,17 @@ import {
 } from "../services/progress-statistics-service.js";
 import type { UserCommunicationService } from "../services/user-communication.js";
 import { renderExecutionProgressImage } from "../utils/execution-progress-image.js";
-import { progressFooterLines } from "../utils/execution-progress-lists.js";
-import { projectExecutionRun } from "../utils/execution-run-projection.js";
 import { withInFlightPause } from "../utils/execution-visits.js";
+import { textEscaper } from "../utils/notification-text.js";
+import {
+  frameNotification,
+  resolveNotificationFrame,
+  type NotificationFrame,
+} from "../services/notification-frame.js";
 
 export class UserNotificationHandler implements INodeHandler {
   private readonly templateProcessor = new GraphTemplateProcessor();
+  private readonly valueTemplateProcessors = new Map<string, GraphTemplateProcessor>();
   private readonly logger: WorkflowLogger = createLogger({ component: "UserNotificationHandler" });
 
   constructor(
@@ -41,6 +51,9 @@ export class UserNotificationHandler implements INodeHandler {
     messageQueue: AgentMessageQueue,
     repository: IDataRepository,
     _engine: IGraphExecutionEngine,
+    _input?: unknown,
+    _variableRegistry?: unknown,
+    liveRun?: () => WorkflowExecution,
   ): Promise<NodeExecutionResult> {
     if (!isUserNotificationNode(node))
       throw new InternalError("UserNotificationHandler can only execute user-notification nodes");
@@ -48,11 +61,16 @@ export class UserNotificationHandler implements INodeHandler {
     if (!context.userId) return this.failure(node, messageQueue, "missing_user", timer.elapsed());
 
     try {
-      let text = this.templateProcessor.processDirective(node.message, context);
-      text = await this.addProcessInfoFooter(text, context, repository, node.id);
+      const body = this.messageProcessor(node.format).processDirective(node.message, context);
+      const frame = await resolveNotificationFrame(repository, context, node.id, liveRun);
+      const text = frameNotification(frame, body, {
+        format: node.format,
+        planList: node.planList,
+        limit: this.communication.maxTextLength,
+      });
       let attachment;
       if (node.attachProgressImage) {
-        attachment = await this.renderProgressAttachment(node, context, repository);
+        attachment = await this.renderProgressAttachment(node, repository, frame);
       } else if (node.attachment) {
         const encoded = this.templateProcessor.processDirective(node.attachment.data, context);
         if (encoded.length % 4 !== 0 || !/^[A-Za-z0-9+/]*={0,2}$/.test(encoded))
@@ -119,24 +137,34 @@ export class UserNotificationHandler implements INodeHandler {
     });
   }
 
+  /** Interpolated values are written for the message's format; the author's markup is not. */
+  private messageProcessor(format: UserNotificationNode["format"]): GraphTemplateProcessor {
+    if (!format || format === "plain") return this.templateProcessor;
+    let processor = this.valueTemplateProcessors.get(format);
+    if (!processor) {
+      processor = new GraphTemplateProcessor(undefined, undefined, textEscaper(format));
+      this.valueTemplateProcessors.set(format, processor);
+    }
+    return processor;
+  }
+
   private async renderProgressAttachment(
     node: UserNotificationNode,
-    context: ExecutionContext,
     repository: IDataRepository,
+    frame: NotificationFrame,
   ) {
-    const graph = await repository.getWorkflowGraph(context.workflowId, context.userId);
-    const persisted = await repository.getExecution(context.executionId);
-    if (!graph?.progress || !persisted) throw new Error("progress_unavailable");
-    // The route persisted so far ends at the last pause; this node runs inside the current cycle.
-    // The picture carries the typical durations of the run's version over its owner's runs.
+    const { graph, run } = frame;
+    if (!graph?.progress || !run) throw new Error("progress_unavailable");
+    // The picture shows the run as of this node, and carries the typical durations of the run's
+    // version over its owner's runs.
     const statistics = await statisticsForRun(
       new ProgressStatisticsService(repository),
       graph,
-      persisted,
+      run,
     );
     const rendered = await this.progressImageRenderer(
       graph,
-      withInFlightPause(graph, persisted, node.id),
+      withInFlightPause(graph, run, node.id),
       {},
       statistics,
     );
@@ -147,34 +175,5 @@ export class UserNotificationHandler implements INodeHandler {
       filename: "workflow-progress.png",
       mimeType: "image/png",
     };
-  }
-
-  private async addProcessInfoFooter(
-    message: string,
-    context: ExecutionContext,
-    repository: IDataRepository,
-    nodeId: string,
-  ): Promise<string> {
-    const processId = context.executionId ? context.executionId.substring(0, 8) : "unknown";
-    let workflowName = context.workflowId || "unknown";
-    // The waiting actor and the bound list of the run projected as of this node.
-    let progressLines: string[] = [];
-    try {
-      const workflow = await repository.getWorkflow(context.workflowId, context.userId);
-      if (workflow?.metadata?.name) workflowName = workflow.metadata.name;
-      const graph = await repository.getWorkflowGraph(context.workflowId, context.userId);
-      if (graph?.progress) {
-        const persisted = await repository.getExecution(context.executionId);
-        if (persisted) {
-          progressLines = progressFooterLines(
-            projectExecutionRun(graph, withInFlightPause(graph, persisted, nodeId)),
-          );
-        }
-      }
-    } catch {
-      // The workflow identifier is an intentional non-secret fallback.
-    }
-    const lines = [`📋 Process: ${processId}`, `🔄 Workflow: ${workflowName}`, ...progressLines];
-    return `${message}\n\n---\n${lines.join("\n")}\n🤖 via MCP Moira`;
   }
 }

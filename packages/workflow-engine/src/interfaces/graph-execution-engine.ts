@@ -4,7 +4,7 @@
 
 import { WorkflowGraph, ExecutionContext } from "../types/index.js";
 import { AgentMessageQueue } from "../services/agent-message-queue.js";
-import type { EngineVisit } from "../utils/execution-visits.js";
+import type { CycleOrigin, EngineVisit } from "../utils/execution-visits.js";
 
 export interface IGraphExecutionEngine {
   executeGraph(
@@ -13,6 +13,8 @@ export interface IGraphExecutionEngine {
     messageQueue: AgentMessageQueue,
     startNodeId: string,
     userInput?: unknown,
+    /** The run this cycle continues; handlers then read the live run (see `liveExecution`). */
+    origin?: CycleOrigin,
   ): Promise<GraphExecutionResult>;
 
   /**

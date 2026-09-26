@@ -18,6 +18,7 @@ import { listProgressLabel } from "./progress-facts.js";
 import type {
   ExecutionBlockList,
   ExecutionBlockTiming,
+  ExecutionListItem,
   ExecutionPassTiming,
   ExecutionProgress,
   ExecutionVariableState,
@@ -230,7 +231,9 @@ export function itemIndexResolver(
 
 /**
  * The bound list nearest the run's position: the active block's when it binds one, otherwise the
- * bound block the route visited most recently. Null when no bound block was reached.
+ * bound block the route visited most recently. Before the route reaches any bound block — a
+ * notification that the plan is ready, sent between planning and the first item — the first bound
+ * block, in process order, whose items resolve. Null when none applies.
  */
 export function nearestBoundList(progress: ExecutionProgress | null): ExecutionBlockList | null {
   if (!progress) return null;
@@ -243,18 +246,89 @@ export function nearestBoundList(progress: ExecutionProgress | null): ExecutionB
   const candidates = progress.nodes
     .filter((node) => node.list && lastSeqByBlock.has(node.id))
     .sort((a, b) => lastSeqByBlock.get(b.id)! - lastSeqByBlock.get(a.id)!);
-  return candidates[0]?.list ?? null;
+  if (candidates[0]?.list) return candidates[0].list;
+  return progress.nodes.find((node) => node.list?.items?.length)?.list ?? null;
 }
+
+/** Text as it may stand in a message of some format; identity for plain text. */
+export type TextEscaper = (text: string) => string;
+
+const asIs: TextEscaper = (text) => text;
 
 /**
  * `done/total: current item` for notification text, worded as the map and the picture word it
  * (an unresolved counter reads `—`); null when no bound list is near.
  */
-export function boundListLine(progress: ExecutionProgress | null): string | null {
+export function boundListLine(
+  progress: ExecutionProgress | null,
+  escape: TextEscaper = asIs,
+): string | null {
   const list = nearestBoundList(progress);
   const count = listProgressLabel(list);
   if (!list || count === null) return null;
-  return list.currentTitle ? `📝 ${count}: ${list.currentTitle}` : `📝 ${count}`;
+  return list.currentTitle ? `📝 ${count}: ${escape(list.currentTitle)}` : `📝 ${count}`;
+}
+
+/** How much of the plan a notification carries: every item, the one-line count, or nothing. */
+export type PlanListMode = "full" | "progress" | "none";
+
+/** A single item title longer than this is shortened, so one item cannot crowd out the rest. */
+const PLAN_TITLE_LIMIT = 160;
+
+function planItemLine(item: ExecutionListItem, escape: TextEscaper): string {
+  const mark = item.done ? "✓" : item.current ? "▶" : "○";
+  const title =
+    item.title.length > PLAN_TITLE_LIMIT
+      ? `${item.title.slice(0, PLAN_TITLE_LIMIT - 1)}…`
+      : item.title;
+  return `${mark} ${item.index + 1}. ${escape(title)}`;
+}
+
+/**
+ * The bound list nearest the run as numbered lines — `✓` done, `▶` in progress, `○` pending —
+ * under a `📝 done/total` line. When the lines do not fit `budget` characters, items are folded
+ * from the ends toward the item in progress (or the first unfinished one) into `… N earlier` and
+ * `… N more` lines, so the item that matters always stays. A list without items (counters only)
+ * reads as the count line alone. Empty when no list is near or nothing fits.
+ */
+export function planListLines(
+  progress: ExecutionProgress | null,
+  budget: number,
+  escape: TextEscaper = asIs,
+): string[] {
+  const list = nearestBoundList(progress);
+  const count = listProgressLabel(list);
+  // A plan not written yet (an empty items array) is no plan to show.
+  if (!list || count === null || list.items?.length === 0) return [];
+  const header = `📝 ${count}`;
+  const items = list.items ?? [];
+  const lines = items.map((item) => planItemLine(item, escape));
+  const size = (parts: readonly string[]) => parts.reduce((sum, line) => sum + line.length + 1, 0);
+  if (size([header, ...lines]) <= budget) return [header, ...lines];
+  if (header.length > budget) return [];
+  const anchor = list.current ?? items.findIndex((item) => !item.done);
+  const focus = anchor < 0 ? Math.max(0, items.length - 1) : anchor;
+  const fold = (from: number, to: number) => [
+    header,
+    ...(from > 0 ? [`… ${from} earlier`] : []),
+    ...lines.slice(from, to),
+    ...(to < lines.length ? [`… ${lines.length - to} more`] : []),
+  ];
+  // Grow a window around the focus item while the folded text still fits.
+  let from = focus;
+  let to = Math.min(lines.length, focus + 1);
+  if (size(fold(from, to)) > budget) return [header];
+  for (;;) {
+    const grown =
+      to < lines.length && size(fold(from, to + 1)) <= budget
+        ? [from, to + 1]
+        : from > 0 && size(fold(from - 1, to)) <= budget
+          ? [from - 1, to]
+          : null;
+    if (!grown) break;
+    [from, to] = grown;
+  }
+  return fold(from, to);
 }
 
 /**
@@ -262,19 +336,12 @@ export function boundListLine(progress: ExecutionProgress | null): string | null
  * for you: <block>` at a gate a person clears, `⏳ agent on the step: <block>` on a step the agent
  * must complete. Null while the run is not paused.
  */
-export function waitingActorLine(progress: ExecutionProgress | null): string | null {
+export function waitingActorLine(
+  progress: ExecutionProgress | null,
+  escape: TextEscaper = asIs,
+): string | null {
   if (!progress || progress.waitingFor === null) return null;
   const actor = progress.waitingFor === "user" ? "🙋 waiting for you" : "⏳ agent on the step";
   const block = progress.nodes.find((node) => node.id === progress.activeNodeId);
-  return block ? `${actor}: ${block.label}` : actor;
-}
-
-/**
- * The progress lines of a notification footer, in order: the waiting actor (while the run is
- * paused), then the bound list nearest the run. Empty when neither applies.
- */
-export function progressFooterLines(progress: ExecutionProgress | null): string[] {
-  return [waitingActorLine(progress), boundListLine(progress)].filter(
-    (line): line is string => line !== null,
-  );
+  return block ? `${actor}: ${escape(block.label)}` : actor;
 }

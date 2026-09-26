@@ -363,6 +363,7 @@ interface UpdateOptions {
   progressActiveLabel?: string | null;
   progressActiveContent?: string | null;
   attachProgressImage?: boolean;
+  planList?: "full" | "progress" | "none";
 }
 
 // === UPDATE COMMAND ===
@@ -567,6 +568,21 @@ function updateNode(
     changes++;
   }
 
+  if (options.planList !== undefined) {
+    if (node.type !== "user-notification") {
+      console.error(c("red", "ERROR: --plan-list is valid only for user-notification nodes"));
+      process.exit(1);
+    }
+    if (options.planList === "progress") {
+      delete node.planList;
+      console.log(c("green", "✓ planList: progress (the default)"));
+    } else {
+      node.planList = options.planList;
+      console.log(c("green", `✓ planList: ${options.planList}`));
+    }
+    changes++;
+  }
+
   if (options.connections !== undefined) {
     try {
       node.connections = JSON.parse(options.connections);
@@ -606,7 +622,7 @@ function updateNode(
     console.log(
       c(
         "yellow",
-        "No changes specified. Use --directive, --completion-condition, --input-schema, --cases, --expressions, --message, --connections, --progress-node-id, --progress-active-label, --progress-active-content, --attach-progress-image, or --add-connection",
+        "No changes specified. Use --directive, --completion-condition, --input-schema, --cases, --expressions, --message, --connections, --progress-node-id, --progress-active-label, --progress-active-content, --attach-progress-image, --plan-list, or --add-connection",
       ),
     );
     process.exit(0);
@@ -1732,6 +1748,7 @@ ${c("cyan", "Update Options:")}
   --progress-active-label <text|none>   Set or clear its active-only block label
   --progress-active-content <json|none> Set or clear its active-only structured content
   --attach-progress-image <true|false>  Toggle progress image on notification nodes
+  --plan-list <full|progress|none>      How much of the plan a user-notification carries
   --cases '[{"when":{...},"output":"key"}]'  Update routing cases (condition / agent-directive)
   --expressions '["a = a + 1"]'       Update node expressions
   --message "text"                     Update message
@@ -1854,6 +1871,14 @@ ${c("cyan", "Examples:")}
         process.exit(1);
       }
       config.options.attachProgressImage = args[i + 1] === "true";
+      i++;
+    } else if (args[i] === "--plan-list" && args[i + 1]) {
+      const mode = args[i + 1];
+      if (mode !== "full" && mode !== "progress" && mode !== "none") {
+        console.error(c("red", "ERROR: --plan-list expects full, progress or none"));
+        process.exit(1);
+      }
+      config.options.planList = mode;
       i++;
     } else if (args[i] === "--connections" && args[i + 1]) {
       config.options.connections = args[i + 1];

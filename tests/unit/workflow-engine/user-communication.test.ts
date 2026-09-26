@@ -14,6 +14,7 @@ import {
   builtinNodeTypeDescriptors,
   projectExecutionRun,
   renderProgressVisualSvg,
+  runPageUrl,
   getActiveCommunicationChannelRegistry,
   getActiveUserCommunicationService,
   resetClientFactory,
@@ -453,13 +454,25 @@ describe("TelegramCommunicationAdapter", () => {
   });
 
   test("keeps Telegram credentials and recipient resolution inside the adapter", async () => {
-    const calls: Array<{ method: string; chatId: string; filename?: string }> = [];
+    const calls: Array<{
+      method: string;
+      chatId: string;
+      filename?: string;
+      disableLinkPreview?: boolean;
+    }> = [];
     setTestClientFactory((token, defaultChatId) => {
       expect(token).toBe("123:secret-token");
       expect(defaultChatId).toBe("private-recipient");
       return {
-        sendMessage: async ({ chatId }: { chatId: string }) => {
-          calls.push({ method: "text", chatId });
+        sendMessage: async ({
+          chatId,
+          disableLinkPreview,
+        }: {
+          chatId: string;
+          disableLinkPreview?: boolean;
+        }) => {
+          // A notification links its run page; the preview card would show the login page.
+          calls.push({ method: "text", chatId, disableLinkPreview });
           return { ok: true };
         },
         sendPhoto: async ({ chatId, filename }: { chatId: string; filename: string }) => {
@@ -512,7 +525,7 @@ describe("TelegramCommunicationAdapter", () => {
     );
 
     expect(calls).toEqual([
-      { method: "text", chatId: "private-recipient" },
+      { method: "text", chatId: "private-recipient", disableLinkPreview: true },
       { method: "photo", chatId: "private-recipient", filename: "progress.png" },
       { method: "document", chatId: "private-recipient", filename: "report.pdf" },
     ]);
@@ -871,7 +884,7 @@ describe("UserNotificationHandler", () => {
     const pictures: string[] = [];
     const statisticsReceived: unknown[] = [];
     const handler = new UserNotificationHandler(
-      { deliver } as unknown as UserCommunicationService,
+      { deliver, maxTextLength: 4096 } as unknown as UserCommunicationService,
       async (workflow, execution, _options, statistics) => {
         statisticsReceived.push(statistics ?? null);
         pictures.push(
@@ -996,7 +1009,7 @@ describe("UserNotificationHandler", () => {
       }),
     ]);
 
-    // A notification that leads to a lock gate renders its image from the same copy the footer
+    // A notification that leads to a lock gate renders its image from the same copy the message
     // describes: the run waiting on the gate.
     renderedFor.length = 0;
     const gated = {
@@ -1042,14 +1055,17 @@ describe("UserNotificationHandler", () => {
     expect(pictures.at(-1)).not.toContain("agent on the step");
   });
 
-  test("the footer names done/total and the current item of the bound list nearest the run", async () => {
+  test("the message names done/total and the current item of the bound list nearest the run", async () => {
     const deliver = jest.fn(async () => ({
       status: "delivered" as const,
       configuredChannels: 1,
       deliveredChannels: 1,
       channels: [{ channelId: "telegram", status: "delivered" as const }],
     }));
-    const handler = new UserNotificationHandler({ deliver } as unknown as UserCommunicationService);
+    const handler = new UserNotificationHandler({
+      deliver,
+      maxTextLength: 4096,
+    } as unknown as UserCommunicationService);
     const node: UserNotificationNode = {
       type: "user-notification",
       id: "notify",
@@ -1136,14 +1152,17 @@ describe("UserNotificationHandler", () => {
     expect(text).not.toMatch(/agent on the step|waiting for you/u);
   });
 
-  test("the footer names the agent on the step before the list line while the projected run is paused, and never says it waits for the reader", async () => {
+  test("the message names the agent on the step after the list line while the projected run is paused, and never says it waits for the reader", async () => {
     const deliver = jest.fn(async () => ({
       status: "delivered" as const,
       configuredChannels: 1,
       deliveredChannels: 1,
       channels: [{ channelId: "telegram", status: "delivered" as const }],
     }));
-    const handler = new UserNotificationHandler({ deliver } as unknown as UserCommunicationService);
+    const handler = new UserNotificationHandler({
+      deliver,
+      maxTextLength: 4096,
+    } as unknown as UserCommunicationService);
     const node: UserNotificationNode = {
       type: "user-notification",
       id: "notify",
@@ -1188,7 +1207,7 @@ describe("UserNotificationHandler", () => {
       ],
     };
     const tasks = [{ action: "Write it" }, { action: "Ship it" }];
-    // A notification node never waits itself; the footer names the actor of the node the run
+    // A notification node never waits itself; the message names the actor of the node the run
     // pauses on right after it — here the directive `next`, so the agent — with that node's block.
     const paused = {
       ...graph,
@@ -1239,9 +1258,9 @@ describe("UserNotificationHandler", () => {
       {} as IGraphExecutionEngine,
     );
     const text = (deliver.mock.calls as unknown as Array<[{ text: string }]>)[0][0].text;
-    expect(text).toContain(
-      "🔄 Workflow: Example\n⏳ agent on the step: Report the checkpoint\n📝 1/2: Ship it\n🤖 via MCP Moira",
-    );
+    expect(
+      text.endsWith("Checkpoint\n\n📝 1/2: Ship it\n\n⏳ agent on the step: Report the checkpoint"),
+    ).toBe(true);
     expect(text).not.toContain("waiting for you");
     expect(text).not.toContain("ждёт вас");
   });
@@ -1252,7 +1271,10 @@ describe("UserNotificationHandler", () => {
       deliveredChannels: 1,
       channels: [{ channelId: "telegram", status: "delivered" as const }],
     }));
-    const handler = new UserNotificationHandler({ deliver } as unknown as UserCommunicationService);
+    const handler = new UserNotificationHandler({
+      deliver,
+      maxTextLength: 4096,
+    } as unknown as UserCommunicationService);
     const node: UserNotificationNode = {
       type: "user-notification",
       id: "notify",
@@ -1325,20 +1347,21 @@ describe("UserNotificationHandler", () => {
       {} as IGraphExecutionEngine,
     );
     const text = (deliver.mock.calls as unknown as Array<[{ text: string }]>)[0][0].text;
-    expect(text).toContain(
-      "🔄 Workflow: Example\n🙋 waiting for you: Approval gate\n🤖 via MCP Moira",
-    );
+    expect(text.endsWith("Approve\n\n🙋 waiting for you: Approval gate")).toBe(true);
     expect(text).not.toContain("agent on the step");
   });
 
-  test("a run whose blocks bind no list gets no count in the footer", async () => {
+  test("a run whose blocks bind no list gets no count, only the heading and the message", async () => {
     const deliver = jest.fn(async () => ({
       status: "delivered" as const,
       configuredChannels: 1,
       deliveredChannels: 1,
       channels: [{ channelId: "telegram", status: "delivered" as const }],
     }));
-    const handler = new UserNotificationHandler({ deliver } as unknown as UserCommunicationService);
+    const handler = new UserNotificationHandler({
+      deliver,
+      maxTextLength: 4096,
+    } as unknown as UserCommunicationService);
     const graph = {
       metadata: { name: "Example", version: "1.0.0", description: "x" },
       progress: { nodes: [{ id: "work", label: "Work" }] },
@@ -1384,13 +1407,15 @@ describe("UserNotificationHandler", () => {
       {} as IGraphExecutionEngine,
     );
     const text = (deliver.mock.calls as unknown as Array<[{ text: string }]>)[0][0].text;
-    expect(text).toContain("🔄 Workflow: Example\n🤖 via MCP Moira");
-    expect(text).not.toContain("📝");
+    expect(text).toBe(`Example\n${runPageUrl({ executionId: "12345678-rest" })}\n\nCheckpoint`);
   });
 
   test("never substitutes a system identity when the execution has no user", async () => {
     const deliver = jest.fn<UserCommunicationService["deliver"]>();
-    const handler = new UserNotificationHandler({ deliver } as unknown as UserCommunicationService);
+    const handler = new UserNotificationHandler({
+      deliver,
+      maxTextLength: 4096,
+    } as unknown as UserCommunicationService);
     const queue = new AgentMessageQueue();
     const result = await handler.execute(
       {

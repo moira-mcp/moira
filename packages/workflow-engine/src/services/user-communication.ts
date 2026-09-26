@@ -401,6 +401,11 @@ export class UserCommunicationService {
     }
   }
 
+  /** The longest text a request may carry; senders fit their text to it. */
+  get maxTextLength(): number {
+    return this.limits.maxTextLength;
+  }
+
   private validateRequest(request: UserCommunicationRequest): void {
     if (!request.userId) throw new Error("User communication requires an authenticated user");
     if (!request.text && !request.attachment)

@@ -46,6 +46,7 @@ Subsequent path segments use standard identifiers:
 ```
 {{executionId}}     - Current execution ID
 {{workflowId}}      - Workflow being executed
+{{runUrl}}          - The run's page in the web app
 {{currentNodeId}}   - Current node ID
 ```
 

@@ -140,7 +140,9 @@ moira-workflow ./workflows/production/flows/<flow>.json move node-to-move
 - Backup format: `<filename>.backup-<timestamp>.json`
 
 `--attach-progress-image` accepts `true` or `false` and is rejected for every node type except
-`user-notification` or deprecated `telegram-notification`. These update options persist the requested fields; they do not derive the
+`user-notification` or deprecated `telegram-notification`. `--plan-list <full|progress|none>` sets
+how much of the run's plan a `user-notification` carries; `progress` is the default and removes the
+field, and every other node type is rejected. These update options persist the requested fields; they do not derive the
 process or validate its meaning — run `derive` afterwards.
 
 `--progress-active-label` is valid only for a node that pauses the run and belongs to a block. It

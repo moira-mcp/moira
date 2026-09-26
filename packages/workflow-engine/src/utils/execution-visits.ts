@@ -143,6 +143,35 @@ export function appendEngineVisits(
 }
 
 /**
+ * Where a cycle started: the run as the executor holds it when it hands the cycle to the engine —
+ * the persisted state plus what the step already changed in memory (a note set by
+ * `execution_note`) — and how the executor will fold the cycle's visits into it.
+ */
+export interface CycleOrigin {
+  execution: WorkflowExecution;
+  teleportTo?: string;
+  answeredBy?: NonNullable<ExecutionVisit["actor"]>;
+}
+
+/**
+ * The run as it will be persisted if the cycle stopped now: the origin with the visits the engine
+ * has recorded so far folded in exactly as the executor folds them, and the engine's current
+ * variables. A node that runs mid-cycle (a notification) reads the plan a step submitted earlier
+ * in the same cycle, and the item it finished, instead of the run as of the last pause. A copy;
+ * the origin is not touched.
+ */
+export function liveExecution(
+  origin: CycleOrigin,
+  visits: readonly EngineVisit[],
+  variables: Record<string, unknown>,
+): WorkflowExecution {
+  const run = structuredClone(origin.execution);
+  appendEngineVisits(run, visits, origin.teleportTo, origin.answeredBy);
+  run.globalContext = { ...run.globalContext, variables: structuredClone(variables) };
+  return run;
+}
+
+/**
  * The execution as a node that runs mid-cycle sees it: the persisted log ends at the last pause,
  * so the visits of the current cycle are not yet appended. A synthetic open visit of `nodeId`
  * (nothing changed, not waiting) lets a projection made inside that cycle — a notification's

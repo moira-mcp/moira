@@ -378,7 +378,7 @@ Node task-1: unclosed template bracket '{{' at position 15
 
 - This is a BLOCKING validation error (workflow save is rejected).
 - Declare globals once in `variableRegistry`; reference node-local outputs as `node-id.name`.
-- System variables (`executionId`, `workflowId`, `userId`) don't need declaration.
+- System variables (`executionId`, `workflowId`, `userId`, `runUrl`) don't need declaration.
 - Control flow keywords (`if`, `each`, `else`) are not flagged.
 
 ### Template Shows "null"
@@ -545,16 +545,18 @@ never sampled. `session progress` and
 `GET /api/executions/:id/progress` return this aggregate as `statistics`;
 `GET /api/workflows/:id/statistics?version=` returns it for any version (`docs/API.md`).
 
-A notification node that
-attaches a progress image renders it inside the cycle that reached it, before that cycle's visits
-are persisted; the handlers therefore project an unpersisted copy of the execution
-(`withInFlightPause`) with an open visit of the notification node and, when the node's single
+A notification node runs inside the cycle that reached it, before that cycle's visits, variables
+and note are persisted. The executor therefore hands every handler the live run of the cycle — the
+persisted run with the visits recorded so far folded in exactly as they will be saved, the
+engine's current variables and a note set by this step's `execution_note` — and the notification
+handlers project it (`withInFlightPause`) with an open visit of the notification node and, when the node's single
 forward connection leads straight to a node the run pauses on — a `lock` (a person's gate) or an
 `agent-directive`, `teleport`, `materialize` or `subgraph` wait (the agent's) — that node as the one waited on,
-with a synthetic open visit that carries no timestamp. The image and the message footer read the
-same copy: the picture marks the block about to wait with the actor's wording, and the footer adds
-`⏳ agent on the step: <block>` or `🙋 waiting for you: <block>` before the bound list's
-`📝 done/total: current item` line (both handlers). A successor that pauses nowhere leaves the
+with a synthetic open visit that carries no timestamp. The image and the message text read the
+same copy: the picture marks the block about to wait with the actor's wording, and the message
+ends with the plan lines and then `⏳ agent on the step: <block>` or `🙋 waiting for you: <block>`
+(both handlers). A plan written, an item finished or a note set earlier in the same cycle is
+therefore already shown. A successor that pauses nowhere leaves the
 notification's block active and adds no actor line.
 
 A node that pauses the run (an `agent-directive` step or another pausing node type) may set
@@ -826,6 +828,7 @@ JSON Schema.
   "message": "Message with {{variables}}",
   "format": "markdown",
   "silent": false,
+  "planList": "full",
   "connections": { "default": "next-node" }
 }
 ```
@@ -839,13 +842,22 @@ does not support the requested attachment is reported as `unsupported` and skipp
 itself make delivery fail. Total attempted failure uses `connections.error` when it exists and
 otherwise continues through `default`.
 
-Every message carries a footer with the short process id, the resolved workflow name and the
-Moira attribution. When the workflow has a block with a `list` binding, the footer also carries
-one line `📝 done/total: current item` for the bound list nearest the run — the active block's
-when it binds one, otherwise the bound block the route passed most recently — taken from the same
-projection the progress attachment uses (the execution copy with an open visit of the notification
-node). A workflow whose blocks bind no list, and a binding that resolves to neither a finished
-count nor a total, add no line.
+Every message opens with a heading, `<workflow name> · <run note>`, linked to the run page
+(`{{runUrl}}`); a run without a note gets the workflow name alone, still linked. The rendered
+`message` follows, then the run's plan as `planList` selects it, then — when the node's successor
+pauses the run — `⏳ agent on the step: <block>` or `🙋 waiting for you: <block>`. `planList` is
+`progress` by default (one line `📝 done/total: current item`), `full` (`📝 done/total` and every
+item numbered, marked `✓` done, `▶` in progress, `○` pending, folded around the item in progress
+into `… N earlier` / `… N more` when it does not fit the channel), or `none`. The plan is the bound
+list nearest the run — the active block's when it binds one, otherwise the bound block the route
+passed most recently, otherwise, before any bound block is reached, the first bound block whose
+items resolve — so a plan-ready notification sent from the planning block shows the plan. A
+workflow whose blocks bind no list, an empty items array and a binding that resolves to neither a
+finished count nor a total add no plan lines. With `format` `markdown` or `html`, substituted
+values, item titles and block labels are escaped for the format; the author's own markup stays.
+The text is fitted to the channel's limit (the plan takes the room left; an over-long message is
+cut at a line with `…`), so delivery never fails for length. The lock node's PIN message opens with
+the same heading in plain text.
 
 `telegram-notification` is deprecated but remains executable for existing Telegram-specific
 workflows. Its explicit `chatId`, `parseMode`, and `replyMarkup` keep their original meanings and
@@ -1188,6 +1200,9 @@ Output stored in `upsertNoteResult` (or `outputVariable`): `{key, version, creat
 - `{{executionId}}` - System variable: process ID
 - `{{workflowId}}` - System variable: workflow ID
 - `{{userId}}` - System variable: current user ID
+- `{{runUrl}}` - System variable: the run page in the web app
+  (`getBaseUrl() + getAppPrefix() + /executions/<id>`; an inline subgraph child links its
+  top-level run)
 - `{{note:KEY}}` - Note content reference (fetches note by key for current user)
 - `{{playbook:NAME}}` - Playbook reference (named, reusable behaviour text of the current user)
 - `{{playbook:@owner/NAME}}` - Published playbook of another account
