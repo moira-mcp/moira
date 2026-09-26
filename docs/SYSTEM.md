@@ -1177,7 +1177,9 @@ interface ValidationError {
   into parentheses, HTML `<a href>`, plain text with the URL on the next line; the name alone when
   the run has no note), then the rendered `message`, then the plan by `planList`
   (`progress`: `📝 done/total: current item`; `full`: `📝 done/total` and numbered `✓`/`▶`/`○` items,
-  folded around the current item into `… N earlier` / `… N more` to fit; `none`), then
+  folded around the current item into `… N earlier` / `… N more` to fit; `none` — and when the
+  node's `default` connection leads straight to an `end` node, the run's last message, no item is
+  in progress: unfinished items read `○` and the `progress` line names no current item), then
   `⏳ agent on the step: <block>` or `🙋 waiting for you: <block>` when the node's single forward
   connection leads to a node the run pauses on (`lock` → a person; `agent-directive`, `teleport`,
   `materialize`, `subgraph` → the agent). Values substituted into a Markdown or HTML message, list

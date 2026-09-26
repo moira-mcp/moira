@@ -525,6 +525,18 @@ describe("plan list", () => {
     ]);
   });
 
+  test("in the run's last message no item is in progress: the unfinished ones read as open", () => {
+    const projected = projectExecutionRun(graph(), onItem(tasks, 2));
+    expect(planListLines(projected, 4096, undefined, { ended: true })).toEqual([
+      "📝 1/3",
+      "✓ 1. Write the parser",
+      "○ 2. Wire the CLI",
+      "○ 3. Document it",
+    ]);
+    expect(boundListLine(projected)).toBe("📝 1/3: Wire the CLI");
+    expect(boundListLine(projected, undefined, { ended: true })).toBe("📝 1/3");
+  });
+
   test("a list too long for the budget folds around the item in progress and keeps it", () => {
     const lines = planListLines(projectExecutionRun(graph(), onItem(many, 20)), 200);
     expect(lines[0]).toBe("📝 19/30");

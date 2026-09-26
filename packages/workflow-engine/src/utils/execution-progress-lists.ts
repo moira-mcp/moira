@@ -256,17 +256,29 @@ export type TextEscaper = (text: string) => string;
 const asIs: TextEscaper = (text) => text;
 
 /**
+ * How a notification reads the list: `ended` for the run's last message, where no item is still in
+ * progress and an unfinished item reads as open.
+ */
+export interface PlanListOptions {
+  ended?: boolean;
+}
+
+/**
  * `done/total: current item` for notification text, worded as the map and the picture word it
- * (an unresolved counter reads `—`); null when no bound list is near.
+ * (an unresolved counter reads `—`); null when no bound list is near. An ended run names no
+ * current item.
  */
 export function boundListLine(
   progress: ExecutionProgress | null,
   escape: TextEscaper = asIs,
+  options: PlanListOptions = {},
 ): string | null {
   const list = nearestBoundList(progress);
   const count = listProgressLabel(list);
   if (!list || count === null) return null;
-  return list.currentTitle ? `📝 ${count}: ${escape(list.currentTitle)}` : `📝 ${count}`;
+  return list.currentTitle && !options.ended
+    ? `📝 ${count}: ${escape(list.currentTitle)}`
+    : `📝 ${count}`;
 }
 
 /** How much of the plan a notification carries: every item, the one-line count, or nothing. */
@@ -275,8 +287,8 @@ export type PlanListMode = "full" | "progress" | "none";
 /** A single item title longer than this is shortened, so one item cannot crowd out the rest. */
 const PLAN_TITLE_LIMIT = 160;
 
-function planItemLine(item: ExecutionListItem, escape: TextEscaper): string {
-  const mark = item.done ? "✓" : item.current ? "▶" : "○";
+function planItemLine(item: ExecutionListItem, escape: TextEscaper, ended: boolean): string {
+  const mark = item.done ? "✓" : item.current && !ended ? "▶" : "○";
   const title =
     item.title.length > PLAN_TITLE_LIMIT
       ? `${item.title.slice(0, PLAN_TITLE_LIMIT - 1)}…`
@@ -289,12 +301,14 @@ function planItemLine(item: ExecutionListItem, escape: TextEscaper): string {
  * under a `📝 done/total` line. When the lines do not fit `budget` characters, items are folded
  * from the ends toward the item in progress (or the first unfinished one) into `… N earlier` and
  * `… N more` lines, so the item that matters always stays. A list without items (counters only)
- * reads as the count line alone. Empty when no list is near or nothing fits.
+ * reads as the count line alone. Empty when no list is near or nothing fits. In an ended run no
+ * item is in progress: an unfinished one reads `○`.
  */
 export function planListLines(
   progress: ExecutionProgress | null,
   budget: number,
   escape: TextEscaper = asIs,
+  options: PlanListOptions = {},
 ): string[] {
   const list = nearestBoundList(progress);
   const count = listProgressLabel(list);
@@ -302,7 +316,7 @@ export function planListLines(
   if (!list || count === null || list.items?.length === 0) return [];
   const header = `📝 ${count}`;
   const items = list.items ?? [];
-  const lines = items.map((item) => planItemLine(item, escape));
+  const lines = items.map((item) => planItemLine(item, escape, options.ended === true));
   const size = (parts: readonly string[]) => parts.reduce((sum, line) => sum + line.length + 1, 0);
   if (size([header, ...lines]) <= budget) return [header, ...lines];
   if (header.length > budget) return [];

@@ -36,6 +36,11 @@ export interface NotificationFrame {
   run: WorkflowExecution | null;
   /** The run projected with the sending node in flight; null without a progress definition. */
   progress: ExecutionProgress | null;
+  /**
+   * The sending node leads straight to an end node: the message is the run's last, so no plan item
+   * is still in progress — unfinished items read as open.
+   */
+  closing: boolean;
 }
 
 /**
@@ -56,6 +61,7 @@ export async function resolveNotificationFrame(
     graph: null,
     run: null,
     progress: null,
+    closing: false,
   };
   try {
     const workflow = await repository.getWorkflow(context.workflowId, userId);
@@ -67,6 +73,9 @@ export async function resolveNotificationFrame(
     frame.run = liveRun ? liveRun() : await repository.getExecution(context.executionId);
     frame.note = frame.run?.note ?? null;
     frame.graph = await repository.getWorkflowGraph(context.workflowId, userId);
+    const sender = frame.graph?.nodes.find((node) => node.id === nodeId);
+    const next = (sender?.connections as Record<string, string | undefined> | undefined)?.default;
+    frame.closing = frame.graph?.nodes.find((node) => node.id === next)?.type === "end";
     if (frame.graph?.progress && frame.run) {
       frame.progress = projectExecutionRun(
         frame.graph,
@@ -91,9 +100,10 @@ export function frameNotification(
     heading: notificationHeading(frame.flowName, frame.note, frame.url, options.format),
     body,
     planList: (budget) => {
-      if (mode === "full") return planListLines(frame.progress, budget, escape);
+      const ended = frame.closing;
+      if (mode === "full") return planListLines(frame.progress, budget, escape, { ended });
       if (mode === "none") return [];
-      const line = boundListLine(frame.progress, escape);
+      const line = boundListLine(frame.progress, escape, { ended });
       return line && line.length <= budget ? [line] : [];
     },
     waitingLine: waitingActorLine(frame.progress, escape),

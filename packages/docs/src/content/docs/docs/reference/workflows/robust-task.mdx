@@ -80,13 +80,15 @@ Planning is goal-first: the plan contains as many substantive steps as the task 
 
 An independent peer reviews the complete current plan against the frozen requirements, primary sources, and real project context. For each blocker it identifies the earliest cause: workflow artifact, validation or test, insufficient evidence, documentation or projection, an invalid or unprovable criterion, or the upstream plan/process. It returns `pass`, `repair`, or `replan`. Local repair is allowed only when the plan artifact owns every blocker; other or mixed causes return to planning.
 
+The plan body stays in `plan.md`; every node that writes a plan also returns `plan_steps` — one short title per step, in plan order, at most 30 — from which the workflow derives `total_steps`. The titles are the plan list people see in notifications and on the run page.
+
 A repair never overwrites the reviewed plan. It first reproduces the problem, then returns `changed` with the next `plans/NNN/plan.md`, or `reassess` with `plans/NNN/repair.md` when the finding cannot honestly be repaired in place. Each direct review and repair reassessment has a separate replan consumer, so a historical reassessment cannot become the cause of a later transition merely because its file still exists.
 
 The automatic plan-review cycle is bounded by `max_review_rounds` (default `5`). At the bound, the user or autonomous agent explicitly chooses another justified repair or truthful incomplete delivery; a blocked plan is never promoted by counter exhaustion. In interactive mode execution starts only after unconditional approval of the exact plan. Rejection creates another plan version and returns it to review.
 
 ## Operating mode
 
-The first step resolves `operating_mode` as `autonomous` or `interactive`. The agent reuses a mode you already stated, infers an unambiguous one — including a run started by an already autonomous parent process — and asks once only when the mode is neither stated nor derivable.
+The first step resolves `operating_mode` as `autonomous` or `interactive`. The agent reuses a mode you already stated, infers an unambiguous one — including a run started by an already autonomous parent process — and asks once only when the mode is neither stated nor derivable. The same step returns `execution_note`, the task in a few words (at most 120 characters, the caller's note when one was given); it heads every notification of the run. It also returns `goal_summary`, the outcome the task must achieve in one sentence, which the plan messages show.
 
 In `interactive` mode everything above is unchanged. In `autonomous` mode the plan-approval gate is bypassed and every bounded decision is made by the agent on evidence: another repair pass only for findings that are reproducible and repairable now, a retry only when something material changed, a replan when the failure invalidates the plan rather than the attempt, and otherwise recorded incompleteness. The independent reviews, the retry and review bounds, the replan routes and the durable records are identical in both modes, and accepted gaps stay visible in the delivery — autonomy removes the waiting, not the honesty.
 
@@ -94,7 +96,7 @@ In `interactive` mode everything above is unchanged. In `autonomous` mode the pl
 
 The execution card and exported progress image share one six-stage presentation: Intake → Plan → Execute → Step Review → Final Review → Deliver. Every node, including routing nodes, the jump-only replan entry and every repair, recovery, and replan role, belongs to one stage; every edge that leaves a stage is labelled and every return explains its cause and exit, so the process view is derived from the executable graph. The presentation adds no executable route, counter, authority decision, or proof mechanism.
 
-The Execute stage binds the plan's counters — `current_step` as the step in progress and `total_steps` as the total — so the run reports how far through the plan it is; once the route has reached that stage, a user notification carries the same count in its plan line, below the message.
+The Execute stage binds the plan itself — `plan_steps` as the items with each `title`, `current_step` as the step in progress, counted from `1`, and `total_steps` as the total — so the run and its notifications show every step, which ones are done and which one is in progress.
 
 Each stage shows its stable purpose, the exact current responsibility, the latest confirmed semantic outcome, and the next meaningful action. The role that owns a result replaces one bounded outcome instead of appending history: intake owns the resolved contract, plan roles own the current plan synopsis and disposition, execution owns the latest plan-qualified attempt, each review family owns its current disposition, and delivery owns the truthful terminal result. Active labels describe current work without hiding the last confirmed outcome.
 
@@ -148,7 +150,31 @@ The End node returns exactly:
 }
 ```
 
-Configured user notifications announce plan readiness, exhausted step retries, and completion. Notification failure does not stop the workflow.
+## Notifications
+
+Robust Task notifies through the user's configured channels. Every message is headed by the flow
+name and the run's task, linked to the run page, and carries no image. Every line written from the
+run's own values comes from a one-sentence field the step writes for a person, without file names
+or internal values: the task's goal, why a review keeps failing, what was decided and why, and the
+result. The messages are in English.
+
+| When | Interactive | Autonomous |
+| --- | --- | --- |
+| The reviewed plan is ready | "Plan ready for your approval" with the goal, the whole plan and the choices: approve it and the work goes ahead, or reject it with feedback to have it revised | "Plan approved — the work goes ahead" with the goal and the whole plan |
+| A step exhausts its repairs | "Step needs your decision": the step's number and title, why its review keeps failing, and the choices — try it again, change the plan, or finish with the step incomplete | "Decided for you", sent after the decision: the step, what was decided and why |
+| The plan review reaches its bound | "The plan keeps failing review": why, and the choices — fix the plan once more, or finish with the plan incomplete | "Decided for you", sent after the decision: what was decided and why |
+| The final review reaches its bound | "The result keeps failing the final review": why, and the choices — fix the result once more, or accept it with its open items | "Decided for you", sent after the decision: what was decided and why |
+| The run finishes | "Completed", or "Completed with open items" when the delivery is incomplete: the result in one sentence and every step marked `✓` done or `○` open — the run has ended, so none reads as in progress | the same |
+
+The three reviews return `failure_summary` whenever they do not pass — what keeps the work from
+passing, in one sentence — and the message at a review bound quotes the latest one. Each of the
+three decisions returns `decision_summary`, what was decided and why in one sentence; the autonomous
+message carries it. The delivery returns `result_summary`, the result in one sentence, for the
+finish. A plan revised after a replan is announced again in its
+revised form, with the steps already done kept as done. Nothing sent in an autonomous run asks for a
+decision. Because the flow notifies, starting it for a user with no configured channel is refused
+with an instruction; an agent that wants to run without notifications prepares the start again with
+`skipNotificationCheck: true`. A failed notification does not stop the workflow.
 
 ## Use cases
 

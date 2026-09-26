@@ -312,7 +312,15 @@ describe("TelegramNotificationHandler Error Handling", () => {
           connections: { success: "test-telegram-node" },
           connectionLabels: { success: "done" },
         },
-        createTelegramNode({ progressNodeId: "report", connections: { default: "end" } }),
+        createTelegramNode({ progressNodeId: "report", connections: { default: "tidy" } }),
+        // A step after the message: the run goes on, so the list still has an item in progress.
+        {
+          id: "tidy",
+          type: "expression",
+          progressNodeId: "report",
+          expressions: ["current_task = current_task"],
+          connections: { default: "end" },
+        },
         { id: "end", type: "end", progressNodeId: "report" },
       ],
     } as any;

@@ -64,7 +64,7 @@ moira-workflow ./workflow.json set-variable-schema result --file ./result-schema
 передаваемом списке, иначе следующая правка сочтёт историю workflow неизвестной.
 
 Маршрутизация правится той же командой `update`. `--cases` заменяет упорядоченные case узла
-`condition` или `agent-directive`, `--expressions` — выражения, которые он вычисляет перед ними, а
+`condition` или `agent-directive`, `--expressions` — выражения, которые он вычисляет перед ними (пустой массив `[]` убирает их), а
 соединения правятся по ключу:
 
 ```bash

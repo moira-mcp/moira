@@ -71,6 +71,9 @@ replaces the node's expressions. Both apply to `condition` and `agent-directive`
 condition node, `success` on an agent-directive node) and other than the reserved control outputs
 `error` and `timeout` — run `validate` after the edit to see the routing diagnostics.
 
+`--expressions '[]'` removes the `expressions` field from any node, including a type that accepts no
+expressions at all, such as a `teleport` node left with one by an earlier edit.
+
 ### rename - Rename a node and every reference to it
 
 ```bash

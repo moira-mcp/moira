@@ -858,9 +858,12 @@ Every message opens with a heading, `<workflow name> · <run note>`, linked to t
 pauses the run — `⏳ agent on the step: <block>` or `🙋 waiting for you: <block>`. `planList` is
 `progress` by default (one line `📝 done/total: current item`), `full` (`📝 done/total` and every
 item numbered, marked `✓` done, `▶` in progress, `○` pending, folded around the item in progress
-into `… N earlier` / `… N more` when it does not fit the channel), or `none`. The plan is the bound
-list nearest the run — the active block's when it binds one, otherwise the bound block the route
-passed most recently, otherwise, before any bound block is reached, the first bound block whose
+into `… N earlier` / `… N more` when it does not fit the channel), or `none`. A notification
+whose `default` connection leads straight to an `end` node is the run's last message: no item is
+in progress, so an unfinished item reads `○` and the `progress` line names no current item.
+The plan is the bound list nearest the run — the active block's when it binds one, otherwise the
+bound block the route passed most recently, otherwise, before any bound block is reached, the
+first bound block whose
 items resolve — so a plan-ready notification sent from the planning block shows the plan. A
 workflow whose blocks bind no list, an empty items array and a binding that resolves to neither a
 finished count nor a total add no plan lines. With `format` `markdown` or `html`, substituted

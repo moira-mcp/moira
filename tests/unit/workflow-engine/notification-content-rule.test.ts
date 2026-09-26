@@ -14,7 +14,6 @@ import { describe, expect, test } from "@jest/globals";
 import { GraphValidator, type WorkflowGraph } from "@mcp-moira/workflow-engine";
 
 const FLOWS = path.join(process.cwd(), "workflows/production/flows");
-const ROBUST_TASK = path.join(FLOWS, "bbbccd66-47b0-47ce-8ed2-b7916f23aa8e.json");
 const SDF = path.join(FLOWS, "91b11263-a180-4a08-9399-55f406f82c69.json");
 
 function bundled(file: string): WorkflowGraph {
@@ -79,19 +78,18 @@ function withMessage(
 }
 
 describe("today's bundled messages that show internal values", () => {
-  test.each([
-    [ROBUST_TASK, "notify-plan-ready", "{{current_plan_file}}", "a file or path"],
-    [ROBUST_TASK, "notify-completion", "{{delivery_file}}", "a file or path"],
-    [SDF, "notify-unit-approval", "{{current_step_index}}", "a bare number"],
-  ])("%#: %s warns on %s", async (file, nodeId, reference, kind) => {
-    const { valid, messages } = await warnings(bundled(file), nodeId);
-    expect(valid).toBe(true);
-    expect(messages).toEqual(
-      expect.arrayContaining([
-        expect.stringMatching(new RegExp(`${reference.replace(/[{}]/gu, "\\$&")}, ${kind}`, "u")),
-      ]),
-    );
-  });
+  test.each([[SDF, "notify-unit-approval", "{{current_step_index}}", "a bare number"]])(
+    "%#: %s warns on %s",
+    async (file, nodeId, reference, kind) => {
+      const { valid, messages } = await warnings(bundled(file), nodeId);
+      expect(valid).toBe(true);
+      expect(messages).toEqual(
+        expect.arrayContaining([
+          expect.stringMatching(new RegExp(`${reference.replace(/[{}]/gu, "\\$&")}, ${kind}`, "u")),
+        ]),
+      );
+    },
+  );
 });
 
 describe("what warns and what stays quiet", () => {
@@ -172,7 +170,7 @@ describe("what warns and what stays quiet", () => {
 describe("moira-workflow validate", () => {
   test("prints the warning and does not fail", () => {
     const file = path.join(os.tmpdir(), `notification-warning-${randomUUID()}.json`);
-    fs.copyFileSync(ROBUST_TASK, file);
+    fs.writeFileSync(file, JSON.stringify(withMessage("Details: {{delivery_file}}")));
     try {
       const output = execFileSync(
         process.execPath,
@@ -180,7 +178,7 @@ describe("moira-workflow validate", () => {
         { cwd: process.cwd(), encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
       );
       expect(output).toContain("warning(s)");
-      expect(output).toContain("Notification notify-completion shows {{delivery_file}}");
+      expect(output).toContain("Notification notify shows {{delivery_file}}");
     } finally {
       fs.rmSync(file, { force: true });
     }

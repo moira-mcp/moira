@@ -64,7 +64,7 @@ the list you pass, or the next edit treats the workflow as having an unknown his
 
 Routing is edited through the same `update` command. `--cases` replaces the ordered cases of a
 `condition` or `agent-directive` node, `--expressions` replaces the expressions it evaluates before
-them, and connections are edited by key:
+them (an empty array `[]` removes them), and connections are edited by key:
 
 ```bash
 moira-workflow ./workflow.json update review \

@@ -440,6 +440,10 @@ of it the message carries:
   `… N earlier` / `… N more`;
 - `none` — no plan.
 
+A notification whose `default` connection leads straight to an `end` node is the run's last
+message: no item is in progress any more, so an unfinished item reads `○` and the `progress` line
+names no current item.
+
 Before the run reaches the block that binds the plan, the first bound block whose items are
 written is used, so a "plan ready" message can show the plan. With `format: "markdown"` or
 `"html"`, every value substituted into the message is escaped for that format, so a value cannot

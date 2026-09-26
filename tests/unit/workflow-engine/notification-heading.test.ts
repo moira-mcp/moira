@@ -226,6 +226,14 @@ describe("planList", () => {
         type: "user-notification",
         progressNodeId: "work",
         message: "Checkpoint",
+        connections: { default: "tidy" },
+      },
+      // A step after the message: the run goes on, so the item it works on is in progress.
+      {
+        id: "tidy",
+        type: "expression",
+        progressNodeId: "work",
+        expressions: ["current_task = current_task"],
         connections: { default: "end" },
       },
       { id: "end", type: "end", progressNodeId: "work" },
@@ -276,6 +284,52 @@ describe("planList", () => {
     expect(texts[0].startsWith("Modes\n")).toBe(true);
     expect(texts[0].endsWith(ending)).toBe(true);
   });
+
+  test.each([
+    ["full", "Checkpoint\n\n📝 0/2\n○ 1. Parse\n○ 2. Ship"],
+    ["progress", "Checkpoint\n\n📝 0/2"],
+  ] as const)(
+    "%s: a message whose next node is the end is the run's last — nothing reads as in progress",
+    async (planList, ending) => {
+      const texts: string[] = [];
+      const closing = {
+        ...graph,
+        nodes: graph.nodes.map((node) =>
+          node.id === "notify" ? { ...node, connections: { default: "end" } } : node,
+        ),
+      } as WorkflowGraph;
+      const handler = new UserNotificationHandler({
+        deliver: async (request: { text: string }) => {
+          texts.push(request.text);
+          return { status: "delivered", configuredChannels: 1, deliveredChannels: 1, channels: [] };
+        },
+        maxTextLength: 4096,
+      } as unknown as UserCommunicationService);
+      const repository = {
+        getWorkflow: async () => ({ metadata: closing.metadata }),
+        getWorkflowGraph: async () => closing,
+        getExecution: async () => null,
+      } as unknown as IDataRepository;
+      await handler.execute(
+        { ...closing.nodes[1], planList } as never,
+        {
+          variables: { tasks },
+          nodeStates: {},
+          executionId: RUN,
+          workflowId: "wf",
+          userId: "user",
+        },
+        new AgentMessageQueue(),
+        repository,
+        {} as IGraphExecutionEngine,
+        undefined,
+        undefined,
+        () => run,
+      );
+      expect(texts).toEqual([expect.stringMatching(/^Modes\n/u)]);
+      expect(texts[0].endsWith(ending)).toBe(true);
+    },
+  );
 });
 
 describe("a notification reads the run as of the node that sends it", () => {

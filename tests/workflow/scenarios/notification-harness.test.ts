@@ -13,7 +13,7 @@ const robustTask = catalogGraph("robust-task");
 describe("the internal-value scan", () => {
   test.each([
     [
-      "a workspace path, as today's Robust Task completion message carries it",
+      "a workspace path in a completion line",
       "Robust Task finished (complete).\n\nAll steps done.\n\nDetails: final/delivery.md",
       "path final/delivery.md",
     ],

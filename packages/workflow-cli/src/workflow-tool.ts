@@ -411,9 +411,11 @@ function updateNode(
       const parsed = JSON.parse(options.expressions);
       if (!Array.isArray(parsed) || parsed.some((item) => typeof item !== "string"))
         throw new Error("expressions must be a JSON array of strings");
-      node.expressions = parsed;
+      // An empty list removes the field: node types without expressions (teleport) refuse it.
+      if (parsed.length === 0) delete node.expressions;
+      else node.expressions = parsed;
       changes++;
-      console.log(c("green", `✓ Updated expressions`));
+      console.log(c("green", parsed.length ? `✓ Updated expressions` : `✓ Cleared expressions`));
     } catch (error) {
       console.log(
         c(
@@ -1750,7 +1752,7 @@ ${c("cyan", "Update Options:")}
   --attach-progress-image <true|false>  Toggle progress image on notification nodes
   --plan-list <full|progress|none>      How much of the plan a user-notification carries
   --cases '[{"when":{...},"output":"key"}]'  Update routing cases (condition / agent-directive)
-  --expressions '["a = a + 1"]'       Update node expressions
+  --expressions '["a = a + 1"]'       Update node expressions ('[]' removes them)
   --message "text"                     Update message
   --connections '{"key":"target"}'     Update connections
   --add-connection <key> <target>      Add connection

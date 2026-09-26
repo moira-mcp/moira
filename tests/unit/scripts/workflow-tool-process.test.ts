@@ -126,6 +126,13 @@ describe("workflow-tool process block authoring", () => {
     expect(read(file).nodes[1]).not.toHaveProperty("connectionLabels");
   });
 
+  test("sets a node's expressions and removes the field with an empty list", () => {
+    run([file, "update", "verify", "--expressions", '["attempts = attempts + 1"]']);
+    expect(read(file).nodes[2].expressions).toEqual(["attempts = attempts + 1"]);
+    expect(run([file, "update", "verify", "--expressions", "[]"])).toContain("Cleared expressions");
+    expect(read(file).nodes[2]).not.toHaveProperty("expressions");
+  });
+
   test("binds a block to a list, rejects a malformed binding, and removes it with none", () => {
     run([
       file,

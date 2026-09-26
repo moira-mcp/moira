@@ -1059,6 +1059,14 @@ describe("UserNotificationHandler", () => {
           type: "user-notification",
           progressNodeId: "report",
           message: "Checkpoint",
+          connections: { default: "tidy" },
+        },
+        // A step after the message: the run goes on, so the list still has an item in progress.
+        {
+          id: "tidy",
+          type: "expression",
+          progressNodeId: "report",
+          expressions: ["current_task = current_task"],
           connections: { default: "end" },
         },
         { id: "end", type: "end", progressNodeId: "report" },
