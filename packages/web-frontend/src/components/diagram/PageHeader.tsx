@@ -2,8 +2,10 @@
  * The header of a process page (a flow, a run): text about what is being looked at, and nothing
  * functional. One row of identity — a back link, the name, its version or id, status badges —
  * with the page's own actions on the right, and beneath it an optional line of description or
- * goal that may wrap to two lines. Everything that does something with the diagram (view modes,
- * search, layout, zoom, guides) lives in the `DiagramToolbar` beneath, never here.
+ * goal that may wrap to two lines. The description keeps at least a readable width: on a narrow
+ * screen the fact chips move to their own line instead of squeezing it. Everything that does
+ * something with the diagram (view modes, search, layout, zoom, guides) lives in the
+ * `DiagramToolbar` beneath, never here.
  */
 
 import React from "react";
@@ -65,13 +67,15 @@ export function PageHeader({
         <div className={cn("mt-0.5 flex min-w-0 flex-wrap items-baseline gap-x-3 gap-y-0.5")}>
           {description && (
             <p
-              className="line-clamp-2 min-w-0 flex-1 text-xs leading-5 text-muted-foreground"
+              className="line-clamp-2 min-w-0 flex-1 basis-64 text-xs leading-5 text-muted-foreground"
               data-testid="page-description"
             >
               {description}
             </p>
           )}
-          {facts && <div className="flex shrink-0 flex-wrap items-center gap-1">{facts}</div>}
+          {facts && (
+            <div className="flex min-w-0 max-w-full flex-wrap items-center gap-1">{facts}</div>
+          )}
         </div>
       )}
     </header>

@@ -643,8 +643,11 @@ default.
 **URL state:**
 
 - `view` (`steps | map | graph`, registry `components/flow/modes.ts`): the default is `steps` for
-  the learning examples (`preferredFlowView`) and `map` otherwise; any other value resolves to that
-  default; a workflow without `progress` has no map and shows the graph in its place.
+  the learning examples (`preferredFlowView`) and for every flow below the `sm` width
+  (`usePhoneWidth`), where a canvas would open with its first card cut at the screen's edge, and
+  `map` otherwise; a `view` in the link still wins, so the map and the graph stay one tap away on a
+  phone; any other value resolves to that default; a workflow without `progress` has no map and
+  shows the graph in its place.
 - `block`.
 - `guide` (walkthrough step).
 - `edit` (`1` turns on edit mode; ignored for non-owners).
@@ -655,7 +658,8 @@ default.
 the workflow name (`flow-title`), `v<version>` as the meta, the description as the header line,
 and as header facts the level the flow was authored at (`flow-level-badge`, absent without a
 level tag), its subject tags (`flow-tag`, never the level tag) and its node count
-(`flow-node-count`) —
+(`flow-node-count`); on a narrow screen the fact chips wrap below the description rather than
+squeezing it —
 with the edit toggle and its hint for owners and the owner actions (copy for public flows,
 visibility, share, delete) on the right, folded into a dropdown below `md`. Everything that acts
 on the diagram lives in the `DiagramToolbar` beneath it, which the active view mounts: the view
@@ -2065,6 +2069,16 @@ Avoid hardcoded colors:
 - **Sidebar persistence**: State saved to cookie (sidebar_state), restored on page load
 - **Keyboard shortcut**: Cmd/Ctrl+B toggles sidebar
 - **Mobile support**: Responsive layout with sidebar toggle, use-mobile hook
+- **Phone width** (checked at 390 px by `tests/e2e/phone-layout.spec.ts`):
+  - the beta notice (`BetaWarningBanner`, `beta-warning-banner`) is one short line below `sm`
+    (`components.betaWarningBanner.short`) and the full notice from `sm` up;
+  - a process page header's description (`page-description`) keeps at least a 16 rem basis, so the
+    fact chips wrap onto their own line instead of squeezing it;
+  - the recommended flows' agent-first note (`agent-first-note`) sits below the header row and
+    spans the card, not the width the header actions leave;
+  - a flow page opens on the steps view (see the flow page's `view`), which fills the remaining
+    height below `lg`; the run page has no steps view and keeps its map default;
+  - the beta notice's dismiss button is a 44 px touch target below `sm`.
 - **Smooth transitions**: Tailwind transition utilities
 
 ## Internationalization (i18n)

@@ -1286,7 +1286,9 @@ test("a phone keeps the flow page readable: contents under the diagram, panel un
 }) => {
   await loginAsAdmin(page);
   await page.setViewportSize({ width: 600, height: 900 });
-  await page.goto(`${BASE_URL}/workflows/moira/quick-task`);
+  // A phone opens on the steps view (tests/e2e/phone-layout.spec.ts); the map, one tap away, keeps
+  // its own phone layout.
+  await page.goto(`${BASE_URL}/workflows/moira/quick-task?view=map`);
   await expect(page.getByTestId("map-view")).toBeVisible();
   const diagram = (await page.getByTestId("canvas-view").boundingBox())!;
   const contents = (await page.getByTestId("map-contents").boundingBox())!;

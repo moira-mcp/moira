@@ -4,7 +4,8 @@
  *
  * The definition is shown in three views. The steps view is the simplest picture: what the agent
  * is told, as numbered instruction cards joined by arrows, with an optional reading of every
- * variable as plain words; it exists for every workflow and is where the learning examples open.
+ * variable as plain words; it exists for every workflow and is where the learning examples, and
+ * every flow on a phone, open.
  * The derived process (from the server for the saved definition, re-derived in the browser while
  * there are unsaved edits) is shown through the run page's two views with no run in them: the map
  * (the process as a diagram with its contents sidebar) and the technical node graph with its
@@ -91,6 +92,7 @@ import { flowGuideSteps, type FlowPanelTab } from "../components/flow/guideSteps
 import { runBlocks } from "../components/run/model";
 import { RegistryPanel } from "../components/flow/RegistryPanel";
 import { FLOW_MODES, resolveFlowMode, type FlowViewMode } from "../components/flow/modes";
+import { usePhoneWidth } from "../hooks/use-phone-width";
 import { definitionProgress } from "../components/flow/model";
 import { EditingProvider, useEditLog } from "../components/flow/editing";
 import { exportDiff } from "../components/flow/operations";
@@ -323,9 +325,12 @@ export const FlowPage: React.FC = () => {
     [progress, statistics],
   );
 
-  // A learning example opens on the steps view; any other flow on the map, or on the graph when it
-  // has no process view. A `view` in the link wins, except a map the definition cannot draw.
-  const preferredView = preferredFlowView(fileInfo?.ownerHandle, fileInfo?.slug);
+  // A learning example opens on the steps view, and so does any flow on a phone, where a canvas
+  // opens with its first card cut at the screen's edge; any other flow opens on the map, or on the
+  // graph when it has no process view. A `view` in the link wins, except a map the definition
+  // cannot draw, so switching views keeps working on a phone.
+  const phone = usePhoneWidth();
+  const preferredView = phone ? "steps" : preferredFlowView(fileInfo?.ownerHandle, fileInfo?.slug);
   const requestedMode = resolveFlowMode(searchParams.get(VIEW_PARAM), preferredView ?? "map");
   const mode: FlowViewMode = requestedMode === "steps" || process ? requestedMode : "graph";
   // Variables read as words on the steps view: the link's `inline` wins, else the reader's choice.
@@ -767,7 +772,12 @@ export const FlowPage: React.FC = () => {
         ) : (
           <div className="flex-1 min-h-0 flex flex-col lg:flex-row overflow-y-auto lg:overflow-hidden">
             <section
-              className="flex min-w-0 flex-col lg:flex-1 lg:min-h-0 lg:overflow-hidden"
+              className={cn(
+                "flex min-w-0 flex-col lg:flex-1 lg:min-h-0 lg:overflow-hidden",
+                // The steps view has no panel under it, so on a narrow screen it takes the whole
+                // remaining height instead of a fixed box with an empty band beneath.
+                mode === "steps" && "flex-1 min-h-0",
+              )}
               aria-label={t("pages.flowPage.title")}
               data-testid="flow-view"
             >
@@ -809,9 +819,9 @@ export const FlowPage: React.FC = () => {
 
               {/* Only the shown view is mounted: the selection lives in the URL and the graph
                   re-centres on its focus request, so a switch loses nothing. */}
-              <div className="lg:flex-1 lg:min-h-0">
+              <div className={cn("lg:flex-1 lg:min-h-0", mode === "steps" && "flex-1 min-h-0")}>
                 {mode === "steps" && (
-                  <div className="h-[60vh] lg:h-full">
+                  <div className="h-full min-h-80">
                     <StepsView
                       workflow={edited}
                       inline={inline}

@@ -181,18 +181,13 @@ export function RecommendedFlows({
       data-testid="recommended-flows"
       data-state={open ? "open" : "closed"}
     >
+      {/* The header row carries only the title and its actions; the note below it spans the whole
+          card, so on a phone the actions never squeeze the text into a narrow column. */}
       <div className="flex items-start justify-between gap-3">
-        <div className="space-y-1">
-          <h2 id="recommended-flows-title" className="inline-flex items-center gap-2 font-semibold">
-            <Sparkles className="size-4 text-primary" aria-hidden="true" />
-            {t("onboarding.title")}
-          </h2>
-          {open && (
-            <p className="max-w-3xl text-sm text-muted-foreground" data-testid="agent-first-note">
-              {t("onboarding.agentFirst")}
-            </p>
-          )}
-        </div>
+        <h2 id="recommended-flows-title" className="inline-flex items-center gap-2 font-semibold">
+          <Sparkles className="size-4 shrink-0 text-primary" aria-hidden="true" />
+          {t("onboarding.title")}
+        </h2>
         <div className="flex shrink-0 items-center gap-1">
           {!compact && (
             <button
@@ -212,6 +207,11 @@ export function RecommendedFlows({
           <HidePanelButton panel={panel} />
         </div>
       </div>
+      {open && (
+        <p className="mt-1 max-w-3xl text-sm text-muted-foreground" data-testid="agent-first-note">
+          {t("onboarding.agentFirst")}
+        </p>
+      )}
       {open && (
         <div className="mt-4 space-y-5">
           <Group

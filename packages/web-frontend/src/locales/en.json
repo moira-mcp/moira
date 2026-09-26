@@ -2819,6 +2819,7 @@
     "betaWarningBanner": {
       "title": "Beta Version:",
       "message": "The system is under development. Data loss, functionality changes, or terms of use modifications are possible. We do our best to prevent this. Thank you for understanding.",
+      "short": "The system is under development: data loss and changes are possible.",
       "dismiss": "Dismiss beta warning"
     },
     "betaAgreementModal": {
