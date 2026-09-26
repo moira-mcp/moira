@@ -59,6 +59,10 @@ moira-workflow ./workflow.json set-tags research,verification
 moira-workflow ./workflow.json set-variable-schema result --file ./result-schema.json
 ```
 
+`set-tags` заменяет весь список тегов. У workflow, созданного Workflow Management Flow, ровно один
+тег уровня — `complexity:simple`, `complexity:standard` или `complexity:complex`; сохраняйте его в
+передаваемом списке, иначе следующая правка сочтёт историю workflow неизвестной.
+
 Маршрутизация правится той же командой `update`. `--cases` заменяет упорядоченные case узла
 `condition` или `agent-directive`, `--expressions` — выражения, которые он вычисляет перед ними, а
 соединения правятся по ключу:

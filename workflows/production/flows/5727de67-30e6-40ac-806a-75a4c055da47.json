@@ -2,8 +2,8 @@
   "id": "5727de67-30e6-40ac-806a-75a4c055da47",
   "metadata": {
     "name": "Workflow Management Flow",
-    "version": "6.13.0",
-    "description": "Creates or edits one complete Moira workflow at the level agreed with the person (simple, standard or complex) through reconciled sources, requirements, official mutation, review, and authority-bound delivery; on the standard and complex levels and on every edit it adds an independently reviewed semantic design and the full quality review, while a simple create is built from the requirements and takes a light review. It materializes nine canonical thematic authoring references and requires each substantive consumer to read its exact applicable files while keeping local node contracts concise. It preserves the process block contract (every node owned by a described block, every boundary edge and return labelled, one readable order), cause-aware repair/replan, publication authority, repository identity, and the complete create/edit route model; it does not execute the downstream task.",
+    "version": "6.14.0",
+    "description": "Creates or edits one complete Moira workflow at the level agreed with the person (simple, standard or complex) through reconciled sources, requirements, official mutation, review, and authority-bound delivery; on the standard and complex levels it adds an independently reviewed semantic design or edit plan and the full quality review, while a simple workflow is built or changed straight from the requirements and takes a light review. An edit starts from the level recorded on the workflow. It materializes nine canonical thematic authoring references and requires each substantive consumer to read its exact applicable files while keeping local node contracts concise. It preserves the process block contract (every node owned by a described block, every boundary edge and return labelled, one readable order), cause-aware repair/replan, publication authority, repository identity, and the complete create/edit route model; it does not execute the downstream task.",
     "author": "mcp-moira-team",
     "tags": [
       "workflow",
@@ -251,7 +251,7 @@
     {
       "type": "agent-directive",
       "id": "approve-structure",
-      "directive": "{{#if escalation_reason}}Before anything else, tell the person in plain words that the level was raised to `{{complexity_tier}}` during this run, and the review gave this reason: “{{escalation_reason}}”; say what it costs — a longer process with structure design, an independent design review and this approval — and what it gives: a more thorough result. {{/if}}Read the current `{{workspace_path}}/workflow-design.md`, present its structure and observable consequences to the user, and ask whether it is approved.\n\nReturn `structure_approved` as `yes` or `no`. When it is `no`, return the user's exact non-empty `structure_feedback`. Do not revise the design here.",
+      "directive": "{{#if escalation_reason}}Before anything else, tell the person in plain words that the level was raised to `{{complexity_tier}}` during this run, and the review gave this reason: “{{escalation_reason}}”; say what it costs — a longer process with structure design, an independent design review and this approval — and what it gives: a more thorough result. {{/if}}Read the current `{{workspace_path}}/workflow-design.md`, present its structure and observable consequences to the user, and ask whether it is approved.\n\nReturn `structure_approved` as `yes` or `no`. When it is `no`, return the user's exact non-empty `structure_feedback`. Do not revise the design here.\n\nIf the person explicitly asks for a simpler process, the level may go down: first record their request, in their words, together with any feedback they gave on the design, and the resulting level in `{{workspace_path}}/workflow-requirements.md`, then return `lowering_request` with their words, the lower `complexity_tier` and an empty `escalation_reason`. Never propose a lower level yourself, and never return the level the run already has. On `simple` the build then works from the requirements and this design is set aside.",
       "completionCondition": "The user approved the current design or supplied actionable rejection feedback",
       "inputSchema": {
         "type": "object",
@@ -268,6 +268,11 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 4000
+          },
+          "lowering_request": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
           }
         },
         "required": [
@@ -290,11 +295,55 @@
                 "structure_feedback"
               ]
             }
+          },
+          {
+            "if": {
+              "required": [
+                "lowering_request"
+              ]
+            },
+            "then": {
+              "required": [
+                "complexity_tier",
+                "escalation_reason"
+              ],
+              "properties": {
+                "complexity_tier": {
+                  "not": {
+                    "const": "complex"
+                  }
+                },
+                "escalation_reason": {
+                  "const": ""
+                }
+              }
+            },
+            "else": {
+              "not": {
+                "anyOf": [
+                  {
+                    "required": [
+                      "complexity_tier"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "escalation_reason"
+                    ]
+                  }
+                ]
+              }
+            }
           }
+        ],
+        "globalInputs": [
+          "complexity_tier",
+          "escalation_reason"
         ]
       },
       "connections": {
         "success": "refine-structure",
+        "simple": "create-workflow-json",
         "approved": "create-workflow-json"
       },
       "progressNodeId": "design",
@@ -308,6 +357,16 @@
           "when": {
             "operator": "eq",
             "left": {
+              "contextPath": "complexity_tier"
+            },
+            "right": "simple"
+          },
+          "output": "simple"
+        },
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
               "contextPath": "approve-structure.structure_approved"
             },
             "right": "yes"
@@ -316,7 +375,8 @@
         }
       ],
       "connectionLabels": {
-        "approved": "structure approved, build"
+        "approved": "structure approved, build",
+        "simple": "lowered to simple, build from the requirements"
       }
     },
     {
@@ -404,29 +464,123 @@
     {
       "type": "agent-directive",
       "id": "gather-edit-requirements",
-      "directive": "Before deciding edit requirements, read `{{workspace_path}}/reference/authority.md`; when the requested change affects or requires progress, also read `{{workspace_path}}/reference/progress.md`.\n\nRead `{{workspace_path}}/reference/conversation.md` and hold the requirements conversation it describes.\n\nCapture the requested changes, protected behavior, authority boundaries, and observable success criteria for the complete workflow at {{workflow_artifact_path}}. Read the complete workflow and relevant Moira/project contracts. Resolve discoverable gaps and ask only for a material decision that cannot be discovered.\n\nWrite the complete requirements once to `{{workspace_path}}/edit-requirements.md`, separate from implementation ideas; it records the agreed level and its reason. Do not copy them into workflow context or add inventories, hashes, matrices, or duplicate state. Return a concise current `progress_requirements_outcome`, replacing its prior value.",
+      "directive": "Before deciding edit requirements, read `{{workspace_path}}/reference/authority.md`; when the requested change affects or requires progress, also read `{{workspace_path}}/reference/progress.md`.\n\nRead `{{workspace_path}}/reference/conversation.md` and hold the requirements conversation it describes.\n\nCapture the requested changes, protected behavior, authority boundaries, and observable success criteria for the complete workflow at {{workflow_artifact_path}}. Read the complete workflow and relevant Moira/project contracts. Resolve discoverable gaps and ask only for a material decision that cannot be discovered.\n\nRead the level recorded on the flow from its `metadata.tags` — exactly one `complexity:<level>` tag — and return it as `recorded_tier`, or `none` when the flow carries no such tag. Start from the recorded level: a flow tagged below `complex` never ran the responsibilities its level skips, and the requested change may raise the level; when it does, those responsibilities run over the whole flow, not only the changed part. A flow without a level tag has an unknown history: decide its level from the flow and the request as the conversation describes. Go below the recorded level only when the person explicitly asks for it in an interactive run: record the request in their words and the resulting level in `edit-requirements.md` before it takes effect, and return the request as `lowering_request`. In `autonomous` mode never go below the recorded level.\n\nWrite the complete requirements once to `{{workspace_path}}/edit-requirements.md`, separate from implementation ideas; it records the recorded level, the agreed level and its reason. Return the agreed level as `complexity_tier`. Do not copy them into workflow context or add inventories, hashes, matrices, or duplicate state. Return a concise current `progress_requirements_outcome`, replacing its prior value.",
       "completionCondition": "The complete current edit requirements and observable success criteria exist once in edit-requirements.md",
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,
-        "properties": {},
+        "properties": {
+          "recorded_tier": {
+            "type": "string",
+            "enum": [
+              "simple",
+              "standard",
+              "complex",
+              "none"
+            ]
+          },
+          "lowering_request": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
+          }
+        },
         "globalInputs": [
-          "progress_requirements_outcome"
+          "progress_requirements_outcome",
+          "complexity_tier"
         ],
         "required": [
-          "progress_requirements_outcome"
+          "progress_requirements_outcome",
+          "complexity_tier",
+          "recorded_tier"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "recorded_tier": {
+                  "const": "complex"
+                },
+                "complexity_tier": {
+                  "enum": [
+                    "simple",
+                    "standard"
+                  ]
+                }
+              },
+              "required": [
+                "recorded_tier",
+                "complexity_tier"
+              ]
+            },
+            "then": {
+              "required": [
+                "lowering_request"
+              ]
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "recorded_tier": {
+                  "const": "standard"
+                },
+                "complexity_tier": {
+                  "const": "simple"
+                }
+              },
+              "required": [
+                "recorded_tier",
+                "complexity_tier"
+              ]
+            },
+            "then": {
+              "required": [
+                "lowering_request"
+              ]
+            }
+          }
         ]
       },
       "connections": {
-        "success": "ask-full-antipattern-audit"
+        "success": "ask-full-antipattern-audit",
+        "simple": "apply-workflow-changes",
+        "complex": "audit-complete-workflow"
       },
       "progressNodeId": "requirements",
-      "progressActiveLabel": "Capture edit requirements"
+      "progressActiveLabel": "Capture edit requirements",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "gather-edit-requirements.complexity_tier"
+            },
+            "right": "simple"
+          },
+          "output": "simple"
+        },
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "gather-edit-requirements.complexity_tier"
+            },
+            "right": "complex"
+          },
+          "output": "complex"
+        }
+      ],
+      "connectionLabels": {
+        "simple": "simple level, apply from the requirements",
+        "complex": "complex level, audit the whole flow",
+        "success": "standard level, decide on the audit"
+      }
     },
     {
       "type": "agent-directive",
       "id": "apply-workflow-changes",
-      "directive": "Before mutation, read `{{workspace_path}}/reference/engine.md`, `{{workspace_path}}/reference/design.md`, `{{workspace_path}}/reference/artifacts.md`, `{{workspace_path}}/reference/review-repair.md`, `{{workspace_path}}/reference/validation.md`, `{{workspace_path}}/reference/authority.md`, `{{workspace_path}}/reference/patterns.md`, and `{{workspace_path}}/reference/antipatterns.md`; when the reviewed edit plan changes or requires progress, also read `{{workspace_path}}/reference/progress.md`. In `{{workspace_path}}/reference/patterns.md` and `{{workspace_path}}/reference/antipatterns.md`, apply the sections for the current `{{complexity_tier}}` tier and every tier below it; the sections of higher tiers do not apply.\n\nApply the independently reviewed and, in interactive mode, user-approved `{{workspace_path}}/edit-plan.md` to the actual workflow at {{workflow_artifact_path}} using actual Moira/project contracts and the official Moira workflow CLI. Implement every accepted outcome and necessary dependency, preserve unrelated behavior and every protected semantic guarantee, author changed decisions as cases on the deciding node with folded expressions as the plan specifies (removing the routing scaffolding the plan names, keeping a separate node only where the plan keeps one), bind each listed stage's list the plan binds, and inspect the whole artifact for every manifestation of each confirmed defect class in scope. If an acceptance criterion in the accepted contract is invalid or conflicts with requirements, use the process-revision teleport instead of weakening it.\n\nValidate the actual workflow with the official CLI, repair concrete structural errors, overwrite `{{workspace_path}}/workspace/workflow-schema.txt` with current CLI `schema` output, and inspect the complete projection and JSON for omitted or misrouted nodes, conditions, starts, teleports, terminals, cycles, reachability, dangling targets, declarations, uses, coverage, and applicable progress semantics. When the workflow declares progress, author or repair its process view with the official CLI block and label commands and run the CLI `derive` until it reports no diagnostic.\n\nReturn a concise current `progress_build_outcome`, replacing its prior value. Independent review verifies the complete result rather than co-authoring ordinary missing work.",
+      "directive": "Before mutation, read `{{workspace_path}}/reference/engine.md`, `{{workspace_path}}/reference/design.md`, `{{workspace_path}}/reference/artifacts.md`, `{{workspace_path}}/reference/review-repair.md`, `{{workspace_path}}/reference/validation.md`, `{{workspace_path}}/reference/authority.md`, `{{workspace_path}}/reference/patterns.md`, and `{{workspace_path}}/reference/antipatterns.md`; when the reviewed edit plan changes or requires progress, also read `{{workspace_path}}/reference/progress.md`. In `{{workspace_path}}/reference/patterns.md` and `{{workspace_path}}/reference/antipatterns.md`, apply the sections for the current `{{complexity_tier}}` tier and every tier below it; the sections of higher tiers do not apply.\n\nApply the independently reviewed and, in interactive mode, user-approved `{{workspace_path}}/edit-plan.md` to the actual workflow at {{workflow_artifact_path}} using actual Moira/project contracts and the official Moira workflow CLI. On the `simple` level no edit plan exists: apply the changes `{{workspace_path}}/edit-requirements.md` asks for directly. Implement every accepted outcome and necessary dependency, preserve unrelated behavior and every protected semantic guarantee, author changed decisions as cases on the deciding node with folded expressions as the plan specifies (removing the routing scaffolding the plan names, keeping a separate node only where the plan keeps one), bind each listed stage's list the plan binds, and inspect the whole artifact for every manifestation of each confirmed defect class in scope. If an acceptance criterion in the accepted contract is invalid or conflicts with requirements, use the process-revision teleport instead of weakening it.\n\nValidate the actual workflow with the official CLI, repair concrete structural errors, overwrite `{{workspace_path}}/workspace/workflow-schema.txt` with current CLI `schema` output, and inspect the complete projection and JSON for omitted or misrouted nodes, conditions, starts, teleports, terminals, cycles, reachability, dangling targets, declarations, uses, coverage, and applicable progress semantics. When the workflow declares progress, author or repair its process view with the official CLI block and label commands and run the CLI `derive` until it reports no diagnostic.\n\nRecord the level as exactly one `complexity:{{complexity_tier}}` tag in `metadata.tags`, replacing any earlier `complexity:` tag and keeping every other tag — `set-tags` replaces the whole list, so pass the existing tags with it. Before handing over, the non-removable minimum holds: `validate` reports no errors and no unreachable node (its unreachable-node warning blocks here), and every route from `start` ends at an `end` in the schema output. When the change shows the workflow needs something its level does not cover, say so in `progress_build_outcome`; the review that follows raises the level.\n\nReturn a concise current `progress_build_outcome`, replacing its prior value. Independent review verifies the complete result rather than co-authoring ordinary missing work.",
       "completionCondition": "The approved changes and necessary dependencies are applied; the actual workflow passes official structural validation; and its complete current structural projection is regenerated and inspected before independent review",
       "inputSchema": {
         "type": "object",
@@ -440,7 +594,8 @@
         ]
       },
       "connections": {
-        "success": "review-workflow-quality"
+        "success": "review-workflow-quality",
+        "simple": "review-workflow-minimum"
       },
       "progressNodeId": "build",
       "progressActiveLabel": "Apply workflow changes",
@@ -449,8 +604,21 @@
         "next": "Independent quality review"
       },
       "connectionLabels": {
-        "success": "changes applied"
-      }
+        "success": "changes applied",
+        "simple": "simple edit applied, light review"
+      },
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "complexity_tier"
+            },
+            "right": "simple"
+          },
+          "output": "simple"
+        }
+      ]
     },
     {
       "type": "agent-directive",
@@ -459,7 +627,7 @@
         "success": "route-final-feedback-action",
         "approved": "ask-upload"
       },
-      "directive": "Present the accepted workflow at {{workflow_artifact_path}} and explain the user-visible result, how it satisfies the requirements, changed and protected routes, verification performed, limitations, and where to inspect full workspace artifacts. Read the accepted JSON, current `{{workspace_path}}/workspace/workflow-schema.txt`, and the approved design or edit plan (on the `simple` level, the requirements file, since no design was written). When the level (`{{complexity_tier}}`) is below `complex`, name in plain words what this level skipped — on `simple`: no separate structure design, no independent design review, no structure approval, and a light review instead of the full quality and antipattern review; on `standard`: the complex-level patterns and antipatterns were not applied — and how to come back for the full path: start this flow again in edit mode on this workflow and ask for the full path; its `complexity:` tag tells that edit what never ran. {{#if escalation_reason}}Also tell the person in plain words that the level was raised to `{{complexity_tier}}` during this run, and the review gave this reason: “{{escalation_reason}}”, and what it costs: the longer process that followed, for a more thorough result.{{/if}} Do not reproduce the complete starts, terminals, cycles, reachability, coverage, or data-flow inventory; the projection owns that detail. Do not treat structural validation as semantic proof.\n\nAsk whether the workflow is approved. Return `work_approved` as `yes` or `no`; when `no`, return the user's exact non-empty `final_feedback` for the earliest stale create/edit responsibility. Replace `progress_delivery_outcome` with the truthful current approval state.",
+      "directive": "Present the accepted workflow at {{workflow_artifact_path}} and explain the user-visible result, how it satisfies the requirements, changed and protected routes, verification performed, limitations, and where to inspect full workspace artifacts. Read the accepted JSON, current `{{workspace_path}}/workspace/workflow-schema.txt`, and the approved design or edit plan (on the `simple` level, `{{#eq action_type 'create'}}workflow-requirements.md{{else}}edit-requirements.md{{/eq}}`, since no design or edit plan was written). When the level (`{{complexity_tier}}`) is below `complex`, name in plain words what this level skipped — on `simple`: {{#eq action_type 'create'}}no separate structure design, no independent design review, no structure approval{{else}}no edit plan, no independent plan review, no plan approval, no full antipattern audit{{/eq}}, and a light review instead of the full quality and antipattern review; on `standard`: the complex-level patterns and antipatterns were not applied — and how to come back for the full path: start this flow again in edit mode on this workflow and ask for the full path; its `complexity:` tag tells that edit what never ran. When the person lowered the level earlier in this run, say so, and name what ran before the lowering as well as what the lower level then skipped. {{#if escalation_reason}}Also tell the person in plain words that the level was raised to `{{complexity_tier}}` during this run, and the review gave this reason: “{{escalation_reason}}”, and what it costs: the longer process that followed, for a more thorough result.{{/if}} Do not reproduce the complete starts, terminals, cycles, reachability, coverage, or data-flow inventory; the projection owns that detail. Do not treat structural validation as semantic proof. If the person explicitly asks for a simpler process, the level may go down: first record their request, in their words, and the resulting level in `{{workspace_path}}/{{#eq action_type 'create'}}workflow-requirements.md{{else}}edit-requirements.md{{/eq}}`, then return `lowering_request` with their words, the lower `complexity_tier` and an empty `escalation_reason`, together with `work_approved` as `no` and their `final_feedback`. Never propose a lower level yourself, and never return the level the run already has. The revision that follows then runs at the lower level.\n\nAsk whether the workflow is approved. Return `work_approved` as `yes` or `no`; when `no`, return the user's exact non-empty `final_feedback` for the earliest stale create/edit responsibility. Replace `progress_delivery_outcome` with the truthful current approval state.",
       "completionCondition": "The user received a presentation grounded in the accepted JSON and current complete structural projection and either approved the resulting workflow or supplied actionable final feedback",
       "inputSchema": {
         "type": "object",
@@ -476,6 +644,11 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 4000
+          },
+          "lowering_request": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
           }
         },
         "required": [
@@ -499,10 +672,54 @@
                 "final_feedback"
               ]
             }
+          },
+          {
+            "if": {
+              "required": [
+                "lowering_request"
+              ]
+            },
+            "then": {
+              "required": [
+                "complexity_tier",
+                "escalation_reason"
+              ],
+              "properties": {
+                "complexity_tier": {
+                  "not": {
+                    "const": "complex"
+                  }
+                },
+                "escalation_reason": {
+                  "const": ""
+                },
+                "work_approved": {
+                  "const": "no"
+                }
+              }
+            },
+            "else": {
+              "not": {
+                "anyOf": [
+                  {
+                    "required": [
+                      "complexity_tier"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "escalation_reason"
+                    ]
+                  }
+                ]
+              }
+            }
           }
         ],
         "globalInputs": [
-          "progress_delivery_outcome"
+          "progress_delivery_outcome",
+          "complexity_tier",
+          "escalation_reason"
         ]
       },
       "progressNodeId": "delivery",
@@ -728,7 +945,7 @@
     {
       "type": "agent-directive",
       "id": "create-edit-plan",
-      "directive": "Before analysis, read `{{workspace_path}}/reference/engine.md`, `{{workspace_path}}/reference/design.md`, `{{workspace_path}}/reference/artifacts.md`, `{{workspace_path}}/reference/validation.md`, `{{workspace_path}}/reference/authority.md`, `{{workspace_path}}/reference/patterns.md`, and `{{workspace_path}}/reference/antipatterns.md`; when this edit changes or requires progress, also read `{{workspace_path}}/reference/progress.md`. In `{{workspace_path}}/reference/patterns.md` and `{{workspace_path}}/reference/antipatterns.md`, apply the sections for the current `{{complexity_tier}}` tier and every tier below it; the sections of higher tiers do not apply.\n\nDerive the pre-mutation edit design from `edit-requirements.md`, the complete workflow at {{workflow_artifact_path}}, `source-provenance.md`, approved audit scope {{additional_edit_scope}}, and the complete current `workspace/workflow-schema.txt`. Write the analysis first and its resulting contract second in the single canonical `{{workspace_path}}/edit-plan.md`.\n\nThe analysis identifies affected responsibilities, routes, connections, variables, schemas, artifacts, authority and failure boundaries, dependencies, protected guarantees, material risks, and real alternatives. It must not record turn counts, reference-load totals, state-utilization inventories, counters/protocols, validation-amplification totals, report inventories, or equivalent unused process diagnostics.\n\nThe contract states the required outcomes, invariants, known dependencies, authority and failure boundaries, repair/replan ownership, discriminating acceptance criteria, evidence modality, and behavioral verification while preserving implementation freedom. It expresses each affected decision on the node that has its evidence (cases and expressions on the deciding node), names any avoidable routing scaffolding in the affected graph as an outcome to remove, keeps a separate condition or expression node only where `reference/design.md` says it reads better alone, and binds the list a stage works through when the flow keeps one in variables. When this edit changes or requires progress, the contract specifies the process view completely — blocks with descriptions and order, the block of every affected node including routing nodes, the label of every boundary edge, the cause and exit of every return, hub order — under the rules `reference/progress.md` owns. Use the projection as structural navigation and confirm meaning in JSON; neither projection nor validation is semantic proof. Do not copy the plan into workflow context. Return a concise current `progress_design_outcome`, replacing its prior value.",
+      "directive": "Before analysis, read `{{workspace_path}}/reference/engine.md`, `{{workspace_path}}/reference/design.md`, `{{workspace_path}}/reference/artifacts.md`, `{{workspace_path}}/reference/validation.md`, `{{workspace_path}}/reference/authority.md`, `{{workspace_path}}/reference/patterns.md`, and `{{workspace_path}}/reference/antipatterns.md`; when this edit changes or requires progress, also read `{{workspace_path}}/reference/progress.md`. In `{{workspace_path}}/reference/patterns.md` and `{{workspace_path}}/reference/antipatterns.md`, apply the sections for the current `{{complexity_tier}}` tier and every tier below it; the sections of higher tiers do not apply.\n\nDerive the pre-mutation edit design from `edit-requirements.md`, the complete workflow at {{workflow_artifact_path}}, `source-provenance.md`, approved audit scope {{additional_edit_scope}}, and the complete current `workspace/workflow-schema.txt`. Write the analysis first and its resulting contract second in the single canonical `{{workspace_path}}/edit-plan.md`. When the agreed level is above the one recorded on the flow (see `edit-requirements.md`), the responsibilities the recorded level skipped run over the whole flow, not only the changed part. {{#if escalation_reason}}The level was raised to `{{complexity_tier}}` during this run, and the review gave this reason: “{{escalation_reason}}”; plan from the current edit requirements and the workflow as it now stands, and cover the whole flow at that level. {{/if}}\n\nThe analysis identifies affected responsibilities, routes, connections, variables, schemas, artifacts, authority and failure boundaries, dependencies, protected guarantees, material risks, and real alternatives. It must not record turn counts, reference-load totals, state-utilization inventories, counters/protocols, validation-amplification totals, report inventories, or equivalent unused process diagnostics.\n\nThe contract states the required outcomes, invariants, known dependencies, authority and failure boundaries, repair/replan ownership, discriminating acceptance criteria, evidence modality, and behavioral verification while preserving implementation freedom. It expresses each affected decision on the node that has its evidence (cases and expressions on the deciding node), names any avoidable routing scaffolding in the affected graph as an outcome to remove, keeps a separate condition or expression node only where `reference/design.md` says it reads better alone, and binds the list a stage works through when the flow keeps one in variables. When this edit changes or requires progress, the contract specifies the process view completely — blocks with descriptions and order, the block of every affected node including routing nodes, the label of every boundary edge, the cause and exit of every return, hub order — under the rules `reference/progress.md` owns. Use the projection as structural navigation and confirm meaning in JSON; neither projection nor validation is semantic proof. Do not copy the plan into workflow context. Return a concise current `progress_design_outcome`, replacing its prior value.",
       "completionCondition": "One document holds the complete analysis of scope, dependencies, protected guarantees, source decision, risks, and affected routes followed by the outcome-oriented edit contract and its discriminating evidence model, without unused process diagnostics",
       "inputSchema": {
         "type": "object",
@@ -763,7 +980,7 @@
     {
       "type": "agent-directive",
       "id": "fix-edit-plan",
-      "directive": "Before repair, read `{{workspace_path}}/reference/design.md`, `{{workspace_path}}/reference/validation.md`, and `{{workspace_path}}/reference/review-repair.md`. When a finding concerns the process view, also read `{{workspace_path}}/reference/progress.md`. Also read `workflow-design-review.md`, the current `edit-plan.md` with its analysis, requirements, original workflow, and applicable primary sources.\n\nReproduce and classify every finding before mutation. Return `changed` only after coherently repairing all real manifestations of a confirmed plan-owned cause in the agreed scope, updating the same plan, and reporting concise `root_cause_class` and `changed_knowledge` for rereview. Return `reassess` without mutation for false, upstream, invalid-criterion, or invalid-evidence findings. Do not turn contextual judgment into a universal detector.\n\nOn either outcome, atomically replace `progress_design_outcome` with the truthful current state and reset `progress_build_outcome`, `progress_review_outcome`, and `progress_delivery_outcome` to pending.",
+      "directive": "Before repair, read `{{workspace_path}}/reference/design.md`, `{{workspace_path}}/reference/validation.md`, and `{{workspace_path}}/reference/review-repair.md`. When a finding concerns the process view, also read `{{workspace_path}}/reference/progress.md`. Also read `workflow-design-review.md`, the current `edit-plan.md` with its analysis, requirements, the original workflow (after a raise during this run, the workflow as it now stands), and applicable primary sources.\n\nReproduce and classify every finding before mutation. Return `changed` only after coherently repairing all real manifestations of a confirmed plan-owned cause in the agreed scope, updating the same plan, and reporting concise `root_cause_class` and `changed_knowledge` for rereview. Return `reassess` without mutation for false, upstream, invalid-criterion, or invalid-evidence findings. Do not turn contextual judgment into a universal detector.\n\nOn either outcome, atomically replace `progress_design_outcome` with the truthful current state and reset `progress_build_outcome`, `progress_review_outcome`, and `progress_delivery_outcome` to pending.",
       "completionCondition": "The finding is classified and either a real plan repair with consumed changed-knowledge evidence exists or reassessment is explicitly selected",
       "inputSchema": {
         "type": "object",
@@ -863,7 +1080,7 @@
     {
       "type": "agent-directive",
       "id": "present-edit-plan",
-      "directive": "Read `{{workspace_path}}/edit-plan.md`, present its current structure, behavioral changes, protected guarantees, and resulting graph to the user, and ask whether it is approved.\n\nReturn `plan_approval` as `yes` or `no`. When it is `no`, return the user's exact non-empty `user_feedback`. Do not revise the plan here.",
+      "directive": "{{#if escalation_reason}}Before anything else, tell the person in plain words that the level was raised to `{{complexity_tier}}` during this run, and the review gave this reason: “{{escalation_reason}}”; say what it costs — a longer process with an edit plan, an independent plan review and this approval — and what it gives: a more thorough result. {{/if}}Read `{{workspace_path}}/edit-plan.md`, present its current structure, behavioral changes, protected guarantees, and resulting graph to the user, and ask whether it is approved.\n\nReturn `plan_approval` as `yes` or `no`. When it is `no`, return the user's exact non-empty `user_feedback`. Do not revise the plan here.\n\nIf the person explicitly asks for a simpler process, the level may go down: first record their request, in their words, together with any feedback they gave on the plan, and the resulting level in `{{workspace_path}}/edit-requirements.md`, then return `lowering_request` with their words, the lower `complexity_tier` and an empty `escalation_reason`. Never propose a lower level yourself, and never return the level the run already has. On `simple` the change is then applied from the edit requirements and this plan is set aside.",
       "completionCondition": "The user approved the current plan or supplied actionable rejection feedback",
       "inputSchema": {
         "type": "object",
@@ -880,6 +1097,11 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 4000
+          },
+          "lowering_request": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
           }
         },
         "required": [
@@ -902,11 +1124,55 @@
                 "user_feedback"
               ]
             }
+          },
+          {
+            "if": {
+              "required": [
+                "lowering_request"
+              ]
+            },
+            "then": {
+              "required": [
+                "complexity_tier",
+                "escalation_reason"
+              ],
+              "properties": {
+                "complexity_tier": {
+                  "not": {
+                    "const": "complex"
+                  }
+                },
+                "escalation_reason": {
+                  "const": ""
+                }
+              }
+            },
+            "else": {
+              "not": {
+                "anyOf": [
+                  {
+                    "required": [
+                      "complexity_tier"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "escalation_reason"
+                    ]
+                  }
+                ]
+              }
+            }
           }
+        ],
+        "globalInputs": [
+          "complexity_tier",
+          "escalation_reason"
         ]
       },
       "connections": {
         "success": "revise-edit-plan",
+        "simple": "apply-workflow-changes",
         "approved": "apply-workflow-changes"
       },
       "progressNodeId": "design",
@@ -920,6 +1186,16 @@
           "when": {
             "operator": "eq",
             "left": {
+              "contextPath": "complexity_tier"
+            },
+            "right": "simple"
+          },
+          "output": "simple"
+        },
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
               "contextPath": "present-edit-plan.plan_approval"
             },
             "right": "yes"
@@ -928,7 +1204,8 @@
         }
       ],
       "connectionLabels": {
-        "approved": "edit plan approved, apply"
+        "approved": "edit plan approved, apply",
+        "simple": "lowered to simple, apply from the requirements"
       }
     },
     {
@@ -1046,7 +1323,7 @@
     {
       "type": "agent-directive",
       "id": "review-workflow-quality",
-      "directive": "Before review, read all nine canonical references: `{{workspace_path}}/reference/engine.md`, `{{workspace_path}}/reference/design.md`, `{{workspace_path}}/reference/artifacts.md`, `{{workspace_path}}/reference/review-repair.md`, `{{workspace_path}}/reference/validation.md`, `{{workspace_path}}/reference/authority.md`, `{{workspace_path}}/reference/patterns.md`, `{{workspace_path}}/reference/antipatterns.md`, and `{{workspace_path}}/reference/progress.md`. In `{{workspace_path}}/reference/patterns.md` and `{{workspace_path}}/reference/antipatterns.md`, apply the sections for the current `{{complexity_tier}}` tier and every tier below it; the sections of higher tiers do not apply.\n\nIndependently review the complete structurally valid workflow at {{workflow_artifact_path}} against applicable requirements, the reviewed design or edit plan, current `workspace/workflow-schema.txt`, and the complete JSON. Trace every affected success, refusal, repair, replan, recovery, cancellation, terminal, teleport, condition, cycle, reachability class, declaration/use, coverage obligation, reference consumer, and applicable progress behavior. Confirm semantic meaning and authority in JSON; do not repeat structural validation. When the workflow declares progress, read the official CLI `derive` output for the complete artifact as its process projection: any diagnostic is a blocker, and judge in the JSON what the validator cannot — labels true to the condition or branch they annotate, cycles naming the real cause and exit, descriptions and order that read as the process, outcome templates on their owning block — as `reference/progress.md` requires.\n\nThe non-removable minimum holds on every level: the official CLI `validate` reports no errors and no unreachable node — the unreachable-node warning is a blocker — every route from `start` ends at an `end` in the schema output, and `metadata.tags` holds exactly one `complexity:{{complexity_tier}}` tag with the other tags preserved. Verify one canonical owner per shared rule, explicit applicable-file reads by every substantive consumer, absence of materialized doctrine in directives, preservation of each local contract, bounded user-facing reports, and every frozen guarantee. Verify routing shape in the JSON: avoidable routing scaffolding, as `reference/design.md` and `reference/antipatterns.md` define it, is a blocker unless the reviewed design keeps the node for a reason `reference/design.md` names; a stage that works through a list the flow keeps in variables binds it as `reference/progress.md` requires. Classify all reproducible blockers by earliest cause. {{#if fix-quality-issues.root_cause_class}}The preceding artifact repair reported root `{{fix-quality-issues.root_cause_class}}` and changed knowledge/reach `{{fix-quality-issues.changed_knowledge}}`; verify both against the actual artifact and findings.{{/if}} Route a repeated unchanged root to replan.\n\nOverwrite `{{workspace_path}}/workflow-quality-review.md` with all current findings. Return `escalate`, with `complexity_tier` `complex` and `escalation_reason` in plain words, when a standard workflow turns out to need what only the complex level covers — the run then continues into design from the current requirements and workflow. Otherwise return `pass` for none, `repair` only when every blocker is a confirmed workflow-artifact defect in scope, or `replan` for any validation, evidence, upstream contract, plan, process, or out-of-scope documentation defect. Do not mutate, expand scope, or design new machinery. Return a concise current `progress_review_outcome`, replacing its prior value. On `escalate`, also reset `progress_build_outcome` and `progress_delivery_outcome` to concise pending values, because the build and delivery are redone at the raised level; return `complexity_tier` and `escalation_reason` only on `escalate`.",
+      "directive": "Before review, read all nine canonical references: `{{workspace_path}}/reference/engine.md`, `{{workspace_path}}/reference/design.md`, `{{workspace_path}}/reference/artifacts.md`, `{{workspace_path}}/reference/review-repair.md`, `{{workspace_path}}/reference/validation.md`, `{{workspace_path}}/reference/authority.md`, `{{workspace_path}}/reference/patterns.md`, `{{workspace_path}}/reference/antipatterns.md`, and `{{workspace_path}}/reference/progress.md`. In `{{workspace_path}}/reference/patterns.md` and `{{workspace_path}}/reference/antipatterns.md`, apply the sections for the current `{{complexity_tier}}` tier and every tier below it; the sections of higher tiers do not apply.\n\nIndependently review the complete structurally valid workflow at {{workflow_artifact_path}} against applicable requirements, the reviewed design or edit plan, current `workspace/workflow-schema.txt`, and the complete JSON. Trace every affected success, refusal, repair, replan, recovery, cancellation, terminal, teleport, condition, cycle, reachability class, declaration/use, coverage obligation, reference consumer, and applicable progress behavior. Confirm semantic meaning and authority in JSON; do not repeat structural validation. When the workflow declares progress, read the official CLI `derive` output for the complete artifact as its process projection: any diagnostic is a blocker, and judge in the JSON what the validator cannot — labels true to the condition or branch they annotate, cycles naming the real cause and exit, descriptions and order that read as the process, outcome templates on their owning block — as `reference/progress.md` requires.\n\nThe non-removable minimum holds on every level: the official CLI `validate` reports no errors and no unreachable node — the unreachable-node warning is a blocker — every route from `start` ends at an `end` in the schema output, and `metadata.tags` holds exactly one `complexity:{{complexity_tier}}` tag with the other tags preserved. Verify one canonical owner per shared rule, explicit applicable-file reads by every substantive consumer, absence of materialized doctrine in directives, preservation of each local contract, bounded user-facing reports, and every frozen guarantee. Verify routing shape in the JSON: avoidable routing scaffolding, as `reference/design.md` and `reference/antipatterns.md` define it, is a blocker unless the reviewed design keeps the node for a reason `reference/design.md` names; a stage that works through a list the flow keeps in variables binds it as `reference/progress.md` requires. Classify all reproducible blockers by earliest cause. {{#if fix-quality-issues.root_cause_class}}The preceding artifact repair reported root `{{fix-quality-issues.root_cause_class}}` and changed knowledge/reach `{{fix-quality-issues.changed_knowledge}}`; verify both against the actual artifact and findings.{{/if}} Route a repeated unchanged root to replan.\n\nOverwrite `{{workspace_path}}/workflow-quality-review.md` with all current findings. Return `escalate`, with `complexity_tier` `complex` and `escalation_reason` in plain words, when a standard workflow turns out to need what only the complex level covers — the run then continues into {{#eq action_type 'create'}}structure design{{else}}the raised level's audit decision and the edit plan{{/eq}} from the current requirements and workflow. Otherwise return `pass` for none, `repair` only when every blocker is a confirmed workflow-artifact defect in scope, or `replan` for any validation, evidence, upstream contract, plan, process, or out-of-scope documentation defect. Do not mutate, expand scope, or design new machinery. Return a concise current `progress_review_outcome`, replacing its prior value. On `escalate`, also reset `progress_build_outcome` and `progress_delivery_outcome` to concise pending values, because the build and delivery are redone at the raised level; return `complexity_tier` and `escalation_reason` only on `escalate`.",
       "completionCondition": "The current independent semantic review is recorded once after direct inspection of the complete JSON and current structural projection, and its pass, repair, or replan outcome matches the classified blocking causes",
       "inputSchema": {
         "type": "object",
@@ -1128,7 +1405,7 @@
         "success": "fix-quality-issues",
         "pass": "route-operating-mode-final",
         "replan": "reassess-design-contract",
-        "escalate": "route-action-after-reassessment"
+        "escalate": "route-after-level-raise"
       },
       "progressNodeId": "review",
       "progressActiveLabel": "Review workflow quality",
@@ -1177,12 +1454,13 @@
           }
         },
         "escalate": {
-          "label": "needs the complex level, design again",
+          "label": "needs the complex level, raise it",
           "cycle": {
             "cause": "The quality review found a standard workflow needs what only the complex level covers, so the level was raised.",
             "exit": "The design review passes at the complex level."
           }
-        }
+        },
+        "pass": "quality review passed, deliver"
       }
     },
     {
@@ -1321,7 +1599,7 @@
     {
       "id": "ask-full-antipattern-audit",
       "type": "agent-directive",
-      "directive": "Decide whether an optional full antipattern audit of the complete original workflow runs before edit planning. Respect an explicit answer already present.\n\nIn `autonomous` mode decide it yourself from the requested change and the evidence you already have: choose `yes` when the source is unknown, large, or suspected of carrying defects beyond the requested cone, and `no` when the change is narrow and the source was recently audited. Do not ask the user.\n\nIn `interactive` mode ask, explaining that `yes` audits the whole source and lets the user select confirmed repairs, while `no` limits analysis to the requested cone and necessary dependencies.\n\nReturn only `full_antipattern_audit` as `yes` or `no`. Do not perform the audit or reset any previously approved scope here.",
+      "directive": "Decide whether an optional full antipattern audit of the complete original workflow runs before edit planning. Respect an explicit answer already present.\n\nIn `autonomous` mode decide it yourself from the requested change and the evidence you already have: choose `yes` when the source is unknown, large, or suspected of carrying defects beyond the requested cone, and `no` when the change is narrow and the source was recently audited. Do not ask the user.\n\nIn `interactive` mode ask, explaining that `yes` audits the whole source and lets the user select confirmed repairs, while `no` limits analysis to the requested cone and necessary dependencies.\n\nWhen the level was raised during this run, the question is about the workflow as it now stands.\n\nReturn only `full_antipattern_audit` as `yes` or `no`. Do not perform the audit or reset any previously approved scope here.",
       "completionCondition": "The audit scope decision is resolved by the user in interactive mode or by the agent in autonomous mode",
       "inputSchema": {
         "type": "object",
@@ -1364,7 +1642,7 @@
     {
       "id": "audit-complete-workflow",
       "type": "agent-directive",
-      "directive": "Before auditing, read all nine canonical references: `{{workspace_path}}/reference/engine.md`, `{{workspace_path}}/reference/design.md`, `{{workspace_path}}/reference/artifacts.md`, `{{workspace_path}}/reference/review-repair.md`, `{{workspace_path}}/reference/validation.md`, `{{workspace_path}}/reference/authority.md`, `{{workspace_path}}/reference/patterns.md`, `{{workspace_path}}/reference/antipatterns.md`, and `{{workspace_path}}/reference/progress.md`. In `{{workspace_path}}/reference/patterns.md` and `{{workspace_path}}/reference/antipatterns.md`, apply the sections for the current `{{complexity_tier}}` tier and every tier below it; the sections of higher tiers do not apply.\n\nAudit the complete original workflow at {{workflow_artifact_path}} together with the complete current `workspace/workflow-schema.txt`. Use the projection for exhaustive structural navigation and confirm semantics in the JSON. Inspect the full node/edge corpus, starts, teleports, terminals, reachability, cycles, dangling targets, schemas, variables, writers/readers, routes, artifacts, engine semantics, and every applicable antipattern. Include pre-existing reproducible defects; exclude style and speculative robustness.\n\nOverwrite `{{workspace_path}}/full-antipattern-audit.md` with the complete report. Interactive mode asks which repairs join this edit. Autonomous mode includes confirmed findings that block the requested outcome or are safe and directly adjacent, leaving the rest recorded for later. Return only the concise resulting `additional_edit_scope`, or `none`; do not repair here or copy the report into context.",
+      "directive": "Before auditing, read all nine canonical references: `{{workspace_path}}/reference/engine.md`, `{{workspace_path}}/reference/design.md`, `{{workspace_path}}/reference/artifacts.md`, `{{workspace_path}}/reference/review-repair.md`, `{{workspace_path}}/reference/validation.md`, `{{workspace_path}}/reference/authority.md`, `{{workspace_path}}/reference/patterns.md`, `{{workspace_path}}/reference/antipatterns.md`, and `{{workspace_path}}/reference/progress.md`. In `{{workspace_path}}/reference/patterns.md` and `{{workspace_path}}/reference/antipatterns.md`, apply the sections for the current `{{complexity_tier}}` tier and every tier below it; the sections of higher tiers do not apply.\n\nAudit the complete workflow at {{workflow_artifact_path}} together with the complete current `workspace/workflow-schema.txt`. Use the projection for exhaustive structural navigation and confirm semantics in the JSON. Inspect the full node/edge corpus, starts, teleports, terminals, reachability, cycles, dangling targets, schemas, variables, writers/readers, routes, artifacts, engine semantics, and every applicable antipattern. Include pre-existing reproducible defects; exclude style and speculative robustness. When the level was raised during this run, a simple change has already been applied, so the workflow at {{workflow_artifact_path}} is the workflow as it now stands, not the original.\n\nOverwrite `{{workspace_path}}/full-antipattern-audit.md` with the complete report. Interactive mode asks which repairs join this edit. Autonomous mode includes confirmed findings that block the requested outcome or are safe and directly adjacent, leaving the rest recorded for later. Return only the concise resulting `additional_edit_scope`, or `none`; do not repair here or copy the report into context.",
       "completionCondition": "The complete original workflow and current structural projection are audited directly against all nine canonical references, the current report is on disk, and additional repair scope is selected under the existing mode contract",
       "inputSchema": {
         "type": "object",
@@ -1473,7 +1751,7 @@
     {
       "type": "agent-directive",
       "id": "revise-edit-requirements",
-      "directive": "Apply the user's final feedback from {{user-final-review.final_feedback}} to the existing `{{workspace_path}}/edit-requirements.md`. Preserve unaffected requirements, the prior audit decision, and its approved repair scope unless the feedback explicitly changes that scope. Update the same requirements file; do not repeat source preparation or the optional audit question.\n\nProgress projection ownership: Atomically replace progress_requirements_outcome with the current revised requirements result and reset progress_design_outcome, progress_build_outcome, progress_review_outcome, and progress_delivery_outcome to concise truthful pending values because those downstream results are invalidated.",
+      "directive": "Apply the user's final feedback from {{user-final-review.final_feedback}} to the existing `{{workspace_path}}/edit-requirements.md`. Preserve unaffected requirements, the prior audit decision, and its approved repair scope unless the feedback explicitly changes that scope. Update the same requirements file; do not repeat source preparation or the optional audit question. On the `simple` level the corrected requirements lead straight to a new change without an edit plan.\n\nProgress projection ownership: Atomically replace progress_requirements_outcome with the current revised requirements result and reset progress_design_outcome, progress_build_outcome, progress_review_outcome, and progress_delivery_outcome to concise truthful pending values because those downstream results are invalidated.",
       "completionCondition": "The edit requirements file incorporates the user's feedback while preserving still-valid source and audit decisions",
       "inputSchema": {
         "type": "object",
@@ -1495,17 +1773,37 @@
         ]
       },
       "connections": {
-        "success": "create-edit-plan"
+        "success": "create-edit-plan",
+        "simple": "apply-workflow-changes"
       },
       "progressNodeId": "requirements",
       "progressActiveLabel": "Revise edit requirements",
       "progressActiveContent": {
         "summary": "Correct requirements after design feedback",
-        "next": "Design the edit"
+        "next": "Design the edit, or on the simple level apply it again"
       },
       "connectionLabels": {
-        "success": "edit requirements revised, plan again"
-      }
+        "success": "edit requirements revised, plan again",
+        "simple": {
+          "label": "edit requirements revised, apply again",
+          "cycle": {
+            "cause": "The person rejected a simple edit, so the corrected requirements are applied again.",
+            "exit": "The light review passes."
+          }
+        }
+      },
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "complexity_tier"
+            },
+            "right": "simple"
+          },
+          "output": "simple"
+        }
+      ]
     },
     {
       "type": "condition",
@@ -1579,7 +1877,7 @@
     {
       "id": "route-operating-mode-final",
       "type": "condition",
-      "progressNodeId": "review",
+      "progressNodeId": "delivery",
       "cases": [
         {
           "when": {
@@ -1604,7 +1902,7 @@
     {
       "id": "report-final-result",
       "type": "agent-directive",
-      "directive": "Report the accepted workflow at {{workflow_artifact_path}} without asking for approval. Explain the user-visible result, how it satisfies the requirements, changed and protected routes, verification performed, limitations, and the workspace path for full artifacts. Read the accepted JSON, current `{{workspace_path}}/workspace/workflow-schema.txt`, and the approved design or edit plan (on the `simple` level, the requirements file, since no design was written). When the level (`{{complexity_tier}}`) is below `complex`, name in plain words what this level skipped — on `simple`: no separate structure design, no independent design review, no structure approval, and a light review instead of the full quality and antipattern review; on `standard`: the complex-level patterns and antipatterns were not applied — and how to come back for the full path: start this flow again in edit mode on this workflow and ask for the full path; its `complexity:` tag tells that edit what never ran. Do not reproduce the complete starts, terminals, cycles, reachability, coverage, or data-flow inventory; the projection owns that detail. Do not treat structural validation as semantic proof.\n\nState the level, why it was chosen, and any raise of the level during the run with its reason. {{#if escalation_reason}}The level was raised to `{{complexity_tier}}` during this run, and the review gave this reason: “{{escalation_reason}}”.{{/if}} This is the autonomous-mode final report and replaces the interactive approval, not delivery of results. Return a concise current `progress_delivery_outcome`, replacing its prior value.",
+      "directive": "Report the accepted workflow at {{workflow_artifact_path}} without asking for approval. Explain the user-visible result, how it satisfies the requirements, changed and protected routes, verification performed, limitations, and the workspace path for full artifacts. Read the accepted JSON, current `{{workspace_path}}/workspace/workflow-schema.txt`, and the approved design or edit plan (on the `simple` level, `{{#eq action_type 'create'}}workflow-requirements.md{{else}}edit-requirements.md{{/eq}}`, since no design or edit plan was written). When the level (`{{complexity_tier}}`) is below `complex`, name in plain words what this level skipped — on `simple`: {{#eq action_type 'create'}}no separate structure design, no independent design review, no structure approval{{else}}no edit plan, no independent plan review, no plan approval, no full antipattern audit{{/eq}}, and a light review instead of the full quality and antipattern review; on `standard`: the complex-level patterns and antipatterns were not applied — and how to come back for the full path: start this flow again in edit mode on this workflow and ask for the full path; its `complexity:` tag tells that edit what never ran. Do not reproduce the complete starts, terminals, cycles, reachability, coverage, or data-flow inventory; the projection owns that detail. Do not treat structural validation as semantic proof.\n\nState the level, why it was chosen, and any raise of the level during the run with its reason. {{#if escalation_reason}}The level was raised to `{{complexity_tier}}` during this run, and the review gave this reason: “{{escalation_reason}}”.{{/if}} This is the autonomous-mode final report and replaces the interactive approval, not delivery of results. Return a concise current `progress_delivery_outcome`, replacing its prior value.",
       "completionCondition": "The user has been given the final result report grounded in the accepted JSON and current complete structural projection",
       "inputSchema": {
         "type": "object",
@@ -1627,7 +1925,7 @@
       "id": "teleport-revise-process",
       "type": "teleport",
       "hint": "Jump here when the process of this run no longer fits the artifact: the captured requirements or the agreed edit scope turned out wrong, an accepted acceptance criterion is itself wrong or conflicts with the requirements, the source is not what it looked like, or the work must be re-scoped. Not for a review finding or a failed validation — those belong to their repair owners.",
-      "directive": "You jumped here because the agreed process of this run no longer matches reality. Say plainly what changed or what was wrong, and update the durable sources it affects so the next normal design pass re-derives the work from corrected inputs rather than memory.\n\nFor create, correct `workflow-requirements.md` when its interpretation or scope changed; on the `simple` level the corrected requirements lead straight to a new build without design. For edit, correct `edit-requirements.md` or the recorded audit scope as applicable, so the analysis and the contract are derived again together from corrected inputs. Preserve the user's original goal and authority; process revision is not permission to erode a requirement. Do not modify the workflow artifact here and do not restate an ordinary review finding that belongs to its repair or reassessment owner.\n\nProgress projection ownership: Atomically replace progress_requirements_outcome and progress_design_outcome with truthful current reassessment states and reset progress_build_outcome, progress_review_outcome, and progress_delivery_outcome to pending values. Preserve only still-true source outcomes.",
+      "directive": "You jumped here because the agreed process of this run no longer matches reality. Say plainly what changed or what was wrong, and update the durable sources it affects so the next normal pass — design, or on the `simple` level the build — re-derives the work from corrected inputs rather than memory.\n\nFor create, correct `workflow-requirements.md` when its interpretation or scope changed; on the `simple` level the corrected requirements lead straight to a new build without design. For edit, correct `edit-requirements.md` or the recorded audit scope as applicable, so the analysis and the contract are derived again together from corrected inputs; on the `simple` level the corrected edit requirements lead straight to a new change without an edit plan. Preserve the user's original goal and authority; process revision is not permission to erode a requirement. Do not modify the workflow artifact here and do not restate an ordinary review finding that belongs to its repair or reassessment owner.\n\nProgress projection ownership: Atomically replace progress_requirements_outcome and progress_design_outcome with truthful current reassessment states and reset progress_build_outcome, progress_review_outcome, and progress_delivery_outcome to pending values. Preserve only still-true source outcomes.",
       "completionCondition": "The reason for process revision is stated and the affected durable sources are corrected without mutating the workflow artifact",
       "inputSchema": {
         "type": "object",
@@ -1658,7 +1956,7 @@
           "label": "process revision requested",
           "cycle": {
             "cause": "A revision was requested from outside the design block.",
-            "exit": "The design review passes."
+            "exit": "The design review passes, or on the simple level the light review passes."
           }
         }
       }
@@ -1666,7 +1964,7 @@
     {
       "type": "agent-directive",
       "id": "review-workflow-design",
-      "directive": "Before review, read `{{workspace_path}}/reference/design.md`, `{{workspace_path}}/reference/validation.md`, `{{workspace_path}}/reference/authority.md`, and `{{workspace_path}}/reference/review-repair.md`; for an edit also read `{{workspace_path}}/reference/engine.md`, and whenever progress is applicable read `{{workspace_path}}/reference/progress.md`.\n\nIndependently review the complete current pre-mutation contract against its canonical upstream sources. For create, review `workflow-design.md` against `workflow-requirements.md`. For edit, review both sections of `edit-plan.md` against `edit-requirements.md`, source provenance, the complete original workflow, and current `workspace/workflow-schema.txt`; trace the whole affected graph in the projection and confirm its meaning and authority in JSON.\n\nCheck outcome completeness, responsibilities, dependencies, writer/reader contracts, authority and failure boundaries, repair/replan ownership, acceptance evidence, and applicable progress. Check routing shape: a decision expressed away from the node that has its evidence — avoidable routing scaffolding as `reference/design.md` and the antipatterns define it — is a design finding, as is a stage that works through a list the flow keeps in variables without binding it. When progress applies, confirm the design or plan specifies the process view completely — block descriptions a newcomer can read, ownership of every node, boundary labels true to their conditions, returns with real cause and exit, one readable order with hubs after their sources, outcome templates on their owning block — as `reference/progress.md` requires. Classify each reproducible blocker by its earliest cause. {{#if fix-create-design.root_cause_class}}The preceding create-design repair reported root `{{fix-create-design.root_cause_class}}` and changed knowledge `{{fix-create-design.changed_knowledge}}`; verify both against current sources.{{/if}} {{#if fix-edit-plan.root_cause_class}}The preceding edit-plan repair reported root `{{fix-edit-plan.root_cause_class}}` and changed knowledge `{{fix-edit-plan.changed_knowledge}}`; verify both against current sources.{{/if}} Route a repeated unchanged root to replan.\n\nOverwrite `{{workspace_path}}/workflow-design-review.md` with all current findings. Return `pass` for none, `repair` only when every blocker belongs to the reviewed design artifact under a valid upstream contract, or `replan` for any upstream, process, criterion, or evidence-model defect. Do not mutate the reviewed artifact or invent process machinery.",
+      "directive": "Before review, read `{{workspace_path}}/reference/design.md`, `{{workspace_path}}/reference/validation.md`, `{{workspace_path}}/reference/authority.md`, and `{{workspace_path}}/reference/review-repair.md`; for an edit also read `{{workspace_path}}/reference/engine.md`, and whenever progress is applicable read `{{workspace_path}}/reference/progress.md`.\n\nIndependently review the complete current pre-mutation contract against its canonical upstream sources. For create, review `workflow-design.md` against `workflow-requirements.md`. For edit, review both sections of `edit-plan.md` against `edit-requirements.md`, source provenance, the complete original workflow (after a raise during this run, the workflow as it now stands, since a simple change was already applied), and current `workspace/workflow-schema.txt`; trace the whole affected graph in the projection and confirm its meaning and authority in JSON.\n\nCheck outcome completeness, responsibilities, dependencies, writer/reader contracts, authority and failure boundaries, repair/replan ownership, acceptance evidence, and applicable progress. Check routing shape: a decision expressed away from the node that has its evidence — avoidable routing scaffolding as `reference/design.md` and the antipatterns define it — is a design finding, as is a stage that works through a list the flow keeps in variables without binding it. When progress applies, confirm the design or plan specifies the process view completely — block descriptions a newcomer can read, ownership of every node, boundary labels true to their conditions, returns with real cause and exit, one readable order with hubs after their sources, outcome templates on their owning block — as `reference/progress.md` requires. Classify each reproducible blocker by its earliest cause. {{#if fix-create-design.root_cause_class}}The preceding create-design repair reported root `{{fix-create-design.root_cause_class}}` and changed knowledge `{{fix-create-design.changed_knowledge}}`; verify both against current sources.{{/if}} {{#if fix-edit-plan.root_cause_class}}The preceding edit-plan repair reported root `{{fix-edit-plan.root_cause_class}}` and changed knowledge `{{fix-edit-plan.changed_knowledge}}`; verify both against current sources.{{/if}} Route a repeated unchanged root to replan.\n\nOverwrite `{{workspace_path}}/workflow-design-review.md` with all current findings. Return `pass` for none, `repair` only when every blocker belongs to the reviewed design artifact under a valid upstream contract, or `replan` for any upstream, process, criterion, or evidence-model defect. Do not mutate the reviewed artifact or invent process machinery.",
       "completionCondition": "The independent pre-mutation review is recorded once; edit review covers the complete current structural projection and JSON while create review does not require a pre-artifact projection; and the pass, repair, or replan outcome matches classified blocking causes",
       "inputSchema": {
         "type": "object",
@@ -1926,6 +2224,16 @@
           "when": {
             "operator": "eq",
             "left": {
+              "contextPath": "complexity_tier"
+            },
+            "right": "simple"
+          },
+          "output": "simple-edit"
+        },
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
               "contextPath": "get-action-type.action_type"
             },
             "right": "create"
@@ -1936,20 +2244,21 @@
       "connections": {
         "true": "design-workflow-structure",
         "simple": "create-workflow-json",
+        "simple-edit": "apply-workflow-changes",
         "default": "create-edit-plan"
       },
       "connectionLabels": {
         "true": {
           "label": "design again",
           "cycle": {
-            "cause": "The contract was reassessed, or the level was raised, so the new workflow is designed again.",
+            "cause": "The contract was reassessed or the process revised, so the new workflow is designed again.",
             "exit": "The design review passes."
           }
         },
         "default": {
           "label": "plan the edit again",
           "cycle": {
-            "cause": "The contract was reassessed, or the level was raised, so the edit is planned again.",
+            "cause": "The contract was reassessed or the process revised, so the edit is planned again.",
             "exit": "The design review passes."
           }
         },
@@ -1959,6 +2268,13 @@
             "cause": "The process of a simple create was revised, so the workflow is built again from the corrected requirements.",
             "exit": "The light review passes."
           }
+        },
+        "simple-edit": {
+          "label": "process revised on a simple edit, apply again",
+          "cycle": {
+            "cause": "The process of a simple edit was revised, so the change is applied again from the corrected edit requirements.",
+            "exit": "The light review passes."
+          }
         }
       }
     },
@@ -1966,7 +2282,7 @@
       "id": "review-workflow-minimum",
       "type": "agent-directive",
       "progressNodeId": "review",
-      "directive": "This is the review of a simple workflow: the non-removable minimum and one light semantic review, not the full quality review. Read `{{workspace_path}}/reference/engine.md`, `{{workspace_path}}/reference/validation.md`, and the `## Simple tier` sections of `{{workspace_path}}/reference/patterns.md` and `{{workspace_path}}/reference/antipatterns.md`; then read `{{workspace_path}}/workflow-requirements.md`, the workflow at {{workflow_artifact_path}} and current `{{workspace_path}}/workspace/workflow-schema.txt`.\n\nCheck the minimum: the official CLI `validate` reports no errors and no unreachable node — the unreachable-node warning is a blocker — every route from `start` ends at an `end`, traced on the schema output, and `metadata.tags` holds exactly one `complexity:simple` tag next to the other tags. Then answer two questions from the requirements and the JSON: does the workflow do what the person asked, and does every completion condition name an observable result rather than an intention? {{#if fix-light-review-findings.repair_outcome}}The preceding repair reported `{{fix-light-review-findings.repair_outcome}}`; check the changed workflow again from the start.{{/if}}\n\nOverwrite `{{workspace_path}}/workflow-light-review.md` with the current findings. Return `pass` for none, `repair` when the workflow can be fixed within the simple level, or `escalate` when it needs something the simple level does not cover — a review-and-redo loop, a teleport, a sub-process, a lock, an effect outside the person's own work, or a progress view with several stages. On `escalate`, return the raised `complexity_tier` (`standard` or `complex`) and `escalation_reason` in plain words; the run then continues into structure design from the current requirements and workflow. Return a concise current `progress_review_outcome`, replacing its prior value. On `escalate`, also reset `progress_build_outcome` and `progress_delivery_outcome` to concise pending values, because the build and delivery are redone at the raised level; return `complexity_tier` and `escalation_reason` only on `escalate`.",
+      "directive": "This is the review of a simple workflow: the non-removable minimum and one light semantic review, not the full quality review. Read `{{workspace_path}}/reference/engine.md`, `{{workspace_path}}/reference/validation.md`, and the `## Simple tier` sections of `{{workspace_path}}/reference/patterns.md` and `{{workspace_path}}/reference/antipatterns.md`; then read `{{workspace_path}}/{{#eq action_type 'create'}}workflow-requirements.md{{else}}edit-requirements.md{{/eq}}`, the workflow at {{workflow_artifact_path}} and current `{{workspace_path}}/workspace/workflow-schema.txt`.\n\nCheck the minimum: the official CLI `validate` reports no errors and no unreachable node — the unreachable-node warning is a blocker — every route from `start` ends at an `end`, traced on the schema output, and `metadata.tags` holds exactly one `complexity:simple` tag next to the other tags. Then answer two questions from the requirements and the JSON: does the workflow do what the person asked, and does every completion condition name an observable result rather than an intention? {{#if fix-light-review-findings.repair_outcome}}The preceding repair reported `{{fix-light-review-findings.repair_outcome}}`; check the changed workflow again from the start.{{/if}}\n\nOverwrite `{{workspace_path}}/workflow-light-review.md` with the current findings. Return `pass` for none, `repair` when the workflow can be fixed within the simple level, or `escalate` when it needs something the simple level does not cover — a review-and-redo loop, a teleport, a sub-process, a lock, an effect outside the person's own work, or a progress view with several stages. On `escalate`, return the raised `complexity_tier` (`standard` or `complex`) and `escalation_reason` in plain words; the run then continues into {{#eq action_type 'create'}}structure design{{else}}the raised level's audit decision and the edit plan{{/eq}} from the current requirements and workflow. Return a concise current `progress_review_outcome`, replacing its prior value. On `escalate`, also reset `progress_build_outcome` and `progress_delivery_outcome` to concise pending values, because the build and delivery are redone at the raised level; return `complexity_tier` and `escalation_reason` only on `escalate`.",
       "completionCondition": "The minimum and the two light-review questions are checked against the requirements, the complete JSON and the current schema output, the findings file is current, and the outcome matches them",
       "inputSchema": {
         "type": "object",
@@ -2073,23 +2389,24 @@
       "connections": {
         "success": "fix-light-review-findings",
         "pass": "route-operating-mode-final",
-        "escalate": "route-action-after-reassessment"
+        "escalate": "route-after-level-raise"
       },
       "connectionLabels": {
         "escalate": {
-          "label": "needs more than a simple flow, design it",
+          "label": "needs more than a simple flow, raise the level",
           "cycle": {
             "cause": "The light review found the workflow needs something the simple level does not cover, so the level was raised.",
             "exit": "The design review passes at the raised level."
           }
-        }
+        },
+        "pass": "light review passed, deliver"
       }
     },
     {
       "id": "fix-light-review-findings",
       "type": "agent-directive",
       "progressNodeId": "review",
-      "directive": "Read `{{workspace_path}}/workflow-light-review.md`, `{{workspace_path}}/workflow-requirements.md`, the workflow at {{workflow_artifact_path}}, current `{{workspace_path}}/workspace/workflow-schema.txt`, and the `## Simple tier` sections of `{{workspace_path}}/reference/patterns.md` and `{{workspace_path}}/reference/antipatterns.md`.\n\nReproduce each finding before changing anything, repair it with the official CLI, keep exactly one `complexity:simple` tag with every other tag in `metadata.tags` (`set-tags` replaces the whole list), validate, and regenerate the schema output. Return `changed` when the repair is done — the light review checks it again — or `escalate` with the raised `complexity_tier` (`standard` or `complex`) and `escalation_reason` in plain words when a finding shows the workflow needs more than the simple level covers. Return a concise current `progress_review_outcome`, replacing its prior value. On `escalate`, also reset `progress_build_outcome` and `progress_delivery_outcome` to concise pending values, because the build and delivery are redone at the raised level; return `complexity_tier` and `escalation_reason` only on `escalate`.",
+      "directive": "Read `{{workspace_path}}/workflow-light-review.md`, `{{workspace_path}}/{{#eq action_type 'create'}}workflow-requirements.md{{else}}edit-requirements.md{{/eq}}`, the workflow at {{workflow_artifact_path}}, current `{{workspace_path}}/workspace/workflow-schema.txt`, and the `## Simple tier` sections of `{{workspace_path}}/reference/patterns.md` and `{{workspace_path}}/reference/antipatterns.md`.\n\nReproduce each finding before changing anything, repair it with the official CLI, keep exactly one `complexity:simple` tag with every other tag in `metadata.tags` (`set-tags` replaces the whole list), validate, and regenerate the schema output. Return `changed` when the repair is done — the light review checks it again — or `escalate` with the raised `complexity_tier` (`standard` or `complex`) and `escalation_reason` in plain words when a finding shows the workflow needs more than the simple level covers. Return a concise current `progress_review_outcome`, replacing its prior value. On `escalate`, also reset `progress_build_outcome` and `progress_delivery_outcome` to concise pending values, because the build and delivery are redone at the raised level; return `complexity_tier` and `escalation_reason` only on `escalate`.",
       "completionCondition": "Each finding was reproduced and either repaired in the validated workflow with a current schema output, or the level was raised with its reason",
       "inputSchema": {
         "type": "object",
@@ -2184,7 +2501,7 @@
       ],
       "connections": {
         "success": "review-workflow-minimum",
-        "escalate": "route-action-after-reassessment"
+        "escalate": "route-after-level-raise"
       },
       "connectionLabels": {
         "success": {
@@ -2195,10 +2512,65 @@
           }
         },
         "escalate": {
-          "label": "needs more than a simple flow, design it",
+          "label": "needs more than a simple flow, raise the level",
           "cycle": {
             "cause": "Repairing the light review's findings showed the workflow needs more than the simple level covers, so the level was raised.",
             "exit": "The design review passes at the raised level."
+          }
+        }
+      }
+    },
+    {
+      "type": "condition",
+      "id": "route-after-level-raise",
+      "progressNodeId": "review",
+      "cases": [
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "get-action-type.action_type"
+            },
+            "right": "create"
+          },
+          "output": "true"
+        },
+        {
+          "when": {
+            "operator": "eq",
+            "left": {
+              "contextPath": "complexity_tier"
+            },
+            "right": "complex"
+          },
+          "output": "audit"
+        }
+      ],
+      "connections": {
+        "true": "design-workflow-structure",
+        "audit": "audit-complete-workflow",
+        "default": "ask-full-antipattern-audit"
+      },
+      "connectionLabels": {
+        "true": {
+          "label": "level raised, design the new workflow",
+          "cycle": {
+            "cause": "A review raised the level of a new workflow, so it is designed at the raised level from the current requirements.",
+            "exit": "The design review passes at the raised level."
+          }
+        },
+        "audit": {
+          "label": "raised to complex, audit the whole flow",
+          "cycle": {
+            "cause": "A review raised an edit to the complex level, so the whole workflow is audited before the edit is planned.",
+            "exit": "The design review passes at the complex level."
+          }
+        },
+        "default": {
+          "label": "raised to standard, decide on the audit",
+          "cycle": {
+            "cause": "A review raised an edit to the standard level, so the audit question is asked before the edit is planned.",
+            "exit": "The design review passes at the standard level."
           }
         }
       }

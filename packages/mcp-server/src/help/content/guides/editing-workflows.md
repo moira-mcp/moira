@@ -58,6 +58,10 @@ moira-workflow ./workflow.json set-tags research,verification
 moira-workflow ./workflow.json set-variable-schema result --file ./result-schema.json
 ```
 
+`set-tags` replaces the whole tag list. A workflow authored by the Workflow Management Flow carries
+exactly one level tag, `complexity:simple`, `complexity:standard` or `complexity:complex`; keep it in
+the list you pass, or the next edit treats the workflow as having an unknown history.
+
 Routing is edited through the same `update` command. `--cases` replaces the ordered cases of a
 `condition` or `agent-directive` node, `--expressions` replaces the expressions it evaluates before
 them, and connections are edited by key:

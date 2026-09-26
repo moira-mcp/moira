@@ -83,7 +83,7 @@ function editInputs(name: string, localPath = `workflows/${name}.json`): Record<
       local_workflow_path: localPath,
       workflow_artifact_path: `${workspace}/workflow.json`,
     },
-    "gather-edit-requirements": {},
+    "gather-edit-requirements": { recorded_tier: "none", complexity_tier: "standard" },
     "ask-full-antipattern-audit": { full_antipattern_audit: "no" },
     "audit-complete-workflow": { additional_edit_scope: "none" },
     "create-edit-plan": {},
@@ -230,6 +230,31 @@ function simpleInputs(name: string): Record<string, MockInput> {
   };
 }
 
+/** An edit run at the simple level: requirements go straight to the change and the light review. */
+function simpleEditInputs(name: string): Record<string, MockInput> {
+  return {
+    ...editInputs(name),
+    "gather-edit-requirements": { recorded_tier: "simple", complexity_tier: "simple" },
+    "review-workflow-minimum": { light_review_outcome: "pass" },
+    "fix-light-review-findings": { repair_outcome: "changed" },
+  };
+}
+
+/** The planning responsibilities the simple level skips on edit. */
+const EDIT_PLAN_PATH = [
+  "ask-full-antipattern-audit",
+  "audit-complete-workflow",
+  "create-edit-plan",
+  "present-edit-plan",
+];
+
+/** A person's explicit request for a simpler process, as the lowering gates record it. */
+const LOWER_TO_SIMPLE = {
+  lowering_request: "Please keep this simple, just the steps in order",
+  complexity_tier: "simple",
+  escalation_reason: "",
+};
+
 /** The design responsibilities the simple level skips on create. */
 const DESIGN_PATH = ["design-workflow-structure", "review-workflow-design", "approve-structure"];
 
@@ -283,7 +308,7 @@ const scenarios: TestScenario[] = [
     },
     [
       "review-workflow-minimum",
-      "route-action-after-reassessment",
+      "route-after-level-raise",
       ...DESIGN_PATH,
       "review-workflow-quality",
       "end",
@@ -331,12 +356,7 @@ const scenarios: TestScenario[] = [
         { quality_review_outcome: "pass" },
       ],
     },
-    [
-      "review-workflow-quality",
-      "route-action-after-reassessment",
-      "design-workflow-structure",
-      "end",
-    ],
+    ["review-workflow-quality", "route-after-level-raise", "design-workflow-structure", "end"],
     ["review-workflow-minimum"],
     { contextContains: { complexity_tier: "complex" } },
   ),
@@ -368,6 +388,143 @@ const scenarios: TestScenario[] = [
       teleportAfter: { afterNode: "create-workflow-json", teleportTo: "teleport-revise-process" },
       contextContains: { complexity_tier: "simple" },
     },
+  ),
+  scenario(
+    "simple edit: the change goes straight to the light review without audit, plan or approval",
+    simpleEditInputs("simple-edit"),
+    [
+      "gather-edit-requirements",
+      "apply-workflow-changes",
+      "review-workflow-minimum",
+      "user-final-review",
+      "end",
+    ],
+    [...EDIT_PLAN_PATH, "review-workflow-design", "review-workflow-quality"],
+    { contextContains: { complexity_tier: "simple" } },
+  ),
+  scenario(
+    "complex edit runs the full antipattern audit without asking",
+    {
+      ...editInputs("complex-edit"),
+      "gather-edit-requirements": { recorded_tier: "complex", complexity_tier: "complex" },
+    },
+    ["audit-complete-workflow", "create-edit-plan", "review-workflow-quality", "end"],
+    ["ask-full-antipattern-audit", "review-workflow-minimum"],
+    { contextContains: { complexity_tier: "complex" } },
+  ),
+  scenario(
+    "a rejected simple edit is revised and applied again without an edit plan",
+    {
+      ...simpleEditInputs("simple-edit-revision"),
+      "user-final-review": [
+        { work_approved: "no", final_feedback: "Also remind the teammate to book the laptop" },
+        { work_approved: "yes" },
+      ],
+    },
+    ["revise-edit-requirements", "apply-workflow-changes", "review-workflow-minimum", "end"],
+    [...EDIT_PLAN_PATH, "review-workflow-quality"],
+    { contextContains: { complexity_tier: "simple" } },
+  ),
+  scenario(
+    "a simple edit the light review finds needs more is raised into the edit plan",
+    {
+      ...simpleEditInputs("simple-edit-escalation"),
+      "review-workflow-minimum": {
+        light_review_outcome: "escalate",
+        complexity_tier: "standard",
+        escalation_reason: "The change adds a review-and-redo loop",
+      },
+    },
+    [
+      "review-workflow-minimum",
+      "route-after-level-raise",
+      "ask-full-antipattern-audit",
+      "create-edit-plan",
+      "review-workflow-design",
+      "present-edit-plan",
+      "review-workflow-quality",
+      "end",
+    ],
+    ["audit-complete-workflow", "fix-light-review-findings"],
+    { contextContains: { complexity_tier: "standard" } },
+  ),
+  scenario(
+    "a simple edit raised to complex runs the full antipattern audit before the edit plan",
+    {
+      ...simpleEditInputs("simple-edit-raised-complex"),
+      "review-workflow-minimum": [{ light_review_outcome: "repair" }],
+      "fix-light-review-findings": {
+        repair_outcome: "escalate",
+        complexity_tier: "complex",
+        escalation_reason: "The change needs a sub-process and a lock",
+      },
+    },
+    [
+      "fix-light-review-findings",
+      "route-after-level-raise",
+      "audit-complete-workflow",
+      "create-edit-plan",
+      "review-workflow-quality",
+      "end",
+    ],
+    ["ask-full-antipattern-audit"],
+    { contextContains: { complexity_tier: "complex" } },
+  ),
+  scenario(
+    "a process revision during a simple edit applies the corrected requirements without a plan",
+    { ...simpleEditInputs("simple-edit-process-revision"), "teleport-revise-process": {} },
+    [
+      "teleport-revise-process",
+      "route-action-after-reassessment",
+      "review-workflow-minimum",
+      "end",
+    ],
+    [...EDIT_PLAN_PATH, "review-workflow-quality"],
+    {
+      teleportAfter: { afterNode: "apply-workflow-changes", teleportTo: "teleport-revise-process" },
+      contextContains: { complexity_tier: "simple" },
+    },
+  ),
+  scenario(
+    "a person who asks for a simpler process at structure approval gets the simple build",
+    {
+      ...createInputs("lowered-at-approval"),
+      "gather-workflow-requirements": { complexity_tier: "complex" },
+      "approve-structure": { structure_approved: "yes", ...LOWER_TO_SIMPLE },
+      "review-workflow-minimum": { light_review_outcome: "pass" },
+    },
+    ["approve-structure", "create-workflow-json", "review-workflow-minimum", "end"],
+    ["review-workflow-quality", "refine-structure"],
+    { contextContains: { complexity_tier: "simple", escalation_reason: "" } },
+  ),
+  scenario(
+    "a person who asks for a simpler process at plan approval gets the simple change",
+    {
+      ...editInputs("lowered-at-plan"),
+      "present-edit-plan": {
+        plan_approval: "no",
+        user_feedback: "This is too much for a small change",
+        ...LOWER_TO_SIMPLE,
+      },
+      "review-workflow-minimum": { light_review_outcome: "pass" },
+    },
+    ["present-edit-plan", "apply-workflow-changes", "review-workflow-minimum", "end"],
+    ["revise-edit-plan", "review-workflow-quality"],
+    { contextContains: { complexity_tier: "simple" } },
+  ),
+  scenario(
+    "a person who asks for a simpler process at the final review gets a simple revision",
+    {
+      ...editInputs("lowered-at-final-review"),
+      "user-final-review": [
+        { work_approved: "no", final_feedback: "Drop the extra checks", ...LOWER_TO_SIMPLE },
+        { work_approved: "yes" },
+      ],
+      "review-workflow-minimum": { light_review_outcome: "pass" },
+    },
+    ["revise-edit-requirements", "review-workflow-minimum", "end"],
+    [],
+    { contextContains: { complexity_tier: "simple" } },
   ),
   scenario(
     "create without upload",
@@ -605,7 +762,7 @@ describe("workflow-management-flow", () => {
   });
 
   test("keeps shared gates and routes each local answer on its owning directive", () => {
-    expect(workflow.metadata.version).toBe("6.13.0");
+    expect(workflow.metadata.version).toBe("6.14.0");
     expect(
       workflow.nodes.filter((node) => node.type === "condition").map((node) => node.id),
     ).toEqual([
@@ -618,6 +775,7 @@ describe("workflow-management-flow", () => {
       "route-action-after-design-review",
       "route-action-design-repair",
       "route-action-after-reassessment",
+      "route-after-level-raise",
     ]);
 
     const eq = (path: string, right: string | boolean, output: string) => ({
@@ -649,13 +807,35 @@ describe("workflow-management-flow", () => {
         {
           success: "fix-light-review-findings",
           pass: "route-operating-mode-final",
-          escalate: "route-action-after-reassessment",
+          escalate: "route-after-level-raise",
         },
       ],
       [
         "fix-light-review-findings",
         [eq("fix-light-review-findings.repair_outcome", "escalate", "escalate")],
-        { success: "review-workflow-minimum", escalate: "route-action-after-reassessment" },
+        { success: "review-workflow-minimum", escalate: "route-after-level-raise" },
+      ],
+      [
+        "gather-edit-requirements",
+        [
+          eq("gather-edit-requirements.complexity_tier", "simple", "simple"),
+          eq("gather-edit-requirements.complexity_tier", "complex", "complex"),
+        ],
+        {
+          success: "ask-full-antipattern-audit",
+          simple: "apply-workflow-changes",
+          complex: "audit-complete-workflow",
+        },
+      ],
+      [
+        "apply-workflow-changes",
+        [eq("complexity_tier", "simple", "simple")],
+        { success: "review-workflow-quality", simple: "review-workflow-minimum" },
+      ],
+      [
+        "revise-edit-requirements",
+        [eq("complexity_tier", "simple", "simple")],
+        { success: "create-edit-plan", simple: "apply-workflow-changes" },
       ],
       [
         "ask-full-antipattern-audit",
@@ -686,13 +866,27 @@ describe("workflow-management-flow", () => {
       ],
       [
         "approve-structure",
-        [eq("approve-structure.structure_approved", "yes", "approved")],
-        { success: "refine-structure", approved: "create-workflow-json" },
+        [
+          eq("complexity_tier", "simple", "simple"),
+          eq("approve-structure.structure_approved", "yes", "approved"),
+        ],
+        {
+          success: "refine-structure",
+          simple: "create-workflow-json",
+          approved: "create-workflow-json",
+        },
       ],
       [
         "present-edit-plan",
-        [eq("present-edit-plan.plan_approval", "yes", "approved")],
-        { success: "revise-edit-plan", approved: "apply-workflow-changes" },
+        [
+          eq("complexity_tier", "simple", "simple"),
+          eq("present-edit-plan.plan_approval", "yes", "approved"),
+        ],
+        {
+          success: "revise-edit-plan",
+          simple: "apply-workflow-changes",
+          approved: "apply-workflow-changes",
+        },
       ],
       [
         "review-workflow-quality",
@@ -705,7 +899,7 @@ describe("workflow-management-flow", () => {
           success: "fix-quality-issues",
           pass: "route-operating-mode-final",
           replan: "reassess-design-contract",
-          escalate: "route-action-after-reassessment",
+          escalate: "route-after-level-raise",
         },
       ],
       [
@@ -754,6 +948,20 @@ describe("workflow-management-flow", () => {
         connections,
       });
     }
+    // A raise continues by action and level: a new workflow is designed again, an edit raised to
+    // complex is audited in full, and an edit raised to standard gets the audit question.
+    expect(workflow.nodes.find((node) => node.id === "route-after-level-raise")).toMatchObject({
+      type: "condition",
+      cases: [
+        eq("get-action-type.action_type", "create", "true"),
+        eq("complexity_tier", "complex", "audit"),
+      ],
+      connections: {
+        true: "design-workflow-structure",
+        audit: "audit-complete-workflow",
+        default: "ask-full-antipattern-audit",
+      },
+    });
     // The shared reassessment router: a revised simple create builds again, any other create is
     // designed again, and an edit is planned again.
     expect(
@@ -771,11 +979,13 @@ describe("workflow-management-flow", () => {
           },
           output: "simple",
         },
+        eq("complexity_tier", "simple", "simple-edit"),
         eq("get-action-type.action_type", "create", "true"),
       ],
       connections: {
         true: "design-workflow-structure",
         simple: "create-workflow-json",
+        "simple-edit": "apply-workflow-changes",
         default: "create-edit-plan",
       },
     });
@@ -835,6 +1045,72 @@ describe("workflow-management-flow", () => {
       expect.arrayContaining(["create-workflow-json", "review-workflow-minimum"]),
     );
 
+    const after = (name: string, node: string) => {
+      const visits = routeVisits(results.find((result) => result.scenario === name)!);
+      return visits.slice(visits.lastIndexOf(node) + 1);
+    };
+    // After a lowering, the run does not take the routes the higher level adds.
+    expect(
+      after(
+        "a person who asks for a simpler process at the final review gets a simple revision",
+        "revise-edit-requirements",
+      ),
+    ).not.toContain("create-edit-plan");
+    expect(
+      after(
+        "a person who asks for a simpler process at the final review gets a simple revision",
+        "revise-edit-requirements",
+      ),
+    ).not.toContain("review-workflow-quality");
+    expect(
+      after(
+        "a process revision during a simple edit applies the corrected requirements without a plan",
+        "teleport-revise-process",
+      ),
+    ).toEqual(expect.arrayContaining(["apply-workflow-changes", "review-workflow-minimum"]));
+    // An edit raise continues from the current edit requirements: their owner runs once.
+    expect(
+      routeVisits(
+        results.find(
+          (result) =>
+            result.scenario ===
+            "a simple edit the light review finds needs more is raised into the edit plan",
+        )!,
+      ).filter((node) => node === "gather-edit-requirements"),
+    ).toHaveLength(1);
+    // Lowering is accepted only where the person is present: the interactive gates and the
+    // requirements owners. No autonomous run visits a gate that lowers.
+    const lowering = workflow.nodes
+      .filter(
+        (node) =>
+          (node as { inputSchema?: { properties?: Record<string, unknown> } }).inputSchema
+            ?.properties?.lowering_request !== undefined,
+      )
+      .map((node) => node.id)
+      .sort();
+    expect(lowering).toEqual([
+      "approve-structure",
+      "gather-edit-requirements",
+      "present-edit-plan",
+      "user-final-review",
+    ]);
+    const autonomousRuns = scenarios
+      .map((item, index) => ({ item, result: results[index] }))
+      .filter(
+        ({ item }) =>
+          (item.mockInputs["get-action-type"] as Record<string, unknown>).operating_mode ===
+          "autonomous",
+      );
+    expect(autonomousRuns.length).toBeGreaterThan(0);
+    for (const { result } of autonomousRuns) {
+      for (const gate of ["approve-structure", "present-edit-plan", "user-final-review"]) {
+        expect({ scenario: result.scenario, visits: routeVisits(result).includes(gate) }).toEqual({
+          scenario: result.scenario,
+          visits: false,
+        });
+      }
+    }
+
     // A raise continues from the current requirements: the requirements owner runs once.
     for (const name of [
       "a simple run whose light review needs more is raised into design without new requirements",
@@ -865,6 +1141,12 @@ describe("workflow-management-flow", () => {
       "simple create, interactive: build, light review and final review without design",
     );
     expect(simple.get("design")?.status).toBe("skipped");
+    const simpleEdit = statusesOf(
+      "simple edit: the change goes straight to the light review without audit, plan or approval",
+    );
+    expect(simpleEdit.get("design")?.status).toBe("skipped");
+    expect(simpleEdit.get("build")?.status).toBe("done");
+    expect(simpleEdit.get("review")?.status).toBe("done");
     expect(simple.get("review")?.status).toBe("done");
     const raised = statusesOf(
       "a simple run whose light review needs more is raised into design without new requirements",

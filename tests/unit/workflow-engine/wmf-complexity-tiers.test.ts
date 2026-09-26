@@ -251,14 +251,16 @@ describe("the level only rises during a create run", () => {
 });
 
 describe("the create owners carry the level", () => {
-  test.each(["create-workflow-json", "fix-quality-issues", "fix-light-review-findings"])(
-    "%s records exactly one complexity tag and keeps the other tags",
-    (id) => {
-      const text = directive(id);
-      expect(text).toMatch(/exactly one `complexity:(\{\{complexity_tier\}\}|simple)` tag/u);
-      expect(text).toMatch(/`set-tags` replaces the whole list/u);
-    },
-  );
+  test.each([
+    "create-workflow-json",
+    "apply-workflow-changes",
+    "fix-quality-issues",
+    "fix-light-review-findings",
+  ])("%s records exactly one complexity tag and keeps the other tags", (id) => {
+    const text = directive(id);
+    expect(text).toMatch(/exactly one `complexity:(\{\{complexity_tier\}\}|simple)` tag/u);
+    expect(text).toMatch(/`set-tags` replaces the whole list/u);
+  });
 
   test.each(["review-workflow-quality", "review-workflow-minimum"])(
     "%s verifies the tag and the non-removable minimum, the unreachable-node warning blocking",
@@ -271,11 +273,14 @@ describe("the create owners carry the level", () => {
     },
   );
 
-  test("the build holds the minimum before handing over", () => {
-    const text = directive("create-workflow-json");
-    expect(text).toContain("no unreachable node");
-    expect(text).toMatch(/every route from `start` ends at an `end`/u);
-  });
+  test.each(["create-workflow-json", "apply-workflow-changes"])(
+    "%s holds the minimum before handing over",
+    (id) => {
+      const text = directive(id);
+      expect(text).toContain("no unreachable node");
+      expect(text).toMatch(/every route from `start` ends at an `end`/u);
+    },
+  );
 
   test("the light review asks the two questions", () => {
     const text = directive("review-workflow-minimum");
@@ -292,7 +297,12 @@ describe("the create owners carry the level", () => {
       expect(text).toContain("below `complex`, name in plain words what this level skipped");
       expect(text).toContain("no independent design review");
       expect(text).toContain("start this flow again in edit mode on this workflow");
-      expect(text).toContain("on the `simple` level, the requirements file");
+      expect(text).toContain(
+        "on the `simple` level, `{{#eq action_type 'create'}}workflow-requirements.md{{else}}edit-requirements.md{{/eq}}`",
+      );
+      expect(text).toContain(
+        "no edit plan, no independent plan review, no plan approval, no full antipattern audit",
+      );
     },
   );
 
@@ -350,7 +360,7 @@ describe("a return to design after a build", () => {
     },
   );
 
-  test.each(["approve-structure", "user-final-review"])(
+  test.each(["approve-structure", "present-edit-plan", "user-final-review"])(
     "in an interactive run, %s tells the person why the process grew and what it costs",
     (id) => {
       const raised = rendered(id, {
@@ -363,6 +373,166 @@ describe("a return to design after a build", () => {
       );
       expect(raised).toContain("what it costs");
       expect(rendered(id, { ...built, complexity_tier: "standard" })).not.toMatch(/raised/u);
+    },
+  );
+});
+
+describe("an edit starts from the level recorded on the flow", () => {
+  const owner = (answer: Record<string, unknown>) =>
+    acceptsAnswer("gather-edit-requirements", {
+      progress_requirements_outcome: "Requirements captured",
+      ...answer,
+    });
+
+  test.each([
+    ["none", "simple"],
+    ["none", "complex"],
+    ["simple", "simple"],
+    ["simple", "complex"],
+    ["standard", "standard"],
+    ["standard", "complex"],
+    ["complex", "complex"],
+  ])("recorded %s, agreed %s: accepted without a request", (recorded_tier, complexity_tier) => {
+    expect(owner({ recorded_tier, complexity_tier })).toBe(true);
+  });
+
+  test.each([
+    ["standard", "simple"],
+    ["complex", "standard"],
+    ["complex", "simple"],
+  ])(
+    "recorded %s, agreed %s: rejected unless the person's request is returned",
+    (recorded_tier, complexity_tier) => {
+      expect(owner({ recorded_tier, complexity_tier })).toBe(false);
+      expect(
+        owner({ recorded_tier, complexity_tier, lowering_request: "Keep it simple, please" }),
+      ).toBe(true);
+    },
+  );
+
+  test("the edit requirements owner reads the tag and lowers only on the recorded interactive request", () => {
+    const text = directive("gather-edit-requirements");
+    expect(text).toContain("Read the level recorded on the flow from its `metadata.tags`");
+    expect(text).toContain("return it as `recorded_tier`, or `none`");
+    expect(text).toContain("never ran the responsibilities its level skips");
+    expect(text).toContain("those responsibilities run over the whole flow");
+    expect(text).toContain("A flow without a level tag has an unknown history");
+    expect(text).toContain(
+      "Go below the recorded level only when the person explicitly asks for it in an interactive run: record the request in their words and the resulting level in `edit-requirements.md` before it takes effect",
+    );
+    expect(text).toContain("In `autonomous` mode never go below the recorded level.");
+  });
+
+  test("a raised edit plans over the whole flow", () => {
+    expect(directive("create-edit-plan")).toContain(
+      "the responsibilities the recorded level skipped run over the whole flow, not only the changed part",
+    );
+  });
+
+  test("a simple edit is applied from the edit requirements, without an edit plan", () => {
+    expect(directive("apply-workflow-changes")).toContain(
+      "On the `simple` level no edit plan exists: apply the changes `{{workspace_path}}/edit-requirements.md` asks for directly.",
+    );
+  });
+
+  test.each([
+    ["create", "workflow-requirements.md", "structure design"],
+    ["edit", "edit-requirements.md", "the raised level's audit decision and the edit plan"],
+  ])("on %s, the light review reads %s and a raise continues into %s", (action, file, next) => {
+    const text = new GraphTemplateProcessor().processDirective(
+      directive("review-workflow-minimum"),
+      {
+        executionId: "wmf-tier-check",
+        workflowId: wmf.id ?? "workflow-management-flow",
+        userId: "tier-check",
+        variables: {
+          workspace_path: "./moira-ws/tier-check",
+          workflow_artifact_path: "./moira-ws/tier-check/workflow.json",
+          action_type: action,
+        },
+        nodeStates: {},
+      },
+    );
+    expect(text).toContain(`then read \`./moira-ws/tier-check/${file}\``);
+    expect(text).toContain(`the run then continues into ${next} from the current requirements`);
+  });
+});
+
+describe("the person can ask for a simpler process where they are present", () => {
+  const LOWER = { lowering_request: "Please keep it simple", escalation_reason: "" };
+  const gates: Array<[string, Record<string, unknown>]> = [
+    ["approve-structure", { structure_approved: "yes" }],
+    ["present-edit-plan", { plan_approval: "yes" }],
+    [
+      "user-final-review",
+      {
+        work_approved: "no",
+        final_feedback: "Drop the extra checks",
+        progress_delivery_outcome: "Awaiting revision",
+      },
+    ],
+  ];
+
+  test.each(gates)("%s lowers only with the person's recorded request", (id, ordinary) => {
+    expect(acceptsAnswer(id, ordinary)).toBe(true);
+    expect(acceptsAnswer(id, { ...ordinary, ...LOWER, complexity_tier: "simple" })).toBe(true);
+    expect(acceptsAnswer(id, { ...ordinary, ...LOWER, complexity_tier: "standard" })).toBe(true);
+    // No level without the request, no request without a level, never up to complex, and a
+    // lowering clears any earlier raise reason.
+    expect(acceptsAnswer(id, { ...ordinary, complexity_tier: "simple" })).toBe(false);
+    expect(acceptsAnswer(id, { ...ordinary, lowering_request: "Simpler please" })).toBe(false);
+    expect(acceptsAnswer(id, { ...ordinary, ...LOWER, complexity_tier: "complex" })).toBe(false);
+    expect(
+      acceptsAnswer(id, {
+        ...ordinary,
+        ...LOWER,
+        complexity_tier: "simple",
+        escalation_reason: "It grew",
+      }),
+    ).toBe(false);
+  });
+
+  test("after a lowering, the final review names what ran before it and what the lower level skipped", () => {
+    expect(directive("user-final-review")).toContain(
+      "When the person lowered the level earlier in this run, say so, and name what ran before the lowering as well as what the lower level then skipped.",
+    );
+  });
+
+  test("the final review lowers only together with a rejection, so the rebuild re-records the tag", () => {
+    expect(
+      acceptsAnswer("user-final-review", {
+        work_approved: "yes",
+        progress_delivery_outcome: "Accepted",
+        ...LOWER,
+        complexity_tier: "simple",
+      }),
+    ).toBe(false);
+  });
+
+  test.each(["approve-structure", "present-edit-plan", "user-final-review"])(
+    "%s records the request in the person's words and never proposes lowering itself",
+    (id) => {
+      const text = directive(id);
+      expect(text).toContain("If the person explicitly asks for a simpler process");
+      expect(text).toContain("first record their request, in their words,");
+      expect(text).toMatch(/and the resulting level in `\{\{workspace_path\}\}\//u);
+      expect(text).toContain("Never propose a lower level yourself");
+    },
+  );
+
+  test.each([
+    ["approve-structure", "the design"],
+    ["present-edit-plan", "the plan"],
+  ])("%s keeps the person's feedback on %s when they also ask to lower", (id, subject) => {
+    expect(directive(id)).toContain(
+      `together with any feedback they gave on ${subject}, and the resulting level`,
+    );
+  });
+
+  test.each(["audit-complete-workflow", "review-workflow-design", "fix-edit-plan"])(
+    "after a raise, %s works on the workflow as it now stands",
+    (id) => {
+      expect(directive(id)).toMatch(/workflow as it now stands/u);
     },
   );
 });

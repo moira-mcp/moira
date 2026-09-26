@@ -151,8 +151,8 @@ describe("process derivation from the authored graph", () => {
       "workflow-management-flow",
       {
         blocks: 6,
-        transitions: 34,
-        cycles: 16,
+        transitions: 41,
+        cycles: 19,
         order: ["source", "requirements", "design", "build", "review", "delivery"],
       },
     ],
