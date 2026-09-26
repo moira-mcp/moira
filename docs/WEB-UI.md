@@ -84,11 +84,9 @@ frontend/src/
 │   └── workflow/                # Workflow management
 │       ├── WorkflowExplorer.tsx # Workflow list with FilterBar (filters folded) + DataListView + useDebounce
 │       ├── WorkflowGraph.tsx    # React Flow visualization with its diagram toolbar
-│       ├── WorkflowCard.tsx     # A flow as a CardShell item: name and version, two-line description, when to pick it, owner/visibility/tags, attention badges
-│       ├── NodeDetailSheet.tsx  # Node detail panel (legacy, used in execution views)
-│       ├── WorkflowHeader.tsx   # Workflow metadata display
-│       ├── WorkflowVariablesPanel.tsx # Collapsible variables sidebar
-│       └── WorkflowVisualizationPage.tsx # Container component
+│       ├── WorkflowCard.tsx     # A flow as a CardShell item: name and version, two-line description, when to pick it, owner/visibility/level/subject tags, attention badges
+│       ├── FlowLevelBadge.tsx   # The level a flow was authored at (complexity:<level>) as a badge of its own
+│       └── NodeDetailSheet.tsx  # Node detail panel (legacy, used where a graph has no onNodeSelect)
 │   ├── QuickStartCard.tsx       # "Connect your agent": per-client setup tabs
 │   ├── notes/                   # Notes management components
 │   │   ├── NoteInlineEditor.tsx # Inline expandable card editor (create/edit)
@@ -655,7 +653,9 @@ default.
 
 **Layout:** the `PageHeader` (`flow-header`) carries the page's text and its own actions — back,
 the workflow name (`flow-title`), `v<version>` as the meta, the description as the header line,
-and as header facts the workflow's tags (`flow-tag`) and its node count (`flow-node-count`) —
+and as header facts the level the flow was authored at (`flow-level-badge`, absent without a
+level tag), its subject tags (`flow-tag`, never the level tag) and its node count
+(`flow-node-count`) —
 with the edit toggle and its hint for owners and the owner actions (copy for public flows,
 visibility, share, delete) on the right, folded into a dropdown below `md`. Everything that acts
 on the diagram lives in the `DiagramToolbar` beneath it, which the active view mounts: the view
@@ -1375,7 +1375,7 @@ WorkflowCard and FlowPage show "Shared" badge when `accessType === "shared"`:
 │ [icon] Name  v1.0.0                              [Invalid] [🗑]  │
 │        What the flow does, in up to two readable lines…          │
 │        Pick it when … (recommended universal flows only)         │
-│        @owner  🌐 Public  tag  tag  tag +2                       │
+│        @owner  🌐 Public  [Simple]  tag  tag  tag +2             │
 └──────────────────────────────────────────────────────────────────┘
 ```
 
@@ -1386,8 +1386,17 @@ WorkflowCard and FlowPage show "Shared" badge when `accessType === "shared"`:
   text in a tooltip on hover over it.
 - **When to pick it** (`workflow-card-when`): the authored onboarding text, for the recommended
   universal flows only (`whenToPickKey` in `onboarding/recommended.ts`).
-- **Meta:** owner handle (`workflow-card-owner`), visibility in words, up to three tags and a count
-  of the rest.
+- **Meta:** owner handle (`workflow-card-owner`), visibility in words, the level badge
+  (`workflow-card-level`) when the flow carries a level tag, then up to three subject tags and a
+  count of the rest of the subject tags.
+
+A flow's tags are split by `splitFlowTags` (`utils/workflow-level.ts`): exactly one
+`complexity:simple|standard|complex` tag, written by the Workflow Management Flow, is the level and
+is shown only as `FlowLevelBadge`, localized; every other tag is a subject. Any other `complexity:`
+value is neither a level nor a subject and shows nothing. Every renderer of flow tags goes through
+that helper, so the level is never a tag chip and never counted among the tags; the catalogue search
+matches slug, name and description, never tags.
+
 - **Delete** (`workflow-card-delete`): on the reader's own flows or for an administrator, shown on
   hover or focus.
 
@@ -1891,7 +1900,7 @@ The graph is the process view's detailed layer, not a separate rendering:
 - **Panel node level**: `NodePanel` on the run and flow pages, opened by a node click through
   `onNodeSelect` or by any "go to this step" in the interface. It is the only surface that shows a
   node's validation, playbooks and catalog configuration.
-- **Legacy Sheet**: `NodeDetailSheet` (Sheet overlay). Used in execution views (`WorkflowVisualizationPage`) where `onNodeSelect` is not provided.
+- **Legacy Sheet**: `NodeDetailSheet` (Sheet overlay). Used where a `WorkflowGraph` is mounted without `onNodeSelect`.
 - **Connections of the selected node**: both surfaces name the incoming and outgoing nodes by
   display name or node id (`nodeName` in `WorkflowGraph`), and list each outgoing connection as
   `output → target` with the summary of the routing case that selects that output
@@ -2275,21 +2284,24 @@ interface StatisticsCounts {
 
 ## Search and Filtering
 
-### Multi-field Search
+### Search
 
-```typescript
-// Search across workflow properties
-- workflow.metadata.name
-- workflow.metadata.description
-- workflow.id
-- workflow.metadata.tags[]
-```
+The flow list's search box sends `search` to `GET /api/workflows`, debounced. The server matches it
+as a substring of the flow's slug, name and description (`listWorkflowsWithFilters` in
+`packages/shared/src/database/repositories/workflow-repository.ts`). Tags are never searched, so a
+flow's level tag (`complexity:<level>`) can never make it a search match.
 
 ### Validation Filtering
 
+The status filter takes one of the values below; any value but `all` is sent as
+`validationStatus`, and `all` sends no filter.
+
 ```typescript
-type ValidationFilter = "all" | "valid" | "invalid" | "warning";
+type ValidationFilter = "all" | "valid" | "invalid" | "unknown";
 ```
+
+`unknown` is a flow that has not been validated yet: the filter option reads "Not checked" /
+«Не проверенные», and the card's badge "Not checked" / «Не проверен».
 
 ## Backend Configuration
 

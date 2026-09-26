@@ -1236,6 +1236,46 @@ test("a node drawn from the catalog shows its configuration, playbooks and valid
     expect(
       await page.getByTestId("flow-tag").evaluateAll((tags) => tags.map((t) => t.textContent)),
     ).toEqual(["catalog", "extension"]);
+    // A flow without a level tag shows no level badge.
+    await expect(page.getByTestId("flow-level-badge")).toHaveCount(0);
+  } finally {
+    await page.request.delete(`${BASE_URL}/api/workflows/${workflowId}`);
+  }
+});
+
+test("the header shows the level a flow was authored at as a badge, and its tag chips hold the subject tags only", async ({
+  page,
+}) => {
+  await loginAsAdmin(page);
+  const created = await (
+    await page.request.post(`${BASE_URL}/api/workflows`, {
+      headers: { "Content-Type": "application/json" },
+      data: {
+        visibility: "private",
+        workflow: {
+          metadata: {
+            name: `Level badge ${Date.now()}`,
+            version: "1.0.0",
+            description: "A simple flow authored by the Workflow Management Flow.",
+            tags: ["onboarding", "complexity:simple", "checklist"],
+          },
+          nodes: [
+            { type: "start", id: "start", connections: { default: "end" } },
+            { type: "end", id: "end" },
+          ],
+        },
+      },
+    })
+  ).json();
+  const workflowId = created.data.workflowId as string;
+  const slug = created.data.slug as string;
+  try {
+    await page.goto(`${BASE_URL}/workflows/admin/${slug}`);
+    await expect(page.getByTestId("flow-level-badge")).toHaveAttribute("data-level", "simple");
+    await expect(page.getByTestId("flow-level-badge")).toHaveText("Simple");
+    expect(
+      await page.getByTestId("flow-tag").evaluateAll((tags) => tags.map((t) => t.textContent)),
+    ).toEqual(["onboarding", "checklist"]);
   } finally {
     await page.request.delete(`${BASE_URL}/api/workflows/${workflowId}`);
   }

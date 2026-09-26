@@ -740,58 +740,6 @@ export class WorkflowTransformer {
   }
 
   /**
-   * Extract workflow statistics
-   */
-  static extractWorkflowStats(workflow: WorkflowGraph): {
-    nodeTypes: Record<string, number>;
-    totalConnections: number;
-    maxDepth: number;
-    complexity: "simple" | "moderate" | "complex";
-  } {
-    const nodeTypes: Record<string, number> = {};
-    let totalConnections = 0;
-
-    workflow.nodes.forEach((node) => {
-      nodeTypes[node.type] = (nodeTypes[node.type] || 0) + 1;
-      totalConnections += Object.keys(node.connections || {}).length;
-    });
-
-    const nodeCount = workflow.nodes.length;
-    const complexity = nodeCount <= 5 ? "simple" : nodeCount <= 15 ? "moderate" : "complex";
-
-    return {
-      nodeTypes,
-      totalConnections,
-      maxDepth: this.calculateMaxDepth(workflow.nodes),
-      complexity,
-    };
-  }
-
-  /**
-   * Calculate maximum depth of workflow
-   */
-  private static calculateMaxDepth(nodes: WorkflowNode[]): number {
-    const startNode = nodes.find(isStartNode);
-    if (!startNode) return 0;
-
-    const visited = new Set<string>();
-
-    const calculateDepth = (nodeId: string): number => {
-      if (visited.has(nodeId)) return 0; // Prevent infinite recursion
-      visited.add(nodeId);
-
-      const node = nodes.find((n) => n.id === nodeId);
-      if (!node?.connections) return 1;
-
-      const depths = Object.values(node.connections).map((targetId) => calculateDepth(targetId));
-
-      return 1 + Math.max(...depths, 0);
-    };
-
-    return calculateDepth(startNode.id);
-  }
-
-  /**
    * Create default validation status for workflows without validation
    */
   static createDefaultValidation(workflow: WorkflowGraph): WorkflowValidationStatus {
@@ -860,24 +808,5 @@ export class WorkflowUtils {
     );
 
     return { incoming, outgoing };
-  }
-
-  /**
-   * Generate workflow summary for display
-   */
-  static generateWorkflowSummary(workflow: WorkflowGraph): {
-    title: string;
-    description: string;
-    stats: string;
-    tags: string[];
-  } {
-    const stats = WorkflowTransformer.extractWorkflowStats(workflow);
-
-    return {
-      title: workflow.metadata.name,
-      description: workflow.metadata.description,
-      stats: `${workflow.nodes.length} nodes, ${stats.totalConnections} connections, ${stats.complexity} complexity`,
-      tags: workflow.metadata.tags || [],
-    };
   }
 }

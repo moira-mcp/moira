@@ -2820,6 +2820,12 @@
       "delete": "Удалить",
       "deleteWorkflow": "Удалить воркфлоу"
     },
+    "flowLevel": {
+      "simple": "Простой",
+      "standard": "Стандартный",
+      "complex": "Сложный",
+      "label": "Собран на уровне «{{level}}»: насколько основательно флоу спроектирован и проверен"
+    },
     "searchFilters": {
       "searchPlaceholder": "Поиск воркфлоу...",
       "status": "Статус",

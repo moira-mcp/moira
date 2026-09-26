@@ -5,7 +5,8 @@
  * - the name, with the version quiet beside it;
  * - what the flow does, in up to two lines (the whole description on hover);
  * - for a recommended universal flow, when to pick it;
- * - owner, visibility and tags as the quiet meta line;
+ * - owner, visibility, the level the flow was authored at and its subject tags as the quiet meta
+ *   line — the level as a badge of its own, never one of the tags (`splitFlowTags`);
  * - a badge only for what needs attention: not valid, not yet validated, shared with you.
  */
 
@@ -16,7 +17,9 @@ import { WorkflowFileInfo } from "types";
 import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
+import { splitFlowTags } from "@/utils/workflow-level";
 import { CardShell, type CardAction } from "../cards/CardShell";
+import { FlowLevelBadge } from "./FlowLevelBadge";
 import { whenToPickKey } from "../onboarding/recommended";
 
 interface WorkflowCardProps {
@@ -29,7 +32,7 @@ interface WorkflowCardProps {
   compact?: boolean;
 }
 
-/** At most this many tags are shown; the rest are counted. */
+/** At most this many subject tags are shown; the rest are counted. */
 const MAX_TAGS = 3;
 
 export const WorkflowCard: React.FC<WorkflowCardProps> = ({
@@ -44,7 +47,7 @@ export const WorkflowCard: React.FC<WorkflowCardProps> = ({
   const { t } = useTranslation();
   const name = workflow.metadata?.name || workflow.id;
   const description = workflow.metadata?.description;
-  const tags = (workflow.metadata?.tags ?? []).filter((tag): tag is string => !!tag);
+  const { level, subjects: tags } = splitFlowTags(workflow.metadata?.tags);
   const whenKey = whenToPickKey(workflow.ownerHandle, workflow.slug);
   const status =
     workflow.validation?.status ?? (workflow.validation?.isValid ? "valid" : "invalid");
@@ -115,6 +118,7 @@ export const WorkflowCard: React.FC<WorkflowCardProps> = ({
           {t("components.workflowCard.private")}
         </span>
       )}
+      <FlowLevelBadge level={level} testId="workflow-card-level" />
       {tags.length > 0 && (
         <span className="inline-flex flex-wrap items-center gap-1" data-testid="workflow-card-tags">
           {tags.slice(0, MAX_TAGS).map((tag) => (

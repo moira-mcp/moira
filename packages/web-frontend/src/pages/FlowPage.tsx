@@ -100,6 +100,8 @@ import { EditBar, ProblemList } from "../components/flow/EditBar";
 import { CanvasEditingHost } from "../components/flow/CanvasEditing";
 import { pausedRunWarnings } from "../components/flow/structure";
 import type { WorkflowValidationStatus } from "../types/react-flow-types";
+import { FlowLevelBadge } from "../components/workflow/FlowLevelBadge";
+import { splitFlowTags } from "../utils/workflow-level";
 
 // Lazy chunk, requested on mount so the first switch to the graph view downloads nothing.
 const importWorkflowGraph = () => import("../components/workflow/WorkflowGraph");
@@ -607,6 +609,9 @@ export const FlowPage: React.FC = () => {
     </div>
   );
 
+  // The level is a badge of its own; the header's tag chips are the subject tags only.
+  const flowTags = splitFlowTags(savedWorkflow?.metadata.tags);
+
   return (
     <EditingProvider
       enabled={editing}
@@ -633,7 +638,8 @@ export const FlowPage: React.FC = () => {
           facts={
             savedWorkflow ? (
               <>
-                {(savedWorkflow.metadata.tags ?? []).map((tag) => (
+                <FlowLevelBadge level={flowTags.level} />
+                {flowTags.subjects.map((tag) => (
                   <span
                     key={tag}
                     className="rounded-full border bg-muted/40 px-2 py-0.5 text-[11px] text-muted-foreground"
