@@ -198,6 +198,7 @@ describe("the level only rises during a create run", () => {
         acceptsAnswer("gather-workflow-requirements", {
           complexity_tier,
           progress_requirements_outcome: "Requirements captured",
+          planned_changes: [{ title: "Collect the items" }],
         }),
       ).toBe(true);
     }
@@ -297,7 +298,7 @@ describe("the create owners carry the level", () => {
     },
   );
 
-  test("the light review asks its three questions", () => {
+  test("the light review asks its four questions", () => {
     const text = directive("review-workflow-minimum");
     expect(text).toContain("does the workflow do what the person asked");
     expect(text).toContain(
@@ -305,6 +306,9 @@ describe("the create owners carry the level", () => {
     );
     expect(text).toContain(
       "does every step that asks the person explain the options and what follows from each, with the agent's recommendation argued",
+    );
+    expect(text).toContain(
+      "does every notification's message follow the notification content rules in `{{workspace_path}}/reference/engine.md`?",
     );
   });
 
@@ -399,6 +403,7 @@ describe("an edit starts from the level recorded on the flow", () => {
   const owner = (answer: Record<string, unknown>) =>
     acceptsAnswer("gather-edit-requirements", {
       progress_requirements_outcome: "Requirements captured",
+      planned_changes: [{ title: "Rename the step" }],
       ...answer,
     });
 
@@ -491,24 +496,45 @@ describe("the person can ask for a simpler process where they are present", () =
     ],
   ];
 
+  // The approval gates build next, so a lowering there returns the lowered plan; the final review's
+  // rejection goes on to the requirement revision, which writes it.
+  const loweredPlan = (id: string) =>
+    id === "user-final-review" ? {} : { planned_changes: [{ title: "List the items" }] };
+
   test.each(gates)("%s lowers only with the person's recorded request", (id, ordinary) => {
+    const lower = { ...LOWER, ...loweredPlan(id) };
     expect(acceptsAnswer(id, ordinary)).toBe(true);
-    expect(acceptsAnswer(id, { ...ordinary, ...LOWER, complexity_tier: "simple" })).toBe(true);
-    expect(acceptsAnswer(id, { ...ordinary, ...LOWER, complexity_tier: "standard" })).toBe(true);
+    expect(acceptsAnswer(id, { ...ordinary, ...lower, complexity_tier: "simple" })).toBe(true);
+    expect(acceptsAnswer(id, { ...ordinary, ...lower, complexity_tier: "standard" })).toBe(true);
     // No level without the request, no request without a level, never up to complex, and a
     // lowering clears any earlier raise reason.
     expect(acceptsAnswer(id, { ...ordinary, complexity_tier: "simple" })).toBe(false);
     expect(acceptsAnswer(id, { ...ordinary, lowering_request: "Simpler please" })).toBe(false);
-    expect(acceptsAnswer(id, { ...ordinary, ...LOWER, complexity_tier: "complex" })).toBe(false);
+    expect(acceptsAnswer(id, { ...ordinary, ...lower, complexity_tier: "complex" })).toBe(false);
     expect(
       acceptsAnswer(id, {
         ...ordinary,
-        ...LOWER,
+        ...lower,
         complexity_tier: "simple",
         escalation_reason: "It grew",
       }),
     ).toBe(false);
   });
+
+  test.each(["approve-structure", "present-edit-plan"])(
+    "%s refuses a lowering without the lowered plan",
+    (id) => {
+      const ordinary = gates.find(([gate]) => gate === id)![1];
+      expect(
+        acceptsAnswer(id, {
+          ...ordinary,
+          lowering_request: "Please keep it simple",
+          escalation_reason: "",
+          complexity_tier: "simple",
+        }),
+      ).toBe(false);
+    },
+  );
 
   test("after a lowering, the final review names what ran before it and what the lower level skipped", () => {
     expect(directive("user-final-review")).toContain(

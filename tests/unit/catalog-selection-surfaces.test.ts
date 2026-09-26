@@ -115,6 +115,22 @@ describe("public workflow selection surfaces", () => {
       ["todo-list", "notify-checklist-ready"],
       ["todo-list", "notify-finished"],
       ["verified-research", "notify-result-ready"],
+      ["workflow-management-flow", "notify-audit-chosen"],
+      ["workflow-management-flow", "notify-audit-question"],
+      ["workflow-management-flow", "notify-audit-skipped"],
+      ["workflow-management-flow", "notify-cancelled"],
+      ["workflow-management-flow", "notify-create-started"],
+      ["workflow-management-flow", "notify-edit-plan-approval"],
+      ["workflow-management-flow", "notify-edit-started"],
+      ["workflow-management-flow", "notify-final-review"],
+      ["workflow-management-flow", "notify-finished"],
+      ["workflow-management-flow", "notify-structure-approval"],
+      ["workflow-management-flow", "notify-upload-error"],
+      ["workflow-management-flow", "notify-upload-not-saving"],
+      ["workflow-management-flow", "notify-upload-question"],
+      ["workflow-management-flow", "notify-upload-retrying"],
+      ["workflow-management-flow", "notify-upload-saving"],
+      ["workflow-management-flow", "notify-upload-skipped"],
     ]);
     for (const node of genericNodes) {
       expect(node).not.toHaveProperty("parseMode");

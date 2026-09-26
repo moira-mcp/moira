@@ -405,7 +405,8 @@ choose a provider, recipient, or credential:
 {
   "id": "notify-complete",
   "type": "user-notification",
-  "message": "Workflow {{workflowName}} completed successfully",
+  "message": "🏁 *Completed* — {{deliver-result.result_summary}}",
+  "planList": "full",
   "format": "markdown",
   "silent": false,
   "connections": {

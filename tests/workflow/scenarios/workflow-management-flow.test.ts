@@ -161,17 +161,63 @@ function progressOutputsFor(
   );
 }
 
+/** The plan list the plan writers return: the stages of a new workflow or the changes of an edit. */
+const PLANNED_CHANGES = [{ title: "Capture the request" }, { title: "Check the result" }];
+const PLAN_WRITERS = new Set([
+  "gather-workflow-requirements",
+  "gather-edit-requirements",
+  "revise-create-requirements",
+  "revise-edit-requirements",
+  "design-workflow-structure",
+  "refine-structure",
+  "create-edit-plan",
+  "revise-edit-plan",
+  "fix-create-design",
+  "fix-edit-plan",
+  "approve-structure",
+  "present-edit-plan",
+  "teleport-revise-process",
+]);
+const DECISIONS = new Set(["ask-full-antipattern-audit", "ask-upload", "handle-upload-error"]);
+
+/** The fields a step writes for the person reading its notifications (the note, the plan list,
+ * decision reasons, the result's name and version, an upload failure). */
+function readerOutputsFor(nodeId: string, input: Record<string, unknown>): Record<string, unknown> {
+  return {
+    ...(nodeId === "get-action-type" ? { execution_note: "Build the release checklist" } : {}),
+    ...(PLAN_WRITERS.has(nodeId) && input.repair_outcome !== "reassess"
+      ? { planned_changes: PLANNED_CHANGES }
+      : {}),
+    ...(DECISIONS.has(nodeId) ? { decision_summary: "Decided on the evidence at hand" } : {}),
+    ...(nodeId === "ask-upload"
+      ? { workflow_name: "Release checklist", workflow_version: "1.0.0" }
+      : {}),
+    ...(nodeId === "save-workflow-to-target" && input.upload_success === "no"
+      ? { failure_summary: "The server refused the upload" }
+      : {}),
+  };
+}
+
+function withOutputs(
+  workflow: WorkflowGraph,
+  nodeId: string,
+  item: Record<string, unknown>,
+): Record<string, unknown> {
+  return {
+    ...progressOutputsFor(workflow, nodeId, item),
+    ...readerOutputsFor(nodeId, item),
+    ...item,
+  };
+}
+
 function addProgressOutputs(workflow: WorkflowGraph, nodeId: string, input: MockInput): MockInput {
   if (Array.isArray(input)) {
-    return input.map((item) => ({ ...progressOutputsFor(workflow, nodeId, item), ...item }));
+    return input.map((item) => withOutputs(workflow, nodeId, item));
   }
   if (typeof input === "function") {
-    return (context: MockInputContext) => {
-      const resolved = input(context);
-      return { ...progressOutputsFor(workflow, nodeId, resolved), ...resolved };
-    };
+    return (context: MockInputContext) => withOutputs(workflow, nodeId, input(context));
   }
-  return { ...progressOutputsFor(workflow, nodeId, input), ...input };
+  return withOutputs(workflow, nodeId, input);
 }
 
 async function runScenario(
@@ -449,6 +495,28 @@ const scenarios: TestScenario[] = [
       "end",
     ],
     ["audit-complete-workflow", "fix-light-review-findings"],
+    { contextContains: { complexity_tier: "standard" } },
+  ),
+  scenario(
+    "an autonomous simple edit raised to standard decides the audit itself, without the question",
+    {
+      ...autonomous(simpleEditInputs("simple-edit-escalation-autonomous")),
+      "review-workflow-minimum": {
+        light_repair_pending: "",
+        light_review_outcome: "escalate",
+        complexity_tier: "standard",
+        escalation_reason: "The change adds a review-and-redo loop",
+      },
+    },
+    [
+      "route-after-level-raise",
+      "ask-full-antipattern-audit",
+      "notify-audit-skipped",
+      "create-edit-plan",
+      "notify-edit-started",
+      "end",
+    ],
+    ["notify-audit-question", "present-edit-plan"],
     { contextContains: { complexity_tier: "standard" } },
   ),
   scenario(
@@ -754,6 +822,44 @@ const scenarios: TestScenario[] = [
     ["present-edit-plan", "revise-edit-plan", "user-final-review", "revise-edit-requirements"],
   ),
   scenario(
+    "autonomous edit skips the audit and saves the upload, announcing each decision after it",
+    {
+      ...autonomous(editInputs("autonomous-edit-save")),
+      "ask-upload": { upload_confirmed: true, upload_method: "standard" },
+    },
+    [
+      "ask-full-antipattern-audit",
+      "notify-audit-skipped",
+      "create-edit-plan",
+      "ask-upload",
+      "notify-upload-saving",
+      "save-workflow-to-target",
+      "end",
+    ],
+    ["notify-audit-question", "notify-upload-question", "audit-complete-workflow"],
+  ),
+  scenario(
+    "autonomous upload failure is decided without asking: a retry, then a skip",
+    {
+      ...autonomous(createInputs("autonomous-upload-error")),
+      "ask-upload": { upload_confirmed: true, upload_method: "standard" },
+      "save-workflow-to-target": [
+        { upload_success: "no", upload_error: "Service unavailable" },
+        { upload_success: "no", upload_error: "Service unavailable" },
+      ],
+      "handle-upload-error": [{ error_action: "retry" }, { error_action: "skip" }],
+    },
+    [
+      "handle-upload-error",
+      "notify-upload-retrying",
+      "save-workflow-to-target",
+      "notify-upload-skipped",
+      "route-local-sync",
+      "end",
+    ],
+    ["notify-upload-error"],
+  ),
+  scenario(
     "process revision teleport re-enters the ordinary analysis and plan contract",
     {
       ...editInputs("revise-process"),
@@ -792,7 +898,7 @@ describe("workflow-management-flow", () => {
   });
 
   test("keeps shared gates and routes each local answer on its owning directive", () => {
-    expect(workflow.metadata.version).toBe("6.16.0");
+    expect(workflow.metadata.version).toBe("6.17.0");
     expect(
       workflow.nodes.filter((node) => node.type === "condition").map((node) => node.id),
     ).toEqual([
@@ -812,11 +918,29 @@ describe("workflow-management-flow", () => {
       when: { operator: "eq", left: { contextPath: path }, right },
       output,
     });
+    // An autonomous decision routes to its own "decided for you" message from the deciding node,
+    // so the message is sent after the decision and before the route acts on it.
+    const autonomous = eq("operating_mode", "autonomous", "autonomous").when;
+    const inAutonomous = (condition: { when: unknown; output: string }, output: string) => ({
+      when: { operator: "and", conditions: [autonomous, condition.when] },
+      output,
+    });
+    const retryCase = {
+      when: {
+        operator: "or",
+        conditions: ["retry", "copy_new", "admin_override"].map((right) => ({
+          operator: "eq",
+          left: { contextPath: "handle-upload-error.error_action" },
+          right,
+        })),
+      },
+      output: "retry",
+    };
     const routes: Array<[string, unknown[], Record<string, string>]> = [
       [
         "gather-workflow-requirements",
         [eq("gather-workflow-requirements.complexity_tier", "simple", "simple")],
-        { success: "design-workflow-structure", simple: "create-workflow-json" },
+        { success: "design-workflow-structure", simple: "start-create-build" },
       ],
       [
         "create-workflow-json",
@@ -826,7 +950,7 @@ describe("workflow-management-flow", () => {
       [
         "revise-create-requirements",
         [eq("complexity_tier", "simple", "simple")],
-        { success: "design-workflow-structure", simple: "create-workflow-json" },
+        { success: "design-workflow-structure", simple: "start-create-build" },
       ],
       [
         "review-workflow-minimum",
@@ -850,11 +974,13 @@ describe("workflow-management-flow", () => {
         [
           eq("gather-edit-requirements.complexity_tier", "simple", "simple"),
           eq("gather-edit-requirements.complexity_tier", "complex", "complex"),
+          { when: autonomous, output: "autonomous" },
         ],
         {
-          success: "ask-full-antipattern-audit",
-          simple: "apply-workflow-changes",
+          success: "notify-audit-question",
+          simple: "start-edit-build",
           complex: "audit-complete-workflow",
+          autonomous: "ask-full-antipattern-audit",
         },
       ],
       [
@@ -865,12 +991,24 @@ describe("workflow-management-flow", () => {
       [
         "revise-edit-requirements",
         [eq("complexity_tier", "simple", "simple")],
-        { success: "create-edit-plan", simple: "apply-workflow-changes" },
+        { success: "create-edit-plan", simple: "start-edit-build" },
       ],
       [
         "ask-full-antipattern-audit",
-        [eq("ask-full-antipattern-audit.full_antipattern_audit", "yes", "audit")],
-        { success: "create-edit-plan", audit: "audit-complete-workflow" },
+        [
+          inAutonomous(
+            eq("ask-full-antipattern-audit.full_antipattern_audit", "yes", ""),
+            "autonomous-audit",
+          ),
+          { when: autonomous, output: "autonomous-skip" },
+          eq("ask-full-antipattern-audit.full_antipattern_audit", "yes", "audit"),
+        ],
+        {
+          success: "create-edit-plan",
+          audit: "audit-complete-workflow",
+          "autonomous-audit": "notify-audit-chosen",
+          "autonomous-skip": "notify-audit-skipped",
+        },
       ],
       [
         "review-workflow-design",
@@ -902,7 +1040,7 @@ describe("workflow-management-flow", () => {
         ],
         {
           success: "refine-structure",
-          simple: "create-workflow-json",
+          simple: "start-create-build",
           approved: "create-workflow-json",
         },
       ],
@@ -914,7 +1052,7 @@ describe("workflow-management-flow", () => {
         ],
         {
           success: "revise-edit-plan",
-          simple: "apply-workflow-changes",
+          simple: "start-edit-build",
           approved: "apply-workflow-changes",
         },
       ],
@@ -940,35 +1078,49 @@ describe("workflow-management-flow", () => {
       [
         "user-final-review",
         [eq("user-final-review.work_approved", "yes", "approved")],
-        { success: "route-final-feedback-action", approved: "ask-upload" },
+        { success: "route-final-feedback-action", approved: "notify-upload-question" },
       ],
       [
         "ask-upload",
-        [eq("ask-upload.upload_confirmed", true, "confirmed")],
-        { success: "route-local-sync", confirmed: "save-workflow-to-target" },
+        [
+          inAutonomous(eq("ask-upload.upload_confirmed", true, ""), "autonomous-save"),
+          { when: autonomous, output: "autonomous-keep" },
+          eq("ask-upload.upload_confirmed", true, "confirmed"),
+        ],
+        {
+          success: "route-local-sync",
+          confirmed: "save-workflow-to-target",
+          "autonomous-save": "notify-upload-saving",
+          "autonomous-keep": "notify-upload-not-saving",
+        },
       ],
       [
         "save-workflow-to-target",
-        [eq("save-workflow-to-target.upload_success", "yes", "uploaded")],
-        { success: "handle-upload-error", uploaded: "route-local-sync" },
+        [
+          eq("save-workflow-to-target.upload_success", "yes", "uploaded"),
+          { when: autonomous, output: "autonomous" },
+        ],
+        {
+          success: "notify-upload-error",
+          uploaded: "route-local-sync",
+          autonomous: "handle-upload-error",
+        },
       ],
       [
         "handle-upload-error",
         [
-          {
-            when: {
-              operator: "or",
-              conditions: ["retry", "copy_new", "admin_override"].map((right) => ({
-                operator: "eq",
-                left: { contextPath: "handle-upload-error.error_action" },
-                right,
-              })),
-            },
-            output: "retry",
-          },
+          inAutonomous(retryCase, "autonomous-retry"),
+          inAutonomous(eq("handle-upload-error.error_action", "skip", ""), "autonomous-skip"),
+          retryCase,
           eq("handle-upload-error.error_action", "skip", "skip"),
         ],
-        { success: "end-cancelled", retry: "save-workflow-to-target", skip: "route-local-sync" },
+        {
+          success: "notify-cancelled",
+          retry: "save-workflow-to-target",
+          skip: "route-local-sync",
+          "autonomous-retry": "notify-upload-retrying",
+          "autonomous-skip": "notify-upload-skipped",
+        },
       ],
     ];
     for (const [id, cases, connections] of routes) {
@@ -985,11 +1137,13 @@ describe("workflow-management-flow", () => {
       cases: [
         eq("get-action-type.action_type", "create", "true"),
         eq("complexity_tier", "complex", "audit"),
+        { when: autonomous, output: "autonomous" },
       ],
       connections: {
         true: "design-workflow-structure",
         audit: "audit-complete-workflow",
-        default: "ask-full-antipattern-audit",
+        autonomous: "ask-full-antipattern-audit",
+        default: "notify-audit-question",
       },
     });
     // The shared reassessment router: a revised simple create builds again, any other create is
@@ -1014,8 +1168,8 @@ describe("workflow-management-flow", () => {
       ],
       connections: {
         true: "design-workflow-structure",
-        simple: "create-workflow-json",
-        "simple-edit": "apply-workflow-changes",
+        simple: "start-create-build",
+        "simple-edit": "start-edit-build",
         default: "create-edit-plan",
       },
     });

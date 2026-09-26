@@ -408,7 +408,8 @@ Expression node может завершиться с ошибкой в двух 
 {
   "id": "notify-complete",
   "type": "user-notification",
-  "message": "Воркфлоу {{workflowName}} успешно завершен",
+  "message": "🏁 *Готово* — {{deliver-result.result_summary}}",
+  "planList": "full",
   "format": "markdown",
   "silent": false,
   "connections": {
