@@ -22,7 +22,8 @@ export type AuthoringErrorCode =
   | "block-not-empty"
   | "no-progress"
   | "invalid-block"
-  | "invalid-label";
+  | "invalid-label"
+  | "invalid-choice";
 
 export class AuthoringError extends Error {
   readonly code: AuthoringErrorCode;

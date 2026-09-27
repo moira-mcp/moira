@@ -10,6 +10,7 @@
  */
 
 export { AuthoringError, type AuthoringErrorCode } from "./errors.js";
+export { readChoice, setChoice, type Choice } from "./choice.js";
 export {
   CONNECTION_KEY_PATTERN,
   NODE_ID_PATTERN,

@@ -9,6 +9,7 @@
 
 import React, { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { guideAnchor } from "../../guides/anchors";
 import { AlertTriangle, MoreHorizontal, Pencil, Plus, Trash2, X } from "lucide-react";
 import { AuthoringError, isValidConnectionKey } from "@mcp-moira/workflow-engine/authoring";
 import { Button } from "@/components/ui/button";
@@ -386,6 +387,7 @@ export function StepActions({ nodeId }: { nodeId: string }): React.JSX.Element |
             className="nodrag nopan inline-flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             aria-label={t("pages.flowPage.structure.stepActions")}
             data-testid={`step-actions-${nodeId}`}
+            {...guideAnchor("flow.edit-step-actions")}
             onClick={(e) => e.stopPropagation()}
           >
             <MoreHorizontal className="size-4" aria-hidden="true" />
@@ -446,7 +448,11 @@ export function ConnectionsEditor({ nodeId }: { nodeId: string }): React.JSX.Ele
     }
   };
   return (
-    <div className="mt-2 space-y-1.5" data-testid={`connections-${nodeId}`}>
+    <div
+      className="mt-2 space-y-1.5"
+      data-testid={`connections-${nodeId}`}
+      {...guideAnchor("flow.edit-connections")}
+    >
       <p className="text-[11px] font-medium text-muted-foreground">
         {t("pages.flowPage.structure.connections.title")}
       </p>
@@ -540,6 +546,7 @@ export function AddStep({ blockId }: { blockId: string }): React.JSX.Element | n
         className="mt-2 h-8 w-full gap-1.5 border-dashed text-xs"
         onClick={() => setOpen(true)}
         data-testid={`block-add-step-${blockId}`}
+        {...guideAnchor("flow.edit-add-step")}
       >
         <Plus className="size-3.5" aria-hidden="true" />
         {t("pages.flowPage.structure.addStep.action")}
@@ -879,6 +886,7 @@ export function AddBlock({ blocks }: { blocks: readonly RunBlock[] }): React.JSX
           setOpen(true);
         }}
         data-testid="block-add"
+        {...guideAnchor("flow.edit-blocks")}
       >
         <Plus className="size-3.5" aria-hidden="true" />
         {t("pages.flowPage.structure.block.add")}

@@ -1616,6 +1616,30 @@
           "addConfirm": "Add block",
           "delete": "Delete block {{name}}",
           "notEmpty": "Move or delete its steps first: only an empty block can be deleted."
+        },
+        "choice": {
+          "add": "Add a choice",
+          "edit": "Choice: {{field}}",
+          "addTitle": "Add a choice to {{step}}",
+          "editTitle": "The choice of {{step}}",
+          "body": "The agent answers the question with one of the options, and the answer picks the route. The marked option continues along the step's usual route; every other option leads to its own step.",
+          "question": "Question",
+          "questionPlaceholder": "Does the result match the request?",
+          "field": "Answer field",
+          "options": "Options — mark the one that continues as before",
+          "defaultOption": "{{option}} continues as before",
+          "optionName": "Option",
+          "continues": "continues as before",
+          "target": "Leads to…",
+          "newStep": "A new step",
+          "label": "Label on the route (optional)",
+          "addOption": "Add an option",
+          "removeOption": "Remove option {{option}}",
+          "newStepBlock": "Block for the new steps",
+          "newStepDirective": "The answer to \"{{question}}\" was \"{{option}}\". Describe what to do in this case.",
+          "newStepCondition": "Describe when this step is done.",
+          "remove": "Remove the choice",
+          "save": "Save the choice"
         }
       },
       "canvas": {
@@ -3447,6 +3471,50 @@
           "body": "A run appears here when your agent runs a flow. To start one, say to your agent: “Use Moira to run Example 1: Simple Steps for this task: …”. Then open the run to watch it step by step."
         }
       }
+    },
+    "flow-editor": {
+      "title": "The editor",
+      "open": "Editor tour",
+      "steps": {
+        "bar": {
+          "title": "Your edits, before they are saved",
+          "body": "Every change collects here, not in the saved flow: the count, what exactly changes (the export), Undo for the last change and Reset for all of them. Nothing reaches the flow until you save."
+        },
+        "add-step": {
+          "title": "Add a step",
+          "body": "Adds a step to this block: pick its type and fill in what it requires. On the graph, right-click a connection to insert a step on it, or a step to add one after it."
+        },
+        "step-actions": {
+          "title": "Rename or delete a step",
+          "body": "Renaming updates every reference to the step's id. Deleting asks where each connection that led to it should go instead."
+        },
+        "blocks": {
+          "title": "Blocks",
+          "body": "Blocks are the stages of the process. Add one here; a block's own menu deletes it once no step is left in it."
+        },
+        "connections": {
+          "title": "Where a step leads",
+          "body": "Point each output at another step, add an output or remove one. A connection that crosses into another block needs a label saying why; you give it on the transition under “Where it leads”."
+        },
+        "choice": {
+          "title": "Add a choice",
+          "body": "Makes the step end with a question and options: the agent answers with one option, and the answer picks the route. One option continues as before; each other leads to its own step, existing or new."
+        },
+        "validation": {
+          "title": "What stops a save",
+          "body": "Moira checks the draft as you edit. Problems show next to the step or block they concern, and Save stays off until none blocks it."
+        },
+        "stale": {
+          "title": "Saved against this revision",
+          "body": "A save is made against the revision you loaded. If the flow was saved elsewhere in the meantime, the save is refused rather than overwriting it: reload, and apply your change again."
+        }
+      }
+    },
+    "editorOffer": {
+      "title": "New to editing?",
+      "body": "A short tour shows where edits collect, how steps, blocks, connections and choices are changed, and what stops a save.",
+      "accept": "Show me the editor",
+      "decline": "Not now"
     }
   }
 }

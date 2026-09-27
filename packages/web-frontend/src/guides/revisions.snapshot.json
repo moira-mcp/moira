@@ -290,5 +290,37 @@
   "settings-telegram.test": {
     "revision": 1,
     "fingerprint": "f680fa12"
+  },
+  "flow-editor.bar": {
+    "revision": 1,
+    "fingerprint": "a51d79ba"
+  },
+  "flow-editor.add-step": {
+    "revision": 1,
+    "fingerprint": "96b5ef0e"
+  },
+  "flow-editor.step-actions": {
+    "revision": 1,
+    "fingerprint": "e462ddde"
+  },
+  "flow-editor.blocks": {
+    "revision": 1,
+    "fingerprint": "ebde6010"
+  },
+  "flow-editor.connections": {
+    "revision": 1,
+    "fingerprint": "b61e8752"
+  },
+  "flow-editor.choice": {
+    "revision": 1,
+    "fingerprint": "86c1e01d"
+  },
+  "flow-editor.validation": {
+    "revision": 1,
+    "fingerprint": "cc2529a2"
+  },
+  "flow-editor.stale": {
+    "revision": 1,
+    "fingerprint": "17e1479f"
   }
 }

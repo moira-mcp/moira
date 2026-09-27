@@ -1306,3 +1306,60 @@ test("a phone keeps the flow page readable: contents under the diagram, panel un
   expect(picture.height).toBeGreaterThanOrEqual(900 * 0.4);
   expect(panel.y).toBeGreaterThanOrEqual(picture.y + picture.height - 1);
 });
+
+test("a choice added on an agent step saves as one edit, and the export lists what it changed", async ({
+  page,
+}) => {
+  await loginAsAdmin(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const copied = await page.request.post(
+    `${BASE_URL}/api/workflows/moira/example-simple-steps/copy`,
+    {
+      data: { newName: `Choice ${Date.now()}` },
+    },
+  );
+  expect(copied.status()).toBe(200);
+  const id = ((await copied.json()) as { data: { workflowId: string } }).data.workflowId;
+  try {
+    await openEditing(page, id);
+    await openBlock(page, "check");
+    await openSteps(page);
+    await page.getByTestId("choice-open-check-result").click();
+    await page.getByTestId("choice-question").fill("Does the result match the request?");
+    await page.getByTestId("choice-field").fill("matches");
+    await page.getByTestId("choice-label-0").fill("yes — it matches");
+    await pickStep(page, "choice-target-1", "report");
+    await page.getByTestId("choice-label-1").fill("no — report what is missing");
+    await page.getByTestId("choice-save").click();
+    await expect(page.getByTestId("choice-dialog")).toHaveCount(0);
+    // The field, the case, the new output and both labels: the export counts entries, not edits.
+    await expect(page.getByTestId("flow-edit-count")).toContainText("5");
+
+    await page.getByTestId("flow-edit-export-toggle").click();
+    const exported = page.getByTestId("flow-edit-export");
+    for (const entry of [
+      "nodes[check-result].inputSchema",
+      "nodes[check-result].cases",
+      "nodes[check-result].connections.no",
+      "nodes[check-result].connectionLabels.no",
+    ]) {
+      await expect(exported).toContainText(entry);
+    }
+
+    await saveWhenChecked(page);
+    const saved = (await detailOf(page, id)).workflow;
+    const check = saved.nodes.find((node: { id: string }) => node.id === "check-result");
+    expect(check.inputSchema.properties.matches.enum).toEqual(["yes", "no"]);
+    expect(check.inputSchema.required).toContain("matches");
+    expect(check.cases).toEqual([
+      {
+        when: { operator: "eq", left: { contextPath: "check-result.matches" }, right: "no" },
+        output: "no",
+      },
+    ]);
+    expect(check.connections).toEqual({ success: "report", no: "report" });
+    await expect(page.getByTestId("choice-open-check-result")).toContainText("matches");
+  } finally {
+    await page.request.delete(`${BASE_URL}/api/workflows/${id}`);
+  }
+});

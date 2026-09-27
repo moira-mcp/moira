@@ -36,6 +36,8 @@ export interface GuideProgress {
   seen?: Record<string, number>;
   /** Guides the reader walked to their end: a step added to one later is new to them. */
   finished?: Record<string, true>;
+  /** Tours offered once (the editor tour, on the first switch into edit mode): offered, whatever the answer. */
+  offered?: Record<string, true>;
   /** Anything a later build stores; kept as it is. */
   [field: string]: unknown;
 }
@@ -55,6 +57,8 @@ export function parseProgress(value: unknown): GuideProgress {
   const finished = progress.finished;
   if (!finished || typeof finished !== "object" || Array.isArray(finished))
     delete progress.finished;
+  const offered = progress.offered;
+  if (!offered || typeof offered !== "object" || Array.isArray(offered)) delete progress.offered;
   const resume = progress.resume;
   if (
     !resume ||
@@ -158,6 +162,11 @@ export const finishGuide =
     return resume && resume.guide !== guide.id ? { ...next, resume } : next;
   };
 
+/** The tour has been offered: it is not offered again, whether it was taken or not. */
+export const markOffered =
+  (guide: string): ProgressChange =>
+  (progress) => ({ ...progress, offered: { ...(progress.offered ?? {}), [guide]: true } });
+
 export const decideFirstRun =
   (decision: "accepted" | "declined"): ProgressChange =>
   (progress) => ({ ...progress, firstRun: decision });
@@ -186,6 +195,7 @@ export const forgetProgress: ProgressChange = (progress) => {
     resume: _resume,
     seen: _seen,
     finished: _finished,
+    offered: _offered,
     ...kept
   } = progress;
   return kept;

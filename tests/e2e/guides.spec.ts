@@ -22,6 +22,7 @@ import { createAuthenticatedMCPClient } from "../utils/mcp-auth.js";
 import { loginAsAdmin } from "./helpers/auth-helper.js";
 import { quickTaskWithRepairLoop } from "./helpers/quick-task.js";
 import { GRAPH, graphOverview, settledCamera } from "./helpers/diagram.js";
+import { freshReader } from "./helpers/guides.js";
 
 const BASE_URL = getTestBaseUrl();
 
@@ -522,3 +523,47 @@ async function inRussian(page: Page, processId: string): Promise<void> {
 
   expect(await englishLeaks(page)).toEqual([]);
 }
+
+test("the editor tour is offered on the first switch into edit mode only, and each step lands on its control", async ({
+  page,
+}) => {
+  await freshReader(page, "editor");
+  const copied = await page.request.post(
+    `${BASE_URL}/api/workflows/moira/example-simple-steps/copy`,
+    {
+      data: { newName: `Editor tour ${Date.now()}` },
+    },
+  );
+  expect(copied.status()).toBe(200);
+  const id = ((await copied.json()) as { data: { workflowId: string } }).data.workflowId;
+  try {
+    await page.goto(`${BASE_URL}/workflows/${id}?view=map`);
+    const toggle = page.getByTestId("flow-edit-toggle");
+    await toggle.click();
+    await expect(page.getByTestId("editor-tour-offer")).toBeVisible();
+    await page.getByTestId("editor-tour-accept").click();
+    await walk(page, "flow-editor", [
+      "bar",
+      "add-step",
+      "step-actions",
+      "blocks",
+      "connections",
+      "choice",
+      "validation",
+      "stale",
+    ]);
+
+    // The second switch, and a switch after a reload, offer nothing.
+    await toggle.click();
+    await expect(page.getByTestId("flow-edit-panel")).toHaveCount(0);
+    await toggle.click();
+    await expect(page.getByTestId("flow-edit-panel")).toBeVisible();
+    await expect(page.getByTestId("editor-tour-offer")).toHaveCount(0);
+    await page.goto(`${BASE_URL}/workflows/${id}?view=map`);
+    await toggle.click();
+    await expect(page.getByTestId("flow-edit-panel")).toBeVisible();
+    await expect(page.getByTestId("editor-tour-offer")).toHaveCount(0);
+  } finally {
+    await page.request.delete(`${BASE_URL}/api/workflows/${id}`);
+  }
+});

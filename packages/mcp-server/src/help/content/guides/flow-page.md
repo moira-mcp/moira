@@ -140,6 +140,15 @@ Edit mode also changes the process's structure:
   unconnected; connect it from its own card and from the step before it.
 - **Add or delete a block.** Use the contents list: "Add block" takes an id, a name, a description
   and the block it follows, and a block's delete control works only while the block owns no step.
+- **Add a choice.** An agent step's card has **Add a choice**: the step then ends with a question
+  whose answer picks the route. Name the question and the answer field, list the options and mark
+  the one that continues along the step's usual route (`success`); every other option leads to a
+  step you pick, or to a new step created with it in the block you choose. Saving the dialog is one
+  edit: it writes the field with its options (`enum`) into the step's input schema and into
+  `required`, one case per other option (`eq` on `<step>.<field>`), the options' connections and
+  their labels — the shape of the learning example "One choice". A step that already has a choice
+  of this shape shows it on the same button, to edit or remove; a step that routes in any other way
+  (other operators, several fields) shows no button, and its routing is edited in the definition.
 
 The **Graph** view is the same editor drawn as the node graph. In edit mode:
 
@@ -173,6 +182,11 @@ finds its step, so move it on with `session recover`.
 
 Every edit goes into the page's edit log. **Undo** takes back the last one — typing into one field
 counts as one edit — and **Discard edits** drops them all. The views re-derive as you type.
+
+The first time you turn on edit mode, a small card above the edit bar offers **the editor tour**: a
+short walk through where edits collect, adding, renaming and deleting steps, blocks, connections
+and their labels, a choice, and what stops a save. It is offered once, whatever you answer; **Editor
+tour** in the edit bar opens it at any time.
 
 The draft is checked in two layers. The process rules run in the browser on every change: a step
 in a block that leaves an edge without a label, a return without its cause and exit, or an empty

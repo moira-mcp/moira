@@ -1,6 +1,6 @@
 /**
- * What each screen's tour must explain, as data: screen → topic → the step of that screen's tour
- * that covers it. A check holds every topic to a step whose anchor is written in the page, so a
+ * What each tour must explain, as data: guide → topic → the step of that tour that covers it.
+ * Every screen tour has a list, and so does the editor's task tour. A check holds every topic to a step whose anchor is written in the page, so a
  * tour cannot quietly lose a topic when its steps change.
  *
  * A topic whose control is hover-only or appears only with data — a note's history, a playbook's
@@ -37,6 +37,17 @@ export const REQUIRED_TOPICS: Readonly<Record<string, Readonly<Record<string, st
     "use-as-template": "template",
     "sharing-visibility": "visibility",
     "edit-mode": "edit",
+  },
+  "flow-editor": {
+    "create-step": "add-step",
+    "insert-on-edge": "add-step",
+    "delete-rename-step": "step-actions",
+    "add-remove-block": "blocks",
+    "reconnect-label": "connections",
+    "add-choice": "choice",
+    "undo-reset": "bar",
+    "inline-validation": "validation",
+    "stale-revision": "stale",
   },
   run: {
     "what-is-a-process": "process",

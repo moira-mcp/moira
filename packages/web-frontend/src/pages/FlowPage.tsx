@@ -87,6 +87,7 @@ import { PanelRightClose, PanelRightOpen } from "lucide-react";
 import { GuidanceHint } from "../components/run/Guidance";
 import { useGuidePage, type GuidePageController } from "../guides/GuideContext";
 import { GuideButton } from "../guides/GuideButton";
+import { EditorTourOffer } from "../guides/EditorTourOffer";
 import { guideAnchor } from "../guides/anchors";
 import { DiagramGuide } from "../components/run/DiagramGuide";
 import { runBlocks } from "../components/run/model";
@@ -818,6 +819,7 @@ export const FlowPage: React.FC = () => {
                 </div>
               )}
 
+              <EditorTourOffer editing={editing} />
               {editing && (
                 <EditBar
                   diff={diff}

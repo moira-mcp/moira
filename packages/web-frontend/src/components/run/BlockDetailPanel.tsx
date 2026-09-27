@@ -38,6 +38,7 @@ import {
 } from "../flow/EditControls";
 import { IssueList } from "../flow/IssueList";
 import { AddStep, ConnectionsEditor, StepActions } from "../flow/StructureControls";
+import { ChoiceEditor } from "../flow/ChoiceEditor";
 import { connectionIssuesOf } from "../flow/issues";
 import { orderedNodeIds } from "../flow/model";
 import type { WorkflowGraph } from "../../types/workflow-types";
@@ -152,6 +153,7 @@ function EditableSteps({
             footer={
               node ? (
                 <>
+                  <ChoiceEditor nodeId={step.id} />
                   <ConnectionsEditor nodeId={step.id} />
                   <NodeTextEditor step={step} node={node as unknown as Record<string, unknown>} />
                 </>

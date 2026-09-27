@@ -9,7 +9,7 @@
  * field coalesce into one operation, so undo steps over whole edits rather than keystrokes.
  * Structural operations (add — alone or as the target of an output —, insert, remove and rename a
  * node, set or remove a connection, add
- * or remove a block) go through the engine's authoring functions: `appendOperation` applies one
+ * or remove a block, set or remove a step's choice) go through the engine's authoring functions: `appendOperation` applies one
  * to the current draft first, so a refused operation throws its `AuthoringError` and never enters
  * the log. `exportDiff` compares the saved definition with the draft, following node ids through
  * renames, and names exactly the flow-file entries that change.
@@ -23,8 +23,10 @@ import {
   removeConnection,
   removeNode,
   renameNode,
+  setChoice,
   setConnection,
   type BlockInput,
+  type Choice,
   type IncomingDecision,
   type ReferenceLocation,
 } from "@mcp-moira/workflow-engine/authoring";
@@ -64,7 +66,17 @@ export type StructuralOperation =
   | { kind: "set-connection"; source: string; key: string; target: string }
   | { kind: "remove-connection"; source: string; key: string }
   | { kind: "add-block"; block: BlockInput; after?: string }
-  | { kind: "remove-block"; blockId: string };
+  | { kind: "remove-block"; blockId: string }
+  /**
+   * A step's choice set, replaced or (null) removed in one undoable step, with the new steps its
+   * options lead to, which are added first.
+   */
+  | {
+      kind: "set-choice";
+      nodeId: string;
+      choice: Choice | null;
+      newNodes?: { node: WorkflowNode; blockId?: string }[];
+    };
 
 export type Operation = ContentOperation | StructuralOperation;
 
@@ -173,6 +185,13 @@ function applyStructural(workflow: WorkflowGraph, op: StructuralOperation): Appl
       return { workflow: fromEngine(addBlock(graph, op.block, op.after)) };
     case "remove-block":
       return { workflow: fromEngine(removeBlock(graph, op.blockId)) };
+    case "set-choice": {
+      const withSteps = (op.newNodes ?? []).reduce(
+        (next, added) => addNode(next, engineNode(added.node), block(added.blockId)),
+        graph,
+      );
+      return { workflow: fromEngine(setChoice(withSteps, op.nodeId, op.choice)) };
+    }
   }
 }
 
@@ -305,6 +324,8 @@ function lineageOf(saved: WorkflowGraph, ops: readonly Operation[]): Lineage {
     draft = applied.workflow;
     if (op.kind === "add-node" || op.kind === "add-connected-node" || op.kind === "insert-on-edge")
       origin.set(op.node.id, null);
+    if (op.kind === "set-choice")
+      for (const added of op.newNodes ?? []) origin.set(added.node.id, null);
     if (op.kind === "remove-node") origin.delete(op.nodeId);
     if (op.kind !== "rename-node") continue;
     const source = origin.get(op.from) ?? null;

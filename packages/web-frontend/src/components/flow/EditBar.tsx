@@ -8,6 +8,9 @@
 
 import React from "react";
 import { useTranslation } from "react-i18next";
+import { guideAnchor } from "../../guides/anchors";
+import { useGuides } from "../../guides/GuideContext";
+import { EDITOR_GUIDE_ID } from "../../pages/flowEditor.guide";
 import {
   AlertCircle,
   AlertTriangle,
@@ -15,6 +18,7 @@ import {
   ChevronDown,
   FileDiff,
   Loader2,
+  CircleHelp,
   RotateCcw,
   Save,
   Undo2,
@@ -145,11 +149,13 @@ export function EditBar({
   runWarnings?: readonly PausedRunWarning[];
 }): React.JSX.Element {
   const { t } = useTranslation();
+  const { start } = useGuides();
   const count = diff.length;
   return (
     <div
       className="border-b border-warning/50 bg-warning/5 px-3 py-1.5"
       data-testid="flow-edit-panel"
+      {...guideAnchor("flow.edit-bar")}
     >
       <Collapsible data-testid="flow-edit-export">
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
@@ -206,6 +212,16 @@ export function EditBar({
               </Button>
             </CollapsibleTrigger>
           </span>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 gap-1 px-2 text-xs text-muted-foreground"
+            onClick={() => start(EDITOR_GUIDE_ID)}
+            data-testid="editor-tour-open"
+          >
+            <CircleHelp className="size-3.5" aria-hidden="true" />
+            {t("guides.flow-editor.open")}
+          </Button>
           <span className="ml-auto flex items-center gap-3">
             <GateStatus
               gate={gate}
@@ -213,7 +229,10 @@ export function EditBar({
               serverErrors={serverErrors}
               onRetry={onRetry}
             />
-            <span className="text-xs tabular-nums text-muted-foreground">
+            <span
+              className="text-xs tabular-nums text-muted-foreground"
+              {...guideAnchor("flow.edit-revision")}
+            >
               {t("pages.flowPage.edit.revision", { revision })}
             </span>
             <Button
@@ -222,6 +241,7 @@ export function EditBar({
               disabled={!gate.enabled || saving}
               className="h-7 gap-1 text-xs"
               data-testid="flow-edit-save"
+              {...guideAnchor("flow.edit-save")}
             >
               {saving ? (
                 <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />

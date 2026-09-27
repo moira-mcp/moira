@@ -4,7 +4,7 @@
  * The web app's routes are data (`routes/routeTable.ts`), and `App.tsx` renders them from it, so a
  * route cannot be added without this check seeing it. Each route is toured by its screen's guide,
  * exempted with a reason, or deferred with a reason tracked as unfinished work; each guide names
- * only routes that exist. Each screen tour covers its required topics (`guides/topics.ts`) with a
+ * only routes that exist. Each screen tour, and the editor's task tour, covers its required topics (`guides/topics.ts`) with a
  * step whose anchor is written in the page. The checks are pure functions, run against the app's
  * real tables and against broken ones, so both the pass and each kind of failure are shown.
  */
@@ -66,9 +66,9 @@ function topicProblems(
 ): string[] {
   const problems: string[] = [];
   for (const [screen, required] of Object.entries(topics)) {
-    const tour = guides.find((guide) => guide.kind === "screen" && guide.screen === screen);
+    const tour = guides.find((guide) => guide.id === screen);
     if (!tour) {
-      problems.push(`${screen}: no screen tour`);
+      problems.push(`${screen}: no tour`);
       continue;
     }
     for (const [topic, stepId] of Object.entries(required)) {
@@ -180,9 +180,9 @@ describe("route coverage", () => {
 });
 
 describe("required topics", () => {
-  test("every screen tour has its topic list, and every topic is a step whose anchor is in the page", () => {
-    const screens = GUIDES.filter((guide) => guide.kind === "screen").map((guide) => guide.screen);
-    expect(Object.keys(REQUIRED_TOPICS).sort()).toEqual(screens.sort());
+  test("every screen tour and the editor tour have a topic list, each topic a step whose anchor is in the page", () => {
+    const screens = GUIDES.filter((guide) => guide.kind === "screen").map((guide) => guide.id);
+    expect(Object.keys(REQUIRED_TOPICS).sort()).toEqual([...screens, "flow-editor"].sort());
     expect(topicProblems(REQUIRED_TOPICS, GUIDES, writtenAnchors())).toEqual([]);
   });
 
@@ -203,7 +203,7 @@ describe("required topics", () => {
       "a screen with topics and no tour",
       { reports: { intro: "intro" } },
       new Set<string>(),
-      ["reports: no screen tour"],
+      ["reports: no tour"],
     ],
   ] as const)("fails on %s", (_case, topics, written, expected) => {
     expect(topicProblems(topics, [tour("notes", ["/notes"])], written)).toEqual(expected);

@@ -322,3 +322,77 @@ describe("the run-less projection", () => {
     expect(order[0]).toBe(graph.nodes.find((n) => n.type === "start")!.id);
   });
 });
+
+describe("a step's choice in the edit log", () => {
+  /** Example 2 with `check-result`'s choice taken out, as a person would start from. */
+  const bare = (): WorkflowGraph => {
+    const graph = catalogGraph("example-one-choice") as unknown as WorkflowGraph;
+    const check = node(graph, "check-result") as unknown as {
+      inputSchema: { properties: Record<string, unknown>; required: string[] };
+      cases?: unknown;
+      connections: Record<string, string>;
+      connectionLabels?: unknown;
+    };
+    delete check.inputSchema.properties.matches;
+    check.inputSchema.required = [];
+    delete check.cases;
+    delete check.connections.no;
+    delete check.connectionLabels;
+    return graph;
+  };
+  const choiceOp = (graph: WorkflowGraph): Operation => ({
+    kind: "set-choice",
+    nodeId: "check-result",
+    choice: {
+      field: "matches",
+      question: "Does the result match?",
+      options: ["yes", "no"],
+      defaultOption: "yes",
+      targets: { no: "fill-gap" },
+      labels: { yes: "yes — it matches", no: "no — something is missing" },
+    },
+    newNodes: [
+      { node: step("fill-gap"), blockId: node(graph, "explain-gap")!.progressNodeId as string },
+    ],
+  });
+
+  test("is one undoable step, with the new step it leads to, and undo restores the draft", () => {
+    const saved = bare();
+    const { result } = renderHook(() => useEditLog(saved));
+    act(() =>
+      result.current.apply({
+        kind: "node-text",
+        nodeId: "check-result",
+        field: "directive",
+        value: "Compare.",
+      }),
+    );
+    const before = result.current.draft;
+    act(() => result.current.apply(choiceOp(saved)));
+    expect(targets(result.current.draft!, "check-result")).toEqual({
+      success: targets(saved, "check-result").success,
+      no: "fill-gap",
+    });
+    expect(node(result.current.draft!, "fill-gap")).toBeDefined();
+
+    act(() => result.current.undo());
+    expect(result.current.draft).toEqual(before);
+  });
+
+  test("the export lists the schema, case, connection and label entries it changed", () => {
+    const saved = bare();
+    const lines = exportDiff(saved, logOf(saved, [choiceOp(saved)])).map((entry) =>
+      entry.kind === "change" ? entry.path : exportLine(entry),
+    );
+    expect(lines).toEqual(
+      expect.arrayContaining([
+        "+ node fill-gap",
+        "nodes[check-result].inputSchema",
+        "nodes[check-result].cases",
+        "nodes[check-result].connections.no",
+        "nodes[check-result].connectionLabels.success",
+        "nodes[check-result].connectionLabels.no",
+      ]),
+    );
+  });
+});

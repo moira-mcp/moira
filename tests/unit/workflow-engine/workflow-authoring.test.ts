@@ -22,9 +22,13 @@ import {
   removeBlock,
   removeConnection,
   removeNode,
+  readChoice,
   renameNode,
+  setChoice,
   setConnection,
+  type Choice,
 } from "@mcp-moira/workflow-engine/authoring";
+import { catalogGraph } from "../../helpers/catalog-graphs.js";
 
 function graph(value: unknown): WorkflowGraph {
   return value as WorkflowGraph;
@@ -552,5 +556,125 @@ describe("kebab-case node ids in the schema", () => {
   test("a kebab-case definition passes the id rule", async () => {
     const result = await new GraphValidator().validateUnified(twoBlocks());
     expect(result.issues.filter((i) => /pattern/.test(i.message))).toEqual([]);
+  });
+});
+
+describe("a step's choice", () => {
+  /** Example 2 ("One choice") and the same flow with `check-result`'s choice taken out by hand. */
+  const example = () => catalogGraph("example-one-choice");
+  const withoutChoice = () => {
+    const bare = example();
+    const step = node(bare, "check-result") as {
+      inputSchema: { properties: Record<string, unknown>; required: string[] };
+      cases?: unknown;
+      connections: Record<string, string>;
+      connectionLabels?: Record<string, unknown>;
+    };
+    delete step.inputSchema.properties.matches;
+    step.inputSchema.required = [];
+    delete step.cases;
+    delete step.connections.no;
+    delete step.connectionLabels;
+    return bare;
+  };
+  const exampleChoice = (): Choice => {
+    const source = node(example(), "check-result") as {
+      inputSchema: { properties: { matches: { description: string } } };
+      connectionLabels: Record<string, string>;
+    };
+    return {
+      field: "matches",
+      question: source.inputSchema.properties.matches.description,
+      options: ["yes", "no"],
+      defaultOption: "yes",
+      targets: { no: "explain-gap" },
+      labels: { yes: source.connectionLabels.success, no: source.connectionLabels.no },
+    };
+  };
+
+  test("setting it rebuilds the example's step exactly", () => {
+    const built = setChoice(withoutChoice(), "check-result", exampleChoice());
+    expect(node(built, "check-result")).toEqual(node(example(), "check-result"));
+  });
+
+  test("the example's step reads back as that choice", () => {
+    expect(readChoice(node(example(), "check-result") as never)).toEqual(exampleChoice());
+  });
+
+  test("removing it takes the field, its cases and option outputs, and keeps success", () => {
+    const removed = node(setChoice(example(), "check-result", null), "check-result");
+    expect(removed.inputSchema).toEqual({
+      type: "object",
+      additionalProperties: false,
+      properties: {},
+      required: [],
+    });
+    expect(removed.cases).toBeUndefined();
+    expect(removed.connections).toEqual({ success: "report" });
+  });
+
+  test("editing the options keeps one case per non-default option", () => {
+    const edited = setChoice(example(), "check-result", {
+      ...exampleChoice(),
+      options: ["yes", "missing", "partly"],
+      targets: { missing: "explain-gap", partly: "report" },
+      labels: {},
+    });
+    const step = node(edited, "check-result") as {
+      cases: Array<{ output: string; when: { right: string } }>;
+      connections: Record<string, string>;
+    };
+    expect(step.cases.map((c) => [c.when.right, c.output])).toEqual([
+      ["missing", "missing"],
+      ["partly", "partly"],
+    ]);
+    expect(step.connections).toEqual({
+      success: "report",
+      missing: "explain-gap",
+      partly: "report",
+    });
+    expect(readChoice(step as never)?.options).toEqual(["yes", "missing", "partly"]);
+  });
+
+  test("renaming the step keeps its choice readable", () => {
+    const renamed = renameNode(example(), "check-result", "compare").workflow;
+    expect(readChoice(node(renamed, "compare") as never)?.field).toBe("matches");
+  });
+
+  test.each([
+    ["a non-agent step", "start", {}],
+    [
+      "a control output as an option",
+      "check-result",
+      { options: ["yes", "error"], targets: { error: "report" } },
+    ],
+    [
+      "the primary output as an option",
+      "check-result",
+      { options: ["yes", "success"], targets: { success: "report" } },
+    ],
+    ["the same option twice", "check-result", { options: ["yes", "no", "no"] }],
+    ["a single option", "check-result", { options: ["yes"], targets: {} }],
+    ["an option with no step to lead to", "check-result", { targets: {} }],
+    ["a default that is not an option", "check-result", { defaultOption: "maybe" }],
+    ["an answer field that is not a name", "check-result", { field: "is matching" }],
+  ])("refuses %s", (_name, nodeId, change) => {
+    const code = codeOf(() =>
+      setChoice(withoutChoice(), nodeId, { ...exampleChoice(), ...(change as Partial<Choice>) }),
+    );
+    expect(["invalid-choice", "invalid-target"]).toContain(code);
+  });
+
+  test("refuses an option that takes an output the step already uses", () => {
+    const bare = setConnection(withoutChoice(), "check-result", "no", "report");
+    expect(codeOf(() => setChoice(bare, "check-result", exampleChoice()))).toBe("invalid-choice");
+  });
+
+  test("refuses a step that routes in another way", () => {
+    const other = withoutChoice();
+    (node(other, "check-result") as { cases?: unknown }).cases = [
+      { when: { operator: "exists", value: { contextPath: "check-result.x" } }, output: "success" },
+    ];
+    expect(codeOf(() => setChoice(other, "check-result", exampleChoice()))).toBe("invalid-choice");
   });
 });

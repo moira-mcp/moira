@@ -48,6 +48,7 @@ import {
   decideFirstRun,
   finishGuide,
   forgetProgress,
+  markOffered,
   newSteps,
   parseProgress,
   recordStep,
@@ -261,8 +262,23 @@ describe("the rules read from progress", () => {
       resume: { guide: "settings", step: "apps", path: "/settings" },
       tutorials: { copyId: "x" },
     };
-    expect(forgetProgress({ ...progress, finished: { settings: true } })).toEqual({
+    expect(
+      forgetProgress({
+        ...progress,
+        finished: { settings: true },
+        offered: { "flow-editor": true },
+      }),
+    ).toEqual({
       tutorials: { copyId: "x" },
+    });
+  });
+
+  test("an offered tour is recorded beside others, and an unreadable record of offers is dropped", () => {
+    expect(markOffered("flow-editor")({ offered: { other: true } })).toEqual({
+      offered: { other: true, "flow-editor": true },
+    });
+    expect(parseProgress({ offered: ["flow-editor"], firstRun: "accepted" })).toEqual({
+      firstRun: "accepted",
     });
   });
 

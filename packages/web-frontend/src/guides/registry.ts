@@ -8,6 +8,7 @@ import { APP_PREFIX } from "../constants/routes";
 import { runGuide } from "../components/execution/run.guide";
 import { artifactsGuide } from "../pages/artifacts.guide";
 import { flowGuide } from "../pages/flow.guide";
+import { flowEditorGuide } from "../pages/flowEditor.guide";
 import { flowsGuide } from "../pages/flows.guide";
 import { homeGuide } from "../pages/home.guide";
 import { notesGuide } from "../pages/notes.guide";
@@ -34,6 +35,7 @@ export const GUIDES: readonly GuideDefinition[] = [
   settingsGuide,
   githubSetupGuide,
   telegramSetupGuide,
+  flowEditorGuide,
 ];
 
 export function guideById(id: string | null | undefined): GuideDefinition | undefined {

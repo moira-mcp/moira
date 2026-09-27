@@ -129,6 +129,10 @@ test("the full tour opens the reader's latest run on the run page", async ({ pag
     });
     await page.getByTestId("guide-finish").click();
     await expect(page).toHaveURL(new RegExp(`/executions/${run.processId}\\?.*guide=run`));
+    // The address changes before the lazily loaded run page replaces the list and its last card.
+    await expect(page.getByTestId("guide-card")).toHaveAttribute("data-guide-id", "run", {
+      timeout: 20000,
+    });
     const visits = await walkTour(page, (visit) => visit.guide === "notes");
     expect(guidesOf(visits)).toEqual(["run"]);
     expect(visits.map((visit) => visit.step)).toEqual(

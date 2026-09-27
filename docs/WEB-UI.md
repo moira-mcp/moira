@@ -278,20 +278,21 @@ page it explains.
 
 **Guides today:**
 
-| Guide               | Kind     | Declared in                         | Opened by                                            |
-| ------------------- | -------- | ----------------------------------- | ---------------------------------------------------- |
-| `home`              | screen   | `pages/home.guide.ts`               | "What is this?" in the home page header              |
-| `flows`             | screen   | `pages/flows.guide.ts`              | "What is this?" in the flow list header              |
-| `flow`              | screen   | `pages/flow.guide.ts`               | "What is this?" in the flow page's diagram toolbar   |
-| `runs`              | screen   | `pages/runs.guide.ts`               | "What is this?" in the runs list header              |
-| `run`               | screen   | `components/execution/run.guide.ts` | "What is this?" in the run page's diagram toolbar    |
-| `notes`             | screen   | `pages/notes.guide.ts`              | "What is this?" in the notes page header             |
-| `playbooks`         | screen   | `pages/playbooks.guide.ts`          | "What is this?" in the playbooks page header         |
-| `artifacts`         | screen   | `pages/artifacts.guide.ts`          | "What is this?" in the artifacts page header         |
-| `settings`          | screen   | `pages/settings/settings.guide.ts`  | "What is this?" in the Settings page header          |
-| `settings-github`   | task     | `pages/settings/settings.guide.ts`  | **Setup guide** in the GitHub & Codespaces section   |
-| `settings-telegram` | task     | `pages/settings/settings.guide.ts`  | **Telegram setup** in the Notifications section      |
-| `runs-empty`        | fallback | `pages/runs.guide.ts`               | The full tour's run stop, when the reader has no run |
+| Guide               | Kind     | Declared in                         | Opened by                                                        |
+| ------------------- | -------- | ----------------------------------- | ---------------------------------------------------------------- |
+| `home`              | screen   | `pages/home.guide.ts`               | "What is this?" in the home page header                          |
+| `flows`             | screen   | `pages/flows.guide.ts`              | "What is this?" in the flow list header                          |
+| `flow`              | screen   | `pages/flow.guide.ts`               | "What is this?" in the flow page's diagram toolbar               |
+| `runs`              | screen   | `pages/runs.guide.ts`               | "What is this?" in the runs list header                          |
+| `run`               | screen   | `components/execution/run.guide.ts` | "What is this?" in the run page's diagram toolbar                |
+| `notes`             | screen   | `pages/notes.guide.ts`              | "What is this?" in the notes page header                         |
+| `playbooks`         | screen   | `pages/playbooks.guide.ts`          | "What is this?" in the playbooks page header                     |
+| `artifacts`         | screen   | `pages/artifacts.guide.ts`          | "What is this?" in the artifacts page header                     |
+| `settings`          | screen   | `pages/settings/settings.guide.ts`  | "What is this?" in the Settings page header                      |
+| `settings-github`   | task     | `pages/settings/settings.guide.ts`  | **Setup guide** in the GitHub & Codespaces section               |
+| `settings-telegram` | task     | `pages/settings/settings.guide.ts`  | **Telegram setup** in the Notifications section                  |
+| `flow-editor`       | task     | `pages/flowEditor.guide.ts`         | The first switch into edit mode; **Editor tour** in the edit bar |
+| `runs-empty`        | fallback | `pages/runs.guide.ts`               | The full tour's run stop, when the reader has no run             |
 
 **Declarations** (`guides/types.ts`). A `GuideDefinition` has an `id`, a `kind` (`screen`, `task`,
 `tutorial` or `fallback` — a guide only the full tour opens, in place of a screen it cannot show), the `screen` whose page runs it, its route patterns, and the views, panels and sections
@@ -327,9 +328,9 @@ card is pointed at or focused (a note's or playbook's history, compare and resto
 open, copy link, edit and delete) are never anchors: the list step's copy says where they are. The home tour ends on "Show me around" in the sidebar (`prepare.sidebar`), which
 on a phone opens the sidebar sheet.
 
-**Required topics** (`guides/topics.ts`, `REQUIRED_TOPICS`) name, per screen, what its tour must
+**Required topics** (`guides/topics.ts`, `REQUIRED_TOPICS`) name, per tour, what it must
 explain and the step that does: for example the flow list's `create-by-agent` is its `intro` step,
-which says a flow is created by the agent at an agreed level. Every screen tour has a topic list.
+which says a flow is created by the agent at an agreed level. Every screen tour has a topic list, and so does the editor's task tour (`flow-editor`), whose topics are the editing controls from creating a step to a save refused on a stale revision.
 
 **Anchors.** An element a step explains carries `data-guide` with one or more space-separated names,
 written as `guideAnchor("screen.name")` so the name stays a literal a static check finds. Names
@@ -399,6 +400,9 @@ region (`guide-announcer`). Under reduced motion (`usePrefersReducedMotion`) not
   and reads another is counted in the role they stopped in. A non-boolean `owner` is ignored on
   read;
 - `seen`: `<guide>.<step>` → the step's revision when the reader last saw it;
+- `offered`: `<guide>` → `true` for a tour offered once — the editor tour, recorded when its offer
+  (`EditorTourOffer`, `editor-tour-offer`) first shows above the edit bar, so the next switch into
+  edit mode offers nothing whatever the answer;
 - `finished`: `<guide>` → `true` for a guide walked to its end. Finishing also records every step
   the guide shows this reader at its current revision, the skipped ones included; another role's
   steps stay unseen.
@@ -437,7 +441,7 @@ last card offers the whole tour (`guide-whole-tour`). Nothing opens by itself.
 - **Settings → Preferences → Guides** (`preferences-guides`): "Start the tour again" forgets the
   seen steps and finished marks of every guide in the full tour and the resume point
   (`restartGuides`), and starts the full tour; "Forget what I have
-  seen" clears `firstRun`, `resume`, `seen` and `finished` (keeping any other field) and this
+  seen" clears `firstRun`, `resume`, `seen`, `finished` and `offered` (keeping any other field) and this
   session's "Later", so the prompt comes back.
 
 **The full tour** (`guides/fullTour.ts`) chains the screen tours in a fixed order (every toured
@@ -993,7 +997,8 @@ request, or the run moving to another step, replaces the travelled step.
     expressions) and a registry entry. Consecutive edits of one field merge into one operation.
   - Structural operations go through the engine's authoring functions
     (`@mcp-moira/workflow-engine/authoring`): add, insert on an edge, remove, rename, set or remove
-    a connection, add or remove a block. `appendOperation` applies one to the current draft first,
+    a connection, add or remove a block, and set or remove a step's choice (`set-choice`, applied by
+    `setChoice`, carrying the new steps its options lead to so the whole choice is one undo step). `appendOperation` applies one to the current draft first,
     so a refused operation throws its `AuthoringError` and never enters the log.
   - `exportDiff` compares the saved definition with the draft, following node ids through renames.
     It yields `change` entries (flow-file path, before, after) and one entry per added, removed or
@@ -1009,7 +1014,13 @@ request, or the run moving to another step, replaces the travelled step.
   - a step card's menu (`StepActions`) opens the rename and delete dialogs;
   - `ConnectionsEditor` on each step card retargets, adds and removes outputs;
   - `AddStep` sits under a block's steps;
-  - `DeleteBlock` on each contents row and `AddBlock` under the contents list.
+  - `DeleteBlock` on each contents row and `AddBlock` under the contents list;
+  - `ChoiceEditor` (`components/flow/ChoiceEditor.tsx`) on an agent step's card: "Add a choice",
+    or the existing choice when the engine's `readChoice` recognises one, opens a dialog that
+    commits one `set-choice`. `setChoice` writes the answer field with `enum` and its `required`
+    entry, one `eq` case per non-default option, the option connections and labels; the default
+    option rides the step's primary output. A step whose cases are not of that shape gets no
+    control.
 
   Each commits one operation through `apply` and shows an `AuthoringError` inline. The dialogs read
   the consequence from the draft first (`components/flow/structure.ts`):

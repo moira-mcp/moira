@@ -9,7 +9,7 @@
 
 import React, { useEffect, useState } from "react";
 import { afterEach, beforeEach, describe, expect, jest, test } from "@jest/globals";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom/jest-globals";
 import { I18nextProvider } from "react-i18next";
 import { MemoryRouter } from "react-router-dom";
@@ -223,6 +223,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  jest.useRealTimers();
   jest.restoreAllMocks();
   const target = globalThis as typeof globalThis & { React?: typeof React };
   if (originalReact) target.React = originalReact;
@@ -344,6 +345,16 @@ describe("an optional step", () => {
   });
 
   test("an element that arrives after the wait is still found, and a view the page never opens is not waited on for ever", async () => {
+    // The runner's waits are timers: driving them by hand makes the sequence independent of how
+    // busy the machine is.
+    jest.useFakeTimers();
+    const elapse = async (ms: number) => {
+      for (let passed = 0; passed < ms; passed += 250) {
+        await act(async () => {
+          jest.advanceTimersByTime(250);
+        });
+      }
+    };
     render(
       <MemoryRouter initialEntries={["/fixture"]}>
         <I18nextProvider i18n={i18n}>
@@ -354,30 +365,24 @@ describe("an optional step", () => {
       </MemoryRouter>,
     );
     fireEvent.click(screen.getByTestId("guide-open"));
-    await waitFor(() =>
-      expect(screen.getByTestId("guide-card")).toHaveAttribute("data-guide-step", "start"),
-    );
+    await elapse(500);
+    expect(screen.getByTestId("guide-card")).toHaveAttribute("data-guide-step", "start");
     fireEvent.click(screen.getByTestId("guide-next"));
     // The required step says it cannot find its element once the wait is over …
-    await waitFor(() => expect(screen.getByTestId("guide-note")).toBeInTheDocument(), {
-      timeout: 4500,
-    });
+    await elapse(3500);
+    expect(screen.getByTestId("guide-note")).toBeInTheDocument();
+    expect(screen.getByTestId("guide-card")).toHaveAttribute("data-guide-step", "late");
     // … and finds it when it arrives, a little later.
-    await waitFor(
-      () =>
-        expect(screen.getByTestId("guide-spotlight")).toHaveAttribute(
-          "data-guide-anchor",
-          "fixture.late",
-        ),
-      { timeout: 4000 },
+    await elapse(1500);
+    expect(screen.getByTestId("guide-spotlight")).toHaveAttribute(
+      "data-guide-anchor",
+      "fixture.late",
     );
     expect(screen.queryByTestId("guide-note")).toBeNull();
     // The next step is drawn only by a view the page never switches to: it is passed after the
     // same wait, and the tour goes on.
     fireEvent.click(screen.getByTestId("guide-next"));
-    await waitFor(
-      () => expect(screen.getByTestId("guide-card")).toHaveAttribute("data-guide-step", "end"),
-      { timeout: 5000 },
-    );
-  }, 20000);
+    await elapse(4000);
+    expect(screen.getByTestId("guide-card")).toHaveAttribute("data-guide-step", "end");
+  });
 });
