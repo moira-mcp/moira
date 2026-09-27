@@ -344,13 +344,13 @@ describe("an optional step", () => {
     expect(shownWithout.every((absent) => !absent)).toBe(true);
   });
 
-  test("an element that arrives after the wait is still found, and a view the page never opens is not waited on for ever", async () => {
+  test("an element that arrives after the wait is still found, and a view the page never opens is not waited on for ever", () => {
     // The runner's waits are timers: driving them by hand makes the sequence independent of how
     // busy the machine is.
     jest.useFakeTimers();
-    const elapse = async (ms: number) => {
+    const elapse = (ms: number): void => {
       for (let passed = 0; passed < ms; passed += 250) {
-        await act(async () => {
+        act(() => {
           jest.advanceTimersByTime(250);
         });
       }
@@ -365,15 +365,15 @@ describe("an optional step", () => {
       </MemoryRouter>,
     );
     fireEvent.click(screen.getByTestId("guide-open"));
-    await elapse(500);
+    elapse(500);
     expect(screen.getByTestId("guide-card")).toHaveAttribute("data-guide-step", "start");
     fireEvent.click(screen.getByTestId("guide-next"));
     // The required step says it cannot find its element once the wait is over …
-    await elapse(3500);
+    elapse(3500);
     expect(screen.getByTestId("guide-note")).toBeInTheDocument();
     expect(screen.getByTestId("guide-card")).toHaveAttribute("data-guide-step", "late");
     // … and finds it when it arrives, a little later.
-    await elapse(1500);
+    elapse(1500);
     expect(screen.getByTestId("guide-spotlight")).toHaveAttribute(
       "data-guide-anchor",
       "fixture.late",
@@ -382,7 +382,7 @@ describe("an optional step", () => {
     // The next step is drawn only by a view the page never switches to: it is passed after the
     // same wait, and the tour goes on.
     fireEvent.click(screen.getByTestId("guide-next"));
-    await elapse(4000);
+    elapse(4000);
     expect(screen.getByTestId("guide-card")).toHaveAttribute("data-guide-step", "end");
   });
 });
