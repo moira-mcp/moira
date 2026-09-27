@@ -37,6 +37,9 @@ The web app explains itself on screen:
   it explains. The right arrow or Enter goes on, the left arrow goes back, and Escape closes. When
   a tour you have walked has new or changed steps, the button carries a dot, and pressing it shows
   only those steps.
+- **Every page of the app has a tour:** the home page, the flow list and each flow, the runs list
+  and each run, notes, playbooks, artifacts and Settings. The tours explain what a page is for and
+  its main controls; steps about a panel you have hidden are skipped. The admin area has no tour.
 - **Where you stopped and what you have seen** follows your account to every browser. Settings →
   Preferences → Guides starts the tour again, or forgets what you have seen.
 

@@ -5,6 +5,8 @@
  * read, checked and snapshotted without mounting anything.
  */
 
+import type { BeginnerPanel } from "../components/onboarding/beginnerPanels";
+
 /** A screen tour explains a routed screen; a task tour one task on it; a tutorial has lessons. */
 export type GuideKind = "screen" | "task" | "tutorial";
 
@@ -29,6 +31,12 @@ export interface GuideStep {
   revision: number;
   /** Skipped, with a note, when its element is still absent after the wait (a hidden beginner panel). */
   optional?: boolean;
+  /**
+   * What tells, before looking, that an optional step's element is not on the page: the beginner
+   * panel it sits in is hidden, or the query parameter its view is opened with is missing. The step
+   * is then skipped at once instead of waited for.
+   */
+  absentWhen?: { panelHidden?: BeginnerPanel; queryMissing?: string };
   /**
    * Views that draw a single anchor; absent means every view. With per-view anchors the views are
    * the keys. Either way the first listed view is where the step goes when the open view lacks it.

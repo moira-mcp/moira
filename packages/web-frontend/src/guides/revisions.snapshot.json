@@ -1,27 +1,55 @@
 {
-  "run.process": {
+  "home.intro": {
     "revision": 1,
-    "fingerprint": "01f2d126"
+    "fingerprint": "71923841"
   },
-  "run.agent": {
+  "home.how": {
     "revision": 1,
-    "fingerprint": "cd92200f"
+    "fingerprint": "8cd89d52"
   },
-  "run.evidence": {
+  "home.connect": {
     "revision": 1,
-    "fingerprint": "7a6f52ef"
+    "fingerprint": "b1c94a84"
   },
-  "run.loop": {
+  "home.try": {
     "revision": 1,
-    "fingerprint": "13a65cf1"
+    "fingerprint": "4ec3739e"
   },
-  "run.route": {
+  "home.recommended": {
     "revision": 1,
-    "fingerprint": "546c0f07"
+    "fingerprint": "d212b19f"
   },
-  "run.explore": {
+  "home.work": {
     "revision": 1,
-    "fingerprint": "804aefa1"
+    "fingerprint": "89eeb00d"
+  },
+  "home.show-me-around": {
+    "revision": 1,
+    "fingerprint": "1cf41460"
+  },
+  "flows.intro": {
+    "revision": 1,
+    "fingerprint": "c7fd5476"
+  },
+  "flows.recommended": {
+    "revision": 1,
+    "fingerprint": "a56e06c6"
+  },
+  "flows.all": {
+    "revision": 1,
+    "fingerprint": "cc7dfbb2"
+  },
+  "flows.scopes": {
+    "revision": 1,
+    "fingerprint": "dc7783b0"
+  },
+  "flows.filters": {
+    "revision": 1,
+    "fingerprint": "e04f816f"
+  },
+  "flows.level": {
+    "revision": 1,
+    "fingerprint": "93c456b8"
   },
   "flow.intro": {
     "revision": 1,
@@ -58,6 +86,90 @@
   "flow.explore": {
     "revision": 1,
     "fingerprint": "9fcbc3cf"
+  },
+  "runs.intro": {
+    "revision": 1,
+    "fingerprint": "d831c188"
+  },
+  "runs.status": {
+    "revision": 1,
+    "fingerprint": "4789b6a2"
+  },
+  "runs.list": {
+    "revision": 1,
+    "fingerprint": "920ffcf2"
+  },
+  "run.process": {
+    "revision": 1,
+    "fingerprint": "01f2d126"
+  },
+  "run.agent": {
+    "revision": 1,
+    "fingerprint": "cd92200f"
+  },
+  "run.evidence": {
+    "revision": 1,
+    "fingerprint": "7a6f52ef"
+  },
+  "run.loop": {
+    "revision": 1,
+    "fingerprint": "13a65cf1"
+  },
+  "run.route": {
+    "revision": 1,
+    "fingerprint": "546c0f07"
+  },
+  "run.explore": {
+    "revision": 1,
+    "fingerprint": "804aefa1"
+  },
+  "notes.intro": {
+    "revision": 1,
+    "fingerprint": "9dcd3d85"
+  },
+  "notes.create": {
+    "revision": 1,
+    "fingerprint": "e9e88082"
+  },
+  "notes.list": {
+    "revision": 1,
+    "fingerprint": "e3bf3d0d"
+  },
+  "notes.quota": {
+    "revision": 1,
+    "fingerprint": "4ce6e92f"
+  },
+  "playbooks.intro": {
+    "revision": 1,
+    "fingerprint": "940ba719"
+  },
+  "playbooks.linked": {
+    "revision": 1,
+    "fingerprint": "ac9c677b"
+  },
+  "playbooks.create": {
+    "revision": 1,
+    "fingerprint": "017cc872"
+  },
+  "playbooks.list": {
+    "revision": 1,
+    "fingerprint": "22b5b4b7"
+  },
+  "artifacts.intro": {
+    "revision": 1,
+    "fingerprint": "84f99cbf"
+  },
+  "artifacts.quota": {
+    "revision": 1,
+    "fingerprint": "e654c038"
+  },
+  "artifacts.create": {
+    "revision": 1,
+    "fingerprint": "e10557f6"
+  },
+  "artifacts.list": {
+    "revision": 1,
+    "fingerprint": "88d8988f"
   },
   "settings.nav": {
     "revision": 1,

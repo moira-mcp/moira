@@ -60,8 +60,13 @@ interface GuideContextValue {
   menuOpen: boolean;
   setMenuOpen: (open: boolean) => void;
   start: (guideId: string, stepId?: string, only?: readonly string[]) => void;
-  go: (stepId: string) => void;
-  close: () => void;
+  /**
+   * Move to a step. `replace` swaps the current history entry instead of adding one: a step passed
+   * without being shown must leave no entry, or the browser's Back would land on it and pass it
+   * forward again, and the reader could never go back past it.
+   */
+  go: (stepId: string, replace?: boolean) => void;
+  close: (replace?: boolean) => void;
   register: (screen: string, controller: GuidePageController) => void;
   unregister: (screen: string, controller: GuidePageController) => void;
   announce: (message: string) => void;
@@ -133,7 +138,7 @@ export function GuideProvider({
   const opener = useRef<HTMLElement | null>(null);
 
   const patch = useCallback(
-    (values: Record<string, string | null>) =>
+    (values: Record<string, string | null>, replace = false) =>
       setSearchParams(
         (previous) => {
           const next = new URLSearchParams(previous);
@@ -143,7 +148,7 @@ export function GuideProvider({
           }
           return next;
         },
-        { replace: false },
+        { replace },
       ),
     [setSearchParams],
   );
@@ -160,13 +165,19 @@ export function GuideProvider({
     },
     [patch],
   );
-  const go = useCallback((step: string) => patch({ [STEP_PARAM]: step }), [patch]);
-  const close = useCallback(() => {
-    patch({ [GUIDE_PARAM]: null, [STEP_PARAM]: null, [ONLY_PARAM]: null });
-    const back = opener.current;
-    opener.current = null;
-    if (back?.isConnected) window.setTimeout(() => back.focus(), 0);
-  }, [patch]);
+  const go = useCallback(
+    (step: string, replace = false) => patch({ [STEP_PARAM]: step }, replace),
+    [patch],
+  );
+  const close = useCallback(
+    (replace = false) => {
+      patch({ [GUIDE_PARAM]: null, [STEP_PARAM]: null, [ONLY_PARAM]: null }, replace);
+      const back = opener.current;
+      opener.current = null;
+      if (back?.isConnected) window.setTimeout(() => back.focus(), 0);
+    },
+    [patch],
+  );
 
   const [announcement, setAnnouncement] = useState("");
   const announce = useCallback((message: string) => setAnnouncement(message), []);

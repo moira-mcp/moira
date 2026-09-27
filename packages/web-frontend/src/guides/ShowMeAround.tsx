@@ -25,6 +25,7 @@ import {
 } from "./progress";
 import { GUIDES, guideById, screenTourForPath } from "./registry";
 import type { GuideDefinition } from "./types";
+import { guideAnchor } from "./anchors";
 
 /** How far the reader is in a screen tour, as the menu words it. */
 type ScreenStatus =
@@ -51,7 +52,13 @@ export function ShowMeAround(): React.JSX.Element {
   const thisPage = screenTourForPath(pathname);
   const resume = progress?.resume;
   const resumeGuide = resume ? guideById(resume.guide) : undefined;
-  const resumeSteps = resumeGuide ? readerSteps(resumeGuide) : [];
+  // Numbered over the steps of the role the reader stopped in: they may own one flow and only read
+  // another, so what they have seen of either role does not say which one this was.
+  const resumeSteps = !resumeGuide
+    ? []
+    : resume?.owner === undefined
+      ? readerSteps(resumeGuide)
+      : visibleSteps(resumeGuide, resume.owner);
   const resumeIndex = resumeSteps.findIndex((step) => step.id === resume?.step);
 
   const statusOf = (guide: GuideDefinition): ScreenStatus => {
@@ -103,6 +110,7 @@ export function ShowMeAround(): React.JSX.Element {
                 aria-haspopup="dialog"
                 aria-expanded={menuOpen}
                 data-testid="show-me-around"
+                {...guideAnchor("home.show-me-around")}
                 // For tests and tools: the reader's guide progress has been read.
                 data-progress={loaded ? "loaded" : "loading"}
               >

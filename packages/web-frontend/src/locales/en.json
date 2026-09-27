@@ -3061,13 +3061,157 @@
       "finish": "Done",
       "close": "Close",
       "announce": "{{guide}}, step {{index}} of {{total}}: {{step}}",
-      "skippedNarrow": "One step was skipped: it points at a control that only a wider screen shows.",
-      "skippedHidden": "One step was skipped: what it explains is hidden on this page.",
+      "skippedNarrow_one": "One step was skipped: it points at a control that only a wider screen shows.",
+      "skippedNarrow_other": "{{count}} steps were skipped: they point at controls that only a wider screen shows.",
+      "skippedHidden_one": "One step was skipped: what it explains is not on this page right now.",
+      "skippedHidden_other": "{{count}} steps were skipped: what they explain is not on this page right now.",
       "notFound": "This part of the page is not shown right now, so there is nothing to highlight.",
       "saveFailed": "Couldn't save your guide progress. Try again.",
       "wholeTour": "Show the whole tour",
       "whatIsThisNew_one": "What is this? {{count}} step changed since you saw it",
       "whatIsThisNew_other": "What is this? {{count}} steps changed since you saw them"
+    },
+    "home": {
+      "title": "The home page",
+      "steps": {
+        "intro": {
+          "title": "Your agent does the work",
+          "body": "Moira is used through your AI agent: you describe a task, the agent runs a flow, and Moira gives it one step at a time and checks each result. This page shows where that work stands."
+        },
+        "how": {
+          "title": "How it works",
+          "body": "Three steps from zero to a checked result. When you know them, hide this panel; Settings → Preferences brings it back."
+        },
+        "connect": {
+          "title": "Connect your agent",
+          "body": "Add Moira to your AI client once. Pick your client here and follow its few steps; the rest happens in the chat with your agent."
+        },
+        "try": {
+          "title": "A first prompt to try",
+          "body": "Say this to your agent on any small task. It runs Example 1: Simple Steps, and you can watch every step here."
+        },
+        "recommended": {
+          "title": "Flows to start with",
+          "body": "Small example flows that show how Moira works, and ready flows for everyday tasks. Name one to your agent, or open it to see its steps."
+        },
+        "work": {
+          "title": "Your work",
+          "body": "The runs in progress, the ones that finished recently and the flows you use most. Open a run to see where it is, or copy a prompt that lets your agent continue it."
+        },
+        "show-me-around": {
+          "title": "Tours of every page",
+          "body": "Every page has a short tour like this one. Open this menu to start the tour of the page you are on, continue where you stopped, and see which tours are new to you."
+        }
+      }
+    },
+    "flows": {
+      "title": "The flow list",
+      "steps": {
+        "intro": {
+          "title": "Flows are made by your agent",
+          "body": "A flow is a process your agent follows step by step. You do not build one on this page: describe the task to your agent, and it runs a ready flow or creates a new one with the Workflow Management Flow, at a level you agree on — Simple, Standard or Complex. A flow built at the Simple level can later be taken through the fuller path: ask your agent again."
+        },
+        "recommended": {
+          "title": "Recommended flows",
+          "body": "Where to start: example flows that teach the basics, and ready flows for everyday tasks. Hide the panel once you know them; Settings → Preferences brings it back."
+        },
+        "all": {
+          "title": "Every flow you can use",
+          "body": "Your own flows, the ones shared with you and the public catalog. Open a flow to read its steps before you ask your agent to run it."
+        },
+        "scopes": {
+          "title": "Whose flows",
+          "body": "Narrow the list to your own flows, the ones shared with you, or the catalog."
+        },
+        "filters": {
+          "title": "Search and filters",
+          "body": "Find a flow by name, and filter by whether it is valid and by who can see it."
+        },
+        "level": {
+          "title": "The flow's level",
+          "body": "A flow built with the Workflow Management Flow shows the level it was built at: Simple, Standard or Complex — how thoroughly it was designed and reviewed. The level is apart from the flow's subject tags."
+        }
+      }
+    },
+    "runs": {
+      "title": "The runs list",
+      "steps": {
+        "intro": {
+          "title": "Every run of a flow",
+          "body": "Each execution listed here is a run: one pass of a flow on one task. Your agent starts it, and Moira records every step it takes."
+        },
+        "status": {
+          "title": "Filter by status",
+          "body": "Show only the runs that are Active, Locked, Completed, Failed or Waiting — or all of them."
+        },
+        "list": {
+          "title": "Open a run",
+          "body": "Open a run to see where it is, what each step asked and what the agent answered. Your first run appears here as soon as your agent starts one."
+        }
+      }
+    },
+    "notes": {
+      "title": "The notes page",
+      "steps": {
+        "intro": {
+          "title": "Notes your agents keep",
+          "body": "A note is a piece of text stored under a key, with tags to group it. Agents write and read notes as they work, so what one run learns the next one can use; you can read and edit them here."
+        },
+        "create": {
+          "title": "Write a note yourself",
+          "body": "Create a note with a unique key, tags and content. An agent finds it by that key."
+        },
+        "list": {
+          "title": "Your notes and their history",
+          "body": "Every change to a note is kept. Point at a note or move focus to it to show its actions: History lists the versions, lets you compare two of them and restore an earlier one."
+        },
+        "quota": {
+          "title": "Storage",
+          "body": "How much of your notes storage is used. Deleting notes you no longer need frees it."
+        }
+      }
+    },
+    "playbooks": {
+      "title": "The playbooks page",
+      "steps": {
+        "intro": {
+          "title": "Reusable instructions",
+          "body": "A playbook is a piece of behaviour text written once and used by many flows: a flow's step refers to it by name, and the run reads its current text at every step."
+        },
+        "linked": {
+          "title": "Someone else's playbook",
+          "body": "A flow's link opened this playbook. It belongs to another account, so it is shown read-only: you can refer to it from your flows, not change it."
+        },
+        "create": {
+          "title": "Write a playbook",
+          "body": "Create one with a name, a title and its text. Once it is saved, its editor also sets who can see it: private to you, or public, so other people's flows can refer to it."
+        },
+        "list": {
+          "title": "Your playbooks and their history",
+          "body": "Open a playbook to edit it. Every save is kept: point at a playbook or move focus to it to show its actions, where History lets you compare versions and restore an earlier one."
+        }
+      }
+    },
+    "artifacts": {
+      "title": "The artifacts page",
+      "steps": {
+        "intro": {
+          "title": "Pages to share",
+          "body": "An artifact is an HTML page — a report, a chart, a summary — published at its own link that you can share. Agents create them as they work, and you can create them here too."
+        },
+        "quota": {
+          "title": "Storage and count",
+          "body": "How much storage your artifacts use and how many you have out of your limit."
+        },
+        "create": {
+          "title": "Create an artifact",
+          "body": "Paste a complete HTML page and give it a name; it gets a link you can open and copy."
+        },
+        "list": {
+          "title": "Your artifacts",
+          "body": "Every artifact you or your agents made. Point at a card or move focus to it to show its actions: open the page, copy its link, edit it or delete it."
+        }
+      }
     },
     "run": {
       "title": "The run page",

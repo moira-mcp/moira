@@ -328,7 +328,12 @@ describe("Guide progress", () => {
   const key = "ui.guide_progress";
   const progress = {
     firstRun: "accepted",
-    resume: { guide: "settings", step: "apps", path: "/settings" },
+    resume: {
+      guide: "flow",
+      step: "edit-reader",
+      path: "/workflows/moira/quick-task",
+      owner: false,
+    },
     seen: { "settings.nav": 1, "settings.apps": 1 },
     finished: { run: true },
   };

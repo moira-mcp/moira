@@ -22,6 +22,8 @@ interface PageShellProps {
   children?: React.ReactNode;
   /** Additional class name for the root container */
   className?: string;
+  /** The guide anchor of the page's title, where its screen tour starts (in every state). */
+  guide?: { "data-guide": string };
 }
 
 export const PageShell: React.FC<PageShellProps> = ({
@@ -34,11 +36,12 @@ export const PageShell: React.FC<PageShellProps> = ({
   retryLabel,
   children,
   className,
+  guide,
 }) => {
   if (loading) {
     return (
       <div className={className || "h-full flex flex-col p-6 md:p-8"}>
-        <PageHeader title={title} description={description}>
+        <PageHeader title={title} description={description} guide={guide}>
           {actions}
         </PageHeader>
         <PageLoader />
@@ -49,7 +52,7 @@ export const PageShell: React.FC<PageShellProps> = ({
   if (error) {
     return (
       <div className={className || "h-full flex flex-col p-6 md:p-8"}>
-        <PageHeader title={title} description={description}>
+        <PageHeader title={title} description={description} guide={guide}>
           {actions}
         </PageHeader>
         <InlineError message={error} onRetry={onRetry} retryLabel={retryLabel} />
@@ -59,7 +62,7 @@ export const PageShell: React.FC<PageShellProps> = ({
 
   return (
     <div className={className || "h-full flex flex-col p-6 md:p-8"}>
-      <PageHeader title={title} description={description}>
+      <PageHeader title={title} description={description} guide={guide}>
         {actions}
       </PageHeader>
       {children}

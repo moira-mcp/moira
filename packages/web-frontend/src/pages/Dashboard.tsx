@@ -20,6 +20,7 @@ import { RecommendedFlows } from "../components/onboarding/RecommendedFlows";
 import { PageShell } from "../components/PageShell";
 import { WorkArea } from "../components/home/WorkArea";
 import { FirstRunPrompt } from "@/guides/FirstRunPrompt";
+import { guideAnchor } from "@/guides/anchors";
 
 const HOW_IT_WORKS = [
   { key: "connect", icon: Plug },
@@ -39,6 +40,7 @@ function HowItWorks(): React.JSX.Element | null {
       className="mb-8 rounded-2xl border bg-gradient-to-br from-primary/10 via-card to-card p-6 md:p-8"
       aria-labelledby="home-how-title"
       data-testid="home-how-it-works"
+      {...guideAnchor("home.how-it-works")}
     >
       <div className="flex items-start justify-between gap-3">
         <h2 id="home-how-title" className="text-2xl font-semibold tracking-tight">
@@ -67,7 +69,11 @@ function HowItWorks(): React.JSX.Element | null {
           </li>
         ))}
       </ol>
-      <div className="mt-5 rounded-xl border border-dashed bg-card/60 p-4" data-testid="home-try">
+      <div
+        className="mt-5 rounded-xl border border-dashed bg-card/60 p-4"
+        data-testid="home-try"
+        {...guideAnchor("home.try")}
+      >
         <p className="text-sm font-medium">{t("pages.dashboard.how.tryTitle")}</p>
         <p className="mt-1 font-mono text-sm text-primary">{t("pages.dashboard.how.tryPrompt")}</p>
       </div>
@@ -103,13 +109,16 @@ export const Dashboard: React.FC = () => {
   }, [loadDashboardData]);
 
   if (loading) {
-    return <PageShell title={t("pages.dashboard.title")} loading />;
+    return (
+      <PageShell title={t("pages.dashboard.title")} guide={guideAnchor("home.header")} loading />
+    );
   }
 
   if (error || !data) {
     return (
       <PageShell
         title={t("pages.dashboard.title")}
+        guide={guideAnchor("home.header")}
         error={error || t("pages.dashboard.failedToLoad")}
         onRetry={loadDashboardData}
         retryLabel={t("pages.dashboard.retry")}
@@ -118,7 +127,7 @@ export const Dashboard: React.FC = () => {
   }
 
   return (
-    <PageShell title={t("pages.dashboard.title")}>
+    <PageShell title={t("pages.dashboard.title")} guide={guideAnchor("home.header")}>
       <FirstRunPrompt />
       <HowItWorks />
 

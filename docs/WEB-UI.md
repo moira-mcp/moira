@@ -135,10 +135,14 @@ frontend/src/
 │   ├── AdminTokens.tsx          # Admin API token management (PageShell + DataListView)
 │   ├── AdminArtifacts.tsx       # Admin artifacts management (PageShell + DataListView)
 │   ├── Artifacts.tsx            # User artifacts management (ArtifactCard list/grid)
+│   ├── home.guide.ts / flows.guide.ts / runs.guide.ts  # Screen tours of home, the flow list and the runs list
+│   ├── notes.guide.ts / playbooks.guide.ts / artifacts.guide.ts  # Screen tours of notes, playbooks and artifacts
 │   ├── Login.tsx                # Login page
 │   ├── Register.tsx             # Registration page
 │   ├── RegistrationSuccess.tsx  # Post-registration email verification page
 │   └── OAuthAuthorize.tsx       # OAuth authorization
+├── routes/
+│   └── routeTable.ts            # Every route as data, with its guard and tour coverage (see "Routes")
 ├── guides/                      # The guide engine (see "Guides")
 │   ├── types.ts / registry.ts   # Guide declarations; the registry that lists every guide
 │   ├── anchors.ts               # `guideAnchor(...)`: the `data-guide` names a step points at
@@ -146,6 +150,7 @@ frontend/src/
 │   ├── GuideRunner.tsx          # The runner: page preparation, spotlight, card, keyboard (lazy-loaded)
 │   ├── GuideButton.tsx          # "What is this?", with the dot for changed steps
 │   ├── progress.ts              # The reader's progress (`ui.guide_progress`): the store and its rules
+│   ├── topics.ts                # What each screen tour must explain, and the step that does (`REQUIRED_TOPICS`)
 │   ├── FirstRunPrompt.tsx / ShowMeAround.tsx  # The home page's one-time prompt; the sidebar's guides menu
 │   └── snapshot.ts / revisions.snapshot.json  # The step revision snapshot (`npm run guides:snapshot`)
 ├── auth/
@@ -275,8 +280,14 @@ page it explains.
 
 | Guide               | Kind   | Declared in                         | Opened by                                          |
 | ------------------- | ------ | ----------------------------------- | -------------------------------------------------- |
-| `run`               | screen | `components/execution/run.guide.ts` | "What is this?" in the run page's diagram toolbar  |
+| `home`              | screen | `pages/home.guide.ts`               | "What is this?" in the home page header            |
+| `flows`             | screen | `pages/flows.guide.ts`              | "What is this?" in the flow list header            |
 | `flow`              | screen | `pages/flow.guide.ts`               | "What is this?" in the flow page's diagram toolbar |
+| `runs`              | screen | `pages/runs.guide.ts`               | "What is this?" in the runs list header            |
+| `run`               | screen | `components/execution/run.guide.ts` | "What is this?" in the run page's diagram toolbar  |
+| `notes`             | screen | `pages/notes.guide.ts`              | "What is this?" in the notes page header           |
+| `playbooks`         | screen | `pages/playbooks.guide.ts`          | "What is this?" in the playbooks page header       |
+| `artifacts`         | screen | `pages/artifacts.guide.ts`          | "What is this?" in the artifacts page header       |
 | `settings`          | screen | `pages/settings/settings.guide.ts`  | "What is this?" in the Settings page header        |
 | `settings-github`   | task   | `pages/settings/settings.guide.ts`  | **Setup guide** in the GitHub & Codespaces section |
 | `settings-telegram` | task   | `pages/settings/settings.guide.ts`  | **Telegram setup** in the Notifications section    |
@@ -289,15 +300,36 @@ that screen has. Each `GuideStep` has:
 - an `anchor`: one name, or one name per view where the views draw the same thing differently;
 - a `kind` (`look` or `do`) and a `revision`, raised when the control it explains or the meaning of
   its copy changes;
-- optionally `optional` (skipped when its element is absent), `views` (the views that draw it, the
+- optionally `optional` (skipped when its element is absent), `absentWhen` (on an optional step:
+  `panelHidden`, a beginner panel, or `queryMissing`, a query parameter — while the panel is hidden
+  or the parameter missing the element cannot be on the page, so the step is skipped at once),
+  `views` (the views that draw it, the
   first being where the step goes from any other), `wide` (drawn only at `md` and wider), `roles`
   (`owner`, `reader` or `any`) and `prepare` (a panel tab, a section, the current block, a recorded
   route, or the app sidebar).
 
-`guides/registry.ts` lists every guide explicitly (`GUIDES`), so checks can enumerate them without
-mounting a page. `screenTourForPath` finds the screen tour of a route: `PageHeader` renders "What is
-this?" (`GuideButton`, `guide-open`) on every route that has one, and the flow and run pages render
-it in their own diagram toolbars.
+`guides/registry.ts` lists every guide explicitly (`GUIDES`), in the order the "Show me around"
+menu lists the screens, so checks can enumerate them without mounting a page. `screenTourForPath`
+finds the screen tour of a route, matching the pathname without the app's base path
+(`APP_PREFIX`, see `appPathname`): `PageHeader` renders "What is this?" (`GuideButton`,
+`guide-open`) on every route that has one, and the flow and run pages render it in their own diagram
+toolbars. `PageShell` and `PageHeader` take a `guide` prop, which puts an anchor on the page title
+in every state (loading, error, loaded), so a tour's first step resolves before the page's data.
+
+**The tours of home, the flow list, runs, notes, playbooks and artifacts** explain purpose and main controls; detail stays in hints. Steps on
+hideable beginner panels, on the quota (shown once storage is read), on a flow's level badge (only
+flows built with the Workflow Management Flow carry a level) and on the read-only view of another
+account's playbook (open only from a flow's link) are `optional`; the panel steps and the
+read-only view declare their absence (`absentWhen`), so a reader who hid the panels, or opened the
+page without a link, passes them at once. Card actions that show only when the
+card is pointed at or focused (a note's or playbook's history, compare and restore; an artifact's
+open, copy link, edit and delete) are never anchors: the list step's copy says where they are. The home tour ends on "Show me around" in the sidebar (`prepare.sidebar`), which
+on a phone opens the sidebar sheet.
+
+**Required topics** (`guides/topics.ts`, `REQUIRED_TOPICS`) name, per screen, what its tour must
+explain and the step that does: for example the flow list's `create-by-agent` is its `intro` step,
+which says a flow is created by the agent at an agreed level. The flow page, the run page and
+Settings keep their walkthroughs' steps and have no topic list.
 
 **Anchors.** An element a step explains carries `data-guide` with one or more space-separated names,
 written as `guideAnchor("screen.name")` so the name stays a literal a static check finds. Names
@@ -321,14 +353,21 @@ filters the steps by role), and the operations that prepare it — `setView`, `o
 - waits until the element exists and has stopped moving (100 ms ticks, up to 3 s), scrolls it into
   view and, inside a diagram, asks the camera to reveal it (`requestReveal`, `diagram/reveal.ts`);
   then follows it as the page scrolls or the camera moves;
-- skips an optional step whose element is still absent when the wait ends, and a wide-only step on
-  a narrow screen, with a one-line note on the next card; a wide-only step is skipped before it is
-  shown or announced. A step is skipped in the direction the reader last moved, so Back crosses it.
+- skips an optional step whose element is still absent when the wait ends, a step its
+  `absentWhen` declares absent, and a wide-only step on a narrow screen, with a note on the next
+  card that counts the steps skipped on the way to it ("4 steps were skipped …"); the note belongs
+  to that card, so the same step reached another way (the browser's history, a link) has none. None
+  is ever shown, announced or recorded: declared-absent and wide-only steps are skipped at once,
+  and any other optional step waits without a card until its element is found (or until the page
+  has switched to a view that draws it). A skipped step leaves no browser history entry, so the
+  browser's Back crosses it. In a run of only the changed steps, a step that cannot be shown is
+  recorded at its revision, so "What is this?" does not keep offering it. A step is skipped in the direction the reader last moved, so Back crosses it.
   A required step whose element is absent shows its card with a "not found" note;
 - dims everything but the element with a `pointer-events: none` layer (`guide-spotlight`, colour
   `--guide-dim`) and a ring, and never writes to the element;
-- records the step as seen at its revision and as the place to resume (the guide, the step, and the
-  page's path and query without the guide's own parameters). Walking a guide to its end finishes
+- records the step as seen at its revision and as the place to resume (the guide, the step, the
+  page's path and query without the guide's own parameters, and — on a screen whose page reports
+  it — whether the reader owns what the page shows). Walking a guide to its end finishes
   it and clears the resume point; closing it keeps it. A run of only the changed steps records
   them as seen and nothing else: it neither moves the resume point nor finishes the guide.
 
@@ -351,7 +390,10 @@ region (`guide-announcer`). Under reduced motion (`usePrefersReducedMotion`) not
 `json`, default `{}`), seeded beside `ui.hidden_panels`:
 
 - `firstRun`: the answer to the first-run prompt, `accepted` or `declined`;
-- `resume`: `{guide, step, path}`;
+- `resume`: `{guide, step, path}`, plus `owner` (`true` or `false`) when the page reported the
+  reader's role; the menu numbers "Continue" over that role's steps, so a reader who owns one flow
+  and reads another is counted in the role they stopped in. A non-boolean `owner` is ignored on
+  read;
 - `seen`: `<guide>.<step>` → the step's revision when the reader last saw it;
 - `finished`: `<guide>` → `true` for a guide walked to its end. Finishing also records every step
   the guide shows this reader at its current revision, the skipped ones included; another role's
@@ -397,7 +439,14 @@ last card offers the whole tour (`guide-whole-tour`). Nothing opens by itself.
 `guides.firstRun.*`. Every step needs both
 English and Russian, and guide components use no `defaultValue` fallbacks.
 
-**Checks** (`tests/unit/web-frontend/guides-registry.test.ts` and `locale-parity.test.ts`):
+**Checks** (`tests/unit/web-frontend/guides-registry.test.ts`, `guides-coverage.test.ts` and
+`locale-parity.test.ts`):
+
+- every route in the route table (see "Routes") is toured by its screen's guide, exempted with a
+  reason, or deferred with a reason (the admin area); every guide names only routes of its screen,
+  and has steps;
+- every required topic of a screen is a step of that screen's tour whose anchor is written in the
+  page;
 
 - every anchor a step names is written by a `guideAnchor` literal, and every literal is named by a
   step;
@@ -410,40 +459,71 @@ English and Russian, and guide components use no `defaultValue` fallbacks.
 
 ## Routes
 
-Application routes:
+Every route is data in `src/routes/routeTable.ts`, and `App.tsx` renders its routes from that table:
+`STANDALONE_ROUTES` outside the app layout (under the base path), `MAIN_ROUTES` inside
+`MainAppLayout`, `ADMIN_ROUTES` inside `AdminLayout`, and `ROOT_REDIRECT`, which sends the site root
+`/` to the home page when the app lives under a base path. `App.tsx` maps each route id to its page
+(`STANDALONE_PAGES`, `MAIN_PAGES`, `ADMIN_PAGES`); a route marked `signedIn`, and every main and
+admin route, renders behind `ProtectedRoute`, and an admin route with a `capability` requires both
+the administrator role and that deployment capability.
 
-```
-/ (protected)                      - Dashboard (home page)
-/workflows (protected)             - Workflow explorer + viewer
-/workflows/:id (protected)         - Flow page (FlowPage.tsx); also /workflows/:handle/:slug
-/executions (protected)            - Execution history
-/playbooks (protected)             - Playbooks (Playbooks.tsx)
-/artifacts (protected)             - User artifacts management
-/settings (protected)              - User settings (single scrollable page with all sections)
-/admin (protected)                 - Admin dashboard with merged analytics
-/admin/users (protected)           - User management (PageShell + DataListView + UserCard)
-/admin/users/:id (protected)       - User detail and security management
-/admin/executions (protected)      - Admin executions monitoring (PageShell + DataListView + ExecutionCard)
-/admin/executions/:id (protected)  - Admin run page (same component as /executions/:id)
-/admin/audit-log (protected)       - Audit log viewer (PageShell + AuditLogCard + total-based pagination)
-/admin/settings (protected)        - Unified settings (Definitions, Values, Maintenance, Codespaces tabs)
-/admin/admin-settings (protected)  - Redirects to /admin/settings
-/admin/analytics (protected)       - Redirects to /admin
-/admin/analytics/operational (protected) - Operational metrics dashboard (OperationalDashboard.tsx)
-/admin/deleted-workflows (protected) - Deleted workflows management (PageShell + DataListView + DeletedWorkflowCard)
-/admin/workflows (protected)         - All workflows browser with filters (PageShell + FilterBar + DataListView + AdminWorkflowCard)
-/admin/notes (protected)           - Notes management (persistent agent memory)
-/admin/tokens (protected)          - Admin API token management (PageShell + DataListView + TokenCard)
-/admin/artifacts (protected)       - Admin artifacts management (PageShell + DataListView + ArtifactCard)
-/admin/monitoring-test (protected) - Monitoring test page for validating monitoring pipeline
-/login (public)                    - Login page
-/register (public)                 - Registration page
-/registration-success (public)     - Post-registration email verification instructions
-/force-password-reset (protected)  - Forced password reset page
-/oauth/authorize (public)          - OAuth authorization
-```
+Each entry also says how a reader has it explained (`coverage`): `screen` names the screen tour, and
+`exempt` or `deferred` gives the reason it has none. The route-coverage check (see "Guides") holds
+the table and the guides to each other, so a new route cannot land without that decision.
 
-Protected routes require authentication (ProtectedRoute wrapper).
+Standalone routes:
+
+| Path                    | Guard     | Coverage                                                                      |
+| ----------------------- | --------- | ----------------------------------------------------------------------------- |
+| `/login`                |           | exempt: a sign-in, registration or account-recovery page, seen before the app |
+| `/register`             |           | exempt: a sign-in, registration or account-recovery page, seen before the app |
+| `/registration-success` |           | exempt: a sign-in, registration or account-recovery page, seen before the app |
+| `/forgot-password`      |           | exempt: a sign-in, registration or account-recovery page, seen before the app |
+| `/reset-password`       |           | exempt: a sign-in, registration or account-recovery page, seen before the app |
+| `/force-password-reset` | signed in | exempt: a one-time password change forced before the app opens                |
+| `/verify-email`         |           | exempt: a sign-in, registration or account-recovery page, seen before the app |
+| `/oauth/authorize`      |           | exempt: an OAuth approval screen an MCP client opens, not a page of the app   |
+| `/oauth/consent`        |           | exempt: an OAuth approval screen an MCP client opens, not a page of the app   |
+| `/test-error`           |           | exempt: a page that throws on purpose, for the error-boundary tests           |
+| `/invites/:token`       |           | exempt: a one-time invitation page, opened from an email                      |
+
+Main routes (signed in):
+
+| Path                       | Guard | Coverage         |
+| -------------------------- | ----- | ---------------- |
+| `/`                        |       | tour `home`      |
+| `/workflows`               |       | tour `flows`     |
+| `/workflows/:handle/:slug` |       | tour `flow`      |
+| `/workflows/:id`           |       | tour `flow`      |
+| `/executions`              |       | tour `runs`      |
+| `/executions/:id`          |       | tour `run`       |
+| `/notes`                   |       | tour `notes`     |
+| `/playbooks`               |       | tour `playbooks` |
+| `/artifacts`               |       | tour `artifacts` |
+| `/settings`                |       | tour `settings`  |
+
+Admin routes (administrators; the admin tour is postponed and tracked separately):
+
+| Path                        | Guard                              | Coverage                                           |
+| --------------------------- | ---------------------------------- | -------------------------------------------------- |
+| `/admin`                    |                                    | deferred: admin tour postponed; tracked separately |
+| `/admin/users`              | capability `userManagement`        | deferred: admin tour postponed; tracked separately |
+| `/admin/users/:id`          | capability `userManagement`        | deferred: admin tour postponed; tracked separately |
+| `/admin/executions`         | capability `multiUserAdmin`        | deferred: admin tour postponed; tracked separately |
+| `/admin/executions/:id`     | capability `multiUserAdmin`        | deferred: admin tour postponed; tracked separately |
+| `/admin/workflows`          | capability `multiUserAdmin`        | deferred: admin tour postponed; tracked separately |
+| `/admin/artifacts`          | capability `multiUserAdmin`        | deferred: admin tour postponed; tracked separately |
+| `/admin/artifacts/reported` | capability `multiUserAdmin`        | deferred: admin tour postponed; tracked separately |
+| `/admin/audit-log`          |                                    | deferred: admin tour postponed; tracked separately |
+| `/admin/settings`           |                                    | deferred: admin tour postponed; tracked separately |
+| `/admin/global-settings`    |                                    | deferred: admin tour postponed; tracked separately |
+| `/admin/deleted-workflows`  | capability `multiUserAdmin`        | deferred: admin tour postponed; tracked separately |
+| `/admin/monitoring-test`    | capability `operationsDevelopment` | deferred: admin tour postponed; tracked separately |
+| `/admin/tokens`             |                                    | deferred: admin tour postponed; tracked separately |
+| `/admin/operational`        | capability `adminOperations`       | deferred: admin tour postponed; tracked separately |
+| `/admin/analytics`          |                                    | exempt: a redirect to the admin dashboard          |
+
+`/admin/analytics` is a redirect to `/admin`.
 
 Sidebar navigation:
 

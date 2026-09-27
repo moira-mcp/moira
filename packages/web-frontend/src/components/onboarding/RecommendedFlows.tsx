@@ -19,6 +19,7 @@ import { useStoredFlag } from "../diagram/useStoredFlag";
 import { recommendedFlows, SYSTEM_HANDLE, type RecommendedFlow } from "./recommended";
 import { HidePanelButton } from "./HidePanelButton";
 import { usePanelVisible } from "./beginnerPanels";
+import { guideAnchor } from "@/guides/anchors";
 
 /**
  * One lookup per set of slugs for the life of the page. The section can mount more than once in a
@@ -180,6 +181,7 @@ export function RecommendedFlows({
       aria-labelledby="recommended-flows-title"
       data-testid="recommended-flows"
       data-state={open ? "open" : "closed"}
+      {...(compact ? guideAnchor("home.recommended") : guideAnchor("flows.recommended"))}
     >
       {/* The header row carries only the title and its actions; the note below it spans the whole
           card, so on a phone the actions never squeeze the text into a narrow column. */}

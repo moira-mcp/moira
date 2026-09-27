@@ -4,8 +4,15 @@
  */
 
 import { matchPath } from "react-router-dom";
+import { APP_PREFIX } from "../constants/routes";
 import { runGuide } from "../components/execution/run.guide";
+import { artifactsGuide } from "../pages/artifacts.guide";
 import { flowGuide } from "../pages/flow.guide";
+import { flowsGuide } from "../pages/flows.guide";
+import { homeGuide } from "../pages/home.guide";
+import { notesGuide } from "../pages/notes.guide";
+import { playbooksGuide } from "../pages/playbooks.guide";
+import { runsGuide } from "../pages/runs.guide";
 import {
   githubSetupGuide,
   settingsGuide,
@@ -13,9 +20,16 @@ import {
 } from "../pages/settings/settings.guide";
 import type { GuideDefinition } from "./types";
 
+/** In the order "Show me around" lists the screens: the way a reader meets them. */
 export const GUIDES: readonly GuideDefinition[] = [
-  runGuide,
+  homeGuide,
+  flowsGuide,
   flowGuide,
+  runsGuide,
+  runGuide,
+  notesGuide,
+  playbooksGuide,
+  artifactsGuide,
   settingsGuide,
   githubSetupGuide,
   telegramSetupGuide,
@@ -25,11 +39,22 @@ export function guideById(id: string | null | undefined): GuideDefinition | unde
   return id ? GUIDES.find((guide) => guide.id === id) : undefined;
 }
 
+/** A pathname without the app's base path, the form guides' route patterns are written in. */
+export function appPathname(pathname: string, prefix: string = APP_PREFIX): string {
+  if (!prefix) return pathname;
+  if (pathname === prefix) return "/";
+  return pathname.startsWith(`${prefix}/`) ? pathname.slice(prefix.length) : pathname;
+}
+
 /** The screen tour of the route a pathname is on, if the screen has one. */
-export function screenTourForPath(pathname: string): GuideDefinition | undefined {
+export function screenTourForPath(
+  pathname: string,
+  prefix: string = APP_PREFIX,
+): GuideDefinition | undefined {
+  const path = appPathname(pathname, prefix);
   return GUIDES.find(
     (guide) =>
       guide.kind === "screen" &&
-      guide.routes.some((pattern) => matchPath({ path: pattern, end: true }, pathname)),
+      guide.routes.some((pattern) => matchPath({ path: pattern, end: true }, path)),
   );
 }

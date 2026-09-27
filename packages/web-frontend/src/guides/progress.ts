@@ -19,6 +19,11 @@ export interface ResumePoint {
   step: string;
   /** Path and query of the page, without the guide's own parameters. */
   path: string;
+  /**
+   * Whether the reader owned what the screen showed, on a screen whose steps differ by it: the
+   * resume line counts the steps of that role, wherever the reader is when they read it.
+   */
+  owner?: boolean;
 }
 
 export interface GuideProgress {
@@ -56,6 +61,9 @@ export function parseProgress(value: unknown): GuideProgress {
     typeof resume.path !== "string"
   ) {
     delete progress.resume;
+  } else if (resume.owner !== undefined && typeof resume.owner !== "boolean") {
+    const { owner: _owner, ...rest } = resume;
+    progress.resume = rest;
   }
   return progress;
 }
@@ -86,10 +94,17 @@ const seenKey = (guide: string, step: string) => `${guide}.${step}`;
 
 /**
  * A step was shown: its revision is seen, and — in a walk through the tour, not a run of just its
- * changed steps — it is where the reader is.
+ * changed steps — it is where the reader is, in the role the page gave them (`owner`, when the
+ * page reports one).
  */
 export const recordStep =
-  (guide: string, step: GuideStep, path: string, moveResume = true): ProgressChange =>
+  (
+    guide: string,
+    step: GuideStep,
+    path: string,
+    moveResume = true,
+    owner?: boolean,
+  ): ProgressChange =>
   (progress) => ({
     ...progress,
     seen: {
@@ -99,7 +114,9 @@ export const recordStep =
         step.revision,
       ),
     },
-    ...(moveResume ? { resume: { guide, step: step.id, path } } : {}),
+    ...(moveResume
+      ? { resume: { guide, step: step.id, path, ...(owner === undefined ? {} : { owner }) } }
+      : {}),
   });
 
 /**

@@ -26,6 +26,7 @@ import { Badge } from "../ui/badge";
 import { promptKey } from "../onboarding/recommended";
 import { usePanelVisible } from "../onboarding/beginnerPanels";
 import { humanizeVariable } from "../diagram/VariableText";
+import { guideAnchor } from "@/guides/anchors";
 
 async function copy(text: string, done: string): Promise<void> {
   try {
@@ -213,7 +214,12 @@ export function WorkArea({ summary }: { summary: WorkSummary }): React.JSX.Eleme
   const hasRuns =
     summary.activeRuns.length > 0 || summary.recentRuns.length > 0 || summary.topFlows.length > 0;
   return (
-    <section className="mt-2" aria-labelledby="work-title" data-testid="work-area">
+    <section
+      className="mt-2"
+      aria-labelledby="work-title"
+      data-testid="work-area"
+      {...guideAnchor("home.work")}
+    >
       <h2 id="work-title" className="mb-4 text-lg font-semibold tracking-tight">
         {t("pages.dashboard.work.title")}
       </h2>

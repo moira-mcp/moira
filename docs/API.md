@@ -288,7 +288,7 @@ Behavior:
 - Enforces the manifest's declared primitive type and then its optional complete JSON Schema; editable JSON text is parsed before validation, and structured input must round-trip through JSON without omitted or transformed values
 - Holds a built-in `json` setting to its declared JSON Schema the same way; a value outside it is listed in `refused` and nothing is stored. The `ui` category has two:
   - `ui.hidden_panels`, the list of beginner panels the user has hidden;
-  - `ui.guide_progress`, an object for the interface's guides: `firstRun` (`accepted` or `declined`), `resume` (`{guide, step, path}`), `seen` (`<guide>.<step>` → revision), and `finished` (`<guide>` → `true`). Its schema checks those fields and accepts any other, so a later build can add its own.
+  - `ui.guide_progress`, an object for the interface's guides: `firstRun` (`accepted` or `declined`), `resume` (`{guide, step, path}`, with an optional boolean `owner`), `seen` (`<guide>.<step>` → revision), and `finished` (`<guide>` → `true`). Its schema checks those fields and accepts any other, so a later build can add its own.
 - Registers the Telegram webhook only when `telegram.bot_token` is present in `saved`, never when that key was refused
 
 Authentication: Required

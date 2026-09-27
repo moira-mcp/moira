@@ -27,6 +27,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { guideAnchor } from "@/guides/anchors";
 
 /** Whose flows the list shows; each is one server query. */
 const SCOPES = ["all", "mine", "shared", "catalog"] as const;
@@ -149,7 +150,7 @@ export const WorkflowExplorer: React.FC<WorkflowExplorerProps> = ({
   return (
     <div className="flex flex-col flex-1 min-h-0" data-testid="workflow-explorer">
       <Tabs value={access} onValueChange={(value) => setAccess(value as Scope)} className="mb-3">
-        <TabsList data-testid="workflow-scopes">
+        <TabsList data-testid="workflow-scopes" {...guideAnchor("flows.scopes")}>
           {SCOPES.map((scope) => (
             <TabsTrigger
               key={scope}
@@ -168,6 +169,7 @@ export const WorkflowExplorer: React.FC<WorkflowExplorerProps> = ({
         searchPlaceholder={t("components.searchFilters.searchPlaceholder")}
         onReset={handleReset}
         foldFilters={{ activeCount: activeFilters }}
+        guide={guideAnchor("flows.filters")}
         filters={
           <>
             <LabeledFilter label={t("common.filters.status")}>

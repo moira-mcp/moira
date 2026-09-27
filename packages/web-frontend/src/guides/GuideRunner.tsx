@@ -31,6 +31,7 @@ import { ChevronLeft, ChevronRight, CircleHelp, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useOptionalSidebar } from "@/components/ui/sidebar";
+import { useBeginnerPanels } from "@/components/onboarding/beginnerPanels";
 import { requestReveal } from "../components/diagram/reveal";
 import { findAnchor } from "./anchors";
 import { usePrefersReducedMotion } from "./usePrefersReducedMotion";
@@ -105,6 +106,22 @@ function isTyping(target: EventTarget | null): boolean {
   );
 }
 
+/** Why a step was passed without being shown. */
+type SkipReason = "hidden" | "narrow";
+/** The steps passed since the reader last moved, by reason, for the note on the next card. */
+type SkipCounts = Partial<Record<SkipReason, number>>;
+/**
+ * The note belongs to the card the skips led to: reached any other way — the browser's history, a
+ * link — that card has nothing skipped on its way, and the note is not shown.
+ */
+type SkipNote = { forStep: string; counts: SkipCounts };
+
+/** One more step passed, from `from` towards `to`; skips in a row add up. */
+function addSkip(note: SkipNote | null, reason: SkipReason, from: string, to: string): SkipNote {
+  const counts = note && note.forStep === from ? note.counts : {};
+  return { forStep: to, counts: { ...counts, [reason]: (counts[reason] ?? 0) + 1 } };
+}
+
 /** Save a change to the reader's progress; a save that fails is undone by the store and reported. */
 function saveProgress(change: ProgressChange): void {
   changeProgress(change).catch(() => toast.error(i18n.t("guides.ui.saveFailed")));
@@ -121,8 +138,10 @@ export default function GuideRunner(): React.JSX.Element | null {
   const step = index >= 0 ? steps[index] : undefined;
   const anchor = step ? anchorIn(step, controller?.view) : null;
 
-  const [note, setNote] = useState<string | null>(null);
+  const [note, setNote] = useState<SkipNote | null>(null);
   const [target, setTarget] = useState<HTMLElement | null>(null);
+  /** The step (and anchor) whose element was last found; an optional step waits for it. */
+  const [resolvedFor, setResolvedFor] = useState<string | null>(null);
   const [box, setBox] = useState<Box | null>(null);
   const [missing, setMissing] = useState(false);
   const [sheetHeight, setSheetHeight] = useState(0);
@@ -131,16 +150,22 @@ export default function GuideRunner(): React.JSX.Element | null {
   // crosses it instead of being sent forward again.
   const direction = useRef<"forward" | "back">("forward");
   const advance = useCallback(
-    (skipped?: string) => {
+    (skipped?: SkipReason) => {
       direction.current = "forward";
-      setNote(skipped ?? null);
+      const current = steps[index];
       const following = steps[index + 1];
-      if (following) go(following.id);
+      setNote((previous) =>
+        skipped && current && following
+          ? addSkip(previous, skipped, current.id, following.id)
+          : null,
+      );
+      // A step passed without being shown leaves no history entry (see `go`).
+      if (following) go(following.id, !!skipped);
       else {
         // Walked to the end: the guide is finished, with nothing left to resume. A run of only its
         // changed steps finishes nothing: the rest of the tour was not walked.
         if (guide && !partial) saveProgress(finishGuide(guide, steps));
-        close();
+        close(!!skipped);
       }
     },
     [steps, index, go, close, guide, partial],
@@ -152,24 +177,48 @@ export default function GuideRunner(): React.JSX.Element | null {
     if (previous) go(previous.id);
   }, [steps, index, go]);
   // Pass the current step, with a note on the card that follows. Going back from the first step
-  // there is nothing behind, so the guide returns forward.
+  // there is nothing behind, so the guide returns forward. In a run of only the changed steps, a
+  // step passed this way counts as offered: it is recorded at its revision, or "What is this?"
+  // would keep offering a change the reader's page cannot show.
   const skip = useCallback(
-    (reason: string) => {
+    (reason: SkipReason) => {
+      if (partial && guide && step) saveProgress(recordStep(guide.id, step, "", false));
       const previous = steps[index - 1];
       if (direction.current === "back" && previous) {
-        setNote(reason);
-        go(previous.id);
+        setNote((current) => (step ? addSkip(current, reason, step.id, previous.id) : current));
+        go(previous.id, true);
       } else advance(reason);
     },
-    [steps, index, go, advance],
+    [steps, index, go, advance, partial, guide, step],
   );
 
-  // A step whose element only a wide screen draws is skipped on a narrow one, with a note. It is
-  // never shown or announced on the way: a card flashed for it could take the next click.
-  const skipping = !!step?.wide && isMobile;
+  // A step is skipped at once, with a note, when its element cannot be on the page: one only a wide
+  // screen draws, on a narrow one; or one the step declares absent — in a beginner panel the reader
+  // hid, or in a view the page opens only from a link. It is never shown or announced on the way: a
+  // card flashed for it could take the next click. Until the hidden panels are known, such a step
+  // waits for its element like any optional step.
+  const panels = useBeginnerPanels();
+  const absentWhen = step?.absentWhen;
+  const knownAbsent =
+    !!absentWhen &&
+    ((!!absentWhen.panelHidden && panels.loaded && panels.isHidden(absentWhen.panelHidden)) ||
+      (!!absentWhen.queryMissing &&
+        !new URLSearchParams(location.search).has(absentWhen.queryMissing)));
+  const skipReason: SkipReason | null =
+    step?.wide && isMobile ? "narrow" : knownAbsent ? "hidden" : null;
+  const skipping = skipReason !== null;
+  // An optional step explains something that may be absent (a hidden panel, a view opened only by
+  // a link). Until its element is found it is not shown, announced or recorded: a card for it would
+  // tell the reader about something that is not there, and it may be skipped a moment later.
+  const stepKey = step ? `${step.id}|${anchor ?? ""}` : null;
+  // A step whose open view does not draw it waits too, while the page switches to a view that does.
+  const switchesView = anchor === null && !!step && !!fallbackView(step) && !!controller?.setView;
+  const resolving =
+    !!step?.optional && (anchor !== null || switchesView) && resolvedFor !== stepKey;
+  const hidden = skipping || resolving;
   useEffect(() => {
-    if (skipping) skip(t("guides.ui.skippedNarrow"));
-  }, [skipping, skip, t]);
+    if (skipReason) skip(skipReason);
+  }, [skipReason, skip]);
 
   // Bring the page into the state the step needs: a view that draws it, the panel, the section.
   useEffect(() => {
@@ -230,7 +279,7 @@ export default function GuideRunner(): React.JSX.Element | null {
       if (!found) {
         if (tries > RESOLVE_TICKS) {
           window.clearInterval(timer);
-          if (step.optional) skip(t("guides.ui.skippedHidden"));
+          if (step.optional) skip("hidden");
           else setMissing(true);
         }
         return;
@@ -250,6 +299,7 @@ export default function GuideRunner(): React.JSX.Element | null {
       // A diagram card lives in a transformed viewport that scrolling cannot reach.
       requestReveal(found);
       setTarget(found);
+      setResolvedFor(`${step.id}|${anchor}`);
     }, TICK_MS);
     return () => window.clearInterval(timer);
   }, [step, anchor, skipping, isMobile, reduceMotion, skip, t]);
@@ -279,18 +329,18 @@ export default function GuideRunner(): React.JSX.Element | null {
     return rest ? `${location.pathname}?${rest}` : location.pathname;
   }, [location.pathname, location.search]);
   useEffect(() => {
-    if (!guide || !step || skipping) return;
-    saveProgress(recordStep(guide.id, step, pagePath, !partial));
+    if (!guide || !step || hidden) return;
+    saveProgress(recordStep(guide.id, step, pagePath, !partial, controller?.owner));
     // Recorded once per step shown, and again when a run of the changed steps becomes the whole
     // tour on the same step (only then does it become the place to resume); the page's path at that
     // moment is the one to come back to.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [guide?.id, step?.id, skipping, partial]);
+  }, [guide?.id, step?.id, hidden, partial]);
 
   // Announce each step once.
   const titleKey = guide && step ? `guides.${guide.id}.steps.${step.id}.title` : null;
   useEffect(() => {
-    if (!guide || !titleKey || skipping) return;
+    if (!guide || !titleKey || hidden) return;
     announce(
       t("guides.ui.announce", {
         guide: t(`guides.${guide.id}.title`),
@@ -299,7 +349,7 @@ export default function GuideRunner(): React.JSX.Element | null {
         total: steps.length,
       }),
     );
-  }, [guide, titleKey, skipping, index, steps.length, announce, t]);
+  }, [guide, titleKey, hidden, index, steps.length, announce, t]);
 
   // Arrows and Enter move, Escape closes; never while the reader types. One listener for the life of
   // the guide, reading the current moves: re-attaching it on every step would leave moments with no
@@ -352,7 +402,7 @@ export default function GuideRunner(): React.JSX.Element | null {
     [],
   );
 
-  if (!guide || !step || skipping) return null;
+  if (!guide || !step || hidden) return null;
 
   const tall = !!box && box.height > window.innerHeight * TALL_SHARE;
   const container = modalOf(target) ?? document.body;
@@ -371,7 +421,7 @@ export default function GuideRunner(): React.JSX.Element | null {
       anchor={anchor}
       index={index}
       total={steps.length}
-      note={note}
+      note={note && note.forStep === step.id ? note.counts : null}
       missing={missing}
       onBack={back}
       onNext={() => advance()}
@@ -454,7 +504,7 @@ function GuideCard({
   anchor: string | null;
   index: number;
   total: number;
-  note: string | null;
+  note: SkipCounts | null;
   missing: boolean;
   onBack: () => void;
   onNext: () => void;
@@ -470,8 +520,12 @@ function GuideCard({
   const cardRef = useRef<HTMLDivElement>(null);
   const reduceMotion = usePrefersReducedMotion();
 
+  // The height without the bottom padding, which only the bottom-docked sheet has: the edge is
+  // chosen from this height, so it must not change with the edge, or the sheet would flip between
+  // edges on every render.
   useLayoutEffect(() => {
-    if (cardRef.current) onHeight(cardRef.current.offsetHeight);
+    const card = cardRef.current;
+    if (card) onHeight(card.offsetHeight - parseFloat(getComputedStyle(card).paddingBottom || "0"));
   });
 
   // Focus goes into the card when the guide opens and stays with it from step to step.
@@ -518,7 +572,14 @@ function GuideCard({
           </p>
           {(note || missing) && (
             <p className="mt-2 text-xs text-muted-foreground" data-testid="guide-note">
-              {missing ? t("guides.ui.notFound") : note}
+              {missing
+                ? t("guides.ui.notFound")
+                : [
+                    note?.hidden ? t("guides.ui.skippedHidden", { count: note.hidden }) : null,
+                    note?.narrow ? t("guides.ui.skippedNarrow", { count: note.narrow }) : null,
+                  ]
+                    .filter(Boolean)
+                    .join(" ")}
             </p>
           )}
         </div>

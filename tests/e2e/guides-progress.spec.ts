@@ -129,9 +129,12 @@ test.describe("Guide progress", () => {
     await login(page, email, PASSWORD);
     await clickAndSave(page, "first-run-accept");
     await expect(page.getByTestId("show-me-around-menu")).toBeInViewport();
-    // Home has no screen tour yet; the menu says so rather than offering nothing.
-    await expect(page.getByTestId("show-me-around-no-tour")).toBeVisible();
     expect((await storedProgress(page)).firstRun).toBe("accepted");
+    // The menu offers the tour of the page the reader is on, and starts it.
+    const thisPage = page.getByTestId("show-me-around-this-page");
+    await expect(thisPage).toHaveText("This page: The home page");
+    await thisPage.click();
+    await expect(page.getByTestId("guide-card")).toHaveAttribute("data-guide-id", "home");
   });
 
   test("closing keeps the place; the menu resumes it after a reload and from another browser", async ({
@@ -270,6 +273,6 @@ test.describe("Guide progress", () => {
     );
     const menu = page.getByTestId("show-me-around-menu");
     await expect(menu).toBeInViewport();
-    await expect(menu.getByTestId("show-me-around-no-tour")).toBeVisible();
+    await expect(menu.getByTestId("show-me-around-this-page")).toBeVisible();
   });
 });

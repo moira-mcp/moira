@@ -27,6 +27,7 @@ import { useLatestRequest } from "../hooks/useLatestRequest";
 import { ExecutionCard, normalizeExecution } from "../components/cards";
 import { DataListView } from "../components/DataListView";
 import { LockedExecutionsWidget } from "../components/LockedExecutionsWidget";
+import { guideAnchor } from "@/guides/anchors";
 
 interface ExecutionListItem {
   executionId: string;
@@ -169,6 +170,7 @@ export const Executions: React.FC = () => {
     return (
       <PageShell
         title={t("pages.executions.title")}
+        guide={guideAnchor("runs.header")}
         description={t("pages.executions.subtitle")}
         loading
       />
@@ -179,6 +181,7 @@ export const Executions: React.FC = () => {
     return (
       <PageShell
         title={t("pages.executions.title")}
+        guide={guideAnchor("runs.header")}
         error={error}
         onRetry={loadExecutions}
         retryLabel={t("pages.executions.retry")}
@@ -187,7 +190,11 @@ export const Executions: React.FC = () => {
   }
 
   return (
-    <PageShell title={t("pages.executions.title")} description={t("pages.executions.subtitle")}>
+    <PageShell
+      title={t("pages.executions.title")}
+      guide={guideAnchor("runs.header")}
+      description={t("pages.executions.subtitle")}
+    >
       <FilterBar
         search={searchQuery}
         onSearchChange={setSearchQuery}
@@ -204,7 +211,11 @@ export const Executions: React.FC = () => {
                   setCurrentPage(1);
                 }}
               >
-                <SelectTrigger className="w-[150px]" data-testid="status-filter">
+                <SelectTrigger
+                  className="w-[150px]"
+                  data-testid="status-filter"
+                  {...guideAnchor("runs.status")}
+                >
                   <SelectValue placeholder={t("pages.executions.filters.status")} />
                 </SelectTrigger>
                 <SelectContent>
@@ -281,6 +292,7 @@ export const Executions: React.FC = () => {
         )}
         keyExtractor={(e) => e.executionId}
         storageKey="executions-view-mode"
+        guide={guideAnchor("runs.list")}
         loading={loading}
         emptyIcon={Play}
         emptyTitle={

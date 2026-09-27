@@ -16,12 +16,15 @@ interface FlowLevelBadgeProps {
   level: FlowLevel | null;
   className?: string;
   testId?: string;
+  /** The guide anchor of the badge, for a screen tour that explains it. */
+  guide?: { "data-guide": string };
 }
 
 export const FlowLevelBadge: React.FC<FlowLevelBadgeProps> = ({
   level,
   className,
   testId = "flow-level-badge",
+  guide,
 }) => {
   const { t } = useTranslation();
   if (!level) return null;
@@ -40,6 +43,7 @@ export const FlowLevelBadge: React.FC<FlowLevelBadgeProps> = ({
             aria-label={label}
             data-testid={testId}
             data-level={level}
+            {...guide}
           >
             <Gauge className="size-3" aria-hidden="true" />
             {name}

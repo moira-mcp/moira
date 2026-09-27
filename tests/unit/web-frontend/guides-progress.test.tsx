@@ -49,6 +49,7 @@ import {
   finishGuide,
   forgetProgress,
   newSteps,
+  parseProgress,
   recordStep,
   stepsForReader,
   resetGuideProgress,
@@ -201,6 +202,15 @@ describe("the progress store", () => {
 });
 
 describe("the rules read from progress", () => {
+  test("a stored resume role that is not yes-or-no is dropped and the place is kept", () => {
+    const place = { guide: "flow", step: "edit", path: "/workflows/moira/quick-task" };
+    expect(parseProgress({ resume: { ...place, owner: "yes" } }).resume).toEqual(place);
+    expect(parseProgress({ resume: { ...place, owner: true } }).resume).toEqual({
+      ...place,
+      owner: true,
+    });
+  });
+
   test("a guide never walked has nothing new; a step whose revision rose since is new", () => {
     const steps = settingsGuide.steps;
     expect(newSteps(settingsGuide, steps, {})).toEqual([]);
@@ -581,6 +591,28 @@ describe("the guides menu away from a tour's page", () => {
     fireEvent.click(screen.getByTestId("show-me-around"));
     await waitFor(() => expect(flowStatus()).toHaveAttribute("data-status", "new"));
     expect(screen.getByTestId("show-me-around-resume")).toHaveTextContent(`of ${readerCount}`);
+  });
+
+  test("a reader who has been both owner and reader has the resume line counted in the role they stopped in", async () => {
+    // They finished the tour on their own flow, then walked it as a reader of someone else's flow
+    // up to its last step: both roles' edit steps are seen.
+    const readerSteps = visibleSteps(flowGuide, false);
+    let progress = ownerFinished;
+    for (const step of readerSteps) {
+      progress = recordStep("flow", step, "/workflows/someone/their-flow", true, false)(progress);
+    }
+    expect(progress.seen).toHaveProperty(["flow.edit"]);
+    expect(progress.seen).toHaveProperty(["flow.edit-reader"]);
+    expect(progress.resume).toMatchObject({ step: "explore", owner: false });
+    fakeUserSettings({ [GUIDE_PROGRESS_KEY]: progress });
+    renderMenu();
+    await waitFor(() =>
+      expect(screen.getByTestId("show-me-around")).toHaveAttribute("data-progress", "loaded"),
+    );
+    fireEvent.click(screen.getByTestId("show-me-around"));
+    expect(await screen.findByTestId("show-me-around-resume")).toHaveTextContent(
+      `step ${readerSteps.length} of ${readerSteps.length}`,
+    );
   });
 
   test("before either role's step is seen, the resume line counts the reader as the page does", async () => {

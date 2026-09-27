@@ -21,6 +21,7 @@ import { splitFlowTags } from "@/utils/workflow-level";
 import { CardShell, type CardAction } from "../cards/CardShell";
 import { FlowLevelBadge } from "./FlowLevelBadge";
 import { whenToPickKey } from "../onboarding/recommended";
+import { guideAnchor } from "@/guides/anchors";
 
 interface WorkflowCardProps {
   workflow: WorkflowFileInfo;
@@ -118,7 +119,11 @@ export const WorkflowCard: React.FC<WorkflowCardProps> = ({
           {t("components.workflowCard.private")}
         </span>
       )}
-      <FlowLevelBadge level={level} testId="workflow-card-level" />
+      <FlowLevelBadge
+        level={level}
+        testId="workflow-card-level"
+        guide={guideAnchor("flows.level")}
+      />
       {tags.length > 0 && (
         <span className="inline-flex flex-wrap items-center gap-1" data-testid="workflow-card-tags">
           {tags.slice(0, MAX_TAGS).map((tag) => (

@@ -12,7 +12,6 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { describe, expect, test } from "@jest/globals";
 import {
   GUIDES,
@@ -28,35 +27,7 @@ import {
 import { visibleSteps } from "../../../packages/web-frontend/src/guides/GuideContext.js";
 import { localeLookup, snapshotOf } from "../../../packages/web-frontend/src/guides/snapshot.js";
 import en from "../../../packages/web-frontend/src/locales/en.json";
-
-const here = path.dirname(fileURLToPath(import.meta.url));
-const frontend = path.resolve(here, "../../../packages/web-frontend/src");
-
-function sourceFiles(dir: string): string[] {
-  return fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
-    const full = path.join(dir, entry.name);
-    if (entry.isDirectory()) return sourceFiles(full);
-    return /\.tsx?$/.test(entry.name) ? [full] : [];
-  });
-}
-
-/** Every anchor name written as a literal argument of `guideAnchor(...)` anywhere in the app. */
-function writtenAnchors(): Set<string> {
-  const names = new Set<string>();
-  for (const file of sourceFiles(frontend)) {
-    if (file.endsWith(path.join("guides", "anchors.ts"))) continue;
-    // A comment may quote the call to document it; only code writes an anchor.
-    const source = fs
-      .readFileSync(file, "utf8")
-      .split("\n")
-      .filter((line) => !/^\s*(\*|\/\/|\/\*)/.test(line))
-      .join("\n");
-    for (const call of source.matchAll(/guideAnchor\(([^)]*)\)/g)) {
-      for (const literal of call[1].matchAll(/"([^"]+)"/g)) names.add(literal[1]);
-    }
-  }
-  return names;
-}
+import { frontendSource, writtenAnchors } from "./helpers/guide-sources.js";
 
 const usedAnchors = new Set(GUIDES.flatMap((guide) => guide.steps.flatMap(anchorsOf)));
 
@@ -79,7 +50,7 @@ describe("guide anchors", () => {
 describe("the revision snapshot", () => {
   test("matches every step's revision, anchor and English copy — on a change, decide whether the step's revision must be raised, then run `npm run guides:snapshot`", () => {
     const committed = JSON.parse(
-      fs.readFileSync(path.join(frontend, "guides/revisions.snapshot.json"), "utf8"),
+      fs.readFileSync(path.join(frontendSource, "guides/revisions.snapshot.json"), "utf8"),
     ) as Record<string, unknown>;
     const current = snapshotOf(GUIDES, localeLookup(en));
     const changed = Object.keys({ ...committed, ...current })
@@ -118,6 +89,12 @@ describe("the registry", () => {
     },
   );
 
+  test("lets only an optional step declare when its element is absent", () => {
+    const declaring = GUIDES.flatMap((guide) => guide.steps.filter((step) => step.absentWhen));
+    expect(declaring.length).toBeGreaterThan(0);
+    expect(declaring.filter((step) => !step.optional).map((step) => step.id)).toEqual([]);
+  });
+
   test("shows the owner the edit switch and a reader how the owner edits", () => {
     const flow = guideById("flow")!;
     const ids = (owner: boolean) => visibleSteps(flow, owner).map((step) => step.id);
@@ -128,6 +105,12 @@ describe("the registry", () => {
   });
 
   test.each([
+    ["/", "home"],
+    ["/workflows", "flows"],
+    ["/executions", "runs"],
+    ["/notes", "notes"],
+    ["/playbooks", "playbooks"],
+    ["/artifacts", "artifacts"],
     ["/executions/0d4c7a1e", "run"],
     ["/workflows/moira/example-simple-steps", "flow"],
     ["/workflows/7c2f3b8e-1a4d-4e6b-9c1f-5d8a2e3b4c01", "flow"],
@@ -136,6 +119,17 @@ describe("the registry", () => {
     ["/login", undefined],
   ])("offers %s the screen tour %p", (pathname, expected) => {
     expect(screenTourForPath(pathname)?.id).toBe(expected);
+  });
+
+  test.each([
+    ["/moira", "home"],
+    ["/moira/workflows", "flows"],
+    ["/moira/executions/0d4c7a1e", "run"],
+    ["/moira/settings", "settings"],
+    ["/moira/admin", undefined],
+    ["/moirax/settings", undefined],
+  ])("under the base path /moira, offers %s the screen tour %p", (pathname, expected) => {
+    expect(screenTourForPath(pathname, "/moira")?.id).toBe(expected);
   });
 });
 
