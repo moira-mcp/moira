@@ -859,6 +859,27 @@ export const playbook = sqliteTable(
   }),
 );
 
+/**
+ * Last upstream state observed for a bundled playbook.
+ *
+ * The three-way reconciliation of the bundled playbook catalog compares this state, the stored
+ * playbook and the catalog file; without it a local edit and an upstream change could not be told
+ * apart.
+ */
+export const managedPlaybookBaseline = sqliteTable(
+  "managedPlaybookBaseline",
+  {
+    ownerId: text("ownerId").notNull(),
+    slug: text("slug").notNull(),
+    state: text("state").notNull(), // JSON ManagedResourceState of the playbook
+    sourceVersion: text("sourceVersion"),
+    updatedAt: integer("updatedAt", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.ownerId, table.slug] }),
+  }),
+);
+
 // ===== Shared Revision Store =====
 // One history for every versioned entity in the product. Notes, global settings and playbooks all
 // keep their content revisions here instead of each owning a private history table.

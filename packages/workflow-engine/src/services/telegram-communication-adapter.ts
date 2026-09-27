@@ -70,6 +70,7 @@ export class TelegramCommunicationAdapter implements CommunicationChannelAdapter
             text: request.text,
             parseMode,
             disableNotification: request.silent,
+            disableLinkPreview: true,
           });
         return;
       }
@@ -90,6 +91,7 @@ export class TelegramCommunicationAdapter implements CommunicationChannelAdapter
             text: request.text,
             parseMode,
             disableNotification: request.silent,
+            disableLinkPreview: true,
           });
         return;
       }
@@ -98,6 +100,7 @@ export class TelegramCommunicationAdapter implements CommunicationChannelAdapter
         text: request.text,
         parseMode,
         disableNotification: request.silent,
+        disableLinkPreview: true,
       });
     } catch (error) {
       if (error instanceof CommunicationChannelError) throw error;

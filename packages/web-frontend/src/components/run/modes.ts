@@ -10,6 +10,9 @@ import { Map, Workflow } from "lucide-react";
 
 export type RunViewMode = "map" | "graph";
 
+/** The tabs of the run page's side panel. */
+export type PanelTab = "block" | "variables" | "errors" | "steps" | "locks";
+
 export interface ModeDefinition {
   id: RunViewMode;
   icon: React.ComponentType<{ className?: string }>;

@@ -2,15 +2,17 @@
  * Bound lists and pass timings of the run projection: a block reads the list it is bound to from
  * the run's variables (items, counters, or both), passes are timed from the route's timestamps,
  * an open pass is measured to the projection moment, runs without timestamps report null, and
- * the notification lines name who a paused run waits for and done/total with the current item.
+ * the notification lines name who a paused run waits for, done/total with the current item, and
+ * the whole plan with a state mark per item, folded around the current item to fit.
  */
 
 import { describe, expect, test } from "@jest/globals";
 import {
   boundListLine,
   nearestBoundList,
-  progressFooterLines,
+  planListLines,
   projectExecutionRun,
+  textEscaper,
   variablesObject,
   waitingActorLine,
   type ExecutionVariableState,
@@ -499,26 +501,81 @@ describe("waiting actor line", () => {
     expect(waitingActorLine(projectExecutionRun(graph(), finished))).toBeNull();
     expect(waitingActorLine(null)).toBeNull();
   });
+});
 
-  test("the footer lines put the actor before the list, and omit whichever does not apply", () => {
-    const onChecklist = execution(
+describe("plan list", () => {
+  const many = Array.from({ length: 30 }, (_, index) => ({ action: `Step number ${index + 1}` }));
+
+  function onItem(items: unknown[], current: number): WorkflowExecution {
+    return execution(
       [
-        { seq: 0, nodeId: "start", exitKey: "default", changes: { tasks, total_tasks: 3 } },
-        { seq: 1, nodeId: "task", exitKey: "success", changes: { current_task: 2 }, waited: true },
-        { seq: 2, nodeId: "task", exitKey: null, changes: {}, waited: true },
+        { seq: 0, nodeId: "start", exitKey: "default", changes: {} },
+        { seq: 1, nodeId: "task", exitKey: null, changes: {}, waited: true },
       ],
-      { tasks, total_tasks: 3, current_task: 2 },
+      { tasks: items, total_tasks: items.length, current_task: current },
     );
-    expect(progressFooterLines(projectExecutionRun(graph(), onChecklist))).toEqual([
-      "⏳ agent on the step: Work",
-      "📝 1/3: Wire the CLI",
+  }
+
+  test("numbers every item under the count, marking done ✓, in progress ▶ and pending ○", () => {
+    expect(planListLines(projectExecutionRun(graph(), onItem(tasks, 2)), 4096)).toEqual([
+      "📝 1/3",
+      "✓ 1. Write the parser",
+      "▶ 2. Wire the CLI",
+      "○ 3. Document it",
     ]);
-    // No block binds a list: the actor alone, no count.
-    const unbound = graph();
-    for (const block of unbound.progress!.nodes) delete block.list;
-    expect(progressFooterLines(projectExecutionRun(unbound, onChecklist))).toEqual([
-      "⏳ agent on the step: Work",
+  });
+
+  test("in the run's last message no item is in progress: the unfinished ones read as open", () => {
+    const projected = projectExecutionRun(graph(), onItem(tasks, 2));
+    expect(planListLines(projected, 4096, undefined, { ended: true })).toEqual([
+      "📝 1/3",
+      "✓ 1. Write the parser",
+      "○ 2. Wire the CLI",
+      "○ 3. Document it",
     ]);
+    expect(boundListLine(projected)).toBe("📝 1/3: Wire the CLI");
+    expect(boundListLine(projected, undefined, { ended: true })).toBe("📝 1/3");
+  });
+
+  test("a list too long for the budget folds around the item in progress and keeps it", () => {
+    const lines = planListLines(projectExecutionRun(graph(), onItem(many, 20)), 200);
+    expect(lines[0]).toBe("📝 19/30");
+    expect(lines).toContain("▶ 20. Step number 20");
+    expect(lines.join("\n").length).toBeLessThanOrEqual(200);
+    // Both ends are folded into counts that account for every hidden item.
+    const earlier = Number(/^… (\d+) earlier$/u.exec(lines[1])![1]);
+    const more = Number(/^… (\d+) more$/u.exec(lines[lines.length - 1])![1]);
+    expect(earlier + more + lines.length - 3).toBe(30);
+    // A budget that holds only the count keeps the count.
+    expect(planListLines(projectExecutionRun(graph(), onItem(many, 20)), 10)).toEqual(["📝 19/30"]);
+  });
+
+  test("titles are written for the message format", () => {
+    const risky = [{ action: "Fix a_b *c* `d` [e]" }];
+    expect(
+      planListLines(projectExecutionRun(graph(), onItem(risky, 1)), 4096, textEscaper("markdown")),
+    ).toEqual(["📝 0/1", "▶ 1. Fix a\\_b \\*c\\* \\`d\\` \\[e]"]);
+  });
+
+  test("before the route reaches a bound block, the first bound block whose items resolve is used", () => {
+    // The run starts in a block without a list, with the plan already written: a notification
+    // that the plan is ready, sent before its block is visited.
+    const planned = graph();
+    planned.nodes[0].progressNodeId = "wrap";
+    const run = execution(
+      [{ seq: 0, nodeId: "start", exitKey: null, changes: { tasks, total_tasks: 3 } }],
+      { tasks, total_tasks: 3 },
+    );
+    expect(nearestBoundList(projectExecutionRun(planned, run))).toMatchObject({ total: 3 });
+    expect(planListLines(projectExecutionRun(planned, run), 4096)).toEqual([
+      "📝 0/3",
+      "▶ 1. Write the parser",
+      "○ 2. Wire the CLI",
+      "○ 3. Document it",
+    ]);
+    // Without items anywhere there is nothing to fall back to.
+    const empty = execution([{ seq: 0, nodeId: "start", exitKey: null, changes: {} }], {});
+    expect(planListLines(projectExecutionRun(planned, empty), 4096)).toEqual([]);
   });
 });
 

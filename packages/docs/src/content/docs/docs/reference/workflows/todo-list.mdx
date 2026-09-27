@@ -26,6 +26,9 @@ Each task contains only:
 
 Both strings are non-empty and limited to 1,000 characters. Array position is the task identity; the agent does not supply IDs, cursors, totals, statuses, or result codes.
 
+The same step returns `execution_note`: the run's task in a few words (at most 120 characters), the
+caller's note when one was given. It heads every notification of the run.
+
 ## Execution
 
 Todo List owns a one-based cursor. It projects the current task, tells the agent its action and expected result, and waits. The agent performs the real work and verifies the expected result before calling `step()` with the local evidence and the bounded display outcome:
@@ -91,7 +94,8 @@ response:
       "expected_result": "The caller's domain report contains the verified result"
     }
   ],
-  "progress_checklist_outcome": "One ordered task is ready"
+  "progress_checklist_outcome": "One ordered task is ready",
+  "execution_note": "Check the implemented requirement"
 }
 ```
 
@@ -101,6 +105,23 @@ first item. Where two supplied items each need the other's result, no order sati
 pair is named to the author rather than chosen silently. Keep domain results in the
 caller. For example, a requirements-coverage workflow should write its own report and own
 `COVERED`/`GAP` classifications instead of asking Todo List to transport them.
+
+## Notifications
+
+Todo List sends two notifications through the user's configured channels, each headed by the flow
+name and the run's task, linked to the run page:
+
+- **Checklist ready** — once the checklist is confirmed and work starts, with the whole checklist
+  (`▶` on the first task, `○` on the rest);
+- **All tasks done** — before the run ends, with every task marked `✓`. After a revision this is
+  the revised checklist.
+
+The messages are in English.
+
+The flow has no user gate, so nothing asks the reader to act. Because the flow notifies, starting
+it for a user with no configured channel is refused with an instruction; an agent that wants to run
+without notifications prepares the start again with `skipNotificationCheck: true`. Child runs
+notify like top-level runs.
 
 ## Completion contract
 

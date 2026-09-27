@@ -378,7 +378,7 @@ Node task-1: unclosed template bracket '{{' at position 15
 
 - This is a BLOCKING validation error (workflow save is rejected).
 - Declare globals once in `variableRegistry`; reference node-local outputs as `node-id.name`.
-- System variables (`executionId`, `workflowId`, `userId`) don't need declaration.
+- System variables (`executionId`, `workflowId`, `userId`, `runUrl`) don't need declaration.
 - Control flow keywords (`if`, `each`, `else`) are not flagged.
 
 ### Template Shows "null"
@@ -545,16 +545,18 @@ never sampled. `session progress` and
 `GET /api/executions/:id/progress` return this aggregate as `statistics`;
 `GET /api/workflows/:id/statistics?version=` returns it for any version (`docs/API.md`).
 
-A notification node that
-attaches a progress image renders it inside the cycle that reached it, before that cycle's visits
-are persisted; the handlers therefore project an unpersisted copy of the execution
-(`withInFlightPause`) with an open visit of the notification node and, when the node's single
+A notification node runs inside the cycle that reached it, before that cycle's visits, variables
+and note are persisted. The executor therefore hands every handler the live run of the cycle — the
+persisted run with the visits recorded so far folded in exactly as they will be saved, the
+engine's current variables and a note set by this step's `execution_note` — and the notification
+handlers project it (`withInFlightPause`) with an open visit of the notification node and, when the node's single
 forward connection leads straight to a node the run pauses on — a `lock` (a person's gate) or an
 `agent-directive`, `teleport`, `materialize` or `subgraph` wait (the agent's) — that node as the one waited on,
-with a synthetic open visit that carries no timestamp. The image and the message footer read the
-same copy: the picture marks the block about to wait with the actor's wording, and the footer adds
-`⏳ agent on the step: <block>` or `🙋 waiting for you: <block>` before the bound list's
-`📝 done/total: current item` line (both handlers). A successor that pauses nowhere leaves the
+with a synthetic open visit that carries no timestamp. The image and the message text read the
+same copy: the picture marks the block about to wait with the actor's wording, and the message
+ends with the plan lines and then `⏳ agent on the step: <block>` or `🙋 waiting for you: <block>`
+(both handlers). A plan written, an item finished or a note set earlier in the same cycle is
+therefore already shown. A successor that pauses nowhere leaves the
 notification's block active and adds no actor line.
 
 A node that pauses the run (an `agent-directive` step or another pausing node type) may set
@@ -603,11 +605,18 @@ title band alone with the edges meeting its borders (see `docs/API.md`). Colours
 interface's own tokens as literal hex per theme, since the raster has no CSS. The model measures
 text with its own metric (`progressTextWidth`, a per-glyph-class width for the rendered face that
 errs wide), wraps by that width, ellipsises a token wider than its line and shortens the facts
-and typical lines by priority, so every label lies inside its box. A `user-notification` node
-can set `attachProgressImage: true`; it must belong to a block and sends the rendered PNG through
-the current user's configured channels with its normal message, drawn with the run owner's
-statistics for the version the run started on. The deprecated `telegram-notification`
-compatibility node retains the same progress attachment.
+and typical lines by priority, so every label lies inside its box.
+
+A notification does not attach this map: at a phone width its cards and return lanes are several
+times wider than the screen and would be shrunk below legibility. A `user-notification` node that
+sets `attachProgressImage: true` (it must belong to a block) sends the run's **steps picture**
+instead (`utils/execution-progress-steps.ts`): the task title, then one row per block in process
+order with its number, title (two lines at most, then `…`), status chip worded and toned as on the
+map, and — for a block with a bound list — `done/total: current item` (two lines at most). It is
+drawn at 390 px (`PROGRESS_STEPS_WIDTH`, the width a phone shows a picture at) with the phone type
+scale, never scaled, and grows downwards; the PNG is rasterised at 3× density
+(`PROGRESS_STEPS_DENSITY`). It reads the same live run as the message and carries no typical
+durations. The deprecated `telegram-notification` compatibility node attaches the same picture.
 
 Engine callers that hold a workflow and execution use
 `renderExecutionProgressImage(workflow, execution, options?, statistics?)`; the optional
@@ -615,7 +624,10 @@ Engine callers that hold a workflow and execution use
 for the run's owner, obtained through `statisticsForRun`) and draw each card's `typically …` line. It returns `null` when no progress
 definition exists; otherwise it returns `{ buffer, mimeType: "image/png", width, height,
 workflowVersion, executionRevision }`. Projection/render failures propagate. The lower-level
-projection and PNG adapter remain available when their narrower contracts are required.
+projection and PNG adapter remain available when their narrower contracts are required. The
+notification picture is `renderExecutionProgressStepsImage(workflow, execution)` with the same
+result shape (`width`/`height` in CSS pixels); `buildProgressStepsModel` and
+`renderProgressStepsSvg` / `renderProgressStepsPng` are its model and rasterisation.
 
 The run page (`/executions/:id`) renders the same projection in its map view — the layered
 diagram with a contents sidebar and a block panel carrying the block's timings, bound list and
@@ -661,7 +673,9 @@ in place when you want to read and edit the current shape.
 **All Nodes:**
 
 - `type` - One of: start, agent-directive, condition, expression, subgraph, user-notification, deprecated telegram-notification, teleport, lock, materialize, read-note, write-note, upsert-note, end
-- `id` - Unique within workflow
+- `id` - Unique within the workflow and kebab-case: lower-case letters and digits separated by hyphens
+  (`^[a-z0-9][a-z0-9-]*$`). The schema refuses any other id, because a dot or an upper-case letter
+  would make `<node>.<key>` edge ids and `{{<node>.<name>}}` references ambiguous
 - `connections` - Required (except end nodes)
 
 ## Node Specifications
@@ -824,6 +838,7 @@ JSON Schema.
   "message": "Message with {{variables}}",
   "format": "markdown",
   "silent": false,
+  "planList": "full",
   "connections": { "default": "next-node" }
 }
 ```
@@ -837,13 +852,29 @@ does not support the requested attachment is reported as `unsupported` and skipp
 itself make delivery fail. Total attempted failure uses `connections.error` when it exists and
 otherwise continues through `default`.
 
-Every message carries a footer with the short process id, the resolved workflow name and the
-Moira attribution. When the workflow has a block with a `list` binding, the footer also carries
-one line `📝 done/total: current item` for the bound list nearest the run — the active block's
-when it binds one, otherwise the bound block the route passed most recently — taken from the same
-projection the progress attachment uses (the execution copy with an open visit of the notification
-node). A workflow whose blocks bind no list, and a binding that resolves to neither a finished
-count nor a total, add no line.
+Every message opens with a heading, `<workflow name> · <run note>`, linked to the run page
+(`{{runUrl}}`); a run without a note gets the workflow name alone, still linked. The rendered
+`message` follows, then the run's plan as `planList` selects it, then — when the node's successor
+pauses the run — `⏳ agent on the step: <block>` or `🙋 waiting for you: <block>`. `planList` is
+`progress` by default (one line `📝 done/total: current item`), `full` (`📝 done/total` and every
+item numbered, marked `✓` done, `▶` in progress, `○` pending, folded around the item in progress
+into `… N earlier` / `… N more` when it does not fit the channel), or `none`. A notification
+whose `default` connection leads straight to an `end` node is the run's last message: no item is
+in progress, so an unfinished item reads `○` and the `progress` line names no current item.
+The plan is the bound list nearest the run — the active block's when it binds one, otherwise the
+bound block the route passed most recently, otherwise, before any bound block is reached, the
+first bound block whose
+items resolve — so a plan-ready notification sent from the planning block shows the plan. A
+workflow whose blocks bind no list, an empty items array and a binding that resolves to neither a
+finished count nor a total add no plan lines. With `format` `markdown` or `html`, substituted
+values, item titles and block labels are escaped for the format; the author's own markup stays.
+The text is fitted to the channel's limit (the plan takes the room left; an over-long message is
+cut at a line with `…`), so delivery never fails for length. The lock node's PIN message opens with
+the same heading in plain text.
+
+The validator warns (never blocks) when a notification's `message` would show the reader a file or
+path, a bare counter with nothing naming what it counts, or a step's raw output; see the
+notification content warning in the public Validation reference.
 
 `telegram-notification` is deprecated but remains executable for existing Telegram-specific
 workflows. Its explicit `chatId`, `parseMode`, and `replyMarkup` keep their original meanings and
@@ -1186,6 +1217,9 @@ Output stored in `upsertNoteResult` (or `outputVariable`): `{key, version, creat
 - `{{executionId}}` - System variable: process ID
 - `{{workflowId}}` - System variable: workflow ID
 - `{{userId}}` - System variable: current user ID
+- `{{runUrl}}` - System variable: the run page in the web app
+  (`getBaseUrl() + getAppPrefix() + /executions/<id>`; an inline subgraph child links its
+  top-level run)
 - `{{note:KEY}}` - Note content reference (fetches note by key for current user)
 - `{{playbook:NAME}}` - Playbook reference (named, reusable behaviour text of the current user)
 - `{{playbook:@owner/NAME}}` - Published playbook of another account
@@ -1215,11 +1249,11 @@ Then in directive: `Execute step {{current_step}}: {{steps[current_step].action}
 
 ### Variable Naming
 
-Variable and node ID names support multiple conventions:
+Variable names support multiple conventions; node ids are always kebab-case:
 
-- **camelCase**: `{{projectName}}`, `{{userInput}}`
-- **snake_case**: `{{project_name}}`, `{{user_input}}`
-- **kebab-case**: `{{my-project}}`, `{{setup-workspace}}`
+- **camelCase** variables: `{{projectName}}`, `{{userInput}}`
+- **snake_case** variables: `{{project_name}}`, `{{user_input}}`
+- **kebab-case** variables and node ids: `{{my-project}}`, `{{setup-workspace.path}}`
 
 Kebab-case is supported in the first segment:
 

@@ -23,6 +23,7 @@ export interface ExecutionContext {
   // Subgraph execution tracking
   _subgraphDepth?: number; // Current nesting level (0 = root)
   _parentExecutionId?: string; // Parent workflow execution ID
+  _rootExecutionId?: string; // Top-level run carrying an inline subgraph child (its run page)
   _subgraphChain?: string[]; // Workflow ID chain for debugging
 
   // Step delegation state tracking

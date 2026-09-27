@@ -15,6 +15,8 @@ import { IndexBadge } from "../diagram/IndexBadge";
 import { INTERACTIVE } from "../diagram/interactive";
 import { formatDuration } from "./duration";
 import { listProgressLabel, type RunBlock } from "./model";
+import { AddBlock, DeleteBlock } from "../flow/StructureControls";
+import { guideAnchor } from "../../guides/anchors";
 
 const SIDEBAR_KEY = "moira.map.sidebarCollapsed";
 
@@ -23,16 +25,19 @@ export function ContentsRow({
   block,
   selected,
   onSelect,
+  trailing,
 }: {
   block: RunBlock;
   selected: boolean;
   onSelect: (id: string) => void;
+  /** A control beside the row (the flow page's delete-block in edit mode). */
+  trailing?: React.ReactNode;
 }): React.JSX.Element {
   const { t } = useTranslation();
   const bound = listProgressLabel(block.list);
   const typical = block.stats?.run.medianMs ?? null;
   return (
-    <li>
+    <li className="flex items-center gap-1">
       <button
         type="button"
         onClick={() => onSelect(block.id)}
@@ -41,8 +46,9 @@ export function ContentsRow({
         data-block-id={block.id}
         data-status={block.status}
         data-testid={`map-contents-${block.id}`}
+        {...guideAnchor("process.contents-row")}
         className={cn(
-          "flex w-full items-center gap-2 rounded-md border border-transparent px-2 py-1 text-left text-sm hover:bg-accent",
+          "flex min-w-0 flex-1 items-center gap-2 rounded-md border border-transparent px-2 py-1 text-left text-sm hover:bg-accent",
           INTERACTIVE.clickable,
           "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
           selected && "bg-accent font-medium",
@@ -73,6 +79,7 @@ export function ContentsRow({
           </span>
         )}
       </button>
+      {trailing}
     </li>
   );
 }
@@ -115,9 +122,11 @@ export function ContentsSidebar({
             block={block}
             selected={selectedBlockId === block.id}
             onSelect={onSelect}
+            trailing={<DeleteBlock block={block} />}
           />
         ))}
       </ol>
+      <AddBlock blocks={blocks} />
     </aside>
   );
 }

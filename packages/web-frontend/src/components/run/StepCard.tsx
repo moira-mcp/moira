@@ -9,6 +9,7 @@
  * (the split view's owner select, diagnostics and editor; the run page's "current" marker).
  */
 
+import { guideAnchor } from "../../guides/anchors";
 import React from "react";
 import { useTranslation } from "react-i18next";
 import { ArrowDownRight, ArrowUpRight, CornerLeftDown, RotateCcw } from "lucide-react";
@@ -58,7 +59,9 @@ export function StepCard({
   afterTitle,
   beforeSummary,
   footer,
+  connectionProblems,
   id,
+  guided = false,
 }: {
   step: StepInfo;
   /** One-based position in the block, shown in a fixed column when given. */
@@ -80,7 +83,11 @@ export function StepCard({
   afterTitle?: React.ReactNode;
   beforeSummary?: React.ReactNode;
   footer?: React.ReactNode;
+  /** Connections with a problem, by output key: the chip is marked and explains it. */
+  connectionProblems?: Readonly<Record<string, string>>;
   id?: string;
+  /** The card is the one a screen tour points at: the block panel's steps, not other lists. */
+  guided?: boolean;
 }): React.JSX.Element {
   const { t } = useTranslation();
   const Body: "button" | "div" = onSelect ? "button" : "div";
@@ -95,6 +102,11 @@ export function StepCard({
       data-node-id={step.id}
       data-step-card=""
       aria-current={current ? "step" : undefined}
+      {...(guided
+        ? current
+          ? guideAnchor("process.step", "process.current-step")
+          : guideAnchor("process.step")
+        : {})}
     >
       <Body
         {...(onSelect ? { type: "button" as const, onClick: onSelect } : {})}
@@ -139,6 +151,11 @@ export function StepCard({
             <p
               className="mt-1 flex flex-wrap items-center gap-1 text-[10px] text-muted-foreground"
               data-node-inputs={step.evidence.map((field) => field.name).join(",")}
+              {...(guided
+                ? current
+                  ? guideAnchor("process.step-inputs", "process.current-step-inputs")
+                  : guideAnchor("process.step-inputs")
+                : {})}
             >
               <span>{t("pages.runPage.blockDetail.returns")}</span>
               {step.evidence.map((field) => (
@@ -194,6 +211,7 @@ export function StepCard({
             <div className="mt-1.5 flex flex-wrap gap-1" data-step-connections="">
               {connections.map((connection) => {
                 const Chip: "button" | "span" = onConnection ? "button" : "span";
+                const problem = connectionProblems?.[connection.label];
                 return (
                   <Chip
                     key={`${connection.label}-${connection.target}`}
@@ -208,7 +226,10 @@ export function StepCard({
                       : {})}
                     data-edge-kind={connection.internal ? "internal" : "external"}
                     data-connection={connection.label}
-                    data-hint={connection.targetName}
+                    data-issue={problem ? "true" : undefined}
+                    data-hint={
+                      problem ? `${connection.targetName} — ${problem}` : connection.targetName
+                    }
                     onMouseEnter={
                       onConnectionHover ? () => onConnectionHover(connection) : undefined
                     }
@@ -222,6 +243,7 @@ export function StepCard({
                         : "border-primary/40 bg-primary/5 text-primary",
                       onConnection &&
                         (connection.internal ? "hover:bg-accent" : "hover:bg-primary/10"),
+                      problem && "border-destructive/60 bg-destructive/10 text-destructive",
                     )}
                   >
                     {connection.internal ? (

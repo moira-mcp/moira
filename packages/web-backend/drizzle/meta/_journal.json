@@ -302,6 +302,13 @@
       "when": 1790000240000,
       "tag": "0041_retire_ui_theme_setting",
       "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "7",
+      "when": 1790000300000,
+      "tag": "0042_managed_playbook_baseline",
+      "breakpoints": true
     }
   ]
 }

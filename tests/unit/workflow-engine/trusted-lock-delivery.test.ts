@@ -4,6 +4,7 @@ import {
   checkTrustedLockDeliveryConfiguration,
   createTrustedExecutionLock,
   getActiveCommunicationChannelRegistry,
+  runPageUrl,
   TrustedLockDeliveryError,
   type TrustedLockDeliveryDependencies,
 } from "@mcp-moira/workflow-engine";
@@ -14,6 +15,7 @@ function repositoryWithSettings(values: Record<string, string | null>): IDataRep
   return {
     getSetting: async (_userId: string, key: string) => values[key] ?? null,
     getWorkflow: async () => ({ metadata: { name: "Trusted workflow" } }),
+    getExecution: async () => ({ note: "Ship the release notes" }),
   } as unknown as IDataRepository;
 }
 
@@ -237,6 +239,15 @@ describe("trusted agent-path lock delivery", () => {
     );
     expect(delivered).not.toHaveProperty("parseMode");
     expect(delivered?.text).toContain("Review [stage]_*");
+    // The PIN message opens with the heading every notification carries — the flow, the run's
+    // task and its page — and has no run-id prefix or engine signature.
+    expect(
+      delivered?.text.startsWith(
+        `🔒 Trusted workflow · Ship the release notes\n${runPageUrl({ executionId: options().executionId })}\n\n`,
+      ),
+    ).toBe(true);
+    expect(delivered?.text).not.toContain("12345678\n");
+    expect(delivered?.text).not.toMatch(/Process:|via MCP Moira/u);
     expect(JSON.stringify(capturedLogs)).not.toContain(PIN);
   });
 });

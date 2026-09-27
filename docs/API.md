@@ -286,7 +286,9 @@ Behavior:
 - Names unknown, unauthorized, schema-invalid and out-of-range keys in `refused` without undoing values already listed in `saved`
 - Refuses a built-in number setting whose value is below its declared `minimum` or above its declared `maximum`, whether sent as a number or as numeric text
 - Enforces the manifest's declared primitive type and then its optional complete JSON Schema; editable JSON text is parsed before validation, and structured input must round-trip through JSON without omitted or transformed values
-- Holds a built-in `json` setting (for example `ui.hidden_panels`, the list of beginner panels the user has hidden) to its declared JSON Schema the same way; a value outside it is listed in `refused` and nothing is stored
+- Holds a built-in `json` setting to its declared JSON Schema the same way; a value outside it is listed in `refused` and nothing is stored. The `ui` category has two:
+  - `ui.hidden_panels`, the list of beginner panels the user has hidden;
+  - `ui.guide_progress`, an object for the interface's guides: `firstRun` (`accepted` or `declined`), `resume` (`{guide, step, path}`, with an optional boolean `owner`), `seen` (`<guide>.<step>` → revision), `finished` (`<guide>` → `true`), `offered` (`<guide>` → `true` for a tour offered once), and `tutorials` (`<tutorial>` → `{copyId, lessons, forMe}`: the reader's copy, each passed lesson's saved `revision` with an optional `forMe`, and the lessons whose "Do it for me" was used); `resume` may also carry a boolean `tour` when the place belongs to the full tour. Its schema checks those fields and accepts any other, so a later build can add its own.
 - Registers the Telegram webhook only when `telegram.bot_token` is present in `saved`, never when that key was refused
 
 Authentication: Required
@@ -369,8 +371,10 @@ guidance, preventing a result from an earlier revision or unit from appearing cu
 
 Within the engine, `renderExecutionProgressImage(workflow, execution, options?)` is the supported
 workflow/execution-level image API; it projects the execution's recorded route, so a caller that
-renders mid-cycle (the notification handlers) passes `withInFlightVisit(execution, nodeId)`, an
-unpersisted copy with an open visit of the node being rendered. It returns `null` for a workflow without progress and otherwise
+renders mid-cycle passes `withInFlightVisit(execution, nodeId)`, an unpersisted copy with an open
+visit of the node being rendered. The notification handlers attach the phone steps picture
+instead: `renderExecutionProgressStepsImage(workflow, execution)` over the handler's live run
+projected with `withInFlightPause`. It returns `null` for a workflow without progress and otherwise
 returns the PNG buffer, `image/png`, dimensions, workflow version, step revision, and context
 revision. Failures
 remain errors rather than an empty image. `progressActiveLabel` may replace only the active
@@ -2195,11 +2199,14 @@ Request body:
 }
 ```
 
-Order of refusals: workflow not found (404), caller not the owner (403), `expectedRevision` other
-than the stored revision (409 `CONFLICT`, `details.currentRevision`), the definition invalid under
-the same validation `manage edit` runs — block-contract diagnostics included (400
-`VALIDATION_FAILED`, `details.validation`); nothing is saved on a refusal. The save keeps the
-workflow's visibility and slug, advances its revision and is audited as a workflow edit.
+Order of refusals: workflow not found (404), caller not the owner (403), the definition invalid
+under the same validation `manage edit` runs — block-contract diagnostics and `{{playbook:…}}`
+references the caller cannot resolve included (400 `VALIDATION_FAILED`, `details.validation` with
+its `issues`), `expectedRevision` other than the stored revision (409 `CONFLICT`,
+`details.currentRevision`); nothing is saved on a refusal. The revision is checked by the write
+itself, in the same statement that advances it, so of several saves sent against one revision
+exactly one lands and the others receive 409. The save keeps the workflow's visibility and slug,
+advances its revision and is audited as a workflow edit.
 
 Response:
 
@@ -2226,9 +2233,46 @@ with `overwrite`, every `manage` mutation that stores a graph, upload, copy) and
 repository's apply (bundled-catalog install and reconciliation bundles). Writes that do not touch
 the graph — visibility, slug, validation cache — leave it alone. `GET /api/workflows/:id`, the
 handle/slug form and `manage get` return it as `fileInfo.revision` / `revision`; `manage edit`
-accepts an optional `expectedRevision` with the same refusal. This is unrelated to the
+accepts an optional `expectedRevision` with the same refusal, checked by the same write. This is unrelated to the
 reconciliation subsystem's string "revision" of conflict records and to an execution's step
 revision.
+
+### POST /api/workflows/:id/validate
+
+Validate a workflow. `id` is a UUID or the caller's slug. With an empty body the stored definition
+is validated; with `{ workflowData: WorkflowGraph }` the given, unsaved definition is validated as
+the caller's save of it would be — engine validation plus the `{{playbook:…}}` references the
+caller cannot resolve — which makes it the dry run an editor calls before saving. Nothing is
+stored.
+
+Response `data`:
+
+```typescript
+{
+  validation: WorkflowValidationStatus;
+  details: { isValid: boolean; errors: string[]; warnings: string[] }; // plus visualization checks
+  nodeValidations: Record<string, { isValid: boolean; errors: string[]; warnings: string[]; suggestions: string[] }>;
+}
+
+interface WorkflowValidationStatus {
+  isValid: boolean;
+  nodeValidation: Record<string, { isValid: boolean; errors: string[]; warnings: string[] }>;
+  globalErrors: string[];
+  globalWarnings: string[];
+  issues: ValidationIssue[]; // every issue, located; the lists above summarise it
+}
+
+interface ValidationIssue {
+  type: "schema" | "structure" | "node" | "connection";
+  severity: "error" | "warning";
+  nodeId?: string; // the node the issue belongs to
+  field?: string; // e.g. "connections.retry", "cases[0].output", "connectionLabels.approved"
+  message: string;
+}
+```
+
+A playbook-reference issue carries the `nodeId` of the first node whose text contains the
+reference and no `field`. The PUT route's 400 carries the same `validation` object.
 
 ### POST /api/workflows/:id/copy
 
@@ -2406,6 +2450,7 @@ Query parameters:
 - `sortOrder`: Sort direction (asc, desc). Default: desc
 - `limit`: Results per page (1-100). Default: 20
 - `offset`: Skip results. Default: 0
+- `mine`: `true` lists only the caller's own executions, also for an admin
 
 Response:
 
@@ -2434,7 +2479,7 @@ Response:
 ```
 
 Authentication: Required
-Admin users see all executions, regular users see only their own.
+Admin users see all executions unless `mine=true`; regular users see only their own.
 
 ### GET /api/executions/:id
 

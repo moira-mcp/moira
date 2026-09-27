@@ -524,13 +524,14 @@ describe("Telegram Services", () => {
         const fetchCall = mockFetch.mock.calls[0];
         const body = JSON.parse((fetchCall[1] as RequestInit).body as string);
 
-        // Template should process correctly + include auto-footer
+        // Template should process correctly, under the heading and with no engine signature
         expect(body.text).toContain("Hello TestUser! Task Sample Task completed with Success");
-        expect(body.text).toContain("📋 Process:");
-        expect(body.text).toContain("🤖 via MCP Moira");
+        expect(body.text).not.toMatch(/📋 Process:|via MCP Moira/u);
+        // The run page link must not unfold into a preview card of the login page.
+        expect(body.link_preview_options).toEqual({ is_disabled: true });
       });
 
-      test("should resolve workflow name in footer", async () => {
+      test("should resolve workflow name in the heading", async () => {
         mockFetch.mockResolvedValueOnce(Response.json({ ok: true, result: {} }));
 
         const testNode: TelegramNotificationNode = {
@@ -553,8 +554,8 @@ describe("Telegram Services", () => {
         const fetchCall = mockFetch.mock.calls[0];
         const body = JSON.parse((fetchCall[1] as RequestInit).body as string);
 
-        // Should contain resolved workflow name, not raw workflowId
-        expect(body.text).toContain("🔄 Workflow: Test Workflow Name");
+        // Should open with the resolved workflow name, not raw workflowId
+        expect(body.text.startsWith("Test Workflow Name")).toBe(true);
         expect(mockRepository.getWorkflow).toHaveBeenCalled();
       });
 
@@ -587,7 +588,7 @@ describe("Telegram Services", () => {
         const body = JSON.parse((fetchCall[1] as RequestInit).body as string);
 
         // Should fallback to raw workflowId from context
-        expect(body.text).toContain("🔄 Workflow:");
+        expect(body.text.startsWith(context.workflowId)).toBe(true);
       });
 
       test("should use default chatId when not provided", async () => {

@@ -31,6 +31,8 @@ export interface SendMessageParams {
   parseMode?: "Markdown" | "HTML";
   /** Sends the message silently without notification */
   disableNotification?: boolean;
+  /** Shows no preview card for links in the text (a run page link previews the login page) */
+  disableLinkPreview?: boolean;
   /** Optional inline keyboard or other reply markup */
   replyMarkup?: ReplyMarkup;
 }
@@ -57,6 +59,9 @@ export interface SendDocumentParams {
   replyMarkup?: ReplyMarkup;
 }
 
+/** The longest message text and the longest photo or document caption the Bot API accepts. */
+export const TELEGRAM_TEXT_MAX_LENGTH = 4096;
+export const TELEGRAM_CAPTION_MAX_LENGTH = 1024;
 export const TELEGRAM_PHOTO_MAX_BYTES = 10 * 1024 * 1024;
 export const TELEGRAM_DOCUMENT_MAX_BYTES = 20 * 1024 * 1024;
 

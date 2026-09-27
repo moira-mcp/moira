@@ -77,8 +77,8 @@ test.describe("Settings page structure", () => {
   });
 
   for (const [lang, helpTitle, tourTitle, tourStep] of [
-    ["en", "When to use an API token", "Settings tour", "Jump between sections"],
-    ["ru", "Когда нужен API-токен", "Обзор настроек", "Переход между разделами"],
+    ["en", "When to use an API token", "The Settings page", "Jump between sections"],
+    ["ru", "Когда нужен API-токен", "Страница настроек", "Переход между разделами"],
   ] as const) {
     test(`help and the page tour open with localized words (${lang})`, async ({ page }) => {
       await loginAsAdmin(page);
@@ -90,20 +90,24 @@ test.describe("Settings page structure", () => {
       await page.keyboard.press("Escape");
       await expect(page.getByTestId("api-tokens-help-content")).toBeHidden();
 
-      await page.getByTestId("settings-guide-open").click();
-      const walkthrough = page.getByTestId("walkthrough");
-      await expect(walkthrough).toContainText(tourTitle);
-      await expect(walkthrough).toContainText(tourStep);
-      await page.getByTestId("walkthrough-next").click();
-      await expect(walkthrough).toHaveAttribute("data-guide-step", "account");
-      // The step rings the section it explains.
+      await page.getByTestId("guide-open").click();
+      const card = page.getByTestId("guide-card");
+      await expect(card).toContainText(tourTitle);
+      await expect(card).toContainText(tourStep);
+      await page.getByTestId("guide-next").click();
+      await expect(card).toHaveAttribute("data-guide-step", "account");
+      // The step lights the section it explains.
       await expect(page.getByTestId("settings-section-profile")).toHaveAttribute(
-        "data-guide-target",
-        "account",
+        "data-guide",
+        "settings.account",
       );
-      await page.getByTestId("walkthrough-close").click();
-      await expect(walkthrough).toBeHidden();
-      expect(new URL(page.url()).searchParams.has("tour")).toBe(false);
+      await expect(page.getByTestId("guide-spotlight")).toHaveAttribute(
+        "data-guide-anchor",
+        "settings.account",
+      );
+      await page.getByTestId("guide-close").click();
+      await expect(card).toBeHidden();
+      expect(new URL(page.url()).searchParams.has("guide")).toBe(false);
     });
   }
 
@@ -111,11 +115,10 @@ test.describe("Settings page structure", () => {
     await loginAsAdmin(page);
     await openSettings(page, "?lang=en");
     await page.getByTestId("github-guide-open").click();
-    const walkthrough = page.getByTestId("walkthrough");
-    await expect(walkthrough).toContainText("Three steps to connect");
-    await expect(page.getByTestId("github-setup-steps")).toHaveAttribute(
-      "data-guide-target",
-      "steps",
+    await expect(page.getByTestId("guide-card")).toContainText("Three steps to connect");
+    await expect(page.getByTestId("guide-spotlight")).toHaveAttribute(
+      "data-guide-anchor",
+      "settings.github-steps",
     );
   });
 });

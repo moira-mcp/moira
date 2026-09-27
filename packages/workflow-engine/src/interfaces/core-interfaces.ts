@@ -193,6 +193,11 @@ export interface INodeHandler {
     engine: IGraphExecutionEngine,
     input?: unknown,
     variableRegistry?: VariableRegistry,
+    /**
+     * The run as of this node, including what the current cycle changed before it (see
+     * `liveExecution`); absent outside a top-level executor cycle, such as an inline subgraph.
+     */
+    liveRun?: () => WorkflowExecution,
   ): Promise<NodeExecutionResult>;
 
   /**

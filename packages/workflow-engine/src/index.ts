@@ -82,6 +82,8 @@ export * from "./utils/execution-variable-policy.js";
 export * from "./utils/execution-run-projection.js";
 export * from "./utils/execution-visits.js";
 export * from "./utils/execution-progress-lists.js";
+export * from "./utils/notification-text.js";
+export * from "./services/notification-frame.js";
 export * from "./utils/execution-statistics.js";
 export {
   ProgressStatisticsService,
@@ -126,6 +128,7 @@ export * from "./utils/process-geometry.js";
 export * from "./utils/execution-progress-renderer.js";
 export * from "./utils/execution-progress-text.js";
 export * from "./utils/execution-progress-image.js";
+export * from "./utils/execution-progress-steps.js";
 export { ContextMapper } from "./utils/context-mapper.js";
 export { ContextHelpers } from "./utils/context-helpers.js";
 export { PathResolver } from "./utils/path-resolver.js";

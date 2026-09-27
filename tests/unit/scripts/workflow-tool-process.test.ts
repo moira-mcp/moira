@@ -126,6 +126,13 @@ describe("workflow-tool process block authoring", () => {
     expect(read(file).nodes[1]).not.toHaveProperty("connectionLabels");
   });
 
+  test("sets a node's expressions and removes the field with an empty list", () => {
+    run([file, "update", "verify", "--expressions", '["attempts = attempts + 1"]']);
+    expect(read(file).nodes[2].expressions).toEqual(["attempts = attempts + 1"]);
+    expect(run([file, "update", "verify", "--expressions", "[]"])).toContain("Cleared expressions");
+    expect(read(file).nodes[2]).not.toHaveProperty("expressions");
+  });
+
   test("binds a block to a list, rejects a malformed binding, and removes it with none", () => {
     run([
       file,
@@ -209,6 +216,29 @@ describe("workflow-tool process block authoring", () => {
     });
   });
 
+  test("rename rewrites the node and every reference to it on disk", () => {
+    const output = run([file, "rename", "do", "perform", "--no-version-bump"]);
+    const saved = read(file);
+    expect(saved.nodes.map((n: { id: string }) => n.id)).toEqual([
+      "start",
+      "perform",
+      "verify",
+      "end",
+    ]);
+    expect(saved.nodes[0].connections).toEqual({ default: "perform" });
+    expect(saved.nodes[2].connections).toEqual({ true: "end", default: "perform" });
+    expect(saved.nodes[2].cases[0].when.left).toEqual({ contextPath: "perform.ok" });
+    expect(output).toContain("Renamed node: do → perform");
+    expect(output).toContain("nodes[verify].cases[0].when.left.contextPath: 1");
+  });
+
+  test("delete retargets the incoming edge it is told to, and leaves nothing dangling", () => {
+    run([file, "delete", "verify", "--retarget", "do.success=end", "--no-version-bump"]);
+    const saved = read(file);
+    expect(saved.nodes.map((n: { id: string }) => n.id)).toEqual(["start", "do", "end"]);
+    expect(saved.nodes[1].connections).toEqual({ success: "end" });
+  });
+
   test.each([
     ["an unknown node", ["set-label", "ghost", "success", "x"]],
     ["an unknown connection key", ["set-label", "do", "failure", "x"]],
@@ -217,6 +247,10 @@ describe("workflow-tool process block authoring", () => {
     ["a duplicate block id", ["add-block", "work", "Work", "Again"]],
     ["editing an unknown block", ["edit-block", "ghost", "--summary", "x"]],
     ["an empty summary", ["edit-block", "work", "--summary", " "]],
+    ["renaming to an existing id", ["rename", "do", "verify"]],
+    ["renaming to a dotted id", ["rename", "do", "do.it"]],
+    ["deleting a node whose incoming edge has no decision", ["delete", "verify"]],
+    ["dropping a primary output", ["delete", "verify", "--drop", "do.success"]],
   ])("refuses %s and leaves the file unchanged", (_name, command) => {
     const before = fs.readFileSync(file, "utf8");
     expect(() => run([file, ...command, "--no-version-bump"])).toThrow();

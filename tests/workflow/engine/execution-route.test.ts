@@ -48,16 +48,18 @@ async function runner(workflow: WorkflowGraph) {
 }
 
 const workspace = "./moira-ws/quick-task-0000aaaa-0000-4000-8000-000000000000";
+const fiveUnits = [1, 2, 3, 4, 5].map((unit) => ({ title: `Unit ${unit}` }));
 const quickTaskInputs = {
   "get-task": (mode: "interactive" | "autonomous") => ({
     task_file: `${workspace}/task.md`,
     execution_file: `${workspace}/execution.md`,
     operating_mode: mode,
     progress_scope_outcome: "Task contract captured",
+    execution_note: "Route the quick task",
   }),
   "create-plan": {
     current_plan_file: `${workspace}/plans/001/plan.md`,
-    total_steps: 5,
+    plan_steps: fiveUnits,
     progress_plan_outcome: "Five-unit plan ready for review",
   },
   review: (issues: number, iteration: number) => ({
@@ -67,7 +69,7 @@ const quickTaskInputs = {
   }),
   "repair-plan": {
     current_plan_file: `${workspace}/plans/002/plan.md`,
-    total_steps: 5,
+    plan_steps: fiveUnits,
     progress_plan_outcome: "Corrected plan replaced the rejected revision",
   },
   "present-plan": {
@@ -108,6 +110,7 @@ describe("recorded route of real runs", () => {
       "repair-plan:success",
       "plan-review:route-operating-mode-plan-approval",
       "route-operating-mode-plan-approval:default",
+      "notify-plan-approval:default",
       "present-plan:check-steps-remaining",
       "check-steps-remaining:true",
       "execute-step:success",
@@ -119,12 +122,12 @@ describe("recorded route of real runs", () => {
       "execute-step:null",
     ]);
     expect(execution.visits!.at(-1)).toMatchObject({ waited: true, changes: {} });
-    expect(execution.visits![9].changes).toEqual({
+    expect(execution.visits![10].changes).toEqual({
       "execute-step.progress_execution_outcome": "Unit 1 done",
       progress_execution_outcome: "Unit 1 done",
     });
     // An expression writes its global by name and into its node-local scope.
-    expect(execution.visits![10].changes).toEqual({
+    expect(execution.visits![11].changes).toEqual({
       current_step: 1,
       "close-completed-step.current_step": 1,
     });
@@ -152,7 +155,7 @@ describe("recorded route of real runs", () => {
     // Loops: the second plan review after the repair, and every pass of the execution cycle after
     // the first.
     expect(projected.route.filter((entry) => entry.loop).map((entry) => entry.seq)).toEqual([
-      5, 11, 12, 13, 14, 15,
+      5, 12, 13, 14, 15, 16,
     ]);
     const currentStep = projected.variables.find((variable) => variable.name === "current_step")!;
     expect(currentStep.current).toBe(2);
@@ -278,9 +281,15 @@ describe("recorded route of real runs", () => {
       operating_mode: "autonomous",
       visual_validation_preference: "disabled",
       progress_intake_outcome: "Task captured",
+      execution_note: "Route the development run",
+      goal_summary: "The run's route is recorded",
     });
     await run.step();
-    await run.step({ health_outcome: "external_blocker", progress_intake_outcome: "Blocked" });
+    await run.step({
+      health_outcome: "external_blocker",
+      blocker_summary: "The package registry is unreachable",
+      progress_intake_outcome: "Blocked",
+    });
     // Ending the whole run is an explicit decision of its own in this flow; aborting a step is not
     // one of its values.
     await run.step({ blocker_decision: "end_workflow", progress_intake_outcome: "Ended" });
@@ -310,7 +319,11 @@ describe("recorded route of real runs", () => {
     ];
     await run.step();
     await run.step();
-    await run.step({ tasks, progress_checklist_outcome: "2 ordered tasks ready" });
+    await run.step({
+      tasks,
+      progress_checklist_outcome: "2 ordered tasks ready",
+      execution_note: "Route the checklist",
+    });
     await run.step({ evidence: "File created", progress_execution_outcome: "File created" });
     await run.step(undefined, "teleport-revise-tasks");
     await run.step({
@@ -346,8 +359,9 @@ describe("recorded route of real runs", () => {
       items: [{ index: 0, title: "Create the file", done: true, current: false }],
     });
     expect(work.timing.recorded).toBe(true);
-    // Three working passes: the executed task, the teleported revision wait and the task re-check.
-    expect(work.timing.passes.length).toBe(3);
+    // Four working passes: the executed task, the teleported revision wait, the task re-check and
+    // the "all tasks done" notification sent from the work block before the end.
+    expect(work.timing.passes.length).toBe(4);
   });
 
   test("a real run stamps the definition version and times every visit from presentation to transition", async () => {
@@ -375,8 +389,9 @@ describe("recorded route of real runs", () => {
     const open = projected.nodes.find((node) => node.status === "waiting")!;
     expect(open.timing.currentMs).toBeGreaterThanOrEqual(0);
     expect(projected.executionWorkflowVersion).toBe(workflow.metadata.version);
-    // The bundled Quick Task binding is counters only, zero-based: before any plan exists the
-    // execute block shows 0 done and no total (total_steps has no default until planning).
+    // The bundled Quick Task binding reads the plan's titled units and a zero-based cursor: before
+    // any plan exists the execute block has no items, 0 done and no total (plan_steps and
+    // total_steps have no default until planning).
     const execute = projected.nodes.find((node) => node.id === "execute")!;
     expect(execute.list).toEqual({
       items: null,

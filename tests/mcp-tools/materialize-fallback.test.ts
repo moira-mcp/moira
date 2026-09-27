@@ -41,7 +41,11 @@ describe("MCP materialize fallback E2E", () => {
 
     // Todo List opens on a materialize node, so the execution is paused exactly where the
     // fallback applies without needing a purpose-built fixture workflow.
-    execution = await startWorkflowExecutionState(client, "moira/todo-list");
+    // Todo List notifies; this user has no channel, so the optional notification preflight is
+    // skipped as an agent would after the start refusal names the flag.
+    execution = await startWorkflowExecutionState(client, "moira/todo-list", {
+      skipNotificationCheck: true,
+    });
     expect(execution.response).toContain("workflow-guide.md");
     // The deployed image must actually present the fallback, not merely accept the call.
     expect(execution.response).toContain('session({ action: "materialize"');

@@ -32,7 +32,9 @@ test.describe("i18n Stage 2 - Layout and Navigation Translations", () => {
       await loginAsAdmin(page);
 
       // Open user menu (in sidebar footer)
-      const userMenuButton = page.locator('[data-slot="sidebar-footer"] button');
+      const userMenuButton = page.locator(
+        '[data-slot="sidebar-footer"] [data-slot="dropdown-menu-trigger"]',
+      );
       await expect(userMenuButton).toBeVisible({ timeout: 5000 });
       await userMenuButton.click({ force: true });
       await page.waitForTimeout(300);
@@ -72,7 +74,9 @@ test.describe("i18n Stage 2 - Layout and Navigation Translations", () => {
       await loginAsAdmin(page);
 
       // Open user menu (in sidebar footer)
-      const userMenuButton = page.locator('[data-slot="sidebar-footer"] button');
+      const userMenuButton = page.locator(
+        '[data-slot="sidebar-footer"] [data-slot="dropdown-menu-trigger"]',
+      );
       await expect(userMenuButton).toBeVisible({ timeout: 5000 });
       await userMenuButton.click({ force: true });
       await page.waitForTimeout(300);

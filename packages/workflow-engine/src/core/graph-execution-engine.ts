@@ -47,7 +47,13 @@ import { IExtensionRunnerClient } from "../extensions/extension-runner-client.js
 import { isExtensionNode } from "../types/graph-nodes.js";
 import { GraphTemplateProcessor } from "../templates/graph-template-processor.js";
 import { SchemaValidator } from "../utils/schema-validator.js";
-import { diffVariables, snapshotVariables, type EngineVisit } from "../utils/execution-visits.js";
+import {
+  diffVariables,
+  liveExecution,
+  snapshotVariables,
+  type CycleOrigin,
+  type EngineVisit,
+} from "../utils/execution-visits.js";
 
 import {
   IGraphExecutionEngine,
@@ -224,6 +230,7 @@ export class GraphExecutionEngine implements IGraphExecutionEngine {
     messageQueue: AgentMessageQueue,
     startNodeId: string,
     userInput?: unknown,
+    origin?: CycleOrigin,
   ): Promise<GraphExecutionResult> {
     this.logger.debug("Starting stateless graph execution", {
       executionId: context.executionId.slice(0, 8),
@@ -331,6 +338,7 @@ export class GraphExecutionEngine implements IGraphExecutionEngine {
           this,
           nodeInput,
           graph.variableRegistry,
+          origin ? () => liveExecution(origin, visits, updatedContext.variables) : undefined,
         );
       } catch (handlerError) {
         // Handler threw exception - this is the boundary for handler errors

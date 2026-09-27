@@ -80,6 +80,25 @@ export class SlugConflictError extends DomainError {
 }
 
 /**
+ * A definition write carried an expected revision that is no longer the stored one: another write
+ * landed first. Nothing was written; `currentRevision` is what the caller must reload.
+ */
+export class WorkflowRevisionConflictError extends DomainError {
+  readonly code = "WORKFLOW_REVISION_CONFLICT";
+  readonly httpStatus = 409;
+
+  constructor(
+    public readonly workflowId: string,
+    public readonly expectedRevision: number,
+    public readonly currentRevision: number,
+  ) {
+    super(
+      `Workflow '${workflowId}' is at revision ${currentRevision}, not ${expectedRevision}; reload and apply the change again`,
+    );
+  }
+}
+
+/**
  * Handle already taken by another user
  */
 export class HandleConflictError extends DomainError {

@@ -201,4 +201,41 @@ describe("workflow definition revision", () => {
     expect(fresh.json.data.revision).toBe(after.revision + 1);
     expect((await get()).revision).toBe(after.revision + 1);
   });
+
+  test("edits and page saves racing on the same revision: exactly one lands, the rest conflict", async () => {
+    const before = await get();
+    const edit = (description: string) =>
+      callMCPToolRaw(client, "manage", {
+        action: "edit",
+        workflowId,
+        expectedRevision: before.revision,
+        changes: { metadata: { description } },
+      });
+    const pageSave = (description: string) =>
+      put(cookie, {
+        workflow: {
+          metadata: { ...before.metadata, description },
+          variableRegistry: before.variableRegistry,
+          nodes: before.nodes,
+        },
+        expectedRevision: before.revision,
+      });
+
+    const [editA, editB, saveA, saveB] = await Promise.all([
+      edit("race edit A"),
+      edit("race edit B"),
+      pageSave("race save A"),
+      pageSave("race save B"),
+    ]);
+    const editConflicts = [editA, editB].filter((raw) => /revision conflict/i.test(raw));
+    const editWins = 2 - editConflicts.length;
+    const saveWins = [saveA, saveB].filter((r) => r.status === 200).length;
+    const saveConflicts = [saveA, saveB].filter((r) => r.status === 409).length;
+    expect(editWins + saveWins).toBe(1);
+    expect(editConflicts.length + saveConflicts).toBe(3);
+
+    const after = await get();
+    expect(after.revision).toBe(before.revision + 1);
+    expect(after.metadata.description).toMatch(/^race (edit|save) [AB]$/);
+  });
 });

@@ -67,6 +67,7 @@ export class ContextMapper {
       // Subgraph tracking
       _subgraphDepth: newDepth,
       _parentExecutionId: parentContext.executionId,
+      _rootExecutionId: parentContext._rootExecutionId ?? parentContext.executionId,
       _subgraphChain: newChain,
     };
 

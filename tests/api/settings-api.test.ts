@@ -224,9 +224,11 @@ describe("Hidden beginner panels", () => {
         headers: { Cookie: authCookie },
       })
     ).json()) as any;
-    expect(definitions.data).toEqual([
-      expect.objectContaining({ key, type: "json", category: "ui", adminOnly: false }),
-    ]);
+    expect(definitions.data).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ key, type: "json", category: "ui", adminOnly: false }),
+      ]),
+    );
 
     const settings = (await (
       await fetch(`${BASE_URL}/api/settings/ui`, { headers: { Cookie: authCookie } })
@@ -313,6 +315,92 @@ describe("Hidden beginner panels are held to their declared schema", () => {
     });
     expect(res.status).toBe(400);
     expect((await readUi()).status).toBe(200);
+  });
+});
+
+describe("Guide progress", () => {
+  // The web interface keeps what a reader did with its guides in one user setting. Required state:
+  // it is a seeded, non-admin json definition in the `ui` category beside the hidden panels, reads
+  // as an empty object until something is saved, accepts the progress the interface writes and a
+  // field a later build adds, stays the user's own, and refuses what is not an object. Plausible
+  // wrong states: the definition is missing (every save refused), its schema is closed (a later
+  // build's field refused), or it takes any value (a bare string breaks every later read).
+  const key = "ui.guide_progress";
+  const progress = {
+    firstRun: "accepted",
+    resume: {
+      guide: "flow",
+      step: "edit-reader",
+      path: "/workflows/moira/quick-task",
+      owner: false,
+    },
+    seen: { "settings.nav": 1, "settings.apps": 1 },
+    finished: { run: true },
+  };
+
+  async function readUi(cookie = authCookie) {
+    return (await (
+      await fetch(`${BASE_URL}/api/settings/ui`, { headers: { Cookie: cookie } })
+    ).json()) as any;
+  }
+
+  test("is a seeded user setting in the ui category that starts empty", async () => {
+    const definitions = (await (
+      await fetch(`${BASE_URL}/api/settings/definitions?category=ui`, {
+        headers: { Cookie: authCookie },
+      })
+    ).json()) as any;
+    expect(definitions.data.map((definition: { key: string }) => definition.key).sort()).toEqual([
+      key,
+      "ui.hidden_panels",
+    ]);
+    expect(definitions.data).toContainEqual(
+      expect.objectContaining({ key, type: "json", category: "ui", adminOnly: false }),
+    );
+    expect((await readUi()).data[key]).toEqual({});
+  });
+
+  test("a bulk save stores the progress and a later build's field, for this user only", async () => {
+    const withFuture = { ...progress, tutorials: { copyId: "wf-1", passed: { "lesson-1": 2 } } };
+    const saved = await fetch(`${BASE_URL}/api/settings`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", Cookie: authCookie },
+      body: JSON.stringify({ [key]: withFuture }),
+    });
+    expect(saved.status).toBe(200);
+    expect(((await saved.json()) as any).data.refused).toEqual([]);
+    expect((await readUi()).data[key]).toEqual(withFuture);
+
+    const other = {
+      email: `guide-progress-other-${Date.now()}@example.com`,
+      password: "TestPass123!",
+    };
+    await createTestUserViaApi(BASE_URL, other.email, other.password, "Other Guides User");
+    const otherCookie = formatSessionCookie(
+      BASE_URL,
+      await signInUser(BASE_URL, other.email, other.password),
+    );
+    expect((await readUi(otherCookie)).data[key]).toEqual({});
+  });
+
+  test.each([
+    ["a bare string", "accepted"],
+    ["a list", [progress]],
+    ["an unknown first-run answer", { firstRun: "maybe" }],
+    ["a seen revision that is not a number", { seen: { "settings.nav": "one" } }],
+    ["a finished mark that is not true", { finished: { settings: "yes" } }],
+  ])("a bulk save of %s is refused and the settings stay readable", async (_label, value) => {
+    const res = await fetch(`${BASE_URL}/api/settings`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", Cookie: authCookie },
+      body: JSON.stringify({ [key]: value }),
+    });
+    const body = (await res.json()) as any;
+    expect(body.data.refused).toEqual([
+      expect.objectContaining({ key, reason: expect.stringContaining("declared schema") }),
+    ]);
+    const read = await fetch(`${BASE_URL}/api/settings/ui`, { headers: { Cookie: authCookie } });
+    expect(read.status).toBe(200);
   });
 });
 

@@ -11,7 +11,12 @@ import { describe, test, expect, jest } from "@jest/globals";
 import { readdirSync, readFileSync } from "fs";
 import path from "path";
 import { GraphTemplateProcessor } from "@mcp-moira/workflow-engine";
-import { collectPlaybookReferences, type PlaybookService } from "@mcp-moira/shared";
+import {
+  collectPlaybookReferences,
+  getWorkflowsDirs,
+  readPlaybookCatalogs,
+  type PlaybookService,
+} from "@mcp-moira/shared";
 import type { ExecutionContext } from "@mcp-moira/workflow-engine";
 
 function mockExecutionContext(variables: Record<string, unknown> = {}): ExecutionContext {
@@ -66,21 +71,28 @@ describe("playbook reference form", () => {
 });
 
 describe("the bundled catalog", () => {
-  test("names no playbook, so every bundled flow still starts", () => {
-    // A bundled flow that names a playbook would be unstartable for everyone: no account has it.
-    // The authoring guidance inside Workflow Management Flow shows the syntax, and showing is not
-    // naming — that distinction is what this check protects.
+  test("names only playbooks it ships for everyone, so every bundled flow still starts", () => {
+    // A bundled flow that names a playbook nobody can read would be unstartable for everyone. The
+    // only playbooks everyone can read are the public ones the bundled catalog installs under the
+    // system owner, and only a reference that names that owner (its seeded handle `moira`)
+    // resolves to them for another user. The authoring guidance inside Workflow Management Flow
+    // shows the syntax, and showing is not naming — that distinction is protected too.
+    const shipped = new Set(
+      readPlaybookCatalogs(getWorkflowsDirs())
+        .filter((entry) => entry.owner === "system-moira" && entry.visibility === "public")
+        .map((entry) => `@moira/${entry.slug}`),
+    );
     const flowsDir = path.join(process.cwd(), "workflows/production/flows");
-    const named: string[] = [];
+    const unresolvable: string[] = [];
 
     for (const file of readdirSync(flowsDir).filter((name) => name.endsWith(".json"))) {
       const definition = JSON.parse(readFileSync(path.join(flowsDir, file), "utf-8")) as unknown;
       for (const reference of collectReferencesIn(definition)) {
-        named.push(`${file}: ${reference}`);
+        if (!shipped.has(reference)) unresolvable.push(`${file}: ${reference}`);
       }
     }
 
-    expect(named).toEqual([]);
+    expect(unresolvable).toEqual([]);
   });
 
   function collectReferencesIn(value: unknown): string[] {

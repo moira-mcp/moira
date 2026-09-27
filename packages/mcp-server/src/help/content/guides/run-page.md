@@ -50,12 +50,14 @@ The two tabs above the picture show the same run in two ways; the choice is in t
   playbooks and a catalog-drawn node's configuration, with a breadcrumb back to the block and a
   "Show on the graph" action that brings the step into view. When the graph opens on the current
   step or moves to a chosen step, its whole card fits in the diagram pane; zoom in to read a card
-  that appears small in a narrow pane.
+  that appears small in a narrow pane. The graph follows the run's current step. Once you travel
+  inside it (the finder, a port, an arrival chip), it keeps your step in view until the run moves
+  to another step.
 
 Both views share one toolbar above the diagram: the **Map / Graph** switch, the contents fold
 button, the route cursor, the step finder (it answers "which block is this step in" and, on the
 graph, opens that step), the layout presets, zoom and fit, the navigator switch, the compass, the
-status legend and **Explain this page**. The presets re-lay the open diagram and bring the camera
+status legend and **What is this?**. The presets re-lay the open diagram and bring the camera
 back to the block you were reading; each view words them for what it moves — on the map _Rows_,
 _Compact_, _Balanced_ (branches on both sides of the main line) and _Top to bottom_, on the graph
 _Stacked groups_, _Compact_, _Groups in a row_ and _Steps top to bottom_ — and both views follow
@@ -128,9 +130,15 @@ is behind the server's (reload and answer again).
 
 ## Explaining the page
 
-**Explain this page** walks through the page in six steps — block, step, evidence, loop, route,
-and the views — highlighting the element that shows each on the live run, in whichever view is
-open: a contents row, the current step in the block panel (the section it sits in unfolds), the
-evidence a step must return, a return port, the route cursor and the toolbar. A highlighted card
-inside the diagram is brought into the camera. The step is in the URL as `guide`, so a position can
-be linked to. The compass in the toolbar opens the note about the open view.
+**What is this?** opens a tour of the page, each card sitting beside the element it explains on the
+live run, in whichever view is open, with the rest of the page dimmed. It covers the block and the
+map and graph views; the current step, the evidence it must return and a loop; the route cursor;
+the panel's tabs; answering the waiting step yourself — the answer form in the Variables tab gives
+the step's answer instead of the agent, checked like the agent's and recorded in the route as your
+adjustment; where Moira's notifications about the run lead (the plan ready for approval, the result
+ready for review, the finished work — each opens with the flow and the task and links to this page);
+and the toolbar. A highlighted card inside the diagram is brought into the camera. A step whose
+element is not on this run (no loop, no waiting step) is skipped with a note on the next card. The
+right arrow or Enter goes on, the left arrow goes back and Escape closes. On a phone the card is a
+sheet along the top or the bottom of the screen, whichever leaves the element in sight. The tour
+and its step are in the URL (`guide=run&step=…`), so a position can be linked to.

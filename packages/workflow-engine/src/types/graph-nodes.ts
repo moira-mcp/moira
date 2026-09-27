@@ -156,6 +156,11 @@ export interface UserNotificationNode extends BaseNode {
   format?: "plain" | "markdown" | "html";
   silent?: boolean;
   attachProgressImage?: boolean;
+  /**
+   * How much of the run's plan (the bound list nearest the run) follows the message: every item
+   * with its state, the `done/total: current` line, or nothing. Default `progress`.
+   */
+  planList?: "full" | "progress" | "none";
   attachment?: {
     kind: "image" | "document";
     data: string;

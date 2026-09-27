@@ -32,6 +32,7 @@ import {
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
 import { Textarea } from "../components/ui/textarea";
+import { guideAnchor } from "@/guides/anchors";
 
 interface ArtifactListItem {
   uuid: string;
@@ -245,13 +246,20 @@ export const Artifacts: React.FC = () => {
   const totalPages = Math.ceil(total / pageSize);
 
   if (loading && artifacts.length === 0) {
-    return <PageShell title={t("pages.artifacts.title")} loading />;
+    return (
+      <PageShell
+        title={t("pages.artifacts.title")}
+        guide={guideAnchor("artifacts.header")}
+        loading
+      />
+    );
   }
 
   if (error) {
     return (
       <PageShell
         title={t("pages.artifacts.title")}
+        guide={guideAnchor("artifacts.header")}
         error={error}
         onRetry={loadArtifacts}
         retryLabel={t("pages.artifacts.retry")}
@@ -260,11 +268,11 @@ export const Artifacts: React.FC = () => {
   }
 
   return (
-    <PageShell title={t("pages.artifacts.title")}>
+    <PageShell title={t("pages.artifacts.title")} guide={guideAnchor("artifacts.header")}>
       <FilterBar
         filters={
           stats ? (
-            <div className="w-64" data-testid="quota-indicator">
+            <div className="w-64" data-testid="quota-indicator" {...guideAnchor("artifacts.quota")}>
               <div className="flex justify-between text-sm text-muted-foreground mb-1">
                 <span>{t("pages.artifacts.quota.storage")}</span>
                 <span>
@@ -282,7 +290,11 @@ export const Artifacts: React.FC = () => {
           ) : undefined
         }
         actions={
-          <Button onClick={() => setCreateDialogOpen(true)} data-testid="create-artifact-button">
+          <Button
+            onClick={() => setCreateDialogOpen(true)}
+            data-testid="create-artifact-button"
+            {...guideAnchor("artifacts.create")}
+          >
             <Plus className="h-4 w-4 mr-2" />
             {t("pages.artifacts.actions.create")}
           </Button>
@@ -304,6 +316,7 @@ export const Artifacts: React.FC = () => {
         )}
         keyExtractor={(a) => a.uuid}
         storageKey="artifacts-view-mode"
+        guide={guideAnchor("artifacts.list")}
         loading={loading}
         emptyIcon={FileCode}
         emptyTitle={t("pages.artifacts.noArtifacts")}

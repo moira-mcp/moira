@@ -18,11 +18,11 @@ mcp__moira__start({ action: "execute", startAttemptId: "<Start attempt ID from p
 
 The flow resolves create/edit identity, online or offline source boundaries, a local source hint, and autonomous or interactive mode. It materializes an execution-correlated workspace with the current authoring reference, obtains complete server and repository candidates, records provenance and semantic differences, and never mechanically merges JSON.
 
-Requirements and an optional full antipattern audit feed one outcome-oriented design contract. Independent pre-mutation review must pass before the official workflow CLI changes the complete artifact. The result is validated and rendered through the official structural schema projection, then independently reviewed against the complete JSON, requirements, design, authority, and evidence modalities.
+On the standard and complex levels, requirements and the full antipattern audit (optional on a standard edit, by default on a complex one) feed one outcome-oriented design contract, and independent pre-mutation review must pass before the official workflow CLI changes the complete artifact. The result is validated and rendered through the official structural schema projection, then independently reviewed against the complete JSON, requirements, design, authority, and evidence modalities. The simple level builds or changes the workflow straight from the requirements and takes a light review instead, as [What each level runs](#what-each-level-runs) describes.
 
 The design contract expresses each decision on the node that has its evidence — routing `cases` and folded `expressions` on the deciding node, `success` when no case holds — and keeps a separate condition or expression node only for a shared or standalone decision; the reviews treat a routing node that only routes or counts what the preceding node already knows (avoidable routing scaffolding) as a finding. When a stage works through a list the flow keeps in its variables, the design binds the progress block to it so the run shows done/total and the current item.
 
-For a workflow with meaningful user-visible stages, the same design lifecycle designs its process view: a short chain of blocks in process order, each with a one-sentence description, every node of the graph — routing nodes included — owned by one block, every edge that leaves a block labelled with the decision it represents, every return explaining its cause and exit, and hubs placed after the blocks that lead into them. WMF's design gate specifies this as part of the pre-mutation contract, its build gates author it with the official CLI and complete only when `derive` reports no diagnostic, and its reviews judge that labels, cycle explanations, descriptions and order are true to the graph. Execution conditions and routes remain in the primary workflow graph; a run is shown from its recorded route. One shared projection and visual model drives both the interface and the server-rendered PNG. Agents may request a short-lived one-time PNG download, while an authorized Telegram node attaches the image directly without storing that token in workflow state. WMF omits progress when it would be decorative.
+For a workflow with meaningful user-visible stages, the same design lifecycle designs its process view: a short chain of blocks in process order, each with a one-sentence description, every node of the graph — routing nodes included — owned by one block, every edge that leaves a block labelled with the decision it represents, every return explaining its cause and exit, and hubs placed after the blocks that lead into them. WMF's design gate specifies this as part of the pre-mutation contract, its build gates author it with the official CLI and complete only when `derive` reports no diagnostic, and its reviews judge that labels, cycle explanations, descriptions and order are true to the graph. Execution conditions and routes remain in the primary workflow graph; a run is shown from its recorded route. One shared projection and visual model drives both the interface and the server-rendered PNG, and agents may request a short-lived one-time PNG download of it. A notification attaches a phone-width picture of the run's steps built from the same projection, without storing any token in workflow state. WMF omits progress when it would be decorative.
 
 When one block represents several current roles, WMF may design `progressActiveLabel` on its
 waiting nodes. It appears only for the exact current primary node; inactive blocks retain their
@@ -31,6 +31,94 @@ can reach that node and rejects stale counters, wrong scope, and progress-owned 
 
 Artifact-owned findings repair the workflow and repeat stale gates. Invalid criteria or upstream process defects replan. The final report describes exact starts, teleports, terminals, routes, cycles, reachability, coverage, data flow, and every frozen semantic guarantee.
 
+## The requirements conversation
+
+The person asking for a workflow usually knows their work, not Moira. Both requirements owners — for create and for edit — read the materialized `reference/conversation.md` and talk in the person's terms: what the workflow is for, how they will tell that a run went well, and any real decision put as a question about their work rather than about nodes or conditions. They offer the options with their cost in plain words — simpler is faster and shorter; more thorough takes longer and gives a bigger process with higher quality; a process can always be improved later — and agree one of three levels:
+
+- **simple** — steps in order, possibly one choice or one approval;
+- **standard** — real branches, a review-and-redo loop, approvals, durable files or effects that need the person's authority;
+- **complex** — several interacting loops, sub-processes, jumps between parts, locks, a multi-stage progress view, publication or other high-authority effects, or any workflow the person wants taken through the full path.
+
+Whenever the agent asks the person something or proposes something, it explains the options in their terms — what each means and what follows from it — and gives the reasons for its recommendation. The same rule is part of what WMF builds into other workflows: the simple-level pattern "Questions that explain and argue" asks for it wherever a workflow's agent asks the person, and the matching antipattern "A bare question or an unargued proposal" makes the reviews and the audit flag a directive that asks without it; on the simple level the light review asks it as its third question. WMF's own approval and upload questions and its approval-gate starting shape follow the same rule.
+
+An interactive run confirms the level with the person; an autonomous run decides it and records why. A request that already says how thorough it should be sets the level without a question. The requirements file records the level, its reason and any chosen starting shape.
+
+The workspace also carries three starting shapes in `reference/templates/`, each a valid workflow to build from with the official CLI: a checklist (`checklist.json`), do–check–redo (`do-check-redo.json`, a review-and-redo loop and therefore standard) and an approval gate (`approval-gate.json`). The pattern and antipattern references are grouped by level: each entry sits in the lowest level where it applies, so the simple section holds only what a short flow of steps can get wrong, and review, repair, evidence and validator machinery sits in the standard and complex sections.
+
+## What each level runs
+
+The level agreed in the requirements decides which responsibilities run:
+
+- **simple** — on create, no structure design, design review or structure approval; on edit, no antipattern audit, edit plan, plan review or plan approval. The workflow is built or changed straight from the requirements file (and, on create, the starting shape it names), then goes to a light review: the non-removable minimum below and four questions — does the workflow do what the person asked, does every completion condition name an observable result rather than an intention, does every step that asks the person explain the options and argue the agent's recommendation, and does every notification's message follow the notification content rules ([below](#what-the-workflows-it-builds-may-say)). A finding is repaired and reviewed again. When the repair cannot reproduce a finding, it says so with what it checked; the light review then withdraws the finding or restates it with exact reproduction steps, and a finding that is not reproduced a second time is not sent back again but carried to the person as an open point. When the person rejects the result at the final review, or the run's process is revised, the requirements are corrected and the workflow is rebuilt or changed again, still without design or an edit plan.
+- **standard** and **complex** — the full path: on create, structure design, independent design review and structure approval in an interactive run; on edit, the edit plan, its independent review and plan approval in an interactive run; then the build and the full quality review. A standard edit asks whether to run the full antipattern audit; a complex edit runs it without asking. The two levels also differ in which catalogue sections apply.
+
+Every responsibility that reads the pattern and antipattern references applies the sections for the current level and every level below it; the sections of higher levels do not apply.
+
+The non-removable minimum holds on every level: the official CLI `validate` reports no errors and no unreachable node — its unreachable-node warning blocks — and every route from `start` ends at an `end`. The workflow carries exactly one `complexity:<level>` tag in `metadata.tags`; the build and every repair of the workflow keep it together with the other tags (`set-tags` replaces the whole list), and both reviews verify it. The web app shows that tag as a level badge — Simple, Standard or Complex — on the flow card and in the flow page header, apart from the flow's subject tags; a flow without it shows no badge.
+
+Reviews only raise the level. When the light review, its repair or the full quality review finds that the workflow needs more than its level covers, it raises the level and states the reason. The run continues from the current requirements and the workflow already built, without capturing the requirements again: a new workflow goes into structure design and its independent review; an edit raised to `standard` gets the audit question and an edit raised to `complex` the full antipattern audit, over the workflow as it now stands, and then the edit plan and its independent review. In an interactive run the agent tells the person in plain words why the process grew and what it costs, at the structure approval (create) or the edit-plan approval (edit) and again at the final review; design and the autonomous report are given the same reason. No review can answer a lower level, and the full quality review raises only to `complex`.
+
+Below `complex`, the final review and the autonomous report name in plain words what the level skipped — on `simple`, for example, the independent design review — and the way back: start this flow again in edit mode on the workflow and ask for the full path; the `complexity:` tag tells that edit what never ran. On an edit at `standard` where the full antipattern audit was declined, they also say that the whole workflow was not audited. Both name any open point the light review carried. The autonomous report also states the level, why it was chosen and any raise with its reason.
+
+An edit starts from the level recorded on the workflow. A tag below `complex` means the responsibilities that level skips never ran on it; when the edit raises the level, they run over the whole workflow, not only the changed part. A workflow without a level tag has an unknown history, and the edit decides its level from the workflow and the request.
+
+The level goes down only when the person explicitly asks for a simpler process in an interactive run: in the requirements conversation, at the structure or edit-plan approval, or at the final review together with a rejection. The agent first records the request, in the person's words, and the resulting level in the requirements file; from that point the run takes only the routes of the lower level, and the final review says what ran before the lowering. No review can lower the level, and an autonomous run never lowers it.
+
 ## Publication and local synchronization
 
-Server upload is a separate decision: standard, copy-new, or explicitly authorized admin override. Autonomous mode never invents upload authority. Repository synchronization preserves the resolved target identity and writes no unrelated path. WMF authors the workflow definition; it does not execute the downstream task that workflow will later perform.
+Server upload is a separate decision: standard, copy-new, or explicitly authorized admin override. Autonomous mode never invents upload authority, neither at the upload question nor after a failed upload: on its own it retries, keeps the workflow unsaved or cancels, and picks copy-new or admin override only when the user explicitly authorized that method. Repository synchronization preserves the resolved target identity and writes no unrelated path. WMF authors the workflow definition; it does not execute the downstream task that workflow will later perform.
+
+## Notifications
+
+WMF notifies through the user's configured channels. Every message is headed by the flow name and
+the run's task, linked to the run page, and carries no image. Every line written from the run's
+values comes from a one-sentence field the step writes for a person, without file names or
+internal values; the fields are listed below. The messages are in English.
+
+| When | Interactive | Autonomous |
+| --- | --- | --- |
+| The plan is ready | Standard and complex: "Workflow structure ready for your approval" or "Edit plan ready for your approval", with the planned stages or changes and the choices — approve it and the build goes ahead, or reject it with feedback. Simple: "Plan ready — the build goes ahead" (or "the changes are being applied"), with the list | "Plan ready — the build goes ahead" (or "the changes are being applied"), with the list |
+| A standard edit asks about the full audit | "Audit the whole workflow first?": what the audit does and costs, and the choices | "Decided for you": auditing the whole workflow, or planning only the requested change, and why |
+| The result is ready | "The workflow is ready for your review": approve it to go on to saving, or ask for changes | — |
+| Saving | "Save the workflow to your catalogue?": what each way of saving does, and not saving | "Decided for you": saving it, or not saving it, and why |
+| Saving failed | "Saving the workflow failed": why, and the choices — try again, keep it unsaved, or cancel; for a workflow that belongs to someone else, a separate copy or an administrator's replacement | "Decided for you": trying again (or the method the user authorized), or keeping it unsaved, and why |
+| The run ends | "Workflow created" or "Workflow updated": its name and version, whether it was saved to the catalogue, and the planned stages or changes marked done | the same |
+| The run is cancelled | "Cancelled": the name and version were built but not saved, and why | the same |
+
+The plan list is the build block's list: `planned_changes`, the stages of a new workflow or the
+planned changes of an edit. The requirements owner writes it on the simple level; the design or
+the edit plan writes it on the standard and complex levels. Every revision rewrites it — a
+revision after a rejected result, a process revision, and a lowering of the level at an
+approval — so the changed plan is announced again. It reads as not yet done whenever a plan is
+announced, and as done once the build has run. A complex edit is audited without the question.
+The reader lines come from one-sentence fields the steps write for a person:
+- `execution_note`, the task, from the first step;
+- `decision_summary` from the audit, upload and upload-error decisions;
+- `workflow_name` and `workflow_version` from the upload decision;
+- `failure_summary` from a failed upload.
+
+A revised plan is announced again. Because the flow notifies, starting it for a user with no
+configured channel is refused with an instruction; an agent that wants to run without
+notifications prepares the start again with `skipNotificationCheck: true`.
+
+### What the workflows it builds may say
+
+WMF teaches the same rules for every notification in a workflow it creates or edits. The rules
+live in the engine reference, `reference/engine.md`:
+
+- The engine adds the heading. It is set through `execution_note` on the first agent step, and a
+  message does not repeat it.
+- The plan list comes from the list bound on the working block through `planList`: `full` at plan
+  ready and at every finish, `progress` elsewhere. A message never writes the list by hand.
+- No internal value reaches the reader: no path or file name, template syntax, node id, variable
+  name, raw enum value or counter without a title. A line written from the run's values comes
+  from a one-sentence field the step writes for a person, and an enum value is worded.
+- Placement follows the operating mode. An interactive run is told before the question, with
+  the choices explained and a recommendation argued. An autonomous run is never told that a
+  decision is pending: it hears that the work goes ahead, and one message after each decision the
+  agent took, with what and why, sent from the deciding node's own route.
+- The run's last message connects straight to `end`, so its list shows no item still in
+  progress.
+
+The light review asks on the simple level, and the full quality review checks on the standard and
+complex levels, that every notification's message follows these rules.

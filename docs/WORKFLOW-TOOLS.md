@@ -49,7 +49,7 @@ moira-workflow ./workflows/production/flows/<flow>.json update analyze-and-plan 
 # Override the block's label only while this node is current (or clear with none)
 moira-workflow ./workflows/production/flows/<flow>.json update analyze-and-plan --progress-active-label "Implement {{unit}}/{{total}}"
 
-# Attach/clear the shared progress PNG on a notification node
+# Attach/clear the run's steps picture on a notification node
 moira-workflow ./workflows/production/flows/<flow>.json update notify-plan-ready --progress-node-id plan --attach-progress-image true
 
 # Replace all connections
@@ -70,6 +70,42 @@ replaces the node's expressions. Both apply to `condition` and `agent-directive`
 `output` must name a key of the node's `connections` other than its default output (`default` on a
 condition node, `success` on an agent-directive node) and other than the reserved control outputs
 `error` and `timeout` — run `validate` after the edit to see the routing diagnostics.
+
+`--expressions '[]'` removes the `expressions` field from any node, including a type that accepts no
+expressions at all, such as a `teleport` node left with one by an earlier edit.
+
+### rename - Rename a node and every reference to it
+
+```bash
+moira-workflow ./workflows/production/flows/<flow>.json rename review-plan independent-plan-review
+```
+
+Gives a node a new id and rewrites every reference to it: connection targets, `{{node.name}}`
+templates and block-helper arguments in any template text, routing case `contextPath` operands,
+progress list bindings, subgraph mappings, end `finalOutput`, batch write-note sources, expression
+identifiers and `runtimePolicy` write allowances. Connection keys, case outputs and block ids are
+not node references and stay as they are, and so does prose that mentions the id outside a
+reference. The command prints each rewritten location with its count. It refuses an unknown node,
+an id that already exists and an id that is not kebab-case (`^[a-z0-9][a-z0-9-]*$`), leaving the
+file unchanged.
+
+### delete - Delete a node
+
+```bash
+# Refused while another node still leads to the node; the error names every such edge
+moira-workflow ./workflows/production/flows/<flow>.json delete legacy-check
+
+# Decide each incoming edge: point it at another node, or drop a non-primary output
+moira-workflow ./workflows/production/flows/<flow>.json delete legacy-check \
+  --retarget review.success=deliver --drop review.skip
+```
+
+Removes the node with its own outputs and labels, and removes it from `runtimePolicy` write
+allowances. Every incoming edge needs a decision, given by its edge id `<source>.<key>`:
+`--retarget` points it at another node, `--drop` removes that connection and its label. A node's
+primary output (`success`, `default` or `unlocked`, by type) cannot be dropped — retarget it. The
+start node cannot be deleted. Template references to the deleted node's outputs are left for
+`validate` to report. Both flags may be repeated.
 
 ### clone - Clone a node
 
@@ -107,7 +143,9 @@ moira-workflow ./workflows/production/flows/<flow>.json move node-to-move
 - Backup format: `<filename>.backup-<timestamp>.json`
 
 `--attach-progress-image` accepts `true` or `false` and is rejected for every node type except
-`user-notification` or deprecated `telegram-notification`. These update options persist the requested fields; they do not derive the
+`user-notification` or deprecated `telegram-notification`. `--plan-list <full|progress|none>` sets
+how much of the run's plan a `user-notification` carries; `progress` is the default and removes the
+field, and every other node type is rejected. These update options persist the requested fields; they do not derive the
 process or validate its meaning — run `derive` afterwards.
 
 `--progress-active-label` is valid only for a node that pauses the run and belongs to a block. It
@@ -421,9 +459,6 @@ Removes a declared global variable from the `variableRegistry`. Creates a backup
 # Add nodes from a JSON file
 moira-workflow ./workflows/production/flows/<flow>.json add new-nodes.json
 
-# Delete a node
-moira-workflow ./workflows/production/flows/<flow>.json delete node-id
-
 # Set the workflow version
 moira-workflow ./workflows/production/flows/<flow>.json set-version 8.0.0
 
@@ -440,8 +475,9 @@ moira-workflow ./workflows/production/flows/<flow>.json set-description --file .
 moira-workflow ./workflows/production/flows/<flow>.json set-system-reminder --file ./reminder.txt
 moira-workflow ./workflows/production/flows/<flow>.json set-system-reminder none
 
-# Set the catalog tags a flow is found by
-moira-workflow ./workflows/production/flows/<flow>.json set-tags research,verification
+# Set the catalog tags a flow is found by. The list replaces all tags: keep the flow's
+# complexity:<level> tag, which the Workflow Management Flow writes and later edits read.
+moira-workflow ./workflows/production/flows/<flow>.json set-tags research,verification,complexity:standard
 
 # Replace an existing copy while preserving its id/slug/owner/visibility/previousSlugs
 moira-workflow ./workspace.json sync ./workflows/production/flows/<flow>.json
@@ -569,6 +605,7 @@ Available for all modifying commands:
 - `update`
 - `add`
 - `delete`
+- `rename`
 - `clone`
 - `move`
 - `set-variable`

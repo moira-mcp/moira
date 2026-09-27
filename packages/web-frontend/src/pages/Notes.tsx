@@ -24,6 +24,7 @@ import { NoteCard } from "../components/cards";
 import { formatSize } from "../components/cards/format-utils";
 import { DataListView } from "../components/DataListView";
 import { ConfirmDialog } from "../components/confirm-dialog";
+import { guideAnchor } from "@/guides/anchors";
 
 interface NoteListItem {
   id: string;
@@ -178,13 +179,14 @@ export const Notes: React.FC = () => {
   const totalPages = Math.ceil(total / pageSize);
 
   if (loading && notes.length === 0) {
-    return <PageShell title={t("pages.notes.title")} loading />;
+    return <PageShell title={t("pages.notes.title")} guide={guideAnchor("notes.header")} loading />;
   }
 
   if (error) {
     return (
       <PageShell
         title={t("pages.notes.title")}
+        guide={guideAnchor("notes.header")}
         error={error}
         onRetry={loadNotes}
         retryLabel={t("pages.notes.retry")}
@@ -193,10 +195,10 @@ export const Notes: React.FC = () => {
   }
 
   return (
-    <PageShell title={t("pages.notes.title")}>
+    <PageShell title={t("pages.notes.title")} guide={guideAnchor("notes.header")}>
       {/* Quota indicator */}
       {stats && (
-        <div className="w-64 mb-6" data-testid="quota-indicator">
+        <div className="w-64 mb-6" data-testid="quota-indicator" {...guideAnchor("notes.quota")}>
           <div className="flex justify-between text-sm text-muted-foreground mb-1">
             <span>{t("pages.notes.quota.used")}</span>
             <span>
@@ -241,7 +243,11 @@ export const Notes: React.FC = () => {
           ) : undefined
         }
         actions={
-          <Button onClick={handleCreateNote} data-testid="create-note-button">
+          <Button
+            onClick={handleCreateNote}
+            data-testid="create-note-button"
+            {...guideAnchor("notes.create")}
+          >
             <Plus className="h-4 w-4 mr-2" />
             {t("pages.notes.actions.create")}
           </Button>
@@ -295,6 +301,7 @@ export const Notes: React.FC = () => {
         }
         keyExtractor={(n) => n.key}
         storageKey="notes-view-mode"
+        guide={guideAnchor("notes.list")}
         loading={loading}
         emptyIcon={FileText}
         emptyTitle={

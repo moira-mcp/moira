@@ -25,6 +25,8 @@ export interface SettingsSectionProps {
   children: React.ReactNode;
   className?: string;
   "data-testid"?: string;
+  /** A guide anchor for the section, as `guideAnchor(...)` spreads it. */
+  "data-guide"?: string;
 }
 
 export function SettingsSection({
@@ -37,6 +39,7 @@ export function SettingsSection({
   children,
   className,
   "data-testid": testId,
+  "data-guide": guide,
 }: SettingsSectionProps): React.JSX.Element {
   const headingId = `${id}-heading`;
   return (
@@ -45,6 +48,7 @@ export function SettingsSection({
       aria-labelledby={headingId}
       data-settings-section={id}
       data-testid={testId}
+      data-guide={guide}
       // The sticky chip bar on narrow screens covers the top of the viewport; a jump must land below it.
       className={cn("scroll-mt-20 space-y-4 lg:scroll-mt-8", className)}
     >

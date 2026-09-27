@@ -58,9 +58,13 @@ moira-workflow ./workflow.json set-tags research,verification
 moira-workflow ./workflow.json set-variable-schema result --file ./result-schema.json
 ```
 
+`set-tags` replaces the whole tag list. A workflow authored by the Workflow Management Flow carries
+exactly one level tag, `complexity:simple`, `complexity:standard` or `complexity:complex`; keep it in
+the list you pass, or the next edit treats the workflow as having an unknown history.
+
 Routing is edited through the same `update` command. `--cases` replaces the ordered cases of a
 `condition` or `agent-directive` node, `--expressions` replaces the expressions it evaluates before
-them, and connections are edited by key:
+them (an empty array `[]` removes them), and connections are edited by key:
 
 ```bash
 moira-workflow ./workflow.json update review \
@@ -76,6 +80,19 @@ The read-only commands show the result: `schema` prints one `CASE <output> WHEN 
 per case plus an `EDGE` line per connection, `structure --detailed` lists each case as
 `Case: <output> when …`, and `diff` names `cases` among a node's changed fields — so a routing
 change is reviewable without reading the raw JSON.
+
+Structure is changed with `rename` and `delete`. `rename` gives a node a new kebab-case id and
+rewrites every reference to it — connection targets, `{{node.name}}` templates, routing case paths,
+expressions, list bindings, subgraph mappings and write allowances — and prints each location it
+changed. Prose that mentions the id outside a reference stays as it is. `delete` refuses while
+another node still leads to the node being removed and names each such edge; decide every one with
+`--retarget <source.key>=<target>`, or with `--drop <source.key>` for an output that is not the
+source node's main one:
+
+```bash
+moira-workflow ./workflow.json rename review independent-review
+moira-workflow ./workflow.json delete legacy-check --retarget review.success=deliver
+```
 
 To bring a file up to the current definition schema, run `migrate`. It rewrites the file in place,
 creating a backup first like every write, and reports «Already at schema version 1; nothing to
@@ -263,7 +280,8 @@ mcp__moira__manage({
 ```
 
 :::caution
-When removing nodes, update connections in other nodes that referenced the removed node.
+When removing nodes, update connections in other nodes that referenced the removed node. The
+CLI's `delete` does this with you: it refuses until every incoming edge is retargeted or dropped.
 :::
 
 ## Safe Editing Process

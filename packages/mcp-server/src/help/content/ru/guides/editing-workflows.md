@@ -59,8 +59,12 @@ moira-workflow ./workflow.json set-tags research,verification
 moira-workflow ./workflow.json set-variable-schema result --file ./result-schema.json
 ```
 
+`set-tags` заменяет весь список тегов. У workflow, созданного Workflow Management Flow, ровно один
+тег уровня — `complexity:simple`, `complexity:standard` или `complexity:complex`; сохраняйте его в
+передаваемом списке, иначе следующая правка сочтёт историю workflow неизвестной.
+
 Маршрутизация правится той же командой `update`. `--cases` заменяет упорядоченные case узла
-`condition` или `agent-directive`, `--expressions` — выражения, которые он вычисляет перед ними, а
+`condition` или `agent-directive`, `--expressions` — выражения, которые он вычисляет перед ними (пустой массив `[]` убирает их), а
 соединения правятся по ключу:
 
 ```bash
@@ -77,6 +81,19 @@ moira-workflow ./workflow.json update review --add-connection blocked fix-issues
 `CASE <output> WHEN <условие>` на каждый case и по строке `EDGE` на каждое соединение,
 `structure --detailed` выводит каждый case как `Case: <output> when …`, а `diff` называет `cases`
 среди изменённых полей узла, — поэтому изменение маршрутизации можно проверить, не читая сырой JSON.
+
+Структура меняется командами `rename` и `delete`. `rename` даёт узлу новый id в kebab-case и
+переписывает все ссылки на него — цели соединений, шаблоны `{{узел.имя}}`, пути в case, выражения,
+привязки списков, маппинги подграфа и разрешения на запись — и печатает каждое изменённое место.
+Текст, где id упомянут вне ссылки, остаётся как есть. `delete` отказывается, пока в удаляемый узел
+ещё ведёт ребро из другого узла, и называет каждое такое ребро; решите каждое через
+`--retarget <источник.ключ>=<цель>` или, для выхода, который не является основным выходом
+узла-источника, через `--drop <источник.ключ>`:
+
+```bash
+moira-workflow ./workflow.json rename review independent-review
+moira-workflow ./workflow.json delete legacy-check --retarget review.success=deliver
+```
 
 Чтобы привести файл к текущей схеме definition, выполните `migrate`. Команда перезаписывает файл на
 месте, предварительно создавая резервную копию, как и любая запись, и сообщает
@@ -270,6 +287,8 @@ mcp__moira__manage({
 
 :::caution
 При удалении узлов обновите соединения в других узлах, которые ссылались на удалённый узел.
+Команда CLI `delete` делает это вместе с вами: она отказывается, пока каждое входящее ребро не
+перенаправлено или не удалено.
 :::
 
 ## Безопасный процесс редактирования

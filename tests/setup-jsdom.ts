@@ -8,6 +8,7 @@
 
 import { TextEncoder, TextDecoder } from "util";
 import { setImmediate, clearImmediate } from "timers";
+import { deserialize, serialize } from "v8";
 import {
   default as fetchPolyfill,
   Headers as FetchHeaders,
@@ -29,6 +30,12 @@ if (typeof global.setImmediate === "undefined") {
 }
 if (typeof global.clearImmediate === "undefined") {
   global.clearImmediate = clearImmediate;
+}
+// jsdom's window lacks structuredClone, which every supported browser has and the engine's
+// authoring functions use; the V8 serializer copies the same values.
+if (typeof global.structuredClone === "undefined") {
+  global.structuredClone = (<T>(value: T): T =>
+    deserialize(serialize(value)) as T) as typeof global.structuredClone;
 }
 if (typeof global.Headers === "undefined") {
   global.Headers = FetchHeaders as unknown as typeof global.Headers;

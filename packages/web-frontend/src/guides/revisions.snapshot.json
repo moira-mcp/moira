@@ -1,0 +1,366 @@
+{
+  "home.intro": {
+    "revision": 1,
+    "fingerprint": "71923841"
+  },
+  "home.how": {
+    "revision": 1,
+    "fingerprint": "8cd89d52"
+  },
+  "home.connect": {
+    "revision": 1,
+    "fingerprint": "b1c94a84"
+  },
+  "home.try": {
+    "revision": 1,
+    "fingerprint": "4ec3739e"
+  },
+  "home.recommended": {
+    "revision": 1,
+    "fingerprint": "d212b19f"
+  },
+  "home.practice": {
+    "revision": 1,
+    "fingerprint": "79b614b7"
+  },
+  "home.work": {
+    "revision": 1,
+    "fingerprint": "89eeb00d"
+  },
+  "home.show-me-around": {
+    "revision": 1,
+    "fingerprint": "1cf41460"
+  },
+  "flows.intro": {
+    "revision": 1,
+    "fingerprint": "c7fd5476"
+  },
+  "flows.recommended": {
+    "revision": 1,
+    "fingerprint": "a56e06c6"
+  },
+  "flows.practice": {
+    "revision": 1,
+    "fingerprint": "a1430965"
+  },
+  "flows.all": {
+    "revision": 1,
+    "fingerprint": "cc7dfbb2"
+  },
+  "flows.scopes": {
+    "revision": 1,
+    "fingerprint": "dc7783b0"
+  },
+  "flows.filters": {
+    "revision": 1,
+    "fingerprint": "e04f816f"
+  },
+  "flows.level": {
+    "revision": 1,
+    "fingerprint": "93c456b8"
+  },
+  "flow.intro": {
+    "revision": 1,
+    "fingerprint": "6a6ea56d"
+  },
+  "flow.facts": {
+    "revision": 1,
+    "fingerprint": "64c79dba"
+  },
+  "flow.level": {
+    "revision": 1,
+    "fingerprint": "ba92acc0"
+  },
+  "flow.modes": {
+    "revision": 1,
+    "fingerprint": "6695e22a"
+  },
+  "flow.steps": {
+    "revision": 1,
+    "fingerprint": "7bd85e90"
+  },
+  "flow.diagram-note": {
+    "revision": 1,
+    "fingerprint": "1d73e251"
+  },
+  "flow.process": {
+    "revision": 1,
+    "fingerprint": "45f945a8"
+  },
+  "flow.agent": {
+    "revision": 1,
+    "fingerprint": "7e146adb"
+  },
+  "flow.evidence": {
+    "revision": 1,
+    "fingerprint": "51ad5107"
+  },
+  "flow.loop": {
+    "revision": 1,
+    "fingerprint": "13a65cf1"
+  },
+  "flow.panel-tabs": {
+    "revision": 1,
+    "fingerprint": "bf721b83"
+  },
+  "flow.playbook": {
+    "revision": 1,
+    "fingerprint": "4b580cf6"
+  },
+  "flow.template": {
+    "revision": 1,
+    "fingerprint": "0c73223a"
+  },
+  "flow.visibility": {
+    "revision": 1,
+    "fingerprint": "c7f3a1aa"
+  },
+  "flow.edit": {
+    "revision": 1,
+    "fingerprint": "d5ef8114"
+  },
+  "flow.edit-reader": {
+    "revision": 1,
+    "fingerprint": "0e9cc2b4"
+  },
+  "flow.explore": {
+    "revision": 1,
+    "fingerprint": "9fcbc3cf"
+  },
+  "runs.intro": {
+    "revision": 1,
+    "fingerprint": "d831c188"
+  },
+  "runs.status": {
+    "revision": 1,
+    "fingerprint": "4789b6a2"
+  },
+  "runs.list": {
+    "revision": 1,
+    "fingerprint": "920ffcf2"
+  },
+  "run.process": {
+    "revision": 1,
+    "fingerprint": "01f2d126"
+  },
+  "run.modes": {
+    "revision": 1,
+    "fingerprint": "355e28f8"
+  },
+  "run.agent": {
+    "revision": 1,
+    "fingerprint": "cd92200f"
+  },
+  "run.evidence": {
+    "revision": 1,
+    "fingerprint": "7a6f52ef"
+  },
+  "run.loop": {
+    "revision": 1,
+    "fingerprint": "13a65cf1"
+  },
+  "run.route": {
+    "revision": 1,
+    "fingerprint": "546c0f07"
+  },
+  "run.panel-tabs": {
+    "revision": 1,
+    "fingerprint": "32788a94"
+  },
+  "run.answer": {
+    "revision": 1,
+    "fingerprint": "aad6755d"
+  },
+  "run.notifications": {
+    "revision": 1,
+    "fingerprint": "4cc68b73"
+  },
+  "run.explore": {
+    "revision": 1,
+    "fingerprint": "804aefa1"
+  },
+  "runs-empty.try": {
+    "revision": 1,
+    "fingerprint": "15b1cd50"
+  },
+  "notes.intro": {
+    "revision": 1,
+    "fingerprint": "9dcd3d85"
+  },
+  "notes.create": {
+    "revision": 1,
+    "fingerprint": "e9e88082"
+  },
+  "notes.list": {
+    "revision": 1,
+    "fingerprint": "e3bf3d0d"
+  },
+  "notes.quota": {
+    "revision": 1,
+    "fingerprint": "4ce6e92f"
+  },
+  "playbooks.intro": {
+    "revision": 1,
+    "fingerprint": "940ba719"
+  },
+  "playbooks.linked": {
+    "revision": 1,
+    "fingerprint": "ac9c677b"
+  },
+  "playbooks.create": {
+    "revision": 1,
+    "fingerprint": "017cc872"
+  },
+  "playbooks.list": {
+    "revision": 1,
+    "fingerprint": "22b5b4b7"
+  },
+  "artifacts.intro": {
+    "revision": 1,
+    "fingerprint": "84f99cbf"
+  },
+  "artifacts.quota": {
+    "revision": 1,
+    "fingerprint": "e654c038"
+  },
+  "artifacts.create": {
+    "revision": 1,
+    "fingerprint": "e10557f6"
+  },
+  "artifacts.list": {
+    "revision": 1,
+    "fingerprint": "88d8988f"
+  },
+  "settings.nav": {
+    "revision": 1,
+    "fingerprint": "804a41c8"
+  },
+  "settings.account": {
+    "revision": 1,
+    "fingerprint": "89ec06b3"
+  },
+  "settings.security": {
+    "revision": 1,
+    "fingerprint": "bd3db604"
+  },
+  "settings.notifications": {
+    "revision": 2,
+    "fingerprint": "f05ef91a"
+  },
+  "settings.github": {
+    "revision": 1,
+    "fingerprint": "f2a10a39"
+  },
+  "settings.apps": {
+    "revision": 1,
+    "fingerprint": "96012979"
+  },
+  "settings.tokens": {
+    "revision": 1,
+    "fingerprint": "e9faa215"
+  },
+  "settings.preferences": {
+    "revision": 1,
+    "fingerprint": "62710191"
+  },
+  "settings-github.steps": {
+    "revision": 1,
+    "fingerprint": "14554319"
+  },
+  "settings-github.connect": {
+    "revision": 1,
+    "fingerprint": "43a7b0b1"
+  },
+  "settings-github.codespaces": {
+    "revision": 1,
+    "fingerprint": "dca3a596"
+  },
+  "settings-github.limits": {
+    "revision": 1,
+    "fingerprint": "51baa04b"
+  },
+  "settings-github.autopause": {
+    "revision": 1,
+    "fingerprint": "9c70ee03"
+  },
+  "settings-telegram.bot": {
+    "revision": 1,
+    "fingerprint": "fa4e221e"
+  },
+  "settings-telegram.chat": {
+    "revision": 1,
+    "fingerprint": "61fed0fc"
+  },
+  "settings-telegram.enable": {
+    "revision": 1,
+    "fingerprint": "e7c59241"
+  },
+  "settings-telegram.test": {
+    "revision": 1,
+    "fingerprint": "f680fa12"
+  },
+  "flow-editor.bar": {
+    "revision": 1,
+    "fingerprint": "a51d79ba"
+  },
+  "flow-editor.add-step": {
+    "revision": 1,
+    "fingerprint": "96b5ef0e"
+  },
+  "flow-editor.step-actions": {
+    "revision": 1,
+    "fingerprint": "e462ddde"
+  },
+  "flow-editor.blocks": {
+    "revision": 1,
+    "fingerprint": "d03da19a"
+  },
+  "flow-editor.connections": {
+    "revision": 1,
+    "fingerprint": "b61e8752"
+  },
+  "flow-editor.choice": {
+    "revision": 1,
+    "fingerprint": "86c1e01d"
+  },
+  "flow-editor.validation": {
+    "revision": 1,
+    "fingerprint": "cc2529a2"
+  },
+  "flow-editor.stale": {
+    "revision": 1,
+    "fingerprint": "17e1479f"
+  },
+  "build-flow.lesson-0": {
+    "revision": 1,
+    "fingerprint": "30dca8db"
+  },
+  "build-flow.lesson-1": {
+    "revision": 1,
+    "fingerprint": "4b3a8674"
+  },
+  "build-flow.lesson-2": {
+    "revision": 1,
+    "fingerprint": "83a194d8"
+  },
+  "build-flow.lesson-3": {
+    "revision": 1,
+    "fingerprint": "5843e312"
+  },
+  "build-flow.lesson-4": {
+    "revision": 1,
+    "fingerprint": "61354f1e"
+  },
+  "build-flow.lesson-5": {
+    "revision": 1,
+    "fingerprint": "d5c6a02d"
+  },
+  "build-flow.lesson-6": {
+    "revision": 1,
+    "fingerprint": "0bf84f7e"
+  },
+  "build-flow.lesson-7": {
+    "revision": 1,
+    "fingerprint": "3afdf87d"
+  }
+}

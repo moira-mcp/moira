@@ -33,6 +33,7 @@ import {
 } from "@/components/ui/select";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { codespaceErrorMessage } from "@/lib/codespace-error-message";
+import { guideAnchor } from "../../guides/anchors";
 
 const BUSY_STATES: ReadonlySet<CodespaceSummaryView["state"]> = new Set([
   "create_pending",
@@ -185,7 +186,7 @@ export const GitHubCodespaceManagement: React.FC = () => {
 
   if (loading) {
     return (
-      <Card data-testid="github-codespace-management">
+      <Card data-testid="github-codespace-management" {...guideAnchor("settings.codespaces")}>
         <CardContent className="flex min-h-32 items-center justify-center p-6">
           <Loader2 className="h-5 w-5 animate-spin" aria-label={t("common.loading")} />
         </CardContent>
@@ -195,7 +196,7 @@ export const GitHubCodespaceManagement: React.FC = () => {
 
   if (loadError || !view) {
     return (
-      <Card data-testid="github-codespace-management">
+      <Card data-testid="github-codespace-management" {...guideAnchor("settings.codespaces")}>
         <CardContent className="space-y-4 p-6">
           <Alert variant="destructive">
             <AlertCircle aria-hidden="true" />
@@ -219,7 +220,7 @@ export const GitHubCodespaceManagement: React.FC = () => {
   const formatDate = (value: number) => new Date(value).toLocaleString(i18n.language);
 
   return (
-    <Card data-testid="github-codespace-management">
+    <Card data-testid="github-codespace-management" {...guideAnchor("settings.codespaces")}>
       <CardHeader className="gap-3">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="flex min-w-0 items-start gap-3">

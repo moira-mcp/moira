@@ -101,6 +101,17 @@ Current workflow identifier.
 {{workflowId}}
 ```
 
+### runUrl
+
+The run's page in the web app, built from the server's configured host and base path
+(`<protocol>://<host>[/<base path>]/executions/<executionId>`, with `http` for a `localhost` host
+and `https` otherwise). A notification already links it from its
+heading; use it to point at the run from any other text.
+
+```
+{{runUrl}}
+```
+
 ### Usage Example
 
 ```json

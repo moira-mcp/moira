@@ -714,40 +714,6 @@
         "hintLabel": "About the cursor",
         "hint": "Drag to replay the run. The cursor is in the URL (at=), so a position can be linked to. Every mode shows block states as they were at the cursor, and the variables tab shows the values written up to it."
       },
-      "guide": {
-        "title": "Understand Moira",
-        "open": "Explain this page",
-        "close": "Close",
-        "back": "Back",
-        "next": "Next",
-        "finish": "Done",
-        "steps": {
-          "process": {
-            "title": "This is a process",
-            "body": "A Moira workflow is a process: a sequence of named stages a piece of work goes through. We call each stage a block. The contents on the left lists them in order, and the highlighted row is one block: a status icon, a coloured number badge, the name, and how far the block has got. The same badge and name head that block's card on the diagram, in its title band."
-          },
-          "agent": {
-            "title": "An agent runs it, one step at a time",
-            "body": "An AI agent executes the process. Inside every block are steps: one step is one instruction Moira hands the agent, with a condition for when it counts as done. Moira gives out exactly one step at a time; the agent cannot skip ahead. The highlight is the step the agent is on right now, in the Steps section of the block panel — click it and the panel opens the node level for that step, with a breadcrumb back to the block and its directive, completion condition, cases and connections in full."
-          },
-          "evidence": {
-            "title": "It must return evidence",
-            "body": "To finish a step, the agent must return evidence: the fields the step asks for, checked against a schema before Moira lets the run continue. The highlighted list is exactly what this step demands back; the Returns section of the node level names each field with its type and whether it is required. No matching evidence, no next step."
-          },
-          "loop": {
-            "title": "A failed review sends the work back",
-            "body": "Some steps are reviews. When a review finds problems, the process does not continue: it returns to an earlier block, and the work is done again. That return is a loop. The highlight is a return port — the dashed pill marked ↻ on the card the work leaves from. It names the transition and where it goes; hover it to light the return line and read what causes the loop and what ends it, and click it to travel to the other end."
-          },
-          "route": {
-            "title": "Every run leaves a route",
-            "body": "A run is one execution of the process. Moira records its route: every step in order, every loop it went through, and the values the steps produced along the way. The highlight is this run's route cursor, in the toolbar of whichever view is open: drag it and the whole page — cards, panel and variables — goes back to that visit. The variables tab shows the values as they stood there, and any adjustment a person made is marked."
-          },
-          "explore": {
-            "title": "Explore the same run your way",
-            "body": "The highlighted toolbar holds everything that changes what you see. The Map / Graph switch picks the view: the Map is the process with the run's state on it, the Graph is every step of the definition. The layout presets beside it re-lay both diagrams — rows, compact, balanced branches, top to bottom — and bring the camera back to the block you were reading. The magnifier finds a step by id or text, and the compass opens the note about the view that is open. Your selection and the camera survive a switch."
-          }
-        }
-      },
       "modeGuide": {
         "map": {
           "title": "Map: the process as a diagram",
@@ -1304,6 +1270,13 @@
           "description": "Panels that help you get started. Hide the ones you no longer need; turn them back on here.",
           "shown": "Shown",
           "hidden": "Hidden"
+        },
+        "guides": {
+          "title": "Guides",
+          "description": "Take the tour again from its first step, or forget which steps you have seen and where you stopped — the first-run question comes back too.",
+          "restart": "Start the tour again",
+          "forget": "Forget what I have seen",
+          "forgotten": "The guides start fresh."
         }
       },
       "definitions": {
@@ -1321,106 +1294,6 @@
           "enabled": {
             "label": "Send notifications to Telegram",
             "description": "Turn off to pause Telegram messages without removing the bot."
-          }
-        }
-      },
-      "tours": {
-        "page": {
-          "title": "Settings tour",
-          "open": "Explain this page",
-          "back": "Back",
-          "next": "Next",
-          "finish": "Finish",
-          "close": "Close tour",
-          "steps": {
-            "nav": {
-              "title": "Jump between sections",
-              "body": "Every setting lives in one of these sections. Pick one to go straight to it; the section you are reading is marked as you scroll."
-            },
-            "account": {
-              "title": "Your account",
-              "body": "Your display name, email and username. The username is part of every workflow link you share, so change it with care."
-            },
-            "security": {
-              "title": "Security & sign-in",
-              "body": "Change your password and see every browser or device signed in to your account. Sign out any you do not recognise."
-            },
-            "notifications": {
-              "title": "Notifications",
-              "body": "Set up where Moira reaches you, such as a Telegram bot, then send a test message to be sure it works."
-            },
-            "github": {
-              "title": "GitHub & Codespaces",
-              "body": "Connect GitHub and choose repositories so agents can work in cloud codespaces. Limits and automatic pausing are set here too."
-            },
-            "apps": {
-              "title": "Connected apps",
-              "body": "AI assistants you have allowed to use Moira. Revoke any you no longer use."
-            },
-            "tokens": {
-              "title": "API tokens",
-              "body": "Keys for clients that cannot use the browser sign-in. A token is shown only once, when you create it."
-            },
-            "preferences": {
-              "title": "Preferences",
-              "body": "Choose the theme and language of the website. These apply in this browser."
-            }
-          }
-        },
-        "github": {
-          "title": "GitHub & Codespaces setup",
-          "open": "Setup guide",
-          "back": "Back",
-          "next": "Next",
-          "finish": "Finish",
-          "close": "Close guide",
-          "steps": {
-            "steps": {
-              "title": "Three steps to connect",
-              "body": "Connect your GitHub account, install the Moira GitHub App, and grant it the repositories agents may work in. The current step is highlighted."
-            },
-            "connect": {
-              "title": "Connect and install",
-              "body": "Press Connect GitHub and approve Moira on GitHub. If the Moira App is not installed yet, GitHub takes you straight to installing it; choose the repositories there. Back here, Check installation confirms it."
-            },
-            "codespaces": {
-              "title": "Create a codespace",
-              "body": "Pick a repository and a branch, then create a codespace. Agents find it by its ID through the codespace tool. Stop keeps its files; Delete removes them."
-            },
-            "limits": {
-              "title": "Know your limits",
-              "body": "How many codespaces you may hold (stopped ones count), how many commands can run at once and how much can be transferred. Delete a codespace you no longer need to free a slot."
-            },
-            "autopause": {
-              "title": "Pause idle codespaces",
-              "body": "Moira stops a codespace no agent has used through Moira for the time you choose, so it does not keep running up your GitHub bill. The next command starts it again."
-            }
-          }
-        },
-        "telegram": {
-          "title": "Telegram setup",
-          "open": "Telegram setup",
-          "back": "Back",
-          "next": "Next",
-          "finish": "Finish",
-          "close": "Close guide",
-          "steps": {
-            "bot": {
-              "title": "Create a bot",
-              "body": "In Telegram, message @BotFather, send /newbot and follow the prompts. Paste the token it gives you here and save."
-            },
-            "chat": {
-              "title": "Find your chat ID",
-              "body": "Message @userinfobot in Telegram: the user ID it replies with is your chat ID. Paste it here and save, then send your own bot any message so it can write to you. Do not put the bot token into a browser URL."
-            },
-            "enable": {
-              "title": "Turn it on",
-              "body": "Tick Send notifications to Telegram and save. The channel shows Ready when everything is in place."
-            },
-            "test": {
-              "title": "Send a test",
-              "body": "Send a test message. If it does not arrive, check the token and chat ID; the error message says which part failed."
-            }
           }
         }
       }
@@ -1550,7 +1423,9 @@
       "title": "Flow",
       "refreshing": "Refreshing…",
       "noProcess": "This workflow declares no process view (no blocks), so the page shows its node graph. Add a `progress` section with blocks to read it as a process.",
-      "diagnostics": "Process diagnostics",
+      "diagnostics": "Problems of the definition",
+      "problems_one": "{{count}} problem",
+      "problems_other": "{{count}} problems",
       "modes": {
         "map": "Map",
         "graph": "Graph",
@@ -1589,19 +1464,32 @@
         "off": "Edit flow",
         "on": "Editing flow",
         "hintLabel": "About editing",
-        "hint": "Edit mode changes the workflow definition itself — block names and descriptions, transition labels and loop explanations, which block a step belongs to, a step's directive or expressions, and the variable registry. It never touches a run. Edits live on the page until you save them; the save is refused if someone else changed the workflow in the meantime.",
+        "hint": "Edit mode changes the workflow definition itself — block names and descriptions, transition labels and loop explanations, which block a step belongs to, a step's directive or expressions, and the variable registry. It never touches a run. Edits live on the page until you save them, and Undo takes back the last one. Every change is checked at once: the process rules in the browser, then the whole definition on the server. Save opens only when both checks pass for exactly what you see, and it is refused if someone else changed the workflow in the meantime.",
         "guideTitle": "You are editing the process definition",
         "guideBody": "Change a block's name or description in place; click the pencil next to a transition to change its label or its loop's cause and exit; in the block panel, move a step to another block or edit its text; in Variables, edit the registry. Both views re-derive at once, rule violations appear as diagnostics, \"Export\" lists exactly which flow-file entries would change, and \"Save\" sends the definition to the server against the revision you loaded.",
         "count_one": "{{count}} edit",
         "count_other": "{{count}} edits",
+        "undo": "Undo",
         "reset": "Discard edits",
         "save": "Save",
         "saved": "Saved as revision {{revision}}",
         "conflict": "Someone changed this workflow since you loaded it. Reload the page and apply your edits again.",
+        "refused": "The server refused the definition; its problems are shown where they occur.",
+        "gate": {
+          "unchanged": "No changes yet",
+          "diagnostics_one": "{{count}} process problem to fix",
+          "diagnostics_other": "{{count}} process problems to fix",
+          "checking": "Checking the draft…",
+          "checkFailed": "Couldn't check the draft",
+          "retry": "Retry",
+          "invalid_one": "{{count}} problem found by the server",
+          "invalid_other": "{{count}} problems found by the server",
+          "ready": "Checked — ready to save"
+        },
         "revision": "revision {{revision}}",
         "export_one": "Export: {{count}} flow-file change",
         "export_other": "Export: {{count}} flow-file changes",
-        "exportHint": "Path in the workflow JSON, value before, value after — exactly what the save sends.",
+        "exportHint": "What the save would change: a path in the workflow JSON with its value before and after, and a line per added, removed or renamed node or block.",
         "editTransition": "Edit this transition",
         "transitionEdges": "Applies to edges: {{edges}}",
         "label": "Label",
@@ -1613,48 +1501,13 @@
           "completionCondition": "Completion condition",
           "message": "Message",
           "expressions": "Expressions (one per line)"
-        }
-      },
-      "guide": {
-        "title": "Understand Moira",
-        "open": "Explain this page",
-        "close": "Close",
-        "back": "Back",
-        "next": "Next",
-        "finish": "Done",
-        "steps": {
-          "process": {
-            "title": "This is a process",
-            "body": "A Moira workflow is a process: a sequence of named stages a piece of work goes through. We call each stage a block. The contents on the left lists them in order, and the highlighted row is one block: a coloured number badge, the name and how long the block usually takes. The same badge and name head that block's card on the diagram, in its title band."
-          },
-          "agent": {
-            "title": "An agent runs it, one step at a time",
-            "body": "An AI agent executes the process. Inside every block are steps: one step is one instruction Moira hands the agent, with a condition for when it counts as done. Moira gives out exactly one step at a time; the agent cannot skip ahead. The highlight is one step of this block, in the Steps section of the block panel — click it and the page goes to that step on the graph and opens the node level of the panel, with its directive, completion condition, cases, connections and validation in full."
-          },
-          "evidence": {
-            "title": "It must return evidence",
-            "body": "To finish a step, the agent must return evidence: the fields the step asks for, checked against a schema before Moira lets the run continue. The highlighted list is exactly what this step demands back; the Returns section of the node level names each field with its type and whether it is required. No matching evidence, no next step."
-          },
-          "loop": {
-            "title": "A failed review sends the work back",
-            "body": "Some steps are reviews. When a review finds problems, the process does not continue: it returns to an earlier block, and the work is done again. That return is a loop. The highlight is a return port — the dashed pill marked ↻ on the card the work leaves from. It names the transition and where it goes; hover it to light the return line and read what causes the loop and what ends it, and click it to travel to the other end."
-          },
-          "edit": {
-            "title": "The definition can be edited here",
-            "body": "This page shows the definition, not a run: the header above names the flow, its version, its description and its facts, and carries the page's actions. Its owner can turn on edit mode to change block names and descriptions, transition labels, which block a step belongs to, a step's text and the variable registry; both views update at once and the save is checked by the server. Runs of this workflow are read on the run page."
-          },
-          "explore": {
-            "title": "Explore the same process your way",
-            "body": "The highlighted toolbar holds everything that changes what you see. The Steps / Map / Graph switch picks the view: Steps is what the agent is told, the Map is the process the workflow declares, the Graph is every step of the definition. On the Map and the Graph, the layout presets re-lay the diagram — rows, compact, balanced branches, top to bottom — and bring the camera back to the block you were reading, the magnifier finds a step by id or text, and the compass opens the note about the view that is open. On Steps, the switch beside the view tabs reads variables as plain words. Your selection and the camera survive a switch."
-          },
-          "intro": {
-            "title": "You don't have to build flows",
-            "body": "Moira is made for agents. Describe your task to your agent in plain words: it picks a ready flow or creates one for you through the Workflow Management Flow — simple or complex, whatever fits. This page is for looking inside a flow when you are curious; nothing here is required."
-          },
-          "steps": {
-            "title": "Read it as plain steps",
-            "body": "The Steps view shows the flow as what the agent is told: numbered instructions joined by arrows. Where the agent's answer decides the way on, the arrows fork and name the answer. With “Variables as words” on, every variable reads as ordinary words, so the whole flow reads like a list of instructions."
-          }
+        },
+        "pausedRuns": {
+          "title": "Your paused runs wait on steps this save renames or removes",
+          "item": "Run {{id}} waits on {{node}}, which is {{change}}.",
+          "renamed": "renamed to {{to}}",
+          "removed": "removed",
+          "hint": "A run reads the saved definition at its next step and will not find that step; after saving, move it with `session recover`."
         }
       },
       "panel": {
@@ -1690,6 +1543,121 @@
           "placed": "{{name}}, before step {{number}}",
           "backToPlace": "back to: {{place}}",
           "nth": "{{name}} (#{{n}})"
+        }
+      },
+      "structure": {
+        "stepActions": "Step actions",
+        "newId": "Step id",
+        "teleport": "Agents jump to this step by its id; a jump that names the old id will no longer find it.",
+        "idProblem": {
+          "empty": "Enter an id.",
+          "invalid": "An id uses lower-case letters, digits and hyphens, and starts with a letter or digit (no dots).",
+          "exists": "Another step already has this id.",
+          "unchanged": "The id is unchanged."
+        },
+        "rename": {
+          "action": "Rename…",
+          "title": "Rename step {{id}}",
+          "body": "Every reference to the step is rewritten with it: the connections that lead to it, its values in templates, routing paths and expressions.",
+          "rewritten": "References that will be rewritten",
+          "prose": "Mentions in text that stay as they are",
+          "confirm": "Rename"
+        },
+        "delete": {
+          "action": "Delete…",
+          "title": "Delete step {{id}}",
+          "body": "Choose where each connection that leads to this step should lead instead. By default it continues to where this step led.",
+          "bodyNoIncoming": "No connection leads to this step.",
+          "onlyStart": "The start step cannot be deleted.",
+          "protected": "main output — retarget it",
+          "drop": "Remove this connection",
+          "choose": "Choose a step",
+          "dangling": "References to this step's values that will be left without a source",
+          "confirm": "Delete",
+          "bodyNoDefault": "Choose where each connection that leads to this step should lead instead."
+        },
+        "connections": {
+          "title": "Connections",
+          "remove": "Remove connection {{key}}",
+          "protected": "The step's main output cannot be removed; lead it to another step instead.",
+          "newKey": "output",
+          "newTarget": "leads to…",
+          "add": "Add connection",
+          "invalidKey": "An output name uses letters, digits, '_' and '-' only.",
+          "keyExists": "This output already exists."
+        },
+        "addStep": {
+          "action": "Add step",
+          "title": "Add a step to this block",
+          "body": "The step joins this block unconnected: connect it from another step's card, or give it connections on its own card. Fields the type needs as a structure (a condition's cases, a subgraph's mappings, an extension's configuration) are written as JSON.",
+          "type": "Type",
+          "confirm": "Add step",
+          "jsonHint": "Written as JSON; the check of the draft tells you whether it fits the type.",
+          "invalidJson": "This is not valid JSON.",
+          "insertTitle": "Insert a step on {{edge}}",
+          "insertBody": "The new step takes this connection's place: the connection leads to it, and it continues to where the connection led. A block boundary's label moves with the part that still crosses it.",
+          "fromTitle": "Create a step for {{edge}}",
+          "fromBody": "The connection you dropped here will lead to the new step. It joins the block it was dropped in (or its source's block).",
+          "outputName": "Name of the new output from {{source}}",
+          "joins": "The new step joins",
+          "joinsSource": "the connection's source block; the boundary label moves to the new step's output",
+          "joinsTarget": "the block the connection leads into; the boundary label stays on {{edge}}",
+          "joinsReturn": "This connection returns to an earlier block, so the new step joins the source's block and its output takes over the label and the return's explanation. Placed in the other block, its connection would loop inside that block unexplained."
+        },
+        "block": {
+          "add": "Add block",
+          "addTitle": "Add a block",
+          "addBody": "A block is one stage of the process: a name, a description, and the steps that belong to it.",
+          "id": "Block id",
+          "idTaken": "Another block already has this id.",
+          "name": "Name",
+          "summary": "Description",
+          "after": "Place after",
+          "addConfirm": "Add block",
+          "delete": "Delete block {{name}}",
+          "notEmpty": "Move or delete its steps first: only an empty block can be deleted."
+        },
+        "choice": {
+          "add": "Add a choice",
+          "edit": "Choice: {{field}}",
+          "addTitle": "Add a choice to {{step}}",
+          "editTitle": "The choice of {{step}}",
+          "body": "The agent answers the question with one of the options, and the answer picks the route. The marked option continues along the step's usual route; every other option leads to its own step.",
+          "question": "Question",
+          "questionPlaceholder": "Does the result match the request?",
+          "field": "Answer field",
+          "options": "Options — mark the one that continues as before",
+          "defaultOption": "{{option}} continues as before",
+          "optionName": "Option",
+          "continues": "continues as before",
+          "target": "Leads to…",
+          "newStep": "A new step",
+          "label": "Label on the route — needed when it leads into another block",
+          "addOption": "Add an option",
+          "removeOption": "Remove option {{option}}",
+          "newStepBlock": "Block for the new steps",
+          "newStepDirective": "The answer to \"{{question}}\" was \"{{option}}\". Describe what to do in this case.",
+          "newStepCondition": "Describe when this step is done.",
+          "remove": "Remove the choice",
+          "save": "Save the choice"
+        }
+      },
+      "canvas": {
+        "newOutput": "output",
+        "insertAfter": "Insert a step after…",
+        "noOutput": "This step has no output to continue through.",
+        "insertOnEdge": "Insert a step on this connection…",
+        "addHere": "Add a step here…",
+        "insideBlock": "In a flow with blocks, right-click inside a block's group to add a step to it.",
+        "nameOutput": {
+          "title": "New output from {{source}} to {{target}}",
+          "body": "Name the output; a case of the step can then select it. Letters, digits, '_' and '-'."
+        },
+        "retarget": {
+          "action": "Lead elsewhere…",
+          "title": "Lead {{edge}} elsewhere",
+          "body": "Choose the step this connection should lead to.",
+          "confirm": "Lead there"
         }
       }
     },
@@ -2673,6 +2641,12 @@
       "delete": "Delete",
       "deleteWorkflow": "Delete workflow"
     },
+    "flowLevel": {
+      "simple": "Simple",
+      "standard": "Standard",
+      "complex": "Complex",
+      "label": "Built at the {{level}} level: how thoroughly the flow was designed and reviewed"
+    },
     "searchFilters": {
       "searchPlaceholder": "Search workflows...",
       "status": "Status",
@@ -2700,6 +2674,7 @@
     "betaWarningBanner": {
       "title": "Beta Version:",
       "message": "The system is under development. Data loss, functionality changes, or terms of use modifications are possible. We do our best to prevent this. Thank you for understanding.",
+      "short": "The system is under development: data loss and changes are possible.",
       "dismiss": "Dismiss beta warning"
     },
     "betaAgreementModal": {
@@ -3100,6 +3075,575 @@
         "run-variables-guide": "Hint on a run's variables",
         "registry-guide": "Hint on a flow's declared variables"
       }
+    },
+    "practice": {
+      "label": "Practice",
+      "body": "Build a small flow by hand in the editor, step by step, on your own copy of Example 1."
+    }
+  },
+  "guides": {
+    "ui": {
+      "whatIsThis": "What is this?",
+      "back": "Back",
+      "next": "Next",
+      "finish": "Done",
+      "close": "Close",
+      "announce": "{{guide}}, step {{index}} of {{total}}: {{step}}",
+      "skippedNarrow_one": "One step was skipped: it points at a control that only a wider screen shows.",
+      "skippedNarrow_other": "{{count}} steps were skipped: they point at controls that only a wider screen shows.",
+      "skippedHidden_one": "One step was skipped: what it explains is not on this page right now.",
+      "skippedHidden_other": "{{count}} steps were skipped: what they explain is not on this page right now.",
+      "notFound": "This part of the page is not shown right now, so there is nothing to highlight.",
+      "saveFailed": "Couldn't save your guide progress. Try again.",
+      "wholeTour": "Show the whole tour",
+      "whatIsThisNew_one": "What is this? {{count}} step changed since you saw it",
+      "whatIsThisNew_other": "What is this? {{count}} steps changed since you saw them"
+    },
+    "home": {
+      "title": "The home page",
+      "steps": {
+        "intro": {
+          "title": "Your agent does the work",
+          "body": "Moira is used through your AI agent: you describe a task, the agent runs a flow, and Moira gives it one step at a time and checks each result. This page shows where that work stands."
+        },
+        "how": {
+          "title": "How it works",
+          "body": "Three steps from zero to a checked result. When you know them, hide this panel; Settings → Preferences brings it back."
+        },
+        "connect": {
+          "title": "Connect your agent",
+          "body": "Add Moira to your AI client once. Pick your client here and follow its few steps; the rest happens in the chat with your agent."
+        },
+        "try": {
+          "title": "A first prompt to try",
+          "body": "Say this to your agent on any small task. It runs Example 1: Simple Steps, and you can watch every step here."
+        },
+        "recommended": {
+          "title": "Flows to start with",
+          "body": "Small example flows that show how Moira works, and ready flows for everyday tasks. Name one to your agent, or open it to see its steps."
+        },
+        "work": {
+          "title": "Your work",
+          "body": "The runs in progress, the ones that finished recently and the flows you use most. Open a run to see where it is, or copy a prompt that lets your agent continue it."
+        },
+        "show-me-around": {
+          "title": "Tours of every page",
+          "body": "Every page has a short tour like this one. Open this menu to start the tour of the page you are on, continue where you stopped, and see which tours are new to you."
+        },
+        "practice": {
+          "title": "Practice by hand",
+          "body": "“Build your first flow” is a tutorial in the flow editor: on your own copy of Example 1 you add a step, connect it, add a choice and use a value from an earlier step, and each lesson is checked. It is optional — your agent builds real flows."
+        }
+      }
+    },
+    "flows": {
+      "title": "The flow list",
+      "steps": {
+        "intro": {
+          "title": "Flows are made by your agent",
+          "body": "A flow is a process your agent follows step by step. You do not build one on this page: describe the task to your agent, and it runs a ready flow or creates a new one with the Workflow Management Flow, at a level you agree on — Simple, Standard or Complex. A flow built at the Simple level can later be taken through the fuller path: ask your agent again."
+        },
+        "recommended": {
+          "title": "Recommended flows",
+          "body": "Where to start: example flows that teach the basics, and ready flows for everyday tasks. Hide the panel once you know them; Settings → Preferences brings it back."
+        },
+        "all": {
+          "title": "Every flow you can use",
+          "body": "Your own flows, the ones shared with you and the public catalog. Open a flow to read its steps before you ask your agent to run it."
+        },
+        "scopes": {
+          "title": "Whose flows",
+          "body": "Narrow the list to your own flows, the ones shared with you, or the catalog."
+        },
+        "filters": {
+          "title": "Search and filters",
+          "body": "Find a flow by name, and filter by whether it is valid and by who can see it."
+        },
+        "level": {
+          "title": "The flow's level",
+          "body": "A flow built with the Workflow Management Flow shows the level it was built at: Simple, Standard or Complex — how thoroughly it was designed and reviewed. The level is apart from the flow's subject tags."
+        },
+        "practice": {
+          "title": "Practice by hand",
+          "body": "“Build your first flow” is a tutorial in the flow editor: on your own copy of Example 1 you add a step, connect it, add a choice and use a value from an earlier step, and each lesson is checked. It is optional — your agent builds real flows."
+        }
+      }
+    },
+    "runs": {
+      "title": "The runs list",
+      "steps": {
+        "intro": {
+          "title": "Every run of a flow",
+          "body": "Each execution listed here is a run: one pass of a flow on one task. Your agent starts it, and Moira records every step it takes."
+        },
+        "status": {
+          "title": "Filter by status",
+          "body": "Show only the runs that are Active, Locked, Completed, Failed or Waiting — or all of them."
+        },
+        "list": {
+          "title": "Open a run",
+          "body": "Open a run to see where it is, what each step asked and what the agent answered. Your first run appears here as soon as your agent starts one."
+        }
+      }
+    },
+    "notes": {
+      "title": "The notes page",
+      "steps": {
+        "intro": {
+          "title": "Notes your agents keep",
+          "body": "A note is a piece of text stored under a key, with tags to group it. Agents write and read notes as they work, so what one run learns the next one can use; you can read and edit them here."
+        },
+        "create": {
+          "title": "Write a note yourself",
+          "body": "Create a note with a unique key, tags and content. An agent finds it by that key."
+        },
+        "list": {
+          "title": "Your notes and their history",
+          "body": "Every change to a note is kept. Point at a note or move focus to it to show its actions: History lists the versions, lets you compare two of them and restore an earlier one."
+        },
+        "quota": {
+          "title": "Storage",
+          "body": "How much of your notes storage is used. Deleting notes you no longer need frees it."
+        }
+      }
+    },
+    "playbooks": {
+      "title": "The playbooks page",
+      "steps": {
+        "intro": {
+          "title": "Reusable instructions",
+          "body": "A playbook is a piece of behaviour text written once and used by many flows: a flow's step refers to it by name, and the run reads its current text at every step."
+        },
+        "linked": {
+          "title": "Someone else's playbook",
+          "body": "A flow's link opened this playbook. It belongs to another account, so it is shown read-only: you can refer to it from your flows, not change it."
+        },
+        "create": {
+          "title": "Write a playbook",
+          "body": "Create one with a name, a title and its text. Once it is saved, its editor also sets who can see it: private to you, or public, so other people's flows can refer to it."
+        },
+        "list": {
+          "title": "Your playbooks and their history",
+          "body": "Open a playbook to edit it. Every save is kept: point at a playbook or move focus to it to show its actions, where History lets you compare versions and restore an earlier one."
+        }
+      }
+    },
+    "artifacts": {
+      "title": "The artifacts page",
+      "steps": {
+        "intro": {
+          "title": "Pages to share",
+          "body": "An artifact is an HTML page — a report, a chart, a summary — published at its own link that you can share. Agents create them as they work, and you can create them here too."
+        },
+        "quota": {
+          "title": "Storage and count",
+          "body": "How much storage your artifacts use and how many you have out of your limit."
+        },
+        "create": {
+          "title": "Create an artifact",
+          "body": "Paste a complete HTML page and give it a name; it gets a link you can open and copy."
+        },
+        "list": {
+          "title": "Your artifacts",
+          "body": "Every artifact you or your agents made. Point at a card or move focus to it to show its actions: open the page, copy its link, edit it or delete it."
+        }
+      }
+    },
+    "run": {
+      "title": "The run page",
+      "steps": {
+        "process": {
+          "title": "This is a process",
+          "body": "A Moira workflow is a process: a sequence of named stages a piece of work goes through. We call each stage a block. The contents on the left lists them in order, and the highlighted row is one block: a status icon, a coloured number badge, the name, and how far the block has got. The same badge and name head that block's card on the diagram, in its title band."
+        },
+        "agent": {
+          "title": "An agent runs it, one step at a time",
+          "body": "An AI agent executes the process. Inside every block are steps: one step is one instruction Moira hands the agent, with a condition for when it counts as done. Moira gives out exactly one step at a time; the agent cannot skip ahead. The highlight is the step the agent is on right now, in the Steps section of the block panel — click it and the panel opens the node level for that step, with a breadcrumb back to the block and its directive, completion condition, cases and connections in full."
+        },
+        "evidence": {
+          "title": "It must return evidence",
+          "body": "To finish a step, the agent must return evidence: the fields the step asks for, checked against a schema before Moira lets the run continue. The highlighted list is exactly what this step demands back; the Returns section of the node level names each field with its type and whether it is required. No matching evidence, no next step."
+        },
+        "loop": {
+          "title": "A failed review sends the work back",
+          "body": "Some steps are reviews. When a review finds problems, the process does not continue: it returns to an earlier block, and the work is done again. That return is a loop. The highlight is a return port — the dashed pill marked ↻ on the card the work leaves from. It names the transition and where it goes; hover it to light the return line and read what causes the loop and what ends it, and click it to travel to the other end."
+        },
+        "route": {
+          "title": "Every run leaves a route",
+          "body": "A run is one execution of the process. Moira records its route: every step in order, every loop it went through, and the values the steps produced along the way. The highlight is this run's route cursor, in the toolbar of whichever view is open: drag it and the whole page — cards, panel and variables — goes back to that visit. The variables tab shows the values as they stood there, and any adjustment a person made is marked."
+        },
+        "explore": {
+          "title": "Explore the same run your way",
+          "body": "The highlighted toolbar holds everything that changes what you see. The Map / Graph switch picks the view: the Map is the process with the run's state on it, the Graph is every step of the definition. The layout presets beside it re-lay both diagrams — rows, compact, balanced branches, top to bottom — and bring the camera back to the block you were reading. The magnifier finds a step by id or text, and the compass opens the note about the view that is open. Your selection and the camera survive a switch."
+        },
+        "modes": {
+          "title": "Map and graph",
+          "body": "Map shows the run's stages as blocks, lit by where the run is and what it has done. Graph shows every node with the run's status on it, the technical picture. Both show the same run."
+        },
+        "panel-tabs": {
+          "title": "The panel's tabs",
+          "body": "Block: the selected block and its steps. Variables: every value with its history — and the place to answer the waiting step yourself. Errors: what the run recorded going wrong. Steps: every step it took, in order. Locks: locks placed on this run."
+        },
+        "answer": {
+          "title": "Answer the waiting step yourself",
+          "body": "The run waits at a step for an answer. You can give it here instead of the agent: fill in what the step asks for and send it. Moira checks it as it would the agent's answer, records it in the route as your adjustment, and the run goes on."
+        },
+        "notifications": {
+          "title": "Where notifications lead",
+          "body": "When this run needs you or moves on — a plan ready for approval, a result ready for review, the work finished — Moira can notify you. Each notification opens with the flow and the task, and its heading links to this page."
+        }
+      }
+    },
+    "flow": {
+      "title": "The flow page",
+      "steps": {
+        "intro": {
+          "title": "You don't have to build flows",
+          "body": "Moira is made for agents. Describe your task to your agent in plain words: it picks a ready flow or creates one for you through the Workflow Management Flow — simple or complex, whatever fits. This page is for looking inside a flow when you are curious; nothing here is required."
+        },
+        "steps": {
+          "title": "Read it as plain steps",
+          "body": "The Steps view shows the flow as what the agent is told: numbered instructions joined by arrows. Where the agent's answer decides the way on, the arrows fork and name the answer. With “Variables as words” on, every variable reads as ordinary words, so the whole flow reads like a list of instructions."
+        },
+        "process": {
+          "title": "This is a process",
+          "body": "A Moira workflow is a process: a sequence of named stages a piece of work goes through. We call each stage a block. The contents on the left lists them in order, and the highlighted row is one block: a coloured number badge, the name and how long the block usually takes. The same badge and name head that block's card on the diagram, in its title band."
+        },
+        "agent": {
+          "title": "An agent runs it, one step at a time",
+          "body": "An AI agent executes the process. Inside every block are steps: one step is one instruction Moira hands the agent, with a condition for when it counts as done. Moira gives out exactly one step at a time; the agent cannot skip ahead. The highlight is one step of this block, in the Steps section of the block panel — click it and the page goes to that step on the graph and opens the node level of the panel, with its directive, completion condition, cases, connections and validation in full."
+        },
+        "evidence": {
+          "title": "It must return evidence",
+          "body": "To finish a step, the agent must return evidence: the fields the step asks for, checked against a schema before Moira lets the run continue. The highlighted list is exactly what this step demands back; the Returns section of the node level names each field with its type and whether it is required. No matching evidence, no next step."
+        },
+        "loop": {
+          "title": "A failed review sends the work back",
+          "body": "Some steps are reviews. When a review finds problems, the process does not continue: it returns to an earlier block, and the work is done again. That return is a loop. The highlight is a return port — the dashed pill marked ↻ on the card the work leaves from. It names the transition and where it goes; hover it to light the return line and read what causes the loop and what ends it, and click it to travel to the other end."
+        },
+        "edit": {
+          "title": "You can edit this flow here",
+          "body": "You own this flow, so the highlighted switch turns on edit mode: change block names and descriptions, transition labels, which block a step belongs to, a step's text and the variable registry. Both views update at once, and the server checks the definition when you save. Runs of this workflow are read on the run page."
+        },
+        "edit-reader": {
+          "title": "Only its owner edits it",
+          "body": "This page shows the definition, not a run: the header names the flow, its version, its description and its facts, and carries the page's actions. Only the flow's owner can edit it. To make your own version, use it as a template: you get a private copy you can change. Runs of this workflow are read on the run page."
+        },
+        "explore": {
+          "title": "Explore the same process your way",
+          "body": "The highlighted toolbar holds everything that changes what you see. The Steps / Map / Graph switch picks the view: Steps is what the agent is told, the Map is the process the workflow declares, the Graph is every step of the definition. On the Map and the Graph, the layout presets re-lay the diagram — rows, compact, balanced branches, top to bottom — and bring the camera back to the block you were reading, the magnifier finds a step by id or text, and the compass opens the note about the view that is open. On Steps, the switch beside the view tabs reads variables as plain words. Your selection and the camera survive a switch."
+        },
+        "facts": {
+          "title": "What the flow is about",
+          "body": "Under the name: what the flow is for, its subject tags and how many nodes it has. A flow's author writes the description and tags; they are how you tell flows apart in the list."
+        },
+        "level": {
+          "title": "The level it was built at",
+          "body": "A flow built with the Workflow Management Flow shows its level: Simple, Standard or Complex. You don't pick it on this page — when you ask your agent for a flow, it agrees the level with you. A Simple flow can later be taken through the fuller path by asking again."
+        },
+        "modes": {
+          "title": "Three ways to look at it",
+          "body": "Steps reads the flow as numbered instructions. Map shows its stages as blocks with the paths between them. Graph shows every node and connection, the technical picture. They are one flow; switch whenever you like."
+        },
+        "diagram-note": {
+          "title": "How to read this diagram",
+          "body": "Each diagram has its own short note here: what the cards, colours and arrows of this view mean. Open it whenever a picture is unclear."
+        },
+        "panel-tabs": {
+          "title": "The panel beside the diagram",
+          "body": "Block shows the selected block — what it does, where it leads, its steps — or, when a node is selected, that node in full. Variables lists the values the flow declares, each with its type, default and description."
+        },
+        "playbook": {
+          "title": "A playbook the step reads",
+          "body": "This node names a playbook: shared behaviour text the step includes when it runs. Its link opens the playbook's page; one that belongs to another account opens read-only."
+        },
+        "template": {
+          "title": "Get a copy you can change",
+          "body": "This flow is public. “Use as Template” makes your own private copy, which you can edit, rename and share. Or ask your agent to make a new flow for your task."
+        },
+        "visibility": {
+          "title": "Who can see it",
+          "body": "Private flows are yours alone; public ones appear in everyone's catalog and can be copied. Share creates invitation links that give chosen people access without making the flow public, and lists who has it."
+        }
+      }
+    },
+    "settings": {
+      "title": "The Settings page",
+      "steps": {
+        "nav": {
+          "title": "Jump between sections",
+          "body": "Every setting lives in one of these sections. Pick one to go straight to it; the section you are reading is marked as you scroll."
+        },
+        "account": {
+          "title": "Your account",
+          "body": "Your display name, email and username. The username is part of every workflow link you share, so change it with care."
+        },
+        "security": {
+          "title": "Security & sign-in",
+          "body": "Change your password and see every browser or device signed in to your account. Sign out any you do not recognise."
+        },
+        "notifications": {
+          "title": "Notifications",
+          "body": "Moira tells you when a run needs you or moves on: a plan ready for approval, a result ready for review, the work finished. Each notification opens with the flow and the task, and its heading links to the run's page. Set up here where they reach you, such as a Telegram bot, and send a test message to be sure it works."
+        },
+        "github": {
+          "title": "GitHub & Codespaces",
+          "body": "Connect GitHub and choose repositories so agents can work in cloud codespaces. Limits and automatic pausing are set here too."
+        },
+        "apps": {
+          "title": "Connected apps",
+          "body": "AI assistants you have allowed to use Moira. Revoke any you no longer use."
+        },
+        "tokens": {
+          "title": "API tokens",
+          "body": "Keys for clients that cannot use the browser sign-in. A token is shown only once, when you create it."
+        },
+        "preferences": {
+          "title": "Preferences",
+          "body": "Choose the theme and language of the website. These apply in this browser."
+        }
+      }
+    },
+    "settings-github": {
+      "title": "GitHub & Codespaces setup",
+      "open": "Setup guide",
+      "steps": {
+        "steps": {
+          "title": "Three steps to connect",
+          "body": "Connect your GitHub account, install the Moira GitHub App, and grant it the repositories agents may work in. The current step is highlighted."
+        },
+        "connect": {
+          "title": "Connect and install",
+          "body": "Press Connect GitHub and approve Moira on GitHub. If the Moira App is not installed yet, GitHub takes you straight to installing it; choose the repositories there. Back here, Check installation confirms it."
+        },
+        "codespaces": {
+          "title": "Create a codespace",
+          "body": "Pick a repository and a branch, then create a codespace. Agents find it by its ID through the codespace tool. Stop keeps its files; Delete removes them."
+        },
+        "limits": {
+          "title": "Know your limits",
+          "body": "How many codespaces you may hold (stopped ones count), how many commands can run at once and how much can be transferred. Delete a codespace you no longer need to free a slot."
+        },
+        "autopause": {
+          "title": "Pause idle codespaces",
+          "body": "Moira stops a codespace no agent has used through Moira for the time you choose, so it does not keep running up your GitHub bill. The next command starts it again."
+        }
+      }
+    },
+    "settings-telegram": {
+      "title": "Telegram setup",
+      "open": "Telegram setup",
+      "steps": {
+        "bot": {
+          "title": "Create a bot",
+          "body": "In Telegram, message @BotFather, send /newbot and follow the prompts. Paste the token it gives you here and save."
+        },
+        "chat": {
+          "title": "Find your chat ID",
+          "body": "Message @userinfobot in Telegram: the user ID it replies with is your chat ID. Paste it here and save, then send your own bot any message so it can write to you. Do not put the bot token into a browser URL."
+        },
+        "enable": {
+          "title": "Turn it on",
+          "body": "Tick Send notifications to Telegram and save. The channel shows Ready when everything is in place."
+        },
+        "test": {
+          "title": "Send a test",
+          "body": "Send a test message. If it does not arrive, check the token and chat ID; the error message says which part failed."
+        }
+      }
+    },
+    "menu": {
+      "open": "Show me around",
+      "title": "Guides",
+      "thisPage": "This page: {{guide}}",
+      "noTour": "This page has no tour.",
+      "resume": "Continue: {{guide}}, step {{index}} of {{total}} — {{step}}",
+      "screens": "Screen tours",
+      "status": {
+        "unseen": "Not started",
+        "started": "In progress",
+        "seen": "Seen",
+        "new_one": "{{count}} new step",
+        "new_other": "{{count}} new steps"
+      },
+      "fullTour": "Full tour",
+      "tutorials": "Tutorials",
+      "tutorialDone": "Done",
+      "tutorialProgress": "{{done}} of {{total}} lessons"
+    },
+    "firstRun": {
+      "title": "New to Moira?",
+      "body": "A short tour shows what each screen is for, on the screen itself. You can open it any time from “Show me around” in the sidebar.",
+      "accept": "Show me around",
+      "later": "Later",
+      "decline": "No thanks"
+    },
+    "runs-empty": {
+      "title": "Your first run",
+      "steps": {
+        "try": {
+          "title": "Your first run",
+          "body": "A run appears here when your agent runs a flow. To start one, say to your agent: “Use Moira to run Example 1: Simple Steps for this task: …”. Then open the run to watch it step by step."
+        }
+      }
+    },
+    "flow-editor": {
+      "title": "The editor",
+      "open": "Editor tour",
+      "steps": {
+        "bar": {
+          "title": "Your edits, before they are saved",
+          "body": "Every change collects here, not in the saved flow: the count, what exactly changes (the export), Undo for the last change and Reset for all of them. Nothing reaches the flow until you save."
+        },
+        "add-step": {
+          "title": "Add a step",
+          "body": "Adds a step to this block: pick its type and fill in what it requires. On the graph, right-click a connection to insert a step on it, or a step to add one after it."
+        },
+        "step-actions": {
+          "title": "Rename or delete a step",
+          "body": "Renaming updates every reference to the step's id. Deleting asks where each connection that led to it should go instead."
+        },
+        "blocks": {
+          "title": "Blocks",
+          "body": "Blocks are the stages of the process. Add one here; the bin on a block's row in the contents deletes it once no step is left in it."
+        },
+        "connections": {
+          "title": "Where a step leads",
+          "body": "Point each output at another step, add an output or remove one. A connection that crosses into another block needs a label saying why; you give it on the transition under “Where it leads”."
+        },
+        "choice": {
+          "title": "Add a choice",
+          "body": "Makes the step end with a question and options: the agent answers with one option, and the answer picks the route. One option continues as before; each other leads to its own step, existing or new."
+        },
+        "validation": {
+          "title": "What stops a save",
+          "body": "Moira checks the draft as you edit. Problems show next to the step or block they concern, and Save stays off until none blocks it."
+        },
+        "stale": {
+          "title": "Saved against this revision",
+          "body": "A save is made against the revision you loaded. If the flow was saved elsewhere in the meantime, the save is refused rather than overwriting it: reload, and apply your change again."
+        }
+      }
+    },
+    "editorOffer": {
+      "title": "New to editing?",
+      "body": "A short tour shows where edits collect, how steps, blocks, connections and choices are changed, and what stops a save.",
+      "accept": "Show me the editor",
+      "decline": "Not now"
+    },
+    "build-flow": {
+      "title": "Build your first flow",
+      "steps": {
+        "lesson-0": {
+          "title": "How flows are made",
+          "body": "For real work you don't build flows by hand: you describe the task to your agent, and it builds the flow through the Workflow Management Flow, agreeing the depth with you — simple, standard or complex. This tutorial builds a small one by hand, so you can read and adjust what the agent makes."
+        },
+        "lesson-1": {
+          "title": "Your own copy",
+          "body": "You practise on your own private copy of the learning example, so nothing shared changes. Press “Use as Template” — or “Do it for me”."
+        },
+        "lesson-2": {
+          "title": "Add a step",
+          "body": "Add a step to the Do block with “Add step”, for example “Save a draft”, with a directive (what the agent does) and a completion condition (when it is done). A step must lead somewhere to be saved: in its connections point its success at check-result, and label that connection — it goes into the Check block, and every connection into another block says why. Save. Nothing leads to your step yet; the check says so, and that is the next lesson."
+        },
+        "lesson-3": {
+          "title": "Connect it",
+          "body": "Now lead the work through your step: point do-task's success at your new step, in do-task's connections. Every step is then on the way from start to the end. Save."
+        },
+        "lesson-4": {
+          "title": "Add a choice",
+          "body": "Make check-result end with a question: open it in the Check block and use “Add a choice”. Ask “Does the result match?” with the options yes and no. Yes continues to the report as before; no leads to a new step, “Explain what is missing”, in the Check block. The new step must lead on too: point it at end and label that connection, since it leaves the Check block. Save. This is the shape of Example 2, “One choice”."
+        },
+        "lesson-5": {
+          "title": "Use a value from an earlier step",
+          "body": "A step can use what an earlier step returned. In the report's directive, add {{ref}} — the task as the agent restated it at the start. Moira fills it in when the report step runs. Save."
+        },
+        "lesson-6": {
+          "title": "Try it (optional)",
+          "body": "The web app does not start runs; your agent does. Say this to your agent, and once the run is complete, check again here. Or skip this lesson."
+        },
+        "lesson-7": {
+          "title": "What next",
+          "body": "You have practised what your agent builds for you: steps, the connections between them, a choice decided by an answer, and a value carried from an earlier step. For real work you don't build flows by hand — ask your agent for a flow, and it builds it through the Workflow Management Flow, agreeing the depth with you. Your copy is no longer needed: you can delete it."
+        }
+      },
+      "findings": {
+        "copy-not-owned": "This flow is not yours. Make your own copy with “Use as Template”.",
+        "copy-not-private": "Your copy should be private while you practise.",
+        "copy-no-process": "This copy has no process view, so it cannot be edited here.",
+        "copy-structure-differs": "This copy is not the unchanged example. Start from a fresh copy of the example.",
+        "example-step-missing": "The example's step “{{node}}” is gone. Put it back (Undo, or Discard edits).",
+        "new-step-missing": "There is no new step yet. Add one to the Do block with “Add step”.",
+        "new-step-extra": "There are {{count}} new steps; this lesson needs exactly one.",
+        "new-step-directive-empty": "The new step “{{node}}” has no directive: say what the agent does.",
+        "new-step-condition-empty": "The new step “{{node}}” has no completion condition: say when it is done.",
+        "new-step-no-block": "The new step “{{node}}” is in no block. Put it in the Do block.",
+        "new-step-not-connected": "“do-task” does not lead to your new step yet: point its success at “{{step}}”.",
+        "new-step-not-continuing": "Your new step “{{node}}” should lead on to “check-result”.",
+        "dangling-connection": "A connection of “{{node}}” leads to a step that does not exist.",
+        "unreachable-node": "No route reaches “{{node}}”: connect a step to it.",
+        "route-without-end": "From “{{node}}” no route reaches the end.",
+        "edge-needs-label": "The connection from “{{node}}” goes into another block and needs a label saying why.",
+        "process-issue": "The process reports a problem on “{{node}}” ({{issue}}).",
+        "choice-field-missing": "check-result does not ask a question yet: use “Add a choice” on it.",
+        "case-not-reading-answer": "A route of check-result does not compare its answer.",
+        "case-compares-value-not-offered": "A route compares “{{value}}”, which the answer does not offer.",
+        "case-output-not-connected": "The option “{{field}}” leads nowhere yet.",
+        "case-output-same-route": "The option “{{field}}” leads where the default route goes; give it its own step.",
+        "choice-loops-back": "The option “{{field}}” comes back to check-result; lead it on towards the end.",
+        "reference-missing": "No step uses a value from an earlier step yet: add {{ref}} to the report.",
+        "reference-field-not-declared": "“{{reference}}” names a field that step does not return.",
+        "reference-not-before-use": "“{{reference}}” is used before its step has run.",
+        "validation-errors": "The flow still has {{count}} error(s) to fix before it can be saved."
+      }
+    },
+    "tutorial": {
+      "header": "{{title}} · lesson {{current}} of {{total}}",
+      "narrow": "The tutorial edits the flow, and editing needs a larger screen. Open Moira on a computer: your progress is kept and waits for you there.",
+      "haveCopy": "You already have a copy from before: “Do it for me” opens it.",
+      "notYourCopy": "This is not your tutorial copy. Open the tutorial from “Show me around” to get back to it.",
+      "conflict": "The save was refused: your copy was changed elsewhere since this page loaded it. Reload to see the saved copy, then make your change again.",
+      "reload": "Reload the copy",
+      "broken": "“{{lesson}}” no longer holds after your changes. Go back and fix it before going on.",
+      "goBack": "Go back to that lesson",
+      "complete": "Done — saved and checked.",
+      "checking": "Your copy is ready.",
+      "looksRight": "Looks right — press Save.",
+      "finish": "Finish",
+      "forMe": {
+        "action": "Do it for me",
+        "directive": "Save a draft of the work so far.",
+        "condition": "A draft of the work is saved.",
+        "label": "draft saved",
+        "question": "Does the result match the request?",
+        "noLabel": "something is missing",
+        "gapDirective": "Explain to the user what is missing from the result and why.",
+        "gapCondition": "The user knows what is missing.",
+        "gapLabel": "gap explained",
+        "reference": "Start by repeating the task: {{ref}}"
+      },
+      "announce": {
+        "findings_one": "The check found {{count}} thing to fix.",
+        "findings_other": "The check found {{count}} things to fix.",
+        "save": "Looks right — press Save.",
+        "complete": "Lesson done.",
+        "conflict": "The save was refused: the copy changed elsewhere.",
+        "broken": "An earlier lesson no longer holds.",
+        "narrow": "The tutorial needs a larger screen."
+      },
+      "tryIt": {
+        "sentence": "Use Moira to run my flow “{{name}}” for this task: …",
+        "checkAgain": "Check again",
+        "skip": "Skip"
+      },
+      "deleteCopy": "Delete my copy",
+      "deleteFailed": "Couldn't delete the copy."
+    },
+    "tourEnd": {
+      "title": "You have seen every screen",
+      "body": "Want to try building a small flow yourself? The tutorial walks you through it in the editor, on your own copy.",
+      "start": "Start the tutorial",
+      "later": "Not now"
     }
   }
 }

@@ -33,6 +33,8 @@ interface FilterBarProps {
   onReset?: () => void;
   /** Fold the filters and the reset behind a button that shows how many are in effect. */
   foldFilters?: { activeCount: number };
+  /** The guide anchor of the bar, for the screen tour that explains it. */
+  guide?: { "data-guide": string };
 }
 
 export const FilterBar: React.FC<FilterBarProps> = ({
@@ -45,13 +47,14 @@ export const FilterBar: React.FC<FilterBarProps> = ({
   className,
   onReset,
   foldFilters,
+  guide,
 }) => {
   const { t } = useTranslation();
   const [unfolded, setUnfolded] = useState(false);
   const folded = foldFilters !== undefined && !unfolded && foldFilters.activeCount === 0;
 
   return (
-    <div className={cn("mb-6 flex flex-wrap gap-4 items-end", className)}>
+    <div className={cn("mb-6 flex flex-wrap gap-4 items-end", className)} {...guide}>
       {onSearchChange !== undefined && (
         <div className="flex flex-col gap-1">
           <span className="text-xs text-muted-foreground font-medium">

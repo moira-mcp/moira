@@ -95,7 +95,7 @@ Automatic node types (execute without agent interaction):
 ### Template System
 
 - Variables: `{{variable}}`, `{{nested.path}}`, `{{array[0]}}`
-- System vars: `{{executionId}}`, `{{workflowId}}`
+- System vars: `{{executionId}}`, `{{workflowId}}`, `{{runUrl}}` (the run page)
 - Processing locations: directive, completionCondition, message fields
 
 ### Storage Architecture

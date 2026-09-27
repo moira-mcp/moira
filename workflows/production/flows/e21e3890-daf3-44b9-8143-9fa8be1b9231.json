@@ -2,7 +2,7 @@
   "id": "e21e3890-daf3-44b9-8143-9fa8be1b9231",
   "metadata": {
     "name": "Quick Task",
-    "version": "4.9.0",
+    "version": "4.11.0",
     "description": "Executes one bounded non-development task of 1–10 work units in an execution-correlated filesystem workspace. It resolves the goal, observable result, scope, constraints, authority and autonomous or interactive mode; writes immutable versioned plan, decision and review records; requires independent plan review before execution; and runs approved work sequentially with durable per-step evidence. A guarded mid-run revision creates a new complete plan version while preserving the evidenced completed prefix, and final independent review checks the actual result before truthful mode-specific presentation: interactive runs retain acceptance or rework, while autonomous runs present the result and end without inventing a decision. The originating request remains the authority ceiling; plan approval does not authorize unrelated external, destructive, publication, production or VCS effects. Choose Quick Task for bounded work outside a software-development lifecycle; use Todo List when the checklist is already known and minimal orchestration is enough, Robust Task for stronger retry/recovery and durable critical work, or Software Development Flow for repository implementation with tests and documentation.",
     "tags": [
       "задача",
@@ -24,7 +24,7 @@
     {
       "id": "get-task",
       "type": "agent-directive",
-      "directive": "Establish the complete task contract from the triggering conversation. Reuse information already present and ask only for a material fact that cannot be discovered; do not ask the user to repeat a complete request. Create ./moira-ws/quick-task-{{executionId}}/ and its required subdirectories, write {{executionId}} to process-id.txt, write the complete task contract once to task.md, and initialize execution.md for one concise evidence entry per approved plan position. Return the exact task and execution file paths. Do not plan or execute the task. If the complete files cannot be created and verified, report the blocker and do not call step().\n\nResolve `operating_mode` in this same turn: reuse a mode the user already stated; infer an unambiguous one, including a run started by an already autonomous parent process; otherwise ask once, naming the consequence — in `autonomous` there is no plan approval and no acceptance question, only the delivered result, while `interactive` keeps both. The mode holds for the whole run and is never asked again.\n\nProgress outcome ownership: Return progress_scope_outcome as a concise truthful synopsis of the resolved task contract, scope, authority, and operating mode. Replace the prior value; do not append history, predict later work, or duplicate the complete task file.",
+      "directive": "Establish the complete task contract from the triggering conversation. Reuse information already present and ask only for a material fact that cannot be discovered; do not ask the user to repeat a complete request. Create ./moira-ws/quick-task-{{executionId}}/ and its required subdirectories, write {{executionId}} to process-id.txt, write the complete task contract once to task.md, and initialize execution.md for one concise evidence entry per approved plan position. Return the exact task and execution file paths. Return `execution_note`: the task in a few words, as a person would name it — it heads every notification of this run; reuse the caller's note when one was given. Do not plan or execute the task. If the complete files cannot be created and verified, report the blocker and do not call step().\n\nResolve `operating_mode` in this same turn: reuse a mode the user already stated; infer an unambiguous one, including a run started by an already autonomous parent process; otherwise ask once, naming the consequence — in `autonomous` there is no plan approval and no acceptance question, only the delivered result, while `interactive` keeps both. The mode holds for the whole run and is never asked again.\n\nProgress outcome ownership: Return progress_scope_outcome as a concise truthful synopsis of the resolved task contract, scope, authority, and operating mode. Replace the prior value; do not append history, predict later work, or duplicate the complete task file.",
       "completionCondition": "The execution workspace, process correlation, complete task contract, and execution evidence file exist at the returned bounded paths",
       "inputSchema": {
         "type": "object",
@@ -41,10 +41,17 @@
             "pattern": "^\\./moira-ws/quick-task-[0-9a-f-]+/execution\\.md$",
             "maxLength": 200,
             "description": "Execution-specific bounded evidence journal"
+          },
+          "execution_note": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120,
+            "description": "The run's task in a few words, shown as the heading of every notification of this run; the caller's note when one was given"
           }
         },
         "required": [
           "execution_file",
+          "execution_note",
           "operating_mode",
           "progress_scope_outcome",
           "task_file"
@@ -70,21 +77,21 @@
     {
       "id": "create-plan",
       "type": "agent-directive",
-      "directive": "Read the complete task contract from {{get-task.task_file}}. Create the first immutable plan record under ./moira-ws/quick-task-{{executionId}}/plans/ using a numeric iteration directory. The complete plan must contain 1..10 meaningful ordered work units; each unit states its action, expected result, and a verification method fitting the work.\n\nA unit fixes what must become true, the evidence that would accept it, and what it depends on; it does not carry the deliverable itself. Where the result is prose — a document, briefs for other agents, the answer of an investigation, a body of rules — plan and result share a medium and nothing separates them by construction, so this altitude is held deliberately: after this plan is approved, work an intelligent executor still has to do remains, and a unit a later step could satisfy by copying text out of the plan is a unit whose result is already written here. Keep plan content semantic and executable; do not add activity logs, tool transcripts, decorative file or command inventories, timings, hashes, or volume metrics. An inventory or metric remains valid when it is itself required by the task.\n\nPrepare under a non-numeric temporary name and publish the numeric record only when complete. Return its exact plan.md path and exact item count; do not return the plan body. If a complete useful plan cannot be created and verified, report the blocker and do not call step().\n\nProgress outcome ownership: Return progress_plan_outcome as the current plan item count and a concise semantic synopsis of its unit outcomes. Replace the prior value atomically; do not append history, include obsolete future units, or return only a generic creation status.",
-      "completionCondition": "A complete immutable initial plan covering the task contract is published at current_plan_file, total_steps exactly equals its 1..10 work units, and every unit fixes an outcome, its acceptance, and what it depends on rather than containing the deliverable",
+      "directive": "Read the complete task contract from {{get-task.task_file}}. Create the first immutable plan record under ./moira-ws/quick-task-{{executionId}}/plans/ using a numeric iteration directory. The complete plan must contain 1..10 meaningful ordered work units; each unit states its action, expected result, and a verification method fitting the work.\n\nA unit fixes what must become true, the evidence that would accept it, and what it depends on; it does not carry the deliverable itself. Where the result is prose — a document, briefs for other agents, the answer of an investigation, a body of rules — plan and result share a medium and nothing separates them by construction, so this altitude is held deliberately: after this plan is approved, work an intelligent executor still has to do remains, and a unit a later step could satisfy by copying text out of the plan is a unit whose result is already written here. Keep plan content semantic and executable; do not add activity logs, tool transcripts, decorative file or command inventories, timings, hashes, or volume metrics. An inventory or metric remains valid when it is itself required by the task.\n\nPrepare under a non-numeric temporary name and publish the numeric record only when complete. Return its exact plan.md path and `plan_steps` — one short title per unit, in plan order, naming each unit's outcome as a person would read it in the plan list of a notification; do not return the plan body. If a complete useful plan cannot be created and verified, report the blocker and do not call step().\n\nProgress outcome ownership: Return progress_plan_outcome as the current plan item count and a concise semantic synopsis of its unit outcomes. Replace the prior value atomically; do not append history, include obsolete future units, or return only a generic creation status.",
+      "completionCondition": "A complete immutable initial plan covering the task contract is published at current_plan_file, plan_steps titles its 1..10 work units in order, and every unit fixes an outcome, its acceptance, and what it depends on rather than containing the deliverable",
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,
         "properties": {},
         "required": [
           "current_plan_file",
-          "progress_plan_outcome",
-          "total_steps"
+          "plan_steps",
+          "progress_plan_outcome"
         ],
         "globalInputs": [
           "current_plan_file",
           "progress_plan_outcome",
-          "total_steps"
+          "plan_steps"
         ]
       },
       "connections": {
@@ -98,7 +105,10 @@
       },
       "connectionLabels": {
         "success": "plan published"
-      }
+      },
+      "expressions": [
+        "total_steps = plan_steps.length"
+      ]
     },
     {
       "id": "plan-review",
@@ -161,21 +171,21 @@
     {
       "id": "repair-plan",
       "type": "agent-directive",
-      "directive": "Read the complete current plan {{current_plan_file}}, its independent report {{plan-review.review_file}}, and the task contract {{get-task.task_file}}. Reproduce every confirmed finding and create the next immutable plan iteration with change.md identifying the review basis and material correction, plus a complete corrected plan.md preserving unaffected obligations and every already executed unit at its position, without rewriting existing execution evidence. The change record is not an activity diary, command/file inventory, copied log, timing/hash ledger, or volume report. The corrected plan keeps the altitude the initial plan is held to: the units it shapes fix what must become true, the evidence that would accept it, and what it depends on, rather than carrying the deliverable. Prepare under a non-numeric temporary name and publish only the complete numeric record. Return the new plan path and exact item count; do not return findings or plan content. If a finding cannot be reproduced or the plan cannot be materially corrected and verified, report the blocker and do not call step().\n\nProgress outcome ownership: Return progress_plan_outcome as the corrected current plan item count and concise semantic synopsis of its unit outcomes. Replace the prior value atomically, retaining only still-true completed outcomes; do not append history or keep obsolete current or future units.",
-      "completionCondition": "A new complete immutable plan iteration corrects every confirmed finding, preserves already executed units at their positions without rewriting their recorded execution evidence, keeps every unit it shapes at the altitude the initial plan is held to rather than containing the deliverable, and current_plan_file and total_steps identify that verified plan",
+      "directive": "Read the complete current plan {{current_plan_file}}, its independent report {{plan-review.review_file}}, and the task contract {{get-task.task_file}}. Reproduce every confirmed finding and create the next immutable plan iteration with change.md identifying the review basis and material correction, plus a complete corrected plan.md preserving unaffected obligations and every already executed unit at its position, without rewriting existing execution evidence. The change record is not an activity diary, command/file inventory, copied log, timing/hash ledger, or volume report. The corrected plan keeps the altitude the initial plan is held to: the units it shapes fix what must become true, the evidence that would accept it, and what it depends on, rather than carrying the deliverable. Prepare under a non-numeric temporary name and publish only the complete numeric record. Return the new plan path and `plan_steps` — one short title per unit, in plan order, naming each unit's outcome as a person would read it in the plan list of a notification; do not return findings or plan content. If a finding cannot be reproduced or the plan cannot be materially corrected and verified, report the blocker and do not call step().\n\nProgress outcome ownership: Return progress_plan_outcome as the corrected current plan item count and concise semantic synopsis of its unit outcomes. Replace the prior value atomically, retaining only still-true completed outcomes; do not append history or keep obsolete current or future units.",
+      "completionCondition": "A new complete immutable plan iteration corrects every confirmed finding, preserves already executed units at their positions without rewriting their recorded execution evidence, keeps every unit it shapes at the altitude the initial plan is held to rather than containing the deliverable, and current_plan_file and plan_steps identify that verified plan and title its units in order",
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,
         "properties": {},
         "required": [
           "current_plan_file",
-          "progress_plan_outcome",
-          "total_steps"
+          "plan_steps",
+          "progress_plan_outcome"
         ],
         "globalInputs": [
           "current_plan_file",
           "progress_plan_outcome",
-          "total_steps"
+          "plan_steps"
         ]
       },
       "connections": {
@@ -195,7 +205,10 @@
             "exit": "A review with zero blocking findings."
           }
         }
-      }
+      },
+      "expressions": [
+        "total_steps = plan_steps.length"
+      ]
     },
     {
       "id": "present-plan",
@@ -259,21 +272,21 @@
     {
       "id": "revise-plan",
       "type": "agent-directive",
-      "directive": "Publish the next immutable plan iteration from whichever basis applies to this run. Read the current plan {{current_plan_file}} and the task contract {{get-task.task_file}}. When the user rejected the plan at the approval gate, the basis is the exact decision record written beside that plan; when you arrived by a mid-execution replan, the basis is the reason you just stated. Create the next numeric iteration with change.md preserving that exact basis and the material plan change, plus a complete revised plan.md preserving unaffected obligations and every already executed unit at its position, without rewriting existing execution evidence. Do not turn the change record into a transcript, activity log, decorative inventory, timing/hash ledger, or volume report. The units this revision shapes keep the altitude the initial plan is held to: they fix what must become true, the evidence that would accept it, and what it depends on, rather than carrying the deliverable. Prepare under a non-numeric temporary name and publish only the complete numeric record. Return the new plan path and exact item count; do not return feedback, the replan reason, or plan content. If the revision cannot be completed and verified, report the blocker and do not call step().\n\nProgress outcome ownership: Return progress_plan_outcome as the revised current plan item count and concise semantic synopsis of its unit outcomes. Replace the prior value atomically, retaining only still-true completed outcomes; do not append history or keep obsolete current or future units.",
-      "completionCondition": "A new complete immutable plan iteration incorporates the exact basis of this revision, preserves already executed units at their positions without rewriting their recorded execution evidence, keeps every unit it shapes at the altitude the initial plan is held to rather than containing the deliverable, and current_plan_file and total_steps identify that verified plan",
+      "directive": "Publish the next immutable plan iteration from whichever basis applies to this run. Read the current plan {{current_plan_file}} and the task contract {{get-task.task_file}}. When the user rejected the plan at the approval gate, the basis is the exact decision record written beside that plan; when you arrived by a mid-execution replan, the basis is the reason you just stated. Create the next numeric iteration with change.md preserving that exact basis and the material plan change, plus a complete revised plan.md preserving unaffected obligations and every already executed unit at its position, without rewriting existing execution evidence. Do not turn the change record into a transcript, activity log, decorative inventory, timing/hash ledger, or volume report. The units this revision shapes keep the altitude the initial plan is held to: they fix what must become true, the evidence that would accept it, and what it depends on, rather than carrying the deliverable. Prepare under a non-numeric temporary name and publish only the complete numeric record. Return the new plan path and `plan_steps` — one short title per unit, in plan order, naming each unit's outcome as a person would read it in the plan list of a notification; do not return feedback, the replan reason, or plan content. If the revision cannot be completed and verified, report the blocker and do not call step().\n\nProgress outcome ownership: Return progress_plan_outcome as the revised current plan item count and concise semantic synopsis of its unit outcomes. Replace the prior value atomically, retaining only still-true completed outcomes; do not append history or keep obsolete current or future units.",
+      "completionCondition": "A new complete immutable plan iteration incorporates the exact basis of this revision, preserves already executed units at their positions without rewriting their recorded execution evidence, keeps every unit it shapes at the altitude the initial plan is held to rather than containing the deliverable, and current_plan_file and plan_steps identify that verified plan and title its units in order",
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,
         "properties": {},
         "required": [
           "current_plan_file",
-          "progress_plan_outcome",
-          "total_steps"
+          "plan_steps",
+          "progress_plan_outcome"
         ],
         "globalInputs": [
           "current_plan_file",
           "progress_plan_outcome",
-          "total_steps"
+          "plan_steps"
         ]
       },
       "connections": {
@@ -293,7 +306,10 @@
             "exit": "The user approves, or the run is autonomous."
           }
         }
-      }
+      },
+      "expressions": [
+        "total_steps = plan_steps.length"
+      ]
     },
     {
       "id": "check-steps-remaining",
@@ -370,7 +386,7 @@
     {
       "id": "final-review",
       "type": "agent-directive",
-      "directive": "Obtain an independent reviewer through an available subagent or child workflow. Review the actual result and real artifacts against the task {{get-task.task_file}}, approved plan {{current_plan_file}}, the plan decision record beside that plan when the run produced one, and accumulated execution evidence {{get-task.execution_file}}. Inspect ./moira-ws/quick-task-{{executionId}}/result-reviews/: create the first numeric review record when none exists; after a latest review with change.md, create the next numeric record; on resume with no intervening change, verify and reuse the existing current review. Write every current reproducible blocking defect to the immutable review.md with the problem, minimum concrete evidence, and required correction. Keep domain evidence needed to judge the requested result, including requested inventories or metrics, but exclude the reviewer's activity diary, tool transcript, decorative inventories, copied raw output, timings, hashes, and counts other than the functional finding count. An explicit zero-findings report is valid. Return review_file and issues_count as the functional review fields in the same response as the required progress output. Do not fix the result. If a complete independent review cannot be produced and verified, report the blocker and do not call step().\n\nProgress outcome ownership: Return progress_review_outcome as a concise truthful synopsis of the current independent result-review disposition and blocking finding count. Replace the prior value; do not append history, predict repair, or claim a clean result when findings remain.",
+      "directive": "Obtain an independent reviewer through an available subagent or child workflow. Review the actual result and real artifacts against the task {{get-task.task_file}}, approved plan {{current_plan_file}}, the plan decision record beside that plan when the run produced one, and accumulated execution evidence {{get-task.execution_file}}. Inspect ./moira-ws/quick-task-{{executionId}}/result-reviews/: create the first numeric review record when none exists; after a latest review with change.md, create the next numeric record; on resume with no intervening change, verify and reuse the existing current review. Write every current reproducible blocking defect to the immutable review.md with the problem, minimum concrete evidence, and required correction. Keep domain evidence needed to judge the requested result, including requested inventories or metrics, but exclude the reviewer's activity diary, tool transcript, decorative inventories, copied raw output, timings, hashes, and counts other than the functional finding count. An explicit zero-findings report is valid. Return review_file and issues_count as the functional review fields in the same response as the required progress output, and `result_summary`: the actual result as it stands, in one sentence a person reads in a notification — what was delivered, not how it was reviewed. Do not fix the result. If a complete independent review cannot be produced and verified, report the blocker and do not call step().\n\nProgress outcome ownership: Return progress_review_outcome as a concise truthful synopsis of the current independent result-review disposition and blocking finding count. Replace the prior value; do not append history, predict repair, or claim a clean result when findings remain.",
       "completionCondition": "A new or safely resumed independent immutable result review exists at review_file for the current result state and issues_count exactly matches its findings",
       "inputSchema": {
         "type": "object",
@@ -393,10 +409,12 @@
         "required": [
           "issues_count",
           "progress_review_outcome",
+          "result_summary",
           "review_file"
         ],
         "globalInputs": [
-          "progress_review_outcome"
+          "progress_review_outcome",
+          "result_summary"
         ]
       },
       "connections": {
@@ -443,7 +461,7 @@
       ],
       "connections": {
         "true": "present-autonomous-result",
-        "default": "present-to-user"
+        "default": "notify-result-ready"
       }
     },
     {
@@ -463,7 +481,7 @@
         ]
       },
       "connections": {
-        "success": "end"
+        "success": "notify-finished"
       },
       "progressNodeId": "deliver",
       "progressActiveLabel": "Present autonomous result",
@@ -542,7 +560,7 @@
       },
       "connections": {
         "success": "rework",
-        "end": "end"
+        "end": "notify-finished"
       },
       "progressNodeId": "deliver",
       "progressActiveLabel": "Present result",
@@ -621,8 +639,8 @@
         }
       ],
       "connections": {
-        "true": "check-steps-remaining",
-        "default": "present-plan"
+        "true": "notify-work-started",
+        "default": "notify-plan-approval"
       },
       "connectionLabels": {
         "true": "approved, or autonomous"
@@ -654,6 +672,49 @@
         "summary": "Explain why the approved plan no longer fits the real work",
         "next": "Publish and independently review a complete revised plan"
       }
+    },
+    {
+      "id": "notify-plan-approval",
+      "type": "user-notification",
+      "progressNodeId": "plan-approval",
+      "format": "markdown",
+      "planList": "full",
+      "message": "📋 *Plan ready for your approval* — approve it and the work goes ahead, or reject it with feedback and the plan is revised.",
+      "connections": {
+        "default": "present-plan"
+      }
+    },
+    {
+      "id": "notify-work-started",
+      "type": "user-notification",
+      "progressNodeId": "execute",
+      "format": "markdown",
+      "planList": "full",
+      "message": "▶️ *Plan approved — the work goes ahead.*",
+      "connections": {
+        "default": "check-steps-remaining"
+      }
+    },
+    {
+      "id": "notify-result-ready",
+      "type": "user-notification",
+      "progressNodeId": "deliver",
+      "format": "markdown",
+      "message": "📦 *Result ready for your review* — {{result_summary}}\n\nAccept it to finish, or ask for rework and say what to change.",
+      "connections": {
+        "default": "present-to-user"
+      }
+    },
+    {
+      "id": "notify-finished",
+      "type": "user-notification",
+      "progressNodeId": "deliver",
+      "format": "markdown",
+      "planList": "full",
+      "message": "🏁 *Finished* — {{result_summary}}",
+      "connections": {
+        "default": "end"
+      }
     }
   ],
   "variableRegistry": {
@@ -665,7 +726,7 @@
     },
     "total_steps": {
       "type": "number",
-      "description": "Exact number of work units in the current immutable plan; authoritative for execution only after approval.",
+      "description": "Number of work units in the current plan, derived from plan_steps whenever a plan is written; the execution loop runs while current_step is below it.",
       "minimum": 1,
       "maximum": 10,
       "multipleOf": 1
@@ -720,6 +781,33 @@
       "default": "Pending",
       "minLength": 1,
       "maxLength": 500
+    },
+    "plan_steps": {
+      "type": "array",
+      "description": "The current plan's units in order, one short title each; the plan list people see in notifications and on the run page",
+      "minItems": 1,
+      "maxItems": 10,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "title"
+        ],
+        "properties": {
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160,
+            "description": "The unit's outcome in a few words"
+          }
+        }
+      }
+    },
+    "result_summary": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 300,
+      "description": "The current result in one sentence, as a person reads it in a notification"
     }
   },
   "progress": {
@@ -779,6 +867,8 @@
           "default": "verify"
         },
         "list": {
+          "items": "plan_steps",
+          "title": "title",
           "current": "current_step",
           "total": "total_steps",
           "indexBase": 0

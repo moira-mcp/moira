@@ -10,6 +10,7 @@
 import React, { useEffect, useState } from "react";
 import type { LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { guideAnchor } from "../../guides/anchors";
 
 export interface SettingsNavItem {
   id: string;
@@ -96,6 +97,7 @@ export function SettingsNav({
       <nav
         aria-label={label}
         data-testid="settings-nav-chips"
+        {...guideAnchor("settings.nav")}
         className="sticky top-0 z-20 -mx-4 mb-6 border-b bg-background/95 px-4 py-2 backdrop-blur supports-[backdrop-filter]:bg-background/80 lg:hidden"
       >
         <ul className="flex gap-2 overflow-x-auto pb-0.5 [scrollbar-width:none]">
@@ -125,6 +127,7 @@ export function SettingsNav({
       <nav
         aria-label={label}
         data-testid="settings-nav"
+        {...guideAnchor("settings.nav")}
         className="sticky top-8 hidden self-start lg:block"
       >
         <ul className="space-y-0.5">

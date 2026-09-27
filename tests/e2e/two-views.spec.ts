@@ -306,9 +306,10 @@ test("the map gives the diagram the column on a desktop and one scrolling column
   expect(shapes.filter((c) => c.ports === 0)).toEqual([]);
 
   // A phone reads the map as one scrolling column: the diagram keeps a readable height, the
-  // contents come beneath it, and scrolling the column reaches the last block.
+  // contents come beneath it, and scrolling the column reaches the last block. A flow opens on its
+  // steps view on a phone, so the map is asked for by name.
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.reload();
+  await page.goto(`${BASE_URL}/workflows/moira/quick-task?view=map`);
   await expect(page.getByTestId("canvas-view")).toBeVisible();
   const phone = (await page.getByTestId("canvas-view").boundingBox())!;
   expect(phone.height).toBeGreaterThanOrEqual(300);

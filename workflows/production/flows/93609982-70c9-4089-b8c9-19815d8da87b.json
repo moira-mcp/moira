@@ -2,7 +2,7 @@
   "id": "93609982-70c9-4089-b8c9-19815d8da87b",
   "metadata": {
     "name": "Todo List",
-    "version": "3.9.0",
+    "version": "3.10.0",
     "description": "Executes a finite caller-owned checklist sequentially with minimal orchestration. It materializes one canonical domain-neutral guide before intake, requires every substantive agent responsibility to read it, and keeps checklist, evidence, progress, revision and authority rules in one source without suppressing requested inventories, metrics or log analysis. It accepts an already supplied typed task list or gathers one bounded list, separates content ownership from dependency ordering, derives total and one-based cursor in the engine, projects exactly the current task, advances only after concise verified evidence, and asks for no approval between items. A guarded mid-run revision preserves completed positions and resumes from an explicit task number while the engine recomputes derived state. Todo List intentionally has no plan-design review, per-item retry budget, recovery protocol, aggregate result report or final semantic reviewer. Choose it when the caller already knows the checklist and needs durable cursor progress; use Quick Task when a bounded task needs planning and independent review, Robust Task for retry/recovery and critical work, or Software Development Flow for repository implementation.",
     "tags": [
       "чеклист",
@@ -43,13 +43,21 @@
     {
       "id": "obtain-tasks",
       "type": "agent-directive",
-      "directive": "Read `./moira-ws/todo-list-{{executionId}}/workflow-guide.md`, the user's complete request, and applicable primary sources. Obtain the complete authoritative ordered checklist under that guide.\n\nReuse a caller-supplied schema-valid task array when one is already present; otherwise plan the checklist once. If no valid dependency order exists, report the exact cycle to the author and do not submit an invalid checklist. Do not execute any task in this step.\n\nReturn `tasks` and replace `progress_checklist_outcome` with a concise bounded synopsis of the authoritative checklist. Do not predict execution or treat the synopsis as proof that work is complete.",
-      "completionCondition": "One guide-compliant bounded typed task array and one bounded checklist synopsis are returned without executing tasks; an unsatisfiable dependency cycle is reported instead of submitted.",
+      "directive": "Read `./moira-ws/todo-list-{{executionId}}/workflow-guide.md`, the user's complete request, and applicable primary sources. Obtain the complete authoritative ordered checklist under that guide.\n\nReuse a caller-supplied schema-valid task array when one is already present; otherwise plan the checklist once. If no valid dependency order exists, report the exact cycle to the author and do not submit an invalid checklist. Do not execute any task in this step.\n\nReturn `tasks` and replace `progress_checklist_outcome` with a concise bounded synopsis of the authoritative checklist. Return `execution_note`: the run's task in a few words, as a person would name it — it heads every notification of this run; reuse the caller's note when one was given. Do not predict execution or treat the synopsis as proof that work is complete.",
+      "completionCondition": "One guide-compliant bounded typed task array, one bounded checklist synopsis and a short task note are returned without executing tasks; an unsatisfiable dependency cycle is reported instead of submitted.",
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,
-        "properties": {},
+        "properties": {
+          "execution_note": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120,
+            "description": "The run's task in a few words, shown as the heading of every notification of this run; the caller's note when one was given"
+          }
+        },
         "required": [
+          "execution_note",
           "progress_checklist_outcome",
           "tasks"
         ],
@@ -59,7 +67,7 @@
         ]
       },
       "connections": {
-        "success": "check-tasks-remaining"
+        "success": "notify-checklist-ready"
       },
       "progressNodeId": "checklist",
       "progressActiveLabel": "Build checklist",
@@ -95,7 +103,7 @@
       ],
       "connections": {
         "true": "project-current-task",
-        "default": "end"
+        "default": "notify-finished"
       },
       "connectionLabels": {
         "default": "no tasks remain"
@@ -222,6 +230,31 @@
         "default": "check-tasks-remaining"
       },
       "progressNodeId": "prepare"
+    },
+    {
+      "id": "notify-checklist-ready",
+      "type": "user-notification",
+      "progressNodeId": "checklist",
+      "format": "markdown",
+      "planList": "full",
+      "message": "✅ *Checklist ready* — work has started on the first task.",
+      "connections": {
+        "default": "check-tasks-remaining"
+      },
+      "connectionLabels": {
+        "default": "checklist confirmed"
+      }
+    },
+    {
+      "id": "notify-finished",
+      "type": "user-notification",
+      "progressNodeId": "work",
+      "format": "markdown",
+      "planList": "full",
+      "message": "🏁 *All tasks done.*",
+      "connections": {
+        "default": "end"
+      }
     }
   ],
   "variableRegistry": {

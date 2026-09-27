@@ -6,6 +6,14 @@ import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../ui/card";
 import { SettingsEditor, type SettingDefinition } from "./SettingsEditor";
+import { guideAnchor } from "../../guides/anchors";
+
+/** Where the Telegram setup tour points: the three settings a person fills in. */
+const TELEGRAM_GUIDE_ANCHORS = {
+  "telegram.bot_token": guideAnchor("settings.telegram-bot-token"),
+  "telegram.chat_id": guideAnchor("settings.telegram-chat-id"),
+  "telegram.enabled": guideAnchor("settings.telegram-enabled"),
+};
 
 export type CommunicationChannelState = "ready" | "disabled" | "incomplete" | "unavailable";
 
@@ -90,6 +98,7 @@ export function CommunicationChannelCard({
             onClick={() => onTest(channel)}
             aria-label={t("pages.settings.channels.testAria", { channel: title })}
             data-testid={`communication-channel-${channel.id}-test`}
+            {...(channel.id === "telegram" ? guideAnchor("settings.telegram-test") : {})}
           >
             {testing && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
             {testing ? t("pages.settings.channels.testing") : t("pages.settings.channels.test")}
@@ -125,6 +134,7 @@ export function CommunicationChannelCard({
             values={values}
             onSave={onSave}
             testIdPrefix={`user-channel-${channel.id}`}
+            guideAnchors={channel.id === "telegram" ? TELEGRAM_GUIDE_ANCHORS : undefined}
             enableFullscreenEdit
             collapsible={false}
             categoryLayout="plain"

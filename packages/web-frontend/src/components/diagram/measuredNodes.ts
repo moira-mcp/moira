@@ -4,13 +4,13 @@
  * React Flow stores a node's measured size — and with it the handle positions the edges are drawn
  * between — on the node object it was given. The diagrams are controlled without keeping their
  * nodes in state and rebuild the node objects whenever what a card shows changes (a selection, a
- * walkthrough step, an arrival pulse), so each rebuilt object arrives unmeasured: React Flow drops
+ * guide step, an arrival pulse), so each rebuilt object arrives unmeasured: React Flow drops
  * the measurement and waits for its ResizeObserver to report the card again. Its node wrapper
  * re-arms that observer only when the node's "initialized" state flips, so a rebuild that lands
  * after the observer has reported but before React has rendered the report leaves the flag where
  * it was: the observer is never re-armed, and the card's size never changes again to wake it. The
  * diagram then stays unmeasured for good — edges lose their handles, the steps of a group are
- * clamped against a zero-size frame, and every `fitView` (the walkthrough's reveal, a port's
+ * clamped against a zero-size frame, and every `fitView` (a guide's reveal, a port's
  * travel) stays queued behind a measurement that never comes. The window is a frame wide, so it
  * opens on a slow or busy machine.
  *

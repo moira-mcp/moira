@@ -15,6 +15,7 @@ import { ROUTES } from "../constants/routes";
 import { ConfirmDialog } from "../components/confirm-dialog";
 import { PageShell } from "../components/PageShell";
 import { toast } from "sonner";
+import { guideAnchor } from "@/guides/anchors";
 
 export const Workflows: React.FC = () => {
   const navigate = useNavigate();
@@ -62,13 +63,18 @@ export const Workflows: React.FC = () => {
   return (
     <PageShell
       title={t("pages.workflows.title")}
+      guide={guideAnchor("flows.header")}
       description={t("pages.workflows.subtitle")}
       // The page scrolls as a whole: the recommended section sits above the list, and the list
       // keeps a readable height of its own below it instead of being squeezed into what is left.
       className="h-full flex flex-col overflow-y-auto p-6 md:p-8"
     >
       <RecommendedFlows />
-      <h2 className="mb-3 text-sm font-semibold" data-testid="all-flows-title">
+      <h2
+        className="mb-3 text-sm font-semibold"
+        data-testid="all-flows-title"
+        {...guideAnchor("flows.list")}
+      >
         {t("pages.workflows.allFlows")}
       </h2>
       <div className="flex min-h-[560px] flex-1 flex-col">

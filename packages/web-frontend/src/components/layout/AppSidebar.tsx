@@ -38,6 +38,7 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar";
 import { UserMenu } from "./UserMenu";
+import { ShowMeAround } from "@/guides/ShowMeAround";
 import { cn } from "@/lib/utils";
 import { useFeatures } from "@/hooks/useFeatures";
 import { ROUTES } from "@/constants/routes";
@@ -180,6 +181,7 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
       </SidebarContent>
 
       <SidebarFooter className="border-t border-sidebar-border">
+        <ShowMeAround />
         <UserMenu compact={isCollapsed} />
       </SidebarFooter>
     </Sidebar>

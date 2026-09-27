@@ -4,7 +4,8 @@
  *
  * The definition is shown in three views. The steps view is the simplest picture: what the agent
  * is told, as numbered instruction cards joined by arrows, with an optional reading of every
- * variable as plain words; it exists for every workflow and is where the learning examples open.
+ * variable as plain words; it exists for every workflow and is where the learning examples, and
+ * every flow on a phone, open.
  * The derived process (from the server for the saved definition, re-derived in the browser while
  * there are unsaved edits) is shown through the run page's two views with no run in them: the map
  * (the process as a diagram with its contents sidebar) and the technical node graph with its
@@ -13,10 +14,13 @@
  * typically takes over the viewer's completed runs of this version — and the variable registry.
  * Owners can turn on edit mode: block names and
  * descriptions, transition labels and loop explanations, which block a step belongs to, a step's
- * directive, message or expressions, and the registry are edited in place; the views re-derive at
- * once, the derivation's diagnostics appear inline, the export lists the flow-file entries that
- * would change, and the save sends the whole definition against the revision the page loaded.
- * A stale revision or an invalid graph is refused by the server and the edits stay on the page.
+ * directive, message or expressions, and the registry are edited in place. Every edit is an
+ * operation in the page's edit log (undo takes the last one back); the views re-derive the draft at
+ * once, the server's dry run judges it a moment later, and both layers' problems appear where they
+ * occur and in one list. The export lists the flow-file entries that would change, and Save —
+ * open only for a changed draft both layers passed as shown — sends the whole definition against
+ * the revision the page loaded. A stale revision or a definition the server still refuses keeps
+ * the draft on the page, the refusal placed like a dry run's.
  * State is deep-linkable: `view`, `block`, `guide`, `edit`, `inline`. A workflow without a process
  * view has the steps view and the node graph, and opens on the graph.
  */
@@ -25,17 +29,13 @@ import React, { Suspense, useCallback, useEffect, useMemo, useRef, useState } fr
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import {
-  AlertTriangle,
   Boxes,
-  Compass,
   Copy,
   Globe,
   Loader2,
   Lock,
   MoreHorizontal,
   PencilLine,
-  RotateCcw,
-  Save,
   Share2,
   Trash2,
   Users,
@@ -48,7 +48,6 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -86,21 +85,39 @@ import { useStoredFlag } from "../components/diagram/useStoredFlag";
 import { useRequest } from "../components/diagram/useRequest";
 import { PanelRightClose, PanelRightOpen } from "lucide-react";
 import { GuidanceHint } from "../components/run/Guidance";
-import { Walkthrough } from "../components/run/Walkthrough";
+import {
+  GUIDE_PARAM,
+  STEP_PARAM,
+  useGuidePage,
+  type GuidePageController,
+  type TutorialFinding,
+} from "../guides/GuideContext";
+import { guideById } from "../guides/registry";
+import { GuideButton } from "../guides/GuideButton";
+import { EditorTourOffer } from "../guides/EditorTourOffer";
+import { guideAnchor } from "../guides/anchors";
 import { DiagramGuide } from "../components/run/DiagramGuide";
-import { flowGuideSteps, type FlowPanelTab } from "../components/flow/guideSteps";
 import { runBlocks } from "../components/run/model";
 import { RegistryPanel } from "../components/flow/RegistryPanel";
-import { FLOW_MODES, resolveFlowMode, type FlowViewMode } from "../components/flow/modes";
-import { definitionProgress } from "../components/flow/model";
 import {
-  EMPTY_EDITS,
-  EditingProvider,
-  applyEdits,
-  countEdits,
-  exportDiff,
-  useFlowEdits,
-} from "../components/flow/editing";
+  FLOW_MODES,
+  resolveFlowMode,
+  type FlowPanelTab,
+  type FlowViewMode,
+} from "../components/flow/modes";
+import { usePhoneWidth } from "../hooks/use-phone-width";
+import { definitionProgress } from "../components/flow/model";
+import { EditingProvider, useEditLog } from "../components/flow/editing";
+import { exportDiff } from "../components/flow/operations";
+import { NO_ISSUES, placeIssues, saveGate } from "../components/flow/issues";
+import { useDraftValidation } from "../components/flow/useDraftValidation";
+import { EditBar, ProblemList } from "../components/flow/EditBar";
+import { CanvasEditingHost } from "../components/flow/CanvasEditing";
+import { pausedRunWarnings } from "../components/flow/structure";
+import type { WorkflowValidationStatus } from "../types/react-flow-types";
+import { FlowLevelBadge } from "../components/workflow/FlowLevelBadge";
+import { splitFlowTags } from "../utils/workflow-level";
+import { collectPlaybookReferences } from "@mcp-moira/shared/services/playbook-references";
 
 // Lazy chunk, requested on mount so the first switch to the graph view downloads nothing.
 const importWorkflowGraph = () => import("../components/workflow/WorkflowGraph");
@@ -112,7 +129,6 @@ const TechnicalGraph = React.lazy(() =>
 
 const VIEW_PARAM = "view";
 const BLOCK_PARAM = "block";
-const GUIDE_PARAM = "guide";
 const EDIT_PARAM = "edit";
 const INLINE_PARAM = "inline";
 
@@ -155,9 +171,12 @@ export const FlowPage: React.FC = () => {
     },
     [requestVariableHighlight],
   );
-  const [edits, setEdits] = useFlowEdits();
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  // A save refused because the flow changed elsewhere; an open tutorial explains it.
+  const [conflict, setConflict] = useState(false);
+  // An open tutorial's lesson findings, shown where validation issues show.
+  const [lessonFindings, setLessonFindings] = useState<readonly TutorialFinding[]>([]);
 
   const workflowIdentifier = handle && slug ? `${handle}/${slug}` : id;
 
@@ -175,17 +194,29 @@ export const FlowPage: React.FC = () => {
   const fileInfo = detail?.fileInfo;
   const savedWorkflow = detail?.workflow;
   const isOwner = fileInfo?.accessType === "owner";
+  const editLog = useEditLog(savedWorkflow);
 
   // The saved definition's process comes from the server, held per workflow: a new revision of
   // the same workflow refreshes it while the previous projection stays on screen; a move to
   // another workflow (breadcrumbs, a subgraph link) fetches afresh and shows nothing of the old one.
   const workflowId = fileInfo?.id;
   const revision = fileInfo?.revision;
-  const savedProcess = useResource<ProcessProjection | null>(workflowId ?? null, () =>
-    workflowId
-      ? apiClient.getWorkflowProcess(workflowId).then((r) => r.process)
-      : Promise.resolve(null),
-  );
+  // Each projection remembers the revision it was asked for: until the refetch for a new revision
+  // arrives, the page derives the new definition's process itself rather than pairing the new
+  // definition with the old projection (a block or step the save added would have no place in it).
+  const revisionRef = useRef(revision);
+  revisionRef.current = revision;
+  const savedProcess = useResource<{
+    revision: number | undefined;
+    process: ProcessProjection | null;
+  }>(workflowId ?? null, () => {
+    const asked = revisionRef.current;
+    return workflowId
+      ? apiClient
+          .getWorkflowProcess(workflowId)
+          .then((r) => ({ revision: asked, process: r.process }))
+      : Promise.resolve({ revision: asked, process: null });
+  });
   const refreshProcess = savedProcess.refresh;
   const seenRef = useRef<{ id: string; revision: number } | null>(null);
   useEffect(() => {
@@ -194,7 +225,9 @@ export const FlowPage: React.FC = () => {
     seenRef.current = { id: workflowId, revision };
     if (seen && seen.id === workflowId && seen.revision !== revision) void refreshProcess();
   }, [workflowId, revision, refreshProcess]);
-  const heldProcess = savedProcess.dataKey === workflowId ? savedProcess.data : undefined;
+  const held = savedProcess.dataKey === workflowId ? savedProcess.data : undefined;
+  const heldProcess = held?.process;
+  const heldIsCurrent = held !== undefined && held.revision === revision;
 
   // A refetch that fails while the page has content keeps the content and says so once.
   const detailError = workflowDetail.error;
@@ -204,7 +237,6 @@ export const FlowPage: React.FC = () => {
 
   // --- URL state
   const editing = isOwner && searchParams.get(EDIT_PARAM) === "1";
-  const guideStep = Number(searchParams.get(GUIDE_PARAM)) || 0;
   const update = useCallback(
     (patch: Record<string, string | null>) => {
       const live = new URLSearchParams(window.location.search);
@@ -220,32 +252,80 @@ export const FlowPage: React.FC = () => {
   );
 
   // --- The definition as edited, its process and the run-less projection.
-  const edited = useMemo(
-    () => (savedWorkflow ? applyEdits(savedWorkflow, edits) : undefined),
-    [savedWorkflow, edits],
-  );
-  // The count shown (and what enables Save) is the number of flow-file entries that actually
-  // change; an edit typed back to the stored value is not a change.
+  // An edit log belongs to the workflow it was made on: moving to another one starts afresh.
+  const resetEdits = editLog.reset;
+  useEffect(() => {
+    resetEdits();
+    setSaveError(null);
+  }, [workflowId, resetEdits]);
+  const edited = editLog.draft;
+  // The count shown is the number of flow-file entries that actually change; an edit typed back
+  // to the stored value is not a change.
   const diff = useMemo(
-    () => (savedWorkflow ? exportDiff(savedWorkflow, edits) : []),
-    [savedWorkflow, edits],
+    () => (savedWorkflow ? exportDiff(savedWorkflow, editLog.ops) : []),
+    [savedWorkflow, editLog.ops],
   );
-  const editCount = diff.length;
-  const hasEdits = countEdits(edits) > 0;
+  const hasEdits = editLog.ops.length > 0;
   const process = useMemo<ProcessProjection | null>(() => {
     if (!edited) return null;
-    if (hasEdits) return deriveProcess(edited as unknown as Parameters<typeof deriveProcess>[0]);
+    if (hasEdits || (held !== undefined && !heldIsCurrent))
+      return deriveProcess(edited as unknown as Parameters<typeof deriveProcess>[0]);
     return heldProcess ?? null;
-  }, [edited, hasEdits, heldProcess]);
+  }, [edited, hasEdits, held, heldIsCurrent, heldProcess]);
   // Before the first projection of this workflow the page has nothing to show yet; a refetch for
   // a new revision keeps the previous projection and only marks the page pending.
-  const processLoading = !hasEdits && heldProcess === undefined && savedProcess.pending;
+  const processLoading = !hasEdits && held === undefined && savedProcess.pending;
   const refetching =
     (workflowDetail.pending && !workflowDetail.loading) ||
-    (savedProcess.pending && heldProcess !== undefined);
+    (savedProcess.pending && held !== undefined);
   const progress = useMemo(
     () => (edited && process ? definitionProgress(edited, process) : null),
     [edited, process],
+  );
+
+  // The server's dry run of the draft. While it runs, the page keeps showing the last answer it
+  // had for this editing session; the save gate trusts only an answer for the very draft shown.
+  const validateDraft = useCallback(
+    (draft: WorkflowGraph) =>
+      apiClient
+        .validateWorkflow(workflowId ?? "", { workflowData: draft })
+        .then((response) => response.validation),
+    [workflowId],
+  );
+  const {
+    dryRun,
+    latest: latestJudgement,
+    accept: acceptJudgement,
+    retry: retryDryRun,
+  } = useDraftValidation(validateDraft, hasEdits ? edited : undefined);
+  const validation = hasEdits ? (latestJudgement ?? detail?.validation) : detail?.validation;
+  const diagnostics = useMemo(() => process?.diagnostics ?? [], [process]);
+  const issues = useMemo(
+    () => (edited ? placeIssues(edited, diagnostics, validation, lessonFindings) : NO_ISSUES),
+    [edited, diagnostics, validation, lessonFindings],
+  );
+  const gate = edited
+    ? saveGate({ changed: diff.length > 0, diagnostics: diagnostics.length, draft: edited, dryRun })
+    : ({ enabled: false, reason: "unchanged" } as const);
+  const serverErrors = issues.all.filter(
+    (i) => i.source === "server" && i.severity === "error",
+  ).length;
+  // The owner's paused runs on a node the draft renames or removes: fetched once the draft first
+  // touches a node's identity, and named before the save.
+  const touchesIdentity = diff.some((e) => e.kind === "rename-node" || e.kind === "remove-node");
+  const runs = useResource(touchesIdentity && workflowId ? `${workflowId}:running` : null, () =>
+    apiClient
+      .getExecutions({ workflowId, status: ["running"], limit: 100 })
+      .then((r) => r.executions),
+  );
+  const runWarnings = useMemo(
+    () => (touchesIdentity ? pausedRunWarnings(runs.data ?? [], diff) : []),
+    [touchesIdentity, runs.data, diff],
+  );
+  // The page lists every error; warnings only while the definition is being edited.
+  const listedIssues = useMemo(
+    () => issues.all.filter((i) => i.severity === "error" || editing || hasEdits),
+    [issues, editing, hasEdits],
   );
   // Typical durations of the saved version, over the viewer's own completed runs. They are held
   // per workflow and version; a workflow nobody has finished yet simply has an empty sample.
@@ -261,9 +341,12 @@ export const FlowPage: React.FC = () => {
     [progress, statistics],
   );
 
-  // A learning example opens on the steps view; any other flow on the map, or on the graph when it
-  // has no process view. A `view` in the link wins, except a map the definition cannot draw.
-  const preferredView = preferredFlowView(fileInfo?.ownerHandle, fileInfo?.slug);
+  // A learning example opens on the steps view, and so does any flow on a phone, where a canvas
+  // opens with its first card cut at the screen's edge; any other flow opens on the map, or on the
+  // graph when it has no process view. A `view` in the link wins, except a map the definition
+  // cannot draw, so switching views keeps working on a phone.
+  const phone = usePhoneWidth();
+  const preferredView = phone ? "steps" : preferredFlowView(fileInfo?.ownerHandle, fileInfo?.slug);
   const requestedMode = resolveFlowMode(searchParams.get(VIEW_PARAM), preferredView ?? "map");
   const mode: FlowViewMode = requestedMode === "steps" || process ? requestedMode : "graph";
   // Variables read as words on the steps view: the link's `inline` wins, else the reader's choice.
@@ -287,8 +370,6 @@ export const FlowPage: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- only the tab change re-focuses
   }, [mode]);
   const shownBlock = blocks.find((b) => b.id === (selectedBlockId ?? blocks[0]?.id)) ?? null;
-
-  const guideSteps = useMemo(() => flowGuideSteps(isOwner), [isOwner]);
 
   // --- Actions
   const handleBack = () => {
@@ -326,13 +407,19 @@ export const FlowPage: React.FC = () => {
     setCopying(true);
     try {
       const result = await apiClient.copyWorkflow(workflowIdentifier);
-      navigate(`${ROUTES.WORKFLOWS}/${result.workflowId}`);
+      // An open tutorial goes on with the copy: its lesson is about making it.
+      const guide = searchParams.get(GUIDE_PARAM);
+      const tutorial = guideById(guide)?.kind === "tutorial";
+      const carried = tutorial
+        ? `?${new URLSearchParams({ [GUIDE_PARAM]: guide!, [STEP_PARAM]: searchParams.get(STEP_PARAM) ?? "" })}`
+        : "";
+      navigate(`${ROUTES.WORKFLOWS}/${result.workflowId}${carried}`);
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : t("common.errors.failedToCreate"));
     } finally {
       setCopying(false);
     }
-  }, [workflowIdentifier, navigate, t]);
+  }, [workflowIdentifier, navigate, t, searchParams]);
 
   const handleSave = useCallback(async () => {
     if (!fileInfo || !edited) return;
@@ -340,22 +427,33 @@ export const FlowPage: React.FC = () => {
     setSaveError(null);
     try {
       const result = await apiClient.updateWorkflow(fileInfo.id, edited, fileInfo.revision);
-      setEdits(EMPTY_EDITS);
+      setConflict(false);
+      resetEdits();
       toast.success(t("pages.flowPage.edit.saved", { revision: result.revision }));
       workflowDetail.refreshWorkflow();
     } catch (err: unknown) {
+      // A refused definition comes back with the server's issues for exactly this draft: they
+      // are placed on the definition like a dry run's.
+      const refused =
+        err instanceof ApiClientError && err.status === 400
+          ? (err.details?.validation as WorkflowValidationStatus | undefined)
+          : undefined;
+      if (refused) acceptJudgement(edited, refused);
+      setConflict(err instanceof ApiClientError && err.status === 409);
       const message =
         err instanceof ApiClientError && err.status === 409
           ? t("pages.flowPage.edit.conflict")
-          : err instanceof Error
-            ? err.message
-            : t("common.errors.failedToUpdate");
+          : refused
+            ? t("pages.flowPage.edit.refused")
+            : err instanceof Error
+              ? err.message
+              : t("common.errors.failedToUpdate");
       setSaveError(message);
       toast.error(message);
     } finally {
       setSaving(false);
     }
-  }, [fileInfo, edited, setEdits, workflowDetail, t]);
+  }, [fileInfo, edited, resetEdits, acceptJudgement, workflowDetail, t]);
 
   const toggleInline = useCallback(() => {
     const next = !inline;
@@ -363,13 +461,17 @@ export const FlowPage: React.FC = () => {
     if (next !== inlineStored) toggleInlineStored();
   }, [inline, inlineStored, toggleInlineStored, update]);
 
-  const onEditsChange = useCallback(
-    (next: Parameters<typeof setEdits>[0]) => {
+  const applyEdit = editLog.apply;
+  const onEdit = useCallback(
+    (op: Parameters<typeof applyEdit>[0]) => {
+      applyEdit(op);
       setSaveError(null);
-      setEdits(next);
     },
-    [setEdits],
+    [applyEdit],
   );
+
+  // A step changed on the graph stays in view while the graph relays itself out.
+  const focusOnGraph = useCallback((nodeId: string) => requestFocus({ nodeId }), [requestFocus]);
 
   const focusNode = useCallback(
     (nodeId: string) => {
@@ -399,10 +501,98 @@ export const FlowPage: React.FC = () => {
   const handleClearSelection = useCallback(() => {
     setSelectedNode(null);
   }, []);
-  const onPanel = useCallback((tab: FlowPanelTab) => setChosenTab(tab), []);
-  // A panel section the walkthrough asked to unfold so its step has something to point at.
+  // A panel section a guide asked to unfold so its step has something to point at.
   const [sectionOpen, requestSection] = useRequest<{ name: string }>();
-  const onSection = useCallback((id: string) => requestSection({ name: id }), [requestSection]);
+  // The page's part in its screen tour: the view it shows, whether the reader owns the flow, and
+  // what brings it into a step's state.
+  // What the tutorial asks the page to do, current as of the last render.
+  const tutorialActions = useRef<{
+    apply: typeof onEdit;
+    openForEditing: (blockId: string) => void;
+    reload: () => void;
+    copy: () => Promise<string | null>;
+  } | null>(null);
+  tutorialActions.current = {
+    apply: onEdit,
+    openForEditing: (blockId) => {
+      update({ [EDIT_PARAM]: "1", [BLOCK_PARAM]: blockId });
+      setChosenTab("block");
+      requestSection({ name: "steps" });
+    },
+    reload: () => {
+      resetEdits();
+      setSaveError(null);
+      setConflict(false);
+      workflowDetail.refreshWorkflow();
+    },
+    copy: async () => {
+      if (!workflowIdentifier) return null;
+      try {
+        return (await apiClient.copyWorkflow(workflowIdentifier)).workflowId;
+      } catch {
+        return null;
+      }
+    },
+  };
+  const guideController = useMemo<GuidePageController>(
+    () => ({
+      view: mode,
+      setView: (view) => update({ [VIEW_PARAM]: view }),
+      openPanel: (tab) => setChosenTab(tab as FlowPanelTab),
+      openSection: (id) => requestSection({ name: id }),
+      // The panel lists a node's playbook references: select the first node that names one.
+      selectPlaybookNode: () => {
+        // The draft exists once the flow has loaded; a tour step before that finds nothing.
+        const named = (edited?.nodes ?? []).find(
+          (node) => collectPlaybookReferences(JSON.stringify(node)).length > 0,
+        );
+        if (!named) return false;
+        setSelectedNode({ id: named.id, position: { x: 0, y: 0 }, data: {} });
+        setChosenTab("block");
+        return true;
+      },
+      owner: isOwner,
+      tutorial:
+        fileInfo && savedWorkflow && edited
+          ? {
+              flowId: fileInfo.id,
+              saved: savedWorkflow,
+              revision: fileInfo.revision ?? 0,
+              visibility: fileInfo.visibility ?? "private",
+              owner: isOwner,
+              draft: edited,
+              diagnostics,
+              validationErrors: serverErrors,
+              flowName: savedWorkflow.metadata?.name ?? fileInfo.id,
+              editing,
+              dirty: hasEdits,
+              conflict,
+              openForEditing: (blockId) => tutorialActions.current!.openForEditing(blockId),
+              apply: (op) => tutorialActions.current!.apply(op),
+              reload: () => tutorialActions.current!.reload(),
+              showFindings: setLessonFindings,
+              copy: () => tutorialActions.current!.copy(),
+            }
+          : undefined,
+    }),
+    // The tutorial's actions go through a ref: the controller changes only with what it reports,
+    // or every render of the page would register it again.
+    [
+      mode,
+      update,
+      requestSection,
+      isOwner,
+      edited,
+      fileInfo,
+      savedWorkflow,
+      diagnostics,
+      editing,
+      hasEdits,
+      conflict,
+      serverErrors,
+    ],
+  );
+  useGuidePage("flow", guideController);
 
   // --- Render
   const ownerActions = (
@@ -414,6 +604,7 @@ export const FlowPage: React.FC = () => {
           onClick={handleCopyWorkflow}
           disabled={copying}
           className="gap-1.5"
+          {...guideAnchor("flow.use-template")}
         >
           <Copy className="w-3.5 h-3.5" />
           {copying
@@ -422,12 +613,14 @@ export const FlowPage: React.FC = () => {
         </Button>
       )}
       {isOwner && fileInfo && (
-        <VisibilityToggle
-          visibility={fileInfo.visibility === "public" ? "public" : "private"}
-          onChange={handleToggleVisibility}
-          disabled={visibilityUpdating}
-          testId="workflow-visibility-toggle"
-        />
+        <span className="inline-flex" {...guideAnchor("flow.visibility")}>
+          <VisibilityToggle
+            visibility={fileInfo.visibility === "public" ? "public" : "private"}
+            onChange={handleToggleVisibility}
+            disabled={visibilityUpdating}
+            testId="workflow-visibility-toggle"
+          />
+        </span>
       )}
       {fileInfo?.accessType === "shared" && (
         <Badge variant="secondary" className="gap-1.5" data-testid="shared-with-you-indicator">
@@ -463,7 +656,12 @@ export const FlowPage: React.FC = () => {
 
   const flowModes = (
     <Tabs value={mode} onValueChange={(value) => update({ [VIEW_PARAM]: value })}>
-      <TabsList aria-label={t("pages.runPage.modeLabel")} className="h-8" data-testid="flow-modes">
+      <TabsList
+        aria-label={t("pages.runPage.modeLabel")}
+        className="h-8"
+        data-testid="flow-modes"
+        {...guideAnchor("flow.modes")}
+      >
         {FLOW_MODES.filter((definition) => process || definition.id !== "map").map((definition) => {
           const Icon = definition.icon;
           return (
@@ -471,6 +669,7 @@ export const FlowPage: React.FC = () => {
               key={definition.id}
               value={definition.id}
               data-mode={definition.id}
+              {...(definition.id === "steps" ? guideAnchor("flow.steps-view-switch") : {})}
               className="gap-1 text-xs"
             >
               <Icon className="h-3.5 w-3.5" aria-hidden="true" />
@@ -484,57 +683,58 @@ export const FlowPage: React.FC = () => {
   const flowTrailing = (
     <>
       {refetching && <PendingIndicator />}
-      <button
-        type="button"
-        onClick={() => update({ [GUIDE_PARAM]: "1" })}
-        data-hint={t("pages.flowPage.guide.open")}
-        aria-label={t("pages.flowPage.guide.open")}
-        className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-transparent text-primary hover:border-border hover:bg-primary/10"
-        data-testid="guide-open"
-      >
-        <Compass className="size-4" aria-hidden="true" />
-      </button>
+      <GuideButton guideId="flow" />
     </>
   );
   const technicalGraph = savedWorkflow && edited && (
     <div className="flex h-full min-h-0">
       <div className="flex-1 min-w-0">
         <Suspense fallback={<DiagramSkeleton />}>
-          <TechnicalGraph
-            workflow={edited}
-            validation={detail?.validation}
-            blocks={blocks}
-            selectedBlockId={selectedBlockId}
-            onWorkflowNavigate={handleNavigate}
-            onNodeSelect={handleNodeSelect}
-            showNodeDetails={false}
-            showControls={true}
-            toolbarModes={flowModes}
-            toolbarLeading={<ContentsToggleSlot />}
-            toolbarTrailing={
-              <>
-                <DiagramGuide mode="graph" />
-                {flowTrailing}
-              </>
-            }
-            showMinimap
-            focusRequest={focusRequest}
-            selectedNodeId={focusRequest?.nodeId ?? null}
-            onVariableSelect={goToVariable}
-            selectedVariable={variableHighlight?.name ?? null}
-          />
+          <CanvasEditingHost onFocusNode={focusOnGraph}>
+            {(canvasEditing) => (
+              <TechnicalGraph
+                editing={canvasEditing}
+                workflow={edited}
+                validation={validation}
+                issues={issues}
+                blocks={blocks}
+                selectedBlockId={selectedBlockId}
+                onWorkflowNavigate={handleNavigate}
+                onNodeSelect={handleNodeSelect}
+                showNodeDetails={false}
+                showControls={true}
+                toolbarModes={flowModes}
+                toolbarLeading={<ContentsToggleSlot />}
+                toolbarTrailing={
+                  <>
+                    <DiagramGuide mode="graph" />
+                    {flowTrailing}
+                  </>
+                }
+                showMinimap
+                focusRequest={focusRequest}
+                selectedNodeId={focusRequest?.nodeId ?? null}
+                onVariableSelect={goToVariable}
+                selectedVariable={variableHighlight?.name ?? null}
+              />
+            )}
+          </CanvasEditingHost>
         </Suspense>
       </div>
     </div>
   );
 
+  // The level is a badge of its own; the header's tag chips are the subject tags only.
+  const flowTags = splitFlowTags(savedWorkflow?.metadata.tags);
+
   return (
     <EditingProvider
       enabled={editing}
       definition
-      edits={edits}
-      diagnostics={process?.diagnostics ?? []}
-      onChange={onEditsChange}
+      issues={issues}
+      draft={edited}
+      blocks={blocks}
+      apply={onEdit}
     >
       <div className="h-full flex flex-col" data-testid="flow-page" data-view={mode}>
         <PageHeader
@@ -553,7 +753,8 @@ export const FlowPage: React.FC = () => {
           facts={
             savedWorkflow ? (
               <>
-                {(savedWorkflow.metadata.tags ?? []).map((tag) => (
+                <FlowLevelBadge level={flowTags.level} guide={guideAnchor("flow.level")} />
+                {flowTags.subjects.map((tag) => (
                   <span
                     key={tag}
                     className="rounded-full border bg-muted/40 px-2 py-0.5 text-[11px] text-muted-foreground"
@@ -574,7 +775,7 @@ export const FlowPage: React.FC = () => {
           actions={
             <>
               <div className="hidden md:flex items-center gap-2">
-                {isOwner && process && (
+                {isOwner && (
                   <>
                     <button
                       type="button"
@@ -587,6 +788,7 @@ export const FlowPage: React.FC = () => {
                           : "text-muted-foreground hover:text-foreground",
                       )}
                       data-testid="flow-edit-toggle"
+                      {...guideAnchor("flow.edit-toggle")}
                     >
                       <PencilLine className="size-3.5" aria-hidden="true" />
                       {t(editing ? "pages.flowPage.edit.on" : "pages.flowPage.edit.off")}
@@ -607,7 +809,7 @@ export const FlowPage: React.FC = () => {
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end">
-                    {isOwner && process && (
+                    {isOwner && (
                       <DropdownMenuItem
                         onClick={() => update({ [EDIT_PARAM]: editing ? null : "1" })}
                       >
@@ -655,6 +857,8 @@ export const FlowPage: React.FC = () => {
             </>
           }
           testId="flow-header"
+          guide={guideAnchor("flow.header")}
+          detailsGuide={guideAnchor("flow.facts")}
         />
 
         {breadcrumbs.length > 0 && (
@@ -681,7 +885,12 @@ export const FlowPage: React.FC = () => {
         ) : (
           <div className="flex-1 min-h-0 flex flex-col lg:flex-row overflow-y-auto lg:overflow-hidden">
             <section
-              className="flex min-w-0 flex-col lg:flex-1 lg:min-h-0 lg:overflow-hidden"
+              className={cn(
+                "flex min-w-0 flex-col lg:flex-1 lg:min-h-0 lg:overflow-hidden",
+                // The steps view has no panel under it, so on a narrow screen it takes the whole
+                // remaining height instead of a fixed box with an empty band beneath.
+                mode === "steps" && "flex-1 min-h-0",
+              )}
               aria-label={t("pages.flowPage.title")}
               data-testid="flow-view"
             >
@@ -695,100 +904,38 @@ export const FlowPage: React.FC = () => {
                 </div>
               )}
 
-              {editing && process && (
-                <div
-                  className="space-y-1 border-b border-warning/50 bg-warning/5 px-3 py-1.5"
-                  data-testid="flow-edit-panel"
-                >
-                  <div className="flex flex-wrap items-center gap-2 text-sm">
-                    <span data-testid="flow-edit-count">
-                      {t("pages.flowPage.edit.count", { count: editCount })}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => onEditsChange(EMPTY_EDITS)}
-                      disabled={!hasEdits}
-                      className="inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-xs hover:bg-accent disabled:opacity-40"
-                      data-testid="flow-edit-reset"
-                    >
-                      <RotateCcw className="size-3" aria-hidden="true" />
-                      {t("pages.flowPage.edit.reset")}
-                    </button>
-                    <Button
-                      size="sm"
-                      onClick={handleSave}
-                      disabled={editCount === 0 || saving || process.diagnostics.length > 0}
-                      className="h-7 gap-1 text-xs"
-                      data-testid="flow-edit-save"
-                    >
-                      {saving ? (
-                        <Loader2 className="size-3 animate-spin" aria-hidden="true" />
-                      ) : (
-                        <Save className="size-3" aria-hidden="true" />
-                      )}
-                      {t("pages.flowPage.edit.save")}
-                    </Button>
-                    <span className="text-xs text-muted-foreground">
-                      {t("pages.flowPage.edit.revision", { revision: fileInfo?.revision ?? 0 })}
-                    </span>
-                    {saveError && (
-                      <span
-                        className="basis-full text-xs text-destructive"
-                        role="alert"
-                        data-testid="flow-save-error"
-                      >
-                        {saveError}
-                      </span>
-                    )}
-                  </div>
-                  <Collapsible data-testid="flow-edit-export">
-                    <CollapsibleTrigger className="inline-flex items-center gap-1.5 rounded-md px-1 text-sm text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-                      {t("pages.flowPage.edit.export", { count: diff.length })}
-                    </CollapsibleTrigger>
-                    <CollapsibleContent>
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        {t("pages.flowPage.edit.exportHint")}
-                      </p>
-                      <ul className="scrollbar-thin mt-2 max-h-[30vh] space-y-1 overflow-auto font-mono text-[11px]">
-                        {diff.map((entry) => (
-                          <li
-                            key={entry.path}
-                            className="rounded-md bg-card p-2"
-                            data-export-path={entry.path}
-                          >
-                            <p className="font-semibold">{entry.path}</p>
-                            <p className="text-destructive">- {JSON.stringify(entry.before)}</p>
-                            <p className="text-success">+ {JSON.stringify(entry.after)}</p>
-                          </li>
-                        ))}
-                      </ul>
-                    </CollapsibleContent>
-                  </Collapsible>
-                </div>
+              <EditorTourOffer editing={editing} />
+              {editing && (
+                <EditBar
+                  diff={diff}
+                  canUndo={hasEdits}
+                  onUndo={() => {
+                    editLog.undo();
+                    setSaveError(null);
+                  }}
+                  onReset={() => {
+                    resetEdits();
+                    setSaveError(null);
+                  }}
+                  gate={gate}
+                  processProblems={diagnostics.length}
+                  serverErrors={serverErrors}
+                  onRetry={retryDryRun}
+                  saving={saving}
+                  onSave={handleSave}
+                  revision={fileInfo?.revision ?? 0}
+                  saveError={saveError}
+                  runWarnings={runWarnings}
+                />
               )}
 
-              {process && process.diagnostics.length > 0 && (
-                <ul
-                  className="border-b bg-destructive/5 px-4 py-2 text-xs text-destructive"
-                  data-testid="flow-diagnostics"
-                  aria-label={t("pages.flowPage.diagnostics")}
-                >
-                  {process.diagnostics.map((d, i) => (
-                    <li key={i} className="flex gap-2">
-                      <AlertTriangle className="mt-0.5 size-3 shrink-0" aria-hidden="true" />
-                      <span>
-                        <span className="font-mono">{d.code}</span>: {d.message}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              )}
+              <ProblemList issues={listedIssues} onFocusNode={focusNode} />
 
               {/* Only the shown view is mounted: the selection lives in the URL and the graph
                   re-centres on its focus request, so a switch loses nothing. */}
-              <div className="lg:flex-1 lg:min-h-0">
+              <div className={cn("lg:flex-1 lg:min-h-0", mode === "steps" && "flex-1 min-h-0")}>
                 {mode === "steps" && (
-                  <div className="h-[60vh] lg:h-full">
+                  <div className="h-full min-h-80">
                     <StepsView
                       workflow={edited}
                       inline={inline}
@@ -886,7 +1033,10 @@ export const FlowPage: React.FC = () => {
                     onValueChange={(value) => setChosenTab(value as FlowPanelTab)}
                     className="flex flex-col h-full"
                   >
-                    <TabsList className="w-full justify-start rounded-none border-b bg-muted/30 pl-2 pr-10 h-10">
+                    <TabsList
+                      className="w-full justify-start rounded-none border-b bg-muted/30 pl-2 pr-10 h-10"
+                      {...guideAnchor("flow.panel-tabs")}
+                    >
                       <TabsTrigger value="block" className="gap-1.5 text-xs">
                         <Boxes className="h-3.5 w-3.5" />
                         {t("pages.flowPage.tabs.block")}
@@ -905,7 +1055,7 @@ export const FlowPage: React.FC = () => {
                           onBack={handleClearSelection}
                           onFocusNode={focusNode}
                           onSelectVariable={goToVariable}
-                          validation={detail?.validation ?? null}
+                          validation={validation ?? null}
                           nodeTypes={nodeTypeIndex}
                         />
                       ) : (
@@ -939,20 +1089,6 @@ export const FlowPage: React.FC = () => {
               </aside>
             )}
           </div>
-        )}
-
-        {process && (
-          <Walkthrough<FlowViewMode, FlowPanelTab>
-            step={guideStep}
-            mode={mode}
-            currentBlockId={null}
-            routeRecorded={false}
-            onNavigate={update}
-            onPanel={onPanel}
-            steps={guideSteps}
-            onSection={onSection}
-            textKey="pages.flowPage.guide"
-          />
         )}
 
         {workflowIdentifier && (

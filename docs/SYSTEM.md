@@ -884,6 +884,8 @@ interface UserNotificationNode {
   format?: "plain" | "markdown" | "html";
   silent?: boolean;
   attachProgressImage?: boolean;
+  /** How much of the run's plan follows the message; default "progress". */
+  planList?: "full" | "progress" | "none";
   attachment?: {
     kind: "image" | "document";
     data: string;
@@ -982,6 +984,7 @@ type ConditionValue = string | number | boolean | null | { contextPath: string }
 - `{{data[1].items[0].value}}` - Nested array/object combinations
 - `{{executionId}}` - System variable
 - `{{workflowId}}` - System variable
+- `{{runUrl}}` - System variable: the run page (`getBaseUrl() + getAppPrefix() + /executions/<id>`)
 
 ## Validation (from packages/workflow-engine/src/validation/)
 
@@ -1029,7 +1032,7 @@ interface UnifiedValidationResult {
 - **Unreachable nodes** — Warning for disconnected nodes
 - **Node limits** — Max 200 nodes per workflow
 - **Subgraph references** — Self-referencing circular dependencies rejected as error
-- **Declared-variable references** — Blocking error. Every `{{variable}}` in an agent-directive/teleport `directive` or `completionCondition`, a user-notification/telegram-notification `message`, user-notification `attachment.data`, and every `contextPath` root in a condition must be one of: a global declared in `variableRegistry`, a `node-id.name` local (root segment is a node id), or a system variable (`executionId`, `workflowId`, `userId`). An undeclared reference fails with: `references undeclared variable '<name>'. Declare it in the workflow variableRegistry or reference a node-local value as 'node-id.name'.`
+- **Declared-variable references** — Blocking error. Every `{{variable}}` in an agent-directive/teleport `directive` or `completionCondition`, a user-notification/telegram-notification `message`, user-notification `attachment.data`, and every `contextPath` root in a condition must be one of: a global declared in `variableRegistry`, a `node-id.name` local (root segment is a node id), or a system variable (`executionId`, `workflowId`, `userId`, `runUrl`). An undeclared reference fails with: `references undeclared variable '<name>'. Declare it in the workflow variableRegistry or reference a node-local value as 'node-id.name'.`
 
 ### Node-Type Semantic Validation
 
@@ -1038,6 +1041,7 @@ Per-node-type checks that AJV schema cannot perform:
 - **Routing cases (ConditionNode / AgentDirectiveNode)** — each case's `when` is validated as a structured condition: the operator must be in the allowed list (eq, neq, gt, gte, lt, lte, contains, exists, and, or, not), binary operators require `left` + `right`, `exists` requires `value`, logical operators require a non-empty `conditions` array, `not` requires a `condition` field, and nested conditions are validated recursively. A case whose `output` is not a key of the node's `connections` is a blocking error (`unknown-case-output`), as is a case naming a reserved control output (`error`, `timeout`). A case that selects the node's own default output (`default` on a condition node, `success` on an agent-directive node) is a warning: such a case is redundant. An authored output that no case names is the warning `unreachable-output` — the definition stays valid, since a connection is often added before the case that selects it; the default output and the control outputs need no case. That a condition node has at least one case and a `connections.default` is enforced earlier, by the AJV schema.
 - **Expressions on routing nodes (ConditionNode / AgentDirectiveNode)** — the `expressions` array gets the same parse and declared-assignment checks as the standalone expression node.
 - **AgentDirectiveNode** — `inputSchema` (if present) must be compilable JSON Schema (validated via AJV compile).
+- **Notification content (UserNotificationNode / TelegramNotificationNode)** — Warning, never an error (`validation/notification-content-rule.ts`). One warning per value in `message` that the reader could not use: a variable named `*_path`/`*_file`/`*_dir`/`*_directory` or a global described as a file path, directory or folder, or literal path syntax in the text; a counter (`*_index`, `*_revision`, `max_*`, `current_step`) when no value in the message is a title (`title`/`name`/`label`/`summary`); a `{{node-id.field}}` whose field is not a URL or title. `this.…` in loops and `SYSTEM_TEMPLATE_VARIABLES` (`templates/system-variables.ts`) are skipped.
 - **Output-scope declaration (AgentDirectiveNode / TeleportNode)** — Blocking errors. Every name in `inputSchema.globalInputs` must exist in the workflow `variableRegistry` (`declares global write '<name>' which is not in the workflow variableRegistry`); a name must not be both a declared global write and a node-local output, i.e. a `globalInputs` name cannot also appear in `inputSchema.properties` (`local output '<name>' shadows the declared global write of the same name`). Non-string `globalInputs` entries are rejected.
 - **ExpressionNode** — each expression is parsed before execution; targets must be safe bare names, and member reads support own-property paths plus bounded fixed or variable array indexes.
 
@@ -1158,7 +1162,7 @@ interface ValidationError {
 - **Auto-execution** - sends message and continues
 - **Template processing** - processes message templates
 - **Inline keyboard support** - passes `replyMarkup` (InlineKeyboardMarkup) to Telegram API as `reply_markup`
-- **System footer** - appends process ID, resolved workflow name, and branding to each notification; when the workflow has a process view, also the progress lines of the run projected as of the node (`withInFlightPause`): `⏳ agent on the step: <block>` or `🙋 waiting for you: <block>` when the node's successor pauses the run, then `📝 done/total: current item` for the bound list nearest the run
+- **Notification frame** - the same frame as `UserNotificationHandler` (see there), with the `progress` plan line; the budget is Telegram's text limit, or its caption limit when a progress image is attached (`TELEGRAM_TEXT_MAX_LENGTH` / `TELEGRAM_CAPTION_MAX_LENGTH` in `telegram-types.ts`); link previews are disabled
 - **Workflow name resolution** - resolves workflowId UUID to human-readable name via repository with fallback
 - **Graceful degradation** - continues workflow on send failures
 - **Actionable error messages** - pushes classified error guidance to messageQueue (invalid token, chat not found, rate limit, etc.)
@@ -1167,13 +1171,31 @@ interface ValidationError {
 ### UserNotificationHandler
 
 - **Auto-execution** - renders the portable message and invokes the shared user communication service
-- **System footer** - appends the short process ID, the resolved workflow name, and branding; when
-  the workflow has a process view, also the progress lines of the run projected as of the node
-  (`withInFlightPause`, the same copy the attached image renders): `⏳ agent on the step: <block>` or
-  `🙋 waiting for you: <block>` when the node's single forward connection leads to a node the run
-  pauses on (`lock` → a person; `agent-directive`, `teleport`, `materialize`, `subgraph` → the agent), then one
-  `📝 done/total: current item` line for the bound list nearest the run (the active block's, else
-  the most recently passed bound block's); no count for an unbound run
+- **Notification frame** (`services/notification-frame.ts` over `utils/notification-text.ts`,
+  shared with the deprecated handler and the lock PIN message) - the delivered text is the heading
+  `<workflow name> · <run note>` linked to `runPageUrl` (Markdown `[…](url)` with brackets turned
+  into parentheses, HTML `<a href>`, plain text with the URL on the next line; the name alone when
+  the run has no note), then the rendered `message`, then the plan by `planList`
+  (`progress`: `📝 done/total: current item`; `full`: `📝 done/total` and numbered `✓`/`▶`/`○` items,
+  folded around the current item into `… N earlier` / `… N more` to fit; `none` — and when the
+  node's `default` connection leads straight to an `end` node, the run's last message, no item is
+  in progress: unfinished items read `○` and the `progress` line names no current item), then
+  `⏳ agent on the step: <block>` or `🙋 waiting for you: <block>` when the node's single forward
+  connection leads to a node the run pauses on (`lock` → a person; `agent-directive`, `teleport`,
+  `materialize`, `subgraph` → the agent). Values substituted into a Markdown or HTML message, list
+  titles and block labels are escaped for the format. The text is fitted to the communication
+  service's `maxTextLength`: the plan takes the room left, and an over-long message is cut at a
+  line with `…`, so delivery never fails for length
+- **Progress picture** - `attachProgressImage` attaches the run's phone steps picture
+  (`renderExecutionProgressStepsImage`: 390 px wide at the phone type scale, never scaled, 3×
+  density), not the map; no statistics are read for it
+- **Run as of the node** - the frame and an attached image read the handler's `liveRun()` — the
+  persisted run with the current cycle's visits, variables and note folded in as the executor will
+  save them — projected with the node in flight (`withInFlightPause`); without a live run (an inline
+  subgraph child) the persisted run
+- **Plan selection** - the bound list nearest the run (the active block's, else the most recently
+  passed bound block's, else — before any bound block is reached — the first bound block whose
+  items resolve); an empty plan or an unbound run adds no plan lines
 - **Channel selection** - fans out only to enabled configured adapters for the execution user
 - **Results** - stores sanitized full, partial, no-channel, or total-failure outcomes under the node ID
 - **Routing** - total attempted failure uses `connections.error` when present; other outcomes continue through `default`

@@ -36,6 +36,10 @@ import {
   OwnerSelect,
   TransitionEditor,
 } from "../flow/EditControls";
+import { IssueList } from "../flow/IssueList";
+import { AddStep, ConnectionsEditor, StepActions } from "../flow/StructureControls";
+import { ChoiceEditor } from "../flow/ChoiceEditor";
+import { connectionIssuesOf } from "../flow/issues";
 import { orderedNodeIds } from "../flow/model";
 import type { WorkflowGraph } from "../../types/workflow-types";
 import type {
@@ -115,6 +119,15 @@ function EditableSteps({
   const nodeIds = useMemo(() => orderedNodeIds(workflow, block), [workflow, block]);
   const steps = useMemo(() => stepsOf(workflow, nodeIds), [workflow, nodeIds]);
   const nodes = useMemo(() => new Map((workflow?.nodes ?? []).map((n) => [n.id, n])), [workflow]);
+  const { issues } = useEditing();
+  /** A step's connections with a problem, by output key, for the chips. */
+  const problemsOf = (nodeId: string): Record<string, string> =>
+    Object.fromEntries(
+      [...connectionIssuesOf(issues, nodeId)].map(([key, found]) => [
+        key,
+        found.map((issue) => issue.message).join("\n"),
+      ]),
+    );
   return (
     <StepCardList testId="block-detail-steps">
       {steps.map((step, position) => {
@@ -124,20 +137,34 @@ function EditableSteps({
             key={step.id}
             step={step}
             position={position + 1}
+            guided
             connections={stepConnections(node, block, blocks)}
             onConnection={(connection) =>
               connection.targetBlockId && onSelectBlock(connection.targetBlockId)
             }
-            afterTitle={<OwnerSelect nodeId={step.id} currentBlockId={block.id} blocks={blocks} />}
+            afterTitle={
+              <>
+                <OwnerSelect nodeId={step.id} currentBlockId={block.id} blocks={blocks} />
+                <StepActions nodeId={step.id} />
+              </>
+            }
             beforeSummary={<DiagnosticBadge nodeId={step.id} className="mt-1" />}
+            connectionProblems={problemsOf(step.id)}
             footer={
               node ? (
-                <NodeTextEditor step={step} node={node as unknown as Record<string, unknown>} />
+                <>
+                  <ChoiceEditor nodeId={step.id} />
+                  <ConnectionsEditor nodeId={step.id} />
+                  <NodeTextEditor step={step} node={node as unknown as Record<string, unknown>} />
+                </>
               ) : undefined
             }
           />
         );
       })}
+      <li className="list-none">
+        <AddStep blockId={block.id} />
+      </li>
     </StepCardList>
   );
 }
@@ -183,12 +210,12 @@ export function BlockDetailPanel({
   listHighlight?: HighlightRequest | null;
   /**
    * A section to unfold: `name` is the section's id and a new `token` unfolds it again. The
-   * walkthrough uses it so a step can point inside a section the reader keeps folded.
+   * guides use it so a step can point inside a section the reader keeps folded.
    */
   openSection?: HighlightRequest | null;
 }): React.JSX.Element {
   const { t } = useTranslation();
-  const { definition, enabled: editing } = useEditing();
+  const { definition, enabled: editing, issues } = useEditing();
   /** The unfold token for one section: only the section that was asked for gets it. */
   const unfold = (id: string): number | undefined =>
     openSection?.name === id ? openSection.token : undefined;
@@ -298,46 +325,59 @@ export function BlockDetailPanel({
           summary={String(block.transitions.length)}
         >
           <ul className="space-y-1.5 text-sm">
-            {block.transitions.map((transition) => (
-              <li
-                key={`${transition.to}-${transition.label}`}
-                className={cn(
-                  "flex items-start gap-2 rounded-lg border px-2.5 py-1.5",
-                  transition.cycle ? "border-primary/40 bg-primary/5" : "border-border bg-muted/30",
-                )}
-                data-transition-kind={transition.cycle ? "cycle" : "forward"}
-              >
-                {transition.cycle ? (
-                  <RotateCcw className="mt-0.5 size-4 shrink-0 text-primary" aria-hidden="true" />
-                ) : (
-                  <ArrowRight
-                    className="mt-0.5 size-4 shrink-0 text-muted-foreground"
-                    aria-hidden="true"
-                  />
-                )}
-                <div className="min-w-0">
-                  <p className="font-medium">
-                    {transition.label}
-                    <TransitionEditor transition={transition} className="ml-1 align-text-bottom" />
-                    <button
-                      type="button"
-                      className="ml-1 font-normal text-muted-foreground underline-offset-2 hover:underline"
-                      onClick={() => onSelectBlock(transition.to)}
-                    >
-                      → {byId.get(transition.to)?.name ?? transition.to}
-                    </button>
-                  </p>
-                  {transition.cycle && (
-                    <p className="mt-0.5 text-xs text-muted-foreground">
-                      {transition.cycle.cause}{" "}
-                      <span className="text-foreground/70">
-                        {t("pages.runPage.map.endsWhen")} {transition.cycle.exit}
-                      </span>
-                    </p>
+            {block.transitions.map((transition) => {
+              const problems = (transition.edges ?? []).flatMap(
+                (edge) => issues.edges.get(edge) ?? [],
+              );
+              return (
+                <li
+                  key={`${transition.to}-${transition.label}`}
+                  className={cn(
+                    "flex items-start gap-2 rounded-lg border px-2.5 py-1.5",
+                    transition.cycle
+                      ? "border-primary/40 bg-primary/5"
+                      : "border-border bg-muted/30",
+                    problems.length > 0 && "border-destructive/60",
                   )}
-                </div>
-              </li>
-            ))}
+                  data-transition-kind={transition.cycle ? "cycle" : "forward"}
+                  data-issue={problems.length > 0 ? "true" : undefined}
+                >
+                  {transition.cycle ? (
+                    <RotateCcw className="mt-0.5 size-4 shrink-0 text-primary" aria-hidden="true" />
+                  ) : (
+                    <ArrowRight
+                      className="mt-0.5 size-4 shrink-0 text-muted-foreground"
+                      aria-hidden="true"
+                    />
+                  )}
+                  <div className="min-w-0">
+                    <p className="font-medium">
+                      {transition.label}
+                      <TransitionEditor
+                        transition={transition}
+                        className="ml-1 align-text-bottom"
+                      />
+                      <button
+                        type="button"
+                        className="ml-1 font-normal text-muted-foreground underline-offset-2 hover:underline"
+                        onClick={() => onSelectBlock(transition.to)}
+                      >
+                        → {byId.get(transition.to)?.name ?? transition.to}
+                      </button>
+                    </p>
+                    {transition.cycle && (
+                      <p className="mt-0.5 text-xs text-muted-foreground">
+                        {transition.cycle.cause}{" "}
+                        <span className="text-foreground/70">
+                          {t("pages.runPage.map.endsWhen")} {transition.cycle.exit}
+                        </span>
+                      </p>
+                    )}
+                    <IssueList issues={problems} className="mt-1" />
+                  </div>
+                </li>
+              );
+            })}
           </ul>
         </PanelSection>
       )}

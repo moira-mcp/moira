@@ -48,4 +48,5 @@ corrected mid-run. It has no plan review and no final review.
 - **Research, content, analysis and more** — the [ready workflows catalog](/docs/reference/workflows/)
   lists every bundled flow; your agent reads the current list with `list()` before it picks.
 - **Nothing fits** — ask your agent: "Create a Moira flow for …". It builds one through the
-  Workflow Management Flow, as simple or as complex as the task needs, and you can use it at once.
+  Workflow Management Flow, as simple or as complex as the task needs — it agrees the level with
+  you first — and you can use it at once.

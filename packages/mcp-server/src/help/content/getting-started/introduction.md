@@ -17,10 +17,35 @@ plain words. The agent does the rest:
    repository.
 2. **Or it builds a new flow for your task** through the Workflow Management Flow, Moira's own flow
    for creating and editing flows. A flow can be as simple as a few steps in a row or as complex as
-   a process with reviews and repair loops; the agent works out the structure the task needs.
+   a process with reviews and repair loops. The agent first agrees with you how thorough the flow
+   should be: a simple one is built quickly and gets a light check, a larger one goes through
+   design and independent review. A flow can always be made more thorough later.
 
 Everything else — the diagrams in the web app, variables, node types, editing a flow by hand — is
 optional. It is there for when you want to look inside a flow, not something you must learn first.
+
+## Finding your way in the web app
+
+The web app explains itself on screen:
+
+- **The first time you sign in**, the home page asks whether you would like to be shown around.
+  "Show me around" opens the guides menu, "Later" asks again in your next session, and "No thanks"
+  is remembered.
+- **"Show me around"** is in the sidebar at any time. It offers the full tour, this page's tour, continues
+  a tour where you left it, and shows how far you are in each screen's tour. The full tour walks
+  the app's screens in order — home, flows, the example flow, runs, your latest run, notes,
+  playbooks, artifacts and Settings — and leaving a page pauses it until you continue. With no run
+  yet, the run stop tells you how to start one. Under **Tutorials** it starts or resumes **Build
+  your first flow**, a hands-on tutorial in the flow editor.
+- **"What is this?"** on a page runs that page's tour. Each card sits beside the part of the page
+  it explains. The right arrow or Enter goes on, the left arrow goes back, and Escape closes. When
+  a tour you have walked has new or changed steps, the button carries a dot, and pressing it shows
+  only those steps.
+- **Every page of the app has a tour:** the home page, the flow list and each flow, the runs list
+  and each run, notes, playbooks, artifacts and Settings. The tours explain what a page is for and
+  its main controls; steps about a panel you have hidden are skipped. The admin area has no tour.
+- **Where you stopped and what you have seen** follows your account to every browser. Settings →
+  Preferences → Guides starts the full tour again, or forgets what you have seen.
 
 ## A gradual path
 

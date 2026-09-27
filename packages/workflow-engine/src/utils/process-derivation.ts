@@ -16,17 +16,20 @@ import type { WorkflowGraph } from "../interfaces/core-interfaces.js";
 import type { ConnectionLabel } from "../types/base-types.js";
 import type { GraphNode } from "../types/graph-nodes.js";
 
-export type ProcessDiagnosticCode =
-  | "unowned-node"
-  | "unknown-block"
-  | "empty-block"
-  | "empty-description"
-  | "unlabeled-edge"
-  | "unexplained-cycle"
-  | "outcome-duplicate"
-  | "outcome-unowned"
-  | "unconnected-block"
-  | "no-start";
+export const PROCESS_DIAGNOSTIC_CODES = [
+  "unowned-node",
+  "unknown-block",
+  "empty-block",
+  "empty-description",
+  "unlabeled-edge",
+  "unexplained-cycle",
+  "outcome-duplicate",
+  "outcome-unowned",
+  "unconnected-block",
+  "no-start",
+] as const;
+
+export type ProcessDiagnosticCode = (typeof PROCESS_DIAGNOSTIC_CODES)[number];
 
 export interface ProcessDiagnostic {
   code: ProcessDiagnosticCode;
@@ -35,6 +38,20 @@ export interface ProcessDiagnostic {
   blockId?: string;
   /** Authored edge as "nodeId.key". */
   edge?: string;
+}
+
+/**
+ * How validation words a process diagnostic when it reports it as a validation issue:
+ * `[<code>] <message>`. A reader that has the diagnostics themselves (the browser derives them on
+ * every change) recognises the restatement with `isProcessDiagnosticMessage` and shows it once.
+ */
+export function processDiagnosticMessage(diagnostic: ProcessDiagnostic): string {
+  return `[${diagnostic.code}] ${diagnostic.message}`;
+}
+
+export function isProcessDiagnosticMessage(message: string): boolean {
+  const code = /^\[([a-z-]+)\] /.exec(message)?.[1];
+  return code !== undefined && (PROCESS_DIAGNOSTIC_CODES as readonly string[]).includes(code);
 }
 
 export interface ProcessCycle {

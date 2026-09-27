@@ -19,6 +19,8 @@ import {
   RESERVED_CONTROL_OUTPUTS,
 } from "../types/graph-nodes.js";
 import type { BuiltinGraphNode } from "../types/graph-nodes.js";
+import { notificationContentWarnings } from "./notification-content-rule.js";
+import { SYSTEM_TEMPLATE_VARIABLES } from "../templates/system-variables.js";
 import type {
   GraphNode,
   ConditionNode,
@@ -38,7 +40,7 @@ import type { ExtensionRegistry } from "../extensions/extension-registry.js";
 import { getActiveExtensionRegistry } from "../extensions/extension-registry-provider.js";
 import { canonicalJson, DECLARED_SCHEMA_AJV_OPTIONS } from "../extensions/declared-schema.js";
 import { isExtensionNodeType } from "../extensions/extension-contract.js";
-import { deriveProcess } from "../utils/process-derivation.js";
+import { deriveProcess, processDiagnosticMessage } from "../utils/process-derivation.js";
 import { migrateWorkflowGraph } from "../migration/workflow-migration.js";
 import {
   classifyNodeType,
@@ -781,7 +783,7 @@ export class GraphValidator {
         severity: "error",
         nodeId: diagnostic.nodeId,
         field,
-        message: `[${diagnostic.code}] ${diagnostic.message}`,
+        message: processDiagnosticMessage(diagnostic),
       });
     }
 
@@ -985,12 +987,22 @@ export class GraphValidator {
       case "expression":
         issues.push(...this.validateExpressionNode(node));
         break;
+      case "telegram-notification":
+      case "user-notification":
+        // A person reads it: warn when it would show them an internal value.
+        issues.push(
+          ...notificationContentWarnings(
+            node.id,
+            node.message,
+            new Set(graph.nodes.map((candidate) => candidate.id)),
+            graph.variableRegistry,
+          ),
+        );
+        break;
       // These node types have no semantic validation beyond schema + connections
       case "start":
       case "end":
       case "subgraph":
-      case "telegram-notification":
-      case "user-notification":
       case "read-note":
       case "write-note":
       case "upsert-note":
@@ -2309,7 +2321,7 @@ export class GraphValidator {
     const variablePattern = /\{\{([a-zA-Z_][a-zA-Z0-9_-]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)*)\}\}/g;
     const blockHelperPattern =
       /\{\{#(?:if|unless|each|eq|neq)\s+([a-zA-Z_][a-zA-Z0-9_-]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)*)/g;
-    const skip = new Set(["else", "this", "executionId", "workflowId", "userId"]);
+    const skip = new Set(["else", "this", ...SYSTEM_TEMPLATE_VARIABLES]);
     const add = (full: string): void => {
       const root = full.split(".")[0];
       if (!skip.has(root)) roots.add(root);
@@ -2503,13 +2515,7 @@ export class GraphValidator {
       /\{\{#(?:if|unless|each|eq|neq)\s+([a-zA-Z_][a-zA-Z0-9_-]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)*)/g;
 
     // Control flow and special keywords to skip
-    const skipKeywords = new Set([
-      "else",
-      "this",
-      "executionId",
-      "workflowId",
-      "userId", // System variables (injected into globalContext by the executor)
-    ]);
+    const skipKeywords = new Set(["else", "this", ...SYSTEM_TEMPLATE_VARIABLES]);
 
     const collect = (fullPath: string): void => {
       const rootVar = fullPath.split(".")[0];

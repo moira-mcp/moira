@@ -12,9 +12,10 @@ import { describe, test, expect, beforeEach, afterEach, jest } from "@jest/globa
 import {
   TelegramNotificationHandler,
   AgentMessageQueue,
-  buildExecutionProgressVisualModel,
+  buildProgressStepsModel,
+  renderProgressStepsSvg,
   projectExecutionRun,
-  renderProgressVisualSvg,
+  runPageUrl,
   TelegramErrorType,
   setTestClientFactory,
   resetClientFactory,
@@ -135,13 +136,9 @@ describe("TelegramNotificationHandler Error Handling", () => {
       lastVisitNode?: string;
     }> = [];
     const pictures: string[] = [];
-    const statisticsReceived: unknown[] = [];
-    handler = new TelegramNotificationHandler(async (workflow, execution, _options, statistics) => {
-      statisticsReceived.push(statistics ?? null);
+    handler = new TelegramNotificationHandler(async (workflow, execution) => {
       pictures.push(
-        renderProgressVisualSvg(
-          await buildExecutionProgressVisualModel(projectExecutionRun(workflow, execution)!),
-        ),
+        renderProgressStepsSvg(buildProgressStepsModel(projectExecutionRun(workflow, execution)!)),
       );
       renderedFor.push({
         currentNodeId: execution.currentNodeId,
@@ -207,34 +204,7 @@ describe("TelegramNotificationHandler Error Handling", () => {
     expect(renderedFor).toEqual([
       { currentNodeId: "test-telegram-node", waitingOn: null, lastVisitNode: "test-telegram-node" },
     ]);
-    // An unstamped run's picture is drawn without statistics; a version-stamped run's carries the
-    // statistics of that version over the owner's completed runs.
-    expect(statisticsReceived).toEqual([null]);
-    statisticsReceived.length = 0;
-    mockRepository.getExecution = jest.fn(async () => ({ ...execution, workflowVersion: "1.0.0" }));
-    (mockRepository as any).summarizeExecutionsByWorkflowVersion = jest.fn(async () => ({
-      count: 0,
-      lastCompletedAt: null,
-      unstamped: 0,
-    }));
-    (mockRepository as any).listExecutionsByWorkflowVersion = jest.fn(async () => []);
-    await handler.execute(
-      createTelegramNode({ progressNodeId: "notify", attachProgressImage: true }),
-      createContext(),
-      messageQueue,
-      mockRepository,
-      mockEngine,
-    );
-    expect(statisticsReceived).toEqual([
-      expect.objectContaining({
-        workflowId: "test-workflow",
-        workflowVersion: "1.0.0",
-        sampledRuns: 0,
-      }),
-    ]);
-    mockRepository.getExecution = jest.fn(async () => execution);
-
-    // A notification that leads to a lock gate renders the image from the same copy the footer
+    // A notification that leads to a lock gate renders the image from the same copy the message
     // describes: the run waiting on the gate, so the picture says «waiting for you» too.
     renderedFor.length = 0;
     sent.length = 0;
@@ -313,7 +283,7 @@ describe("TelegramNotificationHandler Error Handling", () => {
     expect(failureQueue.flush("test-process").messages).toHaveLength(1);
   });
 
-  /** A checklist block followed by the notification's own block, as the footer tests share it. */
+  /** A checklist block followed by the notification's own block, as the message tests share it. */
   function checklistGraph() {
     return {
       metadata: { name: "Example", version: "1.0.0", description: "x" },
@@ -342,14 +312,22 @@ describe("TelegramNotificationHandler Error Handling", () => {
           connections: { success: "test-telegram-node" },
           connectionLabels: { success: "done" },
         },
-        createTelegramNode({ progressNodeId: "report", connections: { default: "end" } }),
+        createTelegramNode({ progressNodeId: "report", connections: { default: "tidy" } }),
+        // A step after the message: the run goes on, so the list still has an item in progress.
+        {
+          id: "tidy",
+          type: "expression",
+          progressNodeId: "report",
+          expressions: ["current_task = current_task"],
+          connections: { default: "end" },
+        },
         { id: "end", type: "end", progressNodeId: "report" },
       ],
     } as any;
   }
   const checklist = [{ action: "Write it" }, { action: "Ship it" }];
 
-  async function footerOf(graph: any, execution: any): Promise<string> {
+  async function deliveredText(graph: any, execution: any): Promise<string> {
     const sent: string[] = [];
     setTestClientFactory(
       () =>
@@ -376,8 +354,8 @@ describe("TelegramNotificationHandler Error Handling", () => {
     return sent[0];
   }
 
-  test("the footer names done/total and the current item of the bound list the route just left, with no actor line while the run moves", async () => {
-    const text = await footerOf(checklistGraph(), {
+  test("the message names done/total and the current item of the bound list the route just left, with no actor line while the run moves", async () => {
+    const text = await deliveredText(checklistGraph(), {
       revision: 1,
       status: "running",
       currentNodeId: "task",
@@ -392,11 +370,11 @@ describe("TelegramNotificationHandler Error Handling", () => {
         { seq: 1, nodeId: "task", exitKey: "success", changes: { current_task: 2 }, waited: true },
       ],
     });
-    expect(text).toContain("🔄 Workflow: Example\n📝 1/2: Ship it\n🤖 via MCP Moira");
+    expect(text.endsWith("\n\n📝 1/2: Ship it")).toBe(true);
     expect(text).not.toMatch(/agent on the step|waiting for you/u);
   });
 
-  test("the footer names the agent on the step before the list line when the notification leads to a directive, never that it waits for the reader", async () => {
+  test("the message names the agent on the step after the list line when the notification leads to a directive, never that it waits for the reader", async () => {
     // A notification node never waits itself; the actor is the one of the node the run pauses on
     // right after it — the directive `next` here, in the notification's block.
     const graph = checklistGraph();
@@ -411,7 +389,7 @@ describe("TelegramNotificationHandler Error Handling", () => {
       completionCondition: "Reported",
       connections: { success: "end" },
     });
-    const text = await footerOf(graph, {
+    const text = await deliveredText(graph, {
       revision: 1,
       status: "running",
       currentNodeId: "test-telegram-node",
@@ -427,9 +405,9 @@ describe("TelegramNotificationHandler Error Handling", () => {
         { seq: 1, nodeId: "task", exitKey: "success", changes: { current_task: 2 }, waited: true },
       ],
     });
-    expect(text).toContain(
-      "🔄 Workflow: Example\n⏳ agent on the step: Report the checkpoint\n📝 1/2: Ship it\n🤖 via MCP Moira",
-    );
+    expect(
+      text.endsWith("\n\n📝 1/2: Ship it\n\n⏳ agent on the step: Report the checkpoint"),
+    ).toBe(true);
     expect(text).not.toContain("waiting for you");
     expect(text).not.toContain("ждёт вас");
   });
@@ -446,7 +424,7 @@ describe("TelegramNotificationHandler Error Handling", () => {
       reason: "A person approves",
       connections: { unlocked: "end" },
     });
-    const text = await footerOf(graph, {
+    const text = await deliveredText(graph, {
       revision: 1,
       status: "running",
       currentNodeId: "test-telegram-node",
@@ -462,13 +440,13 @@ describe("TelegramNotificationHandler Error Handling", () => {
         { seq: 1, nodeId: "task", exitKey: "success", changes: { current_task: 2 }, waited: true },
       ],
     });
-    expect(text).toContain(
-      "🔄 Workflow: Example\n🙋 waiting for you: Report the checkpoint\n📝 1/2: Ship it\n🤖 via MCP Moira",
+    expect(text.endsWith("\n\n📝 1/2: Ship it\n\n🙋 waiting for you: Report the checkpoint")).toBe(
+      true,
     );
     expect(text).not.toContain("agent on the step");
   });
 
-  test("a run whose blocks bind no list gets no count in the footer", async () => {
+  test("a run whose blocks bind no list gets no count, only the heading and the message", async () => {
     const graph = {
       metadata: { name: "Example", version: "1.0.0", description: "x" },
       progress: { nodes: [{ id: "work", label: "Work" }] },
@@ -483,14 +461,16 @@ describe("TelegramNotificationHandler Error Handling", () => {
         { id: "end", type: "end", progressNodeId: "work" },
       ],
     } as any;
-    const text = await footerOf(graph, {
+    const text = await deliveredText(graph, {
       revision: 1,
       status: "running",
       currentNodeId: "start",
       globalContext: { variables: { status: "completed" }, nodeStates: {} },
       visits: [{ seq: 0, nodeId: "start", exitKey: "default", changes: {} }],
     });
-    expect(text).toContain("🔄 Workflow: Example\n🤖 via MCP Moira");
+    expect(
+      text.startsWith(`Example\n${runPageUrl({ executionId: createContext().executionId })}\n\n`),
+    ).toBe(true);
     expect(text).not.toContain("📝");
   });
 

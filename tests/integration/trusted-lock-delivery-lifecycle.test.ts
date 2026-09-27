@@ -13,6 +13,7 @@ import {
   createTrustedExecutionLock,
   DatabaseRepository,
   resetClientFactory,
+  runPageUrl,
   setTestClientFactory,
   UniversalGraphExecutor,
   type WorkflowGraph,
@@ -50,6 +51,7 @@ describe("production LockHandler trusted-delivery lifecycle", () => {
   const executor = new UniversalGraphExecutor(repository);
   const lockService = getLockService();
   const executionIds: string[] = [];
+  const extraWorkflowIds: string[] = [];
   let workflowId = "";
   let savedGraph: WorkflowGraph;
 
@@ -88,6 +90,7 @@ describe("production LockHandler trusted-delivery lifecycle", () => {
       await repository.deleteExecution(executionId);
     }
     await repository.deleteWorkflow(workflowId, TEST_USER_ID);
+    for (const id of extraWorkflowIds) await repository.deleteWorkflow(id, TEST_USER_ID);
     resetClientFactory();
   });
 
@@ -335,5 +338,56 @@ describe("production LockHandler trusted-delivery lifecycle", () => {
     expect(await lockService.getActiveLock(executionId)).toBeNull();
     expect(visibleHistory).toEqual([]);
     expect(JSON.stringify({ result, visibleHistory, audits })).not.toContain(failedPin);
+  });
+
+  test("the PIN message is headed by the task note set earlier in the same cycle", async () => {
+    // The note arrives with the answer that leads straight to the lock, so it is not saved yet
+    // when the PIN is sent; the heading must still carry it.
+    const noted = await getWorkflowService().save({
+      graph: {
+        ...graph,
+        metadata: { ...graph.metadata, name: `Noted Lock ${suffix}` },
+        nodes: [
+          { id: "start", type: "start", connections: { default: "describe" } },
+          {
+            id: "describe",
+            type: "agent-directive",
+            directive: "Name the task",
+            completionCondition: "Named",
+            inputSchema: {
+              type: "object",
+              properties: { execution_note: { type: "string" } },
+              required: ["execution_note"],
+            },
+            connections: { success: "lock-gate" },
+          },
+          ...graph.nodes.slice(1),
+        ],
+      },
+      userId: TEST_USER_ID,
+      visibility: "private",
+    });
+    extraWorkflowIds.push(noted.id);
+    const notedGraph = (await repository.getWorkflowGraph(noted.id, TEST_USER_ID))!;
+    const executionId = await executor.startWorkflow(notedGraph, undefined, TEST_USER_ID);
+    executionIds.push(executionId);
+    await configureValidTelegram();
+    let delivered = "";
+    setTestClientFactory(
+      () =>
+        ({
+          sendMessage: async ({ text }: { text: string }) => {
+            delivered = text;
+            return { ok: true };
+          },
+        }) as never,
+    );
+    await executor.executeStep(executionId);
+    await executor.executeStep(executionId, { execution_note: "Release the parser" });
+    expect(
+      delivered.startsWith(
+        `🔒 Noted Lock ${suffix} · Release the parser\n${runPageUrl({ executionId })}\n\n`,
+      ),
+    ).toBe(true);
   });
 });

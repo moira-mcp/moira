@@ -44,7 +44,8 @@ moira-workflow flow.json variables [--usage]
 moira-workflow flow.json update <node-id> --directive "text"
 moira-workflow flow.json update <node-id> --completion-condition "text"
 moira-workflow flow.json clone <node-id> <new-id>
-moira-workflow flow.json delete <node-id>
+moira-workflow flow.json rename <node-id> <new-id>          # rewrites every reference
+moira-workflow flow.json delete <node-id> [--retarget <source.key>=<target>] [--drop <source.key>]
 moira-workflow flow.json move <node-id> --after <target-id>
 moira-workflow flow.json add <nodes.json>
 moira-workflow flow.json replace <node-id> <node.json>
@@ -91,6 +92,7 @@ byte-for-byte unchanged.
 --progress-node-id <id|none>    # Set or clear the node's progress block
 --progress-active-label <text|none> # Set or clear its active-only block label
 --attach-progress-image <bool>  # Set true/false; notification nodes only
+--plan-list <full|progress|none> # Plan lines of a user-notification (progress = default)
 --connections '{"key":"target"}' # Update connections
 --add-connection <key> <target> # Add connection
 --remove-connection <key>       # Remove connection

@@ -14,6 +14,7 @@ import { useFeatures } from "@/hooks/useFeatures";
 import { localizedDocsPath } from "@/lib/docs-path";
 import { HidePanelButton } from "./onboarding/HidePanelButton";
 import { usePanelVisible } from "./onboarding/beginnerPanels";
+import { guideAnchor } from "@/guides/anchors";
 
 /**
  * MCP URL baked into the bundle at build time from MOIRA_HOST (webpack
@@ -218,6 +219,7 @@ export const QuickStartCard: React.FC = () => {
     <div
       className="bg-card border border-border rounded-lg p-6 mb-8"
       data-testid="quick-start-card"
+      {...guideAnchor("home.connect")}
     >
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-2">

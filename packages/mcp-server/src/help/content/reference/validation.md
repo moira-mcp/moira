@@ -15,6 +15,8 @@ Workflows are validated against a JSON Schema definition:
 
 - Structure validation against workflow schema
 - Required field checking (id, metadata, nodes)
+- Node ids are kebab-case (`^[a-z0-9][a-z0-9-]*$`); an id with a dot, an upper-case letter or an
+  underscore is a schema error on that node
 - Type validation for all properties
 - Built-in node schema branches and the namespaced extension-node form
 
@@ -125,11 +127,12 @@ Validation returns structured results:
 
 ### Warning Types
 
-| Type          | Description        | Threshold                 |
-| ------------- | ------------------ | ------------------------- |
-| `performance` | Large workflow     | >20 agent-directive nodes |
-| `complexity`  | Complex conditions | Deeply nested conditions  |
-| `context`     | Large context      | >100KB context size       |
+| Type          | Description                          | Threshold                                                |
+| ------------- | ------------------------------------ | -------------------------------------------------------- |
+| `performance` | Large workflow                       | >20 agent-directive nodes                                |
+| `complexity`  | Complex conditions                   | Deeply nested conditions                                 |
+| `context`     | Large context                        | >100KB context size                                      |
+| `node`        | Notification shows an internal value | A path, a bare counter or a raw step output in `message` |
 
 ## Validation Examples
 
@@ -291,6 +294,32 @@ Fix it one of two ways:
 
 - Add a `default` to the variable in `variableRegistry`.
 - Have an upstream node write the variable via its `globalInputs` before the node that references it.
+
+## Notification Content Warning
+
+A notification is read by a person, often on a phone, who can open neither a file on the agent's
+machine nor a step's raw output. The `message` of a `user-notification` or
+`telegram-notification` node gets a warning — never an error — for each value it would show them
+that they cannot use:
+
+- **a file or path**: a variable named `*_path`, `*_file`, `*_dir` or `*_directory`, a declared
+  global whose description speaks of a file path, directory or folder, or a path written in the
+  message itself (`./report.md`, `~/notes/today.txt`, `docs/final/report.md`). Say what the file
+  contains in words, or link a URL.
+- **a bare counter**: `*_index`, `*_revision`, `max_*` or `current_step` when nothing in the
+  message names what it counts (a value called `…title`, `…name`, `…label` or `…summary`). Put
+  the title next to it, or rely on the plan list the notification already carries.
+- **a step's raw output**: `{{node-id.field}}` whose field is neither a URL nor a title. Show a
+  title, a sentence or a URL instead.
+
+`{{this.…}}` inside loops and the system values (`{{runUrl}}`, `{{executionId}}`, …) are never
+flagged. The check is a heuristic over names and descriptions; `moira-workflow validate`, a
+workflow upload and the web editor all show the warning, and none of them refuses to save.
+
+```text
+⚠ 1 warning(s):
+  • Notification notify-completion shows {{delivery_file}}, a file or path: the reader cannot open it from a message. Say what it contains in words, or link a URL.
+```
 
 ## Playbook Reference Validation
 

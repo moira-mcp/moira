@@ -31,6 +31,15 @@ import { TestError } from "./pages/TestError";
 import { InviteAcceptPage } from "./pages/InviteAccept";
 import { APP_PREFIX, ROUTES } from "./constants/routes";
 import { RouteSkeleton } from "./components/route-skeleton";
+import {
+  ADMIN_ROUTES,
+  MAIN_ROUTES,
+  ROOT_REDIRECT,
+  STANDALONE_ROUTES,
+  type AdminRouteId,
+  type MainRouteId,
+  type StandaloneRouteId,
+} from "./routes/routeTable";
 
 // Lazy-loaded heavy pages
 const FlowPage = lazy(() => import("./pages/FlowPage").then((m) => ({ default: m.FlowPage })));
@@ -86,6 +95,61 @@ const OperationalDashboard = lazy(() =>
 // Import i18n configuration
 import "./i18n";
 
+/** The page each route renders; the table in `routes/routeTable.ts` holds the paths. */
+const STANDALONE_PAGES: Record<StandaloneRouteId, React.ReactNode> = {
+  login: <Login />,
+  register: <Register />,
+  "registration-success": <RegistrationSuccess />,
+  "forgot-password": <ForgotPassword />,
+  "reset-password": <ResetPassword />,
+  "forced-password-reset": <ForcedPasswordReset />,
+  "verify-email": <VerifyEmail />,
+  "oauth-authorize": <OAuthAuthorize />,
+  "oauth-consent": <OAuthConsent />,
+  "test-error": <TestError />,
+  "invite-accept": <InviteAcceptPage />,
+};
+
+const MAIN_PAGES: Record<MainRouteId, React.ReactNode> = {
+  home: <Dashboard />,
+  flows: <Workflows />,
+  "flow-by-name": <FlowPage />,
+  "flow-by-id": <FlowPage />,
+  runs: <Executions />,
+  run: <ExecutionInspectorPage />,
+  notes: <Notes />,
+  playbooks: <Playbooks />,
+  artifacts: <Artifacts />,
+  settings: <Settings />,
+};
+
+const ADMIN_PAGES: Record<AdminRouteId, React.ReactNode> = {
+  admin: <AdminDashboard />,
+  "admin-users": <UserManagement />,
+  "admin-user": <AdminUserDetail />,
+  "admin-runs": <AdminExecutions />,
+  "admin-run": <AdminExecutionInspectorPage />,
+  "admin-flows": <AdminWorkflows />,
+  "admin-artifacts": <AdminArtifacts />,
+  "admin-reported-artifacts": <AdminReportedArtifacts />,
+  "admin-audit-log": <AuditLog />,
+  "admin-settings": <AdminSettingsUnified />,
+  "admin-global-settings": <AdminSettingsUnified defaultTab="values" />,
+  "admin-deleted-flows": <DeletedWorkflows />,
+  "admin-monitoring-test": <AdminMonitoringTest />,
+  "admin-tokens": <AdminTokens />,
+  "admin-operational": <OperationalDashboard />,
+  "admin-analytics": <Navigate to={ROUTES.ADMIN} replace />,
+};
+
+/** A child route's path relative to its layout's path; the layout's own path is its index. */
+function childRoute(base: string, path: string, element: React.ReactNode): React.ReactElement {
+  return path === base ? (
+    <Route key={path} index element={element} />
+  ) : (
+    <Route key={path} path={path.slice(base === "/" ? 1 : base.length + 1)} element={element} />
+  );
+}
 /**
  * Main Application Component
  * Dashboard-centric layout with sidebar navigation. Lazily loaded pages inside the layouts are
@@ -101,36 +165,30 @@ const App: React.FC = () => {
           <FeaturesProvider>
             <AuthProvider>
               <Routes>
-                {/* Auth routes */}
-                <Route path={ROUTES.LOGIN} element={<Login />} />
-                <Route path={ROUTES.REGISTER} element={<Register />} />
-                <Route
-                  path={`${APP_PREFIX}/registration-success`}
-                  element={<RegistrationSuccess />}
-                />
-                <Route path={`${APP_PREFIX}/forgot-password`} element={<ForgotPassword />} />
-                <Route path={`${APP_PREFIX}/reset-password`} element={<ResetPassword />} />
-                <Route
-                  path={ROUTES.FORCED_PASSWORD_RESET}
-                  element={
-                    <ProtectedRoute>
-                      <ForcedPasswordReset />
-                    </ProtectedRoute>
-                  }
-                />
-                <Route path={`${APP_PREFIX}/verify-email`} element={<VerifyEmail />} />
-                <Route path={ROUTES.OAUTH_AUTHORIZE} element={<OAuthAuthorize />} />
-                <Route path={`${APP_PREFIX}/oauth/consent`} element={<OAuthConsent />} />
-
-                {/* Test route for ErrorBoundary - only used for E2E testing */}
-                <Route path={`${APP_PREFIX}/test-error`} element={<TestError />} />
-
-                {/* Invite accept page - standalone page, works with or without auth */}
-                <Route path={ROUTES.INVITE_ACCEPT} element={<InviteAcceptPage />} />
+                {/* Standalone pages: sign-in, account recovery, consent screens */}
+                {STANDALONE_ROUTES.map((route) => {
+                  const page = STANDALONE_PAGES[route.id];
+                  return (
+                    <Route
+                      key={route.id}
+                      path={`${APP_PREFIX}${route.path}`}
+                      element={
+                        "signedIn" in route && route.signedIn ? (
+                          <ProtectedRoute>{page}</ProtectedRoute>
+                        ) : (
+                          page
+                        )
+                      }
+                    />
+                  );
+                })}
 
                 {/* Root redirect to dashboard — only needed in /app mode to handle bare "/" */}
                 {APP_PREFIX && (
-                  <Route path="/" element={<Navigate to={ROUTES.DASHBOARD} replace />} />
+                  <Route
+                    path={ROOT_REDIRECT.path}
+                    element={<Navigate to={ROUTES.DASHBOARD} replace />}
+                  />
                 )}
 
                 {/* Main App routes - for all users */}
@@ -142,16 +200,7 @@ const App: React.FC = () => {
                     </ProtectedRoute>
                   }
                 >
-                  <Route index element={<Dashboard />} />
-                  <Route path="workflows" element={<Workflows />} />
-                  <Route path="workflows/:handle/:slug" element={<FlowPage />} />
-                  <Route path="workflows/:id" element={<FlowPage />} />
-                  <Route path="executions" element={<Executions />} />
-                  <Route path="executions/:id" element={<ExecutionInspectorPage />} />
-                  <Route path="notes" element={<Notes />} />
-                  <Route path="playbooks" element={<Playbooks />} />
-                  <Route path="artifacts" element={<Artifacts />} />
-                  <Route path="settings" element={<Settings />} />
+                  {MAIN_ROUTES.map((route) => childRoute("/", route.path, MAIN_PAGES[route.id]))}
                 </Route>
 
                 {/* Admin routes - admin only */}
@@ -163,95 +212,20 @@ const App: React.FC = () => {
                     </ProtectedRoute>
                   }
                 >
-                  <Route index element={<AdminDashboard />} />
-                  <Route
-                    path="users"
-                    element={
-                      <ProtectedRoute requireAdmin requireCapability="userManagement">
-                        <UserManagement />
-                      </ProtectedRoute>
-                    }
-                  />
-                  <Route
-                    path="users/:id"
-                    element={
-                      <ProtectedRoute requireAdmin requireCapability="userManagement">
-                        <AdminUserDetail />
-                      </ProtectedRoute>
-                    }
-                  />
-                  <Route
-                    path="executions"
-                    element={
-                      <ProtectedRoute requireAdmin requireCapability="multiUserAdmin">
-                        <AdminExecutions />
-                      </ProtectedRoute>
-                    }
-                  />
-                  <Route
-                    path="executions/:id"
-                    element={
-                      <ProtectedRoute requireAdmin requireCapability="multiUserAdmin">
-                        <AdminExecutionInspectorPage />
-                      </ProtectedRoute>
-                    }
-                  />
-                  <Route
-                    path="workflows"
-                    element={
-                      <ProtectedRoute requireAdmin requireCapability="multiUserAdmin">
-                        <AdminWorkflows />
-                      </ProtectedRoute>
-                    }
-                  />
-                  <Route
-                    path="artifacts"
-                    element={
-                      <ProtectedRoute requireAdmin requireCapability="multiUserAdmin">
-                        <AdminArtifacts />
-                      </ProtectedRoute>
-                    }
-                  />
-                  <Route
-                    path="artifacts/reported"
-                    element={
-                      <ProtectedRoute requireAdmin requireCapability="multiUserAdmin">
-                        <AdminReportedArtifacts />
-                      </ProtectedRoute>
-                    }
-                  />
-                  <Route path="audit-log" element={<AuditLog />} />
-                  <Route path="settings" element={<AdminSettingsUnified />} />
-                  <Route
-                    path="global-settings"
-                    element={<AdminSettingsUnified defaultTab="values" />}
-                  />
-                  <Route
-                    path="deleted-workflows"
-                    element={
-                      <ProtectedRoute requireAdmin requireCapability="multiUserAdmin">
-                        <DeletedWorkflows />
-                      </ProtectedRoute>
-                    }
-                  />
-                  <Route
-                    path="monitoring-test"
-                    element={
-                      <ProtectedRoute requireAdmin requireCapability="operationsDevelopment">
-                        <AdminMonitoringTest />
-                      </ProtectedRoute>
-                    }
-                  />
-                  <Route path="tokens" element={<AdminTokens />} />
-                  <Route
-                    path="operational"
-                    element={
-                      <ProtectedRoute requireAdmin requireCapability="adminOperations">
-                        <OperationalDashboard />
-                      </ProtectedRoute>
-                    }
-                  />
-                  <Route path="analytics" element={<Navigate to={ROUTES.ADMIN} replace />} />
+                  {ADMIN_ROUTES.map((route) => {
+                    const page = ADMIN_PAGES[route.id];
+                    return childRoute(
+                      "/admin",
+                      route.path,
+                      "capability" in route ? (
+                        <ProtectedRoute requireAdmin requireCapability={route.capability}>
+                          {page}
+                        </ProtectedRoute>
+                      ) : (
+                        page
+                      ),
+                    );
+                  })}
                 </Route>
               </Routes>
             </AuthProvider>

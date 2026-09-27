@@ -21,6 +21,19 @@ A definition naming a playbook you cannot read is refused while editing, and a r
 refused before it is created. If a playbook becomes unreadable mid-run, the step continues with a
 visible placeholder and the run records that it ran without that text.
 
+## Playbooks that ship with Moira
+
+Moira installs a few public playbooks under its own `moira` account and upgrades them with each
+release, the way it ships bundled flows. Anyone can read them, and a node names one with its owner,
+for example `{{playbook:@moira/clear-report}}` — the report checklist Example 1 points at, with its
+Russian twin `@moira/clear-report-ru`. Written without the owner, the same name would mean a
+playbook of your own.
+
+These playbooks belong to Moira's `moira` account: you can read and reference them, not change them.
+A release that changes one updates it on your instance and keeps the earlier text in its history;
+starting an older release never rolls it back; and a playbook a release no longer ships stays in
+place, so nothing that names it stops working.
+
 ## Web UI
 
 Playbooks are managed on the Playbooks page, reachable from the sidebar:

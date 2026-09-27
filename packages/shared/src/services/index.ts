@@ -221,6 +221,15 @@ export {
   type ReconciliationClassification,
   type ReconciliationDecision,
 } from "./managed-resource-reconciler.js";
+export {
+  installPlaybookCatalog,
+  readPlaybookCatalogEntry,
+  readPlaybookCatalogs,
+  type ManagedPlaybookContent,
+  type PlaybookCatalogEntry,
+  type PlaybookCatalogInstallResult,
+  type PlaybookInstallOutcome,
+} from "./playbook-catalog.js";
 
 export {
   publishWorkflowReconciliationBundle,

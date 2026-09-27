@@ -27,6 +27,7 @@ const getTaskInput = {
   execution_file: `${workspace}/execution.md`,
   operating_mode: "autonomous",
   progress_scope_outcome: "Task contract captured from the run page",
+  execution_note: "Task named on the run page",
 };
 
 async function answer(
@@ -198,12 +199,19 @@ describe("answering a waiting step from the run page", () => {
       attemptId: nextAttempt,
       input: {
         current_plan_file: `${workspace}/plans/001/plan.md`,
-        total_steps: 2,
+        plan_steps: [{ title: "Draft" }, { title: "Check" }],
         progress_plan_outcome: "Two-unit plan ready for review",
       },
     });
     expect(advanced).toContain("Step attempt ID:");
     expect(advanced).not.toContain("ATTEMPT_STALE");
+    // The answer was accepted, not paused again for a schema error: the run moved on to the review.
+    expect(advanced).not.toContain("VALIDATION ERROR");
+    const afterPlan = await callMCPTool<any>(client, "session", {
+      action: "progress",
+      executionId: run.processId,
+    });
+    expect(afterPlan.route.at(-1).nodeId).toBe("plan-review");
 
     // The route cursor projects the run as it stood at a visit, on MCP and HTTP alike.
     const atAnswer = await callMCPTool<any>(client, "session", {

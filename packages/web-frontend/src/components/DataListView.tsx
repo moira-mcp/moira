@@ -68,6 +68,8 @@ export interface DataListViewProps<T> {
   className?: string;
   /** Told the view mode on mount and on every change, for pages that size pages by it. */
   onViewModeChange?: (mode: ViewMode) => void;
+  /** The guide anchor of the list area, present whether or not the list has items. */
+  guide?: { "data-guide": string };
 }
 
 export function ViewToggle({
@@ -121,6 +123,7 @@ export function DataListView<T>({
   toolbar,
   className,
   onViewModeChange,
+  guide,
 }: DataListViewProps<T>) {
   const { t } = useTranslation();
 
@@ -168,6 +171,7 @@ export function DataListView<T>({
         className="flex-1 min-h-0 overflow-auto"
         ref={containerRef as React.Ref<HTMLDivElement>}
         data-testid="data-list-items"
+        {...guide}
       >
         {items.length === 0 ? (
           <EmptyState

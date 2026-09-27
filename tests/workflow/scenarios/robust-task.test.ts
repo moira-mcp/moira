@@ -25,7 +25,7 @@ function node(workflow: WorkflowGraph, id: string): any {
 
 const plan = (revision: number) => ({
   current_plan_file: `plans/${String(revision).padStart(3, "0")}/plan.md`,
-  total_steps: 1,
+  plan_steps: [{ title: "Produce the reviewed result" }],
 });
 
 const progressOutcome = {
@@ -48,6 +48,7 @@ const replan = (revision: number) => ({
 const planReview = (review_outcome: "pass" | "repair" | "replan") => ({
   review_outcome,
   progress_plan_outcome: `Current plan review outcome: ${review_outcome}`,
+  ...(review_outcome === "pass" ? {} : { failure_summary: "The plan misses a required step" }),
 });
 
 const stepEvidence = (planRevision: number, attempt: number) => ({
@@ -63,6 +64,7 @@ const stepVerdict = (
   verdict_file: `steps/1/plans/${String(planRevision).padStart(3, "0")}/attempts/${attempt}/verdict.md`,
   review_outcome,
   progress_step_review_outcome: `Current step review outcome: ${review_outcome}`,
+  ...(review_outcome === "pass" ? {} : { failure_summary: "The step's result is not complete" }),
   ...(repair_owner ? { repair_owner } : {}),
 });
 
@@ -74,6 +76,7 @@ const finalReview = (
   review_file: `final/reviews/${String(revision).padStart(3, "0")}-review.md`,
   review_outcome,
   progress_final_review_outcome: `Current final review outcome: ${review_outcome}`,
+  ...(review_outcome === "pass" ? {} : { failure_summary: "The result misses a requirement" }),
   ...(repair_owner ? { repair_owner } : {}),
 });
 
@@ -83,12 +86,15 @@ function ordinaryInputs(): Record<string, MockInput> {
       workspace_path: "./moira-ws/robust-task-example-20260821-2300/",
       operating_mode: "interactive",
       progress_intake_outcome: progressOutcome.intake,
+      execution_note: "Produce the reviewed result",
+      goal_summary: "The requested result is produced and independently reviewed",
     },
     "create-plan": { ...plan(1), progress_plan_outcome: "Initial complete plan ready for review" },
     "review-plan": planReview("pass"),
     "ask-plan-review-limit": {
       decision: "finish_incomplete",
       progress_plan_outcome: "Plan review bound ended with disclosed incomplete scope",
+      decision_summary: "Finishing incomplete: the plan blocker cannot be corrected now",
     },
     "fix-plan": { repair_outcome: "changed", ...replan(2) },
     "approve-plan": { decision: "yes", progress_plan_outcome: progressOutcome.plan },
@@ -107,6 +113,7 @@ function ordinaryInputs(): Record<string, MockInput> {
       decision: "finish_incomplete",
       decision_file: "steps/1/decisions/001.md",
       progress_step_review_outcome: "Retry bound ended with disclosed incomplete scope",
+      decision_summary: "Finishing with the step incomplete: another repair would not change it",
     },
     "replan-from-verdict": replan(2),
     "replan-from-decision": replan(2),
@@ -120,6 +127,8 @@ function ordinaryInputs(): Record<string, MockInput> {
     "ask-final-review-limit": {
       decision: "accept_incomplete",
       progress_final_review_outcome: "Final review bound accepted with disclosed incomplete scope",
+      decision_summary:
+        "Accepting the result with its open items: the remaining finding is out of reach",
     },
     "fix-final-review": {
       repair_outcome: "changed",
@@ -130,6 +139,7 @@ function ordinaryInputs(): Record<string, MockInput> {
       delivery_status: "complete",
       summary: "All active requirements are satisfied.",
       progress_delivery_outcome: progressOutcome.delivery,
+      result_summary: "The reviewed result is delivered as far as it got",
     },
   };
 }
@@ -164,6 +174,22 @@ async function runRobustScenario(route: TestScenario) {
   return runScenario(loadWorkflow(), route, { engineSetup: configureMaterialize });
 }
 
+const autonomousIntake = {
+  workspace_path: "./moira-ws/robust-task-example-20260821-2300/",
+  operating_mode: "autonomous",
+  progress_intake_outcome: "Durable task contract established in autonomous mode",
+  execution_note: "Produce the reviewed result",
+  goal_summary: "The requested result is produced and independently reviewed",
+};
+
+const incompleteDelivery = (summary: string) => ({
+  delivery_file: "final/delivery.md",
+  delivery_status: "incomplete",
+  summary,
+  progress_delivery_outcome: `Incomplete delivery: ${summary}`,
+  result_summary: "The reviewed result is delivered as far as it got",
+});
+
 const scenarios: TestScenario[] = [
   scenario(
     "autonomous run completes without the plan approval gate",
@@ -172,12 +198,14 @@ const scenarios: TestScenario[] = [
         workspace_path: "./moira-ws/robust-task-example-20260821-2300/",
         operating_mode: "autonomous",
         progress_intake_outcome: "Durable task contract established in autonomous mode",
+        execution_note: "Produce the reviewed result",
+        goal_summary: "The requested result is produced and independently reviewed",
       },
     },
     ["route-operating-mode-plan-approval", "execute-step", "final-review", "end"],
   ),
   scenario("ordinary interactive execution completes", {}, [
-    "notify-plan-ready",
+    "notify-plan-approval",
     "approve-plan",
     "execute-step",
     "final-review",
@@ -214,6 +242,7 @@ const scenarios: TestScenario[] = [
       "review-plan": [planReview("repair"), planReview("pass")],
       "ask-plan-review-limit": {
         decision: "repair",
+        decision_summary: "Decided repair for the stated reason",
         progress_plan_outcome: "One changed plan repair authorized at the review bound",
       },
     },
@@ -227,15 +256,69 @@ const scenarios: TestScenario[] = [
       "ask-plan-review-limit": {
         decision: "finish_incomplete",
         progress_plan_outcome: "Plan review bound ended with disclosed incomplete scope",
+        decision_summary: "Finishing incomplete: the plan blocker cannot be corrected now",
       },
       "deliver-result": {
         delivery_file: "final/delivery.md",
         delivery_status: "incomplete",
         summary: "The unresolved plan finding is disclosed.",
         progress_delivery_outcome: "Incomplete delivery discloses the unresolved plan finding",
+        result_summary: "The reviewed result is delivered as far as it got",
       },
     },
     ["ask-plan-review-limit", "deliver-result", "end"],
+    { initialVariables: { max_review_rounds: 1 } },
+  ),
+  scenario(
+    "autonomous plan review bound decides first and announces the decision",
+    {
+      "initialize-workspace": autonomousIntake,
+      "review-plan": planReview("repair"),
+      "ask-plan-review-limit": {
+        decision: "finish_incomplete",
+        decision_summary: "Finishing incomplete: the plan blocker cannot be corrected now",
+        progress_plan_outcome: "Plan review bound ended with disclosed incomplete scope",
+      },
+      "deliver-result": incompleteDelivery("The unresolved plan finding is disclosed."),
+    },
+    ["route-plan-limit-mode", "ask-plan-review-limit", "notify-plan-limit-decided", "end"],
+    { initialVariables: { max_review_rounds: 1 } },
+  ),
+  scenario(
+    "autonomous retry exhaustion decides first and announces the decision",
+    {
+      "initialize-workspace": autonomousIntake,
+      "review-step": [stepVerdict(1, 1, "repair", "result"), stepVerdict(1, 2, "repair", "result")],
+      "repair-step": {
+        repair_outcome: "changed",
+        ...stepEvidence(1, 2),
+        progress_step_review_outcome: "Changed attempt remains incomplete",
+      },
+      "ask-retry-decision": {
+        decision: "finish_incomplete",
+        decision_summary: "Finishing with the step incomplete: another repair would not change it",
+        decision_file: "steps/1/decisions/001.md",
+        progress_step_review_outcome: "Retry exhaustion ended with disclosed incomplete scope",
+      },
+      "deliver-result": incompleteDelivery("The open step remains incomplete by decision."),
+    },
+    ["route-escalation-mode", "ask-retry-decision", "notify-retry-decided", "end"],
+    { initialVariables: { max_retries: 1 } },
+  ),
+  scenario(
+    "autonomous final review bound decides first and announces the decision",
+    {
+      "initialize-workspace": autonomousIntake,
+      "final-review": finalReview(1, "repair", "deliverable"),
+      "ask-final-review-limit": {
+        decision: "accept_incomplete",
+        decision_summary: "Accepting the result with its open items: the finding is out of reach",
+        progress_final_review_outcome:
+          "Final review bound accepted with disclosed incomplete scope",
+      },
+      "deliver-result": incompleteDelivery("The accepted final finding is disclosed."),
+    },
+    ["route-final-limit-mode", "ask-final-review-limit", "notify-final-limit-decided", "end"],
     { initialVariables: { max_review_rounds: 1 } },
   ),
   scenario(
@@ -325,6 +408,7 @@ const scenarios: TestScenario[] = [
       ],
       "ask-retry-decision": {
         decision: "retry",
+        decision_summary: "Decided retry for the stated reason",
         decision_file: "steps/1/decisions/001.md",
         progress_step_review_outcome: "Another changed retry authorized",
       },
@@ -351,6 +435,7 @@ const scenarios: TestScenario[] = [
       },
       "ask-retry-decision": {
         decision: "replan",
+        decision_summary: "Decided replan for the stated reason",
         decision_file: "steps/1/decisions/001.md",
         progress_step_review_outcome: "Retry exhaustion requires replanning",
       },
@@ -369,6 +454,7 @@ const scenarios: TestScenario[] = [
       },
       "ask-retry-decision": {
         decision: "finish_incomplete",
+        decision_summary: "Decided finish incomplete for the stated reason",
         decision_file: "steps/1/decisions/001.md",
         progress_step_review_outcome: "Retry exhaustion ended with disclosed incomplete scope",
       },
@@ -377,6 +463,7 @@ const scenarios: TestScenario[] = [
         delivery_status: "incomplete",
         summary: "The open step remains incomplete by explicit decision.",
         progress_delivery_outcome: "Incomplete delivery discloses the unresolved open step",
+        result_summary: "The reviewed result is delivered as far as it got",
       },
     },
     ["ask-retry-decision", "deliver-result", "end"],
@@ -416,6 +503,7 @@ const scenarios: TestScenario[] = [
       "final-review": [finalReview(1, "repair", "deliverable"), finalReview(2, "pass")],
       "ask-final-review-limit": {
         decision: "repair",
+        decision_summary: "Decided repair for the stated reason",
         progress_final_review_outcome: "One changed final repair authorized at the review bound",
       },
     },
@@ -428,6 +516,7 @@ const scenarios: TestScenario[] = [
       "final-review": finalReview(1, "repair", "deliverable"),
       "ask-final-review-limit": {
         decision: "accept_incomplete",
+        decision_summary: "Decided accept incomplete for the stated reason",
         progress_final_review_outcome:
           "Final review bound accepted with disclosed incomplete scope",
       },
@@ -436,6 +525,7 @@ const scenarios: TestScenario[] = [
         delivery_status: "incomplete",
         summary: "The accepted final finding is disclosed.",
         progress_delivery_outcome: "Incomplete delivery discloses the accepted final finding",
+        result_summary: "The reviewed result is delivered as far as it got",
       },
     },
     ["ask-final-review-limit", "deliver-result", "end"],
@@ -530,16 +620,26 @@ describe("Robust Task cause-aware contract", () => {
     expect(directiveText).not.toContain("The steps this revision shapes");
     expect(directiveText).not.toContain("For every contractual check");
     // Autonomous mode is routed, not schema-driven: the plan-approval gate is entered through its
-    // mode condition, and both notification routes lead to that condition.
+    // mode condition, and each branch announces the plan in its own words — a question in
+    // interactive runs, work going ahead in autonomous ones.
     expect(workflow.variableRegistry?.operating_mode?.enum).toEqual(["autonomous", "interactive"]);
     expect(node(workflow, "route-operating-mode-plan-approval").connections).toEqual({
-      true: "check-all-steps-done",
-      default: "approve-plan",
+      true: "notify-work-started",
+      default: "notify-plan-approval",
     });
-    expect(node(workflow, "notify-plan-ready").connections).toEqual({
-      default: "route-operating-mode-plan-approval",
-      error: "route-operating-mode-plan-approval",
+    expect(node(workflow, "notify-plan-approval").connections).toEqual({ default: "approve-plan" });
+    expect(node(workflow, "notify-work-started").connections).toEqual({
+      default: "check-all-steps-done",
     });
+    // A decision node only decides; the route after it is a condition, so a decision taken for the
+    // user in an autonomous run is announced before the flow acts on it.
+    for (const [decision, next] of [
+      ["ask-retry-decision", "route-retry-decided-mode"],
+      ["ask-plan-review-limit", "route-plan-limit-decided-mode"],
+      ["ask-final-review-limit", "route-final-limit-decided-mode"],
+    ]) {
+      expect(node(workflow, decision).connections).toEqual({ success: next });
+    }
     expect(node(workflow, "review-plan").inputSchema.properties.review_outcome.enum).toEqual([
       "pass",
       "repair",
@@ -593,10 +693,10 @@ describe("Robust Task cause-aware contract", () => {
       connections: {
         "replan-from-plan-review": "replan-from-plan-review",
         "check-plan-review-limit": "check-plan-review-limit",
-        success: "notify-plan-ready",
+        success: "route-operating-mode-plan-approval",
       },
     });
-    expect(routing("ask-plan-review-limit")).toEqual({
+    expect(routing("route-plan-limit-decision")).toEqual({
       cases: [
         {
           path: "ask-plan-review-limit.decision",
@@ -607,7 +707,7 @@ describe("Robust Task cause-aware contract", () => {
       ],
       connections: {
         "reset-plan-review-for-repair": "reset-plan-review-for-repair",
-        success: "deliver-result",
+        default: "deliver-result",
       },
     });
     expect(routing("approve-plan")).toEqual({
@@ -663,7 +763,7 @@ describe("Robust Task cause-aware contract", () => {
         success: "repair-step",
       },
     });
-    expect(routing("ask-retry-decision")).toEqual({
+    expect(routing("route-retry-decision")).toEqual({
       cases: [
         {
           path: "ask-retry-decision.decision",
@@ -681,7 +781,7 @@ describe("Robust Task cause-aware contract", () => {
       connections: {
         "reset-step-retry": "reset-step-retry",
         "replan-from-decision": "replan-from-decision",
-        success: "deliver-result",
+        default: "deliver-result",
       },
     });
     expect(routing("repair-step")).toEqual({
@@ -726,7 +826,7 @@ describe("Robust Task cause-aware contract", () => {
         success: "check-final-review-limit",
       },
     });
-    expect(routing("ask-final-review-limit")).toEqual({
+    expect(routing("route-final-limit-decision")).toEqual({
       cases: [
         {
           path: "ask-final-review-limit.decision",
@@ -737,7 +837,7 @@ describe("Robust Task cause-aware contract", () => {
       ],
       connections: {
         "reset-final-for-repair": "reset-final-for-repair",
-        success: "deliver-result",
+        default: "deliver-result",
       },
     });
     expect(routing("fix-final-review")).toEqual({

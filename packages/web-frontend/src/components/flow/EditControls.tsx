@@ -17,8 +17,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { AlertTriangle } from "lucide-react";
-import { diagnosticsFor, useEditing, type NodeTextField } from "./editing";
+import { guideAnchor } from "../../guides/anchors";
+import { useEditing, type NodeTextField } from "./editing";
+import { issuesOfNode } from "./issues";
+import { IssueList } from "./IssueList";
 import type { RunBlock, RunTransition, StepInfo } from "../run/model";
 
 /** Renders `value` as text, or as an input/textarea while editing; commits on every change. */
@@ -245,7 +247,11 @@ export function NodeTextEditor({
   const fields = editableFields(step);
   if (!enabled || fields.length === 0) return null;
   return (
-    <div className="mt-2 space-y-2" data-testid={`edit-node-${step.id}`}>
+    <div
+      className="mt-2 space-y-2"
+      data-testid={`edit-node-${step.id}`}
+      {...guideAnchor("flow.edit-text")}
+    >
       {fields.map((field) => {
         const raw = node[field];
         const value =
@@ -282,7 +288,10 @@ export function NodeTextEditor({
   );
 }
 
-/** The derivation diagnostics that point at one block or step, shown next to it. */
+/**
+ * The problems that point at one block, or at one step and its connections, shown next to it:
+ * the process derivation's diagnostics and the server's validation issues alike.
+ */
 export function DiagnosticBadge({
   blockId,
   nodeId,
@@ -292,28 +301,12 @@ export function DiagnosticBadge({
   nodeId?: string;
   className?: string;
 }): React.JSX.Element | null {
-  const { diagnostics } = useEditing();
-  const own = diagnosticsFor(diagnostics, { blockId, nodeId });
-  if (own.length === 0) return null;
-  return (
-    <span
-      className={cn(
-        "inline-flex max-w-full items-start gap-1 rounded-md border border-destructive/50 bg-destructive/10 px-1.5 py-0.5 text-[11px] leading-4 text-destructive",
-        className,
-      )}
-      role="alert"
-      data-testid="inline-diagnostic"
-      data-diagnostic={own.map((d) => d.code).join(",")}
-      data-hint={own.map((d) => d.message).join("\n")}
-    >
-      <AlertTriangle className="mt-0.5 size-3 shrink-0" aria-hidden="true" />
-      <span className="min-w-0">
-        {own.map((d) => (
-          <span key={`${d.code}-${d.edge ?? ""}`} className="block">
-            <span className="font-mono">{d.code}</span>: {d.message}
-          </span>
-        ))}
-      </span>
-    </span>
-  );
+  const { issues } = useEditing();
+  const own =
+    nodeId !== undefined
+      ? issuesOfNode(issues, nodeId)
+      : blockId !== undefined
+        ? (issues.blocks.get(blockId) ?? [])
+        : [];
+  return <IssueList issues={own} className={className} />;
 }

@@ -14,7 +14,7 @@ test.describe("UserMenu Verification", () => {
   test("1. UserMenu component exists in sidebar", async ({ page }) => {
     // Use sidebar-footer selector - email is in nested element inside button
     const sidebarFooter = page.locator('[data-slot="sidebar-footer"]');
-    const userMenuButton = sidebarFooter.locator("button");
+    const userMenuButton = sidebarFooter.locator('[data-slot="dropdown-menu-trigger"]');
     await expect(userMenuButton).toBeVisible();
     // Verify email text is visible somewhere in sidebar footer
     await expect(sidebarFooter.locator(`text=${ADMIN_CREDENTIALS.email}`)).toBeVisible();
@@ -23,7 +23,7 @@ test.describe("UserMenu Verification", () => {
 
   test("2. Sidebar contains UserMenu at bottom", async ({ page }) => {
     const sidebarFooter = page.locator('[data-slot="sidebar-footer"]');
-    const userMenuButton = sidebarFooter.locator("button");
+    const userMenuButton = sidebarFooter.locator('[data-slot="dropdown-menu-trigger"]');
     await expect(userMenuButton).toBeVisible();
     // Verify email is visible in the button (expanded sidebar shows email)
     await expect(page.locator(`text=${ADMIN_CREDENTIALS.email}`)).toBeVisible();

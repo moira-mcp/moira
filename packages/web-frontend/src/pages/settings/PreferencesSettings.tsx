@@ -3,7 +3,9 @@
  * wired to the same state the rest of the application uses (the theme provider and i18next), so a
  * change here is the change everywhere. Both are kept in this browser. Below them, the beginner
  * panels: each can be shown or hidden here, and one hidden from the panel itself comes back here.
- * That choice belongs to the account and follows the reader to every browser.
+ * That choice belongs to the account and follows the reader to every browser. Last, the guides:
+ * start the tour again, or forget what the guides know about the reader, which also brings back the
+ * first-run prompt.
  */
 
 import React from "react";
@@ -21,6 +23,11 @@ import {
   useBeginnerPanels,
 } from "@/components/onboarding/beginnerPanels";
 import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
+import { useGuides } from "@/guides/GuideContext";
+import { changeProgress, forgetProgress, restartGuides } from "@/guides/progress";
+import { tourGuideIds } from "@/guides/fullTour";
+import { forgetFirstRunLater } from "@/guides/FirstRunPrompt";
 import {
   Select,
   SelectContent,
@@ -81,6 +88,60 @@ function BeginnerPanelsSettings(): React.JSX.Element {
           );
         })}
       </ul>
+    </div>
+  );
+}
+
+function GuidesSettings(): React.JSX.Element {
+  const { t } = useTranslation();
+  const { startFullTour } = useGuides();
+
+  // "Start the tour again" is the full tour, from its first screen, with each of its screens as if
+  // never walked.
+  const restart = () => {
+    changeProgress(restartGuides(tourGuideIds())).catch(() =>
+      toast.error(t("guides.ui.saveFailed")),
+    );
+    startFullTour();
+  };
+
+  const forget = () => {
+    forgetFirstRunLater();
+    changeProgress(forgetProgress).then(
+      () => toast.success(t("pages.settings.preferences.guides.forgotten")),
+      () => toast.error(t("guides.ui.saveFailed")),
+    );
+  };
+
+  return (
+    <div
+      className="flex flex-wrap items-center justify-between gap-4 p-4 sm:p-5"
+      data-testid="preferences-guides"
+    >
+      <div className="space-y-0.5">
+        <p className="text-sm font-medium">{t("pages.settings.preferences.guides.title")}</p>
+        <p className="text-sm text-muted-foreground">
+          {t("pages.settings.preferences.guides.description")}
+        </p>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={restart}
+          data-testid="preferences-guides-restart"
+        >
+          {t("pages.settings.preferences.guides.restart")}
+        </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={forget}
+          data-testid="preferences-guides-forget"
+        >
+          {t("pages.settings.preferences.guides.forget")}
+        </Button>
+      </div>
     </div>
   );
 }
@@ -156,6 +217,7 @@ export function PreferencesSettings(): React.JSX.Element {
           </Select>
         </div>
         <BeginnerPanelsSettings />
+        <GuidesSettings />
       </CardContent>
     </Card>
   );

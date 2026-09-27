@@ -74,7 +74,8 @@ function renderDashboard() {
   return render(
     <I18nextProvider i18n={i18n}>
       <FeaturesProvider>
-        <MemoryRouter>
+        {/* The dashboard's own route: "/" is the home page, whose header offers the home tour. */}
+        <MemoryRouter initialEntries={["/admin"]}>
           <AdminDashboard />
         </MemoryRouter>
       </FeaturesProvider>

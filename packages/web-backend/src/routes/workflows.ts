@@ -35,6 +35,7 @@ import {
 } from "@mcp-moira/workflow-engine";
 import {
   ConflictError,
+  WorkflowRevisionConflictError,
   getWorkflowService,
   queryWorkflowVariables,
   normalizeSlug,
@@ -424,6 +425,7 @@ router.get(
           globalErrors: [],
           globalWarnings: [],
           nodeValidation: {},
+          issues: [],
         };
       }
 
@@ -548,6 +550,7 @@ router.get(
           globalErrors: [],
           globalWarnings: [],
           nodeValidation: {},
+          issues: [],
         };
       }
 
@@ -706,8 +709,11 @@ router.post(
         workflow = workflowInfo.workflow;
       }
 
-      // Perform validation
-      const validation = await validationService.validateWorkflow(workflow);
+      // Perform validation. An unsaved definition is a dry run of the author's save, so it is
+      // judged as the save would judge it, including the caller's playbook references.
+      const validation = validationRequest.workflowData
+        ? await validationService.validateForAuthor(workflow, userId)
+        : await validationService.validateWorkflow(workflow);
       const compatibility = await validationService.checkVisualizationCompatibility(workflow);
 
       // Create detailed validation response
@@ -842,9 +848,12 @@ router.post(
  *
  * Body: `{ workflow, expectedRevision }` — the whole definition as the client holds it and the
  * revision it was read at (`fileInfo.revision` of the GET). Order of refusals: not found (404),
- * not the owner (403), stale revision (409 `CONFLICT` with `currentRevision`), invalid graph
- * (400 with the validation status; nothing is saved). The save advances the revision; the
- * response carries the new revision and the re-derived process view.
+ * not the owner (403), invalid graph — including `{{playbook:…}}` references the caller cannot
+ * resolve, as `manage edit` refuses them — (400 with the validation status and its `issues`;
+ * nothing is saved), stale revision (409 `CONFLICT` with `currentRevision`). The revision is
+ * checked by the write itself, so of two saves sent against the same revision exactly one lands.
+ * The save advances the revision; the response carries the new revision and the re-derived
+ * process view.
  */
 router.put(
   "/:id",
@@ -882,24 +891,33 @@ router.put(
     if (info.accessType !== "owner") {
       throw createApiError.forbidden("Only the owner can edit a workflow");
     }
-    if (info.revision !== expectedRevision) {
-      throw new ConflictError("The workflow has changed; reload and apply the edits again", {
-        workflowId: info.id,
-        expectedRevision,
-        currentRevision: info.revision,
-      });
-    }
-
     const graph: WorkflowGraph = { ...(incoming as WorkflowGraph), id: info.id };
     const validationService = new WorkflowValidationService();
-    const validation = await validationService.validateWorkflow(graph);
+    const validation = await validationService.validateForAuthor(graph, userId);
     if (!validation.isValid) {
       throw createApiError.validationFailed("The workflow definition is invalid", {
         validation,
       });
     }
 
-    await workflowService.save({ graph, userId, visibility: info.visibility, isUpdate: true });
+    try {
+      await workflowService.save({
+        graph,
+        userId,
+        visibility: info.visibility,
+        isUpdate: true,
+        expectedRevision,
+      });
+    } catch (error) {
+      if (error instanceof WorkflowRevisionConflictError) {
+        throw new ConflictError("The workflow has changed; reload and apply the edits again", {
+          workflowId: info.id,
+          expectedRevision,
+          currentRevision: error.currentRevision,
+        });
+      }
+      throw error;
+    }
     const saved = await workflowService.getFullInfo(info.id, userId);
     if (!saved) throw createApiError.notFound(`Workflow not found: ${id}`);
 

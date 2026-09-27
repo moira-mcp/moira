@@ -20,12 +20,19 @@ import {
 } from "@xyflow/react";
 import { FileText, FunctionSquare, Undo2 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { PortedCard, type FactChip, type PortInfo } from "../diagram/PortedCard";
+import {
+  PortedCard,
+  type FactChip,
+  type PortedCardProps,
+  type PortInfo,
+} from "../diagram/PortedCard";
 import { ConditionText, ExpressionText, TemplateText } from "../diagram/VariableText";
 import { STATUS_STYLE } from "../run/status";
 import { isFlashed, isLit, useTransitionFocus } from "../run/focus";
 import { DiagramEdge, DiagramMarkers, type DiagramEdgeKind } from "../diagram/DiagramEdge";
 import type { GraphLink, GraphStep } from "../run/graphModel";
+import { IssueList } from "../flow/IssueList";
+import type { PlacedIssue } from "../flow/issues";
 import type { ExecutionBlockStatus } from "../run/model";
 import { GRAPH_CARD_WIDTH, GRAPH_FLOW_ENTRY_STRIP, type GraphRoute } from "./graphLayout";
 import { roundedPath } from "@mcp-moira/workflow-engine/progress-visual";
@@ -51,6 +58,10 @@ export type StepNodeData = Record<string, unknown> & {
   arrived?: boolean;
   /** The run has been through this step. */
   visited?: boolean;
+  /** The step's own problems (a connection's problem marks its output port instead). */
+  problems?: readonly PlacedIssue[];
+  /** The card accepts new connections (edit mode). */
+  connect?: PortedCardProps["connect"];
 };
 
 export type StepNode = Node<StepNodeData>;
@@ -81,6 +92,8 @@ export type GraphEdgeData = {
   /** Whether the cards' handles sit on their left and right (blocks stacked top to bottom). */
   horizontal: boolean;
   onGoTo?: (stepId: string, linkId: string) => void;
+  /** The connection has a problem: the line is drawn in the destructive colour. */
+  problem?: boolean;
 };
 
 /**
@@ -197,7 +210,19 @@ function stepFacts(graph: GraphStep, t: Translate): FactChip[] {
 export function StepNodeView({ data, selected }: NodeProps<StepNode>): React.JSX.Element {
   const { t } = useTranslation();
   const focus = useTransitionFocus();
-  const { graph, current, error, inputs, outputs, selfLoops, arrived, visited, onGoTo } = data;
+  const {
+    graph,
+    current,
+    error,
+    inputs,
+    outputs,
+    selfLoops,
+    arrived,
+    visited,
+    onGoTo,
+    problems,
+    connect,
+  } = data;
   const links = [...inputs, ...outputs, ...selfLoops].map((port) => port.id);
   // Hovering the card lights every connection it takes part in, and the cards at their far end.
   const near = focus.hovered !== null && links.some((id) => focus.hovered!.has(id));
@@ -231,8 +256,14 @@ export function StepNodeView({ data, selected }: NodeProps<StepNode>): React.JSX
       onHover={(ids) => focus.setHovered(ids)}
       onPortClick={onGoTo ? (port) => port.peer && onGoTo(port.peer, port.id) : undefined}
       allLinkIds={links}
-      dataAttributes={{ "data-graph-node": graph.id }}
-    />
+      connect={connect}
+      dataAttributes={{
+        "data-graph-node": graph.id,
+        "data-issue": problems?.length ? "true" : undefined,
+      }}
+    >
+      {problems && problems.length > 0 && <IssueList issues={problems} className="mt-2" />}
+    </PortedCard>
   );
 }
 
@@ -309,7 +340,7 @@ export function GraphEdgeView({
 }: EdgeProps<GraphEdge>): React.JSX.Element | null {
   const focus = useTransitionFocus();
   if (!data) return null;
-  const { link, route, horizontal, onGoTo } = data;
+  const { link, route, horizontal, onGoTo, problem } = data;
   const lit = isLit(focus, link.id, link.source);
   let path: string;
   if (link.source === link.target) {
@@ -346,6 +377,7 @@ export function GraphEdgeView({
       flash={isFlashed(focus, link.id)}
       title={link.label}
       transitionKey={link.id}
+      problem={problem}
       onHover={(over) => focus.setHovered(over ? [link.id] : null)}
       onClick={onGoTo ? () => onGoTo(link.target, link.id) : undefined}
     />

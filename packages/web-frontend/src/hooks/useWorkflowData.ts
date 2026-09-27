@@ -7,12 +7,7 @@
  */
 
 import { useState, useEffect, useCallback } from "react";
-import {
-  WorkflowListResponse,
-  WorkflowListRequest,
-  WorkflowDetailResponse,
-  WorkflowValidationResponse,
-} from "../types";
+import { WorkflowListResponse, WorkflowListRequest, WorkflowDetailResponse } from "../types";
 
 import { apiClient, ApiErrorUtils } from "../services/api-client";
 import { useSession } from "../auth/better-auth-client";
@@ -115,47 +110,6 @@ export function useWorkflowDetail(workflowId?: string) {
     current: workflow !== null && resource.dataKey === (workflowId ?? null),
     error: resource.error,
     refreshWorkflow: resource.refresh,
-  };
-}
-
-/**
- * Hook for workflow validation
- */
-export function useWorkflowValidation() {
-  const [validationResult, setValidationResult] = useState<WorkflowValidationResponse | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const validateWorkflow = useCallback(
-    async (
-      workflowId: string,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      workflowData?: any,
-    ) => {
-      setLoading(true);
-      setError(null);
-
-      try {
-        const response = await apiClient.validateWorkflow(workflowId, {
-          workflowData,
-        });
-        setValidationResult(response);
-      } catch (err) {
-        const message = ApiErrorUtils.getUserFriendlyMessage(err);
-        setError(message);
-        console.error("Workflow validation failed:", err);
-      } finally {
-        setLoading(false);
-      }
-    },
-    [],
-  );
-
-  return {
-    validationResult,
-    loading,
-    error,
-    validateWorkflow,
   };
 }
 

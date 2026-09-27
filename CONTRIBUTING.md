@@ -144,9 +144,15 @@ lifecycle state but must not be used by itself to reserve work.
 2. Fork the repository and create a feature branch from `master`.
 3. Make your changes, keeping them focused and well-scoped.
 4. Add or update tests for any behavior change.
-5. Run the test suite and make sure it passes.
-6. Update documentation if you changed user-facing behavior.
-7. Open a pull request against `master`, follow the policy below, use a closing
+5. Keep the web app's guides true to it. A new route goes into
+   `packages/web-frontend/src/routes/routeTable.ts` with a screen tour or a written reason for
+   having none; a new major control gets a step in its screen's tour. When you change a control a
+   tour points at, or what a step says, decide whether the step's `revision` must rise, then run
+   `npm run guides:snapshot`. The unit checks fail until this is done (see `docs/WEB-UI.md`,
+   "Guides").
+6. Run the test suite and make sure it passes.
+7. Update documentation if you changed user-facing behavior.
+8. Open a pull request against `master`, follow the policy below, use a closing
    reference to the claimed issue, and describe what and why.
 
 ## Pull-request policy

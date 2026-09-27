@@ -120,7 +120,7 @@ describe("process derivation from the authored graph", () => {
   test("derives the annotated Software Development Flow in authored order with its hubs and no diagnostics", () => {
     const result = counts(bundled("software-development-flow"));
     expect(result.blocks).toBe(15);
-    expect(result.transitions).toBe(55);
+    expect(result.transitions).toBe(56);
     expect(result.cycles).toBe(28);
     expect(result.diagnostics).toEqual([]);
     expect(result.order.slice(0, 4)).toEqual(["intake", "health", "plan", "plan-approval"]);
@@ -151,8 +151,8 @@ describe("process derivation from the authored graph", () => {
       "workflow-management-flow",
       {
         blocks: 6,
-        transitions: 27,
-        cycles: 12,
+        transitions: 41,
+        cycles: 19,
         order: ["source", "requirements", "design", "build", "review", "delivery"],
       },
     ],

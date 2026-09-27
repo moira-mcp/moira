@@ -789,7 +789,7 @@ back for another attempt through `success`.
 {
   "id": "notify-escalation",
   "type": "user-notification",
-  "message": "⚠️ *Escalation Required*\n\nStep failed after {{step_retry}} attempts.\n\nOptions:\n- revise_plan\n- ask_user\n- skip",
+  "message": "⚠️ *The step keeps failing its check*\n\nChoose: go back and revise the plan, ask a person for help with the specific problem, or skip the step if it is optional.",
   "format": "markdown",
   "connections": { "default": "ask-escalation-decision", "error": "ask-escalation-decision" }
 },
@@ -1012,12 +1012,12 @@ Notifications keep users informed during long-running workflows. Use them strate
 
 #### When to Use Notifications
 
-| Scenario                    | Why Notify                              |
-| --------------------------- | --------------------------------------- |
-| **Step start** (long tasks) | User sees progress, can plan their time |
-| **User input required**     | User knows to check and respond         |
-| **Critical errors**         | Immediate awareness of blockers         |
-| **Task completion**         | User can review results                 |
+| Scenario                | Why Notify                                  |
+| ----------------------- | ------------------------------------------- |
+| **Plan ready**          | User sees what will be done, can approve it |
+| **User input required** | User knows to check and respond             |
+| **Critical errors**     | Immediate awareness of blockers             |
+| **Task completion**     | User can review results                     |
 
 #### When NOT to Use
 
@@ -1026,71 +1026,94 @@ Notifications keep users informed during long-running workflows. Use them strate
 - For internal validation loops
 - When error is auto-recoverable
 
-#### Pattern: Step Start Notification
+#### What a message says
 
-For multi-step tasks, notify at each major stage:
+A notification is all the person sees of the run, often on a phone. The engine already opens every
+message with the flow name and the run's task, linked to the run page, so a message never repeats
+them; the flow sets the task through `execution_note` on its first agent step.
+
+- The plan list comes from the list bound on the working block (see the progress reference), through
+  `planList`: `full` at plan ready and at every finish, `progress` — the one-line `📝 done/total:
+current item` — elsewhere. Never write the list into the message.
+- No internal value reaches the reader: no path or file name, template syntax, node id, variable
+  name, raw enum value, or counter without a title. A line written from the run's values comes from
+  a one-sentence field the step writes for a person (a `…_summary` output whose directive says so);
+  an enum value is worded through a template branch or by one message per outcome.
+- Placement follows the operating mode. An interactive run is told before the question, with the
+  choices explained in words. An autonomous run is never told that a decision is pending: at plan
+  ready it hears that the work goes ahead, and after a decision the agent took, one message with
+  what was decided and why, sent from the deciding node's own route.
+- The run's last message connects straight to `end`, so its list shows no item still in progress.
+
+The Workflow Management Flow checks every notification of a workflow it builds against these rules.
+
+#### Pattern: Plan Ready
+
+Announce the plan once it is ready, with the whole list. An interactive run asks for approval;
+an autonomous run goes ahead:
 
 ```json
 {
-  "id": "notify-step-start",
+  "id": "notify-plan-approval",
   "type": "user-notification",
-  "message": "🚀 *Step {{current_step}}/{{total_steps}}*\n\n{{current_step_description}}",
+  "message": "📋 *Plan ready for your approval* — approve it and the work goes ahead, or reject it with feedback and the plan is revised.",
   "format": "markdown",
-  "connections": {
-    "default": "execute-step",
-    "error": "execute-step"
-  }
-}
-```
-
-#### Pattern: User Input Required
-
-Alert when workflow is blocked waiting for user:
-
-```json
+  "planList": "full",
+  "connections": { "default": "present-plan-to-user" }
+},
 {
-  "id": "notify-approval-needed",
+  "id": "notify-work-started",
   "type": "user-notification",
-  "message": "⏳ *Awaiting your approval*\n\nPlan ready for review. Please confirm to proceed.",
+  "message": "▶️ *Plan approved — the work goes ahead.*",
   "format": "markdown",
-  "connections": {
-    "default": "present-plan-to-user",
-    "error": "present-plan-to-user"
-  }
+  "planList": "full",
+  "connections": { "default": "execute-step" }
 }
 ```
 
-#### Pattern: Escalation Alert
+Place the first on the interactive branch of the mode route, the second on the autonomous one.
 
-When automatic retries fail and human decision needed:
+#### Pattern: Your Decision Needed
+
+When automatic retries fail and a person has to decide, say which step, why, and what each choice
+does:
 
 ```json
 {
   "id": "notify-escalation",
   "type": "user-notification",
-  "message": "⚠️ *Action Required*\n\nStep {{current_step}} failed after {{max_retries}} attempts.\n\nOptions:\n- Skip this step\n- Handle manually",
+  "message": "⚠️ *Step needs your decision* — step “{{current_step_title}}” keeps failing its check: {{review-step.failure_summary}}\n\nChoose: try it again, change the plan, or finish with this step incomplete.",
   "format": "markdown",
-  "connections": {
-    "default": "ask-user-decision",
-    "error": "ask-user-decision"
-  }
+  "connections": { "default": "ask-user-decision" }
 }
 ```
 
-#### Pattern: Completion Summary
+`failure_summary` is a one-sentence field the reviewing step returns when it does not pass. In an
+autonomous run the agent decides instead; the deciding node routes each outcome to its own message
+sent after the decision:
 
-Notify when task finishes:
+```json
+{
+  "id": "notify-retry-decided",
+  "type": "user-notification",
+  "message": "🔁 *Decided for you* — trying the step again. {{ask-user-decision.decision_summary}}",
+  "format": "markdown",
+  "connections": { "default": "retry-step" }
+}
+```
+
+#### Pattern: Completion
+
+Say how the run ended, in words, with the plan's final state:
 
 ```json
 {
   "id": "notify-completion",
   "type": "user-notification",
-  "message": "✅ *Task Complete*\n\n{{task_name}}\n\nDeliverable: {{deliverable_summary}}",
+  "message": "🏁 *{{#eq delivery_status 'complete'}}Completed{{else}}Completed with open items{{/eq}}* — {{deliver-result.result_summary}}",
   "format": "markdown",
-  "connections": {
-    "default": "end",
-    "error": "end"
-  }
+  "planList": "full",
+  "connections": { "default": "end" }
 }
 ```
 

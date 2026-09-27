@@ -472,7 +472,7 @@ docker exec mcp-moira-dev2 tail -100 /var/log/supervisor/mcp-server.log
 
 **WITH_CONDITION** - Conditional branching
 
-- Nodes: start → setup → condition → [path_true | path_false] → end
+- Nodes: start → setup → condition → [path-true | path-false] → end
 - Use for: Condition logic tests
 
 **CONTEXT_PRESERVATION** - Context variables

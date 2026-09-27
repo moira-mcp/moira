@@ -119,7 +119,8 @@ const EDGE_ORDER: Record<ProgressEdgeKind, number> = {
   self: 2,
 };
 
-function escapeXml(value: string): string {
+/** Text as it may stand in SVG markup. */
+export function escapeXml(value: string): string {
   return value
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")

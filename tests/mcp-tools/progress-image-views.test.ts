@@ -133,6 +133,8 @@ describe("progress image export views", () => {
       operating_mode: "autonomous",
       visual_validation_preference: "disabled",
       progress_intake_outcome: "Task and repository context captured",
+      execution_note: "Render the progress image",
+      goal_summary: "The run's progress image renders at each revision",
     });
     expect(advanced).toContain("Step attempt ID:");
     expect((await download(grant.downloadUrl)).status).toBe(401);

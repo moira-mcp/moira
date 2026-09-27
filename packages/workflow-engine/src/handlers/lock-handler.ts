@@ -4,7 +4,13 @@
  * until the lock is unlocked
  */
 
-import { GraphNode, LockNode, ExecutionContext, isLockNode } from "../types/index.js";
+import {
+  GraphNode,
+  LockNode,
+  ExecutionContext,
+  WorkflowExecution,
+  isLockNode,
+} from "../types/index.js";
 import { NodeExecutionResult, NodeResultBuilder } from "../types/node-execution.js";
 import { INodeHandler } from "../interfaces/core-interfaces.js";
 import { IDataRepository } from "../interfaces/data-repository.js";
@@ -38,6 +44,8 @@ export class LockHandler implements INodeHandler {
     repository: IDataRepository,
     _engine: IGraphExecutionEngine,
     input?: unknown,
+    _variableRegistry?: unknown,
+    liveRun?: () => WorkflowExecution,
   ): Promise<NodeExecutionResult> {
     if (!isLockNode(node)) {
       throw new InternalError("LockHandler can only execute lock nodes", {
@@ -53,7 +61,7 @@ export class LockHandler implements INodeHandler {
     }
 
     // First visit: create lock and send PIN via Telegram
-    return this.createLockAndNotify(node, context, messageQueue, repository);
+    return this.createLockAndNotify(node, context, messageQueue, repository, liveRun);
   }
 
   canExecute(node: GraphNode, _context: ExecutionContext): boolean {
@@ -158,6 +166,7 @@ export class LockHandler implements INodeHandler {
     context: ExecutionContext,
     messageQueue: AgentMessageQueue,
     repository: IDataRepository,
+    liveRun?: () => WorkflowExecution,
   ): Promise<NodeExecutionResult> {
     const userId = context.userId || "system";
 
@@ -170,6 +179,9 @@ export class LockHandler implements INodeHandler {
       nodeId: lockNode.id,
       reason,
       userId,
+      // The note as of this node: one set earlier in this cycle is not persisted yet.
+      ...(liveRun ? { note: liveRun().note ?? null } : {}),
+      rootExecutionId: context._rootExecutionId,
     });
 
     this.logger.info("Lock created for workflow execution", {

@@ -361,6 +361,7 @@ export class UniversalGraphExecutor implements IGraphExecutor {
         messageQueue,
         startNodeId,
         userInput,
+        { execution, teleportTo, answeredBy: mutation?.answeredBy },
       );
 
       // Update execution with results from stateless engine

@@ -31,6 +31,7 @@ import {
 import { PlaybookCard } from "../components/cards";
 import { VisibilityToggle } from "../components/access/VisibilityToggle";
 import { X } from "lucide-react";
+import { guideAnchor } from "@/guides/anchors";
 
 /**
  * A playbook a link from a workflow node points at.
@@ -162,15 +163,28 @@ export const Playbooks: React.FC = () => {
   const totalPages = Math.ceil(total / pageSize);
 
   if (loading && playbooks.length === 0) {
-    return <PageShell title={t("pages.playbooks.title")} loading />;
+    return (
+      <PageShell
+        title={t("pages.playbooks.title")}
+        guide={guideAnchor("playbooks.header")}
+        loading
+      />
+    );
   }
 
   if (error) {
-    return <PageShell title={t("pages.playbooks.title")} error={error} onRetry={load} />;
+    return (
+      <PageShell
+        title={t("pages.playbooks.title")}
+        guide={guideAnchor("playbooks.header")}
+        error={error}
+        onRetry={load}
+      />
+    );
   }
 
   return (
-    <PageShell title={t("pages.playbooks.title")}>
+    <PageShell title={t("pages.playbooks.title")} guide={guideAnchor("playbooks.header")}>
       <FilterBar
         search={searchQuery}
         onSearchChange={setSearchQuery}
@@ -181,7 +195,11 @@ export const Playbooks: React.FC = () => {
           setCurrentPage(1);
         }}
         actions={
-          <Button onClick={() => startEditing("__NEW__")} data-testid="create-playbook-button">
+          <Button
+            onClick={() => startEditing("__NEW__")}
+            data-testid="create-playbook-button"
+            {...guideAnchor("playbooks.create")}
+          >
             <Plus className="h-4 w-4 mr-2" />
             {t("pages.playbooks.actions.create")}
           </Button>
@@ -201,7 +219,11 @@ export const Playbooks: React.FC = () => {
       )}
 
       {linked?.state === "foreign" && (
-        <div className="mb-4 border rounded-lg p-4 space-y-3" data-testid="linked-playbook">
+        <div
+          className="mb-4 border rounded-lg p-4 space-y-3"
+          data-testid="linked-playbook"
+          {...guideAnchor("playbooks.linked")}
+        >
           <div className="flex items-start justify-between gap-2">
             <div className="min-w-0">
               <div className="font-medium truncate">
@@ -301,6 +323,7 @@ export const Playbooks: React.FC = () => {
         }
         keyExtractor={(p) => p.slug}
         storageKey="playbooks-view-mode"
+        guide={guideAnchor("playbooks.list")}
         loading={loading}
         emptyIcon={BookOpen}
         emptyTitle={

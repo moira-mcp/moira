@@ -17,7 +17,7 @@ import {
   startWorkflowExecutionState,
 } from "../utils/mcp-auth.js";
 import { loginAsAdmin } from "./helpers/auth-helper.js";
-import { openPanelSection } from "./helpers/diagram.js";
+import { GRAPH, openPanelSection, restingCamera } from "./helpers/diagram.js";
 import { QUICK_TASK_WORKSPACE, quickTaskWithRepairLoop } from "./helpers/quick-task.js";
 
 const BASE_URL = getTestBaseUrl();
@@ -255,7 +255,7 @@ test("the graph is a deep-linkable view of its own, with one edge per output", a
   }
 });
 
-test("a link to a retired view opens the map, and the walkthrough opens from the toolbar", async ({
+test("a link to a retired view opens the map, and the page's tour opens from the toolbar", async ({
   page,
 }) => {
   const run = await openRun(page);
@@ -267,11 +267,11 @@ test("a link to a retired view opens the map, and the walkthrough opens from the
       await expect(page.getByTestId("map-view")).toBeVisible();
     }
 
-    // The walkthrough opens from the toolbar and lives in the URL; `walkthrough.spec.ts` runs
-    // every one of its steps through in both views.
+    // "What is this?" opens the run page's tour from the toolbar and it lives in the URL;
+    // `guides.spec.ts` runs every one of its steps through in both views.
     await page.getByTestId("guide-open").click();
-    await expect(page).toHaveURL(/guide=1/);
-    await expect(page.getByTestId("walkthrough")).toHaveAttribute("data-guide-step", "process");
+    await expect(page).toHaveURL(/guide=run/);
+    await expect(page.getByTestId("guide-card")).toHaveAttribute("data-guide-step", "process");
   } finally {
     await run.cleanup();
   }
@@ -298,6 +298,7 @@ test("answering the waiting step from the page continues the run and records the
     await page.getByTestId("answer-field-execution_file").fill(`${workspace}/execution.md`);
     await page.getByTestId("answer-field-operating_mode").selectOption("autonomous");
     await page.getByTestId("answer-field-progress_scope_outcome").fill("Captured from the page");
+    await page.getByTestId("answer-field-execution_note").fill("Task named on the page");
     // A schema-invalid answer is refused with the step's message and changes nothing.
     await page.getByTestId("answer-field-task_file").fill("nope");
     await page.getByTestId("answer-submit").click();
@@ -359,8 +360,50 @@ test("answering the waiting step from the page continues the run and records the
       execution_file: `${workspace}/execution.md`,
       operating_mode: "autonomous",
       progress_scope_outcome: "from the agent",
+      execution_note: "Task named by the agent",
     });
     expect(stale).toContain("ATTEMPT_STALE");
+  } finally {
+    await authenticated.cleanup();
+  }
+});
+
+test("the graph follows the run to its next step after the reader travelled elsewhere", async ({
+  page,
+}) => {
+  const authenticated = await createAuthenticatedMCPClient();
+  try {
+    const run = await startWorkflowExecutionState(authenticated.client, "moira/quick-task", {
+      skipTelegramCheck: true,
+    });
+    await loginAsAdmin(page);
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto(`${BASE_URL}/executions/${run.processId}?view=graph`);
+    const card = (id: string) => page.locator(`${GRAPH} [data-graph-node="${id}"]`);
+    await restingCamera(page, GRAPH);
+    await expect(card("get-task")).toBeInViewport();
+    // The reader travels far from the run with the finder: the step the run will reach next is
+    // out of view.
+    await page.getByTestId("graph-toolbar").getByTestId("toolbar-finder").click();
+    await page.getByTestId("graph-node-finder").fill("final-review");
+    await page.locator('[data-node-match="final-review"]').click();
+    await page.keyboard.press("Escape");
+    await restingCamera(page, GRAPH);
+    await expect(card("final-review")).toBeInViewport();
+    await expect(card("create-plan")).not.toBeInViewport();
+    // The run moves on, and the page's refresh (not a reload, which would forget the travel) brings
+    // it in: the camera follows the run's new step.
+    await advanceWorkflowExecution(authenticated.client, run, {
+      task_file: `${workspace}/task.md`,
+      execution_file: `${workspace}/execution.md`,
+      operating_mode: "autonomous",
+      progress_scope_outcome: "from the agent",
+      execution_note: "Task named by the agent",
+    });
+    await page.locator("button:has(svg.lucide-refresh-cw)").first().click();
+    await expect(card("create-plan")).toHaveAttribute("data-current", "true");
+    await restingCamera(page, GRAPH);
+    await expect(card("create-plan")).toBeInViewport();
   } finally {
     await authenticated.cleanup();
   }

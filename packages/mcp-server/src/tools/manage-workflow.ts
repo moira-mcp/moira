@@ -48,6 +48,7 @@ import {
   isOperationalError,
   normalizeError,
   getWorkflowMutationService,
+  WorkflowRevisionConflictError,
 } from "@mcp-moira/shared";
 import { ERRORS, SUCCESS, formatDomainError } from "../messages/index.js";
 
@@ -181,17 +182,6 @@ export async function manageWorkflow(
         const resolved = await resolveWorkflowIdentifier(repository, workflowId, userId);
         const existingWorkflow = resolved.workflow;
 
-        // Optional optimistic guard: refuse when the stored revision moved on
-        if (expectedRevision !== undefined) {
-          const current = await repository.getWorkflow(resolved.workflowId, userId);
-          if (current && current.revision !== expectedRevision) {
-            return {
-              success: false,
-              error: ERRORS.workflow_revision_conflict(expectedRevision, current.revision),
-            };
-          }
-        }
-
         const modifiedWorkflow: WorkflowGraph = JSON.parse(JSON.stringify(existingWorkflow));
 
         if (changes.metadata) {
@@ -297,12 +287,28 @@ export async function manageWorkflow(
         }
 
         // Save workflow via service (handles audit automatically)
+        // Optional optimistic guard: with an expected revision the write itself refuses a stored
+        // revision that moved on, so a concurrent save cannot slip between a check and the write.
         const workflowService = getWorkflowService();
-        await workflowService.save({
-          graph: modifiedWorkflow,
-          userId,
-          isUpdate: true,
-        });
+        try {
+          await workflowService.save({
+            graph: modifiedWorkflow,
+            userId,
+            isUpdate: true,
+            expectedRevision,
+          });
+        } catch (error) {
+          if (error instanceof WorkflowRevisionConflictError) {
+            return {
+              success: false,
+              error: ERRORS.workflow_revision_conflict(
+                error.expectedRevision,
+                error.currentRevision,
+              ),
+            };
+          }
+          throw error;
+        }
         const savedInfo = await repository.getWorkflow(resolved.workflowId, userId);
 
         const response = {

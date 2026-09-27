@@ -97,6 +97,8 @@ export interface DiagramEdgeProps {
   onClick?: () => void;
   /** A halo under the line in the page colour; off where the lines never cross. */
   halo?: boolean;
+  /** The connection has a problem: the line is drawn in the destructive colour. */
+  problem?: boolean;
 }
 
 export function DiagramEdge({
@@ -111,6 +113,7 @@ export function DiagramEdge({
   onHover,
   onClick,
   halo = true,
+  problem = false,
 }: DiagramEdgeProps): React.JSX.Element {
   const look = EDGE_LOOK[kind];
   const emphasised = lit || flash;
@@ -131,6 +134,7 @@ export function DiagramEdge({
       data-transition={transitionKey}
       data-focused={emphasised ? "true" : undefined}
       data-dimmed={dim ? "true" : undefined}
+      data-issue={problem ? "true" : undefined}
       // The edge explains itself through the application's hint, anchored at the pointer (a
       // long lane's box is nowhere near it), never through the browser's own title bubble; the
       // same text is the accessible name. It is named, not advertised as a control: travel along
@@ -157,9 +161,9 @@ export function DiagramEdge({
         markerEnd={`url(#${emphasised ? MARKER.lit : MARKER[look.marker]})`}
         className={flash ? "edge-flash" : undefined}
         style={{
-          stroke: emphasised ? LIT_STROKE : look.stroke,
+          stroke: problem ? "var(--destructive)" : emphasised ? LIT_STROKE : look.stroke,
           strokeWidth: emphasised ? LIT_WIDTH : look.width,
-          strokeOpacity: dim ? 0.12 : emphasised ? 1 : look.opacity,
+          strokeOpacity: dim ? 0.12 : emphasised || problem ? 1 : look.opacity,
           strokeDasharray: look.dash,
           transition: "stroke-opacity 150ms, stroke-width 150ms",
         }}

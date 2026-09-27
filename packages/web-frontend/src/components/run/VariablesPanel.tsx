@@ -24,6 +24,7 @@ import type { WorkflowGraph } from "../../types/workflow-types";
 import type { VariableFilterField } from "../../utils/context-variable-model";
 import { variableRows, type DeclaredRow } from "./variableRows";
 import { TreeNode, VariableGroup, subtreeMatches, type SavePath } from "./variableTree";
+import { guideAnchor } from "../../guides/anchors";
 
 type Draft = Record<string, string>;
 
@@ -168,6 +169,7 @@ export function AnswerForm({
       className="space-y-2 rounded-lg border border-warning/50 bg-warning/5 p-3 text-sm"
       data-testid="answer-form"
       data-node-id={step.id}
+      {...guideAnchor("run.answer")}
     >
       <p className="flex items-center gap-1.5 font-semibold">
         <Send className="size-4 text-warning-foreground" aria-hidden="true" />

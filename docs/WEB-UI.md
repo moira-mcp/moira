@@ -52,8 +52,13 @@ frontend/src/
 │   │   ├── DiagramViewport.tsx / interaction.ts / placement.ts             # React Flow wrapper, gesture policy, opening placement
 │   │   ├── reveal.ts                                                       # `requestReveal`: bring an element inside a diagram into the camera
 │   │   └── layoutPreset.ts / interactive.ts / useHighlightTarget.ts / useStoredFlag.ts / useRequest.ts
-│   ├── flow/                    # Flow page: the definition as a process, edited in place (`guideSteps.ts`: its walkthrough)
-│   │   ├── editing.tsx / model.ts / modes.ts        # Edit set (apply, export diff), run-less projection, the three views
+│   ├── flow/                    # Flow page: the definition as a process, edited in place
+│   │   ├── operations.ts / editing.tsx              # The edit log (operations, fold, export diff); its page state and editing context
+│   │   ├── issues.ts / useDraftValidation.ts        # Problem placement and the save gate; the server's dry run of the draft
+│   │   ├── EditBar.tsx / IssueList.tsx              # The edit bar with the problem list; a compact inline problem list
+│   │   ├── structure.ts / StructureControls.tsx     # What a structural action would do; the rename, delete, connection, step and block controls
+│   │   ├── canvas.ts / CanvasEditing.tsx            # What a graph gesture means; the graph's editing host (menus at the pointer, drag dialogs)
+│   │   ├── model.ts / modes.ts                      # Run-less projection, the three views
 │   │   ├── StepsView.tsx / stepsModel.ts            # The steps view: what the agent is told, drawn as numbered cards joined by arrows
 │   │   ├── StepsList.tsx                            # The steps view of a large flow: the same cards as a reading list with jump links
 │   │   ├── RegistryPanel.tsx                        # The variable registry (panel tab)
@@ -72,18 +77,16 @@ frontend/src/
 │   │   ├── NodeFinder.tsx                                                   # Step search, mounted in both diagram toolbars
 │   │   ├── variableRows.ts / variableTree.tsx                              # Variables grouping model; shared rows, groups, tree, leaf editor
 │   │   ├── StepCard.tsx / TabBadge.tsx                                      # One step card for every panel list; the panel badge
-│   │   ├── RunCursor.tsx / Walkthrough.tsx / DiagramGuide.tsx / Guidance.tsx / status.tsx  # Cursor, walkthrough, the compass note per view, callouts, status vocabulary and the card tone per status
+│   │   ├── RunCursor.tsx / DiagramGuide.tsx / Guidance.tsx / status.tsx  # Cursor, the compass note per view, callouts, status vocabulary and the card tone per status
 │   │   ├── model.ts / route.ts / layout.ts / focus.tsx                      # Pure view helpers; the map's door to the engine's layout, geometry and presets; the lit-connector store
 │   │   ├── duration.ts / waiting.ts                                         # The engine's duration split worded in the interface language, clock formatting; who-is-waited-for wording
 │   │   └── modes.ts / nodeTypeStyle.tsx
 │   └── workflow/                # Workflow management
 │       ├── WorkflowExplorer.tsx # Workflow list with FilterBar (filters folded) + DataListView + useDebounce
 │       ├── WorkflowGraph.tsx    # React Flow visualization with its diagram toolbar
-│       ├── WorkflowCard.tsx     # A flow as a CardShell item: name and version, two-line description, when to pick it, owner/visibility/tags, attention badges
-│       ├── NodeDetailSheet.tsx  # Node detail panel (legacy, used in execution views)
-│       ├── WorkflowHeader.tsx   # Workflow metadata display
-│       ├── WorkflowVariablesPanel.tsx # Collapsible variables sidebar
-│       └── WorkflowVisualizationPage.tsx # Container component
+│       ├── WorkflowCard.tsx     # A flow as a CardShell item: name and version, two-line description, when to pick it, owner/visibility/level/subject tags, attention badges
+│       ├── FlowLevelBadge.tsx   # The level a flow was authored at (complexity:<level>) as a badge of its own
+│       └── NodeDetailSheet.tsx  # Node detail panel (legacy, used where a graph has no onNodeSelect)
 │   ├── QuickStartCard.tsx       # "Connect your agent": per-client setup tabs
 │   ├── notes/                   # Notes management components
 │   │   ├── NoteInlineEditor.tsx # Inline expandable card editor (create/edit)
@@ -115,7 +118,7 @@ frontend/src/
 │   │   ├── OAuthSettings.tsx    # Connected apps (OAuth consents): search, paging, revoke
 │   │   ├── ApiTokensSettings.tsx # API token management (create, list, revoke)
 │   │   ├── PreferencesSettings.tsx # Theme, interface language, and the beginner-panel switches
-│   │   └── settingsTours.ts     # Page, GitHub & Codespaces and Telegram tours
+│   │   └── settings.guide.ts    # The Settings screen tour and the GitHub & Codespaces and Telegram task tours
 │   ├── Admin.tsx                # Admin panel entry
 │   ├── AdminDashboard.tsx       # Admin dashboard with stats + merged analytics
 │   ├── AdminExecutions.tsx      # Admin executions monitoring (PageShell + DataListView)
@@ -132,10 +135,24 @@ frontend/src/
 │   ├── AdminTokens.tsx          # Admin API token management (PageShell + DataListView)
 │   ├── AdminArtifacts.tsx       # Admin artifacts management (PageShell + DataListView)
 │   ├── Artifacts.tsx            # User artifacts management (ArtifactCard list/grid)
+│   ├── home.guide.ts / flows.guide.ts / runs.guide.ts  # Screen tours of home, the flow list and the runs list
+│   ├── notes.guide.ts / playbooks.guide.ts / artifacts.guide.ts  # Screen tours of notes, playbooks and artifacts
 │   ├── Login.tsx                # Login page
 │   ├── Register.tsx             # Registration page
 │   ├── RegistrationSuccess.tsx  # Post-registration email verification page
 │   └── OAuthAuthorize.tsx       # OAuth authorization
+├── routes/
+│   └── routeTable.ts            # Every route as data, with its guard and tour coverage (see "Routes")
+├── guides/                      # The guide engine (see "Guides")
+│   ├── types.ts / registry.ts   # Guide declarations; the registry that lists every guide
+│   ├── anchors.ts               # `guideAnchor(...)`: the `data-guide` names a step points at
+│   ├── GuideContext.tsx         # `GuideProvider`, `useGuides`, `useGuidePage`: the URL state and page controllers
+│   ├── GuideRunner.tsx          # The runner: page preparation, spotlight, card, keyboard (lazy-loaded)
+│   ├── GuideButton.tsx          # "What is this?", with the dot for changed steps
+│   ├── progress.ts              # The reader's progress (`ui.guide_progress`): the store and its rules
+│   ├── topics.ts                # What each screen tour must explain, and the step that does (`REQUIRED_TOPICS`)
+│   ├── FirstRunPrompt.tsx / ShowMeAround.tsx  # The home page's one-time prompt; the sidebar's guides menu
+│   └── snapshot.ts / revisions.snapshot.json  # The step revision snapshot (`npm run guides:snapshot`)
 ├── auth/
 │   ├── AuthProvider.tsx         # Better Auth UI provider
 │   └── better-auth-client.ts    # Auth client config
@@ -253,42 +270,309 @@ All shared components accept i18n label props for translatable strings — do no
 
 Usage rules documented in `packages/web-frontend/UI_STANDARDS.md`.
 
+### Guides
+
+A guide explains the interface on the interface itself: a card beside the element it is about, over
+a dimmed page. The engine lives in `src/guides/`; each guide is a data declaration kept beside the
+page it explains.
+
+**Guides today:**
+
+| Guide               | Kind     | Declared in                          | Opened by                                                        |
+| ------------------- | -------- | ------------------------------------ | ---------------------------------------------------------------- |
+| `home`              | screen   | `pages/home.guide.ts`                | "What is this?" in the home page header                          |
+| `flows`             | screen   | `pages/flows.guide.ts`               | "What is this?" in the flow list header                          |
+| `flow`              | screen   | `pages/flow.guide.ts`                | "What is this?" in the flow page's diagram toolbar               |
+| `runs`              | screen   | `pages/runs.guide.ts`                | "What is this?" in the runs list header                          |
+| `run`               | screen   | `components/execution/run.guide.ts`  | "What is this?" in the run page's diagram toolbar                |
+| `notes`             | screen   | `pages/notes.guide.ts`               | "What is this?" in the notes page header                         |
+| `playbooks`         | screen   | `pages/playbooks.guide.ts`           | "What is this?" in the playbooks page header                     |
+| `artifacts`         | screen   | `pages/artifacts.guide.ts`           | "What is this?" in the artifacts page header                     |
+| `settings`          | screen   | `pages/settings/settings.guide.ts`   | "What is this?" in the Settings page header                      |
+| `settings-github`   | task     | `pages/settings/settings.guide.ts`   | **Setup guide** in the GitHub & Codespaces section               |
+| `settings-telegram` | task     | `pages/settings/settings.guide.ts`   | **Telegram setup** in the Notifications section                  |
+| `build-flow`        | tutorial | `guides/tutorial/buildFlow.guide.ts` | **Tutorials** in the "Show me around" menu                       |
+| `flow-editor`       | task     | `pages/flowEditor.guide.ts`          | The first switch into edit mode; **Editor tour** in the edit bar |
+| `runs-empty`        | fallback | `pages/runs.guide.ts`                | The full tour's run stop, when the reader has no run             |
+
+**Declarations** (`guides/types.ts`). A `GuideDefinition` has an `id`, a `kind` (`screen`, `task`,
+`tutorial` or `fallback` — a guide only the full tour opens, in place of a screen it cannot show), the `screen` whose page runs it, its route patterns, and the views, panels and sections
+that screen has. Each `GuideStep` has:
+
+- an `id`, stable within the guide;
+- an `anchor`: one name, or one name per view where the views draw the same thing differently;
+- a `kind` (`look` or `do`) and a `revision`, raised when the control it explains or the meaning of
+  its copy changes;
+- optionally `optional` (skipped when its element is absent), `absentWhen` (on an optional step:
+  `panelHidden`, a beginner panel, or `queryMissing`, a query parameter — while the panel is hidden
+  or the parameter missing the element cannot be on the page, so the step is skipped at once),
+  `views` (the views that draw it, the
+  first being where the step goes from any other), `wide` (drawn only at `md` and wider), `roles`
+  (`owner`, `reader` or `any`) and `prepare` (a panel tab, a section, the current block, a recorded
+  route, the app sidebar, or `playbookNode` — a node that names a playbook).
+
+`guides/registry.ts` lists every guide explicitly (`GUIDES`), in the order the "Show me around"
+menu lists the screens, so checks can enumerate them without mounting a page. `screenTourForPath`
+finds the screen tour of a route, matching the pathname without the app's base path
+(`APP_PREFIX`, see `appPathname`): `PageHeader` renders "What is this?" (`GuideButton`,
+`guide-open`) on every route that has one, and the flow and run pages render it in their own diagram
+toolbars. `PageShell` and `PageHeader` take a `guide` prop, which puts an anchor on the page title
+in every state (loading, error, loaded), so a tour's first step resolves before the page's data.
+
+**The screen tours** explain purpose and main controls; detail stays in hints. Steps on
+hideable beginner panels, on the quota (shown once storage is read), on a flow's level badge (only
+flows built with the Workflow Management Flow carry a level) and on the read-only view of another
+account's playbook (open only from a flow's link) are `optional`; the panel steps and the
+read-only view declare their absence (`absentWhen`), so a reader who hid the panels, or opened the
+page without a link, passes them at once. Card actions that show only when the
+card is pointed at or focused (a note's or playbook's history, compare and restore; an artifact's
+open, copy link, edit and delete) are never anchors: the list step's copy says where they are. The home tour ends on "Show me around" in the sidebar (`prepare.sidebar`), which
+on a phone opens the sidebar sheet.
+
+**Required topics** (`guides/topics.ts`, `REQUIRED_TOPICS`) name, per tour, what it must
+explain and the step that does: for example the flow list's `create-by-agent` is its `intro` step,
+which says a flow is created by the agent at an agreed level. Every screen tour has a topic list, and so does the editor's task tour (`flow-editor`), whose topics are the editing controls from creating a step to a save refused on a stale revision.
+
+**Anchors.** An element a step explains carries `data-guide` with one or more space-separated names,
+written as `guideAnchor("screen.name")` so the name stays a literal a static check finds. Names
+follow `<screen>.<name>`; elements the run and flow pages share use `process.`. When several
+elements carry a name, the step points at the first visible one. Test ids keep their own purpose.
+
+**Pages and the provider.** `GuideProvider` is mounted inside `SidebarProvider` by `MainAppLayout`
+and by `AdminLayout` (the admin area shows the run page). It keeps the open guide in the URL as
+`guide=<id>&step=<step>`, so a step can be linked, and `only=<step ids>` when the guide runs just
+the steps that changed; closing removes them and returns focus to the control that opened the
+guide. A page registers a controller for its screen with
+`useGuidePage(screen, controller)`: the view it shows, whether the reader owns what is shown (which
+filters the steps by role), and the operations that prepare it — `setView`, `openPanel`,
+`openSection`, `selectCurrentBlock`, `selectPlaybookNode` (the flow page selects the first node
+that names a playbook) — plus whether a route is recorded. Pass a memoised controller.
+
+**The runner** (`GuideRunner.tsx`, loaded only when a guide opens), for each step:
+
+- brings the page into the step's state: a view that draws it, the panel tab, the unfolded section,
+  the current block; for a step in the app sidebar it opens the sidebar (the phone sheet, or a
+  collapsed rail) and closes again only what it opened;
+- waits until the element exists and has stopped moving (100 ms ticks, up to 3 s), scrolls it into
+  view and, inside a diagram, asks the camera to reveal it (`requestReveal`, `diagram/reveal.ts`);
+  then follows it as the page scrolls or the camera moves;
+- skips an optional step whose element is still absent when the wait ends, a step its
+  `absentWhen` declares absent, and a wide-only step on a narrow screen, with a note on the next
+  card that counts the steps skipped on the way to it ("4 steps were skipped …"); the note belongs
+  to that card, so the same step reached another way (the browser's history, a link) has none. A
+  skipped step gets no card and no announcement: declared-absent and wide-only steps are skipped at once,
+  and any other optional step waits without a card until its element is found (or until the page
+  has switched to a view that draws it). A skipped step leaves no browser history entry, so the
+  browser's Back crosses it. In a run of only the changed steps, a step that cannot be shown is
+  recorded at its revision, so "What is this?" does not keep offering it. A step is skipped in the direction the reader last moved, so Back crosses it.
+  The wait for a view switch is bounded like any other wait. A required step whose element is
+  absent shows its card with a "not found" note and keeps looking for it; when the element arrives
+  (a page whose code or data comes late), the note goes and the card moves beside it;
+- dims everything but the element with a `pointer-events: none` layer (`guide-spotlight`, colour
+  `--guide-dim`) and a ring, and never writes to the element;
+- records the step as seen at its revision and as the place to resume (the guide, the step, the
+  page's path and query without the guide's own parameters, and — on a screen whose page reports
+  it — whether the reader owns what the page shows). Walking a guide to its end finishes
+  it and clears the resume point; closing it keeps it. A run of only the changed steps records
+  them as seen and nothing else: it neither moves the resume point nor finishes the guide.
+
+**The card** (`guide-card`, a non-modal `role="dialog"` titled by the step) sits where
+`data-guide-dock` says:
+
+- `beside` — a Radix popover next to the visible part of the element, on a wide screen;
+- `corner` — the bottom-right corner, when the element is absent or taller than half the window;
+- `bottom` or `top` — a sheet across a narrow screen. The element is scrolled to the top of its
+  scroll area, and the sheet docks to the bottom unless the element would be under it there and a
+  top sheet covers less of it (`sheetEdge`).
+
+When the element sits in a modal dialog (the phone sidebar sheet), the card is rendered inside that
+dialog, which keeps it reachable; an element in a popover keeps the card in the page. Focus moves
+into the card; the right arrow and Enter go on, the left arrow goes back, Escape closes, and none of
+them act while the reader types in a field. Each step is announced once through a polite live
+region (`guide-announcer`). Under reduced motion (`usePrefersReducedMotion`) nothing animates.
+
+**Progress** (`guides/progress.ts`) is one user setting, `ui.guide_progress` (category `ui`, type
+`json`, default `{}`), seeded beside `ui.hidden_panels`:
+
+- `firstRun`: the answer to the first-run prompt, `accepted` or `declined`;
+- `resume`: `{guide, step, path}`, plus `tour` (`true`) when the guide was a leg of the full
+  tour, and `owner` (`true` or `false`) when the page reported the
+  reader's role; the menu numbers "Continue" over that role's steps, so a reader who owns one flow
+  and reads another is counted in the role they stopped in. A non-boolean `owner` is ignored on
+  read;
+- `seen`: `<guide>.<step>` → the step's revision when the reader last saw it;
+- `tutorials`: `<tutorial>` → `{copyId, lessons}`: the reader's copy a tutorial works on and each
+  passed lesson's saved `revision` (with `forMe: true` when "Do it for me" made the change);
+- `offered`: `<guide>` → `true` for a tour offered once — the editor tour, recorded when its offer
+  (`EditorTourOffer`, `editor-tour-offer`) first shows above the edit bar, so the next switch into
+  edit mode offers nothing whatever the answer;
+- `finished`: `<guide>` → `true` for a guide walked to its end. Finishing also records every step
+  the guide shows this reader at its current revision, the skipped ones included; another role's
+  steps stay unseen.
+
+The schema checks those fields and accepts any other, so a later build can add its own. The
+in-page copy is `lib/userSettingStore.ts`, the store the beginner panels also use. A change is a
+function of the stored value; it shows at once, is saved against the value re-read from the server
+(so tabs and devices never undo each other and unknown fields are kept), and is taken back and
+reported ("Couldn't save your guide progress") when the server refuses it.
+
+A step is **new** when the reader saw it at a revision below its current one, or, in a guide they
+finished, when they never saw it, meaning it was added since. In a guide not finished, a step not
+reached yet is simply unseen, as is every step of a guide never opened. Away from a tour's own page
+the menu counts the reader against every step for everyone, plus the role-only steps of the role
+they were shown, once they have seen one; before that, as a reader, the way the page counts
+someone who does not own what it shows. When a screen's tour has new steps,
+"What is this?" carries a dot (`guide-new-dot`, `data-new-steps`) and runs only those steps; the
+last card offers the whole tour (`guide-whole-tour`). Nothing opens by itself.
+
+**Entry points:**
+
+- **The first-run prompt** (`FirstRunPrompt`, `first-run-prompt`) sits inline at the top of home
+  for an account with no guide progress at all. The layout passes `promptReady` to the provider: true once
+  the features are known and the beta agreement, where the deployment asks it (`betaNotices`), is
+  accepted. "Show me around" records `accepted` and opens the guides menu (the sidebar sheet first
+  on a phone); "Later" hides it for the browser session (a session cookie, `moira-guides-later`,
+  shared by every tab); "No thanks" records `declined`.
+- **"Show me around"** (`ShowMeAround`, `show-me-around`) is in the sidebar footer above the user
+  menu, so it is also in the phone sheet and the admin area. Its menu (`show-me-around-menu`)
+  offers the full tour (`show-me-around-full-tour`, see "The full tour" below), this page's tour
+  (or says the page has none), "Continue" to the resume point (it opens that
+  page with the guide at that step), and each screen tour's status: not started, in progress, seen,
+  or N new steps. "Seen" means the tour was walked to its end. The button carries
+  `data-progress="loaded"` once the reader's progress is read. It closes on Escape and on a press
+  outside, not when focus leaves it (the phone sheet takes focus as it opens around it).
+- **Settings → Preferences → Guides** (`preferences-guides`): "Start the tour again" forgets the
+  seen steps and finished marks of every guide in the full tour and the resume point
+  (`restartGuides`), and starts the full tour; "Forget what I have
+  seen" clears `firstRun`, `resume`, `seen`, `finished`, `offered` and `tutorials` (keeping any other field) and this
+  session's "Later", so the prompt comes back.
+
+**The tutorial** "Build your first flow" (`guides/tutorial/`) is a guide of kind `tutorial` whose
+steps are lessons 0–7 (how flows are made, the copy, a step, connecting it, a choice, a value from an
+earlier step, an optional run of the copy, what next); for it `GuideProvider` loads `TutorialRunner` instead of the tour runner. It runs
+on the flow page, which gives it a `TutorialSurface` on its page controller: the saved definition
+and revision, the draft and its process diagnostics, the copy's visibility and ownership, whether a
+save was refused as stale, and `openForEditing`, `apply`, `reload`, `copy` and `showFindings`. The
+surface's callbacks go through a ref, so the controller changes only with what it reports. The
+lesson checks are pure functions in the engine's authoring entry (`checkOwnCopy`, `checkNewStep`, `checkConnected`, `checkChoice`, `checkReference`, finding codes `TUTORIAL_FINDING_CODES`, copy
+`guides.build-flow.findings.<code>`). The runner checks the draft after every change and hands the
+findings to the page, which places them with the validation issues (source `tutorial`, warnings); it
+records a lesson (`tutorials` in progress) only when the check passes on the saved definition with
+no unsaved edits. A stale save shows an explanation and a reload; an earlier building lesson that no
+longer holds on the draft is named with a way back; below `md` the card explains that editing needs
+a larger screen. Each distinct result is announced once (`useResultAnnouncement`). The menu starts
+it (`tutorial/start.ts`) on the example of the reader's language, or on the recorded copy at the
+first lesson not passed while the copy exists; "Use as Template" carries an open tutorial into the
+copy. The editor tour's offer waits while any guide or tutorial is open. Lesson 6 has no definition
+check: it looks up the reader's completed runs of the copy (`getExecutions` with `mine`) for one
+whose context answered the new step, offers "Check again" and "Skip", and never passes otherwise.
+Lesson 7 offers to delete the copy, which also forgets it. A lesson does not move on by itself when
+its result holds: the card says it is done, announces it, and opens Next. The ids of the example the lessons name
+are `TUTORIAL_EXAMPLE_IDS`, held to both language versions by a test. Besides the menu, the
+tutorial opens from the **Practice** card after the examples in the recommended flows (with a
+`practice` step in the home and flow-list tours) and from the full tour's closing card
+(`TourClosingOffer`), shown once the last screen's tour is walked.
+
+**The full tour** (`guides/fullTour.ts`) chains the screen tours in a fixed order (every toured
+screen of the route table, the admin area excluded) (`FULL_TOUR_LEGS`): home, the flow list, the example flow of the reader's
+language (the Simple Steps entry of `recommendedFlows`), runs, the reader's latest run (the newest
+by `updatedAt` from `getExecutions` with `mine`, so an admin gets their own), notes, playbooks, artifacts and Settings. A reader with no run,
+or whose run list cannot be read, gets the `runs-empty` fallback on the runs list instead, which
+hands over the prompt to start one. The chain lives in the URL as `tour=full` beside `guide` and
+`step`, so it survives a reload: finishing a leg's guide opens the next leg (`continueTour`), and
+leaving the page drops the guide, which pauses the chain — the resume point keeps `tour`, and
+"Continue" resumes it. Opening any guide on its own, or closing one, removes `tour`.
+
+**Copy** lives only in the locale files: `guides.<guide>.title`,
+`guides.<guide>.steps.<step>.title` and `.body`, and the shared `guides.ui.*`, `guides.menu.*` and
+`guides.firstRun.*`. Every step needs both
+English and Russian, and guide components use no `defaultValue` fallbacks.
+
+**Checks** (`tests/unit/web-frontend/guides-registry.test.ts`, `guides-coverage.test.ts` and
+`locale-parity.test.ts`):
+
+- every route in the route table (see "Routes") is toured by its screen's guide, exempted with a
+  reason, or deferred with a reason (the admin area); every guide names only routes of its screen,
+  and has steps;
+- every required topic of a screen is a step of that screen's tour whose anchor is written in the
+  page;
+
+- every anchor a step names is written by a `guideAnchor` literal, and every literal is named by a
+  step;
+- every step is reachable from every view it can be opened on and prepares only panels and sections
+  its screen has;
+- every step has its copy in both languages;
+- the committed `guides/revisions.snapshot.json` matches each step's revision and a fingerprint of
+  its anchor and English copy. When a step's anchor or English text changes, decide whether that is
+  a new revision (raise `revision`), then run `npm run guides:snapshot` to refresh the file.
+
 ## Routes
 
-Application routes:
+Every route is data in `src/routes/routeTable.ts`, and `App.tsx` renders its routes from that table:
+`STANDALONE_ROUTES` outside the app layout (under the base path), `MAIN_ROUTES` inside
+`MainAppLayout`, `ADMIN_ROUTES` inside `AdminLayout`, and `ROOT_REDIRECT`, which sends the site root
+`/` to the home page when the app lives under a base path. `App.tsx` maps each route id to its page
+(`STANDALONE_PAGES`, `MAIN_PAGES`, `ADMIN_PAGES`); a route marked `signedIn`, and every main and
+admin route, renders behind `ProtectedRoute`, and an admin route with a `capability` requires both
+the administrator role and that deployment capability.
 
-```
-/ (protected)                      - Dashboard (home page)
-/workflows (protected)             - Workflow explorer + viewer
-/workflows/:id (protected)         - Flow page (FlowPage.tsx); also /workflows/:handle/:slug
-/executions (protected)            - Execution history
-/playbooks (protected)             - Playbooks (Playbooks.tsx)
-/artifacts (protected)             - User artifacts management
-/settings (protected)              - User settings (single scrollable page with all sections)
-/admin (protected)                 - Admin dashboard with merged analytics
-/admin/users (protected)           - User management (PageShell + DataListView + UserCard)
-/admin/users/:id (protected)       - User detail and security management
-/admin/executions (protected)      - Admin executions monitoring (PageShell + DataListView + ExecutionCard)
-/admin/executions/:id (protected)  - Admin run page (same component as /executions/:id)
-/admin/audit-log (protected)       - Audit log viewer (PageShell + AuditLogCard + total-based pagination)
-/admin/settings (protected)        - Unified settings (Definitions, Values, Maintenance, Codespaces tabs)
-/admin/admin-settings (protected)  - Redirects to /admin/settings
-/admin/analytics (protected)       - Redirects to /admin
-/admin/analytics/operational (protected) - Operational metrics dashboard (OperationalDashboard.tsx)
-/admin/deleted-workflows (protected) - Deleted workflows management (PageShell + DataListView + DeletedWorkflowCard)
-/admin/workflows (protected)         - All workflows browser with filters (PageShell + FilterBar + DataListView + AdminWorkflowCard)
-/admin/notes (protected)           - Notes management (persistent agent memory)
-/admin/tokens (protected)          - Admin API token management (PageShell + DataListView + TokenCard)
-/admin/artifacts (protected)       - Admin artifacts management (PageShell + DataListView + ArtifactCard)
-/admin/monitoring-test (protected) - Monitoring test page for validating monitoring pipeline
-/login (public)                    - Login page
-/register (public)                 - Registration page
-/registration-success (public)     - Post-registration email verification instructions
-/force-password-reset (protected)  - Forced password reset page
-/oauth/authorize (public)          - OAuth authorization
-```
+Each entry also says how a reader has it explained (`coverage`): `screen` names the screen tour, and
+`exempt` or `deferred` gives the reason it has none. The route-coverage check (see "Guides") holds
+the table and the guides to each other, so a new route cannot land without that decision.
 
-Protected routes require authentication (ProtectedRoute wrapper).
+Standalone routes:
+
+| Path                    | Guard     | Coverage                                                                      |
+| ----------------------- | --------- | ----------------------------------------------------------------------------- |
+| `/login`                |           | exempt: a sign-in, registration or account-recovery page, seen before the app |
+| `/register`             |           | exempt: a sign-in, registration or account-recovery page, seen before the app |
+| `/registration-success` |           | exempt: a sign-in, registration or account-recovery page, seen before the app |
+| `/forgot-password`      |           | exempt: a sign-in, registration or account-recovery page, seen before the app |
+| `/reset-password`       |           | exempt: a sign-in, registration or account-recovery page, seen before the app |
+| `/force-password-reset` | signed in | exempt: a one-time password change forced before the app opens                |
+| `/verify-email`         |           | exempt: a sign-in, registration or account-recovery page, seen before the app |
+| `/oauth/authorize`      |           | exempt: an OAuth approval screen an MCP client opens, not a page of the app   |
+| `/oauth/consent`        |           | exempt: an OAuth approval screen an MCP client opens, not a page of the app   |
+| `/test-error`           |           | exempt: a page that throws on purpose, for the error-boundary tests           |
+| `/invites/:token`       |           | exempt: a one-time invitation page, opened from an email                      |
+
+Main routes (signed in):
+
+| Path                       | Guard | Coverage         |
+| -------------------------- | ----- | ---------------- |
+| `/`                        |       | tour `home`      |
+| `/workflows`               |       | tour `flows`     |
+| `/workflows/:handle/:slug` |       | tour `flow`      |
+| `/workflows/:id`           |       | tour `flow`      |
+| `/executions`              |       | tour `runs`      |
+| `/executions/:id`          |       | tour `run`       |
+| `/notes`                   |       | tour `notes`     |
+| `/playbooks`               |       | tour `playbooks` |
+| `/artifacts`               |       | tour `artifacts` |
+| `/settings`                |       | tour `settings`  |
+
+Admin routes (administrators; the admin tour is postponed and tracked separately):
+
+| Path                        | Guard                              | Coverage                                           |
+| --------------------------- | ---------------------------------- | -------------------------------------------------- |
+| `/admin`                    |                                    | deferred: admin tour postponed; tracked separately |
+| `/admin/users`              | capability `userManagement`        | deferred: admin tour postponed; tracked separately |
+| `/admin/users/:id`          | capability `userManagement`        | deferred: admin tour postponed; tracked separately |
+| `/admin/executions`         | capability `multiUserAdmin`        | deferred: admin tour postponed; tracked separately |
+| `/admin/executions/:id`     | capability `multiUserAdmin`        | deferred: admin tour postponed; tracked separately |
+| `/admin/workflows`          | capability `multiUserAdmin`        | deferred: admin tour postponed; tracked separately |
+| `/admin/artifacts`          | capability `multiUserAdmin`        | deferred: admin tour postponed; tracked separately |
+| `/admin/artifacts/reported` | capability `multiUserAdmin`        | deferred: admin tour postponed; tracked separately |
+| `/admin/audit-log`          |                                    | deferred: admin tour postponed; tracked separately |
+| `/admin/settings`           |                                    | deferred: admin tour postponed; tracked separately |
+| `/admin/global-settings`    |                                    | deferred: admin tour postponed; tracked separately |
+| `/admin/deleted-workflows`  | capability `multiUserAdmin`        | deferred: admin tour postponed; tracked separately |
+| `/admin/monitoring-test`    | capability `operationsDevelopment` | deferred: admin tour postponed; tracked separately |
+| `/admin/tokens`             |                                    | deferred: admin tour postponed; tracked separately |
+| `/admin/operational`        | capability `adminOperations`       | deferred: admin tour postponed; tracked separately |
+| `/admin/analytics`          |                                    | exempt: a redirect to the admin dashboard          |
+
+`/admin/analytics` is a redirect to `/admin`.
 
 Sidebar navigation:
 
@@ -307,8 +591,9 @@ Active route highlighting via NavLink isActive.
 
 ### Home page
 
-The home page (`pages/Dashboard.tsx`, route `/`) leads with how Moira is meant to be used
-(`home-how-it-works`). It shows three numbered steps (`home-steps`):
+The home page (`pages/Dashboard.tsx`, route `/`) opens, for an account with no guide progress at all,
+with the one-time first-run prompt (`first-run-prompt`, see "Guides"). It then leads with how Moira
+is meant to be used (`home-how-it-works`). It shows three numbered steps (`home-steps`):
 
 1. connect your agent;
 2. describe the task in plain words;
@@ -362,8 +647,9 @@ A hidden panel renders nothing.
 
 Which panels are hidden belongs to the account: the user setting `ui.hidden_panels` (category
 `ui`, type `json`, a list of panel ids, default empty), seeded like every built-in definition and
-written with the bulk `PUT /api/settings`. `components/onboarding/beginnerPanels.ts` holds the ids and
-one in-page copy of the set, keyed by the signed-in account, that every panel and the Settings
+written with the bulk `PUT /api/settings`. `components/onboarding/beginnerPanels.ts` holds the ids and,
+through `lib/userSettingStore.ts` (the one in-page store for a user setting the interface edits
+optimistically, which the guide progress uses too), one copy of the set, keyed by the signed-in account, that every panel and the Settings
 switches read (`usePanelVisible`, `useBeginnerPanels`, `setPanelHidden`). A panel is drawn only once
 the set is known. A change shows at once; saves run one after another and each applies its change to
 the list re-read from the server, so quick successive hides are all kept and another device's change
@@ -424,8 +710,8 @@ One page at `/settings` whose sections are all always mounted. `Settings.tsx` do
 
 **Frame:**
 
-- `PageHeader` with the title, a one-sentence description and **Explain this page**, which opens
-  the page tour.
+- `PageHeader` with the title, a one-sentence description and **What is this?**, which opens the
+  Settings screen tour.
 - `SettingsNav`: on wide screens a sticky list of the sections beside the content, on narrow screens
   a sticky row of chips above it; the section being read is marked with `aria-current` as the reader
   scrolls (`useActiveSection`), and choosing one moves to it.
@@ -437,20 +723,21 @@ One page at `/settings` whose sections are all always mounted. `Settings.tsx` do
 **Sections** (each a `SettingsSection`: icon, heading, one-sentence description, optional
 `HelpPopover` and actions; the anchor is the section `id`):
 
-| Anchor                | Section             | `data-testid`                   | Content                                                                                                                                                                                                                                                         |
-| --------------------- | ------------------- | ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `account`             | Account             | `settings-section-profile`      | `ProfileSettings`: name, email with verification badge, handle with a help popover on why changing it breaks links and a confirmation                                                                                                                           |
-| `security`            | Security & sign-in  | `settings-section-security`     | `SecuritySettings`: the change-password form, or for an account that signs in only through a social provider, how it signs in and a set-password form; an Active Sessions subsection (`settings-section-sessions`, help popover) with `SessionsSettings`        |
-| `notifications`       | Notifications       | `settings-section-dynamic`      | One `CommunicationChannelCard` per channel, a help popover, the **Telegram setup** tour button when Telegram is present, an empty state without channels                                                                                                        |
-| `integrations-github` | GitHub & Codespaces | `settings-section-integrations` | Help popover, **Setup guide** tour, and the connection, Cloud codespaces, Automatic pause and Your limits cards under one `GitHubCodespacesProvider`                                                                                                            |
-| `connected-apps`      | Connected apps      | `settings-section-oauth`        | `OAuthSettings` with a help popover                                                                                                                                                                                                                             |
-| `api-tokens`          | API tokens          | `settings-section-api-tokens`   | `ApiTokensSettings` with a help popover on when a token is needed, the Bearer header and the one-time display                                                                                                                                                   |
-| `preferences`         | Preferences         | `settings-section-preferences`  | `PreferencesSettings` theme (Light/Dark/System, via `useTheme`) and interface language, both kept in this browser; the beginner-panel switches (the account's `ui.hidden_panels`); then the generic editor for remaining definitions (`settings-section-other`) |
+| Anchor                | Section             | `data-testid`                   | Content                                                                                                                                                                                                                                                                                                                                                     |
+| --------------------- | ------------------- | ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `account`             | Account             | `settings-section-profile`      | `ProfileSettings`: name, email with verification badge, handle with a help popover on why changing it breaks links and a confirmation                                                                                                                                                                                                                       |
+| `security`            | Security & sign-in  | `settings-section-security`     | `SecuritySettings`: the change-password form, or for an account that signs in only through a social provider, how it signs in and a set-password form; an Active Sessions subsection (`settings-section-sessions`, help popover) with `SessionsSettings`                                                                                                    |
+| `notifications`       | Notifications       | `settings-section-dynamic`      | One `CommunicationChannelCard` per channel, a help popover, the **Telegram setup** tour button when Telegram is present, an empty state without channels                                                                                                                                                                                                    |
+| `integrations-github` | GitHub & Codespaces | `settings-section-integrations` | Help popover, **Setup guide** tour, and the connection, Cloud codespaces, Automatic pause and Your limits cards under one `GitHubCodespacesProvider`                                                                                                                                                                                                        |
+| `connected-apps`      | Connected apps      | `settings-section-oauth`        | `OAuthSettings` with a help popover                                                                                                                                                                                                                                                                                                                         |
+| `api-tokens`          | API tokens          | `settings-section-api-tokens`   | `ApiTokensSettings` with a help popover on when a token is needed, the Bearer header and the one-time display                                                                                                                                                                                                                                               |
+| `preferences`         | Preferences         | `settings-section-preferences`  | `PreferencesSettings` theme (Light/Dark/System, via `useTheme`) and interface language, both kept in this browser; the beginner-panel switches (the account's `ui.hidden_panels`); the Guides block (`preferences-guides`: "Start the tour again", "Forget what I have seen"); then the generic editor for remaining definitions (`settings-section-other`) |
 
-**Tours:** `settingsTours.ts` defines the page tour, the GitHub & Codespaces setup tour and the
-Telegram setup tour, run by the shared `Walkthrough` and addressed by `?tour=<id>&guide=<step>`, so a
-step can be linked and reopened. Every step anchors an element the page always renders. Texts live
-under `pages.settings.tours.<tour>`.
+**Guides:** `pages/settings/settings.guide.ts` declares the Settings screen tour (`settings`), one
+step per section, and two task tours, `settings-github` and `settings-telegram`, which the GitHub &
+Codespaces and Notifications sections start with their own buttons. They run on the guide engine
+(see "Guides") and are addressed as `?guide=<id>&step=<step>`. Every step anchors an element the
+page always renders.
 
 **Reusable primitives** (`components/settings/`): `SettingsSection` and `SettingsSubsection`,
 `SettingsNav` with `useActiveSection`, `HelpPopover` (a question-mark button opening a
@@ -617,46 +904,57 @@ declares (`pages/FlowPage.tsx`).
 **Data:** the workflow detail (`apiClient.getWorkflow`, whose `fileInfo.revision` is the
 definition revision the page saves against) and the saved definition's derived process
 (`apiClient.getWorkflowProcess`), both held in `useResource` stores (the detail through
-`useWorkflowDetail`, the process keyed by workflow id and refreshed when the revision changes): a
+`useWorkflowDetail`, the process keyed by workflow id and refreshed when the revision changes;
+each projection carries the revision it was asked for, and until the refetch for a new revision
+lands the page derives that revision's process in the browser rather than pairing the new
+definition with the old projection): a
 refetch keeps the current value on screen with a "Refreshing…" indicator (`flow-pending`, in the
 header row or the no-process bar), the page loader appears only before the first data of a
 workflow (a move to another workflow through breadcrumbs or a subgraph link is a first load and
 shows nothing of the previous one), and a failed refetch keeps the content and reports once
 through a toast. While the page holds unsaved edits it re-derives the process in
 the browser with the engine's `deriveProcess` (the `@mcp-moira/workflow-engine/process` subpath),
-so the diagnostics it shows are the ones the server's validation would raise. The map renders a
+so the diagnostics it shows are the ones the server's validation would raise, and it has the
+server validate the draft itself (see **Editing** below). The map renders a
 run-less projection (`components/flow/model.ts`: every block pending, no route, no cursor, no run
 title) through the run page's `MapView`; the page's context (`EditingProvider` with
 `definition`) makes the shared status chips and icons, the run's no-content sentences and the run
-notes disappear, and the map reads its guidance from `pages.flowPage.modeGuide`. Derivation
-diagnostics are also shown on the offending block or step (`DiagnosticBadge`), and the registry
-panel edits a whole declaration as JSON Schema besides its type, description and default.
+notes disappear, and the map reads its guidance from `pages.flowPage.modeGuide`. The context also
+carries where each current problem sits, so a block, a step and a connection show their own, and
+the registry panel edits a whole declaration as JSON Schema besides its type, description and
+default.
 
 **URL state:**
 
 - `view` (`steps | map | graph`, registry `components/flow/modes.ts`): the default is `steps` for
-  the learning examples (`preferredFlowView`) and `map` otherwise; any other value resolves to that
-  default; a workflow without `progress` has no map and shows the graph in its place.
+  the learning examples (`preferredFlowView`) and for every flow below the `sm` width
+  (`usePhoneWidth`), where a canvas would open with its first card cut at the screen's edge, and
+  `map` otherwise; a `view` in the link still wins, so the map and the graph stay one tap away on a
+  phone; any other value resolves to that default; a workflow without `progress` has no map and
+  shows the graph in its place.
 - `block`.
-- `guide` (walkthrough step).
+- `guide` and `step` (the open guide and its step; see "Guides").
 - `edit` (`1` turns on edit mode; ignored for non-owners).
 - `inline` (`1` or `0`: variables as words on the steps view; without it the reader's stored
   choice, `moira.flow.inlineVariables`, default on).
 
 **Layout:** the `PageHeader` (`flow-header`) carries the page's text and its own actions — back,
 the workflow name (`flow-title`), `v<version>` as the meta, the description as the header line,
-and as header facts the workflow's tags (`flow-tag`) and its node count (`flow-node-count`) —
+and as header facts the level the flow was authored at (`flow-level-badge`, absent without a
+level tag), its subject tags (`flow-tag`, never the level tag) and its node count
+(`flow-node-count`); on a narrow screen the fact chips wrap below the description rather than
+squeezing it —
 with the edit toggle and its hint for owners and the owner actions (copy for public flows,
 visibility, share, delete) on the right, folded into a dropdown below `md`. Everything that acts
 on the diagram lives in the `DiagramToolbar` beneath it, which the active view mounts: the view
 tabs (`flow-modes`) as the toolbar's `modes` slot, the contents fold button, the folded step
 finder, the layout presets, zoom/fit, the minimap switch, and trailing the refresh indicator and
-"Explain this page" (`guide-open`).
+"What is this?" (`guide-open`), which opens the flow page's tour.
 
-Then, in order: the edit panel while editing (the edit count, which is the export diff's entry
-count so a value typed back to what is stored is not an edit; discard, which clears every recorded
-edit; save; the loaded revision; the export diff as flow-file path / before / after; the server's
-refusal message); the process diagnostics inline; the active view filling the main area; and the
+Then, in order: the edit bar while editing (`EditBar`, `flow-edit-panel`); the problem list
+(`ProblemList`, `flow-diagnostics`: every error, and while editing every warning too, each with its
+place — an edge, a step or a block — whose button brings the step into view); the active view
+filling the main area; and the
 panel beside it (under it on a phone, foldable through `flow-panel-collapse` / `flow-panel-expand`)
 with the **Block** tab and the **Variables** tab (`RegistryPanel`: the registry on the shared
 variable rows — name, type badge and default in the row, description and the whole declaration as
@@ -700,7 +998,7 @@ and the page's panel is not mounted beside it:
     with its order ("(#2)") where two would read alike, and a return to one reads "back to: …".
 
   The view carries `data-presentation`. Cards keep `steps-card` with `data-step-kind` and
-  `data-node-id`, so the walkthrough's anchor holds on both.
+  `data-node-id`, and the flow tour's anchors hold on both.
 
 - With words on, `TemplateText` also reads the engine's template blocks: `#if`, `#unless`, `#eq`,
   `#neq`, `#each`, `else`, `this` and `@index` become short words in parentheses
@@ -713,22 +1011,141 @@ graph receives `focusRequest` (a chosen node brought into view), `selectedBlockI
 group is ringed and pulses on arrival) and the page's toolbar slots, and it takes its contents
 fold button through `ContentsToggleProvider` / `ContentsToggleSlot`. Selection lives in the URL and
 the graph re-centres on its focus request, so a switch loses nothing; the graph's lazy chunk is
-fetched when its view is first shown, behind `DiagramSkeleton`.
+fetched when its view is first shown, behind `DiagramSkeleton`. The camera follows one step
+through relayouts: the step the reader last travelled to inside the graph (the finder, a port, an
+arrival chip), or else the page's latest focus request, or else the run's current step. A new
+request, or the run moving to another step, replaces the travelled step.
 
-**Editing** (`components/flow/editing.tsx`): the edit set covers block label and summary,
-connection labels with a loop's cause and exit, node ownership, node text (directive, completion
-condition, message, expressions) and registry entries; `applyEdits` yields the edited definition,
-`exportDiff` the changed flow-file entries. Editors (`components/flow/EditControls.tsx`), all in
-the block panel: `BlockNameEditor` / `BlockSummaryEditor` on the block header, `TransitionEditor`
-on each transition, `OwnerSelect` and `NodeTextEditor` on each step card; `RegistryPanel`
-(variables tab; a default and a whole declaration are parsed as JSON before they
-are applied). The save calls
-`apiClient.updateWorkflow(id, edited, fileInfo.revision)` (`PUT /api/workflows/:id`); a 409 shows
-the conflict text and a 400 the server's message, both keeping the edits; a success clears them and
-reloads the detail and then the process for the new revision, the previous picture staying mounted
-through both. The walkthrough (`Walkthrough`, generic over the page's views) opens on
-the agent-first message (anchored on the page header), then the steps view (an instruction card, or
-the **Steps** tab on the map and the graph), then block, step, evidence, loop, editing and the views.
+**Editing.**
+
+- **The edit log** (`components/flow/operations.ts`) is an ordered list of operations over the
+  saved definition, and the draft the page shows, derives, validates and saves is its fold. The
+  saved graph is never mutated.
+  - Content operations are applied as typed: block label and summary, a connection label with a
+    loop's cause and exit, a node's block, node text (directive, completion condition, message,
+    expressions) and a registry entry. Consecutive edits of one field merge into one operation.
+  - Structural operations go through the engine's authoring functions
+    (`@mcp-moira/workflow-engine/authoring`): add, insert on an edge, remove, rename, set or remove
+    a connection, add or remove a block, and set or remove a step's choice (`set-choice`, applied by
+    `setChoice`, carrying the new steps its options lead to so the whole choice is one undo step). `appendOperation` applies one to the current draft first,
+    so a refused operation throws its `AuthoringError` and never enters the log.
+  - `exportDiff` compares the saved definition with the draft, following node ids through renames.
+    It yields `change` entries (flow-file path, before, after) and one entry per added, removed or
+    renamed node — a rename with the references it rewrote, per location — or per added or
+    removed block.
+- **Page state** (`components/flow/editing.tsx`). `useEditLog` holds the log, the draft, `apply`,
+  `undo` and `reset`. It keeps the draft after each operation and reuses those drafts while the log
+  only grows or its last entry is replaced, so a keystroke does not refold (and re-clone) the whole
+  log. The log is dropped when the page moves to another workflow.
+  `EditingProvider` gives the views the setters (each appends one operation), the generic
+  `apply`, and the problem placement.
+- **Structural editing** (`components/flow/StructureControls.tsx`), shown only in edit mode:
+  - a step card's menu (`StepActions`) opens the rename and delete dialogs;
+  - `ConnectionsEditor` on each step card retargets, adds and removes outputs;
+  - `AddStep` sits under a block's steps;
+  - `DeleteBlock` on each contents row and `AddBlock` under the contents list;
+  - `ChoiceEditor` (`components/flow/ChoiceEditor.tsx`) on an agent step's card: "Add a choice",
+    or the existing choice when the engine's `readChoice` recognises one, opens a dialog that
+    commits one `set-choice`. `setChoice` writes the answer field with `enum` and its `required`
+    entry, one `eq` case per non-default option, the option connections and labels; the default
+    option rides the step's primary output. A step whose cases are not of that shape gets no
+    control.
+
+  Each commits one operation through `apply` and shows an `AuthoringError` inline. The dialogs read
+  the consequence from the draft first (`components/flow/structure.ts`):
+  - `renamePreview`: the id problem, every rewritten location including incoming connections,
+    prose mentions (the engine's `findProseMentions` reads every place a definition holds prose:
+    node fields, the process, block labels and content, the registry, the metadata and the
+    `systemReminder`; a block's list binding holds only paths), and the teleport flag;
+  - `deletePlan`: incoming edges keyed by the engine's `edgeId`, each proposed to lead to the
+    deleted step's primary target and marked protected when it is its source's primary output;
+    the start refusal; and references left dangling;
+  - `targetGroups`: steps by block;
+  - `insertBlockChoice`: the two blocks a step inserted on a connection may join, only for a
+    connection between blocks that `deriveProcess` does not report as a back-edge; `AddStepDialog`
+    passes the target's block as the `insert-on-edge` operation's `blockId`, and on a return it shows
+    why the step stays in the source's block;
+  - `creatableTypes`: every catalog type but `start`, each with its required fields. A text or a
+    list of texts is typed as such, any other structure as JSON starting from `[]` or `{}`, and an
+    extension's `config` as JSON, required when its schema requires a key. `fieldProblem` marks a
+    missing field or invalid JSON, and `newNode` parses what was typed;
+  - `pausedRunWarnings`: the owner's running executions (`getExecutions`, fetched once the export
+    has a rename or removal) paused on a renamed or removed step, shown in the edit bar as
+    `flow-edit-run-warnings`.
+
+  The editing context carries the draft and its blocks for these controls.
+
+- **Graph editing** (`components/flow/CanvasEditing.tsx`, `components/flow/canvas.ts`), only in edit
+  mode. `CanvasEditingHost` wraps the page's `WorkflowGraph` and hands it an `editing` interface.
+  Without it the graph is read-only, which is how the run page uses it.
+  - **Menus at the pointer:**
+    - a step: rename, insert after (`insertAfterEdge`, the primary output's edge), delete;
+    - a connection, from its line or its output port (`[data-port="out"][data-transition]`):
+      insert on it, lead elsewhere, remove (disabled for a primary output);
+    - the empty canvas: add a step in the block whose group is under the pointer. Groups take no
+      pointer events, so `blockAtPoint` compares the pointer with the groups' boxes.
+  - **Ports.** Each card that can have outputs carries a `+ output` port (`out:new`), and every card
+    carries a drop port (`in:new`), with a 40 px connection radius.
+  - **`connectIntent`.** A drag from an output port to a card retargets it (`set-connection`); a
+    drag from `out:new` opens the output-name dialog. React Flow reports a target only near a
+    handle, so `releaseAt` resolves the release: anywhere on a card (the `[data-graph-node]` under
+    the pointer) still connects to that step, while a release on the card the drag started from, or
+    outside the graph, does nothing.
+  - **`dropOnCanvasIntent`.** A drop on the empty canvas opens the add-step dialog for a step the
+    output leads to, which is one `add-connected-node` operation. A new output is named in the same
+    dialog.
+  - **Camera.** After a canvas action the page focuses the changed step; cancelling a dialog
+    leaves the camera where it is.
+  - **Workflows without `progress`.** The owner gets edit mode, the edit bar and every operation
+    except the block ones, and a new step joins no block.
+
+- **Editors** (`components/flow/EditControls.tsx`) all sit in the block panel: `BlockNameEditor` /
+  `BlockSummaryEditor` on the block header, `TransitionEditor` on each transition, `OwnerSelect`
+  and `NodeTextEditor` on each step card, and `RegistryPanel` in the variables tab (a default and
+  a whole declaration are parsed as JSON before they are applied).
+- **Draft validation.**
+  - `useDraftValidation` sends the draft to `POST /api/workflows/:id/validate` (`workflowData`)
+    once it has been unchanged for `DRY_RUN_DELAY_MS`. It keeps an answer only while the draft
+    that answer judged is still the current one, and it exposes the session's `latest` answer,
+    which the page shows while the next check is pending.
+  - `placeIssues` (`components/flow/issues.ts`) merges the browser's process diagnostics with the
+    server's located issues. An issue goes on an edge (`<node>.<key>` from a diagnostic's edge, or
+    an issue field `connections.<key>` / `connectionLabels.<key>` of an existing connection), on
+    a node, on a block, or on the page. The server's restatements of process diagnostics
+    (`isProcessDiagnosticMessage`) are skipped, because the browser's layer already placed them.
+  - Where problems show:
+    - the step card's `DiagnosticBadge`, with its connection chip marked through
+      `connectionIssuesOf`;
+    - a transition in the block panel;
+    - a graph card's badge, and a problem connection's output port and line (`WorkflowGraph`
+      `issues`);
+    - `NodePanel`'s validation, which reads the draft's validation;
+    - `ProblemList`.
+- **The edit bar** shows:
+  - the change count (the export's entry count, so a value typed back is not a change);
+  - Undo and Discard;
+  - the export toggle (`flow-edit-export-toggle`);
+  - the gate state (`flow-edit-gate`, `data-gate`), with Retry after a failed check;
+  - the loaded revision;
+  - Save.
+- **The save gate.** `saveGate` enables Save only for a changed draft with no process diagnostics
+  whose dry run is done, judged this very draft object, and found no error.
+- **Saving.** The save calls `apiClient.updateWorkflow(id, draft, fileInfo.revision)`
+  (`PUT /api/workflows/:id`).
+  - A 409 shows the conflict text.
+  - A 400 hands its `details.validation` to the dry run as the answer for that draft, so the
+    refusal is placed like a check.
+  - Both keep the draft.
+  - A success clears the log and reloads the detail and then the process for the new revision,
+    the previous picture staying mounted through both.
+
+The flow page's tour (guide `flow`, declared in `pages/flow.guide.ts`) opens on the agent-first
+message (anchored on the page header), then the steps view (an instruction card, or the **Steps**
+tab on the map and the graph), then block, step, evidence, loop, editing and the views. The steps
+about the process view are optional, since a flow without that view or without a loop has nothing
+to show for them. The editing step depends on the reader: the owner's points at the edit switch and
+is shown only on a wide screen; a reader's says that only the owner edits and that **Use as
+Template** makes their own copy.
 
 ### Run page (ExecutionInspector component)
 
@@ -769,7 +1186,7 @@ the cursor for the views.
 
 **URL state:** `view` (`map | graph`, default map, registry `components/run/modes.ts`; any other
 value resolves to `map`), `block` (selected block), `at` (route cursor, a visit sequence number),
-`guide` (walkthrough step). Unknown values fall back to defaults; navigation compares against the
+`guide` and `step` (the open guide and its step; see "Guides"). Unknown values fall back to defaults; navigation compares against the
 live URL so a duplicate change pushes no history entry.
 
 **Layout:**
@@ -788,7 +1205,7 @@ live URL so a duplicate change pushes no history entry.
   then the contents fold button and the route cursor (`RunCursor`, when a route is recorded), the
   folded step finder, the layout presets, zoom/fit, the minimap switch, and trailing the status
   legend (`legend-open`, a disclosure over `StatusLegend` worded for the run's `waitingFor`) and
-  "Explain this page" (`guide-open`). Only the view the tab names is mounted, so the document holds
+  "What is this?" (`guide-open`), which opens the run page's tour. Only the view the tab names is mounted, so the document holds
   one diagram, one toolbar and one marker set; selection and cursor live in the URL and the graph
   re-centres on its focus request, so a switch loses nothing. The header's current-node button and a
   step's "focus" click switch to the graph view and focus the node. Without a process view (a
@@ -838,7 +1255,9 @@ live URL so a duplicate change pushes no history entry.
   it would pass through a block on an intermediate row (`crossesBlock`, `SKIP_GAP_INSET` /
   `RETURN_GAP_INSET`), and adjacent forward elbows turn in the gap after the source's column; the
   gap between ranks is at least `MIN_RANK_SEP` and widens with the longest adjacent transition
-  label, capped at `LABEL_MAX_WIDTH` (`rankSeparation`, `labelPillWidth`).
+  label, capped at `LABEL_MAX_WIDTH` (`rankSeparation`, `labelPillWidth`). While a new layout is computed the previous one stays on screen; only its blocks that
+  the current process still has are drawn, with the edges between them, so a changed set of blocks
+  (one added or removed by an edit or a save) never reaches a block that no longer exists.
 - Each block is a `PortedCard`: a title band with the block's `IndexBadge`, its name, its status
   chip and its pass count; a column of input ports on the left, one per transition arriving (named
   by its source block, with the transition label as the detail) and a column of output ports on the
@@ -981,16 +1400,15 @@ refusal shown inline); `ExecutionErrorHistory`; `StepProgression`. The lazily lo
 whether the answer was accepted or refused, because a rejected answer is still an engine step that
 advances the revision.
 
-**Walkthrough** (`Walkthrough.tsx`; the flow page's steps in `components/flow/guideSteps.ts`): six
-anchored steps (process, agent, evidence, loop, route, explore), each with a selector for both
-views — the contents row, the step and its evidence in the block panel, a return port
-(`[data-port-kind="return"]`), the route cursor and the open view's toolbar — plus the current
-block, the panel tab and the panel section (`section`, unfolded through `BlockDetailPanel`'s
-`openSection` request) it needs, so a step never switches the reader's view. The highlight is a
-ring on the target element, applied once the element has come to rest; the element is scrolled
-into view and, when it sits inside a diagram, `requestReveal` (`diagram/reveal.ts`) asks the
-mounted `DiagramViewport` to move its camera to the node containing it. **Guidance** callouts
-introduce the panels (on a phone they fold to their title); the compass note is described above.
+**The run page's tour** (guide `run`, declared in `components/execution/run.guide.ts`): six steps
+(process, agent, evidence, loop, route, explore), each anchored in both views — the contents row,
+the step and its evidence in the block panel, a return port, the route cursor and the open view's
+toolbar — plus the current block, the panel tab and the panel section (unfolded through
+`BlockDetailPanel`'s `openSection` request) it needs, so a step never switches the reader's view.
+The loop step is optional, because a run of a flow without a loop has no return port. How a step's
+element is found, revealed and shown is the guide engine's (see "Guides"). The admin area shows the
+same page with the same tour. **Guidance** callouts introduce the panels (on a phone they fold to
+their title); the compass note is described above.
 
 **Lock Dialog:**
 
@@ -1042,7 +1460,8 @@ second fullscreen button); read-only when `editable` is not set.
 **Implementation:**
 
 - `components/execution/ExecutionInspector.tsx` - the page (toolbar, panel, dialogs, graph wrapper)
-- `components/run/` - modes, panels, cursor, walkthrough, pure view helpers and layout
+- `components/run/` - modes, panels, cursor, pure view helpers and layout
+- `components/execution/run.guide.ts` - the run page's tour
 - `pages/ExecutionInspectorPage.tsx` - user view wrapper
 - `pages/AdminExecutionInspectorPage.tsx` - admin view wrapper
 - `components/execution/ExecutionErrorHistory.tsx` - error history display
@@ -1255,7 +1674,7 @@ WorkflowCard and FlowPage show "Shared" badge when `accessType === "shared"`:
 │ [icon] Name  v1.0.0                              [Invalid] [🗑]  │
 │        What the flow does, in up to two readable lines…          │
 │        Pick it when … (recommended universal flows only)         │
-│        @owner  🌐 Public  tag  tag  tag +2                       │
+│        @owner  🌐 Public  [Simple]  tag  tag  tag +2             │
 └──────────────────────────────────────────────────────────────────┘
 ```
 
@@ -1266,8 +1685,17 @@ WorkflowCard and FlowPage show "Shared" badge when `accessType === "shared"`:
   text in a tooltip on hover over it.
 - **When to pick it** (`workflow-card-when`): the authored onboarding text, for the recommended
   universal flows only (`whenToPickKey` in `onboarding/recommended.ts`).
-- **Meta:** owner handle (`workflow-card-owner`), visibility in words, up to three tags and a count
-  of the rest.
+- **Meta:** owner handle (`workflow-card-owner`), visibility in words, the level badge
+  (`workflow-card-level`) when the flow carries a level tag, then up to three subject tags and a
+  count of the rest of the subject tags.
+
+A flow's tags are split by `splitFlowTags` (`utils/workflow-level.ts`): exactly one
+`complexity:simple|standard|complex` tag, written by the Workflow Management Flow, is the level and
+is shown only as `FlowLevelBadge`, localized; every other tag is a subject. Any other `complexity:`
+value is neither a level nor a subject and shows nothing. Every renderer of flow tags goes through
+that helper, so the level is never a tag chip and never counted among the tags; the catalogue search
+matches slug, name and description, never tags.
+
 - **Delete** (`workflow-card-delete`): on the reader's own flows or for an administrator, shown on
   hover or focus.
 
@@ -1771,7 +2199,7 @@ The graph is the process view's detailed layer, not a separate rendering:
 - **Panel node level**: `NodePanel` on the run and flow pages, opened by a node click through
   `onNodeSelect` or by any "go to this step" in the interface. It is the only surface that shows a
   node's validation, playbooks and catalog configuration.
-- **Legacy Sheet**: `NodeDetailSheet` (Sheet overlay). Used in execution views (`WorkflowVisualizationPage`) where `onNodeSelect` is not provided.
+- **Legacy Sheet**: `NodeDetailSheet` (Sheet overlay). Used where a `WorkflowGraph` is mounted without `onNodeSelect`.
 - **Connections of the selected node**: both surfaces name the incoming and outgoing nodes by
   display name or node id (`nodeName` in `WorkflowGraph`), and list each outgoing connection as
   `output → target` with the summary of the routing case that selects that output
@@ -1936,6 +2364,16 @@ Avoid hardcoded colors:
 - **Sidebar persistence**: State saved to cookie (sidebar_state), restored on page load
 - **Keyboard shortcut**: Cmd/Ctrl+B toggles sidebar
 - **Mobile support**: Responsive layout with sidebar toggle, use-mobile hook
+- **Phone width** (checked at 390 px by `tests/e2e/phone-layout.spec.ts`):
+  - the beta notice (`BetaWarningBanner`, `beta-warning-banner`) is one short line below `sm`
+    (`components.betaWarningBanner.short`) and the full notice from `sm` up;
+  - a process page header's description (`page-description`) keeps at least a 16 rem basis, so the
+    fact chips wrap onto their own line instead of squeezing it;
+  - the recommended flows' agent-first note (`agent-first-note`) sits below the header row and
+    spans the card, not the width the header actions leave;
+  - a flow page opens on the steps view (see the flow page's `view`), which fills the remaining
+    height below `lg`; the run page has no steps view and keeps its map default;
+  - the beta notice's dismiss button is a 44 px touch target below `sm`.
 - **Smooth transitions**: Tailwind transition utilities
 
 ## Internationalization (i18n)
@@ -2155,21 +2593,24 @@ interface StatisticsCounts {
 
 ## Search and Filtering
 
-### Multi-field Search
+### Search
 
-```typescript
-// Search across workflow properties
-- workflow.metadata.name
-- workflow.metadata.description
-- workflow.id
-- workflow.metadata.tags[]
-```
+The flow list's search box sends `search` to `GET /api/workflows`, debounced. The server matches it
+as a substring of the flow's slug, name and description (`listWorkflowsWithFilters` in
+`packages/shared/src/database/repositories/workflow-repository.ts`). Tags are never searched, so a
+flow's level tag (`complexity:<level>`) can never make it a search match.
 
 ### Validation Filtering
 
+The status filter takes one of the values below; any value but `all` is sent as
+`validationStatus`, and `all` sends no filter.
+
 ```typescript
-type ValidationFilter = "all" | "valid" | "invalid" | "warning";
+type ValidationFilter = "all" | "valid" | "invalid" | "unknown";
 ```
+
+`unknown` is a flow that has not been validated yet: the filter option reads "Not checked" /
+«Не проверенные», and the card's badge "Not checked" / «Не проверен».
 
 ## Backend Configuration
 
@@ -2378,7 +2819,7 @@ frontend/
 │   ├── hooks/                   # useWorkflowData, useLayoutState, use-mobile
 │   ├── services/                # api-client.ts HTTP communication
 │   ├── utils/                   # workflow-transformer.ts
-│   ├── lib/                     # utils.ts (cn()), user-agent.ts, docs-path.ts, codespace-error-message.ts
+│   ├── lib/                     # utils.ts (cn()), user-agent.ts, docs-path.ts, codespace-error-message.ts, userSettingStore.ts
 │   └── styles/                  # globals.css (Tailwind v4 + semantic tokens)
 ├── components.json              # shadcn/ui configuration
 ├── package.json                 # Frontend dependencies and scripts

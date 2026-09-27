@@ -66,6 +66,6 @@ terminal result или явного решения пользователя.
 
 ## Создание или редактирование workflow
 
-Если подходящего workflow нет, используйте `moira/workflow-management-flow`. Он определяет source identity и provenance, выводит и независимо проверяет design contract, редактирует полный JSON через official tooling, валидирует и строит structural projection текущего артефакта, проводит independent whole-artifact review и отделяет repository synchronization от явно разрешённой server publication.
+Если подходящего workflow нет, используйте `moira/workflow-management-flow`. Он согласует с человеком уровень основательности (simple, standard или complex), определяет source identity и provenance, редактирует полный JSON через official tooling, валидирует и строит structural projection текущего артефакта и отделяет repository synchronization от явно разрешённой server publication. На уровнях standard и complex он выводит и независимо проверяет design contract или план правки и проводит independent whole-artifact review; простой workflow строится или меняется прямо по требованиям и проходит лёгкое ревью. Правка начинается с уровня, записанного в теге `complexity:` workflow.
 
 [Подробнее о Workflow Management Flow →](/ru/docs/reference/workflows/workflow-management-flow/)

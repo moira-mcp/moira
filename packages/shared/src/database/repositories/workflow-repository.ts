@@ -34,6 +34,7 @@ import {
   normalizeSlug,
 } from "../../validation/slug-handle.js";
 import { executeListQuery, type ListQueryConfig } from "../list-query-builder.js";
+import { WorkflowRevisionConflictError } from "../../errors/domain-errors.js";
 
 const DELETED_WORKFLOW_LIST_CONFIG: ListQueryConfig<"name" | "deletedAt"> = {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -197,6 +198,12 @@ export interface SaveWorkflowOptions {
    * This flag is NOT validated here - it's trusted
    */
   adminBypass?: boolean;
+  /**
+   * The revision the caller read the definition at. When given, the update applies only if the
+   * stored revision still equals it — checked and written in one statement — and a
+   * `WorkflowRevisionConflictError` reports the current revision otherwise. Ignored for a create.
+   */
+  expectedRevision?: number;
 }
 
 /**
@@ -926,8 +933,9 @@ export class WorkflowRepository {
         );
       }
 
-      // Update - only owner can update
-      await this.db
+      // Update - only owner can update. With an expected revision the check and the write are one
+      // statement, so two writers that read the same revision cannot both succeed.
+      const updated = await this.db
         .update(workflow)
         .set({
           name: graph.metadata.name,
@@ -941,7 +949,24 @@ export class WorkflowRepository {
           updatedAt: now,
           revision: sql`${workflow.revision} + 1`,
         })
-        .where(eq(workflow.id, existingId));
+        .where(
+          options.expectedRevision === undefined
+            ? eq(workflow.id, existingId)
+            : and(eq(workflow.id, existingId), eq(workflow.revision, options.expectedRevision)),
+        )
+        .returning({ id: workflow.id });
+
+      if (updated.length === 0) {
+        const [current] = await this.db
+          .select({ revision: workflow.revision })
+          .from(workflow)
+          .where(eq(workflow.id, existingId));
+        throw new WorkflowRevisionConflictError(
+          existingId,
+          options.expectedRevision ?? 0,
+          current?.revision ?? 0,
+        );
+      }
 
       return { id: existingId, slug: ownership.slug! };
     } else {

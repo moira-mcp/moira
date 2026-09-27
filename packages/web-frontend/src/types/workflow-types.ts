@@ -124,6 +124,7 @@ export interface UserNotificationNode extends BaseNode {
   format?: "plain" | "markdown" | "html";
   silent?: boolean;
   attachProgressImage?: boolean;
+  planList?: "full" | "progress" | "none";
   attachment?: {
     kind: "image" | "document";
     data: string;

@@ -334,7 +334,7 @@ take `conditions`; `not` takes `condition`; `exists` takes `value`. Source:
 ## Template Processing
 
 `{{variable}}`, `{{nested.path}}`, `{{array[0].field}}`, plus system variables
-`{{executionId}}` / `{{workflowId}}`. Resolution order: system variables first,
+`{{executionId}}` / `{{workflowId}}` / `{{runUrl}}`. Resolution order: system variables first,
 then `context.variables`. Source: `packages/workflow-engine/src/templates/`.
 
 ## Validation

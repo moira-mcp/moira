@@ -109,10 +109,14 @@ exit are on the run page's ports, not in the image) — and `hide` / `collapse`:
 left out of the image with their transitions collapsed onto the neighbours, or drawn as a
 label-only chip. Unknown ids are refused when the token is minted. A `user-notification` node may set
 `attachProgressImage: true` and use its normal message as the image caption. Such a node must belong to
-an existing block. The message's footer names who the run waits for after it — `⏳ agent on the
-step: <block>` or `🙋 waiting for you: <block>` when the node leads straight to a step that pauses
-(a lock gate is a person's; a directive, teleport, materialize or subgraph wait is the agent's) — and the
-bound list's `📝 done/total: current item`; the attached image shows the same state. The deprecated `telegram-notification` compatibility node supports
+an existing block. The picture a notification attaches is not this map but the run's steps, made
+for a phone: the task on top, then one row per block in process order with its number, title,
+status and, for a block with a bound list, `done/total: current item`; it is 390 px wide, never
+shrunk, and grows downwards for a long flow. Below the message come the bound list's plan lines (see `planList` on the
+node) and then who the run waits for after it — `⏳ agent on the step: <block>` or
+`🙋 waiting for you: <block>` when the node leads straight to a step that pauses (a lock gate is a
+person's; a directive, teleport, materialize or subgraph wait is the agent's); the attached image
+shows the same state. The deprecated `telegram-notification` compatibility node supports
 the same attachment for existing provider-specific workflows.
 
 Engine integrations with a workflow and execution use `renderExecutionProgressImage(...)`. It
@@ -175,6 +179,9 @@ Globals are referenced by bare name (`{{project_name}}`); a node writes a global
 ### Nodes Array
 
 Nodes are the steps in your workflow. Each node has an `id` and a `type` that determines its behavior.
+The `id` is unique in the workflow and kebab-case — lower-case letters and digits separated by
+hyphens, such as `review-plan` — because edges are addressed as `<node>.<key>` and a node's outputs
+as `{{<node>.<name>}}`.
 
 ## Workflow Execution
 

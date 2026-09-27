@@ -11,7 +11,9 @@ import {
   TelegramResponse,
   TelegramError,
   TelegramErrorType,
+  TELEGRAM_CAPTION_MAX_LENGTH,
   TELEGRAM_PHOTO_MAX_BYTES,
+  TELEGRAM_TEXT_MAX_LENGTH,
   TELEGRAM_DOCUMENT_MAX_BYTES,
 } from "../types/telegram-types.js";
 import { RateLimiter, createTelegramRateLimiter } from "./rate-limiter.js";
@@ -69,10 +71,10 @@ export class TelegramClient {
           `Photo size must be between 1 and ${TELEGRAM_PHOTO_MAX_BYTES} bytes`,
         );
       await this.rateLimiter.waitForAvailability();
-      if (params.caption && params.caption.length > 1024)
+      if (params.caption && params.caption.length > TELEGRAM_CAPTION_MAX_LENGTH)
         throw this.createError(
           TelegramErrorType.MESSAGE_TOO_LONG,
-          "Photo caption exceeds 1024 characters",
+          `Photo caption exceeds ${TELEGRAM_CAPTION_MAX_LENGTH} characters`,
         );
       const body = new FormData();
       body.set("chat_id", params.chatId);
@@ -121,10 +123,10 @@ export class TelegramClient {
         TelegramErrorType.API_ERROR,
         `Document size must be between 1 and ${TELEGRAM_DOCUMENT_MAX_BYTES} bytes`,
       );
-    if (params.caption && params.caption.length > 1024)
+    if (params.caption && params.caption.length > TELEGRAM_CAPTION_MAX_LENGTH)
       throw this.createError(
         TelegramErrorType.MESSAGE_TOO_LONG,
-        "Document caption exceeds 1024 characters",
+        `Document caption exceeds ${TELEGRAM_CAPTION_MAX_LENGTH} characters`,
       );
     await this.rateLimiter.waitForAvailability();
     const body = new FormData();
@@ -385,7 +387,7 @@ export class TelegramClient {
    */
   private buildRequestBody(params: SendMessageParams): Record<string, unknown> {
     // Validate message length
-    if (params.text.length > 4096) {
+    if (params.text.length > TELEGRAM_TEXT_MAX_LENGTH) {
       throw this.createError(
         TelegramErrorType.MESSAGE_TOO_LONG,
         `Message too long: ${params.text.length} characters (max 4096)`,
@@ -404,6 +406,10 @@ export class TelegramClient {
 
     if (params.disableNotification !== undefined) {
       body.disable_notification = params.disableNotification;
+    }
+
+    if (params.disableLinkPreview) {
+      body.link_preview_options = { is_disabled: true };
     }
 
     if (params.replyMarkup) {

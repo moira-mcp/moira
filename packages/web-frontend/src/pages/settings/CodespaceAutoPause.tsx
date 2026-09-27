@@ -19,6 +19,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { HelpPopover } from "@/components/settings/HelpPopover";
+import { guideAnchor } from "../../guides/anchors";
 
 export const AUTO_STOP_KEY = "codespaces.auto_stop_enabled";
 export const IDLE_TIMEOUT_KEY = "codespaces.idle_timeout_minutes";
@@ -58,7 +59,7 @@ export function CodespaceAutoPause({
   };
 
   return (
-    <Card data-testid="codespace-auto-pause">
+    <Card data-testid="codespace-auto-pause" {...guideAnchor("settings.codespace-autopause")}>
       <CardHeader>
         <div className="flex items-center gap-1.5">
           <PauseCircle className="size-4 text-muted-foreground" aria-hidden="true" />

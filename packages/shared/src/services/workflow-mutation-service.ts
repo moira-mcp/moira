@@ -49,6 +49,8 @@ export interface MutationSaveOptions {
    * IMPORTANT: Caller MUST verify admin role before setting this flag
    */
   adminBypass?: boolean;
+  /** Revision the caller read; the write is refused if it moved on (see the repository). */
+  expectedRevision?: number;
 }
 
 /**
@@ -145,7 +147,15 @@ export class WorkflowMutationService {
    * with their validation status cached for the list endpoint.
    */
   async save(options: MutationSaveOptions): Promise<MutationSaveResult> {
-    const { graph, userId, slug, visibility = "private", skipAudit, adminBypass } = options;
+    const {
+      graph,
+      userId,
+      slug,
+      visibility = "private",
+      skipAudit,
+      adminBypass,
+      expectedRevision,
+    } = options;
 
     // Check if this is an update (workflow exists)
     const ownership = await this.workflowRepo.getOwnership(graph.id);
@@ -172,6 +182,7 @@ export class WorkflowMutationService {
       slug,
       visibility,
       adminBypass,
+      expectedRevision,
     });
 
     // 3. Cache validation result
@@ -231,13 +242,25 @@ export class WorkflowMutationService {
    * engine.
    */
   async unresolvablePlaybookReferences(graph: WorkflowGraph, userId: string): Promise<string[]> {
+    return (await this.missingPlaybookReferences(graph, userId)).map((missing) => missing.message);
+  }
+
+  /**
+   * The same answer as data: each unresolvable reference as written after `playbook:` (for example
+   * `team/checklist`), with the message shown to the author. Callers that need to locate a
+   * reference in the definition use `reference`, never the message text.
+   */
+  async missingPlaybookReferences(
+    graph: WorkflowGraph,
+    userId: string,
+  ): Promise<Array<{ reference: string; message: string }>> {
     if (!this.playbookService) return [];
 
     const missing = await unresolvedPlaybookReferences(graph, userId, this.playbookService);
-    return missing.map(
-      (reference) =>
-        `Playbook '${reference.text}' is not available to you: create it, publish it, or remove the {{playbook:${reference.text}}} reference`,
-    );
+    return missing.map((reference) => ({
+      reference: reference.text,
+      message: `Playbook '${reference.text}' is not available to you: create it, publish it, or remove the {{playbook:${reference.text}}} reference`,
+    }));
   }
 
   /**

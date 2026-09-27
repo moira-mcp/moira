@@ -245,6 +245,11 @@
   },
   "additionalProperties": false,
   "$defs": {
+    "nodeId": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]*$",
+      "description": "Node id: kebab-case (lower-case letters and digits separated by hyphens), unique in the workflow. A dot or an upper-case letter would make `<node>.<key>` edge ids and `{{<node>.<name>}}` references ambiguous."
+    },
     "connectionLabels": {
       "type": "object",
       "description": "Human labels for this node's connections, keyed like `connections`. Required by the aggregated process view for every edge that crosses a progress-block boundary or returns to an earlier node; a `cycle` entry explains a return.",
@@ -380,8 +385,7 @@
           "const": "start"
         },
         "id": {
-          "type": "string",
-          "minLength": 1
+          "$ref": "#/$defs/nodeId"
         },
         "progressNodeId": {
           "$ref": "#/$defs/progressNodeId"
@@ -433,8 +437,7 @@
           "const": "end"
         },
         "id": {
-          "type": "string",
-          "minLength": 1
+          "$ref": "#/$defs/nodeId"
         },
         "progressNodeId": {
           "$ref": "#/$defs/progressNodeId"
@@ -456,8 +459,7 @@
           "const": "agent-directive"
         },
         "id": {
-          "type": "string",
-          "minLength": 1
+          "$ref": "#/$defs/nodeId"
         },
         "progressNodeId": {
           "$ref": "#/$defs/progressNodeId"
@@ -525,8 +527,7 @@
           "const": "condition"
         },
         "id": {
-          "type": "string",
-          "minLength": 1
+          "$ref": "#/$defs/nodeId"
         },
         "progressNodeId": {
           "$ref": "#/$defs/progressNodeId"
@@ -576,8 +577,7 @@
           "const": "subgraph"
         },
         "id": {
-          "type": "string",
-          "minLength": 1
+          "$ref": "#/$defs/nodeId"
         },
         "progressNodeId": {
           "$ref": "#/$defs/progressNodeId"
@@ -645,8 +645,7 @@
           "const": "user-notification"
         },
         "id": {
-          "type": "string",
-          "minLength": 1
+          "$ref": "#/$defs/nodeId"
         },
         "progressNodeId": {
           "$ref": "#/$defs/progressNodeId"
@@ -667,6 +666,10 @@
         },
         "attachProgressImage": {
           "type": "boolean"
+        },
+        "planList": {
+          "enum": ["full", "progress", "none"],
+          "description": "How much of the run's plan follows the message: every item with its state (full), the done/total line with the current item (progress, the default), or nothing (none)"
         },
         "attachment": {
           "type": "object",
@@ -736,8 +739,7 @@
           "const": "telegram-notification"
         },
         "id": {
-          "type": "string",
-          "minLength": 1
+          "$ref": "#/$defs/nodeId"
         },
         "progressNodeId": {
           "$ref": "#/$defs/progressNodeId"
@@ -857,8 +859,7 @@
           "const": "expression"
         },
         "id": {
-          "type": "string",
-          "minLength": 1
+          "$ref": "#/$defs/nodeId"
         },
         "progressNodeId": {
           "$ref": "#/$defs/progressNodeId"
@@ -905,8 +906,7 @@
           "const": "read-note"
         },
         "id": {
-          "type": "string",
-          "minLength": 1
+          "$ref": "#/$defs/nodeId"
         },
         "progressNodeId": {
           "$ref": "#/$defs/progressNodeId"
@@ -971,8 +971,7 @@
           "const": "write-note"
         },
         "id": {
-          "type": "string",
-          "minLength": 1
+          "$ref": "#/$defs/nodeId"
         },
         "progressNodeId": {
           "$ref": "#/$defs/progressNodeId"
@@ -1030,8 +1029,7 @@
           "const": "upsert-note"
         },
         "id": {
-          "type": "string",
-          "minLength": 1
+          "$ref": "#/$defs/nodeId"
         },
         "progressNodeId": {
           "$ref": "#/$defs/progressNodeId"
@@ -1104,8 +1102,7 @@
           "const": "teleport"
         },
         "id": {
-          "type": "string",
-          "minLength": 1
+          "$ref": "#/$defs/nodeId"
         },
         "progressNodeId": {
           "$ref": "#/$defs/progressNodeId"
@@ -1165,8 +1162,7 @@
           "const": "lock"
         },
         "id": {
-          "type": "string",
-          "minLength": 1
+          "$ref": "#/$defs/nodeId"
         },
         "progressNodeId": {
           "$ref": "#/$defs/progressNodeId"
@@ -1211,8 +1207,7 @@
           "const": "materialize"
         },
         "id": {
-          "type": "string",
-          "minLength": 1
+          "$ref": "#/$defs/nodeId"
         },
         "progressNodeId": {
           "$ref": "#/$defs/progressNodeId"
@@ -1298,8 +1293,7 @@
           "pattern": "^[a-z0-9][a-z0-9-]*\\.[a-z0-9][a-z0-9-]*$"
         },
         "id": {
-          "type": "string",
-          "minLength": 1
+          "$ref": "#/$defs/nodeId"
         },
         "progressNodeId": {
           "$ref": "#/$defs/progressNodeId"
