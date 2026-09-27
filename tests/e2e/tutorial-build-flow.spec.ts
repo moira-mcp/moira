@@ -34,10 +34,10 @@ async function saveWhenChecked(page: Page) {
 }
 
 for (const language of ["en", "ru"] as const) {
-  test(`lessons 0–3 by hand, in ${language}: checked on the draft, completed only when saved`, async ({
+  test(`lessons 0–5 and 7 by hand, in ${language}: checked on the draft, completed only when saved`, async ({
     page,
   }) => {
-    test.setTimeout(120000);
+    test.setTimeout(240000);
     await freshReader(page, `tutorial-${language}`);
     await page.addInitScript((lng) => localStorage.setItem("i18nextLng", lng), language);
     await page.goto(`${BASE_URL}/`);
@@ -100,14 +100,63 @@ for (const language of ["en", "ru"] as const) {
       await saveWhenChecked(page);
       await expect(card(page)).toHaveAttribute("data-status", "complete", { timeout: 15000 });
 
-      // The page records the lesson at once; the setting reaches the server a moment later.
-      await expect
-        .poll(async () => Object.keys((await progressOf(page))?.lessons ?? {}).sort())
-        .toEqual(["lesson-1", "lesson-2", "lesson-3"]);
+      // Lesson 4: a choice on check-result; "no" leads to a new step in Check, which leads to end.
+      await page.getByTestId("tutorial-next").click();
+      await expect(card(page)).toHaveAttribute("data-lesson", "lesson-4");
+      await expect(
+        page.getByTestId("tutorial-findings").locator('[data-code="choice-field-missing"]'),
+      ).toBeVisible();
+      await page.getByTestId("choice-open-check-result").click();
+      await page.getByTestId("choice-question").fill("Does the result match the request?");
+      await page.getByTestId("choice-field").fill("matches");
+      await page.getByTestId("choice-target-1").click();
+      await page
+        .getByRole("option", { name: language === "ru" ? /Новый шаг/ : /A new step/ })
+        .click();
+      await page.getByTestId("choice-label-1").fill("something is missing");
+      await page.getByTestId("choice-save").click();
+      await page.getByTestId("connection-new-key-check-result-no").fill("success");
+      await page.getByTestId("connection-new-target-check-result-no").click();
+      await page.locator('[role="option"][data-target="end"]').click();
+      await page.getByTestId("connection-add-check-result-no").click();
+      await page.locator('[data-edges="check-result-no.success"]').first().click();
+      await page.getByTestId("edit-transition-label").fill("gap explained");
+      await page.keyboard.press("Escape");
+      await expect(card(page)).toHaveAttribute("data-status", "save");
+      await saveWhenChecked(page);
+      await expect(card(page)).toHaveAttribute("data-status", "complete", { timeout: 15000 });
+
+      // Lesson 5: the report repeats the task as the agent restated it.
+      await page.getByTestId("tutorial-next").click();
+      await expect(card(page)).toHaveAttribute("data-lesson", "lesson-5");
+      await expect(
+        page.getByTestId("tutorial-findings").locator('[data-code="reference-missing"]'),
+      ).toBeVisible();
+      const directive = page.getByTestId("edit-node-report-directive");
+      await directive.fill(`${await directive.inputValue()} {{understand-task.task}}`);
+      await expect(card(page)).toHaveAttribute("data-status", "save", { timeout: 15000 });
+      await saveWhenChecked(page);
+      await expect(card(page)).toHaveAttribute("data-status", "complete", { timeout: 15000 });
+
+      // Lesson 6 is skipped: no run exists, and the card never pretends one does.
+      await page.getByTestId("tutorial-next").click();
+      await expect(card(page)).toHaveAttribute("data-lesson", "lesson-6");
+      await expect(page.getByTestId("tutorial-next")).toBeDisabled();
+      await expect(page.getByTestId("tutorial-sentence")).toContainText("(copy)");
+      await page.getByTestId("tutorial-skip").click();
+
+      // Lesson 7 sums up; deleting the copy ends the tutorial.
+      await expect(card(page)).toHaveAttribute("data-lesson", "lesson-7");
       const own = await progressOf(page);
       expect(own.copyId).toBe(copyId);
+      expect(Object.keys(own.lessons).sort()).toEqual(
+        expect.arrayContaining(["lesson-1", "lesson-2", "lesson-3", "lesson-4", "lesson-5"]),
+      );
       expect(own.lessons["lesson-3"].revision).toBeGreaterThan(own.lessons["lesson-2"].revision);
       expect(own.lessons["lesson-2"].forMe).toBeUndefined();
+      await page.getByTestId("tutorial-delete-copy").click();
+      await expect(page).toHaveURL(/\/workflows$/);
+      expect((await page.request.get(`${BASE_URL}/api/workflows/${copyId}`)).status()).toBe(404);
     } finally {
       await page.request.delete(`${BASE_URL}/api/workflows/${copyId}`);
     }
@@ -184,3 +233,20 @@ async function saveWhenCheckedAllowingRefusal(page: Page) {
   });
   await page.getByTestId("flow-edit-save").click();
 }
+
+test("the tutorial opens from Practice on home and on the flow list, and from the full tour's end", async ({
+  page,
+}) => {
+  await freshReader(page, "tutorial-entries");
+  await page.goto(`${BASE_URL}/`);
+  await page.getByTestId("recommended-practice").click();
+  await expect(page).toHaveURL(/example-simple-steps\?.*guide=build-flow&step=lesson-0/);
+  await page.goto(`${BASE_URL}/workflows`);
+  await page.getByTestId("recommended-practice").click();
+  await expect(page).toHaveURL(/example-simple-steps\?.*guide=build-flow&step=lesson-0/);
+  // The full tour's last screen, finished, offers the tutorial.
+  await page.goto(`${BASE_URL}/settings?guide=settings&step=preferences&tour=full`);
+  await page.getByTestId("guide-finish").click();
+  await page.getByTestId("tour-closing-start").click();
+  await expect(page).toHaveURL(/example-simple-steps\?.*guide=build-flow&step=lesson-0/);
+});

@@ -48,6 +48,14 @@ export const homeGuide: GuideDefinition = {
       optional: true,
       absentWhen: { panelHidden: "home-recommended" },
     },
+    {
+      id: "practice",
+      anchor: "home.practice",
+      kind: "look",
+      revision: 1,
+      optional: true,
+      absentWhen: { panelHidden: "home-recommended" },
+    },
     { id: "work", anchor: "home.work", kind: "look", revision: 1 },
     {
       id: "show-me-around",

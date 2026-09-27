@@ -222,6 +222,10 @@ step on; edit a workflow with paused runs deliberately.
 Shared and bundled workflows are shown without edit mode; copy a bundled flow ("Use as template")
 to get an editable one.
 
+To practise editing, the tutorial **Build your first flow** (**Show me around → Tutorials**) walks
+you through adding a step, connecting it, adding a choice and using a value from an earlier step
+on your own copy of Example 1, checking each lesson on this page.
+
 ## Explaining the page
 
 **What is this?** opens a tour of the page, each card sitting beside the element it explains, in

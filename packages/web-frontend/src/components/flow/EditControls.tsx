@@ -17,6 +17,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { guideAnchor } from "../../guides/anchors";
 import { useEditing, type NodeTextField } from "./editing";
 import { issuesOfNode } from "./issues";
 import { IssueList } from "./IssueList";
@@ -246,7 +247,11 @@ export function NodeTextEditor({
   const fields = editableFields(step);
   if (!enabled || fields.length === 0) return null;
   return (
-    <div className="mt-2 space-y-2" data-testid={`edit-node-${step.id}`}>
+    <div
+      className="mt-2 space-y-2"
+      data-testid={`edit-node-${step.id}`}
+      {...guideAnchor("flow.edit-text")}
+    >
       {fields.map((field) => {
         const raw = node[field];
         const value =

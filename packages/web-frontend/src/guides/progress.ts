@@ -183,12 +183,14 @@ export const recordTutorialCopy =
   (progress) => {
     const own = progress.tutorials?.[tutorial] ?? {};
     // A different copy starts the lessons after it over: they were passed on the old one.
-    const lessons = own.copyId && own.copyId !== copyId ? {} : own.lessons;
+    const other = !!own.copyId && own.copyId !== copyId;
+    // "Do it for me" starts over with them: its once-per-lesson belongs to the old copy too.
+    const kept = other ? { copyId } : { ...own, copyId };
     return {
       ...progress,
       tutorials: {
         ...(progress.tutorials ?? {}),
-        [tutorial]: { ...own, copyId, ...(lessons ? { lessons } : {}) },
+        [tutorial]: other ? { ...kept, lessons: {} } : kept,
       },
     };
   };

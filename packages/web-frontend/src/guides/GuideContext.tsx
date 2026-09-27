@@ -33,6 +33,7 @@ import {
   type TourContext,
 } from "./fullTour";
 import { guideById } from "./registry";
+import { TourClosingOffer } from "./TourClosingOffer";
 import type { GuideDefinition, GuideStep } from "./types";
 import type { Operation } from "../components/flow/operations";
 import type { WorkflowGraph } from "../types/workflow-types";
@@ -54,6 +55,10 @@ export interface TutorialSurface {
   owner: boolean;
   draft: WorkflowGraph;
   diagnostics: readonly { code: string; nodeId?: string; edge?: string }[];
+  /** Errors the server's check of the draft reports (its last answer). */
+  validationErrors: number;
+  /** The flow's name, as the reader would say it to their agent. */
+  flowName: string;
   editing: boolean;
   /** The draft differs from the saved definition. */
   dirty: boolean;
@@ -279,10 +284,15 @@ export function GuideProvider({
     opener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     void openLeg(0);
   }, [openLeg]);
+  // The full tour's last screen walked: the closing card offers the tutorial.
+  const [tourEnded, setTourEnded] = useState(false);
   const continueTour = useCallback(() => {
     const next = guide ? legOf(guide.id) + 1 : 0;
     if (next > 0 && next < FULL_TOUR_LEGS.length) void openLeg(next);
-    else close();
+    else {
+      close();
+      if (next >= FULL_TOUR_LEGS.length) setTourEnded(true);
+    }
   }, [guide, openLeg, close]);
 
   const [announcement, setAnnouncement] = useState("");
@@ -338,6 +348,7 @@ export function GuideProvider({
           {guide.kind === "tutorial" ? <TutorialRunner /> : <GuideRunner />}
         </Suspense>
       )}
+      {tourEnded && !guide && <TourClosingOffer onClose={() => setTourEnded(false)} />}
       <div className="sr-only" role="status" aria-live="polite" data-testid="guide-announcer">
         {announcement}
       </div>

@@ -448,13 +448,13 @@ last card offers the whole tour (`guide-whole-tour`). Nothing opens by itself.
   session's "Later", so the prompt comes back.
 
 **The tutorial** "Build your first flow" (`guides/tutorial/`) is a guide of kind `tutorial` whose
-steps are lessons; for it `GuideProvider` loads `TutorialRunner` instead of the tour runner. It runs
+steps are lessons 0–7 (how flows are made, the copy, a step, connecting it, a choice, a value from an
+earlier step, an optional run of the copy, what next); for it `GuideProvider` loads `TutorialRunner` instead of the tour runner. It runs
 on the flow page, which gives it a `TutorialSurface` on its page controller: the saved definition
 and revision, the draft and its process diagnostics, the copy's visibility and ownership, whether a
 save was refused as stale, and `openForEditing`, `apply`, `reload`, `copy` and `showFindings`. The
 surface's callbacks go through a ref, so the controller changes only with what it reports. The
-lesson checks are pure functions in the engine's authoring entry (`checkOwnCopy`, `checkNewStep`,
-`checkConnected`, finding codes `TUTORIAL_FINDING_CODES`, copy
+lesson checks are pure functions in the engine's authoring entry (`checkOwnCopy`, `checkNewStep`, `checkConnected`, `checkChoice`, `checkReference`, finding codes `TUTORIAL_FINDING_CODES`, copy
 `guides.build-flow.findings.<code>`). The runner checks the draft after every change and hands the
 findings to the page, which places them with the validation issues (source `tutorial`, warnings); it
 records a lesson (`tutorials` in progress) only when the check passes on the saved definition with
@@ -463,7 +463,14 @@ longer holds on the draft is named with a way back; below `md` the card explains
 a larger screen. Each distinct result is announced once (`useResultAnnouncement`). The menu starts
 it (`tutorial/start.ts`) on the example of the reader's language, or on the recorded copy at the
 first lesson not passed while the copy exists; "Use as Template" carries an open tutorial into the
-copy. The editor tour's offer waits while any guide or tutorial is open.
+copy. The editor tour's offer waits while any guide or tutorial is open. Lesson 6 has no definition
+check: it looks up the reader's completed runs of the copy (`getExecutions` with `mine`) for one
+whose context answered the new step, offers "Check again" and "Skip", and never passes otherwise.
+Lesson 7 offers to delete the copy, which also forgets it. The ids of the example the lessons name
+are `TUTORIAL_EXAMPLE_IDS`, held to both language versions by a test. Besides the menu, the
+tutorial opens from the **Practice** card after the examples in the recommended flows (with a
+`practice` step in the home and flow-list tours) and from the full tour's closing card
+(`TourClosingOffer`), shown once the last screen's tour is walked.
 
 **The full tour** (`guides/fullTour.ts`) chains the screen tours in a fixed order (every toured
 screen of the route table, the admin area excluded) (`FULL_TOUR_LEGS`): home, the flow list, the example flow of the reader's

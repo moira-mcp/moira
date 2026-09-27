@@ -20,6 +20,9 @@ import { recommendedFlows, SYSTEM_HANDLE, type RecommendedFlow } from "./recomme
 import { HidePanelButton } from "./HidePanelButton";
 import { usePanelVisible } from "./beginnerPanels";
 import { guideAnchor } from "@/guides/anchors";
+import { useGuideProgress } from "@/guides/progress";
+import { BUILD_FLOW_ID } from "@/guides/tutorial/buildFlow.guide";
+import { tutorialStart } from "@/guides/tutorial/start";
 
 /**
  * One lookup per set of slugs for the life of the page. The section can mount more than once in a
@@ -127,6 +130,30 @@ function FlowCard({
   );
 }
 
+/** "Practice": the tutorial that builds a small flow by hand, after the three examples. */
+function PracticeCard({ compact }: { compact: boolean }): React.JSX.Element {
+  const { t, i18n } = useTranslation();
+  const navigate = useNavigate();
+  const { progress } = useGuideProgress();
+  const open = async () =>
+    navigate(await tutorialStart(progress?.tutorials?.[BUILD_FLOW_ID], i18n.language));
+  return (
+    <button
+      type="button"
+      onClick={() => void open()}
+      className="flex h-full flex-col items-start gap-1 rounded-lg border border-dashed border-primary/40 bg-background p-3 text-left transition hover:border-primary"
+      data-testid="recommended-practice"
+      {...guideAnchor(compact ? "home.practice" : "flows.practice")}
+    >
+      <span className="text-[11px] font-medium uppercase tracking-wide text-primary">
+        {t("onboarding.practice.label")}
+      </span>
+      <span className="text-sm font-semibold">{t("guides.build-flow.title")}</span>
+      <span className="text-xs text-muted-foreground">{t("onboarding.practice.body")}</span>
+    </button>
+  );
+}
+
 function Group({
   icon: Icon,
   title,
@@ -134,10 +161,13 @@ function Group({
   flows,
   compact,
   testId,
+  extra,
 }: {
   icon: React.ComponentType<{ className?: string }>;
   title: string;
   subtitle: string;
+  /** A card after the flows: the tutorial after the examples. */
+  extra?: React.ReactNode;
   flows: RecommendedFlow[];
   compact: boolean;
   testId: string;
@@ -156,6 +186,7 @@ function Group({
         {flows.map((flow) => (
           <FlowCard key={flow.slug} flow={flow} compact={compact} />
         ))}
+        {extra}
       </div>
     </div>
   );
@@ -223,6 +254,7 @@ export function RecommendedFlows({
             flows={flows.filter((flow) => flow.kind === "example")}
             compact={compact}
             testId="recommended-examples"
+            extra={<PracticeCard compact={compact} />}
           />
           <Group
             icon={Wrench}

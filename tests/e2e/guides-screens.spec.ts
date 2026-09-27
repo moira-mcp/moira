@@ -119,6 +119,7 @@ const TOURS: readonly (readonly [
       ["connect", "home.connect"],
       ["try", "home.try"],
       ["recommended", "home.recommended"],
+      ["practice", "home.practice"],
       ["work", "home.work"],
       ["show-me-around", "home.show-me-around"],
     ],
@@ -134,6 +135,7 @@ const TOURS: readonly (readonly [
     [
       ["intro", "flows.header"],
       ["recommended", "flows.recommended"],
+      ["practice", "flows.practice"],
       ["all", "flows.list"],
       ["scopes", "flows.scopes"],
       ["filters", "flows.filters"],
@@ -211,7 +213,7 @@ test.describe("Screen tours", () => {
     }
   }
 
-  test("with the beginner panels hidden, the home tour passes its four panel steps at once and says so", async ({
+  test("with the beginner panels hidden, the home tour passes its five panel steps at once and says so", async ({
     page,
   }) => {
     await freshReader(page, "hidden-note", true);
@@ -223,7 +225,7 @@ test.describe("Screen tours", () => {
     // The panels are known to be hidden: no step waits the runner's three seconds for them.
     expect(Date.now() - moved).toBeLessThan(2000);
     await expect(page.getByTestId("guide-note")).toHaveText(
-      "4 steps were skipped: what they explain is not on this page right now.",
+      "5 steps were skipped: what they explain is not on this page right now.",
     );
   });
 
@@ -236,7 +238,7 @@ test.describe("Screen tours", () => {
     await expect(card).toHaveAttribute("data-guide-step", "intro");
     await page.getByTestId("guide-next").click();
     await expect(card).toHaveAttribute("data-guide-step", "work");
-    await expect(page.getByTestId("guide-note")).toContainText("4 steps were skipped");
+    await expect(page.getByTestId("guide-note")).toContainText("5 steps were skipped");
     await page.goBack();
     await expect(card).toHaveAttribute("data-guide-step", "intro");
     // Nothing was skipped on the way back to the first step: the note stayed with "Your work".

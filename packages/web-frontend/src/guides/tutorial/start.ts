@@ -56,7 +56,10 @@ export async function tutorialStart(
 ): Promise<string> {
   const copyId = await liveCopy(own);
   if (copyId) {
-    const next = ["lesson-2", "lesson-3"].find((lesson) => !own?.lessons?.[lesson]) ?? "lesson-3";
+    const next =
+      ["lesson-2", "lesson-3", "lesson-4", "lesson-5", "lesson-6"].find(
+        (lesson) => !own?.lessons?.[lesson],
+      ) ?? "lesson-7";
     return lessonAddress(next, copyId, language);
   }
   return lessonAddress("lesson-0", undefined, language);

@@ -3075,6 +3075,10 @@
         "run-variables-guide": "Hint on a run's variables",
         "registry-guide": "Hint on a flow's declared variables"
       }
+    },
+    "practice": {
+      "label": "Practice",
+      "body": "Build a small flow by hand in the editor, step by step, on your own copy of Example 1."
     }
   },
   "guides": {
@@ -3125,6 +3129,10 @@
         "show-me-around": {
           "title": "Tours of every page",
           "body": "Every page has a short tour like this one. Open this menu to start the tour of the page you are on, continue where you stopped, and see which tours are new to you."
+        },
+        "practice": {
+          "title": "Practice by hand",
+          "body": "“Build your first flow” is a tutorial in the flow editor: on your own copy of Example 1 you add a step, connect it, add a choice and use a value from an earlier step, and each lesson is checked. It is optional — your agent builds real flows."
         }
       }
     },
@@ -3154,6 +3162,10 @@
         "level": {
           "title": "The flow's level",
           "body": "A flow built with the Workflow Management Flow shows the level it was built at: Simple, Standard or Complex — how thoroughly it was designed and reviewed. The level is apart from the flow's subject tags."
+        },
+        "practice": {
+          "title": "Practice by hand",
+          "body": "“Build your first flow” is a tutorial in the flow editor: on your own copy of Example 1 you add a step, connect it, add a choice and use a value from an earlier step, and each lesson is checked. It is optional — your agent builds real flows."
         }
       }
     },
@@ -3537,6 +3549,22 @@
         "lesson-3": {
           "title": "Connect it",
           "body": "Now lead the work through your step: point do-task's success at your new step, in do-task's connections. Every step is then on the way from start to the end. Save."
+        },
+        "lesson-4": {
+          "title": "Add a choice",
+          "body": "Make check-result end with a question: open it in the Check block and use “Add a choice”. Ask “Does the result match?” with the options yes and no. Yes continues to the report as before; no leads to a new step, “Explain what is missing”, in the Check block. The new step must lead on too: point it at end and label that connection, since it leaves the Check block. Save. This is the shape of Example 2, “One choice”."
+        },
+        "lesson-5": {
+          "title": "Use a value from an earlier step",
+          "body": "A step can use what an earlier step returned. In the report's directive, add {{ref}} — the task as the agent restated it at the start. Moira fills it in when the report step runs. Save."
+        },
+        "lesson-6": {
+          "title": "Try it (optional)",
+          "body": "The web app does not start runs; your agent does. Say this to your agent, and once the run is complete, check again here. Or skip this lesson."
+        },
+        "lesson-7": {
+          "title": "What next",
+          "body": "You have practised what your agent builds for you: steps, the connections between them, a choice decided by an answer, and a value carried from an earlier step. For real work you don't build flows by hand — ask your agent for a flow, and it builds it through the Workflow Management Flow, agreeing the depth with you. Your copy is no longer needed: you can delete it."
         }
       },
       "findings": {
@@ -3556,7 +3584,17 @@
         "unreachable-node": "No route reaches “{{node}}”: connect a step to it.",
         "route-without-end": "From “{{node}}” no route reaches the end.",
         "edge-needs-label": "The connection from “{{node}}” goes into another block and needs a label saying why.",
-        "process-issue": "The process reports a problem on “{{node}}” ({{issue}})."
+        "process-issue": "The process reports a problem on “{{node}}” ({{issue}}).",
+        "choice-field-missing": "check-result does not ask a question yet: use “Add a choice” on it.",
+        "case-not-reading-answer": "A route of check-result does not compare its answer.",
+        "case-compares-value-not-offered": "A route compares “{{value}}”, which the answer does not offer.",
+        "case-output-not-connected": "The option “{{field}}” leads nowhere yet.",
+        "case-output-same-route": "The option “{{field}}” leads where the default route goes; give it its own step.",
+        "choice-loops-back": "The option “{{field}}” comes back to check-result; lead it on towards the end.",
+        "reference-missing": "No step uses a value from an earlier step yet: add {{ref}} to the report.",
+        "reference-field-not-declared": "“{{reference}}” names a field that step does not return.",
+        "reference-not-before-use": "“{{reference}}” is used before its step has run.",
+        "validation-errors": "The flow still has {{count}} error(s) to fix before it can be saved."
       }
     },
     "tutorial": {
@@ -3576,7 +3614,13 @@
         "action": "Do it for me",
         "directive": "Save a draft of the work so far.",
         "condition": "A draft of the work is saved.",
-        "label": "draft saved"
+        "label": "draft saved",
+        "question": "Does the result match the request?",
+        "noLabel": "something is missing",
+        "gapDirective": "Explain to the user what is missing from the result and why.",
+        "gapCondition": "The user knows what is missing.",
+        "gapLabel": "gap explained",
+        "reference": "Start by repeating the task: {{ref}}"
       },
       "announce": {
         "findings_one": "The check found {{count}} thing to fix.",
@@ -3586,7 +3630,20 @@
         "conflict": "The save was refused: the copy changed elsewhere.",
         "broken": "An earlier lesson no longer holds.",
         "narrow": "The tutorial needs a larger screen."
-      }
+      },
+      "tryIt": {
+        "sentence": "Use Moira to run my flow “{{name}}” for this task: …",
+        "checkAgain": "Check again",
+        "skip": "Skip"
+      },
+      "deleteCopy": "Delete my copy",
+      "deleteFailed": "Couldn't delete the copy."
+    },
+    "tourEnd": {
+      "title": "You have seen every screen",
+      "body": "Want to try building a small flow yourself? The tutorial walks you through it in the editor, on your own copy.",
+      "start": "Start the tutorial",
+      "later": "Not now"
     }
   }
 }

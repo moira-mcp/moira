@@ -562,6 +562,8 @@ export const FlowPage: React.FC = () => {
               owner: isOwner,
               draft: edited,
               diagnostics,
+              validationErrors: serverErrors,
+              flowName: savedWorkflow.metadata?.name ?? fileInfo.id,
               editing,
               dirty: hasEdits,
               conflict,
@@ -587,6 +589,7 @@ export const FlowPage: React.FC = () => {
       editing,
       hasEdits,
       conflict,
+      serverErrors,
     ],
   );
   useGuidePage("flow", guideController);

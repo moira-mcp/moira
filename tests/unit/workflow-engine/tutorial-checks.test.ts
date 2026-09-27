@@ -11,11 +11,15 @@ import type { WorkflowGraph } from "@mcp-moira/workflow-engine";
 import { deriveProcess } from "@mcp-moira/workflow-engine/process";
 import {
   addNode,
+  checkChoice,
   checkConnected,
   checkNewStep,
   checkOwnCopy,
+  checkReference,
   renameNode,
+  setChoice,
   setConnection,
+  TUTORIAL_EXAMPLE_IDS,
 } from "@mcp-moira/workflow-engine/authoring";
 import type { GraphNode } from "@mcp-moira/workflow-engine/types";
 import { catalogGraph } from "../../helpers/catalog-graphs.js";
@@ -123,3 +127,141 @@ describe.each(["example-simple-steps", "example-simple-steps-ru"])("on %s", (slu
     expect(checkConnected(renamed, example(), issues(renamed)).passed).toBe(true);
   });
 });
+
+/** Lesson 4 done on top of lesson 3: `check-result` asks whether the result matches. */
+function withChoice(example: WorkflowGraph, text = { gap: "Explain what is missing." }) {
+  let graph = connected(example);
+  graph = addNode(
+    graph,
+    {
+      id: "explain-gap",
+      type: "agent-directive",
+      directive: text.gap,
+      completionCondition: text.gap,
+    } as never,
+    { blockId: "check" },
+  );
+  graph = setConnection(graph, "explain-gap", "success", "end");
+  (
+    graph.nodes.find((node) => node.id === "explain-gap") as { connectionLabels?: unknown }
+  ).connectionLabels = { success: "gap explained" };
+  return setChoice(graph, "check-result", {
+    field: "matches",
+    question: "Does the result match?",
+    options: ["yes", "no"],
+    defaultOption: "yes",
+    targets: { no: "explain-gap" },
+    labels: { yes: "result checked", no: "something is missing" },
+  });
+}
+
+/** Lesson 5 done on top of lesson 4: the report repeats the task as the agent restated it. */
+function withReference(example: WorkflowGraph, words = "Repeat the task:") {
+  const graph = withChoice(example);
+  const report = graph.nodes.find((node) => node.id === "report") as { directive: string };
+  report.directive = `${words} {{understand-task.task}}`;
+  return graph;
+}
+
+describe.each(["example-simple-steps", "example-simple-steps-ru"])("lessons 4–5 on %s", (slug) => {
+  const example = () => catalogGraph(slug);
+
+  test("lesson 4 fails before the choice and passes with it", () => {
+    const before = connected(example());
+    expect(codes(checkChoice(before, issues(before)))).toEqual(["choice-field-missing"]);
+    const after = withChoice(example());
+    expect(checkChoice(after, issues(after))).toEqual({ passed: true, findings: [] });
+  });
+
+  test("lesson 4 names a case comparing a value the answer does not offer", () => {
+    const graph = withChoice(example());
+    const step = graph.nodes.find((node) => node.id === "check-result") as {
+      cases: Array<{ when: { right: string } }>;
+    };
+    step.cases[0].when.right = "maybe";
+    expect(codes(checkChoice(graph, issues(graph)))).toContain("case-compares-value-not-offered");
+  });
+
+  test("lesson 4 names a `no` route that loops back to the check", () => {
+    let graph = withChoice(example());
+    graph = setConnection(graph, "explain-gap", "success", "do-task");
+    expect(codes(checkChoice(graph, issues(graph)))).toContain("choice-loops-back");
+  });
+
+  test("lesson 5 passes on a reference to the restated task, whatever the words around it", () => {
+    expect(checkReference(withReference(example()), 0)).toEqual({ passed: true, findings: [] });
+  });
+
+  test.each([
+    [
+      "a misspelt field",
+      (graph: WorkflowGraph) => {
+        (graph.nodes.find((n) => n.id === "report") as { directive: string }).directive =
+          "Repeat {{understand-task.tsk}}";
+      },
+      "reference-field-not-declared",
+    ],
+    [
+      "a reference to a step that runs later",
+      (graph: WorkflowGraph) => {
+        (graph.nodes.find((n) => n.id === "report") as { directive: string }).directive = "Report.";
+        (graph.nodes.find((n) => n.id === "understand-task") as { directive: string }).directive =
+          "Restate {{report.report}}";
+      },
+      "reference-not-before-use",
+    ],
+    [
+      "the task mentioned in words without a reference",
+      (graph: WorkflowGraph) => {
+        (graph.nodes.find((n) => n.id === "report") as { directive: string }).directive =
+          "Repeat the task as understand-task restated it.";
+      },
+      "reference-missing",
+    ],
+  ])("lesson 5 fails on %s", (_name, change, code) => {
+    const graph = withReference(example());
+    change(graph);
+    expect(codes(checkReference(graph, 0))).toEqual([code]);
+  });
+
+  test("lesson 5 waits while validation errors remain", () => {
+    expect(codes(checkReference(withReference(example()), 2))).toEqual(["validation-errors"]);
+  });
+
+  test("renaming the new step keeps lessons 3 to 5 passing", () => {
+    const renamed = renameNode(withReference(example()), "save-draft", "keep-a-draft").workflow;
+    expect(checkConnected(renamed, example(), issues(renamed)).passed).toBe(true);
+    expect(checkChoice(renamed, issues(renamed)).passed).toBe(true);
+    expect(checkReference(renamed, 0).passed).toBe(true);
+  });
+});
+
+test("the text's language does not change a result: English words in the Russian copy, Russian in the English", () => {
+  const results = (graph: WorkflowGraph, example: WorkflowGraph) => [
+    checkConnected(graph, example, issues(graph)),
+    checkChoice(graph, issues(graph)),
+    checkReference(graph, 0),
+  ];
+  const en = catalogGraph("example-simple-steps");
+  const ru = catalogGraph("example-simple-steps-ru");
+  const englishInRussian = withReference(ru, "Repeat the task:");
+  const russianInEnglish = withReference(en, "Повторите задачу:");
+  expect(results(englishInRussian, ru)).toEqual(
+    results(withReference(ru, "Повторите задачу:"), ru),
+  );
+  expect(results(russianInEnglish, en)).toEqual(results(withReference(en, "Repeat the task:"), en));
+  expect(results(englishInRussian, ru).every((result) => result.passed)).toBe(true);
+});
+
+test.each(["example-simple-steps", "example-simple-steps-ru"])(
+  "%s keeps every step and block id the tutorial names",
+  (slug) => {
+    const graph = catalogGraph(slug);
+    expect(graph.nodes.map((node) => node.id)).toEqual(
+      expect.arrayContaining([...TUTORIAL_EXAMPLE_IDS.nodes]),
+    );
+    expect((graph.progress?.nodes ?? []).map((block) => block.id)).toEqual(
+      expect.arrayContaining([...TUTORIAL_EXAMPLE_IDS.blocks]),
+    );
+  },
+);

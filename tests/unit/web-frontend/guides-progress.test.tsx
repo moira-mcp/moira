@@ -289,7 +289,9 @@ describe("the rules read from progress", () => {
       "build-flow": { copyId: "c1", lessons: { "lesson-1": { revision: 3, forMe: true } } },
     });
     expect(recordTutorialCopy("build-flow", "c1")(passed).tutorials).toEqual(passed.tutorials);
-    expect(recordTutorialCopy("build-flow", "c2")(passed).tutorials).toEqual({
+    // A used "Do it for me" belongs to the old copy too: a new copy offers it again.
+    const used = markLessonForMe("build-flow", "lesson-2")(passed);
+    expect(recordTutorialCopy("build-flow", "c2")(used).tutorials).toEqual({
       "build-flow": { copyId: "c2", lessons: {} },
     });
   });

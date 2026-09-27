@@ -19,6 +19,10 @@
     "revision": 1,
     "fingerprint": "d212b19f"
   },
+  "home.practice": {
+    "revision": 1,
+    "fingerprint": "79b614b7"
+  },
   "home.work": {
     "revision": 1,
     "fingerprint": "89eeb00d"
@@ -34,6 +38,10 @@
   "flows.recommended": {
     "revision": 1,
     "fingerprint": "a56e06c6"
+  },
+  "flows.practice": {
+    "revision": 1,
+    "fingerprint": "a1430965"
   },
   "flows.all": {
     "revision": 1,
@@ -338,5 +346,21 @@
   "build-flow.lesson-3": {
     "revision": 1,
     "fingerprint": "5843e312"
+  },
+  "build-flow.lesson-4": {
+    "revision": 1,
+    "fingerprint": "61354f1e"
+  },
+  "build-flow.lesson-5": {
+    "revision": 1,
+    "fingerprint": "d5c6a02d"
+  },
+  "build-flow.lesson-6": {
+    "revision": 1,
+    "fingerprint": "0bf84f7e"
+  },
+  "build-flow.lesson-7": {
+    "revision": 1,
+    "fingerprint": "3afdf87d"
   }
 }

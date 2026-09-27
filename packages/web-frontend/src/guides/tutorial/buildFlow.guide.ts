@@ -2,7 +2,8 @@
  * The tutorial "Build your first flow": lessons done in the flow page's editor on the reader's own
  * copy of the learning example, each checked on the definition. Lesson 0 explains how flows are
  * really made (by the agent, at an agreed level); lesson 1 makes the copy; lessons 2 and 3 add a
- * step and connect it. A lesson's anchor is the control its work starts from.
+ * step and connect it; 4 adds a choice; 5 uses a value from an earlier step; 6 runs the copy
+ * (optional); 7 sums up and offers to delete the copy. A lesson's anchor is the control its work starts from.
  */
 
 import type { GuideDefinition } from "../types";
@@ -22,5 +23,9 @@ export const buildFlowTutorial: GuideDefinition = {
     { id: "lesson-1", anchor: "flow.use-template", kind: "do", revision: 1 },
     { id: "lesson-2", anchor: "flow.edit-add-step", kind: "do", revision: 1 },
     { id: "lesson-3", anchor: "flow.edit-connections", kind: "do", revision: 1 },
+    { id: "lesson-4", anchor: "flow.edit-choice", kind: "do", revision: 1 },
+    { id: "lesson-5", anchor: "flow.edit-text", kind: "do", revision: 1 },
+    { id: "lesson-6", anchor: "flow.header", kind: "look", revision: 1 },
+    { id: "lesson-7", anchor: "flow.header", kind: "look", revision: 1 },
   ],
 };

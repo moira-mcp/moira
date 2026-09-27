@@ -12,7 +12,7 @@ no variables and no loops, and asks for one short answer per step.
 and think of any small task — renaming a file, answering a question, writing a note.
 
 **To look at a flow:** open **Workflows** in the web app. The recommended section at the top lists
-the three examples; each opens on the **Steps** view — the instructions the agent receives, as
+the three examples, followed by **Practice**, the in-app tutorial; each opens on the **Steps** view — the instructions the agent receives, as
 numbered cards joined by arrows. **Map** and **Graph** show the same flow as a process and as the
 full technical graph.
 
@@ -96,6 +96,16 @@ work you still ask the agent.
   saved, a step must lead somewhere: point it on to `check-result` and label that connection,
   because it goes into another block. Nothing leads to the step yet — the check says so.
 - **Connect it.** Point `do-task` at your step, so every step is on the way from start to end.
+- **Add a choice.** On `check-result`, "Add a choice" asks whether the result matches: yes goes on
+  to the report, no to a new step in the Check block that explains what is missing and leads to the
+  end. This is the shape of Example 2.
+- **Use a value from an earlier step.** Put `{{understand-task.task}}` into the report's
+  directive, so the report repeats the task as the agent restated it.
+- **Try it (optional).** Ask your agent to run your copy with the sentence the card gives you; once
+  the run is complete, **Check again** finds it and the lesson passes when the run answered your new
+  step. You can skip it.
+- **What next.** A summary of what you practised and how it maps to what the agent builds, with an
+  offer to delete your copy.
 
 The lesson card sits over the diagram. After every change it checks your draft and names what is
 still missing, in the card and on the step it concerns; a lesson is done only when the check passes
@@ -104,6 +114,8 @@ copy was changed elsewhere, the save is refused and the card offers to reload it
 
 ## Next
 
+- **Build your first flow** in the web app (see above): open it from **Show me around → Tutorials**
+  or the **Practice** card after the examples.
 - [Which ready flow to use](/docs/getting-started/ready-flows/) — Quick Task, Robust Task and Todo
   List for everyday tasks.
 - To get a flow of your own, say to your agent: "Create a Moira flow for …". It builds one through

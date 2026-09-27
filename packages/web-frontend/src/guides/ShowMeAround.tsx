@@ -102,7 +102,7 @@ export function ShowMeAround(): React.JSX.Element {
 
   // The tutorial's lessons with a check, and how many of them the reader has passed.
   const tutorial = progress?.tutorials?.[BUILD_FLOW_ID];
-  const checked = ["lesson-1", "lesson-2", "lesson-3"];
+  const checked = ["lesson-1", "lesson-2", "lesson-3", "lesson-4", "lesson-5"];
   const passed = checked.filter((lesson) => tutorial?.lessons?.[lesson]).length;
   const tutorialStatus =
     passed === checked.length

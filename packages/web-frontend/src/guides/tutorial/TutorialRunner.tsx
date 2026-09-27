@@ -8,25 +8,30 @@
  * reader's progress.
  */
 
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { GraduationCap, X } from "lucide-react";
 import {
+  checkChoice,
   checkConnected,
   checkNewStep,
   checkOwnCopy,
+  checkReference,
+  lessonStepId,
   type LessonResult,
 } from "@mcp-moira/workflow-engine/authoring";
 import { deriveProcess } from "@mcp-moira/workflow-engine/process";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { ROUTES } from "../../constants/routes";
 import { apiClient } from "../../services/api-client";
 import type { WorkflowGraph, WorkflowNode } from "../../types/workflow-types";
 import { useGuides, type TutorialSurface } from "../GuideContext";
 import {
   changeProgress,
+  dropTutorialCopy,
   markLessonForMe,
   passLesson,
   recordTutorialCopy,
@@ -39,6 +44,15 @@ import { useResultAnnouncement } from "./announce";
 /** The width below which the flow page does not offer editing (Tailwind's `md`). */
 const WIDE_QUERY = "(min-width: 768px)";
 const DO_BLOCK = "work";
+/** The reference lesson 5 teaches; passed into the copy as a value so i18next leaves it as written. */
+const LESSON_REFERENCE = "{{understand-task.task}}";
+/** The block each building lesson works in; the editor opens on it. */
+const LESSON_BLOCK: Record<string, string> = {
+  "lesson-2": DO_BLOCK,
+  "lesson-3": DO_BLOCK,
+  "lesson-4": "check",
+  "lesson-5": "report",
+};
 
 type Engine = Parameters<typeof checkNewStep>[0];
 const engine = (graph: WorkflowGraph) => graph as unknown as Engine;
@@ -54,13 +68,6 @@ function useWide(): boolean {
   return wide;
 }
 
-/** The step a lesson added: the one agent step the example lacks. */
-function addedStepId(draft: WorkflowGraph, example: WorkflowGraph): string | undefined {
-  const known = new Set(example.nodes.map((node) => node.id));
-  const added = draft.nodes.filter((n) => n.type === "agent-directive" && !known.has(n.id));
-  return added.length === 1 ? added[0].id : undefined;
-}
-
 function freeId(draft: WorkflowGraph, base: string): string {
   let id = base;
   for (let n = 2; draft.nodes.some((node) => node.id === id); n += 1) id = `${base}-${n}`;
@@ -74,6 +81,7 @@ function check(
   example: WorkflowGraph,
   surface: TutorialSurface,
   issues: readonly { code: string; nodeId?: string; edge?: string }[],
+  validationErrors = 0,
 ): LessonResult | null {
   switch (lesson) {
     case "lesson-1":
@@ -85,6 +93,10 @@ function check(
       return checkNewStep(engine(graph), engine(example));
     case "lesson-3":
       return checkConnected(engine(graph), engine(example), issues);
+    case "lesson-4":
+      return checkChoice(engine(graph), issues);
+    case "lesson-5":
+      return checkReference(engine(graph), validationErrors);
     default:
       return null;
   }
@@ -129,7 +141,14 @@ export default function TutorialRunner(): React.JSX.Element | null {
   const live = useMemo(
     () =>
       surface && example && onCopy
-        ? check(lesson, surface.draft, example, surface, surface.diagnostics)
+        ? check(
+            lesson,
+            surface.draft,
+            example,
+            surface,
+            surface.diagnostics,
+            surface.validationErrors,
+          )
         : null,
     [surface, example, onCopy, lesson],
   );
@@ -141,8 +160,12 @@ export default function TutorialRunner(): React.JSX.Element | null {
     [surface, example, onCopy, lesson],
   );
   const record = own?.lessons?.[lesson];
+  // Lesson 6 is passed by a run of the copy, found through the API; lessons 0 and 7 only explain.
+  const [runFound, setRunFound] = useState(false);
   const completed =
     lesson === "lesson-0" ||
+    lesson === "lesson-7" ||
+    (lesson === "lesson-6" && (runFound || !!record)) ||
     (!!saved?.passed && !surface?.dirty && !!record && record.revision === surface?.revision);
 
   // An earlier building lesson that no longer holds on the draft. Lesson 1 is not among them: its
@@ -179,6 +202,7 @@ export default function TutorialRunner(): React.JSX.Element | null {
       (live?.findings ?? []).map((finding) => ({
         ...finding,
         message: t(`guides.build-flow.findings.${finding.code}`, {
+          ref: LESSON_REFERENCE,
           ...(finding.data ?? {}),
           node: finding.nodeId ?? "",
         }),
@@ -220,15 +244,41 @@ export default function TutorialRunner(): React.JSX.Element | null {
     announce,
   );
 
+  // Lesson 6: a completed run of the copy that answered the new step. Never assumed: looked up.
+  const lookForRun = useCallback(async () => {
+    if (!surface || !example) return;
+    const stepId = lessonStepId(engine(surface.saved), engine(example));
+    if (!stepId) return;
+    const { executions } = await apiClient
+      .getExecutions({ workflowId: surface.flowId, status: ["completed"], mine: true, limit: 20 })
+      .catch(() => ({ executions: [] as { executionId: string }[] }));
+    for (const run of executions) {
+      const detail = await apiClient.getExecution(run.executionId).catch(() => null);
+      if (detail && detail.context.variables[stepId] !== undefined) {
+        setRunFound(true);
+        await changeProgress(passLesson(BUILD_FLOW_ID, "lesson-6", surface.revision, false)).catch(
+          () => undefined,
+        );
+        return;
+      }
+    }
+  }, [surface, example]);
+  useEffect(() => {
+    if (lesson === "lesson-6" && onCopy && !record) void lookForRun();
+    // Looked up when the lesson opens; "Check again" looks again.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lesson, onCopy]);
+
   // A building lesson on the copy opens the editor on the Do block once, after the lesson's address
   // is committed: a change made in the same moment as the move could be lost to it.
   const opened = useRef<string | null>(null);
   const openForEditing = surface?.openForEditing;
   useEffect(() => {
-    if (!openForEditing || !onCopy || lesson === "lesson-0" || lesson === "lesson-1") return;
+    const block = LESSON_BLOCK[lesson];
+    if (!openForEditing || !onCopy || !block) return;
     if (opened.current === lesson) return;
     opened.current = lesson;
-    openForEditing(DO_BLOCK);
+    openForEditing(block);
   }, [openForEditing, onCopy, lesson]);
 
   // The control the lesson starts from, outlined without covering the page.
@@ -247,14 +297,16 @@ export default function TutorialRunner(): React.JSX.Element | null {
 
   const doItForMe = async () => {
     if (!surface || !example) return;
-    // Once per lesson, remembered across reloads.
-    await changeProgress(markLessonForMe(BUILD_FLOW_ID, lesson)).catch(() => undefined);
+    // Once per lesson, remembered across reloads — once the change was actually made.
+    const spent = () =>
+      changeProgress(markLessonForMe(BUILD_FLOW_ID, lesson)).catch(() => undefined);
     if (lesson === "lesson-1") {
       setBusy(true);
       const copyId = (await liveCopy(own)) ?? (await surface.copy());
       setBusy(false);
       if (!copyId) return;
       await changeProgress(recordTutorialCopy(BUILD_FLOW_ID, copyId)).catch(() => undefined);
+      await spent();
       navigate(lessonAddress("lesson-1", copyId, i18n.language));
       return;
     }
@@ -280,10 +332,72 @@ export default function TutorialRunner(): React.JSX.Element | null {
       });
     }
     if (lesson === "lesson-3") {
-      const id = addedStepId(surface.draft, example);
+      const id = lessonStepId(engine(surface.draft), engine(example));
       if (!id) return;
       surface.apply({ kind: "set-connection", source: "do-task", key: "success", target: id });
     }
+    if (lesson === "lesson-4") {
+      const gap = freeId(surface.draft, "explain-gap");
+      const current = surface.draft.nodes.find((n) => n.id === "check-result")?.connectionLabels
+        ?.success;
+      surface.apply({
+        kind: "set-choice",
+        nodeId: "check-result",
+        choice: {
+          field: "matches",
+          question: t("guides.tutorial.forMe.question"),
+          options: ["yes", "no"],
+          defaultOption: "yes",
+          targets: { no: gap },
+          labels: {
+            ...(current ? { yes: current } : {}),
+            no: t("guides.tutorial.forMe.noLabel"),
+          },
+        },
+        newNodes: [
+          {
+            node: {
+              id: gap,
+              type: "agent-directive",
+              directive: t("guides.tutorial.forMe.gapDirective"),
+              completionCondition: t("guides.tutorial.forMe.gapCondition"),
+              connections: { success: "end" },
+              connectionLabels: { success: t("guides.tutorial.forMe.gapLabel") },
+            } as unknown as WorkflowNode,
+            blockId: "check",
+          },
+        ],
+      });
+    }
+    if (lesson === "lesson-5") {
+      const report = surface.draft.nodes.find((n) => n.id === "report") as
+        (WorkflowNode & { directive?: string }) | undefined;
+      surface.apply({
+        kind: "node-text",
+        nodeId: "report",
+        field: "directive",
+        value:
+          `${report?.directive ?? ""} ${t("guides.tutorial.forMe.reference", { ref: LESSON_REFERENCE })}`.trim(),
+      });
+    }
+    if (lesson !== "lesson-1") await spent();
+  };
+
+  const deleteCopy = async () => {
+    if (!surface) return;
+    setBusy(true);
+    const deleted = await apiClient.deleteWorkflow(surface.flowId).then(
+      () => true,
+      () => false,
+    );
+    setBusy(false);
+    if (!deleted) {
+      toast.error(t("guides.tutorial.deleteFailed"));
+      return;
+    }
+    await changeProgress(dropTutorialCopy(BUILD_FLOW_ID)).catch(() => undefined);
+    close();
+    navigate(ROUTES.WORKFLOWS);
   };
 
   const next = () => {
@@ -307,6 +421,8 @@ export default function TutorialRunner(): React.JSX.Element | null {
     !!surface &&
     !!example &&
     lesson !== "lesson-0" &&
+    lesson !== "lesson-6" &&
+    lesson !== "lesson-7" &&
     !completed &&
     !forMeUsed &&
     (lesson === "lesson-1" ? true : onCopy);
@@ -360,7 +476,9 @@ export default function TutorialRunner(): React.JSX.Element | null {
           className="mt-2 text-sm leading-relaxed text-muted-foreground"
           data-testid="tutorial-body"
         >
-          {!wide ? t("guides.tutorial.narrow") : t(`guides.build-flow.steps.${lesson}.body`)}
+          {!wide
+            ? t("guides.tutorial.narrow")
+            : t(`guides.build-flow.steps.${lesson}.body`, { ref: LESSON_REFERENCE })}
         </p>
         {wide && lesson === "lesson-1" && onExample && own?.copyId && (
           <p className="mt-2 text-sm">{t("guides.tutorial.haveCopy")}</p>
@@ -412,21 +530,75 @@ export default function TutorialRunner(): React.JSX.Element | null {
             ))}
           </ul>
         )}
-        {wide && (status === "save" || status === "complete") && lesson !== "lesson-0" && (
-          <p
-            className={cn(
-              "mt-2 text-sm font-medium",
-              status === "complete" ? "text-success" : "text-foreground",
+        {wide && lesson === "lesson-6" && surface && onCopy && (
+          <div className="mt-2 space-y-2 text-sm" data-testid="tutorial-try-it">
+            <p
+              className="rounded-md bg-muted p-2 font-mono text-xs"
+              data-testid="tutorial-sentence"
+            >
+              {t("guides.tutorial.tryIt.sentence", { name: surface.flowName })}
+            </p>
+            {!completed && (
+              <div className="flex gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-7 text-xs"
+                  onClick={() => void lookForRun()}
+                  data-testid="tutorial-check-run"
+                >
+                  {t("guides.tutorial.tryIt.checkAgain")}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-7 text-xs"
+                  onClick={() => {
+                    // Skipped is recorded as done, so a later start resumes after it.
+                    if (surface)
+                      void changeProgress(
+                        passLesson(BUILD_FLOW_ID, "lesson-6", surface.revision, false),
+                      ).catch(() => undefined);
+                    go("lesson-7");
+                  }}
+                  data-testid="tutorial-skip"
+                >
+                  {t("guides.tutorial.tryIt.skip")}
+                </Button>
+              </div>
             )}
-            data-testid="tutorial-result"
-          >
-            {status === "complete"
-              ? t("guides.tutorial.complete")
-              : lesson === "lesson-1"
-                ? t("guides.tutorial.checking")
-                : t("guides.tutorial.looksRight")}
-          </p>
+          </div>
         )}
+        {wide && lesson === "lesson-7" && surface && onCopy && (
+          <Button
+            size="sm"
+            variant="outline"
+            className="mt-2 h-7 text-xs text-destructive"
+            onClick={() => void deleteCopy()}
+            disabled={busy}
+            data-testid="tutorial-delete-copy"
+          >
+            {t("guides.tutorial.deleteCopy")}
+          </Button>
+        )}
+        {wide &&
+          (status === "save" || status === "complete") &&
+          lesson !== "lesson-0" &&
+          lesson !== "lesson-7" && (
+            <p
+              className={cn(
+                "mt-2 text-sm font-medium",
+                status === "complete" ? "text-success" : "text-foreground",
+              )}
+              data-testid="tutorial-result"
+            >
+              {status === "complete"
+                ? t("guides.tutorial.complete")
+                : lesson === "lesson-1"
+                  ? t("guides.tutorial.checking")
+                  : t("guides.tutorial.looksRight")}
+            </p>
+          )}
         <div className="mt-3 flex items-center justify-between gap-2">
           <Button
             size="sm"

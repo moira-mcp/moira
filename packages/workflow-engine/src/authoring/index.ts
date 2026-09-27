@@ -12,10 +12,14 @@
 export { AuthoringError, type AuthoringErrorCode } from "./errors.js";
 export { readChoice, setChoice, type Choice } from "./choice.js";
 export {
+  checkChoice,
   checkConnected,
   checkNewStep,
   checkOwnCopy,
+  checkReference,
+  lessonStepId,
   TUTORIAL_CHECKED_LESSONS,
+  TUTORIAL_EXAMPLE_IDS,
   TUTORIAL_FINDING_CODES,
   type CopyFacts,
   type LessonFinding,
