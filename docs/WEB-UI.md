@@ -466,7 +466,8 @@ first lesson not passed while the copy exists; "Use as Template" carries an open
 copy. The editor tour's offer waits while any guide or tutorial is open. Lesson 6 has no definition
 check: it looks up the reader's completed runs of the copy (`getExecutions` with `mine`) for one
 whose context answered the new step, offers "Check again" and "Skip", and never passes otherwise.
-Lesson 7 offers to delete the copy, which also forgets it. The ids of the example the lessons name
+Lesson 7 offers to delete the copy, which also forgets it. A lesson does not move on by itself when
+its result holds: the card says it is done, announces it, and opens Next. The ids of the example the lessons name
 are `TUTORIAL_EXAMPLE_IDS`, held to both language versions by a test. Besides the menu, the
 tutorial opens from the **Practice** card after the examples in the recommended flows (with a
 `practice` step in the home and flow-list tours) and from the full tour's closing card

@@ -29,7 +29,10 @@ export interface GuideStep {
    * that draw it.
    */
   anchor: string | Record<string, string>;
-  /** Whether the reader looks at the element or does something with it; both advance on Next. */
+  /**
+   * Whether the reader looks at the element or does something with it; both advance on Next. In a
+   * tutorial a do step opens Next only once its result holds, and does not move on by itself.
+   */
   kind: "look" | "do";
   /** Raised by the step's author when the control it explains or the meaning of its copy changes. */
   revision: number;
