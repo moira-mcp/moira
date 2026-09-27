@@ -19,6 +19,7 @@ import { SidebarProvider, SidebarInset, SidebarTrigger } from "@/components/ui/s
 import { AppSidebar, type NavRoute } from "./AppSidebar";
 import { ROUTES, APP_PREFIX } from "../../constants/routes";
 import { localizedDocsPath } from "@/lib/docs-path";
+import { useFeatures } from "@/hooks/useFeatures";
 
 export const MainAppLayout: React.FC = () => {
   const { t, i18n } = useTranslation();
@@ -47,8 +48,12 @@ export const MainAppLayout: React.FC = () => {
   const navigate = useNavigate();
   const { data: session } = useSession();
 
-  const { showModal, acceptAgreement, declineAgreement, showBanner, dismissBanner } =
+  const { showModal, hasAccepted, acceptAgreement, declineAgreement, showBanner, dismissBanner } =
     useBetaAgreement(!!session?.user);
+  // The first-run guide prompt waits until the beta agreement, where the deployment asks it, is
+  // answered; before the features are known nobody can tell whether it will be asked.
+  const features = useFeatures();
+  const guidePromptReady = features.loaded && (!features.isEnabled("betaNotices") || hasAccepted);
 
   // Fetch admin status once on mount
   useEffect(() => {
@@ -82,7 +87,7 @@ export const MainAppLayout: React.FC = () => {
       </a>
 
       <SidebarProvider>
-        <GuideProvider>
+        <GuideProvider promptReady={guidePromptReady}>
           <AppSidebar routes={MAIN_APP_ROUTES} isAdmin={isAdmin} />
           <SidebarInset className="flex flex-col h-screen overflow-hidden">
             {/* Mobile header with sidebar trigger */}

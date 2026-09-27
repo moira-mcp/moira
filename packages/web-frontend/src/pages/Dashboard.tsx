@@ -19,6 +19,7 @@ import { QuickStartCard } from "../components/QuickStartCard";
 import { RecommendedFlows } from "../components/onboarding/RecommendedFlows";
 import { PageShell } from "../components/PageShell";
 import { WorkArea } from "../components/home/WorkArea";
+import { FirstRunPrompt } from "@/guides/FirstRunPrompt";
 
 const HOW_IT_WORKS = [
   { key: "connect", icon: Plug },
@@ -118,6 +119,7 @@ export const Dashboard: React.FC = () => {
 
   return (
     <PageShell title={t("pages.dashboard.title")}>
+      <FirstRunPrompt />
       <HowItWorks />
 
       {/* Step 1 — connect the agent: per-client MCP configuration */}

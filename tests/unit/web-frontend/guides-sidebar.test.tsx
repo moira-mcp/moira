@@ -46,6 +46,8 @@ jest.unstable_mockModule("../../../packages/web-frontend/src/guides/registry", (
 // Imported after the mock, so the provider and the button read the fixture registry.
 const { GuideProvider } = await import("../../../packages/web-frontend/src/guides/GuideContext");
 const { GuideButton } = await import("../../../packages/web-frontend/src/guides/GuideButton");
+const { resetGuideProgress } = await import("../../../packages/web-frontend/src/guides/progress");
+const { fakeUserSettings } = await import("./helpers/fake-user-settings");
 const { modalOf, sheetEdge } =
   await import("../../../packages/web-frontend/src/guides/GuideRunner");
 
@@ -81,12 +83,17 @@ function setWidth(width: number): void {
 const card = () => screen.getByTestId("guide-card");
 const onStep = (id: string) =>
   waitFor(() => expect(card()).toHaveAttribute("data-guide-step", id), { timeout: 4000 });
+/** The guide has opened: its card has focus, taken in the pass that starts its key listener. */
+const opened = () => waitFor(() => expect(document.activeElement).toBe(card()), { timeout: 4000 });
 const phoneSheet = () => document.querySelector<HTMLElement>('[data-mobile="true"]');
 const railState = () =>
   document.querySelector('[data-slot="sidebar"][data-state]')?.getAttribute("data-state");
 
 beforeEach(() => {
   (globalThis as typeof globalThis & { React?: typeof React }).React = React;
+  // The runner records progress; each test starts with none, on a server that stores it.
+  resetGuideProgress();
+  fakeUserSettings();
   document.cookie = "sidebar_state=; max-age=0; path=/";
   // jsdom lays nothing out: give every element a box so an anchor counts as visible.
   HTMLElement.prototype.getBoundingClientRect = () =>
@@ -112,6 +119,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  jest.restoreAllMocks();
   const target = globalThis as typeof globalThis & { React?: typeof React };
   if (originalReact) target.React = originalReact;
   else delete target.React;
@@ -123,6 +131,7 @@ describe("a guide step in the app sidebar", () => {
     renderShell({ sidebarOpen: true });
     fireEvent.click(screen.getByTestId("guide-open"));
     await onStep("page");
+    await opened();
     expect(phoneSheet()).toBeNull();
 
     fireEvent.keyDown(window, { key: "ArrowRight" });
@@ -147,6 +156,7 @@ describe("a guide step in the app sidebar", () => {
       renderShell({ sidebarOpen });
       fireEvent.click(screen.getByTestId("guide-open"));
       await onStep("page");
+      await opened();
       expect(railState()).toBe(states[0]);
 
       fireEvent.keyDown(window, { key: "ArrowRight" });
@@ -164,6 +174,7 @@ describe("a guide step in the app sidebar", () => {
     renderShell({ sidebarOpen: true });
     fireEvent.click(screen.getByTestId("guide-open"));
     await onStep("page");
+    await opened();
     fireEvent.keyDown(window, { key: "ArrowRight" });
     await onStep("nav");
     await waitFor(() => expect(phoneSheet()).not.toBeNull());
@@ -260,6 +271,7 @@ describe("going back across a step that cannot be shown", () => {
     setWidth(390);
     renderShell({ sidebarOpen: true, at: "/fixture?guide=fixture&step=end" });
     await onStep("end");
+    await opened();
     fireEvent.keyDown(window, { key: "ArrowLeft" });
     await onStep("after");
     await waitFor(() => expect(screen.getByTestId("guide-note")).toBeVisible());

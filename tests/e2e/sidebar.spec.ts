@@ -244,7 +244,7 @@ test.describe("Sidebar Navigation & Collapse", () => {
     await expect(sidebarFooter).toBeVisible();
 
     // Should have user menu button (contains avatar initials)
-    const userMenuButton = sidebarFooter.locator("button");
+    const userMenuButton = sidebarFooter.locator('[data-slot="dropdown-menu-trigger"]');
     await expect(userMenuButton).toBeVisible();
 
     // Click to open dropdown and verify it works

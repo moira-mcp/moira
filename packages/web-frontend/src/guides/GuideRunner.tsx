@@ -24,6 +24,9 @@ import { useTranslation } from "react-i18next";
 import { createPortal } from "react-dom";
 import { Popover as PopoverPrimitive } from "radix-ui";
 import { LazyMotion, domAnimation, m } from "motion/react";
+import { useLocation } from "react-router-dom";
+import { toast } from "sonner";
+import i18n from "@/i18n";
 import { ChevronLeft, ChevronRight, CircleHelp, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useIsMobile } from "@/hooks/use-mobile";
@@ -31,7 +34,8 @@ import { useOptionalSidebar } from "@/components/ui/sidebar";
 import { requestReveal } from "../components/diagram/reveal";
 import { findAnchor } from "./anchors";
 import { usePrefersReducedMotion } from "./usePrefersReducedMotion";
-import { useGuides } from "./GuideContext";
+import { GUIDE_PARAM, ONLY_PARAM, STEP_PARAM, useGuides } from "./GuideContext";
+import { changeProgress, finishGuide, recordStep, type ProgressChange } from "./progress";
 import { anchorIn, fallbackView } from "./types";
 
 /** How long a missing element is waited for before the step is treated as absent. */
@@ -101,9 +105,15 @@ function isTyping(target: EventTarget | null): boolean {
   );
 }
 
+/** Save a change to the reader's progress; a save that fails is undone by the store and reported. */
+function saveProgress(change: ProgressChange): void {
+  changeProgress(change).catch(() => toast.error(i18n.t("guides.ui.saveFailed")));
+}
+
 export default function GuideRunner(): React.JSX.Element | null {
   const { t } = useTranslation();
-  const { guide, steps, stepId, controller, go, close, announce } = useGuides();
+  const { guide, steps, stepId, partial, controller, start, go, close, announce } = useGuides();
+  const location = useLocation();
   const isMobile = useIsMobile();
   const reduceMotion = usePrefersReducedMotion();
 
@@ -126,9 +136,14 @@ export default function GuideRunner(): React.JSX.Element | null {
       setNote(skipped ?? null);
       const following = steps[index + 1];
       if (following) go(following.id);
-      else close();
+      else {
+        // Walked to the end: the guide is finished, with nothing left to resume. A run of only its
+        // changed steps finishes nothing: the rest of the tour was not walked.
+        if (guide && !partial) saveProgress(finishGuide(guide, steps));
+        close();
+      }
     },
-    [steps, index, go, close],
+    [steps, index, go, close, guide, partial],
   );
   const back = useCallback(() => {
     direction.current = "back";
@@ -256,6 +271,22 @@ export default function GuideRunner(): React.JSX.Element | null {
     return () => window.cancelAnimationFrame(frame);
   }, [target]);
 
+  // A step shown is seen at its revision, and it is where the reader stopped.
+  const pagePath = useMemo(() => {
+    const query = new URLSearchParams(location.search);
+    [GUIDE_PARAM, STEP_PARAM, ONLY_PARAM].forEach((param) => query.delete(param));
+    const rest = query.toString();
+    return rest ? `${location.pathname}?${rest}` : location.pathname;
+  }, [location.pathname, location.search]);
+  useEffect(() => {
+    if (!guide || !step || skipping) return;
+    saveProgress(recordStep(guide.id, step, pagePath, !partial));
+    // Recorded once per step shown, and again when a run of the changed steps becomes the whole
+    // tour on the same step (only then does it become the place to resume); the page's path at that
+    // moment is the one to come back to.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [guide?.id, step?.id, skipping, partial]);
+
   // Announce each step once.
   const titleKey = guide && step ? `guides.${guide.id}.steps.${step.id}.title` : null;
   useEffect(() => {
@@ -270,30 +301,34 @@ export default function GuideRunner(): React.JSX.Element | null {
     );
   }, [guide, titleKey, skipping, index, steps.length, announce, t]);
 
-  // Arrows and Enter move, Escape closes; never while the reader types.
+  // Arrows and Enter move, Escape closes; never while the reader types. One listener for the life of
+  // the guide, reading the current moves: re-attaching it on every step would leave moments with no
+  // listener at all, and a key pressed in one would be lost.
+  const moves = useRef({ advance, back, close });
+  moves.current = { advance, back, close };
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (isTyping(event.target)) return;
       if (event.key === "Escape") {
         event.preventDefault();
-        close();
+        moves.current.close();
       } else if (event.key === "ArrowRight") {
         event.preventDefault();
-        advance();
+        moves.current.advance();
       } else if (event.key === "Enter") {
         // Enter on a focused button or link is that control's own click.
         if (event.target instanceof HTMLButtonElement || event.target instanceof HTMLAnchorElement)
           return;
         event.preventDefault();
-        advance();
+        moves.current.advance();
       } else if (event.key === "ArrowLeft") {
         event.preventDefault();
-        back();
+        moves.current.back();
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [advance, back, close]);
+  }, []);
 
   const boxRef = useRef<Box | null>(box);
   boxRef.current = box;
@@ -341,6 +376,7 @@ export default function GuideRunner(): React.JSX.Element | null {
       onBack={back}
       onNext={() => advance()}
       onClose={close}
+      onWholeTour={partial ? () => start(guide.id) : undefined}
       dock={dock}
       onHeight={setSheetHeight}
     />
@@ -409,6 +445,7 @@ function GuideCard({
   onBack,
   onNext,
   onClose,
+  onWholeTour,
   dock,
   onHeight,
 }: {
@@ -422,6 +459,8 @@ function GuideCard({
   onBack: () => void;
   onNext: () => void;
   onClose: () => void;
+  /** Present when the guide runs only its new steps: the last card offers the whole tour. */
+  onWholeTour?: () => void;
   dock: CardDock;
   /** Reports the card's height, which decides the edge a narrow screen's sheet docks to. */
   onHeight: (height: number) => void;
@@ -514,7 +553,7 @@ function GuideCard({
         </div>
         <button
           type="button"
-          onClick={last ? onClose : onNext}
+          onClick={onNext}
           // The dark theme's primary is too light for white small text; its background reads.
           className="inline-flex items-center gap-1 rounded-md bg-primary px-2.5 py-1 text-xs font-medium text-primary-foreground hover:bg-primary/90 dark:text-background"
           data-testid={last ? "guide-finish" : "guide-next"}
@@ -523,6 +562,16 @@ function GuideCard({
           {!last && <ChevronRight className="size-3.5" aria-hidden="true" />}
         </button>
       </div>
+      {last && onWholeTour && (
+        <button
+          type="button"
+          onClick={onWholeTour}
+          className="mt-2 text-xs font-medium text-primary underline-offset-4 hover:underline"
+          data-testid="guide-whole-tour"
+        >
+          {t("guides.ui.wholeTour")}
+        </button>
+      )}
     </m.div>
   );
 }

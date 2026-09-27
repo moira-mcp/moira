@@ -144,7 +144,9 @@ frontend/src/
 │   ├── anchors.ts               # `guideAnchor(...)`: the `data-guide` names a step points at
 │   ├── GuideContext.tsx         # `GuideProvider`, `useGuides`, `useGuidePage`: the URL state and page controllers
 │   ├── GuideRunner.tsx          # The runner: page preparation, spotlight, card, keyboard (lazy-loaded)
-│   ├── GuideButton.tsx          # "What is this?"
+│   ├── GuideButton.tsx          # "What is this?", with the dot for changed steps
+│   ├── progress.ts              # The reader's progress (`ui.guide_progress`): the store and its rules
+│   ├── FirstRunPrompt.tsx / ShowMeAround.tsx  # The home page's one-time prompt; the sidebar's guides menu
 │   └── snapshot.ts / revisions.snapshot.json  # The step revision snapshot (`npm run guides:snapshot`)
 ├── auth/
 │   ├── AuthProvider.tsx         # Better Auth UI provider
@@ -304,8 +306,9 @@ elements carry a name, the step points at the first visible one. Test ids keep t
 
 **Pages and the provider.** `GuideProvider` is mounted inside `SidebarProvider` by `MainAppLayout`
 and by `AdminLayout` (the admin area shows the run page). It keeps the open guide in the URL as
-`guide=<id>&step=<step>`, so a step can be linked; closing removes both and returns focus to the
-control that opened the guide. A page registers a controller for its screen with
+`guide=<id>&step=<step>`, so a step can be linked, and `only=<step ids>` when the guide runs just
+the steps that changed; closing removes them and returns focus to the control that opened the
+guide. A page registers a controller for its screen with
 `useGuidePage(screen, controller)`: the view it shows, whether the reader owns what is shown (which
 filters the steps by role), and the operations that prepare it — `setView`, `openPanel`,
 `openSection`, `selectCurrentBlock` — plus whether a route is recorded. Pass a memoised controller.
@@ -323,7 +326,11 @@ filters the steps by role), and the operations that prepare it — `setView`, `o
   shown or announced. A step is skipped in the direction the reader last moved, so Back crosses it.
   A required step whose element is absent shows its card with a "not found" note;
 - dims everything but the element with a `pointer-events: none` layer (`guide-spotlight`, colour
-  `--guide-dim`) and a ring, and never writes to the element.
+  `--guide-dim`) and a ring, and never writes to the element;
+- records the step as seen at its revision and as the place to resume (the guide, the step, and the
+  page's path and query without the guide's own parameters). Walking a guide to its end finishes
+  it and clears the resume point; closing it keeps it. A run of only the changed steps records
+  them as seen and nothing else: it neither moves the resume point nor finishes the guide.
 
 **The card** (`guide-card`, a non-modal `role="dialog"` titled by the step) sits where
 `data-guide-dock` says:
@@ -340,8 +347,54 @@ into the card; the right arrow and Enter go on, the left arrow goes back, Escape
 them act while the reader types in a field. Each step is announced once through a polite live
 region (`guide-announcer`). Under reduced motion (`usePrefersReducedMotion`) nothing animates.
 
+**Progress** (`guides/progress.ts`) is one user setting, `ui.guide_progress` (category `ui`, type
+`json`, default `{}`), seeded beside `ui.hidden_panels`:
+
+- `firstRun`: the answer to the first-run prompt, `accepted` or `declined`;
+- `resume`: `{guide, step, path}`;
+- `seen`: `<guide>.<step>` → the step's revision when the reader last saw it;
+- `finished`: `<guide>` → `true` for a guide walked to its end. Finishing also records every step
+  the guide shows this reader at its current revision, the skipped ones included; another role's
+  steps stay unseen.
+
+The schema checks those fields and accepts any other, so a later build can add its own. The
+in-page copy is `lib/userSettingStore.ts`, the store the beginner panels also use. A change is a
+function of the stored value; it shows at once, is saved against the value re-read from the server
+(so tabs and devices never undo each other and unknown fields are kept), and is taken back and
+reported ("Couldn't save your guide progress") when the server refuses it.
+
+A step is **new** when the reader saw it at a revision below its current one, or, in a guide they
+finished, when they never saw it, meaning it was added since. In a guide not finished, a step not
+reached yet is simply unseen, as is every step of a guide never opened. Away from a tour's own page
+the menu counts the reader against every step for everyone, plus the role-only steps of the role
+they were shown, once they have seen one; before that, as a reader, the way the page counts
+someone who does not own what it shows. When a screen's tour has new steps,
+"What is this?" carries a dot (`guide-new-dot`, `data-new-steps`) and runs only those steps; the
+last card offers the whole tour (`guide-whole-tour`). Nothing opens by itself.
+
+**Entry points:**
+
+- **The first-run prompt** (`FirstRunPrompt`, `first-run-prompt`) sits inline at the top of home
+  for an account with no guide progress at all. The layout passes `promptReady` to the provider: true once
+  the features are known and the beta agreement, where the deployment asks it (`betaNotices`), is
+  accepted. "Show me around" records `accepted` and opens the guides menu (the sidebar sheet first
+  on a phone); "Later" hides it for the browser session (a session cookie, `moira-guides-later`,
+  shared by every tab); "No thanks" records `declined`.
+- **"Show me around"** (`ShowMeAround`, `show-me-around`) is in the sidebar footer above the user
+  menu, so it is also in the phone sheet and the admin area. Its menu (`show-me-around-menu`)
+  offers this page's tour (or says the page has none), "Continue" to the resume point (it opens that
+  page with the guide at that step), and each screen tour's status: not started, in progress, seen,
+  or N new steps. "Seen" means the tour was walked to its end. The button carries
+  `data-progress="loaded"` once the reader's progress is read. It closes on Escape and on a press
+  outside, not when focus leaves it (the phone sheet takes focus as it opens around it).
+- **Settings → Preferences → Guides** (`preferences-guides`): "Start the tour again" forgets the
+  Settings tour's seen steps, finished mark and resume point, and starts it; "Forget what I have
+  seen" clears `firstRun`, `resume`, `seen` and `finished` (keeping any other field) and this
+  session's "Later", so the prompt comes back.
+
 **Copy** lives only in the locale files: `guides.<guide>.title`,
-`guides.<guide>.steps.<step>.title` and `.body`, and the shared `guides.ui.*`. Every step needs both
+`guides.<guide>.steps.<step>.title` and `.body`, and the shared `guides.ui.*`, `guides.menu.*` and
+`guides.firstRun.*`. Every step needs both
 English and Russian, and guide components use no `defaultValue` fallbacks.
 
 **Checks** (`tests/unit/web-frontend/guides-registry.test.ts` and `locale-parity.test.ts`):
@@ -409,8 +462,9 @@ Active route highlighting via NavLink isActive.
 
 ### Home page
 
-The home page (`pages/Dashboard.tsx`, route `/`) leads with how Moira is meant to be used
-(`home-how-it-works`). It shows three numbered steps (`home-steps`):
+The home page (`pages/Dashboard.tsx`, route `/`) opens, for an account with no guide progress at all,
+with the one-time first-run prompt (`first-run-prompt`, see "Guides"). It then leads with how Moira
+is meant to be used (`home-how-it-works`). It shows three numbered steps (`home-steps`):
 
 1. connect your agent;
 2. describe the task in plain words;
@@ -464,8 +518,9 @@ A hidden panel renders nothing.
 
 Which panels are hidden belongs to the account: the user setting `ui.hidden_panels` (category
 `ui`, type `json`, a list of panel ids, default empty), seeded like every built-in definition and
-written with the bulk `PUT /api/settings`. `components/onboarding/beginnerPanels.ts` holds the ids and
-one in-page copy of the set, keyed by the signed-in account, that every panel and the Settings
+written with the bulk `PUT /api/settings`. `components/onboarding/beginnerPanels.ts` holds the ids and,
+through `lib/userSettingStore.ts` (the one in-page store for a user setting the interface edits
+optimistically, which the guide progress uses too), one copy of the set, keyed by the signed-in account, that every panel and the Settings
 switches read (`usePanelVisible`, `useBeginnerPanels`, `setPanelHidden`). A panel is drawn only once
 the set is known. A change shows at once; saves run one after another and each applies its change to
 the list re-read from the server, so quick successive hides are all kept and another device's change
@@ -539,15 +594,15 @@ One page at `/settings` whose sections are all always mounted. `Settings.tsx` do
 **Sections** (each a `SettingsSection`: icon, heading, one-sentence description, optional
 `HelpPopover` and actions; the anchor is the section `id`):
 
-| Anchor                | Section             | `data-testid`                   | Content                                                                                                                                                                                                                                                         |
-| --------------------- | ------------------- | ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `account`             | Account             | `settings-section-profile`      | `ProfileSettings`: name, email with verification badge, handle with a help popover on why changing it breaks links and a confirmation                                                                                                                           |
-| `security`            | Security & sign-in  | `settings-section-security`     | `SecuritySettings`: the change-password form, or for an account that signs in only through a social provider, how it signs in and a set-password form; an Active Sessions subsection (`settings-section-sessions`, help popover) with `SessionsSettings`        |
-| `notifications`       | Notifications       | `settings-section-dynamic`      | One `CommunicationChannelCard` per channel, a help popover, the **Telegram setup** tour button when Telegram is present, an empty state without channels                                                                                                        |
-| `integrations-github` | GitHub & Codespaces | `settings-section-integrations` | Help popover, **Setup guide** tour, and the connection, Cloud codespaces, Automatic pause and Your limits cards under one `GitHubCodespacesProvider`                                                                                                            |
-| `connected-apps`      | Connected apps      | `settings-section-oauth`        | `OAuthSettings` with a help popover                                                                                                                                                                                                                             |
-| `api-tokens`          | API tokens          | `settings-section-api-tokens`   | `ApiTokensSettings` with a help popover on when a token is needed, the Bearer header and the one-time display                                                                                                                                                   |
-| `preferences`         | Preferences         | `settings-section-preferences`  | `PreferencesSettings` theme (Light/Dark/System, via `useTheme`) and interface language, both kept in this browser; the beginner-panel switches (the account's `ui.hidden_panels`); then the generic editor for remaining definitions (`settings-section-other`) |
+| Anchor                | Section             | `data-testid`                   | Content                                                                                                                                                                                                                                                                                                                                                     |
+| --------------------- | ------------------- | ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `account`             | Account             | `settings-section-profile`      | `ProfileSettings`: name, email with verification badge, handle with a help popover on why changing it breaks links and a confirmation                                                                                                                                                                                                                       |
+| `security`            | Security & sign-in  | `settings-section-security`     | `SecuritySettings`: the change-password form, or for an account that signs in only through a social provider, how it signs in and a set-password form; an Active Sessions subsection (`settings-section-sessions`, help popover) with `SessionsSettings`                                                                                                    |
+| `notifications`       | Notifications       | `settings-section-dynamic`      | One `CommunicationChannelCard` per channel, a help popover, the **Telegram setup** tour button when Telegram is present, an empty state without channels                                                                                                                                                                                                    |
+| `integrations-github` | GitHub & Codespaces | `settings-section-integrations` | Help popover, **Setup guide** tour, and the connection, Cloud codespaces, Automatic pause and Your limits cards under one `GitHubCodespacesProvider`                                                                                                                                                                                                        |
+| `connected-apps`      | Connected apps      | `settings-section-oauth`        | `OAuthSettings` with a help popover                                                                                                                                                                                                                                                                                                                         |
+| `api-tokens`          | API tokens          | `settings-section-api-tokens`   | `ApiTokensSettings` with a help popover on when a token is needed, the Bearer header and the one-time display                                                                                                                                                                                                                                               |
+| `preferences`         | Preferences         | `settings-section-preferences`  | `PreferencesSettings` theme (Light/Dark/System, via `useTheme`) and interface language, both kept in this browser; the beginner-panel switches (the account's `ui.hidden_panels`); the Guides block (`preferences-guides`: "Start the tour again", "Forget what I have seen"); then the generic editor for remaining definitions (`settings-section-other`) |
 
 **Guides:** `pages/settings/settings.guide.ts` declares the Settings screen tour (`settings`), one
 step per section, and two task tours, `settings-github` and `settings-telegram`, which the GitHub &
@@ -2628,7 +2683,7 @@ frontend/
 │   ├── hooks/                   # useWorkflowData, useLayoutState, use-mobile
 │   ├── services/                # api-client.ts HTTP communication
 │   ├── utils/                   # workflow-transformer.ts
-│   ├── lib/                     # utils.ts (cn()), user-agent.ts, docs-path.ts, codespace-error-message.ts
+│   ├── lib/                     # utils.ts (cn()), user-agent.ts, docs-path.ts, codespace-error-message.ts, userSettingStore.ts
 │   └── styles/                  # globals.css (Tailwind v4 + semantic tokens)
 ├── components.json              # shadcn/ui configuration
 ├── package.json                 # Frontend dependencies and scripts

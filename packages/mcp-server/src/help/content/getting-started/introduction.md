@@ -24,6 +24,22 @@ plain words. The agent does the rest:
 Everything else — the diagrams in the web app, variables, node types, editing a flow by hand — is
 optional. It is there for when you want to look inside a flow, not something you must learn first.
 
+## Finding your way in the web app
+
+The web app explains itself on screen:
+
+- **The first time you sign in**, the home page asks whether you would like to be shown around.
+  "Show me around" opens the guides menu, "Later" asks again in your next session, and "No thanks"
+  is remembered.
+- **"Show me around"** is in the sidebar at any time. It offers this page's tour, continues a tour
+  where you left it, and shows how far you are in each screen's tour.
+- **"What is this?"** on a page runs that page's tour. Each card sits beside the part of the page
+  it explains. The right arrow or Enter goes on, the left arrow goes back, and Escape closes. When
+  a tour you have walked has new or changed steps, the button carries a dot, and pressing it shows
+  only those steps.
+- **Where you stopped and what you have seen** follows your account to every browser. Settings →
+  Preferences → Guides starts the tour again, or forgets what you have seen.
+
 ## A gradual path
 
 Start at the top and stop wherever you have what you need:

@@ -1,0 +1,150 @@
+/**
+ * An in-page copy of one user setting that the interface edits optimistically: every component that
+ * reads the setting sees the same copy, and a change made anywhere is seen everywhere at once.
+ *
+ * A change is a function of the stored value. It is shown immediately and saved; saves run one after
+ * another, and each reads the stored value just before writing and applies only its own change, so a
+ * change made meanwhile on another tab or device is never undone. A change the server refuses, or a
+ * save that fails, is taken back on the page and rejects the returned promise, for the caller to
+ * report. The copy belongs to the signed-in user: another account reads its own afresh.
+ */
+
+import { useEffect, useSyncExternalStore } from "react";
+import { useSession } from "../auth/better-auth-client";
+import { apiClient } from "../services/api-client";
+
+export type SettingChange<T> = (value: T) => T;
+
+export interface UserSettingStore<T> {
+  /** The value as this page knows it; `loaded` is false until it is known. */
+  useValue(): { loaded: boolean; value: T | null };
+  /** Apply a change: seen at once, saved against the stored value, undone if refused. */
+  change(change: SettingChange<T>): Promise<void>;
+  /** Forget the in-page copy; for tests that sign in as another user. */
+  reset(): void;
+}
+
+export interface UserSettingStoreOptions<T> {
+  /** The stored value as this build understands it; anything unexpected reads as a default. */
+  parse: (stored: unknown) => T;
+  /** The value to write; the parsed form by default. */
+  serialize?: (value: T) => unknown;
+  /**
+   * What the page shows when the stored value cannot be read. Absent: the value stays unknown and
+   * nothing that depends on it is shown; the next mount asks again.
+   */
+  whenUnreadable?: () => T;
+}
+
+/** The key of a reader whose session is not known; the server answers for whoever is signed in. */
+const ANONYMOUS = "";
+
+export function createUserSettingStore<T>(
+  key: string,
+  { parse, serialize = (value) => value, whenUnreadable }: UserSettingStoreOptions<T>,
+): UserSettingStore<T> {
+  let state: { userId: string | null; value: T | null } = { userId: null, value: null };
+  let loadingFor: string | null = null;
+  const listeners = new Set<() => void>();
+  /** Changes shown on this page whose save has not finished, in the order they were made. */
+  const pending: SettingChange<T>[] = [];
+  /** Saves run one after another. */
+  let saving: Promise<void> = Promise.resolve();
+  /** The value as last read from or written to the server, under the pending changes. */
+  let stored: T | null = null;
+
+  const publish = (next: typeof state) => {
+    state = next;
+    listeners.forEach((listener) => listener());
+  };
+  const withPending = (base: T): T => pending.reduce((value, change) => change(value), base);
+
+  const load = (userId: string) => {
+    if (loadingFor === userId) return;
+    if (state.userId !== userId) {
+      // Another account: nothing of the previous one's value or pending changes applies.
+      pending.length = 0;
+      stored = null;
+    }
+    loadingFor = userId;
+    publish({ userId, value: null });
+    apiClient.getUserSettings().then(
+      (settings) => {
+        if (loadingFor !== userId) return;
+        stored = parse(settings[key]);
+        publish({ userId, value: withPending(stored) });
+      },
+      () => {
+        if (loadingFor !== userId) return;
+        loadingFor = null;
+        stored = whenUnreadable ? whenUnreadable() : null;
+        publish({ userId, value: stored === null ? null : withPending(stored) });
+      },
+    );
+  };
+
+  const subscribe = (listener: () => void) => {
+    listeners.add(listener);
+    return () => listeners.delete(listener);
+  };
+
+  const change = (change: SettingChange<T>): Promise<void> => {
+    const owner = state.userId;
+    pending.push(change);
+    // A value not known yet stays unknown until the save has read the server's: showing a change
+    // applied to a guessed default would tell the page things about the reader that may be false.
+    publish({ userId: owner, value: stored === null ? null : withPending(stored) });
+    const settle = () => {
+      const index = pending.indexOf(change);
+      if (index >= 0) pending.splice(index, 1);
+    };
+    const run = saving.then(async () => {
+      try {
+        const current = parse((await apiClient.getUserSettings())[key]);
+        const next = change(current);
+        const result = await apiClient.updateUserSettings({ [key]: serialize(next) });
+        const refused = result.refused.find((entry) => entry.key === key);
+        if (refused) throw new Error(refused.reason);
+        settle();
+        if (state.userId === owner) {
+          stored = next;
+          publish({ userId: owner, value: withPending(next) });
+        }
+      } catch (error) {
+        settle();
+        if (state.userId === owner) {
+          publish({ userId: owner, value: stored === null ? null : withPending(stored) });
+        }
+        throw error;
+      }
+    });
+    saving = run.catch(() => undefined);
+    return run;
+  };
+
+  const useValue = () => {
+    // Pages that edit a user setting render behind the signed-in route, so the session is known
+    // here; a change of account without a reload reads the new account's value.
+    const { data: session } = useSession();
+    const userId = session?.user?.id ?? ANONYMOUS;
+    useEffect(() => {
+      load(userId);
+    }, [userId]);
+    const snapshot = useSyncExternalStore(subscribe, () => state);
+    const current = snapshot.userId === userId;
+    return {
+      loaded: current && snapshot.value !== null,
+      value: current ? snapshot.value : null,
+    };
+  };
+
+  const reset = () => {
+    loadingFor = null;
+    pending.length = 0;
+    saving = Promise.resolve();
+    stored = null;
+    state = { userId: null, value: null };
+  };
+
+  return { useValue, change, reset };
+}

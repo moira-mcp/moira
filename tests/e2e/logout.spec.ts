@@ -79,7 +79,9 @@ test.describe("Logout Button and Session Display", () => {
     await handleBetaDialog(page);
 
     // User menu button should be visible in sidebar footer
-    const userMenuButton = page.locator('[data-slot="sidebar-footer"] button');
+    const userMenuButton = page.locator(
+      '[data-slot="sidebar-footer"] [data-slot="dropdown-menu-trigger"]',
+    );
     await expect(userMenuButton).toBeVisible({ timeout: 5000 });
 
     // Verify email is shown somewhere in the button (as part of composite text)

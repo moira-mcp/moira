@@ -134,6 +134,40 @@ export const initialDefinitions: Omit<SettingDefinition, "createdAt" | "updatedA
     protected: true,
   },
 
+  {
+    // What this user has done with the web interface's guides: the first-run answer, where they
+    // stopped, and the revision of each step they saw. Later builds add fields; the schema lets
+    // them through.
+    key: "ui.guide_progress",
+    type: "json",
+    category: "ui",
+    label: "Guide progress",
+    description:
+      "Where this user stopped in the interface's guides, which steps they have seen, which guides they finished, and their answer to the first-run prompt. Reset it in Settings → Preferences → Guides.",
+    defaultValue: "{}",
+    required: false,
+    validation: JSON.stringify({
+      type: "object",
+      properties: {
+        firstRun: { type: "string", enum: ["accepted", "declined"] },
+        resume: {
+          type: "object",
+          properties: {
+            guide: { type: "string" },
+            step: { type: "string" },
+            path: { type: "string" },
+          },
+          required: ["guide", "step", "path"],
+        },
+        seen: { type: "object", additionalProperties: { type: "integer", minimum: 0 } },
+        finished: { type: "object", additionalProperties: { const: true } },
+      },
+      additionalProperties: true,
+    }),
+    adminOnly: false,
+    protected: true,
+  },
+
   // ===== MCP Settings (Admin Only) =====
   {
     key: "mcp.systemReminder",

@@ -77,8 +77,8 @@ test.describe("Settings page structure", () => {
   });
 
   for (const [lang, helpTitle, tourTitle, tourStep] of [
-    ["en", "When to use an API token", "Settings tour", "Jump between sections"],
-    ["ru", "Когда нужен API-токен", "Обзор настроек", "Переход между разделами"],
+    ["en", "When to use an API token", "The Settings page", "Jump between sections"],
+    ["ru", "Когда нужен API-токен", "Страница настроек", "Переход между разделами"],
   ] as const) {
     test(`help and the page tour open with localized words (${lang})`, async ({ page }) => {
       await loginAsAdmin(page);

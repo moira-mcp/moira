@@ -25,6 +25,8 @@ import type { GuideDefinition, GuideStep } from "./types";
 
 export const GUIDE_PARAM = "guide";
 export const STEP_PARAM = "step";
+/** A comma-separated list of step ids: the guide runs only those (the steps new to the reader). */
+export const ONLY_PARAM = "only";
 
 /** What a page tells the runner about itself, and what it lets the runner do. */
 export interface GuidePageController {
@@ -44,8 +46,20 @@ interface GuideContextValue {
   guide: GuideDefinition | undefined;
   steps: GuideStep[];
   stepId: string | null;
+  /** The guide runs only some of its steps (the new ones); the full tour is one step away. */
+  partial: boolean;
   controller: GuidePageController | undefined;
-  start: (guideId: string, stepId?: string) => void;
+  /** Whether the reader owns what a screen shows, as its page reports; unknown when not mounted. */
+  ownerOf: (screen: string) => boolean | undefined;
+  /**
+   * The layout has nothing more urgent to ask (the beta agreement, where it applies, is answered),
+   * so the one-time first-run prompt may appear.
+   */
+  promptReady: boolean;
+  /** The "Show me around" menu, which the first-run prompt opens too. */
+  menuOpen: boolean;
+  setMenuOpen: (open: boolean) => void;
+  start: (guideId: string, stepId?: string, only?: readonly string[]) => void;
   go: (stepId: string) => void;
   close: () => void;
   register: (screen: string, controller: GuidePageController) => void;
@@ -64,13 +78,21 @@ export function visibleSteps(guide: GuideDefinition, owner: boolean): GuideStep[
 
 const GuideRunner = lazy(() => import("./GuideRunner"));
 
-export function GuideProvider({ children }: { children: React.ReactNode }): React.JSX.Element {
+export function GuideProvider({
+  children,
+  promptReady = true,
+}: {
+  children: React.ReactNode;
+  promptReady?: boolean;
+}): React.JSX.Element {
   const [searchParams, setSearchParams] = useSearchParams();
   const guide = guideById(searchParams.get(GUIDE_PARAM));
   const requestedStep = searchParams.get(STEP_PARAM);
+  const onlyParam = searchParams.get(ONLY_PARAM);
+  const [menuOpen, setMenuOpen] = useState(false);
 
   const controllers = useRef(new Map<string, GuidePageController>());
-  const [, setVersion] = useState(0);
+  const [version, setVersion] = useState(0);
   const register = useCallback((screen: string, controller: GuidePageController) => {
     controllers.current.set(screen, controller);
     setVersion((version) => version + 1);
@@ -83,9 +105,24 @@ export function GuideProvider({ children }: { children: React.ReactNode }): Reac
   }, []);
   const controller = guide ? controllers.current.get(guide.screen) : undefined;
 
-  const steps = useMemo(
-    () => (guide ? visibleSteps(guide, controller?.owner ?? false) : []),
-    [guide, controller?.owner],
+  const steps = useMemo(() => {
+    if (!guide) return [];
+    const visible = visibleSteps(guide, controller?.owner ?? false);
+    const only = onlyParam ? new Set(onlyParam.split(",")) : null;
+    const chosen = only ? visible.filter((step) => only.has(step.id)) : visible;
+    // A list naming no step this reader sees runs the whole guide rather than nothing.
+    return chosen.length > 0 ? chosen : visible;
+  }, [guide, controller?.owner, onlyParam]);
+  const partial =
+    !!guide && !!onlyParam && steps.length < visibleSteps(guide, controller?.owner ?? false).length;
+  const ownerOf = useCallback(
+    (screen: string) => {
+      const controller = controllers.current.get(screen);
+      return controller ? (controller.owner ?? false) : undefined;
+    },
+    // The controllers live in a ref; the version changes whenever one registers or leaves.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [version],
   );
   const stepId =
     guide && steps.length > 0
@@ -112,16 +149,20 @@ export function GuideProvider({ children }: { children: React.ReactNode }): Reac
   );
 
   const start = useCallback(
-    (guideId: string, step?: string) => {
+    (guideId: string, step?: string, only?: readonly string[]) => {
       opener.current =
         document.activeElement instanceof HTMLElement ? document.activeElement : null;
-      patch({ [GUIDE_PARAM]: guideId, [STEP_PARAM]: step ?? null });
+      patch({
+        [GUIDE_PARAM]: guideId,
+        [STEP_PARAM]: step ?? null,
+        [ONLY_PARAM]: only && only.length > 0 ? only.join(",") : null,
+      });
     },
     [patch],
   );
   const go = useCallback((step: string) => patch({ [STEP_PARAM]: step }), [patch]);
   const close = useCallback(() => {
-    patch({ [GUIDE_PARAM]: null, [STEP_PARAM]: null });
+    patch({ [GUIDE_PARAM]: null, [STEP_PARAM]: null, [ONLY_PARAM]: null });
     const back = opener.current;
     opener.current = null;
     if (back?.isConnected) window.setTimeout(() => back.focus(), 0);
@@ -135,7 +176,12 @@ export function GuideProvider({ children }: { children: React.ReactNode }): Reac
       guide,
       steps,
       stepId,
+      partial,
       controller,
+      ownerOf,
+      promptReady,
+      menuOpen,
+      setMenuOpen,
       start,
       go,
       close,
@@ -143,7 +189,22 @@ export function GuideProvider({ children }: { children: React.ReactNode }): Reac
       unregister,
       announce,
     }),
-    [guide, steps, stepId, controller, start, go, close, register, unregister, announce],
+    [
+      guide,
+      steps,
+      stepId,
+      partial,
+      controller,
+      ownerOf,
+      promptReady,
+      menuOpen,
+      start,
+      go,
+      close,
+      register,
+      unregister,
+      announce,
+    ],
   );
 
   return (

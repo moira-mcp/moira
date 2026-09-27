@@ -8,7 +8,7 @@
  */
 
 import React from "react";
-import { afterEach, beforeEach, describe, expect, test } from "@jest/globals";
+import { afterEach, beforeEach, describe, expect, jest, test } from "@jest/globals";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom/jest-globals";
 import { I18nextProvider } from "react-i18next";
@@ -19,6 +19,8 @@ import { GuideButton } from "../../../packages/web-frontend/src/guides/GuideButt
 import { guideAnchor } from "../../../packages/web-frontend/src/guides/anchors";
 import { PageHeader } from "../../../packages/web-frontend/src/components/page-header";
 import en from "../../../packages/web-frontend/src/locales/en.json";
+import { resetGuideProgress } from "../../../packages/web-frontend/src/guides/progress";
+import { fakeUserSettings } from "./helpers/fake-user-settings";
 
 const originalReact = (globalThis as typeof globalThis & { React?: typeof React }).React;
 const settings = en.guides.settings.steps;
@@ -74,6 +76,9 @@ function stubMedia({ reducedMotion }: { reducedMotion: boolean }): void {
 
 beforeEach(() => {
   (globalThis as typeof globalThis & { React?: typeof React }).React = React;
+  // The runner records progress; each test starts with none, on a server that stores it.
+  resetGuideProgress();
+  fakeUserSettings();
   // jsdom lays nothing out: give every element a box so an anchor counts as visible.
   HTMLElement.prototype.getBoundingClientRect = () =>
     DOMRect.fromRect({ x: 40, y: 80, width: 320, height: 48 });
@@ -92,6 +97,7 @@ beforeEach(() => {
 
 afterEach(async () => {
   cleanup();
+  jest.restoreAllMocks();
   await i18n.changeLanguage("en");
   const target = globalThis as typeof globalThis & { React?: typeof React };
   if (originalReact) target.React = originalReact;
@@ -102,7 +108,10 @@ async function openTour(): Promise<HTMLElement> {
   const opener = screen.getByTestId("guide-open");
   opener.focus();
   fireEvent.click(opener);
-  return screen.findByRole("dialog", { name: settings.nav.title }, { timeout: 4000 });
+  const card = await screen.findByRole("dialog", { name: settings.nav.title }, { timeout: 4000 });
+  // The card takes focus in the same pass that starts the guide's key listener.
+  await waitFor(() => expect(document.activeElement).toBe(card));
+  return card;
 }
 
 describe("a guide's card", () => {

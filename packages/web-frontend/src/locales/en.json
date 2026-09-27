@@ -1270,6 +1270,13 @@
           "description": "Panels that help you get started. Hide the ones you no longer need; turn them back on here.",
           "shown": "Shown",
           "hidden": "Hidden"
+        },
+        "guides": {
+          "title": "Guides",
+          "description": "Take the tour again from its first step, or forget which steps you have seen and where you stopped — the first-run question comes back too.",
+          "restart": "Start the tour again",
+          "forget": "Forget what I have seen",
+          "forgotten": "The guides start fresh."
         }
       },
       "definitions": {
@@ -3056,7 +3063,11 @@
       "announce": "{{guide}}, step {{index}} of {{total}}: {{step}}",
       "skippedNarrow": "One step was skipped: it points at a control that only a wider screen shows.",
       "skippedHidden": "One step was skipped: what it explains is hidden on this page.",
-      "notFound": "This part of the page is not shown right now, so there is nothing to highlight."
+      "notFound": "This part of the page is not shown right now, so there is nothing to highlight.",
+      "saveFailed": "Couldn't save your guide progress. Try again.",
+      "wholeTour": "Show the whole tour",
+      "whatIsThisNew_one": "What is this? {{count}} step changed since you saw it",
+      "whatIsThisNew_other": "What is this? {{count}} steps changed since you saw them"
     },
     "run": {
       "title": "The run page",
@@ -3129,7 +3140,7 @@
       }
     },
     "settings": {
-      "title": "Settings tour",
+      "title": "The Settings page",
       "steps": {
         "nav": {
           "title": "Jump between sections",
@@ -3212,6 +3223,28 @@
           "body": "Send a test message. If it does not arrive, check the token and chat ID; the error message says which part failed."
         }
       }
+    },
+    "menu": {
+      "open": "Show me around",
+      "title": "Guides",
+      "thisPage": "This page: {{guide}}",
+      "noTour": "This page has no tour.",
+      "resume": "Continue: {{guide}}, step {{index}} of {{total}} — {{step}}",
+      "screens": "Screen tours",
+      "status": {
+        "unseen": "Not started",
+        "started": "In progress",
+        "seen": "Seen",
+        "new_one": "{{count}} new step",
+        "new_other": "{{count}} new steps"
+      }
+    },
+    "firstRun": {
+      "title": "New to Moira?",
+      "body": "A short tour shows what each screen is for, on the screen itself. You can open it any time from “Show me around” in the sidebar.",
+      "accept": "Show me around",
+      "later": "Later",
+      "decline": "No thanks"
     }
   }
 }
