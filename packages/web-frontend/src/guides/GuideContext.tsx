@@ -34,11 +34,48 @@ import {
 } from "./fullTour";
 import { guideById } from "./registry";
 import type { GuideDefinition, GuideStep } from "./types";
+import type { Operation } from "../components/flow/operations";
+import type { WorkflowGraph } from "../types/workflow-types";
 
 export const GUIDE_PARAM = "guide";
 export const STEP_PARAM = "step";
 /** A comma-separated list of step ids: the guide runs only those (the steps new to the reader). */
 export const ONLY_PARAM = "only";
+
+/**
+ * What a tutorial needs from the flow page's editor: the saved definition and the draft, the facts
+ * its checks read, and the operations its lessons use. Only the flow page provides it.
+ */
+export interface TutorialSurface {
+  flowId: string;
+  saved: WorkflowGraph;
+  revision: number;
+  visibility: string;
+  owner: boolean;
+  draft: WorkflowGraph;
+  diagnostics: readonly { code: string; nodeId?: string; edge?: string }[];
+  editing: boolean;
+  /** The draft differs from the saved definition. */
+  dirty: boolean;
+  /** The last save was refused because the flow changed elsewhere since the page loaded it. */
+  conflict: boolean;
+  /** Turn editing on with a block's steps open in the panel, in one change of the address. */
+  openForEditing: (blockId: string) => void;
+  apply: (op: Operation) => void;
+  /** Drop the draft and load the saved definition again. */
+  reload: () => void;
+  /** Show the lesson's findings on the definition, where validation issues show. */
+  showFindings: (findings: readonly TutorialFinding[]) => void;
+  /** Copy the shown flow for the reader; the copy's id, or null when refused. */
+  copy: () => Promise<string | null>;
+}
+
+export interface TutorialFinding {
+  code: string;
+  message: string;
+  nodeId?: string;
+  field?: string;
+}
 
 /** What a page tells the runner about itself, and what it lets the runner do. */
 export interface GuidePageController {
@@ -54,6 +91,8 @@ export interface GuidePageController {
   routeRecorded?: boolean;
   /** Whether the reader owns what the screen shows; steps are filtered by it. */
   owner?: boolean;
+  /** The flow page's editor, for a tutorial. */
+  tutorial?: TutorialSurface;
 }
 
 interface GuideContextValue {
@@ -102,6 +141,7 @@ export function visibleSteps(guide: GuideDefinition, owner: boolean): GuideStep[
 }
 
 const GuideRunner = lazy(() => import("./GuideRunner"));
+const TutorialRunner = lazy(() => import("./tutorial/TutorialRunner"));
 
 export function GuideProvider({
   children,
@@ -295,7 +335,7 @@ export function GuideProvider({
       {children}
       {guide && stepId && (
         <Suspense fallback={null}>
-          <GuideRunner />
+          {guide.kind === "tutorial" ? <TutorialRunner /> : <GuideRunner />}
         </Suspense>
       )}
       <div className="sr-only" role="status" aria-live="polite" data-testid="guide-announcer">

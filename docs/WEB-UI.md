@@ -278,21 +278,22 @@ page it explains.
 
 **Guides today:**
 
-| Guide               | Kind     | Declared in                         | Opened by                                                        |
-| ------------------- | -------- | ----------------------------------- | ---------------------------------------------------------------- |
-| `home`              | screen   | `pages/home.guide.ts`               | "What is this?" in the home page header                          |
-| `flows`             | screen   | `pages/flows.guide.ts`              | "What is this?" in the flow list header                          |
-| `flow`              | screen   | `pages/flow.guide.ts`               | "What is this?" in the flow page's diagram toolbar               |
-| `runs`              | screen   | `pages/runs.guide.ts`               | "What is this?" in the runs list header                          |
-| `run`               | screen   | `components/execution/run.guide.ts` | "What is this?" in the run page's diagram toolbar                |
-| `notes`             | screen   | `pages/notes.guide.ts`              | "What is this?" in the notes page header                         |
-| `playbooks`         | screen   | `pages/playbooks.guide.ts`          | "What is this?" in the playbooks page header                     |
-| `artifacts`         | screen   | `pages/artifacts.guide.ts`          | "What is this?" in the artifacts page header                     |
-| `settings`          | screen   | `pages/settings/settings.guide.ts`  | "What is this?" in the Settings page header                      |
-| `settings-github`   | task     | `pages/settings/settings.guide.ts`  | **Setup guide** in the GitHub & Codespaces section               |
-| `settings-telegram` | task     | `pages/settings/settings.guide.ts`  | **Telegram setup** in the Notifications section                  |
-| `flow-editor`       | task     | `pages/flowEditor.guide.ts`         | The first switch into edit mode; **Editor tour** in the edit bar |
-| `runs-empty`        | fallback | `pages/runs.guide.ts`               | The full tour's run stop, when the reader has no run             |
+| Guide               | Kind     | Declared in                          | Opened by                                                        |
+| ------------------- | -------- | ------------------------------------ | ---------------------------------------------------------------- |
+| `home`              | screen   | `pages/home.guide.ts`                | "What is this?" in the home page header                          |
+| `flows`             | screen   | `pages/flows.guide.ts`               | "What is this?" in the flow list header                          |
+| `flow`              | screen   | `pages/flow.guide.ts`                | "What is this?" in the flow page's diagram toolbar               |
+| `runs`              | screen   | `pages/runs.guide.ts`                | "What is this?" in the runs list header                          |
+| `run`               | screen   | `components/execution/run.guide.ts`  | "What is this?" in the run page's diagram toolbar                |
+| `notes`             | screen   | `pages/notes.guide.ts`               | "What is this?" in the notes page header                         |
+| `playbooks`         | screen   | `pages/playbooks.guide.ts`           | "What is this?" in the playbooks page header                     |
+| `artifacts`         | screen   | `pages/artifacts.guide.ts`           | "What is this?" in the artifacts page header                     |
+| `settings`          | screen   | `pages/settings/settings.guide.ts`   | "What is this?" in the Settings page header                      |
+| `settings-github`   | task     | `pages/settings/settings.guide.ts`   | **Setup guide** in the GitHub & Codespaces section               |
+| `settings-telegram` | task     | `pages/settings/settings.guide.ts`   | **Telegram setup** in the Notifications section                  |
+| `build-flow`        | tutorial | `guides/tutorial/buildFlow.guide.ts` | **Tutorials** in the "Show me around" menu                       |
+| `flow-editor`       | task     | `pages/flowEditor.guide.ts`          | The first switch into edit mode; **Editor tour** in the edit bar |
+| `runs-empty`        | fallback | `pages/runs.guide.ts`                | The full tour's run stop, when the reader has no run             |
 
 **Declarations** (`guides/types.ts`). A `GuideDefinition` has an `id`, a `kind` (`screen`, `task`,
 `tutorial` or `fallback` — a guide only the full tour opens, in place of a screen it cannot show), the `screen` whose page runs it, its route patterns, and the views, panels and sections
@@ -400,6 +401,8 @@ region (`guide-announcer`). Under reduced motion (`usePrefersReducedMotion`) not
   and reads another is counted in the role they stopped in. A non-boolean `owner` is ignored on
   read;
 - `seen`: `<guide>.<step>` → the step's revision when the reader last saw it;
+- `tutorials`: `<tutorial>` → `{copyId, lessons}`: the reader's copy a tutorial works on and each
+  passed lesson's saved `revision` (with `forMe: true` when "Do it for me" made the change);
 - `offered`: `<guide>` → `true` for a tour offered once — the editor tour, recorded when its offer
   (`EditorTourOffer`, `editor-tour-offer`) first shows above the edit bar, so the next switch into
   edit mode offers nothing whatever the answer;
@@ -441,8 +444,26 @@ last card offers the whole tour (`guide-whole-tour`). Nothing opens by itself.
 - **Settings → Preferences → Guides** (`preferences-guides`): "Start the tour again" forgets the
   seen steps and finished marks of every guide in the full tour and the resume point
   (`restartGuides`), and starts the full tour; "Forget what I have
-  seen" clears `firstRun`, `resume`, `seen`, `finished` and `offered` (keeping any other field) and this
+  seen" clears `firstRun`, `resume`, `seen`, `finished`, `offered` and `tutorials` (keeping any other field) and this
   session's "Later", so the prompt comes back.
+
+**The tutorial** "Build your first flow" (`guides/tutorial/`) is a guide of kind `tutorial` whose
+steps are lessons; for it `GuideProvider` loads `TutorialRunner` instead of the tour runner. It runs
+on the flow page, which gives it a `TutorialSurface` on its page controller: the saved definition
+and revision, the draft and its process diagnostics, the copy's visibility and ownership, whether a
+save was refused as stale, and `openForEditing`, `apply`, `reload`, `copy` and `showFindings`. The
+surface's callbacks go through a ref, so the controller changes only with what it reports. The
+lesson checks are pure functions in the engine's authoring entry (`checkOwnCopy`, `checkNewStep`,
+`checkConnected`, finding codes `TUTORIAL_FINDING_CODES`, copy
+`guides.build-flow.findings.<code>`). The runner checks the draft after every change and hands the
+findings to the page, which places them with the validation issues (source `tutorial`, warnings); it
+records a lesson (`tutorials` in progress) only when the check passes on the saved definition with
+no unsaved edits. A stale save shows an explanation and a reload; an earlier building lesson that no
+longer holds on the draft is named with a way back; below `md` the card explains that editing needs
+a larger screen. Each distinct result is announced once (`useResultAnnouncement`). The menu starts
+it (`tutorial/start.ts`) on the example of the reader's language, or on the recorded copy at the
+first lesson not passed while the copy exists; "Use as Template" carries an open tutorial into the
+copy. The editor tour's offer waits while any guide or tutorial is open.
 
 **The full tour** (`guides/fullTour.ts`) chains the screen tours in a fixed order (every toured
 screen of the route table, the admin area excluded) (`FULL_TOUR_LEGS`): home, the flow list, the example flow of the reader's

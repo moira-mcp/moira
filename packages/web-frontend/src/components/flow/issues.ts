@@ -20,8 +20,11 @@ import type { ValidationIssue, WorkflowValidationStatus } from "../../types/reac
 import type { WorkflowGraph } from "../../types/workflow-types";
 
 export interface PlacedIssue {
-  /** Which layer found it: the browser's process derivation or the server's validation. */
-  source: "process" | "server";
+  /**
+   * Which layer found it: the browser's process derivation, the server's validation, or an open
+   * tutorial's lesson check.
+   */
+  source: "process" | "server" | "tutorial";
   severity: "error" | "warning";
   /** The diagnostic code, or the validation issue's type. */
   code: string;
@@ -82,6 +85,7 @@ export function placeIssues(
   workflow: WorkflowGraph,
   diagnostics: readonly ProcessDiagnostic[],
   validation: WorkflowValidationStatus | null | undefined,
+  lessonFindings: readonly Omit<PlacedIssue, "source" | "severity">[] = [],
 ): IssuePlacement {
   const nodes = new Map<string, PlacedIssue[]>();
   const edges = new Map<string, PlacedIssue[]>();
@@ -130,6 +134,17 @@ export function placeIssues(
       ...(issue.field ? { field: issue.field } : {}),
       ...(node ? { nodeId: node.id } : {}),
       ...(onEdge ? { edge: edgeId(node.id, key), connection: key } : {}),
+    });
+  }
+  for (const finding of lessonFindings) {
+    const node = finding.nodeId ? byId.get(finding.nodeId) : undefined;
+    const onEdge = node && finding.field !== undefined && finding.field in (node.connections ?? {});
+    place({
+      ...finding,
+      source: "tutorial",
+      severity: "warning",
+      ...(node ? { nodeId: node.id } : { nodeId: undefined }),
+      ...(onEdge ? { edge: edgeId(node.id, finding.field!), connection: finding.field } : {}),
     });
   }
   return { all, nodes, edges, blocks, page };

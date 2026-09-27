@@ -28,6 +28,15 @@ export interface ResumePoint {
   tour?: boolean;
 }
 
+/** A tutorial's place: the reader's copy it works on, and the lessons passed, each at the saved
+ * revision its check passed on (and whether "Do it for me" made the change). */
+export interface TutorialProgress {
+  copyId?: string;
+  lessons?: Record<string, { revision: number; forMe?: true }>;
+  /** Lessons whose "Do it for me" was used, passed or not: it is offered once per lesson. */
+  forMe?: Record<string, true>;
+}
+
 export interface GuideProgress {
   /** The one-time prompt's answer; absent until the reader decides. */
   firstRun?: "accepted" | "declined";
@@ -38,6 +47,8 @@ export interface GuideProgress {
   finished?: Record<string, true>;
   /** Tours offered once (the editor tour, on the first switch into edit mode): offered, whatever the answer. */
   offered?: Record<string, true>;
+  /** Tutorials by id: the copy each works on and the lessons passed. */
+  tutorials?: Record<string, TutorialProgress>;
   /** Anything a later build stores; kept as it is. */
   [field: string]: unknown;
 }
@@ -57,6 +68,10 @@ export function parseProgress(value: unknown): GuideProgress {
   const finished = progress.finished;
   if (!finished || typeof finished !== "object" || Array.isArray(finished))
     delete progress.finished;
+  const tutorials = progress.tutorials;
+  if (!tutorials || typeof tutorials !== "object" || Array.isArray(tutorials)) {
+    delete progress.tutorials;
+  }
   const offered = progress.offered;
   if (!offered || typeof offered !== "object" || Array.isArray(offered)) delete progress.offered;
   const resume = progress.resume;
@@ -162,6 +177,65 @@ export const finishGuide =
     return resume && resume.guide !== guide.id ? { ...next, resume } : next;
   };
 
+/** The copy a tutorial works on, once the reader has it. */
+export const recordTutorialCopy =
+  (tutorial: string, copyId: string): ProgressChange =>
+  (progress) => {
+    const own = progress.tutorials?.[tutorial] ?? {};
+    // A different copy starts the lessons after it over: they were passed on the old one.
+    const lessons = own.copyId && own.copyId !== copyId ? {} : own.lessons;
+    return {
+      ...progress,
+      tutorials: {
+        ...(progress.tutorials ?? {}),
+        [tutorial]: { ...own, copyId, ...(lessons ? { lessons } : {}) },
+      },
+    };
+  };
+
+/** The recorded copy is gone: the tutorial starts over from a new copy, its lessons with it. */
+export const dropTutorialCopy =
+  (tutorial: string): ProgressChange =>
+  (progress) => {
+    const tutorials = { ...(progress.tutorials ?? {}) };
+    delete tutorials[tutorial];
+    return { ...progress, tutorials };
+  };
+
+/** "Do it for me" was used in a lesson. */
+export const markLessonForMe =
+  (tutorial: string, lesson: string): ProgressChange =>
+  (progress) => {
+    const own = progress.tutorials?.[tutorial] ?? {};
+    return {
+      ...progress,
+      tutorials: {
+        ...(progress.tutorials ?? {}),
+        [tutorial]: { ...own, forMe: { ...(own.forMe ?? {}), [lesson]: true } },
+      },
+    };
+  };
+
+/** A lesson passed on the saved definition at `revision`; `forMe` when "Do it for me" did it. */
+export const passLesson =
+  (tutorial: string, lesson: string, revision: number, forMe: boolean): ProgressChange =>
+  (progress) => {
+    const own = progress.tutorials?.[tutorial] ?? {};
+    return {
+      ...progress,
+      tutorials: {
+        ...(progress.tutorials ?? {}),
+        [tutorial]: {
+          ...own,
+          lessons: {
+            ...(own.lessons ?? {}),
+            [lesson]: { revision, ...(forMe ? { forMe: true } : {}) },
+          },
+        },
+      },
+    };
+  };
+
 /** The tour has been offered: it is not offered again, whether it was taken or not. */
 export const markOffered =
   (guide: string): ProgressChange =>
@@ -196,6 +270,7 @@ export const forgetProgress: ProgressChange = (progress) => {
     seen: _seen,
     finished: _finished,
     offered: _offered,
+    tutorials: _tutorials,
     ...kept
   } = progress;
   return kept;

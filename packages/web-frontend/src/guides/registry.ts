@@ -19,6 +19,7 @@ import {
   settingsGuide,
   telegramSetupGuide,
 } from "../pages/settings/settings.guide";
+import { buildFlowTutorial } from "./tutorial/buildFlow.guide";
 import type { GuideDefinition } from "./types";
 
 /** In the order "Show me around" lists the screens: the way a reader meets them. */
@@ -36,6 +37,7 @@ export const GUIDES: readonly GuideDefinition[] = [
   githubSetupGuide,
   telegramSetupGuide,
   flowEditorGuide,
+  buildFlowTutorial,
 ];
 
 export function guideById(id: string | null | undefined): GuideDefinition | undefined {

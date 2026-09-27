@@ -46,10 +46,11 @@ interface OptionRow {
 
 type EngineNode = Parameters<typeof readChoice>[0];
 
-function initialRows(choice: Choice | null): OptionRow[] {
+/** The dialog's rows: the existing choice, or two options whose first keeps the step's label. */
+function initialRows(choice: Choice | null, primaryLabel: string): OptionRow[] {
   if (!choice) {
     return [
-      { name: "yes", label: "", target: "" },
+      { name: "yes", label: primaryLabel, target: "" },
       { name: "no", label: "", target: "" },
     ];
   }
@@ -127,11 +128,14 @@ function ChoiceDialog({
   const { t } = useTranslation();
   const { draft, blocks } = useEditing();
   const { error, commit } = useCommit();
+  // A new choice keeps the label the step's main route already has, so it is not lost unseen.
+  const current = node.connectionLabels?.success;
+  const primaryLabel = typeof current === "string" ? current : (current?.label ?? "");
   const [field, setField] = useState(existing?.field ?? "answer");
   const [question, setQuestion] = useState(existing?.question ?? "");
-  const [rows, setRows] = useState<OptionRow[]>(() => initialRows(existing));
+  const [rows, setRows] = useState<OptionRow[]>(() => initialRows(existing, primaryLabel));
   const [defaultOption, setDefaultOption] = useState(
-    existing?.defaultOption ?? initialRows(existing)[0].name,
+    existing?.defaultOption ?? initialRows(existing, primaryLabel)[0].name,
   );
   const [blockId, setBlockId] = useState(node.progressNodeId ?? blocks[0]?.id ?? "");
   if (!draft) return null;
@@ -279,7 +283,7 @@ function ChoiceDialog({
                   <button
                     type="button"
                     onClick={() => setRows((current) => current.filter((_, i) => i !== index))}
-                    disabled={rows.length <= 2}
+                    disabled={rows.length <= 2 || isDefault}
                     className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-destructive disabled:opacity-30"
                     aria-label={t("pages.flowPage.structure.choice.removeOption", {
                       option: row.name,

@@ -237,8 +237,9 @@ export function setChoice(
     const key = option === choice.defaultOption ? primary : option;
     if (key !== primary) connections[key] = choice.targets[option];
     const label = choice.labels?.[option];
+    // The dialog shows every option's label, the default's included: an empty one is removed.
     if (label !== undefined && label !== "") labels[key] = label;
-    else if (key !== primary) delete labels[key];
+    else delete labels[key];
   }
   step.connections = connections;
   if (Object.keys(labels).length) step.connectionLabels = labels;

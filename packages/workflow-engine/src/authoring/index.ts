@@ -12,6 +12,17 @@
 export { AuthoringError, type AuthoringErrorCode } from "./errors.js";
 export { readChoice, setChoice, type Choice } from "./choice.js";
 export {
+  checkConnected,
+  checkNewStep,
+  checkOwnCopy,
+  TUTORIAL_CHECKED_LESSONS,
+  TUTORIAL_FINDING_CODES,
+  type CopyFacts,
+  type LessonFinding,
+  type LessonResult,
+  type ProcessIssue,
+} from "./tutorial.js";
+export {
   CONNECTION_KEY_PATTERN,
   NODE_ID_PATTERN,
   isValidConnectionKey,

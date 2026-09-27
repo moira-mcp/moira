@@ -7,7 +7,7 @@
 import React, { useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { useLocation, useNavigate } from "react-router-dom";
-import { Compass, Map as MapIcon, Play, RotateCcw } from "lucide-react";
+import { Compass, GraduationCap, Map as MapIcon, Play, RotateCcw } from "lucide-react";
 import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover";
 import {
   SidebarMenu,
@@ -27,13 +27,15 @@ import { FULL_TOUR, TOUR_PARAM } from "./fullTour";
 import { GUIDES, guideById, screenTourForPath } from "./registry";
 import type { GuideDefinition } from "./types";
 import { guideAnchor } from "./anchors";
+import { BUILD_FLOW_ID } from "./tutorial/buildFlow.guide";
+import { tutorialStart } from "./tutorial/start";
 
 /** How far the reader is in a screen tour, as the menu words it. */
 type ScreenStatus =
   { kind: "unseen" } | { kind: "started" } | { kind: "seen" } | { kind: "new"; count: number };
 
 export function ShowMeAround(): React.JSX.Element {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const navigate = useNavigate();
   const { pathname } = useLocation();
   const { start, startFullTour, ownerOf, menuOpen, setMenuOpen } = useGuides();
@@ -97,6 +99,21 @@ export function ShowMeAround(): React.JSX.Element {
   };
 
   const screens = GUIDES.filter((guide) => guide.kind === "screen");
+
+  // The tutorial's lessons with a check, and how many of them the reader has passed.
+  const tutorial = progress?.tutorials?.[BUILD_FLOW_ID];
+  const checked = ["lesson-1", "lesson-2", "lesson-3"];
+  const passed = checked.filter((lesson) => tutorial?.lessons?.[lesson]).length;
+  const tutorialStatus =
+    passed === checked.length
+      ? t("guides.menu.tutorialDone")
+      : tutorial
+        ? t("guides.menu.tutorialProgress", { done: passed, total: checked.length })
+        : t("guides.menu.status.unseen");
+  const openTutorial = async () => {
+    leave();
+    navigate(await tutorialStart(tutorial, i18n.language));
+  };
   const label = t("guides.menu.open");
 
   return (
@@ -216,6 +233,20 @@ export function ShowMeAround(): React.JSX.Element {
                 );
               })}
             </ul>
+            <p className="mt-3 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              {t("guides.menu.tutorials")}
+            </p>
+            <button
+              type="button"
+              onClick={() => void openTutorial()}
+              className="mt-1 flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent"
+              data-testid="show-me-around-tutorial"
+              data-guide-id={BUILD_FLOW_ID}
+            >
+              <GraduationCap className="size-4 shrink-0 text-primary" aria-hidden="true" />
+              <span className="flex-1">{t(`guides.${BUILD_FLOW_ID}.title`)}</span>
+              <span className="text-xs text-muted-foreground">{tutorialStatus}</span>
+            </button>
           </PopoverContent>
         </Popover>
       </SidebarMenuItem>

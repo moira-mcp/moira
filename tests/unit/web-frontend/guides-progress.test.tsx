@@ -48,7 +48,11 @@ import {
   decideFirstRun,
   finishGuide,
   forgetProgress,
+  markLessonForMe,
+  dropTutorialCopy,
   markOffered,
+  passLesson,
+  recordTutorialCopy,
   newSteps,
   parseProgress,
   recordStep,
@@ -124,7 +128,7 @@ describe("the progress store", () => {
   test("two changes made together both land, and a later build's field is kept", async () => {
     // A server that answers slowly, so the second change is made before the first is saved.
     let stored: Record<string, unknown> = {
-      [GUIDE_PROGRESS_KEY]: { tutorials: { copyId: "later-build" } },
+      [GUIDE_PROGRESS_KEY]: { laterBuild: { mark: "later-build" } },
     };
     const delay = () => new Promise((resolve) => setTimeout(resolve, 20));
     jest.spyOn(apiClient, "getUserSettings").mockImplementation(async () => {
@@ -146,7 +150,7 @@ describe("the progress store", () => {
       ]);
     });
     expect(stored[GUIDE_PROGRESS_KEY]).toEqual({
-      tutorials: { copyId: "later-build" },
+      laterBuild: { mark: "later-build" },
       firstRun: "accepted",
       seen: { "settings.nav": 1 },
       resume: { guide: "settings", step: "nav", path: "/settings" },
@@ -260,17 +264,43 @@ describe("the rules read from progress", () => {
       firstRun: "declined",
       seen: allSeen,
       resume: { guide: "settings", step: "apps", path: "/settings" },
-      tutorials: { copyId: "x" },
+      laterBuild: { mark: "x" },
     };
     expect(
       forgetProgress({
         ...progress,
         finished: { settings: true },
         offered: { "flow-editor": true },
+        tutorials: { "build-flow": { copyId: "c1" } },
       }),
     ).toEqual({
-      tutorials: { copyId: "x" },
+      laterBuild: { mark: "x" },
     });
+  });
+
+  test("a tutorial records its copy and passed lessons; a different copy starts the lessons over", () => {
+    const passed = passLesson(
+      "build-flow",
+      "lesson-1",
+      3,
+      true,
+    )(recordTutorialCopy("build-flow", "c1")({}));
+    expect(passed.tutorials).toEqual({
+      "build-flow": { copyId: "c1", lessons: { "lesson-1": { revision: 3, forMe: true } } },
+    });
+    expect(recordTutorialCopy("build-flow", "c1")(passed).tutorials).toEqual(passed.tutorials);
+    expect(recordTutorialCopy("build-flow", "c2")(passed).tutorials).toEqual({
+      "build-flow": { copyId: "c2", lessons: {} },
+    });
+  });
+
+  test("a used “Do it for me” is remembered, and a copy that is gone is forgotten with its lessons", () => {
+    const used = markLessonForMe(
+      "build-flow",
+      "lesson-2",
+    )(recordTutorialCopy("build-flow", "c1")({ firstRun: "declined" }));
+    expect(used.tutorials?.["build-flow"]?.forMe).toEqual({ "lesson-2": true });
+    expect(dropTutorialCopy("build-flow")(used)).toEqual({ firstRun: "declined", tutorials: {} });
   });
 
   test("an offered tour is recorded beside others, and an unreadable record of offers is dropped", () => {

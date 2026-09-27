@@ -35,7 +35,8 @@ The web app explains itself on screen:
   a tour where you left it, and shows how far you are in each screen's tour. The full tour walks
   the app's screens in order — home, flows, the example flow, runs, your latest run, notes,
   playbooks, artifacts and Settings — and leaving a page pauses it until you continue. With no run
-  yet, the run stop tells you how to start one.
+  yet, the run stop tells you how to start one. Under **Tutorials** it starts or resumes **Build
+  your first flow**, a hands-on tutorial in the flow editor.
 - **"What is this?"** on a page runs that page's tour. Each card sits beside the part of the page
   it explains. The right arrow or Enter goes on, the left arrow goes back, and Escape closes. When
   a tour you have walked has new or changed steps, the button carries a dot, and pressing it shows

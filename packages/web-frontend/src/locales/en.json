@@ -1632,7 +1632,7 @@
           "continues": "continues as before",
           "target": "Leads to…",
           "newStep": "A new step",
-          "label": "Label on the route (optional)",
+          "label": "Label on the route — needed when it leads into another block",
           "addOption": "Add an option",
           "removeOption": "Remove option {{option}}",
           "newStepBlock": "Block for the new steps",
@@ -3454,7 +3454,10 @@
         "new_one": "{{count}} new step",
         "new_other": "{{count}} new steps"
       },
-      "fullTour": "Full tour"
+      "fullTour": "Full tour",
+      "tutorials": "Tutorials",
+      "tutorialDone": "Done",
+      "tutorialProgress": "{{done}} of {{total}} lessons"
     },
     "firstRun": {
       "title": "New to Moira?",
@@ -3490,7 +3493,7 @@
         },
         "blocks": {
           "title": "Blocks",
-          "body": "Blocks are the stages of the process. Add one here; a block's own menu deletes it once no step is left in it."
+          "body": "Blocks are the stages of the process. Add one here; the bin on a block's row in the contents deletes it once no step is left in it."
         },
         "connections": {
           "title": "Where a step leads",
@@ -3515,6 +3518,75 @@
       "body": "A short tour shows where edits collect, how steps, blocks, connections and choices are changed, and what stops a save.",
       "accept": "Show me the editor",
       "decline": "Not now"
+    },
+    "build-flow": {
+      "title": "Build your first flow",
+      "steps": {
+        "lesson-0": {
+          "title": "How flows are made",
+          "body": "For real work you don't build flows by hand: you describe the task to your agent, and it builds the flow through the Workflow Management Flow, agreeing the depth with you — simple, standard or complex. This tutorial builds a small one by hand, so you can read and adjust what the agent makes."
+        },
+        "lesson-1": {
+          "title": "Your own copy",
+          "body": "You practise on your own private copy of the learning example, so nothing shared changes. Press “Use as Template” — or “Do it for me”."
+        },
+        "lesson-2": {
+          "title": "Add a step",
+          "body": "Add a step to the Do block with “Add step”, for example “Save a draft”, with a directive (what the agent does) and a completion condition (when it is done). A step must lead somewhere to be saved: in its connections point its success at check-result, and label that connection — it goes into the Check block, and every connection into another block says why. Save. Nothing leads to your step yet; the check says so, and that is the next lesson."
+        },
+        "lesson-3": {
+          "title": "Connect it",
+          "body": "Now lead the work through your step: point do-task's success at your new step, in do-task's connections. Every step is then on the way from start to the end. Save."
+        }
+      },
+      "findings": {
+        "copy-not-owned": "This flow is not yours. Make your own copy with “Use as Template”.",
+        "copy-not-private": "Your copy should be private while you practise.",
+        "copy-no-process": "This copy has no process view, so it cannot be edited here.",
+        "copy-structure-differs": "This copy is not the unchanged example. Start from a fresh copy of the example.",
+        "example-step-missing": "The example's step “{{node}}” is gone. Put it back (Undo, or Discard edits).",
+        "new-step-missing": "There is no new step yet. Add one to the Do block with “Add step”.",
+        "new-step-extra": "There are {{count}} new steps; this lesson needs exactly one.",
+        "new-step-directive-empty": "The new step “{{node}}” has no directive: say what the agent does.",
+        "new-step-condition-empty": "The new step “{{node}}” has no completion condition: say when it is done.",
+        "new-step-no-block": "The new step “{{node}}” is in no block. Put it in the Do block.",
+        "new-step-not-connected": "“do-task” does not lead to your new step yet: point its success at “{{step}}”.",
+        "new-step-not-continuing": "Your new step “{{node}}” should lead on to “check-result”.",
+        "dangling-connection": "A connection of “{{node}}” leads to a step that does not exist.",
+        "unreachable-node": "No route reaches “{{node}}”: connect a step to it.",
+        "route-without-end": "From “{{node}}” no route reaches the end.",
+        "edge-needs-label": "The connection from “{{node}}” goes into another block and needs a label saying why.",
+        "process-issue": "The process reports a problem on “{{node}}” ({{issue}})."
+      }
+    },
+    "tutorial": {
+      "header": "{{title}} · lesson {{current}} of {{total}}",
+      "narrow": "The tutorial edits the flow, and editing needs a larger screen. Open Moira on a computer: your progress is kept and waits for you there.",
+      "haveCopy": "You already have a copy from before: “Do it for me” opens it.",
+      "notYourCopy": "This is not your tutorial copy. Open the tutorial from “Show me around” to get back to it.",
+      "conflict": "The save was refused: your copy was changed elsewhere since this page loaded it. Reload to see the saved copy, then make your change again.",
+      "reload": "Reload the copy",
+      "broken": "“{{lesson}}” no longer holds after your changes. Go back and fix it before going on.",
+      "goBack": "Go back to that lesson",
+      "complete": "Done — saved and checked.",
+      "checking": "Your copy is ready.",
+      "looksRight": "Looks right — press Save.",
+      "finish": "Finish",
+      "forMe": {
+        "action": "Do it for me",
+        "directive": "Save a draft of the work so far.",
+        "condition": "A draft of the work is saved.",
+        "label": "draft saved"
+      },
+      "announce": {
+        "findings_one": "The check found {{count}} thing to fix.",
+        "findings_other": "The check found {{count}} things to fix.",
+        "save": "Looks right — press Save.",
+        "complete": "Lesson done.",
+        "conflict": "The save was refused: the copy changed elsewhere.",
+        "broken": "An earlier lesson no longer holds.",
+        "narrow": "The tutorial needs a larger screen."
+      }
     }
   }
 }

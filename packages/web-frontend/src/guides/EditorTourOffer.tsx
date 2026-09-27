@@ -16,11 +16,13 @@ import { changeProgress, guideStarted, markOffered, useGuideProgress } from "./p
 
 export function EditorTourOffer({ editing }: { editing: boolean }): React.JSX.Element | null {
   const { t } = useTranslation();
-  const { start } = useGuides();
+  const { start, guide } = useGuides();
   const { loaded, progress } = useGuideProgress();
   const [state, setState] = useState<"waiting" | "shown" | "closed">("waiting");
+  // Not while another guide or a tutorial is open: one teacher at a time, and the offer stays due.
   const due =
     editing &&
+    !guide &&
     loaded &&
     progress !== null &&
     !progress.offered?.[EDITOR_GUIDE_ID] &&

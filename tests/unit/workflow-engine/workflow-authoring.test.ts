@@ -636,33 +636,55 @@ describe("a step's choice", () => {
     expect(readChoice(step as never)?.options).toEqual(["yes", "missing", "partly"]);
   });
 
+  test("an option label emptied in an edit is removed, the default option's included", () => {
+    const edited = setChoice(example(), "check-result", {
+      ...exampleChoice(),
+      labels: { no: "no — something is missing" },
+    });
+    expect(node(edited, "check-result").connectionLabels).toEqual({
+      no: "no — something is missing",
+    });
+  });
+
   test("renaming the step keeps its choice readable", () => {
     const renamed = renameNode(example(), "check-result", "compare").workflow;
     expect(readChoice(node(renamed, "compare") as never)?.field).toBe("matches");
   });
 
   test.each([
-    ["a non-agent step", "start", {}],
+    ["a non-agent step", "start", {}, "invalid-choice"],
     [
       "a control output as an option",
       "check-result",
       { options: ["yes", "error"], targets: { error: "report" } },
+      "invalid-choice",
     ],
     [
       "the primary output as an option",
       "check-result",
       { options: ["yes", "success"], targets: { success: "report" } },
+      "invalid-choice",
     ],
-    ["the same option twice", "check-result", { options: ["yes", "no", "no"] }],
-    ["a single option", "check-result", { options: ["yes"], targets: {} }],
-    ["an option with no step to lead to", "check-result", { targets: {} }],
-    ["a default that is not an option", "check-result", { defaultOption: "maybe" }],
-    ["an answer field that is not a name", "check-result", { field: "is matching" }],
-  ])("refuses %s", (_name, nodeId, change) => {
+    ["the same option twice", "check-result", { options: ["yes", "no", "no"] }, "invalid-choice"],
+    ["a single option", "check-result", { options: ["yes"], targets: {} }, "invalid-choice"],
+    ["an option with no step to lead to", "check-result", { targets: {} }, "invalid-target"],
+    [
+      "a default that is not an option",
+      "check-result",
+      { defaultOption: "maybe" },
+      "invalid-choice",
+    ],
+    [
+      "an answer field that is not a name",
+      "check-result",
+      { field: "is matching" },
+      "invalid-choice",
+    ],
+  ])("refuses %s", (_name, nodeId, change, expected) => {
     const code = codeOf(() =>
       setChoice(withoutChoice(), nodeId, { ...exampleChoice(), ...(change as Partial<Choice>) }),
     );
-    expect(["invalid-choice", "invalid-target"]).toContain(code);
+    expect(code).toBe(expected);
   });
 
   test("refuses an option that takes an output the step already uses", () => {

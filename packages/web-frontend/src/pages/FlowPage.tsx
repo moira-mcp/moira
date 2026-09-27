@@ -85,7 +85,14 @@ import { useStoredFlag } from "../components/diagram/useStoredFlag";
 import { useRequest } from "../components/diagram/useRequest";
 import { PanelRightClose, PanelRightOpen } from "lucide-react";
 import { GuidanceHint } from "../components/run/Guidance";
-import { useGuidePage, type GuidePageController } from "../guides/GuideContext";
+import {
+  GUIDE_PARAM,
+  STEP_PARAM,
+  useGuidePage,
+  type GuidePageController,
+  type TutorialFinding,
+} from "../guides/GuideContext";
+import { guideById } from "../guides/registry";
 import { GuideButton } from "../guides/GuideButton";
 import { EditorTourOffer } from "../guides/EditorTourOffer";
 import { guideAnchor } from "../guides/anchors";
@@ -166,6 +173,10 @@ export const FlowPage: React.FC = () => {
   );
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  // A save refused because the flow changed elsewhere; an open tutorial explains it.
+  const [conflict, setConflict] = useState(false);
+  // An open tutorial's lesson findings, shown where validation issues show.
+  const [lessonFindings, setLessonFindings] = useState<readonly TutorialFinding[]>([]);
 
   const workflowIdentifier = handle && slug ? `${handle}/${slug}` : id;
 
@@ -290,8 +301,8 @@ export const FlowPage: React.FC = () => {
   const validation = hasEdits ? (latestJudgement ?? detail?.validation) : detail?.validation;
   const diagnostics = useMemo(() => process?.diagnostics ?? [], [process]);
   const issues = useMemo(
-    () => (edited ? placeIssues(edited, diagnostics, validation) : NO_ISSUES),
-    [edited, diagnostics, validation],
+    () => (edited ? placeIssues(edited, diagnostics, validation, lessonFindings) : NO_ISSUES),
+    [edited, diagnostics, validation, lessonFindings],
   );
   const gate = edited
     ? saveGate({ changed: diff.length > 0, diagnostics: diagnostics.length, draft: edited, dryRun })
@@ -396,13 +407,19 @@ export const FlowPage: React.FC = () => {
     setCopying(true);
     try {
       const result = await apiClient.copyWorkflow(workflowIdentifier);
-      navigate(`${ROUTES.WORKFLOWS}/${result.workflowId}`);
+      // An open tutorial goes on with the copy: its lesson is about making it.
+      const guide = searchParams.get(GUIDE_PARAM);
+      const tutorial = guideById(guide)?.kind === "tutorial";
+      const carried = tutorial
+        ? `?${new URLSearchParams({ [GUIDE_PARAM]: guide!, [STEP_PARAM]: searchParams.get(STEP_PARAM) ?? "" })}`
+        : "";
+      navigate(`${ROUTES.WORKFLOWS}/${result.workflowId}${carried}`);
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : t("common.errors.failedToCreate"));
     } finally {
       setCopying(false);
     }
-  }, [workflowIdentifier, navigate, t]);
+  }, [workflowIdentifier, navigate, t, searchParams]);
 
   const handleSave = useCallback(async () => {
     if (!fileInfo || !edited) return;
@@ -410,6 +427,7 @@ export const FlowPage: React.FC = () => {
     setSaveError(null);
     try {
       const result = await apiClient.updateWorkflow(fileInfo.id, edited, fileInfo.revision);
+      setConflict(false);
       resetEdits();
       toast.success(t("pages.flowPage.edit.saved", { revision: result.revision }));
       workflowDetail.refreshWorkflow();
@@ -421,6 +439,7 @@ export const FlowPage: React.FC = () => {
           ? (err.details?.validation as WorkflowValidationStatus | undefined)
           : undefined;
       if (refused) acceptJudgement(edited, refused);
+      setConflict(err instanceof ApiClientError && err.status === 409);
       const message =
         err instanceof ApiClientError && err.status === 409
           ? t("pages.flowPage.edit.conflict")
@@ -486,6 +505,35 @@ export const FlowPage: React.FC = () => {
   const [sectionOpen, requestSection] = useRequest<{ name: string }>();
   // The page's part in its screen tour: the view it shows, whether the reader owns the flow, and
   // what brings it into a step's state.
+  // What the tutorial asks the page to do, current as of the last render.
+  const tutorialActions = useRef<{
+    apply: typeof onEdit;
+    openForEditing: (blockId: string) => void;
+    reload: () => void;
+    copy: () => Promise<string | null>;
+  } | null>(null);
+  tutorialActions.current = {
+    apply: onEdit,
+    openForEditing: (blockId) => {
+      update({ [EDIT_PARAM]: "1", [BLOCK_PARAM]: blockId });
+      setChosenTab("block");
+      requestSection({ name: "steps" });
+    },
+    reload: () => {
+      resetEdits();
+      setSaveError(null);
+      setConflict(false);
+      workflowDetail.refreshWorkflow();
+    },
+    copy: async () => {
+      if (!workflowIdentifier) return null;
+      try {
+        return (await apiClient.copyWorkflow(workflowIdentifier)).workflowId;
+      } catch {
+        return null;
+      }
+    },
+  };
   const guideController = useMemo<GuidePageController>(
     () => ({
       view: mode,
@@ -504,8 +552,42 @@ export const FlowPage: React.FC = () => {
         return true;
       },
       owner: isOwner,
+      tutorial:
+        fileInfo && savedWorkflow && edited
+          ? {
+              flowId: fileInfo.id,
+              saved: savedWorkflow,
+              revision: fileInfo.revision ?? 0,
+              visibility: fileInfo.visibility ?? "private",
+              owner: isOwner,
+              draft: edited,
+              diagnostics,
+              editing,
+              dirty: hasEdits,
+              conflict,
+              openForEditing: (blockId) => tutorialActions.current!.openForEditing(blockId),
+              apply: (op) => tutorialActions.current!.apply(op),
+              reload: () => tutorialActions.current!.reload(),
+              showFindings: setLessonFindings,
+              copy: () => tutorialActions.current!.copy(),
+            }
+          : undefined,
     }),
-    [mode, update, requestSection, isOwner, edited],
+    // The tutorial's actions go through a ref: the controller changes only with what it reports,
+    // or every render of the page would register it again.
+    [
+      mode,
+      update,
+      requestSection,
+      isOwner,
+      edited,
+      fileInfo,
+      savedWorkflow,
+      diagnostics,
+      editing,
+      hasEdits,
+      conflict,
+    ],
   );
   useGuidePage("flow", guideController);
 

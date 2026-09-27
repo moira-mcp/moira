@@ -305,7 +305,7 @@
   },
   "flow-editor.blocks": {
     "revision": 1,
-    "fingerprint": "ebde6010"
+    "fingerprint": "d03da19a"
   },
   "flow-editor.connections": {
     "revision": 1,
@@ -322,5 +322,21 @@
   "flow-editor.stale": {
     "revision": 1,
     "fingerprint": "17e1479f"
+  },
+  "build-flow.lesson-0": {
+    "revision": 1,
+    "fingerprint": "30dca8db"
+  },
+  "build-flow.lesson-1": {
+    "revision": 1,
+    "fingerprint": "4b3a8674"
+  },
+  "build-flow.lesson-2": {
+    "revision": 1,
+    "fingerprint": "83a194d8"
+  },
+  "build-flow.lesson-3": {
+    "revision": 1,
+    "fingerprint": "5843e312"
   }
 }

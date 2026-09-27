@@ -81,6 +81,27 @@ each labelled with the answer that takes it.
 Real flows use the same pieces, only more of them: reviews, repair loops, files, notes. Your agent
 handles that structure; you describe the task.
 
+## Build one yourself, in the app
+
+The web app has a tutorial, **Build your first flow**: open **Show me around** in the sidebar and
+choose it under **Tutorials**. It works on a computer — editing needs a larger screen — and in the
+language of the interface. It is practice for reading and adjusting what your agent builds; for real
+work you still ask the agent.
+
+- **How flows are made.** Your agent builds flows through the Workflow Management Flow and agrees
+  the depth with you; the tutorial builds a small one by hand.
+- **Your own copy.** "Use as Template" on the Simple Steps example (or "Do it for me") gives you a
+  private copy to practise on. The tutorial remembers it and comes back to it next time.
+- **Add a step.** Add a step to the Do block with a directive and a completion condition. To be
+  saved, a step must lead somewhere: point it on to `check-result` and label that connection,
+  because it goes into another block. Nothing leads to the step yet — the check says so.
+- **Connect it.** Point `do-task` at your step, so every step is on the way from start to end.
+
+The lesson card sits over the diagram. After every change it checks your draft and names what is
+still missing, in the card and on the step it concerns; a lesson is done only when the check passes
+on the saved flow. "Do it for me" makes a lesson's change once, so you can watch and save it. If the
+copy was changed elsewhere, the save is refused and the card offers to reload it.
+
 ## Next
 
 - [Which ready flow to use](/docs/getting-started/ready-flows/) — Quick Task, Robust Task and Todo

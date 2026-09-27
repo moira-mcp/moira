@@ -379,6 +379,31 @@ describe("a step's choice in the edit log", () => {
     expect(result.current.draft).toEqual(before);
   });
 
+  test("editing an option through the log keeps one case per non-default option", () => {
+    const saved = catalogGraph("example-one-choice") as unknown as WorkflowGraph;
+    const draft = foldOperations(
+      saved,
+      logOf(saved, [
+        {
+          kind: "set-choice",
+          nodeId: "check-result",
+          choice: {
+            field: "matches",
+            question: "Does the result match?",
+            options: ["yes", "missing"],
+            defaultOption: "yes",
+            targets: { missing: "explain-gap" },
+          },
+        },
+      ]),
+    );
+    const check = node(draft, "check-result") as unknown as {
+      cases: Array<{ output: string; when: { right: string } }>;
+    };
+    expect(check.cases.map((c) => [c.when.right, c.output])).toEqual([["missing", "missing"]]);
+    expect(Object.keys(targets(draft, "check-result")).sort()).toEqual(["missing", "success"]);
+  });
+
   test("the export lists the schema, case, connection and label entries it changed", () => {
     const saved = bare();
     const lines = exportDiff(saved, logOf(saved, [choiceOp(saved)])).map((entry) =>

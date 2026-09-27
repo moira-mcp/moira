@@ -16,6 +16,7 @@
  * its words fails this test rather than a screenshot.
  */
 
+import { TUTORIAL_FINDING_CODES } from "@mcp-moira/workflow-engine/authoring";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -104,6 +105,8 @@ function runtimeKeys(): string[] {
       keys.push(`guides.${guide.id}.steps.${step.id}.body`);
     }
   }
+  // Every finding a tutorial check can return is rendered from its code.
+  for (const code of TUTORIAL_FINDING_CODES) keys.push(`guides.build-flow.findings.${code}`);
   // A step card and the node panel name the same section by whether the step routes or instructs.
   for (const family of ["components.diagram.stepFacts", "components.nodePanel.sections"]) {
     keys.push(`${family}.directive`, `${family}.message`);
