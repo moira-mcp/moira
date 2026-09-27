@@ -102,6 +102,10 @@ describe("heading", () => {
 });
 
 describe("values written for the format", () => {
+  test("a literal backslash cannot consume the escape for following Markdown markup", () => {
+    expect(textEscaper("markdown")("C:\\tmp\\_name")).toBe(String.raw`C:\\tmp\\\_name`);
+  });
+
   test("a substituted value is escaped; the author's markup and the run URL are not", () => {
     const processor = new GraphTemplateProcessor(undefined, undefined, textEscaper("markdown"));
     const text = processor.processDirective("*Done:* {{title}} — [open]({{runUrl}})", {

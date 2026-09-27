@@ -12,6 +12,7 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, test } from "@jest/globals";
 import { GraphValidator, type WorkflowGraph } from "@mcp-moira/workflow-engine";
+import { notificationContentWarnings } from "../../../packages/workflow-engine/src/validation/notification-content-rule.js";
 
 const FLOWS = path.join(process.cwd(), "workflows/production/flows");
 
@@ -164,6 +165,32 @@ describe("what warns and what stays quiet", () => {
     );
     expect(valid).toBe(true);
     expect(messages).toEqual([expect.stringContaining("{{report_path}}, a file or path")]);
+  });
+});
+
+describe("literal text in notification templates", () => {
+  test("skips paths inside template expressions and warns about paths outside them", () => {
+    const issues = notificationContentWarnings(
+      "notify",
+      "{{#eq goal './internal/report.md'}}Done{{/eq}} See ./reports/final.md",
+      new Set(),
+      undefined,
+    );
+    expect(issues.map((issue) => issue.message)).toEqual([
+      expect.stringContaining('the path "./reports/final.md"'),
+    ]);
+  });
+
+  test("scans a long sequence of unclosed opening brackets before a literal path", () => {
+    const issues = notificationContentWarnings(
+      "notify",
+      `${"{{".repeat(16_000)} See ./reports/final.md`,
+      new Set(),
+      undefined,
+    );
+    expect(issues.map((issue) => issue.message)).toEqual([
+      expect.stringContaining('the path "./reports/final.md"'),
+    ]);
   });
 });
 

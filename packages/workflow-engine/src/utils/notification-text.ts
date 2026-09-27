@@ -21,10 +21,12 @@ const escapeHtml: TextEscaper = (text) =>
 
 /**
  * Text as it must stand outside an entity in a message of `format`: Telegram's legacy Markdown
- * treats `_ * \` [` as markup unless escaped with a backslash; HTML needs its entities.
+ * treats `_ * \` [` as markup unless escaped with a backslash; a literal backslash must be escaped
+ * first so it cannot consume the escape added for the following character. HTML needs its entities.
  */
 export function textEscaper(format: NotificationFormat | undefined): TextEscaper {
-  if (format === "markdown") return (text) => text.replace(/([_*`[])/g, "\\$1");
+  if (format === "markdown")
+    return (text) => text.replace(/\\/g, "\\\\").replace(/([_*`[])/g, "\\$1");
   if (format === "html") return escapeHtml;
   return (text) => text;
 }

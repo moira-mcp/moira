@@ -41,7 +41,29 @@ function valueReferences(template: string): string[] {
 
 /** The message's own text, with every template expression removed. */
 function literalText(template: string): string {
-  return template.replace(/\{\{[^}]*\}\}/gu, " ");
+  const parts: string[] = [];
+  let expressionStart = -1;
+  let literalStart = 0;
+
+  for (let index = 0; index < template.length - 1; index++) {
+    if (template[index] === "{" && template[index + 1] === "{") {
+      // Keep the first opening pair, as the former expression matcher did.
+      if (expressionStart < 0) expressionStart = index;
+      index++;
+    } else if (template[index] === "}") {
+      if (template[index + 1] === "}" && expressionStart >= 0) {
+        parts.push(template.slice(literalStart, expressionStart), " ");
+        index++;
+        literalStart = index + 1;
+      } else if (template[index + 1] === "}") {
+        index++;
+      }
+      expressionStart = -1;
+    }
+  }
+
+  parts.push(template.slice(literalStart));
+  return parts.join("");
 }
 
 function lastSegment(path: string): string {
