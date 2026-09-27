@@ -112,10 +112,8 @@ test.describe("Steps view as a reading list", () => {
   test("the page tour's steps anchor lands on an instruction card of the list", async ({
     page,
   }) => {
-    await page.goto(`${SDF}&guide=flow`);
+    await page.goto(`${SDF}&guide=flow&step=steps`);
     const card = page.getByTestId("guide-card");
-    await expect(card).toHaveAttribute("data-guide-step", "intro");
-    await page.getByTestId("guide-next").click();
     await expect(card).toHaveAttribute("data-guide-step", "steps");
     await expect(card).toHaveAttribute("data-guide-anchor", "flow.instruction-card");
     const target = page.locator('[data-guide~="flow.instruction-card"]:visible').first();

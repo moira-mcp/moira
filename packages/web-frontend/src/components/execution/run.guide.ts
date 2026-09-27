@@ -1,6 +1,8 @@
 /**
- * The run page's screen tour: what a run shows — the process, the agent on its step, the evidence
- * it owes, the loop a failed review takes, the route the run leaves, and how to look at it.
+ * The run page's screen tour: what a run shows — the process, its two views, the agent on its step,
+ * the evidence it owes, the loop a failed review takes, the route the run leaves, the panel's tabs,
+ * answering a step that waits for the person, where Moira's notifications about the run lead, and
+ * how to look at it.
  *
  * Every anchor is drawn beside both diagrams (the contents, the block panel, the return ports and
  * the route cursor sit next to the map and the graph alike), so no step moves the reader to a view
@@ -19,6 +21,7 @@ export const runGuide: GuideDefinition = {
   sections: ["steps"],
   steps: [
     { id: "process", anchor: "process.contents-row", kind: "look", revision: 1 },
+    { id: "modes", anchor: "run.modes", kind: "look", revision: 1 },
     {
       id: "agent",
       anchor: "process.current-step",
@@ -42,6 +45,18 @@ export const runGuide: GuideDefinition = {
       revision: 1,
       prepare: { route: true, panel: "variables" },
     },
+    // A collapsed panel draws no tabs.
+    { id: "panel-tabs", anchor: "run.panel-tabs", kind: "look", revision: 1, optional: true },
+    // Only a run that waits for the person has an answer form.
+    {
+      id: "answer",
+      anchor: "run.answer",
+      kind: "look",
+      revision: 1,
+      optional: true,
+      prepare: { panel: "variables" },
+    },
+    { id: "notifications", anchor: "run.header", kind: "look", revision: 1 },
     {
       id: "explore",
       anchor: { map: "process.map-toolbar", graph: "process.graph-toolbar" },

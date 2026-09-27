@@ -17,7 +17,9 @@ export const settingsGuide: GuideDefinition = {
     { id: "nav", anchor: "settings.nav", kind: "look", revision: 1 },
     { id: "account", anchor: "settings.account", kind: "look", revision: 1 },
     { id: "security", anchor: "settings.security", kind: "look", revision: 1 },
-    { id: "notifications", anchor: "settings.notifications", kind: "look", revision: 1 },
+    // Revision 2: the step says what Moira's notifications are for (plan ready, action needed,
+    // finished) and that their heading opens the run page.
+    { id: "notifications", anchor: "settings.notifications", kind: "look", revision: 2 },
     { id: "github", anchor: "settings.integrations", kind: "look", revision: 1 },
     { id: "apps", anchor: "settings.apps", kind: "look", revision: 1 },
     { id: "tokens", anchor: "settings.api-tokens", kind: "look", revision: 1 },

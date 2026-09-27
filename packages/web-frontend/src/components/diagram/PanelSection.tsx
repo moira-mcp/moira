@@ -19,6 +19,7 @@ export function PanelSection({
   className,
   testId,
   openToken,
+  guide,
 }: {
   /** Storage key suffix; the fold state is kept per id. */
   id: string;
@@ -31,6 +32,8 @@ export function PanelSection({
   testId?: string;
   /** A new value unfolds the section (a "go to" landed inside it). */
   openToken?: number;
+  /** The guide anchor of the section, for a tour step that explains it. */
+  guide?: { "data-guide": string };
 }): React.JSX.Element {
   const [folded, toggle] = useStoredFlag(`moira.panel.folded:${id}`, !defaultOpen);
   const lastToken = useRef(openToken);
@@ -44,6 +47,7 @@ export function PanelSection({
       className={cn("rounded-lg border bg-card", className)}
       data-testid={testId ?? `panel-section-${id}`}
       data-folded={folded ? "true" : undefined}
+      {...guide}
     >
       <button
         type="button"

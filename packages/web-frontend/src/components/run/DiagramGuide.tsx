@@ -17,6 +17,7 @@ import { cn } from "@/lib/utils";
 import { useModeGuideKey } from "../flow/editing";
 import { useStoredFlag } from "../diagram/useStoredFlag";
 import type { RunViewMode } from "./modes";
+import { guideAnchor } from "../../guides/anchors";
 
 export function DiagramGuide({ mode }: { mode: RunViewMode }): React.JSX.Element {
   const { t } = useTranslation();
@@ -36,6 +37,7 @@ export function DiagramGuide({ mode }: { mode: RunViewMode }): React.JSX.Element
           open && "border-primary/50 bg-primary/10 text-primary",
         )}
         data-testid="diagram-guide-toggle"
+        {...guideAnchor("process.diagram-note")}
       >
         <Compass className="size-4" aria-hidden="true" />
       </button>

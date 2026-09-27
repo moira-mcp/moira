@@ -16,3 +16,15 @@ export const runsGuide: GuideDefinition = {
     { id: "list", anchor: "runs.list", kind: "look", revision: 1 },
   ],
 };
+
+/**
+ * The runs list for a reader with no run yet, where the full tour would show the run page: what a
+ * run is and the prompt that makes the first one.
+ */
+export const runsEmptyGuide: GuideDefinition = {
+  id: "runs-empty",
+  kind: "fallback",
+  screen: "runs",
+  routes: ["/executions"],
+  steps: [{ id: "try", anchor: "runs.list", kind: "look", revision: 1 }],
+};

@@ -109,6 +109,7 @@ import { pausedRunWarnings } from "../components/flow/structure";
 import type { WorkflowValidationStatus } from "../types/react-flow-types";
 import { FlowLevelBadge } from "../components/workflow/FlowLevelBadge";
 import { splitFlowTags } from "../utils/workflow-level";
+import { collectPlaybookReferences } from "@mcp-moira/shared/services/playbook-references";
 
 // Lazy chunk, requested on mount so the first switch to the graph view downloads nothing.
 const importWorkflowGraph = () => import("../components/workflow/WorkflowGraph");
@@ -490,9 +491,20 @@ export const FlowPage: React.FC = () => {
       setView: (view) => update({ [VIEW_PARAM]: view }),
       openPanel: (tab) => setChosenTab(tab as FlowPanelTab),
       openSection: (id) => requestSection({ name: id }),
+      // The panel lists a node's playbook references: select the first node that names one.
+      selectPlaybookNode: () => {
+        // The draft exists once the flow has loaded; a tour step before that finds nothing.
+        const named = (edited?.nodes ?? []).find(
+          (node) => collectPlaybookReferences(JSON.stringify(node)).length > 0,
+        );
+        if (!named) return false;
+        setSelectedNode({ id: named.id, position: { x: 0, y: 0 }, data: {} });
+        setChosenTab("block");
+        return true;
+      },
       owner: isOwner,
     }),
-    [mode, update, requestSection, isOwner],
+    [mode, update, requestSection, isOwner, edited],
   );
   useGuidePage("flow", guideController);
 
@@ -506,6 +518,7 @@ export const FlowPage: React.FC = () => {
           onClick={handleCopyWorkflow}
           disabled={copying}
           className="gap-1.5"
+          {...guideAnchor("flow.use-template")}
         >
           <Copy className="w-3.5 h-3.5" />
           {copying
@@ -514,12 +527,14 @@ export const FlowPage: React.FC = () => {
         </Button>
       )}
       {isOwner && fileInfo && (
-        <VisibilityToggle
-          visibility={fileInfo.visibility === "public" ? "public" : "private"}
-          onChange={handleToggleVisibility}
-          disabled={visibilityUpdating}
-          testId="workflow-visibility-toggle"
-        />
+        <span className="inline-flex" {...guideAnchor("flow.visibility")}>
+          <VisibilityToggle
+            visibility={fileInfo.visibility === "public" ? "public" : "private"}
+            onChange={handleToggleVisibility}
+            disabled={visibilityUpdating}
+            testId="workflow-visibility-toggle"
+          />
+        </span>
       )}
       {fileInfo?.accessType === "shared" && (
         <Badge variant="secondary" className="gap-1.5" data-testid="shared-with-you-indicator">
@@ -555,7 +570,12 @@ export const FlowPage: React.FC = () => {
 
   const flowModes = (
     <Tabs value={mode} onValueChange={(value) => update({ [VIEW_PARAM]: value })}>
-      <TabsList aria-label={t("pages.runPage.modeLabel")} className="h-8" data-testid="flow-modes">
+      <TabsList
+        aria-label={t("pages.runPage.modeLabel")}
+        className="h-8"
+        data-testid="flow-modes"
+        {...guideAnchor("flow.modes")}
+      >
         {FLOW_MODES.filter((definition) => process || definition.id !== "map").map((definition) => {
           const Icon = definition.icon;
           return (
@@ -647,7 +667,7 @@ export const FlowPage: React.FC = () => {
           facts={
             savedWorkflow ? (
               <>
-                <FlowLevelBadge level={flowTags.level} />
+                <FlowLevelBadge level={flowTags.level} guide={guideAnchor("flow.level")} />
                 {flowTags.subjects.map((tag) => (
                   <span
                     key={tag}
@@ -752,6 +772,7 @@ export const FlowPage: React.FC = () => {
           }
           testId="flow-header"
           guide={guideAnchor("flow.header")}
+          detailsGuide={guideAnchor("flow.facts")}
         />
 
         {breadcrumbs.length > 0 && (
@@ -925,7 +946,10 @@ export const FlowPage: React.FC = () => {
                     onValueChange={(value) => setChosenTab(value as FlowPanelTab)}
                     className="flex flex-col h-full"
                   >
-                    <TabsList className="w-full justify-start rounded-none border-b bg-muted/30 pl-2 pr-10 h-10">
+                    <TabsList
+                      className="w-full justify-start rounded-none border-b bg-muted/30 pl-2 pr-10 h-10"
+                      {...guideAnchor("flow.panel-tabs")}
+                    >
                       <TabsTrigger value="block" className="gap-1.5 text-xs">
                         <Boxes className="h-3.5 w-3.5" />
                         {t("pages.flowPage.tabs.block")}

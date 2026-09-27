@@ -3239,6 +3239,22 @@
         "explore": {
           "title": "Explore the same run your way",
           "body": "The highlighted toolbar holds everything that changes what you see. The Map / Graph switch picks the view: the Map is the process with the run's state on it, the Graph is every step of the definition. The layout presets beside it re-lay both diagrams — rows, compact, balanced branches, top to bottom — and bring the camera back to the block you were reading. The magnifier finds a step by id or text, and the compass opens the note about the view that is open. Your selection and the camera survive a switch."
+        },
+        "modes": {
+          "title": "Map and graph",
+          "body": "Map shows the run's stages as blocks, lit by where the run is and what it has done. Graph shows every node with the run's status on it, the technical picture. Both show the same run."
+        },
+        "panel-tabs": {
+          "title": "The panel's tabs",
+          "body": "Block: the selected block and its steps. Variables: every value with its history — and the place to answer the waiting step yourself. Errors: what the run recorded going wrong. Steps: every step it took, in order. Locks: locks placed on this run."
+        },
+        "answer": {
+          "title": "Answer the waiting step yourself",
+          "body": "The run waits at a step for an answer. You can give it here instead of the agent: fill in what the step asks for and send it. Moira checks it as it would the agent's answer, records it in the route as your adjustment, and the run goes on."
+        },
+        "notifications": {
+          "title": "Where notifications lead",
+          "body": "When this run needs you or moves on — a plan ready for approval, a result ready for review, the work finished — Moira can notify you. Each notification opens with the flow and the task, and its heading links to this page."
         }
       }
     },
@@ -3280,6 +3296,38 @@
         "explore": {
           "title": "Explore the same process your way",
           "body": "The highlighted toolbar holds everything that changes what you see. The Steps / Map / Graph switch picks the view: Steps is what the agent is told, the Map is the process the workflow declares, the Graph is every step of the definition. On the Map and the Graph, the layout presets re-lay the diagram — rows, compact, balanced branches, top to bottom — and bring the camera back to the block you were reading, the magnifier finds a step by id or text, and the compass opens the note about the view that is open. On Steps, the switch beside the view tabs reads variables as plain words. Your selection and the camera survive a switch."
+        },
+        "facts": {
+          "title": "What the flow is about",
+          "body": "Under the name: what the flow is for, its subject tags and how many nodes it has. A flow's author writes the description and tags; they are how you tell flows apart in the list."
+        },
+        "level": {
+          "title": "The level it was built at",
+          "body": "A flow built with the Workflow Management Flow shows its level: Simple, Standard or Complex. You don't pick it on this page — when you ask your agent for a flow, it agrees the level with you. A Simple flow can later be taken through the fuller path by asking again."
+        },
+        "modes": {
+          "title": "Three ways to look at it",
+          "body": "Steps reads the flow as numbered instructions. Map shows its stages as blocks with the paths between them. Graph shows every node and connection, the technical picture. They are one flow; switch whenever you like."
+        },
+        "diagram-note": {
+          "title": "How to read this diagram",
+          "body": "Each diagram has its own short note here: what the cards, colours and arrows of this view mean. Open it whenever a picture is unclear."
+        },
+        "panel-tabs": {
+          "title": "The panel beside the diagram",
+          "body": "Block shows the selected block — what it does, where it leads, its steps — or, when a node is selected, that node in full. Variables lists the values the flow declares, each with its type, default and description."
+        },
+        "playbook": {
+          "title": "A playbook the step reads",
+          "body": "This node names a playbook: shared behaviour text the step includes when it runs. Its link opens the playbook's page; one that belongs to another account opens read-only."
+        },
+        "template": {
+          "title": "Get a copy you can change",
+          "body": "This flow is public. “Use as Template” makes your own private copy, which you can edit, rename and share. Or ask your agent to make a new flow for your task."
+        },
+        "visibility": {
+          "title": "Who can see it",
+          "body": "Private flows are yours alone; public ones appear in everyone's catalog and can be copied. Share creates invitation links that give chosen people access without making the flow public, and lists who has it."
         }
       }
     },
@@ -3300,7 +3348,7 @@
         },
         "notifications": {
           "title": "Notifications",
-          "body": "Set up where Moira reaches you, such as a Telegram bot, then send a test message to be sure it works."
+          "body": "Moira tells you when a run needs you or moves on: a plan ready for approval, a result ready for review, the work finished. Each notification opens with the flow and the task, and its heading links to the run's page. Set up here where they reach you, such as a Telegram bot, and send a test message to be sure it works."
         },
         "github": {
           "title": "GitHub & Codespaces",
@@ -3381,7 +3429,8 @@
         "seen": "Seen",
         "new_one": "{{count}} new step",
         "new_other": "{{count}} new steps"
-      }
+      },
+      "fullTour": "Full tour"
     },
     "firstRun": {
       "title": "New to Moira?",
@@ -3389,6 +3438,15 @@
       "accept": "Show me around",
       "later": "Later",
       "decline": "No thanks"
+    },
+    "runs-empty": {
+      "title": "Your first run",
+      "steps": {
+        "try": {
+          "title": "Your first run",
+          "body": "A run appears here when your agent runs a flow. To start one, say to your agent: “Use Moira to run Example 1: Simple Steps for this task: …”. Then open the run to watch it step by step."
+        }
+      }
     }
   }
 }

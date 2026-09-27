@@ -278,22 +278,23 @@ page it explains.
 
 **Guides today:**
 
-| Guide               | Kind   | Declared in                         | Opened by                                          |
-| ------------------- | ------ | ----------------------------------- | -------------------------------------------------- |
-| `home`              | screen | `pages/home.guide.ts`               | "What is this?" in the home page header            |
-| `flows`             | screen | `pages/flows.guide.ts`              | "What is this?" in the flow list header            |
-| `flow`              | screen | `pages/flow.guide.ts`               | "What is this?" in the flow page's diagram toolbar |
-| `runs`              | screen | `pages/runs.guide.ts`               | "What is this?" in the runs list header            |
-| `run`               | screen | `components/execution/run.guide.ts` | "What is this?" in the run page's diagram toolbar  |
-| `notes`             | screen | `pages/notes.guide.ts`              | "What is this?" in the notes page header           |
-| `playbooks`         | screen | `pages/playbooks.guide.ts`          | "What is this?" in the playbooks page header       |
-| `artifacts`         | screen | `pages/artifacts.guide.ts`          | "What is this?" in the artifacts page header       |
-| `settings`          | screen | `pages/settings/settings.guide.ts`  | "What is this?" in the Settings page header        |
-| `settings-github`   | task   | `pages/settings/settings.guide.ts`  | **Setup guide** in the GitHub & Codespaces section |
-| `settings-telegram` | task   | `pages/settings/settings.guide.ts`  | **Telegram setup** in the Notifications section    |
+| Guide               | Kind     | Declared in                         | Opened by                                            |
+| ------------------- | -------- | ----------------------------------- | ---------------------------------------------------- |
+| `home`              | screen   | `pages/home.guide.ts`               | "What is this?" in the home page header              |
+| `flows`             | screen   | `pages/flows.guide.ts`              | "What is this?" in the flow list header              |
+| `flow`              | screen   | `pages/flow.guide.ts`               | "What is this?" in the flow page's diagram toolbar   |
+| `runs`              | screen   | `pages/runs.guide.ts`               | "What is this?" in the runs list header              |
+| `run`               | screen   | `components/execution/run.guide.ts` | "What is this?" in the run page's diagram toolbar    |
+| `notes`             | screen   | `pages/notes.guide.ts`              | "What is this?" in the notes page header             |
+| `playbooks`         | screen   | `pages/playbooks.guide.ts`          | "What is this?" in the playbooks page header         |
+| `artifacts`         | screen   | `pages/artifacts.guide.ts`          | "What is this?" in the artifacts page header         |
+| `settings`          | screen   | `pages/settings/settings.guide.ts`  | "What is this?" in the Settings page header          |
+| `settings-github`   | task     | `pages/settings/settings.guide.ts`  | **Setup guide** in the GitHub & Codespaces section   |
+| `settings-telegram` | task     | `pages/settings/settings.guide.ts`  | **Telegram setup** in the Notifications section      |
+| `runs-empty`        | fallback | `pages/runs.guide.ts`               | The full tour's run stop, when the reader has no run |
 
-**Declarations** (`guides/types.ts`). A `GuideDefinition` has an `id`, a `kind` (`screen`, `task` or
-`tutorial`), the `screen` whose page runs it, its route patterns, and the views, panels and sections
+**Declarations** (`guides/types.ts`). A `GuideDefinition` has an `id`, a `kind` (`screen`, `task`,
+`tutorial` or `fallback` — a guide only the full tour opens, in place of a screen it cannot show), the `screen` whose page runs it, its route patterns, and the views, panels and sections
 that screen has. Each `GuideStep` has:
 
 - an `id`, stable within the guide;
@@ -306,7 +307,7 @@ that screen has. Each `GuideStep` has:
   `views` (the views that draw it, the
   first being where the step goes from any other), `wide` (drawn only at `md` and wider), `roles`
   (`owner`, `reader` or `any`) and `prepare` (a panel tab, a section, the current block, a recorded
-  route, or the app sidebar).
+  route, the app sidebar, or `playbookNode` — a node that names a playbook).
 
 `guides/registry.ts` lists every guide explicitly (`GUIDES`), in the order the "Show me around"
 menu lists the screens, so checks can enumerate them without mounting a page. `screenTourForPath`
@@ -316,7 +317,7 @@ finds the screen tour of a route, matching the pathname without the app's base p
 toolbars. `PageShell` and `PageHeader` take a `guide` prop, which puts an anchor on the page title
 in every state (loading, error, loaded), so a tour's first step resolves before the page's data.
 
-**The tours of home, the flow list, runs, notes, playbooks and artifacts** explain purpose and main controls; detail stays in hints. Steps on
+**The screen tours** explain purpose and main controls; detail stays in hints. Steps on
 hideable beginner panels, on the quota (shown once storage is read), on a flow's level badge (only
 flows built with the Workflow Management Flow carry a level) and on the read-only view of another
 account's playbook (open only from a flow's link) are `optional`; the panel steps and the
@@ -328,8 +329,7 @@ on a phone opens the sidebar sheet.
 
 **Required topics** (`guides/topics.ts`, `REQUIRED_TOPICS`) name, per screen, what its tour must
 explain and the step that does: for example the flow list's `create-by-agent` is its `intro` step,
-which says a flow is created by the agent at an agreed level. The flow page, the run page and
-Settings keep their walkthroughs' steps and have no topic list.
+which says a flow is created by the agent at an agreed level. Every screen tour has a topic list.
 
 **Anchors.** An element a step explains carries `data-guide` with one or more space-separated names,
 written as `guideAnchor("screen.name")` so the name stays a literal a static check finds. Names
@@ -343,7 +343,8 @@ the steps that changed; closing removes them and returns focus to the control th
 guide. A page registers a controller for its screen with
 `useGuidePage(screen, controller)`: the view it shows, whether the reader owns what is shown (which
 filters the steps by role), and the operations that prepare it — `setView`, `openPanel`,
-`openSection`, `selectCurrentBlock` — plus whether a route is recorded. Pass a memoised controller.
+`openSection`, `selectCurrentBlock`, `selectPlaybookNode` (the flow page selects the first node
+that names a playbook) — plus whether a route is recorded. Pass a memoised controller.
 
 **The runner** (`GuideRunner.tsx`, loaded only when a guide opens), for each step:
 
@@ -356,13 +357,15 @@ filters the steps by role), and the operations that prepare it — `setView`, `o
 - skips an optional step whose element is still absent when the wait ends, a step its
   `absentWhen` declares absent, and a wide-only step on a narrow screen, with a note on the next
   card that counts the steps skipped on the way to it ("4 steps were skipped …"); the note belongs
-  to that card, so the same step reached another way (the browser's history, a link) has none. None
-  is ever shown, announced or recorded: declared-absent and wide-only steps are skipped at once,
+  to that card, so the same step reached another way (the browser's history, a link) has none. A
+  skipped step gets no card and no announcement: declared-absent and wide-only steps are skipped at once,
   and any other optional step waits without a card until its element is found (or until the page
   has switched to a view that draws it). A skipped step leaves no browser history entry, so the
   browser's Back crosses it. In a run of only the changed steps, a step that cannot be shown is
   recorded at its revision, so "What is this?" does not keep offering it. A step is skipped in the direction the reader last moved, so Back crosses it.
-  A required step whose element is absent shows its card with a "not found" note;
+  The wait for a view switch is bounded like any other wait. A required step whose element is
+  absent shows its card with a "not found" note and keeps looking for it; when the element arrives
+  (a page whose code or data comes late), the note goes and the card moves beside it;
 - dims everything but the element with a `pointer-events: none` layer (`guide-spotlight`, colour
   `--guide-dim`) and a ring, and never writes to the element;
 - records the step as seen at its revision and as the place to resume (the guide, the step, the
@@ -390,7 +393,8 @@ region (`guide-announcer`). Under reduced motion (`usePrefersReducedMotion`) not
 `json`, default `{}`), seeded beside `ui.hidden_panels`:
 
 - `firstRun`: the answer to the first-run prompt, `accepted` or `declined`;
-- `resume`: `{guide, step, path}`, plus `owner` (`true` or `false`) when the page reported the
+- `resume`: `{guide, step, path}`, plus `tour` (`true`) when the guide was a leg of the full
+  tour, and `owner` (`true` or `false`) when the page reported the
   reader's role; the menu numbers "Continue" over that role's steps, so a reader who owns one flow
   and reads another is counted in the role they stopped in. A non-boolean `owner` is ignored on
   read;
@@ -424,15 +428,27 @@ last card offers the whole tour (`guide-whole-tour`). Nothing opens by itself.
   shared by every tab); "No thanks" records `declined`.
 - **"Show me around"** (`ShowMeAround`, `show-me-around`) is in the sidebar footer above the user
   menu, so it is also in the phone sheet and the admin area. Its menu (`show-me-around-menu`)
-  offers this page's tour (or says the page has none), "Continue" to the resume point (it opens that
+  offers the full tour (`show-me-around-full-tour`, see "The full tour" below), this page's tour
+  (or says the page has none), "Continue" to the resume point (it opens that
   page with the guide at that step), and each screen tour's status: not started, in progress, seen,
   or N new steps. "Seen" means the tour was walked to its end. The button carries
   `data-progress="loaded"` once the reader's progress is read. It closes on Escape and on a press
   outside, not when focus leaves it (the phone sheet takes focus as it opens around it).
 - **Settings → Preferences → Guides** (`preferences-guides`): "Start the tour again" forgets the
-  Settings tour's seen steps, finished mark and resume point, and starts it; "Forget what I have
+  seen steps and finished marks of every guide in the full tour and the resume point
+  (`restartGuides`), and starts the full tour; "Forget what I have
   seen" clears `firstRun`, `resume`, `seen` and `finished` (keeping any other field) and this
   session's "Later", so the prompt comes back.
+
+**The full tour** (`guides/fullTour.ts`) chains the screen tours in a fixed order (every toured
+screen of the route table, the admin area excluded) (`FULL_TOUR_LEGS`): home, the flow list, the example flow of the reader's
+language (the Simple Steps entry of `recommendedFlows`), runs, the reader's latest run (the newest
+by `updatedAt` from `getExecutions` with `mine`, so an admin gets their own), notes, playbooks, artifacts and Settings. A reader with no run,
+or whose run list cannot be read, gets the `runs-empty` fallback on the runs list instead, which
+hands over the prompt to start one. The chain lives in the URL as `tour=full` beside `guide` and
+`step`, so it survives a reload: finishing a leg's guide opens the next leg (`continueTour`), and
+leaving the page drops the guide, which pauses the chain — the resume point keeps `tour`, and
+"Continue" resumes it. Opening any guide on its own, or closing one, removes `tour`.
 
 **Copy** lives only in the locale files: `guides.<guide>.title`,
 `guides.<guide>.steps.<step>.title` and `.body`, and the shared `guides.ui.*`, `guides.menu.*` and

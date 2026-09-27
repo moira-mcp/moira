@@ -26,18 +26,35 @@ import { GRAPH, graphOverview, settledCamera } from "./helpers/diagram.js";
 const BASE_URL = getTestBaseUrl();
 
 /** The step ids each guide runs through, in order, for the reader who opens it. */
-const RUN_STEPS = ["process", "agent", "evidence", "loop", "route", "explore"];
-const FLOW_READER_STEPS = [
+const RUN_STEPS = [
+  "process",
+  "modes",
+  "agent",
+  "evidence",
+  "loop",
+  "route",
+  "panel-tabs",
+  "answer",
+  "notifications",
+  "explore",
+];
+// Quick Task carries no level tag and names no playbook, so those optional steps are passed.
+const FLOW_SHARED_START = [
   "intro",
+  "facts",
+  "modes",
   "steps",
+  "diagram-note",
   "process",
   "agent",
   "evidence",
   "loop",
-  "edit-reader",
-  "explore",
+  "panel-tabs",
 ];
-const FLOW_OWNER_STEPS = FLOW_READER_STEPS.map((id) => (id === "edit-reader" ? "edit" : id));
+// A reader of the public Quick Task can copy it and learns that the owner edits.
+const FLOW_READER_STEPS = [...FLOW_SHARED_START, "template", "edit-reader", "explore"];
+// The owner of a private copy sets who sees it and edits it.
+const FLOW_OWNER_STEPS = [...FLOW_SHARED_START, "visibility", "edit", "explore"];
 const SETTINGS_STEPS = [
   "nav",
   "account",
@@ -118,21 +135,22 @@ for (const view of ["map", "graph"] as const) {
   });
 }
 
-test("the flow page's tour lands on a rendered element at every step for a reader, in both views", async ({
-  page,
-}) => {
-  await loginAsAdmin(page);
-  await page.setViewportSize({ width: 1600, height: 1000 });
-
-  for (const view of ["map", "graph"] as const) {
+// One test per view, as for the run page: both walks of the whole tour in one test would not fit
+// the per-test budget on a slow runner.
+for (const view of ["map", "graph"] as const) {
+  test(`the flow page's tour lands on a rendered element at every step for a reader, in the ${view} view`, async ({
+    page,
+  }) => {
+    await loginAsAdmin(page);
+    await page.setViewportSize({ width: 1600, height: 1000 });
     await page.goto(`${BASE_URL}/workflows/moira/quick-task?view=${view}`);
     await expect(page.getByTestId("flow-page")).toBeVisible({ timeout: 20000 });
     await page.getByTestId("guide-open").click();
     // A reader is told the owner edits and how to get a copy, not pointed at a switch they lack.
     await walk(page, "flow", FLOW_READER_STEPS);
     await expect(page.getByTestId("flow-page")).toHaveAttribute("data-view", view);
-  }
-});
+  });
+}
 
 /** A private copy of the bundled Quick Task, owned by the signed-in admin; removed afterwards. */
 async function withOwnCopy(page: Page, run: (id: string) => Promise<void>): Promise<void> {
@@ -181,6 +199,50 @@ for (const [guideId, opener, steps] of [
   });
 }
 
+test("the flow page's tour explains the level badge of a flow built at a level", async ({
+  page,
+}) => {
+  await loginAsAdmin(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const created = await (
+    await page.request.post(`${BASE_URL}/api/workflows`, {
+      headers: { Origin: new URL(BASE_URL).origin },
+      data: {
+        visibility: "private",
+        workflow: {
+          metadata: {
+            name: `Leveled ${Date.now()}`,
+            version: "1.0.0",
+            description: "A flow built at the standard level.",
+            tags: ["reports", "complexity:standard"],
+          },
+          nodes: [
+            { type: "start", id: "start", connections: { default: "end" } },
+            { type: "end", id: "end" },
+          ],
+        },
+      },
+    })
+  ).json();
+  const id = created.data.workflowId as string;
+  try {
+    await page.goto(`${BASE_URL}/workflows/${id}?guide=flow&step=facts`);
+    const card = page.getByTestId("guide-card");
+    await expect(card).toHaveAttribute("data-guide-step", "facts", { timeout: 20000 });
+    await page.getByTestId("guide-next").click();
+    await expect(card).toHaveAttribute("data-guide-step", "level");
+    await expect(page.getByTestId("guide-spotlight")).toHaveAttribute(
+      "data-guide-anchor",
+      "flow.level",
+    );
+    await expect(page.locator('[data-guide~="flow.level"]:visible')).toHaveText("Standard");
+  } finally {
+    await page.request.delete(`${BASE_URL}/api/workflows/${id}`, {
+      headers: { Origin: new URL(BASE_URL).origin },
+    });
+  }
+});
+
 test("on a phone the card is a bottom sheet, and a desktop-only step is skipped with a note", async ({
   page,
 }) => {
@@ -188,15 +250,20 @@ test("on a phone the card is a bottom sheet, and a desktop-only step is skipped 
   await page.setViewportSize({ width: 1600, height: 1000 });
   await withOwnCopy(page, async (id) => {
     await page.setViewportSize({ width: 390, height: 844 });
-    await page.goto(`${BASE_URL}/workflows/${id}?view=steps&guide=flow&step=loop`);
+    await page.goto(`${BASE_URL}/workflows/${id}?view=steps&guide=flow&step=panel-tabs`);
     const card = page.getByTestId("guide-card");
     await expect(card).toBeVisible({ timeout: 20000 });
-    // The sheet spans the screen along its bottom edge.
+    // The sheet spans the screen along an edge: the bottom, or the top when the element is under
+    // the bottom (the panel's tabs sit low on a phone).
+    await expect(card).toHaveAttribute("data-guide-dock", /^(bottom|top)$/);
+    const dock = await card.getAttribute("data-guide-dock");
     const box = (await card.boundingBox())!;
     expect(box.width).toBeGreaterThanOrEqual(385);
-    expect(box.y + box.height).toBeGreaterThanOrEqual(840);
-    // The edit switch is drawn only on a wide screen: the owner's edit step, next after the loop,
-    // is skipped with a note — and never shown on the way, where it could take a click.
+    const gap = dock === "top" ? box.y : 844 - (box.y + box.height);
+    expect(gap).toBeLessThanOrEqual(4);
+    // The visibility controls and the edit switch are drawn only on a wide screen: the owner's two
+    // steps after the panel's tabs are skipped with a note — and never shown on the way, where
+    // they could take a click.
     await page.evaluate(() => {
       const shown: string[] = [];
       (window as unknown as { guideStepsShown: string[] }).guideStepsShown = shown;
@@ -209,11 +276,13 @@ test("on a phone the card is a bottom sheet, and a desktop-only step is skipped 
     });
     await page.getByTestId("guide-next").click();
     await expect(card).toHaveAttribute("data-guide-step", "explore");
+    await expect(page.getByTestId("guide-note")).toContainText("2 steps were skipped");
     await expect(page.getByTestId("guide-note")).toContainText("wider screen");
     const shown = await page.evaluate(
       () => (window as unknown as { guideStepsShown: string[] }).guideStepsShown,
     );
     expect(shown).not.toContain("edit");
+    expect(shown).not.toContain("visibility");
     expect(shown[shown.length - 1]).toBe("explore");
   });
 });

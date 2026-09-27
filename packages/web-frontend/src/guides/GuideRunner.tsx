@@ -36,6 +36,7 @@ import { requestReveal } from "../components/diagram/reveal";
 import { findAnchor } from "./anchors";
 import { usePrefersReducedMotion } from "./usePrefersReducedMotion";
 import { GUIDE_PARAM, ONLY_PARAM, STEP_PARAM, useGuides } from "./GuideContext";
+import { TOUR_PARAM } from "./fullTour";
 import { changeProgress, finishGuide, recordStep, type ProgressChange } from "./progress";
 import { anchorIn, fallbackView } from "./types";
 
@@ -129,7 +130,19 @@ function saveProgress(change: ProgressChange): void {
 
 export default function GuideRunner(): React.JSX.Element | null {
   const { t } = useTranslation();
-  const { guide, steps, stepId, partial, controller, start, go, close, announce } = useGuides();
+  const {
+    guide,
+    steps,
+    stepId,
+    partial,
+    controller,
+    start,
+    go,
+    close,
+    announce,
+    tour,
+    continueTour,
+  } = useGuides();
   const location = useLocation();
   const isMobile = useIsMobile();
   const reduceMotion = usePrefersReducedMotion();
@@ -165,10 +178,12 @@ export default function GuideRunner(): React.JSX.Element | null {
         // Walked to the end: the guide is finished, with nothing left to resume. A run of only its
         // changed steps finishes nothing: the rest of the tour was not walked.
         if (guide && !partial) saveProgress(finishGuide(guide, steps));
-        close(!!skipped);
+        // A leg of the full tour hands over to the next screen's tour.
+        if (tour && !partial) continueTour();
+        else close(!!skipped);
       }
     },
-    [steps, index, go, close, guide, partial],
+    [steps, index, go, close, guide, partial, tour, continueTour],
   );
   const back = useCallback(() => {
     direction.current = "back";
@@ -215,6 +230,13 @@ export default function GuideRunner(): React.JSX.Element | null {
   const switchesView = anchor === null && !!step && !!fallbackView(step) && !!controller?.setView;
   const resolving =
     !!step?.optional && (anchor !== null || switchesView) && resolvedFor !== stepKey;
+  // The switch has the same bound as any wait for an element: a page that never draws the step is
+  // passed, not waited on for ever.
+  useEffect(() => {
+    if (!switchesView) return;
+    const timer = window.setTimeout(() => skip("hidden"), (RESOLVE_TICKS + 1) * TICK_MS);
+    return () => window.clearTimeout(timer);
+  }, [switchesView, stepKey, skip]);
   const hidden = skipping || resolving;
   useEffect(() => {
     if (skipReason) skip(skipReason);
@@ -228,6 +250,7 @@ export default function GuideRunner(): React.JSX.Element | null {
       !anchor || (step.prepare?.route && !controller.routeRecorded && controller.view !== fallback);
     if (fallback && needsOtherView && controller.view !== fallback) controller.setView?.(fallback);
     if (step.prepare?.currentBlock) controller.selectCurrentBlock?.();
+    if (step.prepare?.playbookNode) controller.selectPlaybookNode?.();
     if (step.prepare?.panel) controller.openPanel?.(step.prepare.panel);
     if (step.prepare?.section) controller.openSection?.(step.prepare.section);
   }, [step, anchor, controller]);
@@ -277,13 +300,17 @@ export default function GuideRunner(): React.JSX.Element | null {
       const found = findAnchor(anchor);
       tries += 1;
       if (!found) {
-        if (tries > RESOLVE_TICKS) {
+        if (tries > RESOLVE_TICKS && step.optional) {
           window.clearInterval(timer);
-          if (step.optional) skip("hidden");
-          else setMissing(true);
+          skip("hidden");
+        } else if (tries === RESOLVE_TICKS + 1) {
+          // A required step says it cannot find its element, and keeps looking: a page whose code
+          // or data arrives late (the next screen of the full tour) still gets its step.
+          setMissing(true);
         }
         return;
       }
+      setMissing(false);
       const current = boxOf(found);
       settling += 1;
       if (!sameBox(current, last) && settling < SETTLE_TICKS) {
@@ -324,13 +351,15 @@ export default function GuideRunner(): React.JSX.Element | null {
   // A step shown is seen at its revision, and it is where the reader stopped.
   const pagePath = useMemo(() => {
     const query = new URLSearchParams(location.search);
-    [GUIDE_PARAM, STEP_PARAM, ONLY_PARAM].forEach((param) => query.delete(param));
+    [GUIDE_PARAM, STEP_PARAM, ONLY_PARAM, TOUR_PARAM].forEach((param) => query.delete(param));
     const rest = query.toString();
     return rest ? `${location.pathname}?${rest}` : location.pathname;
   }, [location.pathname, location.search]);
   useEffect(() => {
     if (!guide || !step || hidden) return;
-    saveProgress(recordStep(guide.id, step, pagePath, !partial, controller?.owner));
+    saveProgress(
+      recordStep(guide.id, step, pagePath, !partial, { owner: controller?.owner, tour }),
+    );
     // Recorded once per step shown, and again when a run of the changed steps becomes the whole
     // tour on the same step (only then does it become the place to resume); the page's path at that
     // moment is the one to come back to.

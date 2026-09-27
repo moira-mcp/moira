@@ -26,6 +26,7 @@ import { NodeSchemaReadout } from "../workflow/NodeSchemaReadout";
 import { NodePlaybookReferences, collectNodeReferences } from "../workflow/NodePlaybookReferences";
 import { AlertCircle, AlertTriangle } from "lucide-react";
 import { blockById, nodeOwners, stepsOf, type RunBlock } from "./model";
+import { guideAnchor } from "../../guides/anchors";
 
 export function NodePanel({
   workflow,
@@ -260,6 +261,7 @@ export function NodePanel({
             title={t("components.workflowGraph.nodeDetails.playbooks")}
             summary={String(playbooks.length)}
             testId="node-panel-playbooks"
+            guide={guideAnchor("process.node-playbooks")}
           >
             <NodePlaybookReferences texts={playbookTexts} />
           </PanelSection>

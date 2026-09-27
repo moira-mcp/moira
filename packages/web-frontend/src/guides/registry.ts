@@ -12,7 +12,7 @@ import { flowsGuide } from "../pages/flows.guide";
 import { homeGuide } from "../pages/home.guide";
 import { notesGuide } from "../pages/notes.guide";
 import { playbooksGuide } from "../pages/playbooks.guide";
-import { runsGuide } from "../pages/runs.guide";
+import { runsEmptyGuide, runsGuide } from "../pages/runs.guide";
 import {
   githubSetupGuide,
   settingsGuide,
@@ -27,6 +27,7 @@ export const GUIDES: readonly GuideDefinition[] = [
   flowGuide,
   runsGuide,
   runGuide,
+  runsEmptyGuide,
   notesGuide,
   playbooksGuide,
   artifactsGuide,

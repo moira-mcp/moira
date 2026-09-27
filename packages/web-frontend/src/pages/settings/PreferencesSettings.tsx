@@ -25,7 +25,8 @@ import {
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { useGuides } from "@/guides/GuideContext";
-import { changeProgress, forgetProgress, restartGuide } from "@/guides/progress";
+import { changeProgress, forgetProgress, restartGuides } from "@/guides/progress";
+import { tourGuideIds } from "@/guides/fullTour";
 import { forgetFirstRunLater } from "@/guides/FirstRunPrompt";
 import {
   Select,
@@ -91,16 +92,17 @@ function BeginnerPanelsSettings(): React.JSX.Element {
   );
 }
 
-/** The tour that "Start the tour again" runs from its first step: this screen's. */
-const RESTART_GUIDE = "settings";
-
 function GuidesSettings(): React.JSX.Element {
   const { t } = useTranslation();
-  const { start } = useGuides();
+  const { startFullTour } = useGuides();
 
+  // "Start the tour again" is the full tour, from its first screen, with each of its screens as if
+  // never walked.
   const restart = () => {
-    changeProgress(restartGuide(RESTART_GUIDE)).catch(() => toast.error(t("guides.ui.saveFailed")));
-    start(RESTART_GUIDE);
+    changeProgress(restartGuides(tourGuideIds())).catch(() =>
+      toast.error(t("guides.ui.saveFailed")),
+    );
+    startFullTour();
   };
 
   const forget = () => {

@@ -210,18 +210,17 @@ to get an editable one.
 
 ## Explaining the page
 
-**What is this?** opens a tour of the page in eight steps — that your agent, not you, picks or
-builds flows; the steps view; block, step, evidence, loop, editing; and the views — each card
-sitting beside the element that shows it, in whichever view is open, with the rest of the page
-dimmed: the page header, a numbered instruction card on the steps view (on the map and the graph,
-the **Steps** tab), a contents row, a step in the block panel (the section it sits in unfolds), the
-evidence a step must return, a return port, the edit toggle and the toolbar. A step whose element
-the open view does not draw moves to the view that does, and a highlighted card inside the diagram
-is brought into the camera. The steps about the map are skipped, with a note, on a flow that has
-no process view, and the loop step on a flow without a loop. The editing step depends on who reads: the flow's owner is shown the
-edit toggle, on a wide screen only; anyone else learns, on the page header, that only the owner
-edits and that "Use as Template" makes an editable copy. The right arrow or Enter goes on, the
-left arrow goes back and Escape closes. On a phone the card is a sheet along the top or the bottom
-of the screen, whichever leaves the element in sight. The tour and its step are in the URL
-(`guide=flow&step=…`), so a position can be linked to. The compass in the toolbar opens the note
-about the open view.
+**What is this?** opens a tour of the page, each card sitting beside the element it explains, in
+whichever view is open, with the rest of the page dimmed. It covers that your agent, not you, picks
+or builds flows; what the flow is about (the description and tags under the name); the level it
+was built at, on a flow built with the Workflow Management Flow; the three views and the diagram
+note of the open one; the steps view, a block, a step, its evidence and a loop; the panel's tabs; a
+playbook a step names (the tour selects such a step); and what you can do with the flow — as its
+owner, who can see it and editing it; as anyone else, "Use as Template" for an editable copy. A
+step whose element the open view does not draw moves to the view that does, and a highlighted card
+inside the diagram is brought into the camera. A step whose element is not on this flow (no
+process view, no loop, no playbook, no level) is skipped with a note on the next card, and the
+steps about visibility, "Use as Template" and editing need a wide screen. The right arrow or Enter goes on,
+the left arrow goes back and Escape closes. On a phone the card is a sheet along the top or the
+bottom of the screen, whichever leaves the element in sight. The tour and its step are in the URL
+(`guide=flow&step=…`), so a position can be linked to.

@@ -19,7 +19,19 @@ import React, {
   useRef,
   useState,
 } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
+import { useTranslation } from "react-i18next";
+import { APP_PREFIX } from "../constants/routes";
+import { recommendedFlows } from "../components/onboarding/recommended";
+import { apiClient } from "../services/api-client";
+import {
+  FULL_TOUR,
+  FULL_TOUR_LEGS,
+  TOUR_PARAM,
+  legOf,
+  targetOf,
+  type TourContext,
+} from "./fullTour";
 import { guideById } from "./registry";
 import type { GuideDefinition, GuideStep } from "./types";
 
@@ -36,6 +48,8 @@ export interface GuidePageController {
   openPanel?: (tab: string) => void;
   openSection?: (id: string) => void;
   selectCurrentBlock?: () => void;
+  /** Select a node that names a playbook; false when the screen shows none. */
+  selectPlaybookNode?: () => boolean;
   /** The shown run has a recorded route; steps that need one wait for a view that draws it. */
   routeRecorded?: boolean;
   /** Whether the reader owns what the screen shows; steps are filtered by it. */
@@ -60,6 +74,12 @@ interface GuideContextValue {
   menuOpen: boolean;
   setMenuOpen: (open: boolean) => void;
   start: (guideId: string, stepId?: string, only?: readonly string[]) => void;
+  /** Whether the open guide is a leg of the full tour. */
+  tour: boolean;
+  /** Start the full tour from its first screen. */
+  startFullTour: () => void;
+  /** The open guide, a leg of the full tour, is done: open the next screen's tour, or finish. */
+  continueTour: () => void;
   /**
    * Move to a step. `replace` swaps the current history entry instead of adding one: a step passed
    * without being shown must leave no entry, or the browser's Back would land on it and pass it
@@ -94,7 +114,10 @@ export function GuideProvider({
   const guide = guideById(searchParams.get(GUIDE_PARAM));
   const requestedStep = searchParams.get(STEP_PARAM);
   const onlyParam = searchParams.get(ONLY_PARAM);
+  const tour = searchParams.get(TOUR_PARAM) === FULL_TOUR;
   const [menuOpen, setMenuOpen] = useState(false);
+  const navigate = useNavigate();
+  const { i18n } = useTranslation();
 
   const controllers = useRef(new Map<string, GuidePageController>());
   const [version, setVersion] = useState(0);
@@ -161,6 +184,7 @@ export function GuideProvider({
         [GUIDE_PARAM]: guideId,
         [STEP_PARAM]: step ?? null,
         [ONLY_PARAM]: only && only.length > 0 ? only.join(",") : null,
+        [TOUR_PARAM]: null,
       });
     },
     [patch],
@@ -171,13 +195,55 @@ export function GuideProvider({
   );
   const close = useCallback(
     (replace = false) => {
-      patch({ [GUIDE_PARAM]: null, [STEP_PARAM]: null, [ONLY_PARAM]: null }, replace);
+      patch(
+        { [GUIDE_PARAM]: null, [STEP_PARAM]: null, [ONLY_PARAM]: null, [TOUR_PARAM]: null },
+        replace,
+      );
       const back = opener.current;
       opener.current = null;
       if (back?.isConnected) window.setTimeout(() => back.focus(), 0);
     },
     [patch],
   );
+
+  // The full tour opens each screen at an address found for this reader: the example flow of their
+  // language, their latest run.
+  const tourContext = useMemo<TourContext>(
+    () => ({
+      exampleFlowSlug: () =>
+        recommendedFlows(i18n.language).find((flow) => flow.key === "simpleSteps")!.slug,
+      latestRunId: async () => {
+        const { executions } = await apiClient.getExecutions({
+          limit: 1,
+          sort: "updatedAt",
+          sortOrder: "desc",
+          mine: true,
+        });
+        return executions[0]?.executionId ?? null;
+      },
+    }),
+    [i18n.language],
+  );
+  const openLeg = useCallback(
+    async (index: number) => {
+      const leg = FULL_TOUR_LEGS[index];
+      const target = await targetOf(leg, tourContext);
+      const query = new URLSearchParams({ [GUIDE_PARAM]: target.guide, [TOUR_PARAM]: FULL_TOUR });
+      navigate(
+        `${target.path === "/" ? `${APP_PREFIX}/` : `${APP_PREFIX}${target.path}`}?${query}`,
+      );
+    },
+    [navigate, tourContext],
+  );
+  const startFullTour = useCallback(() => {
+    opener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    void openLeg(0);
+  }, [openLeg]);
+  const continueTour = useCallback(() => {
+    const next = guide ? legOf(guide.id) + 1 : 0;
+    if (next > 0 && next < FULL_TOUR_LEGS.length) void openLeg(next);
+    else close();
+  }, [guide, openLeg, close]);
 
   const [announcement, setAnnouncement] = useState("");
   const announce = useCallback((message: string) => setAnnouncement(message), []);
@@ -194,6 +260,9 @@ export function GuideProvider({
       menuOpen,
       setMenuOpen,
       start,
+      tour,
+      startFullTour,
+      continueTour,
       go,
       close,
       register,
@@ -210,6 +279,9 @@ export function GuideProvider({
       promptReady,
       menuOpen,
       start,
+      tour,
+      startFullTour,
+      continueTour,
       go,
       close,
       register,

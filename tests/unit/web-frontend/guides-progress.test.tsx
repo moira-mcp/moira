@@ -53,7 +53,7 @@ import {
   recordStep,
   stepsForReader,
   resetGuideProgress,
-  restartGuide,
+  restartGuides,
   useGuideProgress,
   type GuideProgress,
 } from "../../../packages/web-frontend/src/guides/progress";
@@ -202,13 +202,27 @@ describe("the progress store", () => {
 });
 
 describe("the rules read from progress", () => {
-  test("a stored resume role that is not yes-or-no is dropped and the place is kept", () => {
+  test("a stored resume role or tour mark that is not yes-or-no is dropped and the place is kept", () => {
     const place = { guide: "flow", step: "edit", path: "/workflows/moira/quick-task" };
-    expect(parseProgress({ resume: { ...place, owner: "yes" } }).resume).toEqual(place);
-    expect(parseProgress({ resume: { ...place, owner: true } }).resume).toEqual({
+    expect(parseProgress({ resume: { ...place, owner: "yes", tour: "full" } }).resume).toEqual(
+      place,
+    );
+    expect(parseProgress({ resume: { ...place, owner: true, tour: true } }).resume).toEqual({
       ...place,
       owner: true,
+      tour: true,
     });
+  });
+
+  test("a step shown in the full tour makes the tour the place to resume", () => {
+    const step = settingsGuide.steps[0];
+    expect(recordStep("settings", step, "/settings", true, { tour: true })({}).resume).toEqual({
+      guide: "settings",
+      step: step.id,
+      path: "/settings",
+      tour: true,
+    });
+    expect(recordStep("settings", step, "/settings")({}).resume).not.toHaveProperty("tour");
   });
 
   test("a guide never walked has nothing new; a step whose revision rose since is new", () => {
@@ -252,21 +266,21 @@ describe("the rules read from progress", () => {
     });
   });
 
-  test("starting a guide over forgets its seen steps and its resume point, not another guide's", () => {
+  test("starting guides over forgets their seen steps and a resume point in them, not another guide's", () => {
     const progress: GuideProgress = {
-      seen: { ...allSeen, "run.process": 1 },
+      seen: { ...allSeen, "run.process": 1, "settings-github.steps": 1 },
       resume: { guide: "settings", step: "apps", path: "/settings" },
-      finished: { settings: true, run: true },
+      finished: { settings: true, run: true, "settings-github": true },
     };
-    expect(restartGuide("settings")(progress)).toEqual({
-      seen: { "run.process": 1 },
-      finished: { run: true },
+    expect(restartGuides(["settings", "run"])(progress)).toEqual({
+      seen: { "settings-github.steps": 1 },
+      finished: { "settings-github": true },
     });
     const elsewhere = {
       ...progress,
-      resume: { guide: "run", step: "loop", path: "/executions/1" },
+      resume: { guide: "notes", step: "list", path: "/notes" },
     };
-    expect(restartGuide("settings")(elsewhere).resume).toEqual(elsewhere.resume);
+    expect(restartGuides(["settings", "run"])(elsewhere).resume).toEqual(elsewhere.resume);
   });
 });
 
@@ -599,7 +613,9 @@ describe("the guides menu away from a tour's page", () => {
     const readerSteps = visibleSteps(flowGuide, false);
     let progress = ownerFinished;
     for (const step of readerSteps) {
-      progress = recordStep("flow", step, "/workflows/someone/their-flow", true, false)(progress);
+      progress = recordStep("flow", step, "/workflows/someone/their-flow", true, { owner: false })(
+        progress,
+      );
     }
     expect(progress.seen).toHaveProperty(["flow.edit"]);
     expect(progress.seen).toHaveProperty(["flow.edit-reader"]);
@@ -622,9 +638,11 @@ describe("the guides menu away from a tour's page", () => {
       expect(screen.getByTestId("show-me-around")).toHaveAttribute("data-progress", "loaded"),
     );
     fireEvent.click(screen.getByTestId("show-me-around"));
-    // Walked to "loop", the sixth step; the tour a reader is shown has eight.
+    // Walked to "loop"; numbered over the steps a reader is shown.
+    const readerSteps = visibleSteps(flowGuide, false);
+    const loop = readerSteps.findIndex((step) => step.id === "loop") + 1;
     expect(await screen.findByTestId("show-me-around-resume")).toHaveTextContent(
-      `step 6 of ${visibleSteps(flowGuide, false).length}`,
+      `step ${loop} of ${readerSteps.length}`,
     );
   });
 });

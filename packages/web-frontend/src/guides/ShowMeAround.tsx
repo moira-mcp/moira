@@ -7,7 +7,7 @@
 import React, { useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { useLocation, useNavigate } from "react-router-dom";
-import { Compass, Play, RotateCcw } from "lucide-react";
+import { Compass, Map as MapIcon, Play, RotateCcw } from "lucide-react";
 import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover";
 import {
   SidebarMenu,
@@ -23,6 +23,7 @@ import {
   stepsForReader,
   useGuideProgress,
 } from "./progress";
+import { FULL_TOUR, TOUR_PARAM } from "./fullTour";
 import { GUIDES, guideById, screenTourForPath } from "./registry";
 import type { GuideDefinition } from "./types";
 import { guideAnchor } from "./anchors";
@@ -35,7 +36,7 @@ export function ShowMeAround(): React.JSX.Element {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const { pathname } = useLocation();
-  const { start, ownerOf, menuOpen, setMenuOpen } = useGuides();
+  const { start, startFullTour, ownerOf, menuOpen, setMenuOpen } = useGuides();
   const { loaded, progress } = useGuideProgress();
   const sidebar = useOptionalSidebar();
   const anchorRef = useRef<HTMLDivElement>(null);
@@ -91,6 +92,7 @@ export function ShowMeAround(): React.JSX.Element {
     const params = new URLSearchParams(query);
     params.set(GUIDE_PARAM, resume.guide);
     params.set(STEP_PARAM, resume.step);
+    if (resume.tour) params.set(TOUR_PARAM, FULL_TOUR);
     navigate(`${path}?${params.toString()}`);
   };
 
@@ -134,6 +136,18 @@ export function ShowMeAround(): React.JSX.Element {
           >
             <p className="text-sm font-semibold">{t("guides.menu.title")}</p>
             <div className="mt-2 space-y-1">
+              <button
+                type="button"
+                onClick={() => {
+                  leave();
+                  startFullTour();
+                }}
+                className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent"
+                data-testid="show-me-around-full-tour"
+              >
+                <MapIcon className="size-4 shrink-0 text-primary" aria-hidden="true" />
+                <span>{t("guides.menu.fullTour")}</span>
+              </button>
               {thisPage ? (
                 <button
                   type="button"

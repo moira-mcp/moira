@@ -24,6 +24,8 @@ export interface ResumePoint {
    * resume line counts the steps of that role, wherever the reader is when they read it.
    */
   owner?: boolean;
+  /** The reader stopped in the full tour: "Continue" resumes the tour, not only this screen. */
+  tour?: boolean;
 }
 
 export interface GuideProgress {
@@ -61,9 +63,14 @@ export function parseProgress(value: unknown): GuideProgress {
     typeof resume.path !== "string"
   ) {
     delete progress.resume;
-  } else if (resume.owner !== undefined && typeof resume.owner !== "boolean") {
-    const { owner: _owner, ...rest } = resume;
-    progress.resume = rest;
+  } else {
+    // A field of the wrong type is dropped; the place itself is kept.
+    const { owner, tour, ...place } = resume;
+    progress.resume = {
+      ...place,
+      ...(typeof owner === "boolean" ? { owner } : {}),
+      ...(typeof tour === "boolean" ? { tour } : {}),
+    };
   }
   return progress;
 }
@@ -103,7 +110,7 @@ export const recordStep =
     step: GuideStep,
     path: string,
     moveResume = true,
-    owner?: boolean,
+    where: { owner?: boolean; tour?: boolean } = {},
   ): ProgressChange =>
   (progress) => ({
     ...progress,
@@ -115,7 +122,15 @@ export const recordStep =
       ),
     },
     ...(moveResume
-      ? { resume: { guide, step: step.id, path, ...(owner === undefined ? {} : { owner }) } }
+      ? {
+          resume: {
+            guide,
+            step: step.id,
+            path,
+            ...(where.owner === undefined ? {} : { owner: where.owner }),
+            ...(where.tour ? { tour: true } : {}),
+          },
+        }
       : {}),
   });
 
@@ -147,18 +162,21 @@ export const decideFirstRun =
   (decision: "accepted" | "declined"): ProgressChange =>
   (progress) => ({ ...progress, firstRun: decision });
 
-/** Start a guide over: forget where the reader stopped and what they saw of it. */
-export const restartGuide =
-  (guide: string): ProgressChange =>
+/** Start guides over: forget what the reader saw of them, and where they stopped in one. */
+export const restartGuides =
+  (guides: readonly string[]): ProgressChange =>
   (progress) => {
+    const restarted = new Set(guides);
     const seen = Object.fromEntries(
-      Object.entries(progress.seen ?? {}).filter(([key]) => !key.startsWith(`${guide}.`)),
+      Object.entries(progress.seen ?? {}).filter(([key]) => !restarted.has(key.split(".")[0])),
     );
-    const { [guide]: _restarted, ...finished } = progress.finished ?? {};
+    const finished = Object.fromEntries(
+      Object.entries(progress.finished ?? {}).filter(([guide]) => !restarted.has(guide)),
+    );
     const { resume, finished: _all, ...rest } = progress;
     const next: GuideProgress =
       Object.keys(finished).length > 0 ? { ...rest, seen, finished } : { ...rest, seen };
-    return resume && resume.guide !== guide ? { ...next, resume } : next;
+    return resume && !restarted.has(resume.guide) ? { ...next, resume } : next;
   };
 
 /** Forget everything the guides know about the reader, so the first-run prompt comes back. */

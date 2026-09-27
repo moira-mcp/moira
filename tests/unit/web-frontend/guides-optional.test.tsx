@@ -85,7 +85,28 @@ jest.unstable_mockModule("../../../packages/web-frontend/src/guides/registry", (
       },
     ],
   };
-  const guides = [fixture, declared, viewed];
+  // A required step whose element arrives late, and an optional one on a view the page never opens.
+  const slow: GuideDefinition = {
+    id: "slow",
+    kind: "screen",
+    screen: "slow",
+    routes: ["/fixture"],
+    views: ["steps", "map"],
+    steps: [
+      { id: "start", anchor: "fixture.page", kind: "look", revision: 1 },
+      { id: "late", anchor: "fixture.late", kind: "look", revision: 1 },
+      {
+        id: "never",
+        anchor: "fixture.never",
+        kind: "look",
+        revision: 1,
+        optional: true,
+        views: ["map"],
+      },
+      { id: "end", anchor: "fixture.page", kind: "look", revision: 1 },
+    ],
+  };
+  const guides = [fixture, declared, viewed, slow];
   return {
     GUIDES: guides,
     guideById: (id: string | null | undefined) => guides.find((guide) => guide.id === id),
@@ -140,6 +161,19 @@ function TwoViews(): React.JSX.Element {
       <GuideButton guideId="viewed" />
       <section {...guideAnchor("fixture.page")}>page</section>
       {view === "map" && <section {...guideAnchor("fixture.map")}>map</section>}
+    </main>
+  );
+}
+
+/** A page that registers a controller whose view never changes, and draws one element late. */
+function StuckViews(): React.JSX.Element {
+  const controller = React.useMemo(() => ({ view: "steps", setView: () => {} }), []);
+  useGuidePage("slow", controller);
+  return (
+    <main>
+      <GuideButton guideId="slow" />
+      <section {...guideAnchor("fixture.page")}>page</section>
+      <Late />
     </main>
   );
 }
@@ -308,4 +342,42 @@ describe("an optional step", () => {
     expect(shownWithout.length).toBeGreaterThan(0);
     expect(shownWithout.every((absent) => !absent)).toBe(true);
   });
+
+  test("an element that arrives after the wait is still found, and a view the page never opens is not waited on for ever", async () => {
+    render(
+      <MemoryRouter initialEntries={["/fixture"]}>
+        <I18nextProvider i18n={i18n}>
+          <GuideProvider>
+            <StuckViews />
+          </GuideProvider>
+        </I18nextProvider>
+      </MemoryRouter>,
+    );
+    fireEvent.click(screen.getByTestId("guide-open"));
+    await waitFor(() =>
+      expect(screen.getByTestId("guide-card")).toHaveAttribute("data-guide-step", "start"),
+    );
+    fireEvent.click(screen.getByTestId("guide-next"));
+    // The required step says it cannot find its element once the wait is over …
+    await waitFor(() => expect(screen.getByTestId("guide-note")).toBeInTheDocument(), {
+      timeout: 4500,
+    });
+    // … and finds it when it arrives, a little later.
+    await waitFor(
+      () =>
+        expect(screen.getByTestId("guide-spotlight")).toHaveAttribute(
+          "data-guide-anchor",
+          "fixture.late",
+        ),
+      { timeout: 4000 },
+    );
+    expect(screen.queryByTestId("guide-note")).toBeNull();
+    // The next step is drawn only by a view the page never switches to: it is passed after the
+    // same wait, and the tour goes on.
+    fireEvent.click(screen.getByTestId("guide-next"));
+    await waitFor(
+      () => expect(screen.getByTestId("guide-card")).toHaveAttribute("data-guide-step", "end"),
+      { timeout: 5000 },
+    );
+  }, 20000);
 });

@@ -1551,6 +1551,8 @@ export class MoiraApiClient {
     sortOrder?: "asc" | "desc";
     limit?: number;
     offset?: number;
+    /** Only the caller's own runs, also for an admin. */
+    mine?: boolean;
   }): Promise<{
     executions: Array<{
       executionId: string;
@@ -1612,6 +1614,9 @@ export class MoiraApiClient {
       }
       if (params?.offset !== undefined) {
         queryParams.append("offset", params.offset.toString());
+      }
+      if (params?.mine) {
+        queryParams.append("mine", "true");
       }
 
       const queryString = queryParams.toString();

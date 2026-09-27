@@ -7,8 +7,12 @@
 
 import type { BeginnerPanel } from "../components/onboarding/beginnerPanels";
 
-/** A screen tour explains a routed screen; a task tour one task on it; a tutorial has lessons. */
-export type GuideKind = "screen" | "task" | "tutorial";
+/**
+ * A screen tour explains a routed screen; a task tour one task on it, started from its section; a
+ * tutorial has lessons. A fallback stands in for a screen's tour the full tour cannot show — the
+ * run page for a reader with no run.
+ */
+export type GuideKind = "screen" | "task" | "tutorial" | "fallback";
 
 /**
  * Who a step is shown to. `owner` and `reader` split a screen whose controls differ by whether the
@@ -56,6 +60,8 @@ export interface GuideStep {
     currentBlock?: boolean;
     route?: boolean;
     sidebar?: boolean;
+    /** A node that names a playbook, selected so the panel shows its references. */
+    playbookNode?: boolean;
   };
 }
 

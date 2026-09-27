@@ -182,11 +182,7 @@ describe("route coverage", () => {
 describe("required topics", () => {
   test("every screen tour has its topic list, and every topic is a step whose anchor is in the page", () => {
     const screens = GUIDES.filter((guide) => guide.kind === "screen").map((guide) => guide.screen);
-    // The flow page, the run page and Settings kept the walkthroughs they had; their topics are
-    // the walkthroughs' steps, checked in the registry test.
-    expect(Object.keys(REQUIRED_TOPICS).sort()).toEqual(
-      screens.filter((screen) => !["flow", "run", "settings"].includes(screen)).sort(),
-    );
+    expect(Object.keys(REQUIRED_TOPICS).sort()).toEqual(screens.sort());
     expect(topicProblems(REQUIRED_TOPICS, GUIDES, writtenAnchors())).toEqual([]);
   });
 

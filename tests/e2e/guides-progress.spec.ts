@@ -14,10 +14,23 @@
 import { test, expect, type Browser, type Page } from "./fixtures.js";
 import { createTestUser, login } from "./helpers/auth-helper.js";
 import { getTestBaseUrl } from "../utils/test-config.js";
+import { readFileSync } from "node:fs";
 
 const BASE_URL = getTestBaseUrl();
 const PASSWORD = "TestPass123!";
 const PROGRESS_KEY = "ui.guide_progress";
+
+/** The Settings tour's steps at their current revisions, read from the committed snapshot. */
+const settingsSteps = Object.entries(
+  JSON.parse(
+    readFileSync(
+      new URL("../../packages/web-frontend/src/guides/revisions.snapshot.json", import.meta.url),
+      "utf8",
+    ),
+  ) as Record<string, { revision: number }>,
+)
+  .filter(([key]) => key.startsWith("settings."))
+  .map(([key, { revision }]) => ({ id: key.slice("settings.".length), revision }));
 
 async function freshUser(label: string): Promise<string> {
   const email = `guides-progress-${label}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}@example.com`;
@@ -183,18 +196,12 @@ test.describe("Guide progress", () => {
     await login(page, email, PASSWORD);
     // The reader walked the Settings tour, and saw its security step at an earlier revision: the
     // state a raised revision leaves every reader who saw the step before.
-    const steps = [
-      "nav",
-      "account",
-      "security",
-      "notifications",
-      "github",
-      "apps",
-      "tokens",
-      "preferences",
-    ];
+    // Every step seen at its current revision, except security, seen at an earlier one.
     const seen = Object.fromEntries(
-      steps.map((id) => [`settings.${id}`, id === "security" ? 0 : 1]),
+      settingsSteps.map((step) => [
+        `settings.${step.id}`,
+        step.id === "security" ? step.revision - 1 : step.revision,
+      ]),
     );
     const put = await page.request.put(`${BASE_URL}/api/settings`, {
       data: { [PROGRESS_KEY]: { firstRun: "declined", seen } },
@@ -224,8 +231,11 @@ test.describe("Guide progress", () => {
     const email = await freshUser("added");
     await login(page, email, PASSWORD);
     // The reader walked the Settings tour to its end before its preferences step existed.
-    const earlier = ["nav", "account", "security", "notifications", "github", "apps", "tokens"];
-    const seen = Object.fromEntries(earlier.map((id) => [`settings.${id}`, 1]));
+    const seen = Object.fromEntries(
+      settingsSteps
+        .filter((step) => step.id !== "preferences")
+        .map((step) => [`settings.${step.id}`, step.revision]),
+    );
     const put = await page.request.put(`${BASE_URL}/api/settings`, {
       data: { [PROGRESS_KEY]: { firstRun: "declined", seen, finished: { settings: true } } },
     });

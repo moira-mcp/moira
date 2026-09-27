@@ -2450,6 +2450,7 @@ Query parameters:
 - `sortOrder`: Sort direction (asc, desc). Default: desc
 - `limit`: Results per page (1-100). Default: 20
 - `offset`: Skip results. Default: 0
+- `mine`: `true` lists only the caller's own executions, also for an admin
 
 Response:
 
@@ -2478,7 +2479,7 @@ Response:
 ```
 
 Authentication: Required
-Admin users see all executions, regular users see only their own.
+Admin users see all executions unless `mine=true`; regular users see only their own.
 
 ### GET /api/executions/:id
 

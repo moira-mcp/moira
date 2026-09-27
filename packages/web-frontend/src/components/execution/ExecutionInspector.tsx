@@ -88,6 +88,7 @@ import { currentBlockId, runBlocks, stepsOf, waitingStep } from "../run/model";
 import { StepCard, StepCardList } from "../run/StepCard";
 import type { RunBlock, RunProgress } from "../run/model";
 import { clampCursor } from "../run/route";
+import { guideAnchor } from "../../guides/anchors";
 
 // The technical graph is a large chunk: it is loaded lazily, but requested as soon as the page
 // mounts, so the first switch to the graph view has nothing to wait for.
@@ -678,7 +679,12 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
   // page has one row above the diagram: view tabs and route cursor first, legend and guide last.
   const runModes = progress ? (
     <Tabs value={mode} onValueChange={(value) => update({ [VIEW_PARAM]: value })}>
-      <TabsList aria-label={t("pages.runPage.modeLabel")} className="h-8" data-testid="run-modes">
+      <TabsList
+        aria-label={t("pages.runPage.modeLabel")}
+        className="h-8"
+        data-testid="run-modes"
+        {...guideAnchor("run.modes")}
+      >
         {MODES.map((definition) => {
           const Icon = definition.icon;
           return (
@@ -778,6 +784,7 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
       <PageHeader
         description={progress?.goal ?? progress?.taskTitle ?? undefined}
         testId="run-header"
+        guide={guideAnchor("run.header")}
       >
         <Tooltip>
           <TooltipTrigger asChild>
@@ -1027,6 +1034,7 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
                 variant="line"
                 className="@container !h-auto w-full flex-wrap justify-start gap-x-0 gap-y-1 rounded-none border-b bg-card py-1 pl-2 pr-10"
                 data-testid="run-panel-tabs"
+                {...guideAnchor("run.panel-tabs")}
               >
                 {progress && (
                   <TabsTrigger

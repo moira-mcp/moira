@@ -274,7 +274,7 @@ router.post(
 /**
  * GET /api/executions
  * List user's executions with filters, sorting, and pagination (admins see all)
- * Query params: status, workflowId, search, sort, sortOrder, limit, offset
+ * Query params: status, workflowId, search, sort, sortOrder, limit, offset, mine
  */
 router.get(
   "/",
@@ -315,10 +315,12 @@ router.get(
     const sortOrder = (req.query.sortOrder as "asc" | "desc") || "desc";
     const limit = Math.min(Math.max(1, parseInt(req.query.limit as string) || 20), 100);
     const offset = Math.max(0, parseInt(req.query.offset as string) || 0);
+    // `mine=true` narrows an admin's list to their own runs, as every other user's list already is.
+    const mine = req.query.mine === "true";
 
     // Get executions with filters
     const result = await repository.listExecutionsWithFilters({
-      userId: isAdmin ? undefined : userId, // Admins see all, users see only their own
+      userId: isAdmin && !mine ? undefined : userId, // Admins see all unless `mine`, users see only their own
       status: dbStatuses,
       workflowId,
       search,

@@ -138,8 +138,11 @@ describe("the walkthroughs the guides replaced", () => {
   const step = (guide: string, id: string) => guideById(guide)!.steps.find((s) => s.id === id)!;
 
   test("keep every step of the run page, the flow page and Settings, in order", () => {
-    expect(stepIds("run")).toEqual(["process", "agent", "evidence", "loop", "route", "explore"]);
-    expect(stepIds("flow")).toEqual([
+    // The migrated steps keep their order; the steps the full coverage added sit among them.
+    const migrated = (guide: string, ids: string[]) =>
+      expect(stepIds(guide).filter((id) => ids.includes(id))).toEqual(ids);
+    migrated("run", ["process", "agent", "evidence", "loop", "route", "explore"]);
+    migrated("flow", [
       "intro",
       "steps",
       "process",

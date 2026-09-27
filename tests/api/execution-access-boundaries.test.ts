@@ -120,6 +120,21 @@ describe("Execution access boundaries", () => {
   });
 
   describe("inspecting the run is also the operator's", () => {
+    test("an operator's own list leaves somebody else's run out", async () => {
+      const list = async (query: string) => {
+        const res = await fetch(`${BASE_URL}/api/executions?limit=100&sort=updatedAt${query}`, {
+          headers: { Cookie: operatorCookie },
+        });
+        expect(res.status).toBe(200);
+        const body = (await res.json()) as {
+          data: { executions: Array<{ executionId: string }> };
+        };
+        return body.data.executions.map((execution) => execution.executionId);
+      };
+      expect(await list("")).toContain(executionId);
+      expect(await list("&mine=true")).not.toContain(executionId);
+    });
+
     test("an operator reads somebody else's run", async () => {
       const res = await fetch(`${BASE_URL}/api/executions/${executionId}`, {
         headers: { Cookie: operatorCookie },

@@ -23,6 +23,7 @@ export function PageHeader({
   children,
   testId = "page-header",
   guide,
+  detailsGuide,
 }: {
   back?: { label: string; onClick: () => void; testId?: string };
   title?: React.ReactNode;
@@ -41,6 +42,8 @@ export function PageHeader({
   testId?: string;
   /** A guide anchor (`guideAnchor(...)`) for the header as a whole. */
   guide?: { "data-guide": string };
+  /** A guide anchor for the row under the title: the description and the fact chips. */
+  detailsGuide?: { "data-guide": string };
 }): React.JSX.Element {
   return (
     <header className="shrink-0 border-b bg-card px-3 py-1.5" data-testid={testId} {...guide}>
@@ -67,7 +70,10 @@ export function PageHeader({
         {actions && <div className="ml-auto flex shrink-0 items-center gap-1.5">{actions}</div>}
       </div>
       {(description || facts) && (
-        <div className={cn("mt-0.5 flex min-w-0 flex-wrap items-baseline gap-x-3 gap-y-0.5")}>
+        <div
+          className={cn("mt-0.5 flex min-w-0 flex-wrap items-baseline gap-x-3 gap-y-0.5")}
+          {...detailsGuide}
+        >
           {description && (
             <p
               className="line-clamp-2 min-w-0 flex-1 basis-64 text-xs leading-5 text-muted-foreground"
