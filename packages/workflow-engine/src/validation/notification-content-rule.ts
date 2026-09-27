@@ -22,8 +22,74 @@ const LINK_OR_TITLE = /(?:url|link|title|name|label|summary)/iu;
  * fraction (`1.2/1.3`), an abbreviation (`e.g./i.e.`) or a host (`www.example.com/page.html`) is
  * not a path.
  */
-const LITERAL_PATH =
-  /(?:^|[\s(`'"])((?:\.{1,2}\/|~\/|\/?[\w-]+\/[\w./-]*\.[A-Za-z][A-Za-z0-9]{0,5}\b)[\w./-]*)/u;
+const PATH_BOUNDARY = /[\s(`'"]/u;
+
+function isAsciiLetter(char: string | undefined): boolean {
+  return char !== undefined && ((char >= "A" && char <= "Z") || (char >= "a" && char <= "z"));
+}
+
+function isAsciiDigit(char: string | undefined): boolean {
+  return char !== undefined && char >= "0" && char <= "9";
+}
+
+function isWordCharacter(char: string | undefined): boolean {
+  return char === "_" || isAsciiLetter(char) || isAsciiDigit(char);
+}
+
+function isPathCharacter(char: string | undefined): boolean {
+  return isWordCharacter(char) || char === "." || char === "/" || char === "-";
+}
+
+/** Find the first literal path without retrying overlapping extension candidates. */
+function literalPath(text: string): string | undefined {
+  for (let start = 0; start < text.length;) {
+    if (start > 0 && !PATH_BOUNDARY.test(text[start - 1])) {
+      start++;
+      continue;
+    }
+
+    const prefixLength = text.startsWith("../", start)
+      ? 3
+      : text.startsWith("./", start) || text.startsWith("~/", start)
+        ? 2
+        : 0;
+    if (prefixLength > 0) {
+      let end = start + prefixLength;
+      while (isPathCharacter(text[end])) end++;
+      return text.slice(start, end);
+    }
+
+    if (!isPathCharacter(text[start])) {
+      start++;
+      continue;
+    }
+    let end = start;
+    while (isPathCharacter(text[end])) end++;
+
+    let segmentEnd = start + (text[start] === "/" ? 1 : 0);
+    const segmentStart = segmentEnd;
+    while (segmentEnd < end && (isWordCharacter(text[segmentEnd]) || text[segmentEnd] === "-")) {
+      segmentEnd++;
+    }
+    if (segmentEnd > segmentStart && text[segmentEnd] === "/") {
+      for (let dot = segmentEnd + 1; dot < end; dot++) {
+        if (text[dot] !== "." || !isAsciiLetter(text[dot + 1])) continue;
+        let extensionEnd = dot + 2;
+        let extraCharacters = 0;
+        while (
+          extraCharacters < 5 &&
+          (isAsciiLetter(text[extensionEnd]) || isAsciiDigit(text[extensionEnd]))
+        ) {
+          extensionEnd++;
+          extraCharacters++;
+        }
+        if (!isWordCharacter(text[extensionEnd])) return text.slice(start, end);
+      }
+    }
+    start = end;
+  }
+  return undefined;
+}
 
 /** Every `{{…}}` value reference of a template, outside block-helper syntax and `this`. */
 function valueReferences(template: string): string[] {
@@ -114,10 +180,12 @@ export function notificationContentWarnings(
       );
     }
   }
-  const literal = LITERAL_PATH.exec(literalText(message));
-  if (literal) {
+  const literal = literalPath(literalText(message));
+  if (literal !== undefined) {
+    let end = literal.length;
+    while (end > 0 && literal[end - 1] === ".") end--;
     warn(
-      `Notification ${nodeId} contains the path "${literal[1].replace(/\.+$/u, "")}": the reader cannot open it from a message. Describe the result in words, or link a URL.`,
+      `Notification ${nodeId} contains the path "${literal.slice(0, end)}": the reader cannot open it from a message. Describe the result in words, or link a URL.`,
     );
   }
   return issues;

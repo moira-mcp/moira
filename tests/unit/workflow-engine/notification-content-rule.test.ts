@@ -103,6 +103,7 @@ describe("what warns and what stays quiet", () => {
     ],
     ["a literal path", "See ./reports/final.md for details", 'the path "./reports/final.md"'],
     ["a home path", "Saved to ~/notes/today.txt", 'the path "~/notes/today.txt"'],
+    ["an absolute file path", "Saved to /srv/reports/final.md", 'the path "/srv/reports/final.md"'],
     [
       "a relative multi-segment path",
       "Details in final/delivery.md",
@@ -152,6 +153,7 @@ describe("what warns and what stays quiet", () => {
     ["decimal fractions", "Coverage went from 1.2/1.3 to 0.5/1.5"],
     ["an abbreviation with a slash", "Use short names, e.g./i.e. forms"],
     ["a host without a scheme", "Mirror at www.example.com/page.html"],
+    ["a long file extension", "Read reports/result.toolongext"],
     ["a description that is not about files", "Goal: {{goal}}"],
   ])("stays quiet for %s", async (_case, message) => {
     const { messages } = await warnings(withMessage(message), "notify");
@@ -185,6 +187,18 @@ describe("literal text in notification templates", () => {
     const issues = notificationContentWarnings(
       "notify",
       `${"{{".repeat(16_000)} See ./reports/final.md`,
+      new Set(),
+      undefined,
+    );
+    expect(issues.map((issue) => issue.message)).toEqual([
+      expect.stringContaining('the path "./reports/final.md"'),
+    ]);
+  });
+
+  test("scans a long extension-free dotted segment before the first real path", () => {
+    const issues = notificationContentWarnings(
+      "notify",
+      `draft/${".".repeat(100_000)} See ./reports/final.md`,
       new Set(),
       undefined,
     );
