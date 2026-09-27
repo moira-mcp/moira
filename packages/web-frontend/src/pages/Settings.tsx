@@ -14,13 +14,12 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import {
   AlertCircle,
   AppWindow,
   Bell,
-  Compass,
+  CircleHelp,
   Github,
   KeyRound,
   ShieldCheck,
@@ -33,7 +32,6 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/empty-state";
-import { Walkthrough } from "@/components/run/Walkthrough";
 import {
   SettingsEditor,
   type SettingDefinition as EditorSettingDefinition,
@@ -62,14 +60,8 @@ import { GitHubCodespacesProvider } from "./settings/GitHubCodespacesData";
 import { CodespaceAutoPause } from "./settings/CodespaceAutoPause";
 import { CodespaceLimitsFromData } from "./settings/CodespaceLimitsPanel";
 import { PreferencesSettings } from "./settings/PreferencesSettings";
-import {
-  GUIDE_PARAM,
-  SETTINGS_TOURS,
-  TOUR_PARAM,
-  isSettingsTourId,
-  type SettingsTourId,
-  type SettingsTourView,
-} from "./settings/settingsTours";
+import { useGuides } from "@/guides/GuideContext";
+import { guideAnchor } from "@/guides/anchors";
 
 interface SettingDefinition {
   key: string;
@@ -96,11 +88,9 @@ const OWNED_CATEGORIES = new Set([
   "ui",
 ]);
 
-const noop = () => {};
-
 export const Settings: React.FC = () => {
   const { t } = useTranslation();
-  const [searchParams, setSearchParams] = useSearchParams();
+  const { start: startGuide } = useGuides();
 
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [definitions, setDefinitions] = useState<SettingDefinition[]>([]);
@@ -240,28 +230,6 @@ export const Settings: React.FC = () => {
   const active = useActiveSection(sectionIds, !loading);
   const { highlight } = useSectionHighlight(contentRef, !loading);
 
-  // Tutorials: `?tour=<id>&guide=<step>`, so a step can be linked and reopened.
-  const tourParam = searchParams.get(TOUR_PARAM);
-  const tour: SettingsTourId = isSettingsTourId(tourParam) ? tourParam : "page";
-  const guideStep = Number(searchParams.get(GUIDE_PARAM)) || 0;
-  const navigateTour = useCallback(
-    (patch: Record<string, string | null>) => {
-      setSearchParams(
-        (previous) => {
-          const next = new URLSearchParams(previous);
-          for (const [key, value] of Object.entries(patch)) {
-            if (value === null) next.delete(key);
-            else next.set(key, value);
-          }
-          if (patch[GUIDE_PARAM] === null) next.delete(TOUR_PARAM);
-          return next;
-        },
-        { replace: true },
-      );
-    },
-    [setSearchParams],
-  );
-  const openTour = (id: SettingsTourId) => navigateTour({ [TOUR_PARAM]: id, [GUIDE_PARAM]: "1" });
   const hasTelegram = channels.some((channel) => channel.id === "telegram");
 
   const sectionSkeleton = (
@@ -273,17 +241,7 @@ export const Settings: React.FC = () => {
 
   return (
     <div className="px-4 py-6 sm:px-6 md:px-8 md:py-8">
-      <PageHeader title={t("pages.settings.title")} description={t("pages.settings.description")}>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => openTour("page")}
-          data-testid="settings-guide-open"
-        >
-          <Compass className="mr-1.5 size-4" aria-hidden="true" />
-          {t("pages.settings.tours.page.open")}
-        </Button>
-      </PageHeader>
+      <PageHeader title={t("pages.settings.title")} description={t("pages.settings.description")} />
 
       <div className="grid grid-cols-[minmax(0,1fr)] gap-x-10 lg:grid-cols-[13rem_minmax(0,1fr)]">
         <SettingsNav
@@ -317,6 +275,7 @@ export const Settings: React.FC = () => {
             title={t("pages.settings.sections.account.title")}
             description={t("pages.settings.sections.account.description")}
             data-testid="settings-section-profile"
+            {...guideAnchor("settings.account")}
           >
             {profile ? (
               <ProfileSettings profile={profile} onProfileUpdate={setProfile} />
@@ -331,6 +290,7 @@ export const Settings: React.FC = () => {
             title={t("pages.settings.sections.security.title")}
             description={t("pages.settings.sections.security.description")}
             data-testid="settings-section-security"
+            {...guideAnchor("settings.security")}
           >
             <SecuritySettings />
             <SettingsSubsection
@@ -370,15 +330,16 @@ export const Settings: React.FC = () => {
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => openTour("telegram")}
+                  onClick={() => startGuide("settings-telegram")}
                   data-testid="telegram-guide-open"
                 >
-                  <Compass className="mr-1.5 size-4" aria-hidden="true" />
-                  {t("pages.settings.tours.telegram.open")}
+                  <CircleHelp className="mr-1.5 size-4" aria-hidden="true" />
+                  {t("guides.settings-telegram.open")}
                 </Button>
               )
             }
             data-testid="settings-section-dynamic"
+            {...guideAnchor("settings.notifications")}
           >
             {loading ? (
               sectionSkeleton
@@ -423,14 +384,15 @@ export const Settings: React.FC = () => {
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => openTour("github")}
+                onClick={() => startGuide("settings-github")}
                 data-testid="github-guide-open"
               >
-                <Compass className="mr-1.5 size-4" aria-hidden="true" />
-                {t("pages.settings.tours.github.open")}
+                <CircleHelp className="mr-1.5 size-4" aria-hidden="true" />
+                {t("guides.settings-github.open")}
               </Button>
             }
             data-testid="settings-section-integrations"
+            {...guideAnchor("settings.integrations")}
           >
             <GitHubCodespacesProvider>
               <GitHubCodespaceSettings />
@@ -455,6 +417,7 @@ export const Settings: React.FC = () => {
               </HelpPopover>
             }
             data-testid="settings-section-oauth"
+            {...guideAnchor("settings.apps")}
           >
             <OAuthSettings />
           </SettingsSection>
@@ -475,6 +438,7 @@ export const Settings: React.FC = () => {
               </HelpPopover>
             }
             data-testid="settings-section-api-tokens"
+            {...guideAnchor("settings.api-tokens")}
           >
             <ApiTokensSettings />
           </SettingsSection>
@@ -485,6 +449,7 @@ export const Settings: React.FC = () => {
             title={t("pages.settings.sections.preferences.title")}
             description={t("pages.settings.sections.preferences.description")}
             data-testid="settings-section-preferences"
+            {...guideAnchor("settings.preferences")}
           >
             <PreferencesSettings />
             {otherDefinitions.length > 0 && (
@@ -504,17 +469,6 @@ export const Settings: React.FC = () => {
           </SettingsSection>
         </div>
       </div>
-
-      <Walkthrough<SettingsTourView, never>
-        step={guideStep}
-        mode="page"
-        currentBlockId={null}
-        routeRecorded={false}
-        onNavigate={navigateTour}
-        onPanel={noop}
-        steps={SETTINGS_TOURS[tour]}
-        textKey={`pages.settings.tours.${tour}`}
-      />
     </div>
   );
 };

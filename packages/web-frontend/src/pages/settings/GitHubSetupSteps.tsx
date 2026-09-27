@@ -9,6 +9,7 @@ import { useTranslation } from "react-i18next";
 import { Check } from "lucide-react";
 import type { CodespaceConnectionView } from "@mcp-moira/shared";
 import { cn } from "@/lib/utils";
+import { guideAnchor } from "../../guides/anchors";
 
 type StepState = "done" | "current" | "upcoming" | "blocked";
 
@@ -46,6 +47,7 @@ export function GitHubSetupSteps({
       className="grid gap-2 sm:grid-cols-3"
       aria-label={t("pages.settings.github.steps.label")}
       data-testid="github-setup-steps"
+      {...guideAnchor("settings.github-steps")}
     >
       {STEP_IDS.map((id, index) => {
         const state = states[id];

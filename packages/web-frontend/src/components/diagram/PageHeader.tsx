@@ -22,6 +22,7 @@ export function PageHeader({
   facts,
   children,
   testId = "page-header",
+  guide,
 }: {
   back?: { label: string; onClick: () => void; testId?: string };
   title?: React.ReactNode;
@@ -38,9 +39,11 @@ export function PageHeader({
   /** Small fact chips under the description (the projection's facts). */
   facts?: React.ReactNode;
   testId?: string;
+  /** A guide anchor (`guideAnchor(...)`) for the header as a whole. */
+  guide?: { "data-guide": string };
 }): React.JSX.Element {
   return (
-    <header className="shrink-0 border-b bg-card px-3 py-1.5" data-testid={testId}>
+    <header className="shrink-0 border-b bg-card px-3 py-1.5" data-testid={testId} {...guide}>
       <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
         {children}
         {back && (

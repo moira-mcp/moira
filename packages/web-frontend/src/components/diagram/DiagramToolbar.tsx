@@ -65,6 +65,7 @@ export function DiagramToolbar({
   surface = "map",
   presets = true,
   testId = "diagram-toolbar",
+  guide,
 }: {
   /** The page's view-mode switch (map / graph), first in the row. */
   modes?: React.ReactNode;
@@ -83,6 +84,8 @@ export function DiagramToolbar({
   /** Show the layout presets; a diagram with one fixed layout turns them off. */
   presets?: boolean;
   testId?: string;
+  /** A guide anchor for the toolbar as a whole. */
+  guide?: { "data-guide": string };
 }): React.JSX.Element {
   const { t } = useTranslation();
   const [finderOpen, setFinderOpen] = useState(false);
@@ -93,6 +96,7 @@ export function DiagramToolbar({
       // buttons cut off at the edge.
       className="flex shrink-0 flex-wrap items-center gap-x-1 gap-y-1 border-b bg-card px-2 py-1"
       data-testid={testId}
+      {...guide}
       role="toolbar"
     >
       {modes && <div className="flex shrink-0 items-center">{modes}</div>}
@@ -116,7 +120,9 @@ export function DiagramToolbar({
           )}
         </div>
       )}
-      <div className="ml-auto flex shrink-0 items-center gap-0.5">
+      {/* In a narrow column these controls wrap among themselves: one group wider than the toolbar
+          would otherwise be cut at its edge. */}
+      <div className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-0.5">
         {presets && (
           <>
             <LayoutPresetButtons variant="toolbar" surface={surface} />

@@ -255,7 +255,7 @@ test("the graph is a deep-linkable view of its own, with one edge per output", a
   }
 });
 
-test("a link to a retired view opens the map, and the walkthrough opens from the toolbar", async ({
+test("a link to a retired view opens the map, and the page's tour opens from the toolbar", async ({
   page,
 }) => {
   const run = await openRun(page);
@@ -267,11 +267,11 @@ test("a link to a retired view opens the map, and the walkthrough opens from the
       await expect(page.getByTestId("map-view")).toBeVisible();
     }
 
-    // The walkthrough opens from the toolbar and lives in the URL; `walkthrough.spec.ts` runs
-    // every one of its steps through in both views.
+    // "What is this?" opens the run page's tour from the toolbar and it lives in the URL;
+    // `guides.spec.ts` runs every one of its steps through in both views.
     await page.getByTestId("guide-open").click();
-    await expect(page).toHaveURL(/guide=1/);
-    await expect(page.getByTestId("walkthrough")).toHaveAttribute("data-guide-step", "process");
+    await expect(page).toHaveURL(/guide=run/);
+    await expect(page.getByTestId("guide-card")).toHaveAttribute("data-guide-step", "process");
   } finally {
     await run.cleanup();
   }

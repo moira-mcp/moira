@@ -48,6 +48,11 @@ function useSidebar() {
   return context;
 }
 
+/** The sidebar's state where a caller may also render outside the app shell, or null there. */
+function useOptionalSidebar() {
+  return React.useContext(SidebarContext);
+}
+
 // Helper to read cookie value
 function getCookieValue(name: string): string | null {
   if (typeof document === "undefined") return null;
@@ -707,4 +712,5 @@ export {
   SidebarSeparator,
   SidebarTrigger,
   useSidebar,
+  useOptionalSidebar,
 };

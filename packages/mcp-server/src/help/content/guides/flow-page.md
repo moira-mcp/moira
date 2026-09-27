@@ -77,13 +77,13 @@ as `view`.
 The map and the graph share one toolbar above the diagram: the **Steps / Map / Graph** switch,
 the contents fold button, the step finder (it answers "which block is this step in" and, on the graph, opens that
 step), the layout presets, zoom and fit, the navigator switch, the compass, the refresh indicator
-and **Explain this page**. The presets re-lay the open diagram and bring the camera back to the block you were
+and **What is this?**. The presets re-lay the open diagram and bring the camera back to the block you were
 reading; each view words them for what it moves — on the map _Rows_, _Compact_, _Balanced_
 (branches on both sides of the main line) and _Top to bottom_, on the graph _Stacked groups_,
 _Compact_, _Groups in a row_ and _Steps top to bottom_ — and both views follow the one you chose.
 The compass opens a note on how to read the view that is open and remembers whether you left it
-open. The steps view's toolbar carries the same switch, **Variables as words** and **Explain this
-page**, and zoom and fit when the flow is drawn.
+open. The steps view's toolbar carries the same switch, **Variables as words** and **What is
+this?**, and zoom and fit when the flow is drawn.
 
 Switching tabs keeps the page as it is: the map keeps its selected block, the graph the position
 you left it at, and nothing reloads.
@@ -210,10 +210,18 @@ to get an editable one.
 
 ## Explaining the page
 
-**Explain this page** walks through the page in eight steps — that your agent, not you, picks or
-builds flows; the steps view; block, step, evidence, loop, editing; and the views — highlighting
-the element that shows each, in whichever view is open: the page header, a numbered instruction
-card on the steps view (on the map and the graph, the **Steps** tab), a contents row, a step in the block panel (the section it sits in unfolds), the evidence a step must return, a
-return port, the edit toggle (the header for a reader who cannot edit) and the toolbar. A step whose
-element the open view does not draw moves to the view that does. A highlighted card inside the diagram is brought into the camera. The step is in the URL as `guide`,
-so a position can be linked to. The compass in the toolbar opens the note about the open view.
+**What is this?** opens a tour of the page in eight steps — that your agent, not you, picks or
+builds flows; the steps view; block, step, evidence, loop, editing; and the views — each card
+sitting beside the element that shows it, in whichever view is open, with the rest of the page
+dimmed: the page header, a numbered instruction card on the steps view (on the map and the graph,
+the **Steps** tab), a contents row, a step in the block panel (the section it sits in unfolds), the
+evidence a step must return, a return port, the edit toggle and the toolbar. A step whose element
+the open view does not draw moves to the view that does, and a highlighted card inside the diagram
+is brought into the camera. The steps about the map are skipped, with a note, on a flow that has
+no process view, and the loop step on a flow without a loop. The editing step depends on who reads: the flow's owner is shown the
+edit toggle, on a wide screen only; anyone else learns, on the page header, that only the owner
+edits and that "Use as Template" makes an editable copy. The right arrow or Enter goes on, the
+left arrow goes back and Escape closes. On a phone the card is a sheet along the top or the bottom
+of the screen, whichever leaves the element in sight. The tour and its step are in the URL
+(`guide=flow&step=…`), so a position can be linked to. The compass in the toolbar opens the note
+about the open view.

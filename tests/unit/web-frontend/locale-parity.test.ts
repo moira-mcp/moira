@@ -12,7 +12,7 @@
  * Scope is the surfaces the diagram design system owns — the map, the graph, the panels, the
  * toolbar and the two pages that mount them. Keys are extracted statically; the handful of keys
  * those components build at run time are enumerated here from the product's own id lists (the
- * layout presets, the view modes, the walkthrough steps), so adding a preset or a step without
+ * layout presets, the view modes, the guides and their steps), so adding a preset or a step without
  * its words fails this test rather than a screenshot.
  */
 
@@ -22,11 +22,9 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, test } from "@jest/globals";
 import { LAYOUT_PRESETS } from "../../../packages/web-frontend/src/components/diagram/layoutPreset.js";
 import { MODES } from "../../../packages/web-frontend/src/components/run/modes.js";
-import { GUIDE_STEPS } from "../../../packages/web-frontend/src/components/run/Walkthrough.js";
+import { GUIDES } from "../../../packages/web-frontend/src/guides/registry.js";
 import en from "../../../packages/web-frontend/src/locales/en.json";
 import ru from "../../../packages/web-frontend/src/locales/ru.json";
-import { flowGuideSteps } from "../../../packages/web-frontend/src/components/flow/guideSteps.js";
-import { SETTINGS_TOURS } from "../../../packages/web-frontend/src/pages/settings/settingsTours.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const frontend = path.resolve(here, "../../../packages/web-frontend/src");
@@ -57,14 +55,16 @@ const BASE = {
 
 /**
  * The components whose words this unit owns: the diagram primitives, the run surfaces, the two
- * diagram organisms, the run page and the flow page.
+ * diagram organisms, the run page and the flow page, and the guides that explain them.
  */
 const SCOPE: string[] = [
   ...fs
     .readdirSync(path.join(frontend, "components/diagram"))
     .map((file) => `components/diagram/${file}`),
   ...fs.readdirSync(path.join(frontend, "components/run")).map((file) => `components/run/${file}`),
-  "components/flow/guideSteps.ts",
+  ...fs.readdirSync(path.join(frontend, "guides")).map((file) => `guides/${file}`),
+  "components/execution/run.guide.ts",
+  "pages/flow.guide.ts",
   "components/workflow/WorkflowGraph.tsx",
   "components/workflow/graphNodes.tsx",
   "components/execution/ExecutionInspector.tsx",
@@ -95,13 +95,13 @@ function runtimeKeys(): string[] {
       keys.push(`${page}.modeGuide.${mode}.body`);
     }
   }
-  for (const [page, steps] of [
-    ["pages.runPage.guide", GUIDE_STEPS],
-    ["pages.flowPage.guide", flowGuideSteps(true)],
-  ] as const) {
-    for (const step of steps) {
-      keys.push(`${page}.steps.${step.id}.title`);
-      keys.push(`${page}.steps.${step.id}.body`);
+  // Every guide's title and every step's words, whoever the step is shown to.
+  for (const guide of GUIDES) {
+    keys.push(`guides.${guide.id}.title`);
+    if (guide.kind === "task") keys.push(`guides.${guide.id}.open`);
+    for (const step of guide.steps) {
+      keys.push(`guides.${guide.id}.steps.${step.id}.title`);
+      keys.push(`guides.${guide.id}.steps.${step.id}.body`);
     }
   }
   // A step card and the node panel name the same section by whether the step routes or instructs.
@@ -230,13 +230,12 @@ describe("the Settings page's components", () => {
   const sources = new Map(
     settingsFiles.map((file) => [file, fs.readFileSync(path.join(frontend, file), "utf8")]),
   );
-  const tourKeys = Object.entries(SETTINGS_TOURS).flatMap(([tour, steps]) => [
-    ...["title", "open", "back", "next", "finish", "close"].map(
-      (key) => `pages.settings.tours.${tour}.${key}`,
-    ),
-    ...steps.flatMap((step) => [
-      `pages.settings.tours.${tour}.steps.${step.id}.title`,
-      `pages.settings.tours.${tour}.steps.${step.id}.body`,
+  const tourKeys = GUIDES.filter((guide) => guide.screen === "settings").flatMap((guide) => [
+    `guides.${guide.id}.title`,
+    ...(guide.kind === "task" ? [`guides.${guide.id}.open`] : []),
+    ...guide.steps.flatMap((step) => [
+      `guides.${guide.id}.steps.${step.id}.title`,
+      `guides.${guide.id}.steps.${step.id}.body`,
     ]),
   ]);
   const referenced = [

@@ -37,6 +37,7 @@ import { TemplateText, VariableProvider, type VariableDefinition } from "../diag
 import type { WorkflowGraph } from "../../types/workflow-types";
 import { stepsModel, stepsPresentation, type StepCard, type StepsModel } from "./stepsModel";
 import { StepsList } from "./StepsList";
+import { guideAnchor } from "../../guides/anchors";
 
 const CARD_WIDTH = 360;
 const PILL_WIDTH = 150;
@@ -202,6 +203,7 @@ function StepNodeView({ data }: NodeProps<StepNode>): React.JSX.Element {
   const common = {
     "data-testid": "steps-card",
     "data-step-kind": card.kind,
+    ...(card.kind === "instruction" ? guideAnchor("flow.instruction-card") : {}),
     "data-node-id": card.id,
   };
   if (card.kind === "start" || card.kind === "finish") {
@@ -457,6 +459,7 @@ export function StepsView({
         })}
         trailing={toolbarTrailing}
         testId="steps-toolbar"
+        guide={guideAnchor("flow.steps-toolbar")}
       />
       <div className="min-h-0 flex-1 overflow-hidden bg-muted/20" data-testid="steps-canvas">
         {model.cards.length === 0 ? (

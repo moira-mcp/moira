@@ -20,6 +20,7 @@ import { Hint } from "./Hint";
 import { TemplateText } from "./VariableText";
 import { INTERACTIVE } from "./interactive";
 import { IndexBadge } from "./IndexBadge";
+import { guideAnchor } from "../../guides/anchors";
 
 /** One port: a React Flow handle id, what the row shows and what its tooltip explains. */
 export interface PortInfo {
@@ -200,6 +201,7 @@ function Port({
       onMouseLeave={() => onHover?.(null)}
       data-port={side}
       data-port-kind={port.kind}
+      {...(port.kind === "return" ? guideAnchor("process.return-port") : {})}
       data-transition={port.id}
       data-peer={port.peer}
       data-lit={lit ? "true" : undefined}

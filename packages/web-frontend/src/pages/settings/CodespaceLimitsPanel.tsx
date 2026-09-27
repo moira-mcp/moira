@@ -13,6 +13,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { HelpPopover } from "@/components/settings/HelpPopover";
 import { useGitHubCodespaces } from "./GitHubCodespacesData";
+import { guideAnchor } from "../../guides/anchors";
 
 /** Bytes in the largest whole unit, localized. */
 export function formatBytes(bytes: number, locale: string): string {
@@ -126,7 +127,7 @@ export function CodespaceLimitsPanel({
   ];
 
   return (
-    <Card data-testid="github-codespace-limits">
+    <Card data-testid="github-codespace-limits" {...guideAnchor("settings.codespace-limits")}>
       <CardHeader>
         <div className="flex items-center gap-1.5">
           <Gauge className="size-4 text-muted-foreground" aria-hidden="true" />

@@ -43,7 +43,6 @@ import {
   Play,
   AlertTriangle,
   Check,
-  Compass,
   Loader2,
   ListChecks,
   Lock,
@@ -81,7 +80,9 @@ import { nodeOwners } from "../run/model";
 import { VariablesPanel } from "../run/VariablesPanel";
 import { RunCursor } from "../run/RunCursor";
 import { StatusLegend } from "../run/status";
-import { Walkthrough, type PanelTab } from "../run/Walkthrough";
+import type { PanelTab } from "../run/modes";
+import { useGuidePage, type GuidePageController } from "../../guides/GuideContext";
+import { GuideButton } from "../../guides/GuideButton";
 import { DiagramGuide } from "../run/DiagramGuide";
 import { currentBlockId, runBlocks, stepsOf, waitingStep } from "../run/model";
 import { StepCard, StepCardList } from "../run/StepCard";
@@ -100,7 +101,6 @@ const WorkflowGraph = React.lazy(() =>
 const VIEW_PARAM = "view";
 const BLOCK_PARAM = "block";
 const AT_PARAM = "at";
-const GUIDE_PARAM = "guide";
 
 // Base execution data - common fields
 export interface ExecutionData {
@@ -309,7 +309,6 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
     () => (progress ? clampCursor(searchParams.get(AT_PARAM), progress.route) : null),
     [progress, searchParams],
   );
-  const guideStep = Number(searchParams.get(GUIDE_PARAM)) || 0;
   // A view is rendered from the first time it is asked for and never unmounted again.
 
   const update = useCallback(
@@ -444,7 +443,7 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
   const [variableHighlight, requestVariableHighlight] = useRequest<{ name: string }>();
   // A list item clicked on a block card: the block panel opens its list section at that item.
   const [listHighlight, requestListHighlight] = useRequest<{ name: string }>();
-  // A panel section the walkthrough asked to unfold so its step has something to point at.
+  // A panel section a guide asked to unfold so its step has something to point at.
   const [sectionOpen, requestSection] = useRequest<{ name: string }>();
   const selectListItem = useCallback(
     (blockId: string, index: number) => {
@@ -589,10 +588,24 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
     [blocks, waiting],
   );
 
-  const onPanel = useCallback((tab: PanelTab) => setChosenTab(tab), []);
-  // The walkthrough points inside sections the panel remembers as folded; this unfolds the one
-  // the current step needs, the same way a click on a list item unfolds the list.
-  const onSection = useCallback((id: string) => requestSection({ name: id }), [requestSection]);
+  // The page's part in its screen tour: the view it shows and what brings it into a step's state.
+  // A step inside a section the panel remembers as folded unfolds it, the same way a click on a
+  // list item unfolds the list.
+  const routeRecorded = progress?.routeRecorded ?? false;
+  const guideController = useMemo<GuidePageController>(
+    () => ({
+      view: mode,
+      setView: (view) => update({ [VIEW_PARAM]: view }),
+      openPanel: (tab) => setChosenTab(tab as PanelTab),
+      openSection: (id) => requestSection({ name: id }),
+      selectCurrentBlock: () => {
+        if (current) update({ [BLOCK_PARAM]: current });
+      },
+      routeRecorded,
+    }),
+    [mode, update, requestSection, current, routeRecorded],
+  );
+  useGuidePage("run", guideController);
 
   const getCurrentNode = () => {
     if (!execution?.currentNodeId || !workflow?.workflow?.nodes) return null;
@@ -719,16 +732,7 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
           </div>
         )}
       </div>
-      <button
-        type="button"
-        onClick={() => update({ [GUIDE_PARAM]: "1" })}
-        data-hint={t("pages.runPage.guide.open")}
-        aria-label={t("pages.runPage.guide.open")}
-        className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-transparent text-primary hover:border-border hover:bg-primary/10"
-        data-testid="guide-open"
-      >
-        <Compass className="size-4" aria-hidden="true" />
-      </button>
+      <GuideButton guideId="run" />
     </>
   ) : null;
 
@@ -1373,18 +1377,6 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
           )}
         </DialogContent>
       </Dialog>
-
-      {progress && (
-        <Walkthrough
-          step={guideStep}
-          mode={mode}
-          currentBlockId={current}
-          routeRecorded={progress.routeRecorded}
-          onNavigate={update}
-          onPanel={onPanel}
-          onSection={onSection}
-        />
-      )}
     </div>
   );
 };

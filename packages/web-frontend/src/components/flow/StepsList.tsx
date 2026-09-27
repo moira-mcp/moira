@@ -9,7 +9,7 @@
  * moment, so a reader can follow a choice through a long flow without losing the thread.
  *
  * Cards keep the steps view's test id and kinds (`steps-card`, `data-step-kind`), so the
- * walkthrough's anchor and every assertion about instruction cards hold on either presentation.
+ * guide's anchor and every assertion about instruction cards hold on either presentation.
  */
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -19,6 +19,7 @@ import { cn } from "@/lib/utils";
 import { useHighlightTarget, type HighlightRequest } from "../diagram/useHighlightTarget";
 import { TemplateText } from "../diagram/VariableText";
 import type { StepCard, StepEdge, StepsModel } from "./stepsModel";
+import { guideAnchor } from "../../guides/anchors";
 
 function anchorOf(id: string): string {
   return `step-${id}`;
@@ -205,6 +206,7 @@ export function StepsList({
     tabIndex: -1,
     "data-testid": "steps-card",
     "data-step-kind": card.kind,
+    ...(card.kind === "instruction" ? guideAnchor("flow.instruction-card") : {}),
     "data-node-id": card.id,
   });
   const focusClass = "focus:outline-none focus-visible:ring-2 focus-visible:ring-ring";

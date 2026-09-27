@@ -136,6 +136,7 @@ function EditableSteps({
             key={step.id}
             step={step}
             position={position + 1}
+            guided
             connections={stepConnections(node, block, blocks)}
             onConnection={(connection) =>
               connection.targetBlockId && onSelectBlock(connection.targetBlockId)
@@ -207,7 +208,7 @@ export function BlockDetailPanel({
   listHighlight?: HighlightRequest | null;
   /**
    * A section to unfold: `name` is the section's id and a new `token` unfolds it again. The
-   * walkthrough uses it so a step can point inside a section the reader keeps folded.
+   * guides use it so a step can point inside a section the reader keeps folded.
    */
   openSection?: HighlightRequest | null;
 }): React.JSX.Element {

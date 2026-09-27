@@ -7,6 +7,7 @@
 import React from "react";
 import { useTranslation } from "react-i18next";
 import type { ExecutionRouteEntry } from "@mcp-moira/workflow-engine/progress-visual";
+import { guideAnchor } from "../../guides/anchors";
 
 export function RunCursor({
   route,
@@ -27,6 +28,7 @@ export function RunCursor({
     <div
       className="flex min-w-0 flex-nowrap items-center gap-1.5 px-1 py-0.5"
       data-testid="run-cursor"
+      {...guideAnchor("run.route-cursor")}
     >
       <button
         type="button"

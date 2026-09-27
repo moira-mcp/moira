@@ -71,6 +71,7 @@ import {
   type StepInfo,
 } from "./model";
 import { TransitionFocusProvider, isFlashed, isLit, useTransitionFocus } from "./focus";
+import { guideAnchor } from "../../guides/anchors";
 
 type BlockNodeData = {
   block: RunBlock;
@@ -741,6 +742,7 @@ function CanvasInner({
         onFit={() => rfRef.current && fitOverview(rfRef.current)}
         minimap={{ on: minimapOn, toggle: toggleMinimap }}
         testId="map-toolbar"
+        guide={guideAnchor("process.map-toolbar")}
       />
       <div
         ref={wrapperRef}

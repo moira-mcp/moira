@@ -165,7 +165,7 @@ test("the technical graph is the page's other view, and a link to a retired view
   }
 });
 
-test("a step in the block panel opens on the graph as the node level of the panel, and the walkthrough opens from its link", async ({
+test("a step in the block panel opens on the graph as the node level of the panel, and the page's tour opens from its link", async ({
   page,
 }) => {
   await loginAsAdmin(page);
@@ -193,12 +193,15 @@ test("a step in the block panel opens on the graph as the node level of the pane
   await expect(repairConnection).toBeVisible();
   await expect(connections).not.toContainText("Decision");
 
-  // The walkthrough lives in the URL; `walkthrough.spec.ts` runs every one of its steps through
-  // in both views and checks each anchor resolves. It opens on the agent-first message, anchored
-  // on the page header.
-  await page.goto(`${BASE_URL}/workflows/moira/quick-task?guide=1`);
-  await expect(page.getByTestId("walkthrough")).toHaveAttribute("data-guide-step", "intro");
-  await expect(page.locator('[data-guide-target="intro"]')).toBeVisible();
+  // The tour lives in the URL; `guides.spec.ts` runs every one of its steps through in both views
+  // and checks each anchor resolves. It opens on the agent-first message, anchored on the header.
+  await page.goto(`${BASE_URL}/workflows/moira/quick-task?guide=flow`);
+  await expect(page.getByTestId("guide-card")).toHaveAttribute("data-guide-step", "intro");
+  await expect(page.getByTestId("guide-spotlight")).toHaveAttribute(
+    "data-guide-anchor",
+    "flow.header",
+  );
+  await expect(page.locator('[data-guide~="flow.header"]:visible').first()).toBeVisible();
 });
 
 /** A ninety-character block name: the map card must clamp it rather than grow or overflow. */

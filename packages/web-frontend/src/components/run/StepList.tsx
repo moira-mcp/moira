@@ -30,6 +30,8 @@ export function StepList({
           key={step.id}
           step={step}
           current={currentNodeId === step.id}
+          // The block panel's steps are the ones the screen tours point at.
+          guided
           onSelect={onFocusNode ? () => onFocusNode(step.id) : undefined}
           selectTitle={onFocusNode ? t("pages.runPage.blockDetail.focusStep") : undefined}
         />

@@ -9,6 +9,7 @@
  * (the split view's owner select, diagnostics and editor; the run page's "current" marker).
  */
 
+import { guideAnchor } from "../../guides/anchors";
 import React from "react";
 import { useTranslation } from "react-i18next";
 import { ArrowDownRight, ArrowUpRight, CornerLeftDown, RotateCcw } from "lucide-react";
@@ -60,6 +61,7 @@ export function StepCard({
   footer,
   connectionProblems,
   id,
+  guided = false,
 }: {
   step: StepInfo;
   /** One-based position in the block, shown in a fixed column when given. */
@@ -84,6 +86,8 @@ export function StepCard({
   /** Connections with a problem, by output key: the chip is marked and explains it. */
   connectionProblems?: Readonly<Record<string, string>>;
   id?: string;
+  /** The card is the one a screen tour points at: the block panel's steps, not other lists. */
+  guided?: boolean;
 }): React.JSX.Element {
   const { t } = useTranslation();
   const Body: "button" | "div" = onSelect ? "button" : "div";
@@ -98,6 +102,11 @@ export function StepCard({
       data-node-id={step.id}
       data-step-card=""
       aria-current={current ? "step" : undefined}
+      {...(guided
+        ? current
+          ? guideAnchor("process.step", "process.current-step")
+          : guideAnchor("process.step")
+        : {})}
     >
       <Body
         {...(onSelect ? { type: "button" as const, onClick: onSelect } : {})}
@@ -142,6 +151,11 @@ export function StepCard({
             <p
               className="mt-1 flex flex-wrap items-center gap-1 text-[10px] text-muted-foreground"
               data-node-inputs={step.evidence.map((field) => field.name).join(",")}
+              {...(guided
+                ? current
+                  ? guideAnchor("process.step-inputs", "process.current-step-inputs")
+                  : guideAnchor("process.step-inputs")
+                : {})}
             >
               <span>{t("pages.runPage.blockDetail.returns")}</span>
               {step.evidence.map((field) => (

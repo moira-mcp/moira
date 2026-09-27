@@ -30,7 +30,7 @@ describe("useMeasuredNodes", () => {
         { id: "a", type: "dimensions", dimensions: { width: 462, height: 101 } },
       ]),
     );
-    // The diagram rebuilds its nodes (a new selection, a walkthrough step): fresh objects.
+    // The diagram rebuilds its nodes (a new selection, a guide step): fresh objects.
     const rebuilt = [card("a"), card("b")];
     rerender({ nodes: rebuilt });
     expect(result.current.nodes?.[0].measured).toEqual({ width: 462, height: 101 });

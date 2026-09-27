@@ -11,6 +11,7 @@ import { AppSidebar, type NavRoute } from "./AppSidebar";
 import { AnimatedPage } from "../AnimatedPage";
 import { RouteSkeleton } from "../route-skeleton";
 import { ROUTES } from "../../constants/routes";
+import { GuideProvider } from "@/guides/GuideContext";
 
 export const AdminLayout: React.FC = () => {
   const { t } = useTranslation();
@@ -79,21 +80,24 @@ export const AdminLayout: React.FC = () => {
 
   return (
     <SidebarProvider>
-      <AppSidebar routes={ADMIN_ROUTES} isAdmin={true} title="Admin Panel" />
-      <SidebarInset className="flex flex-col h-screen overflow-hidden">
-        {/* Mobile header with sidebar trigger */}
-        <header className="flex md:hidden items-center h-14 px-4 border-b bg-background shrink-0">
-          <SidebarTrigger className="min-h-[44px] min-w-[44px]" />
-          <span className="ml-2 font-semibold">Admin Panel</span>
-        </header>
-        <main className="flex-1 overflow-y-auto">
-          <AnimatedPage>
-            <Suspense fallback={<RouteSkeleton />}>
-              <Outlet />
-            </Suspense>
-          </AnimatedPage>
-        </main>
-      </SidebarInset>
+      {/* The admin area shows the run page too, and the run page takes part in guides. */}
+      <GuideProvider>
+        <AppSidebar routes={ADMIN_ROUTES} isAdmin={true} title="Admin Panel" />
+        <SidebarInset className="flex flex-col h-screen overflow-hidden">
+          {/* Mobile header with sidebar trigger */}
+          <header className="flex md:hidden items-center h-14 px-4 border-b bg-background shrink-0">
+            <SidebarTrigger className="min-h-[44px] min-w-[44px]" />
+            <span className="ml-2 font-semibold">Admin Panel</span>
+          </header>
+          <main className="flex-1 overflow-y-auto">
+            <AnimatedPage>
+              <Suspense fallback={<RouteSkeleton />}>
+                <Outlet />
+              </Suspense>
+            </AnimatedPage>
+          </main>
+        </SidebarInset>
+      </GuideProvider>
     </SidebarProvider>
   );
 };

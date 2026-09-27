@@ -59,6 +59,8 @@ export interface SettingsEditorProps {
   enableFullscreenEdit?: boolean;
   /** Data-testid prefix for testing */
   testIdPrefix?: string;
+  /** Guide anchors for individual settings, by key, as `guideAnchor(...)` returns them. */
+  guideAnchors?: Readonly<Record<string, { "data-guide": string }>>;
   /** Optional callback for history button click - if provided, history button is shown */
   onHistoryClick?: (key: string) => void;
   /** Show character count for long text fields */
@@ -163,6 +165,7 @@ export const SettingsEditor: React.FC<SettingsEditorProps> = ({
   categorySortOrder = [],
   enableFullscreenEdit = true,
   testIdPrefix = "setting",
+  guideAnchors,
   onHistoryClick,
   showCharacterCount = false,
   getInheritanceLevel,
@@ -447,6 +450,7 @@ export const SettingsEditor: React.FC<SettingsEditorProps> = ({
         key={def.key}
         className="p-4 border border-border rounded-lg"
         data-testid={`${testIdPrefix}-${def.key}`}
+        {...guideAnchors?.[def.key]}
       >
         <div className="flex justify-between items-start mb-2">
           <div>

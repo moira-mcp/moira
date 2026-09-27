@@ -30,7 +30,6 @@ import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import {
   Boxes,
-  Compass,
   Copy,
   Globe,
   Loader2,
@@ -86,12 +85,18 @@ import { useStoredFlag } from "../components/diagram/useStoredFlag";
 import { useRequest } from "../components/diagram/useRequest";
 import { PanelRightClose, PanelRightOpen } from "lucide-react";
 import { GuidanceHint } from "../components/run/Guidance";
-import { Walkthrough } from "../components/run/Walkthrough";
+import { useGuidePage, type GuidePageController } from "../guides/GuideContext";
+import { GuideButton } from "../guides/GuideButton";
+import { guideAnchor } from "../guides/anchors";
 import { DiagramGuide } from "../components/run/DiagramGuide";
-import { flowGuideSteps, type FlowPanelTab } from "../components/flow/guideSteps";
 import { runBlocks } from "../components/run/model";
 import { RegistryPanel } from "../components/flow/RegistryPanel";
-import { FLOW_MODES, resolveFlowMode, type FlowViewMode } from "../components/flow/modes";
+import {
+  FLOW_MODES,
+  resolveFlowMode,
+  type FlowPanelTab,
+  type FlowViewMode,
+} from "../components/flow/modes";
 import { usePhoneWidth } from "../hooks/use-phone-width";
 import { definitionProgress } from "../components/flow/model";
 import { EditingProvider, useEditLog } from "../components/flow/editing";
@@ -115,7 +120,6 @@ const TechnicalGraph = React.lazy(() =>
 
 const VIEW_PARAM = "view";
 const BLOCK_PARAM = "block";
-const GUIDE_PARAM = "guide";
 const EDIT_PARAM = "edit";
 const INLINE_PARAM = "inline";
 
@@ -220,7 +224,6 @@ export const FlowPage: React.FC = () => {
 
   // --- URL state
   const editing = isOwner && searchParams.get(EDIT_PARAM) === "1";
-  const guideStep = Number(searchParams.get(GUIDE_PARAM)) || 0;
   const update = useCallback(
     (patch: Record<string, string | null>) => {
       const live = new URLSearchParams(window.location.search);
@@ -355,8 +358,6 @@ export const FlowPage: React.FC = () => {
   }, [mode]);
   const shownBlock = blocks.find((b) => b.id === (selectedBlockId ?? blocks[0]?.id)) ?? null;
 
-  const guideSteps = useMemo(() => flowGuideSteps(isOwner), [isOwner]);
-
   // --- Actions
   const handleBack = () => {
     clearBreadcrumbs();
@@ -479,10 +480,21 @@ export const FlowPage: React.FC = () => {
   const handleClearSelection = useCallback(() => {
     setSelectedNode(null);
   }, []);
-  const onPanel = useCallback((tab: FlowPanelTab) => setChosenTab(tab), []);
-  // A panel section the walkthrough asked to unfold so its step has something to point at.
+  // A panel section a guide asked to unfold so its step has something to point at.
   const [sectionOpen, requestSection] = useRequest<{ name: string }>();
-  const onSection = useCallback((id: string) => requestSection({ name: id }), [requestSection]);
+  // The page's part in its screen tour: the view it shows, whether the reader owns the flow, and
+  // what brings it into a step's state.
+  const guideController = useMemo<GuidePageController>(
+    () => ({
+      view: mode,
+      setView: (view) => update({ [VIEW_PARAM]: view }),
+      openPanel: (tab) => setChosenTab(tab as FlowPanelTab),
+      openSection: (id) => requestSection({ name: id }),
+      owner: isOwner,
+    }),
+    [mode, update, requestSection, isOwner],
+  );
+  useGuidePage("flow", guideController);
 
   // --- Render
   const ownerActions = (
@@ -551,6 +563,7 @@ export const FlowPage: React.FC = () => {
               key={definition.id}
               value={definition.id}
               data-mode={definition.id}
+              {...(definition.id === "steps" ? guideAnchor("flow.steps-view-switch") : {})}
               className="gap-1 text-xs"
             >
               <Icon className="h-3.5 w-3.5" aria-hidden="true" />
@@ -564,16 +577,7 @@ export const FlowPage: React.FC = () => {
   const flowTrailing = (
     <>
       {refetching && <PendingIndicator />}
-      <button
-        type="button"
-        onClick={() => update({ [GUIDE_PARAM]: "1" })}
-        data-hint={t("pages.flowPage.guide.open")}
-        aria-label={t("pages.flowPage.guide.open")}
-        className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-transparent text-primary hover:border-border hover:bg-primary/10"
-        data-testid="guide-open"
-      >
-        <Compass className="size-4" aria-hidden="true" />
-      </button>
+      <GuideButton guideId="flow" />
     </>
   );
   const technicalGraph = savedWorkflow && edited && (
@@ -678,6 +682,7 @@ export const FlowPage: React.FC = () => {
                           : "text-muted-foreground hover:text-foreground",
                       )}
                       data-testid="flow-edit-toggle"
+                      {...guideAnchor("flow.edit-toggle")}
                     >
                       <PencilLine className="size-3.5" aria-hidden="true" />
                       {t(editing ? "pages.flowPage.edit.on" : "pages.flowPage.edit.off")}
@@ -746,6 +751,7 @@ export const FlowPage: React.FC = () => {
             </>
           }
           testId="flow-header"
+          guide={guideAnchor("flow.header")}
         />
 
         {breadcrumbs.length > 0 && (
@@ -972,20 +978,6 @@ export const FlowPage: React.FC = () => {
               </aside>
             )}
           </div>
-        )}
-
-        {process && (
-          <Walkthrough<FlowViewMode, FlowPanelTab>
-            step={guideStep}
-            mode={mode}
-            currentBlockId={null}
-            routeRecorded={false}
-            onNavigate={update}
-            onPanel={onPanel}
-            steps={guideSteps}
-            onSection={onSection}
-            textKey="pages.flowPage.guide"
-          />
         )}
 
         {workflowIdentifier && (

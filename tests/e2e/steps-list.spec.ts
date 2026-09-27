@@ -3,7 +3,7 @@
  * steps, forks and returns — opens as numbered instruction cards top to bottom at normal size; a
  * fork's labelled choices link to the step they lead to and following one brings it into view; a
  * return says which step it goes back to; "variables as words" and its link parameter work as on
- * the drawn diagram; and the walkthrough's steps anchor lands on an instruction card.
+ * the drawn diagram; and the page tour's steps anchor lands on an instruction card.
  */
 
 import { test, expect } from "./fixtures.js";
@@ -109,14 +109,16 @@ test.describe("Steps view as a reading list", () => {
     expect(await cards.filter({ hasText: "{{" }).count()).toBeGreaterThan(0);
   });
 
-  test("the walkthrough's steps anchor lands on an instruction card of the list", async ({
+  test("the page tour's steps anchor lands on an instruction card of the list", async ({
     page,
   }) => {
-    await page.goto(`${SDF}&guide=1`);
-    await expect(page.getByTestId("walkthrough")).toHaveAttribute("data-guide-step", "intro");
-    await page.getByTestId("walkthrough-next").click();
-    await expect(page.getByTestId("walkthrough")).toHaveAttribute("data-guide-step", "steps");
-    const target = page.locator('[data-guide-target="steps"]');
+    await page.goto(`${SDF}&guide=flow`);
+    const card = page.getByTestId("guide-card");
+    await expect(card).toHaveAttribute("data-guide-step", "intro");
+    await page.getByTestId("guide-next").click();
+    await expect(card).toHaveAttribute("data-guide-step", "steps");
+    await expect(card).toHaveAttribute("data-guide-anchor", "flow.instruction-card");
+    const target = page.locator('[data-guide~="flow.instruction-card"]:visible').first();
     await expect(target).toHaveAttribute("data-step-kind", "instruction");
     await expect(target).toBeInViewport({ ratio: 0.5 });
     await expect(page.getByTestId("steps-view")).toHaveAttribute("data-presentation", "list");

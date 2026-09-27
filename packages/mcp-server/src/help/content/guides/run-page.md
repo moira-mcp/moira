@@ -57,7 +57,7 @@ The two tabs above the picture show the same run in two ways; the choice is in t
 Both views share one toolbar above the diagram: the **Map / Graph** switch, the contents fold
 button, the route cursor, the step finder (it answers "which block is this step in" and, on the
 graph, opens that step), the layout presets, zoom and fit, the navigator switch, the compass, the
-status legend and **Explain this page**. The presets re-lay the open diagram and bring the camera
+status legend and **What is this?**. The presets re-lay the open diagram and bring the camera
 back to the block you were reading; each view words them for what it moves — on the map _Rows_,
 _Compact_, _Balanced_ (branches on both sides of the main line) and _Top to bottom_, on the graph
 _Stacked groups_, _Compact_, _Groups in a row_ and _Steps top to bottom_ — and both views follow
@@ -130,9 +130,13 @@ is behind the server's (reload and answer again).
 
 ## Explaining the page
 
-**Explain this page** walks through the page in six steps — block, step, evidence, loop, route,
-and the views — highlighting the element that shows each on the live run, in whichever view is
-open: a contents row, the current step in the block panel (the section it sits in unfolds), the
-evidence a step must return, a return port, the route cursor and the toolbar. A highlighted card
-inside the diagram is brought into the camera. The step is in the URL as `guide`, so a position can
-be linked to. The compass in the toolbar opens the note about the open view.
+**What is this?** opens a tour of the page in six steps — block, step, evidence, loop, route, and
+the views — each card sitting beside the element that shows it on the live run, in whichever view
+is open, with the rest of the page dimmed: a contents row, the current step in the block panel (the
+section it sits in unfolds), the evidence a step must return, a return port, the route cursor and
+the toolbar. A highlighted card inside the diagram is brought into the camera. The loop step is
+skipped, with a note, on a run whose flow has no loop. The right arrow or Enter goes on, the left
+arrow goes back and Escape closes. On a phone the card is a sheet along the top or the bottom of
+the screen, whichever leaves the element in sight. The tour and its step are in the URL
+(`guide=run&step=…`), so a position can be linked to. The compass in the toolbar opens the note
+about the open view.

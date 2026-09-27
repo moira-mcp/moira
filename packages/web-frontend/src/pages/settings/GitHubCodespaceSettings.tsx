@@ -11,6 +11,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { useGitHubCodespaces } from "./GitHubCodespacesData";
 import { GitHubSetupSteps } from "./GitHubSetupSteps";
+import { guideAnchor } from "../../guides/anchors";
 
 function statusVariant(
   state: CodespaceConnectionView["state"],
@@ -145,7 +146,7 @@ export const GitHubCodespaceSettings: React.FC = () => {
 
   if (loading) {
     return (
-      <Card data-testid="github-codespace-settings">
+      <Card data-testid="github-codespace-settings" {...guideAnchor("settings.github-connect")}>
         <CardContent className="flex min-h-32 items-center justify-center p-6">
           <Loader2 className="h-5 w-5 animate-spin" aria-label={t("common.loading")} />
         </CardContent>
@@ -155,7 +156,7 @@ export const GitHubCodespaceSettings: React.FC = () => {
 
   if (loadError || !status) {
     return (
-      <Card data-testid="github-codespace-settings">
+      <Card data-testid="github-codespace-settings" {...guideAnchor("settings.github-connect")}>
         <CardContent className="space-y-4 p-6">
           <Alert variant="destructive">
             <AlertCircle aria-hidden="true" />
@@ -179,7 +180,7 @@ export const GitHubCodespaceSettings: React.FC = () => {
   ].includes(status.reason ?? "");
 
   return (
-    <Card data-testid="github-codespace-settings">
+    <Card data-testid="github-codespace-settings" {...guideAnchor("settings.github-connect")}>
       <CardHeader className="gap-3">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="flex min-w-0 items-start gap-3">

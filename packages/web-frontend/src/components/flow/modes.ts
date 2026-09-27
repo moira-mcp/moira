@@ -12,6 +12,9 @@ import { ListOrdered, Map, Workflow } from "lucide-react";
 
 export type FlowViewMode = "steps" | "map" | "graph";
 
+/** The tabs of the flow page's side panel. */
+export type FlowPanelTab = "block" | "variables";
+
 export interface FlowModeDefinition {
   id: FlowViewMode;
   icon: React.ComponentType<{ className?: string }>;

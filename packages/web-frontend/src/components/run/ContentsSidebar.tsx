@@ -16,6 +16,7 @@ import { INTERACTIVE } from "../diagram/interactive";
 import { formatDuration } from "./duration";
 import { listProgressLabel, type RunBlock } from "./model";
 import { AddBlock, DeleteBlock } from "../flow/StructureControls";
+import { guideAnchor } from "../../guides/anchors";
 
 const SIDEBAR_KEY = "moira.map.sidebarCollapsed";
 
@@ -45,6 +46,7 @@ export function ContentsRow({
         data-block-id={block.id}
         data-status={block.status}
         data-testid={`map-contents-${block.id}`}
+        {...guideAnchor("process.contents-row")}
         className={cn(
           "flex min-w-0 flex-1 items-center gap-2 rounded-md border border-transparent px-2 py-1 text-left text-sm hover:bg-accent",
           INTERACTIVE.clickable,

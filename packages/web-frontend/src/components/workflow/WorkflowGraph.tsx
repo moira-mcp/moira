@@ -70,6 +70,7 @@ import {
 } from "../../types";
 import { useTranslation } from "react-i18next";
 import { useNodeTypes } from "../../hooks/useNodeTypes";
+import { guideAnchor } from "../../guides/anchors";
 
 // Every authored type renders the same step node; the per-type registration keeps React Flow's
 // `react-flow__node-<type>` class, which the node-type catalog and the graph specs rely on.
@@ -963,6 +964,7 @@ export const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
           onFit={handleFitView}
           minimap={{ on: minimapOn, toggle: toggleMinimap }}
           testId="graph-toolbar"
+          guide={guideAnchor("process.graph-toolbar")}
         />
       )}
       <div className="relative min-h-0 flex-1">

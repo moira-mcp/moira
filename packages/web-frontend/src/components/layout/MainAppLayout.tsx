@@ -4,6 +4,7 @@
  * Handles beta agreement modal and warning banner
  */
 
+import { GuideProvider } from "@/guides/GuideContext";
 import React, { Suspense, useState, useEffect } from "react";
 import { Outlet, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
@@ -81,22 +82,24 @@ export const MainAppLayout: React.FC = () => {
       </a>
 
       <SidebarProvider>
-        <AppSidebar routes={MAIN_APP_ROUTES} isAdmin={isAdmin} />
-        <SidebarInset className="flex flex-col h-screen overflow-hidden">
-          {/* Mobile header with sidebar trigger */}
-          <header className="flex md:hidden items-center h-14 px-4 border-b bg-background shrink-0">
-            <SidebarTrigger className="min-h-[44px] min-w-[44px]" />
-            <span className="ml-2 font-semibold">MCP Moira</span>
-          </header>
-          <main id="main-content" className="flex-1 overflow-y-auto">
-            <AnimatedPage>
-              <Suspense fallback={<RouteSkeleton />}>
-                <Outlet />
-              </Suspense>
-            </AnimatedPage>
-          </main>
-          {showBanner && <BetaWarningBanner onDismiss={dismissBanner} />}
-        </SidebarInset>
+        <GuideProvider>
+          <AppSidebar routes={MAIN_APP_ROUTES} isAdmin={isAdmin} />
+          <SidebarInset className="flex flex-col h-screen overflow-hidden">
+            {/* Mobile header with sidebar trigger */}
+            <header className="flex md:hidden items-center h-14 px-4 border-b bg-background shrink-0">
+              <SidebarTrigger className="min-h-[44px] min-w-[44px]" />
+              <span className="ml-2 font-semibold">MCP Moira</span>
+            </header>
+            <main id="main-content" className="flex-1 overflow-y-auto">
+              <AnimatedPage>
+                <Suspense fallback={<RouteSkeleton />}>
+                  <Outlet />
+                </Suspense>
+              </AnimatedPage>
+            </main>
+            {showBanner && <BetaWarningBanner onDismiss={dismissBanner} />}
+          </SidebarInset>
+        </GuideProvider>
       </SidebarProvider>
     </>
   );
