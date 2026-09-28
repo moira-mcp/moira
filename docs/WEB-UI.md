@@ -363,10 +363,11 @@ that names a playbook) — plus whether a route is recorded. Pass a memoised con
   skipped step gets no card and no announcement: declared-absent and wide-only steps are skipped at once,
   and any other optional step waits without a card until its element is found (or until the page
   has switched to a view that draws it). A skipped step leaves no browser history entry, so the
-  browser's Back crosses it. In a run of only the changed steps, a step that cannot be shown is
+  browser's Back crosses it. A required step for another view also waits without a card until
+  the view and target are ready. In a run of only the changed steps, a step that cannot be shown is
   recorded at its revision, so "What is this?" does not keep offering it. A step is skipped in the direction the reader last moved, so Back crosses it.
   The wait for a view switch is bounded like any other wait. A required step whose element is
-  absent shows its card with a "not found" note and keeps looking for it; when the element arrives
+  absent shows its card with a "not found" note after that wait and keeps looking for it; when the element arrives
   (a page whose code or data comes late), the note goes and the card moves beside it;
 - dims everything but the element with a `pointer-events: none` layer (`guide-spotlight`, colour
   `--guide-dim`) and a ring, and never writes to the element;

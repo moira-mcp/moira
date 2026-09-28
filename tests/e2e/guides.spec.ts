@@ -95,13 +95,12 @@ async function walk(page: Page, guideId: string, steps: readonly string[]): Prom
   for (const [index, id] of steps.entries()) {
     await expect(card).toHaveAttribute("data-guide-id", guideId);
     await expect(card).toHaveAttribute("data-guide-step", id);
+    await expect(card).toHaveAttribute("data-guide-anchor", /.+/, { timeout: 15000 });
     const anchor = await card.getAttribute("data-guide-anchor");
-    expect(anchor).toBeTruthy();
-    await expect(page.getByTestId("guide-spotlight")).toHaveAttribute(
-      "data-guide-anchor",
-      anchor!,
-      { timeout: 15000 },
-    );
+    if (!anchor) throw new Error(`Guide step ${guideId}/${id} has no anchor`);
+    await expect(page.getByTestId("guide-spotlight")).toHaveAttribute("data-guide-anchor", anchor, {
+      timeout: 15000,
+    });
     const target = page.locator(`[data-guide~="${anchor}"]:visible`).first();
     await expect(target).toBeVisible({ timeout: 15000 });
     await expect(target).toBeInViewport({ ratio: 0.5, timeout: 15000 });
