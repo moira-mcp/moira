@@ -826,7 +826,22 @@ async function fillAgentStep(page: Page, id: string): Promise<void> {
   await expect(page.getByTestId("add-step-dialog")).toHaveCount(0);
 }
 
-test("the graph view edits the structure: a step inserted on a boundary edge keeps its label, and a drag creates a connection", async ({
+/** The graph opens on its first nodes; find a later node before clicking a port on it. */
+async function focusGraphNode(page: Page, nodeId: string): Promise<void> {
+  await page.getByTestId("graph-toolbar").getByTestId("toolbar-finder").click();
+  await page.getByTestId("graph-node-finder").fill(nodeId);
+  await page.locator(`[data-node-match="${nodeId}"]`).click();
+  await page.keyboard.press("Escape");
+  await restingCamera(page, GRAPH);
+}
+
+async function openGraphEditing(page: Page, id: string): Promise<void> {
+  await page.goto(`${BASE_URL}/workflows/${id}?view=graph&edit=1`);
+  await expect(page.getByTestId("flow-edit-panel")).toBeVisible();
+  await settledCamera(page, GRAPH);
+}
+
+test("an inserted step on a boundary edge keeps its label and saves from the graph", async ({
   page,
 }) => {
   await loginAsAdmin(page);
@@ -842,6 +857,20 @@ test("the graph view edits the structure: a step inserted on a boundary edge kee
     await expect(page.getByTestId("flow-edit-panel")).toBeVisible();
     await settledCamera(page, GRAPH);
     // Insert on the intake's labelled hand-off to planning, from its output port.
+    await focusGraphNode(page, "get-task");
+    const output = page.locator(
+      `${GRAPH} [data-graph-node="get-task"] [data-port="out"][data-transition="get-task.success"]`,
+    );
+    // The target must receive pointer events inside the pane, not merely exist offscreen.
+    await expect
+      .poll(() =>
+        output.evaluate((element) => {
+          const box = element.getBoundingClientRect();
+          const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+          return hit?.closest("[data-port]") === element;
+        }),
+      )
+      .toBe(true);
     await canvasAction(
       page,
       `${GRAPH} [data-graph-node="get-task"] [data-port="out"][data-transition="get-task.success"]`,
@@ -859,11 +888,31 @@ test("the graph view edits the structure: a step inserted on a boundary edge kee
     await expect(page.locator('[data-node-id="clarify"][data-step-card]')).toBeVisible();
     await expect(page.locator('[data-edges="clarify.success"]')).toBeAttached();
 
-    // Drag from a step's new-output port onto the middle of another step's card, away from its
-    // ports: the output is named and connected.
-    await page.getByTestId("flow-modes").locator('[data-mode="graph"]').click();
-    await settledCamera(page, GRAPH);
-    // The graph opens on its first blocks: the start card and the planning card are both in view.
+    // The inserted step is the only edit in this copy.
+    await saveWhenChecked(page);
+    const saved = (await detailOf(page, id)).workflow;
+    const clarify = saved.nodes.find((n: any) => n.id === "clarify");
+    expect(clarify).toMatchObject({
+      progressNodeId: "scope",
+      connections: { success: "create-plan" },
+      connectionLabels: { success: "task contract written" },
+    });
+    expect(saved.nodes.find((n: any) => n.id === "get-task").connections.success).toBe("clarify");
+  } finally {
+    await page.request.delete(`${BASE_URL}/api/workflows/${id}`);
+  }
+});
+
+test("graph port drags create, retarget and remove outputs without changing the saved flow", async ({
+  page,
+}) => {
+  await loginAsAdmin(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const id = await copyQuickTask(page);
+  try {
+    await openGraphEditing(page, id);
+    await focusGraphNode(page, "start");
+    // A new output dropped on the middle of another card is named and connected.
     await dragPort(page, `${GRAPH} [data-graph-node="start"] [data-new-output]`, (pane) =>
       visibleMiddle(page, `${GRAPH} [data-graph-node="create-plan"]`, pane),
     );
@@ -876,7 +925,7 @@ test("the graph view edits the structure: a step inserted on a boundary edge kee
     ).toContainText("create-plan");
     await page.getByTestId("flow-edit-export-toggle").click();
 
-    // Dragging an existing output by its handle onto another card leads it there.
+    // An existing output can be retargeted by dragging its handle; undo restores its target.
     await dragPort(
       page,
       `${GRAPH} [data-graph-node="start"] [data-handleid="out:start.default"]`,
@@ -887,9 +936,38 @@ test("the graph view edits the structure: a step inserted on a boundary edge kee
       page.locator('[data-export-path="nodes[start].connections.default"]'),
     ).toContainText("create-plan");
     await page.getByTestId("flow-edit-export-toggle").click();
-    await page.getByTestId("flow-edit-undo").click(); // the retarget
+    await page.getByTestId("flow-edit-undo").click();
 
-    // Dropping an output on the empty canvas offers to create a step there that it leads to.
+    // The primary output cannot be removed; the new one can.
+    await page
+      .locator(
+        `${GRAPH} [data-graph-node="start"] [data-port="out"][data-transition="start.default"]`,
+      )
+      .click({ button: "right" });
+    await expect(page.getByTestId("canvas-remove-connection")).toBeDisabled();
+    await page.keyboard.press("Escape");
+    await canvasAction(
+      page,
+      `${GRAPH} [data-graph-node="start"] [data-port="out"][data-transition="start.skip-intake"]`,
+      "edge",
+      "remove-connection",
+    );
+    await expect(page.locator(`${GRAPH} [data-transition="start.skip-intake"]`)).toHaveCount(0);
+    await expect(page.getByTestId("flow-edit-count")).toContainText("0");
+  } finally {
+    await page.request.delete(`${BASE_URL}/api/workflows/${id}`);
+  }
+});
+
+test("dropping an output on empty graph space creates a connected step, and the edge menu retargets", async ({
+  page,
+}) => {
+  await loginAsAdmin(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const id = await copyQuickTask(page);
+  try {
+    await openGraphEditing(page, id);
+    await focusGraphNode(page, "start");
     await dragPort(page, `${GRAPH} [data-graph-node="start"] [data-new-output]`, async () => {
       const card = await restingBox(page, `${GRAPH} [data-graph-node="start"]`);
       return { x: card.x + 40, y: card.y + card.height + 18 };
@@ -905,9 +983,8 @@ test("the graph view edits the structure: a step inserted on a boundary edge kee
       page.locator('[data-export-path="nodes[start].connections.fast-lane"]'),
     ).toContainText("triage");
     await page.getByTestId("flow-edit-export-toggle").click();
+    await page.getByTestId("flow-edit-undo").click();
 
-    // The connection menu: a primary output cannot be removed; the drawn output can, and it goes.
-    await page.getByTestId("flow-edit-undo").click(); // the dropped step
     await canvasAction(
       page,
       `${GRAPH} [data-graph-node="create-plan"] [data-port="out"][data-transition="create-plan.success"]`,
@@ -921,23 +998,21 @@ test("the graph view edits the structure: a step inserted on a boundary edge kee
       page.locator('[data-export-path="nodes[create-plan].connections.success"]'),
     ).toContainText("get-task");
     await page.getByTestId("flow-edit-export-toggle").click();
-    await page.getByTestId("flow-edit-undo").click(); // the retarget
-    await page
-      .locator(
-        `${GRAPH} [data-graph-node="start"] [data-port="out"][data-transition="start.default"]`,
-      )
-      .click({ button: "right" });
-    await expect(page.getByTestId("canvas-remove-connection")).toBeDisabled();
-    await page.keyboard.press("Escape");
-    await canvasAction(
-      page,
-      `${GRAPH} [data-graph-node="start"] [data-port="out"][data-transition="start.skip-intake"]`,
-      "edge",
-      "remove-connection",
-    );
-    await expect(page.locator(`${GRAPH} [data-transition="start.skip-intake"]`)).toHaveCount(0);
+    await page.getByTestId("flow-edit-undo").click();
+    await expect(page.getByTestId("flow-edit-count")).toContainText("0");
+  } finally {
+    await page.request.delete(`${BASE_URL}/api/workflows/${id}`);
+  }
+});
 
-    // The canvas menu: a step added inside a block's group joins that block.
+test("a graph canvas step joins its block, while a drag outside the pane changes nothing", async ({
+  page,
+}) => {
+  await loginAsAdmin(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const id = await copyQuickTask(page);
+  try {
+    await openGraphEditing(page, id);
     const scope = await restingBox(page, `${GRAPH} [data-graph-group][data-block-id="scope"]`);
     await page.mouse.click(scope.x + 12, scope.y + scope.height - 12, { button: "right" });
     await expect(page.getByTestId("canvas-menu-pane")).toBeVisible();
@@ -947,28 +1022,18 @@ test("the graph view edits the structure: a step inserted on a boundary edge kee
     await openBlock(page, "scope");
     await openSteps(page);
     await expect(page.locator('[data-node-id="note-it"][data-step-card]')).toBeVisible();
-    await page.getByTestId("flow-edit-undo").click(); // the added step
+    await page.getByTestId("flow-edit-undo").click();
 
-    // Released outside the graph, over the panel beside it, a drag changes nothing. Last, because
-    // a drag towards the pane's edge pans the canvas.
+    // A release over the panel must not open either creation dialog.
     await page.getByTestId("flow-modes").locator('[data-mode="graph"]').click();
+    await focusGraphNode(page, "start");
     await dragPort(page, `${GRAPH} [data-graph-node="start"] [data-new-output]`, async (pane) => ({
       x: pane.x + pane.width + 80,
       y: pane.y + pane.height / 2,
     }));
     await expect(page.getByTestId("add-step-dialog")).toHaveCount(0);
     await expect(page.getByTestId("name-output-dialog")).toHaveCount(0);
-
-    // What remains is the insert, the drawn output and its removal: the insert alone saves.
-    await saveWhenChecked(page);
-    const saved = (await detailOf(page, id)).workflow;
-    const clarify = saved.nodes.find((n: any) => n.id === "clarify");
-    expect(clarify).toMatchObject({
-      progressNodeId: "scope",
-      connections: { success: "create-plan" },
-      connectionLabels: { success: "task contract written" },
-    });
-    expect(saved.nodes.find((n: any) => n.id === "get-task").connections.success).toBe("clarify");
+    await expect(page.getByTestId("flow-edit-count")).toContainText("0");
   } finally {
     await page.request.delete(`${BASE_URL}/api/workflows/${id}`);
   }

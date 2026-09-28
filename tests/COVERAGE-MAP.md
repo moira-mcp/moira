@@ -47,6 +47,8 @@ level headings classify the tracked test paths listed beneath them.
 
 **e2e**
 
+The graph canvas checks in `flow-page.spec.ts` use separate private copies for boundary insertion, port drags, empty-canvas creation and group actions; the insertion case finds and hit-tests its port before clicking. The walkers in `guides-full-tour.spec.ts` and `guides.spec.ts` wait for a nonempty card anchor before comparing it with the spotlight.
+
 - `tests/e2e/admin-analytics.spec.ts`
 - `tests/e2e/admin-execution-errors.spec.ts` — the admin execution page: error history of another user's execution and its variables panel
 - `tests/e2e/phone-layout.spec.ts` — at 390 px: the flow header's description keeps a readable width with the fact chips wrapped below, the recommended flows' agent-first note spans the card, and the beta notice is one short line (the full notice from `sm` up); a flow opens on the steps view at phone width and on the map at 1280, and a link's `view` still wins
@@ -439,6 +441,8 @@ level headings classify the tracked test paths listed beneath them.
 ### i18n
 
 **unit**
+
+`guides-optional.test.tsx` also checks that a required step for another view never shows a card before that view draws its target, then presents the matching card anchor and spotlight.
 
 - `tests/unit/web-frontend/i18n.test.ts`
 - `tests/unit/web-frontend/locale-parity.test.ts` — the RU «IP-адрес» wording (no «IP адрес» left) and the localized unknown-user name in both languages; no string in either locale tells a reader to put a bot token into a URL (`bot<…>`, `getUpdates`, `api.telegram.org/bot`); the words of the process interface in both languages: `en.json` and `ru.json` hold the same keys once plural suffixes are folded away, and each language carries every plural category its own CLDR rules require (English one/other, Russian one/few/many/other); every literal key the diagram, run and flow components name, plus the run-time families enumerated from the layout presets, the view modes, every guide's title and step words from the guide registry and the shared directive/message section, exists in both files (other run-time families, such as duration units and status words, are guarded by the key-set equality only); none of those components writes an accessible label, hint or placeholder as a literal; and none of those components carries a `defaultValue` or `t(key, "text")` fallback or a Russian string written into the component, either of which would render the same words in every language and hide the missing key

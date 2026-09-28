@@ -44,7 +44,9 @@ async function walkTour(page: Page, until?: (visit: Visit) => boolean): Promise<
   const visits: Visit[] = [];
   for (let moves = 0; moves < 150; moves += 1) {
     await expect(card).toBeVisible({ timeout: 20000 });
-    const anchor = (await card.getAttribute("data-guide-anchor"))!;
+    await expect(card).toHaveAttribute("data-guide-anchor", /.+/, { timeout: 20000 });
+    const anchor = await card.getAttribute("data-guide-anchor");
+    if (!anchor) throw new Error("The visible guide card has no anchor");
     await expect(page.getByTestId("guide-spotlight")).toHaveAttribute("data-guide-anchor", anchor, {
       timeout: 20000,
     });

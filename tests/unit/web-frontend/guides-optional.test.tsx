@@ -85,6 +85,17 @@ jest.unstable_mockModule("../../../packages/web-frontend/src/guides/registry", (
       },
     ],
   };
+  const viewedRequired: GuideDefinition = {
+    id: "viewed-required",
+    kind: "screen",
+    screen: "viewed-required",
+    routes: ["/fixture"],
+    views: ["steps", "map"],
+    steps: [
+      { id: "start", anchor: "fixture.page", kind: "look", revision: 1 },
+      { id: "mapped", anchor: "fixture.map", kind: "look", revision: 1, views: ["map"] },
+    ],
+  };
   // A required step whose element arrives late, and an optional one on a view the page never opens.
   const slow: GuideDefinition = {
     id: "slow",
@@ -106,7 +117,7 @@ jest.unstable_mockModule("../../../packages/web-frontend/src/guides/registry", (
       { id: "end", anchor: "fixture.page", kind: "look", revision: 1 },
     ],
   };
-  const guides = [fixture, declared, viewed, slow];
+  const guides = [fixture, declared, viewed, viewedRequired, slow];
   return {
     GUIDES: guides,
     guideById: (id: string | null | undefined) => guides.find((guide) => guide.id === id),
@@ -149,16 +160,16 @@ function Late(): React.JSX.Element | null {
 }
 
 /** A page with two views that registers its controller; switching views takes a moment. */
-function TwoViews(): React.JSX.Element {
+function TwoViews({ guideId = "viewed" }: { guideId?: string }): React.JSX.Element {
   const [view, setView] = useState("steps");
   const controller = React.useMemo(
     () => ({ view, setView: (next: string) => window.setTimeout(() => setView(next), 300) }),
     [view],
   );
-  useGuidePage("viewed", controller);
+  useGuidePage(guideId, controller);
   return (
     <main>
-      <GuideButton guideId="viewed" />
+      <GuideButton guideId={guideId} />
       <section {...guideAnchor("fixture.page")}>page</section>
       {view === "map" && <section {...guideAnchor("fixture.map")}>map</section>}
     </main>
@@ -342,6 +353,46 @@ describe("an optional step", () => {
     observer.disconnect();
     expect(shownWithout.length).toBeGreaterThan(0);
     expect(shownWithout.every((absent) => !absent)).toBe(true);
+  });
+
+  test("a required step waits unseen for its other view and its spotlight", async () => {
+    render(
+      <MemoryRouter initialEntries={["/fixture"]}>
+        <I18nextProvider i18n={i18n}>
+          <GuideProvider>
+            <TwoViews guideId="viewed-required" />
+          </GuideProvider>
+        </I18nextProvider>
+      </MemoryRouter>,
+    );
+    const shownWithoutSpotlight: boolean[] = [];
+    const observer = new MutationObserver(() => {
+      const card = document.querySelector('[data-testid="guide-card"]');
+      if (card?.getAttribute("data-guide-step") === "mapped") {
+        shownWithoutSpotlight.push(
+          !document.querySelector('[data-guide~="fixture.map"]') ||
+            !document.querySelector('[data-testid="guide-spotlight"]'),
+        );
+      }
+    });
+    observer.observe(document.body, { subtree: true, childList: true, attributes: true });
+    fireEvent.click(screen.getByTestId("guide-open"));
+    await waitFor(() =>
+      expect(screen.getByTestId("guide-card")).toHaveAttribute("data-guide-step", "start"),
+    );
+    fireEvent.click(screen.getByTestId("guide-next"));
+    await waitFor(
+      () => expect(screen.getByTestId("guide-card")).toHaveAttribute("data-guide-step", "mapped"),
+      { timeout: 4000 },
+    );
+    observer.disconnect();
+    expect(shownWithoutSpotlight.length).toBeGreaterThan(0);
+    expect(shownWithoutSpotlight.every((absent) => !absent)).toBe(true);
+    expect(screen.getByTestId("guide-card")).toHaveAttribute("data-guide-anchor", "fixture.map");
+    expect(screen.getByTestId("guide-spotlight")).toHaveAttribute(
+      "data-guide-anchor",
+      "fixture.map",
+    );
   });
 
   test("an element that arrives after the wait is still found, and a view the page never opens is not waited on for ever", () => {

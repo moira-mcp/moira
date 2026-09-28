@@ -153,10 +153,10 @@ export default function GuideRunner(): React.JSX.Element | null {
 
   const [note, setNote] = useState<SkipNote | null>(null);
   const [target, setTarget] = useState<HTMLElement | null>(null);
-  /** The step (and anchor) whose element was last found; an optional step waits for it. */
+  /** The step (and anchor) whose element was last found; unresolved steps wait for it. */
   const [resolvedFor, setResolvedFor] = useState<string | null>(null);
   const [box, setBox] = useState<Box | null>(null);
-  const [missing, setMissing] = useState(false);
+  const [missingFor, setMissingFor] = useState<string | null>(null);
   const [sheetHeight, setSheetHeight] = useState(0);
 
   // The way the reader last moved: a step that cannot be shown is passed in that direction, so Back
@@ -226,10 +226,17 @@ export default function GuideRunner(): React.JSX.Element | null {
   // a link). Until its element is found it is not shown, announced or recorded: a card for it would
   // tell the reader about something that is not there, and it may be skipped a moment later.
   const stepKey = step ? `${step.id}|${anchor ?? ""}` : null;
+  const missing = stepKey !== null && missingFor === stepKey;
   // A step whose open view does not draw it waits too, while the page switches to a view that does.
   const switchesView = anchor === null && !!step && !!fallbackView(step) && !!controller?.setView;
+  // A view-specific required step also waits for its target before showing a card. If the target
+  // never appears, the existing required-step note becomes visible after the bounded wait.
   const resolving =
-    !!step?.optional && (anchor !== null || switchesView) && resolvedFor !== stepKey;
+    !!step &&
+    anchor !== null &&
+    (step.optional || !!fallbackView(step)) &&
+    resolvedFor !== stepKey &&
+    (step.optional || !missing);
   // The switch has the same bound as any wait for an element: a page that never draws the step is
   // passed, not waited on for ever.
   useEffect(() => {
@@ -237,7 +244,7 @@ export default function GuideRunner(): React.JSX.Element | null {
     const timer = window.setTimeout(() => skip("hidden"), (RESOLVE_TICKS + 1) * TICK_MS);
     return () => window.clearTimeout(timer);
   }, [switchesView, stepKey, skip]);
-  const hidden = skipping || resolving;
+  const hidden = skipping || switchesView || resolving;
   useEffect(() => {
     if (skipReason) skip(skipReason);
   }, [skipReason, skip]);
@@ -291,7 +298,7 @@ export default function GuideRunner(): React.JSX.Element | null {
   useEffect(() => {
     setTarget(null);
     setBox(null);
-    setMissing(false);
+    setMissingFor(null);
     if (!step || !anchor || skipping) return;
     let tries = 0;
     let settling = 0;
@@ -306,11 +313,11 @@ export default function GuideRunner(): React.JSX.Element | null {
         } else if (tries === RESOLVE_TICKS + 1) {
           // A required step says it cannot find its element, and keeps looking: a page whose code
           // or data arrives late (the next screen of the full tour) still gets its step.
-          setMissing(true);
+          setMissingFor(stepKey);
         }
         return;
       }
-      setMissing(false);
+      setMissingFor(null);
       const current = boxOf(found);
       settling += 1;
       if (!sameBox(current, last) && settling < SETTLE_TICKS) {
@@ -326,10 +333,11 @@ export default function GuideRunner(): React.JSX.Element | null {
       // A diagram card lives in a transformed viewport that scrolling cannot reach.
       requestReveal(found);
       setTarget(found);
+      setBox(boxOf(found));
       setResolvedFor(`${step.id}|${anchor}`);
     }, TICK_MS);
     return () => window.clearInterval(timer);
-  }, [step, anchor, skipping, isMobile, reduceMotion, skip, t]);
+  }, [step, stepKey, anchor, skipping, isMobile, reduceMotion, skip, t]);
 
   // Follow the element while it moves: the page scrolls to it and a diagram's camera glides.
   useEffect(() => {
