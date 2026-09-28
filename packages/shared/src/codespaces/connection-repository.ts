@@ -61,6 +61,9 @@ export interface ConnectedCodespaceInput {
   now: number;
 }
 
+export type CodespaceAuthorizationIntent =
+  { kind: "connect" } | { kind: "reauthorize"; connectionId: string; generation: number };
+
 export function digestCodespaceAuthorizationValue(value: string): string {
   return createHash("sha256").update(value, "utf8").digest("hex");
 }
@@ -74,6 +77,7 @@ export class CodespaceConnectionRepository {
     sessionTokenHash: string;
     provider: string;
     redirectPath: string;
+    intent: CodespaceAuthorizationIntent;
     expiresAt: number;
     now: number;
   }): void {
@@ -93,8 +97,9 @@ export class CodespaceConnectionRepository {
       this.sqlite
         .prepare(
           `INSERT INTO codespaceAuthorizationState
-             (stateHash, userId, sessionTokenHash, provider, redirectPath, expiresAt, consumedAt, createdAt)
-           VALUES (?, ?, ?, ?, ?, ?, NULL, ?)`,
+             (stateHash, userId, sessionTokenHash, provider, redirectPath,
+              intent, expectedConnectionId, expectedGeneration, expiresAt, consumedAt, createdAt)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)`,
         )
         .run(
           input.stateHash,
@@ -102,6 +107,9 @@ export class CodespaceConnectionRepository {
           input.sessionTokenHash,
           input.provider,
           input.redirectPath,
+          input.intent.kind,
+          input.intent.kind === "reauthorize" ? input.intent.connectionId : null,
+          input.intent.kind === "reauthorize" ? input.intent.generation : null,
           input.expiresAt,
           input.now,
         );
@@ -115,24 +123,43 @@ export class CodespaceConnectionRepository {
     sessionTokenHash: string;
     provider: string;
     now: number;
-  }): { redirectPath: string } | null {
+  }): { redirectPath: string; intent: CodespaceAuthorizationIntent } | null {
     const tx = this.sqlite.transaction(() => {
       const row = this.sqlite
         .prepare(
-          `SELECT redirectPath FROM codespaceAuthorizationState
+          `SELECT redirectPath, intent, expectedConnectionId, expectedGeneration
+           FROM codespaceAuthorizationState
            WHERE stateHash = ? AND userId = ? AND sessionTokenHash = ? AND provider = ?
              AND consumedAt IS NULL AND expiresAt >= ?`,
         )
         .get(input.stateHash, input.userId, input.sessionTokenHash, input.provider, input.now) as
-        { redirectPath: string } | undefined;
+        | {
+            redirectPath: string;
+            intent: string;
+            expectedConnectionId: string | null;
+            expectedGeneration: number | null;
+          }
+        | undefined;
       if (!row) return null;
+      const intent: CodespaceAuthorizationIntent =
+        row.intent === "reauthorize" &&
+        row.expectedConnectionId !== null &&
+        Number.isSafeInteger(row.expectedGeneration) &&
+        row.expectedGeneration! >= 1
+          ? {
+              kind: "reauthorize",
+              connectionId: row.expectedConnectionId,
+              generation: row.expectedGeneration!,
+            }
+          : { kind: "connect" };
+      if (row.intent !== intent.kind) return null;
       const result = this.sqlite
         .prepare(
           `UPDATE codespaceAuthorizationState SET consumedAt = ?
            WHERE stateHash = ? AND consumedAt IS NULL`,
         )
         .run(input.now, input.stateHash);
-      return result.changes === 1 ? row : null;
+      return result.changes === 1 ? { redirectPath: row.redirectPath, intent } : null;
     });
     return tx();
   }
@@ -183,15 +210,54 @@ export class CodespaceConnectionRepository {
   }
 
   completeConnection(input: ConnectedCodespaceInput): void {
+    this.writeConnection(input);
+  }
+
+  /** Replace an active grant without moving it through `connecting` or losing its old credential. */
+  replaceConnectedAuthorization(
+    input: ConnectedCodespaceInput & {
+      expectedGeneration: number;
+      expectedExternalAccountId: string;
+    },
+  ): boolean {
+    if (!input.supersededRevocation) {
+      throw new Error("Connected authorization must retain the superseded credential");
+    }
+    return this.writeConnection(input, {
+      generation: input.expectedGeneration,
+      accountId: input.expectedExternalAccountId,
+    });
+  }
+
+  private writeConnection(
+    input: ConnectedCodespaceInput,
+    expected?: { generation: number; accountId: string },
+  ): boolean {
     const tx = this.sqlite.transaction(() => {
       const owned = this.sqlite
         .prepare(
-          `SELECT id, externalAccountId, credentialGeneration FROM codespaceConnection
+          `SELECT id, externalAccountId, credentialGeneration, status FROM codespaceConnection
            WHERE id = ? AND userId = ? AND provider = ?`,
         )
         .get(input.connectionId, input.userId, input.provider) as
-        { id: string; externalAccountId: string; credentialGeneration: number } | undefined;
+        | {
+            id: string;
+            externalAccountId: string;
+            credentialGeneration: number;
+            status: CodespaceConnectionStatus;
+          }
+        | undefined;
       if (!owned) throw new Error("Codespace connection is not owned by user");
+      if (
+        expected &&
+        (owned.status !== "connected" ||
+          owned.externalAccountId !== expected.accountId ||
+          owned.credentialGeneration !== expected.generation ||
+          input.externalAccountId !== expected.accountId ||
+          input.envelope.generation !== expected.generation + 1)
+      ) {
+        return false;
+      }
 
       this.sqlite
         .prepare(
@@ -286,8 +352,9 @@ export class CodespaceConnectionRepository {
           input.now,
         );
       }
+      return true;
     });
-    tx();
+    return tx.immediate();
   }
 
   /**

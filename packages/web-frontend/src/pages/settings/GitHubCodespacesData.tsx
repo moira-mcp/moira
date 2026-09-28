@@ -23,8 +23,8 @@ export interface GitHubCodespacesState {
   /** Replace the connection view with one a connection request returned, then refresh codespaces. */
   applyConnection: (next: CodespaceConnectionView) => void;
   reloadConnection: () => Promise<void>;
-  /** `silent` keeps the current view on screen instead of showing the loading state. */
-  reloadManagement: (options?: { silent?: boolean }) => Promise<void>;
+  /** `sync` asks GitHub for current resource state; `silent` keeps the current view on screen. */
+  reloadManagement: (options?: { silent?: boolean; sync?: boolean }) => Promise<void>;
   setManagement: React.Dispatch<React.SetStateAction<CodespaceManagementView | null>>;
 }
 
@@ -50,17 +50,22 @@ export function GitHubCodespacesProvider({ children }: { children: React.ReactNo
     }
   }, []);
 
-  const reloadManagement = useCallback(async ({ silent = false }: { silent?: boolean } = {}) => {
-    try {
-      if (!silent) setManagementLoading(true);
-      setManagementError(false);
-      setManagement(await apiClient.getGitHubCodespaces());
-    } catch {
-      if (!silent) setManagementError(true);
-    } finally {
-      if (!silent) setManagementLoading(false);
-    }
-  }, []);
+  const reloadManagement = useCallback(
+    async ({ silent = false, sync = false }: { silent?: boolean; sync?: boolean } = {}) => {
+      try {
+        if (!silent) setManagementLoading(true);
+        setManagementError(false);
+        setManagement(
+          sync ? await apiClient.refreshGitHubCodespaces() : await apiClient.getGitHubCodespaces(),
+        );
+      } catch {
+        if (!silent) setManagementError(true);
+      } finally {
+        if (!silent) setManagementLoading(false);
+      }
+    },
+    [],
+  );
 
   useEffect(() => {
     void reloadConnection();

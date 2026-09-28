@@ -126,7 +126,7 @@ type CodespaceNewToolParams<Action extends CodespaceAction> = Exclude<
 
 export interface CodespaceToolServices {
   connection: Pick<CodespaceConnectionService, "getStatus" | "refreshGrants">;
-  observability: Pick<CodespaceObservabilityService, "readiness" | "limits">;
+  observability: Pick<CodespaceObservabilityService, "readiness" | "limitsWithBilling">;
   guidance: (situation: CodespaceGuidanceSituation) => {
     provider: string;
     situation: CodespaceGuidanceSituation;
@@ -138,6 +138,7 @@ export interface CodespaceToolServices {
     | "listRepositories"
     | "setupSituation"
     | "listResources"
+    | "refreshProviderState"
     | "getCodespace"
     | "create"
     | "startCodespace"
@@ -180,6 +181,8 @@ const SAFE_ERROR_MESSAGES: Record<string, string> = {
     "The retained operation result has expired. Do not repeat a mutation without inspecting the codespace first.",
   CODESPACE_AUTHORIZATION_REQUIRED: "Restore codespace repository access in Moira Settings.",
   CODESPACE_CREATE_REJECTED: "Codespace creation was rejected.",
+  CODESPACE_BILLING_UNSUPPORTED:
+    "GitHub would bill an organization for this repository; Moira supports only personally billed Codespaces.",
   CODESPACE_CREATE_PENDING: "Codespace creation or cleanup is still pending.",
   CODESPACE_NOT_RUNNING: "The codespace is not ready and running.",
   CODESPACE_START_TIMEOUT:
@@ -584,6 +587,10 @@ export async function executeCodespaceTool(
       const grants = await services.connection.refreshGrants(userId, {
         force: listInput.refresh === true,
       });
+      const resources =
+        listInput.refresh === true && !grants.stale && services.resource
+          ? await services.resource.refreshProviderState(userId, { authorizationFresh: true })
+          : { stale: listInput.refresh === true && grants.stale };
       status = services.connection.getStatus(userId);
       return jsonResult({
         readiness: {
@@ -604,8 +611,11 @@ export async function executeCodespaceTool(
             private: repository.private,
           })) ?? [],
         repositories_stale: grants.stale,
+        resources_stale: resources.stale,
         codespaces: services.resource?.listResources(userId).map(projectCodespace) ?? [],
-        limits: services.observability.limits(userId),
+        limits: await services.observability.limitsWithBilling(userId, {
+          force: listInput.refresh === true,
+        }),
       });
     }
 

@@ -681,6 +681,13 @@ export class MoiraApiClient {
     return response.data.data!;
   }
 
+  async refreshGitHubCodespaces(): Promise<CodespaceManagementView> {
+    const response = await this.client.post<ApiResponse<CodespaceManagementView>>(
+      "/integrations/github/codespaces/refresh",
+    );
+    return response.data.data!;
+  }
+
   async createGitHubCodespace(input: {
     repository_id: string;
     ref: string;

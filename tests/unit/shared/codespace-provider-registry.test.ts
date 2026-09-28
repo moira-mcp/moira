@@ -19,6 +19,7 @@ function provider(id: string): CodespaceProviderAdapter {
     health: async () => ({ state: "available", reason: null }),
     getIdentity: async () => ({ id: "1", login: "owner" }),
     listMachines: async () => [],
+    preflightCreate: async () => ({ billableOwnerId: "1" }),
     create: async () => ({ outcome: "rejected", reason: "unused" }),
     listOwned: async () => [],
     getExact: async () => null,

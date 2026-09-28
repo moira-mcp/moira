@@ -309,6 +309,13 @@
       "when": 1790000300000,
       "tag": "0042_managed_playbook_baseline",
       "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1790000360000,
+      "tag": "0043_codespace_reauthorization_intent",
+      "breakpoints": true
     }
   ]
 }

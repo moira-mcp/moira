@@ -86,6 +86,10 @@ export const GitHubCodespaceSettings: React.FC = () => {
     window.location.assign("/api/integrations/github/start");
   };
 
+  const updateAuthorization = () => {
+    window.location.assign("/api/integrations/github/reauthorize");
+  };
+
   /**
    * Whether GitHub now shows the App installed, read with the stored credential. It replaces
    * Reconnect while installation is pending: the credential is fine, only the installation is not.
@@ -259,6 +263,17 @@ export const GitHubCodespaceSettings: React.FC = () => {
               <h3 className="text-sm font-medium">{t("pages.settings.github.repositories")}</h3>
               <div className="flex items-center gap-2">
                 <span className="text-xs text-muted-foreground">{status.repositories.length}</span>
+                {status.installationUrl && (
+                  <Button size="sm" variant="outline" asChild>
+                    <a
+                      href={status.installationUrl}
+                      rel="noreferrer"
+                      data-testid="github-codespace-add-installation"
+                    >
+                      {t("pages.settings.github.addInstallation")}
+                    </a>
+                  </Button>
+                )}
                 <Button
                   size="sm"
                   variant="outline"
@@ -310,6 +325,15 @@ export const GitHubCodespaceSettings: React.FC = () => {
         )}
 
         <div className="flex flex-wrap gap-2">
+          {status.state === "connected" && (
+            <Button
+              variant="outline"
+              onClick={updateAuthorization}
+              data-testid="github-codespace-reauthorize"
+            >
+              {t("pages.settings.github.reauthorize")}
+            </Button>
+          )}
           {status.canConnect && status.state !== "installation_required" && (
             <Button onClick={startAuthorization} data-testid="github-codespace-connect">
               {status.state === "connection_required" || status.state === "disconnected"

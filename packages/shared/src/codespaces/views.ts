@@ -98,6 +98,29 @@ export function projectCodespaceOperationSummary(
   };
 }
 
+/** GitHub's monthly bill for the connected personal account, separate from Moira's own limits. */
+export interface CodespaceAvailableBillingView {
+  state: "available";
+  payer_login: string;
+  period: { year: number; month: number };
+  /** When Moira retrieved the summary; GitHub's usage data may lag this time. */
+  retrieved_at: number;
+  plan: "free" | "pro" | null;
+  compute: {
+    used_core_hours: number;
+    included_core_hours: number | null;
+    net_amount_usd: number;
+  };
+  storage: {
+    used_gb_month: number;
+    included_gb_month: number | null;
+    net_amount_usd: number;
+  };
+  net_amount_usd: number;
+}
+
+export type CodespaceProviderBillingView = "unavailable" | CodespaceAvailableBillingView;
+
 /**
  * One user's codespace limits beside their current use, as both the website and the MCP `list`
  * result present them. Every limit is the value Moira enforces (see `effectiveCodespaceLimits`);
@@ -140,8 +163,8 @@ export interface CodespaceLimitsView {
     start_wait_seconds: number;
     idle: { auto_stop_enabled: boolean; timeout_minutes: number; provider_max_minutes: number };
   };
-  /** What the provider reveals about its own quota and billing; GitHub reveals nothing to Moira. */
-  provider: { billing: "unavailable" };
+  /** The provider's monthly billing read, independent of limits enforced by Moira. */
+  provider: { billing: CodespaceProviderBillingView };
 }
 
 export function projectCodespaceLimits(input: {

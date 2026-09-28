@@ -343,6 +343,8 @@ export class CodespaceResourceService {
         >
       >;
       policy: () => CodespaceResourcePolicy;
+      /** Refresh provider grants before scheduled observation can interpret an exact 404. */
+      refreshAuthorization?: (userId: string) => Promise<boolean>;
       now?: () => number;
       /** Injected so waiting for a start costs no real time in tests. */
       delay?: (milliseconds: number) => Promise<void>;
@@ -539,6 +541,7 @@ export class CodespaceResourceService {
         if (exact) {
           this.dependencies.repository.recordProviderObservation(
             record.id,
+            record.generation,
             {
               repositoryFullName: exact.repositoryFullName,
               observedRef: exact.ref,
@@ -629,6 +632,17 @@ export class CodespaceResourceService {
       throw new CodespaceConnectionError("REPOSITORY_NOT_ALLOWED", "Repository is not approved");
     }
     approved = currentApproval;
+    if (this.requiresPersonalBilling()) {
+      const preflight = await provider
+        .preflightCreate(credential, approved.repository, requestedRef)
+        .catch(providerFailure);
+      if (preflight.billableOwnerId !== identity.id) {
+        throw new CodespaceResourceError(
+          "CODESPACE_BILLING_UNSUPPORTED",
+          "GitHub would bill an organization for this repository; Moira supports only personally billed Codespaces",
+        );
+      }
+    }
     const machine = smallestPermittedMachine(
       await provider
         .listMachines(credential, approved.repository, requestedRef)
@@ -1378,6 +1392,7 @@ export class CodespaceResourceService {
     }
     this.dependencies.repository.recordProviderObservation(
       record.id,
+      record.generation,
       {
         repositoryFullName: exact.repositoryFullName,
         observedRef: exact.ref,
@@ -1602,6 +1617,7 @@ export class CodespaceResourceService {
       }
       this.dependencies.repository.recordProviderObservation(
         record.id,
+        record.generation,
         {
           repositoryFullName: exact.repositoryFullName,
           observedRef: exact.ref,
@@ -1689,10 +1705,9 @@ export class CodespaceResourceService {
   }
 
   /**
-   * Lists the codespaces of the users whose observation is due — at most one listing per user per
-   * observation interval — and records what the provider says about each running one: its checked-
-   * out ref and last start time, and, when the provider already stopped it, that it is stopped. Nothing
-   * is mutated at the provider. Returns the records observed.
+   * Lists the codespaces of the users whose observation is due, at most once per user per interval.
+   * A missing list entry is checked by exact name before a stable managed resource is retired.
+   * Nothing is mutated at the provider. Returns records observed for the idle-stop pass.
    */
   private async observeProviderState(): Promise<Set<string>> {
     const observed = new Set<string>();
@@ -1707,48 +1722,133 @@ export class CodespaceResourceService {
     );
     for (const userId of users) {
       try {
-        const records = this.dependencies.repository.listObservableRunning(userId, provider.id);
-        if (records.length === 0) continue;
-        const credential = await this.dependencies.credentials.getCredential(userId, provider.id);
-        const listed = new Map(
-          (await provider.listOwned(credential)).map((resource) => [resource.name, resource]),
-        );
-        for (const record of records) {
-          observed.add(record.id);
-          const actual = listed.get(record.providerResourceName!);
-          // Absent from the listing, or no longer this record's: lifecycle decides that from an
-          // exact read when the codespace is next used, not a listing.
-          if (!actual || !exactIdentityMatches(actual, record)) continue;
-          this.dependencies.repository.recordProviderObservation(
-            record.id,
-            {
-              repositoryFullName: actual.repositoryFullName,
-              observedRef: actual.ref,
-              lastUsedAt: actual.lastUsedAt,
-            },
-            this.now(),
-          );
-          if (
-            actual.state === "shutdown" &&
-            this.dependencies.repository.markObservedStopped(
-              record.id,
-              record.generation,
-              this.now(),
-            )
-          ) {
-            await this.emit(
-              "stop",
-              this.dependencies.repository.getOwned(userId, record.id)!,
-              "provider_observed_stopped",
-            );
-          }
-        }
+        const result = await this.observeUserProviderState(userId, provider);
+        for (const resourceId of result.observed) observed.add(resourceId);
       } catch {
         // One user's credential or provider failure never holds back another's observation or the
         // rest of the tick; the next interval observes again.
       }
     }
     return observed;
+  }
+
+  /** Explicit Settings refresh uses the same bounded, read-only observation as the scheduler. */
+  async refreshProviderState(
+    userId: string,
+    options: { authorizationFresh?: boolean } = {},
+  ): Promise<{ stale: boolean }> {
+    if (!this.dependencies.policy().enabled) return { stale: false };
+    try {
+      const result = await this.observeUserProviderState(
+        userId,
+        this.provider(),
+        options.authorizationFresh === true,
+      );
+      return { stale: result.stale };
+    } catch {
+      // The local list remains usable during a provider or credential outage.
+      return { stale: true };
+    }
+  }
+
+  private async observeUserProviderState(
+    userId: string,
+    provider: CodespaceProviderAdapter,
+    authorizationFresh = false,
+  ): Promise<{ observed: Set<string>; stale: boolean }> {
+    const observed = new Set<string>();
+    const records = this.dependencies.repository.listObservablePersistent(userId, provider.id);
+    if (records.length === 0) return { observed, stale: false };
+    if (
+      !authorizationFresh &&
+      this.dependencies.refreshAuthorization &&
+      !(await this.dependencies.refreshAuthorization(userId))
+    ) {
+      return { observed, stale: true };
+    }
+    const credential = await this.dependencies.credentials.getCredential(userId, provider.id);
+    const identity = await provider.getIdentity(credential);
+    const listed = new Map(
+      (await provider.listOwned(credential)).map((resource) => [resource.name, resource]),
+    );
+    let stale = false;
+    for (const record of records) {
+      if (
+        record.externalOwnerId !== identity.id ||
+        !this.dependencies.repository.hasCurrentAuthorization(userId, record.id)
+      ) {
+        stale = true;
+        continue;
+      }
+      observed.add(record.id);
+      let actual = listed.get(record.providerResourceName!);
+      if (!actual || !exactIdentityMatches(actual, record)) {
+        try {
+          actual = (await provider.getExact(credential, record.providerResourceName!)) ?? undefined;
+        } catch {
+          stale = true;
+          continue;
+        }
+      }
+      if (!actual) {
+        const removed = this.dependencies.repository.completeAbsentPersistentLifecycle(
+          record.id,
+          record.generation,
+          record.desiredState as "running" | "stopped",
+          "verified_externally_absent",
+          this.now(),
+          { userId, state: record.state as "usable" | "stopped" },
+        );
+        if (removed) {
+          await this.emit(
+            "delete",
+            this.dependencies.repository.getOwned(userId, record.id)!,
+            "verified_externally_absent",
+          );
+        } else {
+          stale = true;
+        }
+        continue;
+      }
+      if (!exactIdentityMatches(actual, record)) {
+        stale = true;
+        continue;
+      }
+      if (!this.dependencies.repository.hasCurrentAuthorization(userId, record.id)) {
+        stale = true;
+        continue;
+      }
+      this.dependencies.repository.recordProviderObservation(
+        record.id,
+        record.generation,
+        {
+          repositoryFullName: actual.repositoryFullName,
+          observedRef: actual.ref,
+          lastUsedAt: actual.lastUsedAt,
+        },
+        this.now(),
+      );
+      if (
+        actual.state === "shutdown" &&
+        this.dependencies.repository.markObservedStopped(record.id, record.generation, this.now())
+      ) {
+        await this.emit(
+          "stop",
+          this.dependencies.repository.getOwned(userId, record.id)!,
+          "provider_observed_stopped",
+        );
+      } else if (
+        actual.state === "available" &&
+        this.dependencies.repository.markObservedRunning(record.id, record.generation, this.now())
+      ) {
+        await this.emit(
+          "start",
+          this.dependencies.repository.getOwned(userId, record.id)!,
+          "provider_observed_running",
+        );
+      }
+    }
+    return { observed, stale };
   }
 
   /**

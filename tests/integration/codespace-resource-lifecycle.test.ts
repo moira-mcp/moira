@@ -62,6 +62,7 @@ class FakeProvider implements CodespaceProviderAdapter {
   startObservation: (() => void) | null = null;
   returnedMachine: CodespaceMachine = machine;
   returnedBillableOwnerId = "101";
+  preflightBillableOwnerId = "101";
   returnedState: CodespaceProviderResource["state"] = "available";
   ownedResources: CodespaceProviderResource[] | null = null;
   connectorAvailable = true;
@@ -85,6 +86,7 @@ class FakeProvider implements CodespaceProviderAdapter {
   readonly healthCalls = jest.fn();
   readonly machineCalls = jest.fn();
   readonly createCalls = jest.fn();
+  readonly preflightCalls = jest.fn();
   readonly connectorCalls = jest.fn();
   readonly startCalls = jest.fn();
   readonly stopCalls = jest.fn();
@@ -93,6 +95,8 @@ class FakeProvider implements CodespaceProviderAdapter {
   readonly identityCalls = jest.fn();
   readonly listCalls = jest.fn();
   readonly exactCalls = jest.fn();
+  exactFailure = false;
+  exactObservation: (() => void) | null = null;
 
   constructor(
     // A provider id the registry has never seen is a case this suite exercises, so the parameter is
@@ -127,6 +131,14 @@ class FakeProvider implements CodespaceProviderAdapter {
     this.machineCalls(repository, ref);
     this.machineObservation?.();
     return [machine];
+  }
+  async preflightCreate(
+    _credential: string,
+    repository: Parameters<CodespaceProviderAdapter["preflightCreate"]>[1],
+    ref: string,
+  ) {
+    this.preflightCalls(repository, ref);
+    return { billableOwnerId: this.preflightBillableOwnerId };
   }
   guidance() {
     return {
@@ -178,6 +190,8 @@ class FakeProvider implements CodespaceProviderAdapter {
   }
   async getExact(_token: string, name: string) {
     this.exactCalls(name);
+    this.exactObservation?.();
+    if (this.exactFailure) throw new Error("GitHub unavailable");
     if (this.resource?.name === name) return this.resource;
     return this.others.find((other) => other.name === name) ?? null;
   }
@@ -247,7 +261,10 @@ class FakeProvider implements CodespaceProviderAdapter {
   }
 }
 
-function fixture(policyOverrides: Partial<CodespaceResourcePolicy> = {}) {
+function fixture(
+  policyOverrides: Partial<CodespaceResourcePolicy> = {},
+  refreshAuthorization?: (userId: string) => Promise<boolean>,
+) {
   const sqlite = new Database(":memory:");
   sqlite.pragma("foreign_keys = ON");
   migrate(drizzle(sqlite), { migrationsFolder: migrations });
@@ -309,6 +326,7 @@ function fixture(policyOverrides: Partial<CodespaceResourcePolicy> = {}) {
         personalBillingOnly: true,
       },
       policy: () => effectivePolicy,
+      refreshAuthorization,
       now: () => currentTime,
       delay: async (milliseconds) => {
         currentTime += milliseconds;
@@ -1683,6 +1701,57 @@ describe("durable persistent codespace lifecycle", () => {
     }
   });
 
+  test("refuses organization billing before any provider create or held reservation", async () => {
+    const value = fixture();
+    try {
+      value.provider.preflightBillableOwnerId = "organization-202";
+      await expect(value.service.create("user-1", "301", "refs/heads/main")).rejects.toMatchObject({
+        code: "CODESPACE_BILLING_UNSUPPORTED",
+      });
+      expect(value.provider.preflightCalls).toHaveBeenCalledWith(
+        expect.objectContaining({ id: "301" }),
+        "refs/heads/main",
+      );
+      expect(value.provider.createCalls).not.toHaveBeenCalled();
+      expect(value.repository.countHeld("user-1", CODESPACE_PROVIDER_GITHUB)).toBe(0);
+    } finally {
+      value.sqlite.close();
+    }
+  });
+
+  test("creates a personally billed Codespace from its approved organization repository", async () => {
+    const value = fixture();
+    try {
+      value.sqlite
+        .prepare(
+          `INSERT INTO codespaceConnectionRepository
+           (connectionId, externalInstallationId, externalRepositoryId, fullName, private, createdAt)
+           VALUES ('connection-1', 'organization-installation', '303', 'moira-mcp/moira', 0, ?)`,
+        )
+        .run(value.clock());
+
+      const created = await value.service.create("user-1", "303", "refs/heads/master");
+      expect(value.provider.preflightCalls).toHaveBeenCalledWith(
+        expect.objectContaining({ id: "303", fullName: "moira-mcp/moira" }),
+        "refs/heads/master",
+      );
+      expect(value.provider.createCalls).toHaveBeenCalledWith(
+        expect.objectContaining({
+          repository: expect.objectContaining({ id: "303", fullName: "moira-mcp/moira" }),
+          ref: "refs/heads/master",
+        }),
+      );
+      expect(created.resource).toMatchObject({
+        state: "usable",
+        repositoryId: "303",
+        repositoryFullName: "moira-mcp/moira",
+        billableOwnerId: "101",
+      });
+    } finally {
+      value.sqlite.close();
+    }
+  });
+
   test("keeps a transitional returned resource pending without connector transport", async () => {
     const value = fixture();
     try {
@@ -2640,6 +2709,149 @@ describe("the provider's own view of running codespaces is observed periodically
         lastOutcome: "provider_observed_stopped",
       });
       expect(value.provider.stopCalls).not.toHaveBeenCalled();
+    } finally {
+      value.sqlite.close();
+    }
+  });
+
+  test.each(["usable", "stopped"] as const)(
+    "an externally deleted %s Codespace disappears and releases its held slot after exact 404",
+    async (state) => {
+      const value = fixture();
+      try {
+        const created = await value.service.create("user-1", "301", "refs/heads/main");
+        if (state === "stopped") await value.service.stopCodespace("user-1", created.resource.id);
+        value.provider.resource = null;
+        const refreshed = await value.service.refreshProviderState("user-1");
+        expect(refreshed).toEqual({ stale: false });
+        expect(value.provider.exactCalls).toHaveBeenCalledWith("silver-space-123");
+        expect(value.service.listResources("user-1")).toEqual([]);
+        expect(value.repository.countHeld("user-1", CODESPACE_PROVIDER_GITHUB)).toBe(0);
+        expect(value.repository.getOwned("user-1", created.resource.id)).toMatchObject({
+          state: "deleted",
+          observedState: "absent",
+        });
+      } finally {
+        value.sqlite.close();
+      }
+    },
+  );
+
+  test("a missing list entry with a successful exact read keeps the resource and capacity", async () => {
+    const value = fixture();
+    try {
+      const created = await value.service.create("user-1", "301", "refs/heads/main");
+      value.provider.ownedResources = [];
+      expect(await value.service.refreshProviderState("user-1")).toEqual({ stale: false });
+      expect(value.provider.exactCalls).toHaveBeenCalledWith("silver-space-123");
+      expect(value.service.getCodespace("user-1", created.resource.id).state).toBe("usable");
+      expect(value.repository.countHeld("user-1", CODESPACE_PROVIDER_GITHUB)).toBe(1);
+    } finally {
+      value.sqlite.close();
+    }
+  });
+
+  test("an exact provider error preserves a missing listed resource and reports stale state", async () => {
+    const value = fixture();
+    try {
+      const created = await value.service.create("user-1", "301", "refs/heads/main");
+      value.provider.ownedResources = [];
+      value.provider.exactFailure = true;
+      expect(await value.service.refreshProviderState("user-1")).toEqual({ stale: true });
+      expect(value.service.getCodespace("user-1", created.resource.id).state).toBe("usable");
+      expect(value.repository.countHeld("user-1", CODESPACE_PROVIDER_GITHUB)).toBe(1);
+    } finally {
+      value.sqlite.close();
+    }
+  });
+
+  test("failed grant refresh prevents treating provider absence as deletion", async () => {
+    const value = fixture({}, async () => false);
+    try {
+      const created = await value.service.create("user-1", "301", "refs/heads/main");
+      value.provider.resource = null;
+      expect(await value.service.refreshProviderState("user-1")).toEqual({ stale: true });
+      expect(value.provider.exactCalls).not.toHaveBeenCalled();
+      expect(value.service.getCodespace("user-1", created.resource.id).state).toBe("usable");
+      expect(value.repository.countHeld("user-1", CODESPACE_PROVIDER_GITHUB)).toBe(1);
+    } finally {
+      value.sqlite.close();
+    }
+  });
+
+  test("authorization changed during exact 404 prevents retiring a resource", async () => {
+    const value = fixture();
+    try {
+      const created = await value.service.create("user-1", "301", "refs/heads/main");
+      value.provider.resource = null;
+      value.provider.exactObservation = () => reauthorize(value, "connection-1");
+      expect(await value.service.refreshProviderState("user-1")).toEqual({ stale: true });
+      expect(value.service.getCodespace("user-1", created.resource.id).state).toBe("usable");
+      expect(value.repository.countHeld("user-1", CODESPACE_PROVIDER_GITHUB)).toBe(1);
+    } finally {
+      value.sqlite.close();
+    }
+  });
+
+  test("a new local generation superseding exact 404 keeps the current resource", async () => {
+    const value = fixture();
+    try {
+      const created = await value.service.create("user-1", "301", "refs/heads/main");
+      value.provider.resource = null;
+      value.provider.exactObservation = () => {
+        value.sqlite
+          .prepare("UPDATE codespaceResource SET generation = generation + 1 WHERE id = ?")
+          .run(created.resource.id);
+      };
+      expect(await value.service.refreshProviderState("user-1")).toEqual({ stale: true });
+      expect(value.service.getCodespace("user-1", created.resource.id)).toMatchObject({
+        state: "usable",
+        generation: created.resource.generation + 1,
+      });
+      expect(value.repository.countHeld("user-1", CODESPACE_PROVIDER_GITHUB)).toBe(1);
+    } finally {
+      value.sqlite.close();
+    }
+  });
+
+  test("provider resources without a Moira record are not adopted by refresh", async () => {
+    const value = fixture();
+    try {
+      value.provider.resource = {
+        name: "external-space",
+        displayName: "external-marker",
+        ownerId: "101",
+        billableOwnerId: "101",
+        repositoryId: "301",
+        repositoryFullName: "owner/repository",
+        ref: "main",
+        state: "available",
+        lastUsedAt: null,
+        machine,
+        createdAt: value.clock(),
+      };
+      expect(await value.service.refreshProviderState("user-1")).toEqual({ stale: false });
+      expect(value.service.listResources("user-1")).toEqual([]);
+      expect(value.repository.countHeld("user-1", CODESPACE_PROVIDER_GITHUB)).toBe(0);
+    } finally {
+      value.sqlite.close();
+    }
+  });
+
+  test("an externally restarted stopped Codespace is recorded running without provider mutation", async () => {
+    const value = fixture();
+    try {
+      const created = await value.service.create("user-1", "301", "refs/heads/main");
+      await value.service.stopCodespace("user-1", created.resource.id);
+      value.provider.resource = { ...value.provider.resource!, state: "available" };
+      value.provider.startCalls.mockClear();
+      expect(await value.service.refreshProviderState("user-1")).toEqual({ stale: false });
+      expect(value.service.getCodespace("user-1", created.resource.id)).toMatchObject({
+        state: "usable",
+        desiredState: "running",
+        observedState: "running",
+      });
+      expect(value.provider.startCalls).not.toHaveBeenCalled();
     } finally {
       value.sqlite.close();
     }

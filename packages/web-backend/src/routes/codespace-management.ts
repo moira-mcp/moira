@@ -21,11 +21,12 @@ import {
 
 export interface CodespaceManagementServices {
   connection: Pick<CodespaceConnectionService, "getStatus" | "refreshGrants">;
-  observability: Pick<CodespaceObservabilityService, "readiness" | "limits">;
+  observability: Pick<CodespaceObservabilityService, "readiness" | "limitsWithBilling">;
   resource: Pick<
     CodespaceResourceService,
     | "listRepositories"
     | "listResources"
+    | "refreshProviderState"
     | "getCodespace"
     | "create"
     | "startCodespace"
@@ -42,6 +43,7 @@ const RESOURCE_ERROR_STATUS: Record<string, number> = {
   CODESPACE_NOT_RUNNING: 409,
   CODESPACE_RESOURCE_INVALID: 400,
   CODESPACE_CREATE_REJECTED: 422,
+  CODESPACE_BILLING_UNSUPPORTED: 422,
   CODESPACE_POLICY_LIMIT: 429,
   CODESPACE_SESSION_UNAVAILABLE: 409,
   CODESPACE_START_TIMEOUT: 504,
@@ -122,28 +124,43 @@ export function createCodespaceManagementRoutes(
   const codespaceId = (value: unknown): string | null =>
     typeof value === "string" && UUID.test(value) ? value : null;
 
+  const managementData = async (userId: string, refresh: boolean) => {
+    const grants = refresh
+      ? await services.connection.refreshGrants(userId, { force: true })
+      : await services.connection.refreshGrants(userId);
+    const resources =
+      refresh && !grants.stale && services.resource
+        ? await services.resource.refreshProviderState(userId, { authorizationFresh: true })
+        : { stale: refresh && grants.stale };
+    return {
+      readiness: await services.observability.readiness(),
+      connection: services.connection.getStatus(userId),
+      repositories:
+        services.resource?.listRepositories(userId).map((repository) => ({
+          repository_id: repository.id,
+          name: repository.fullName,
+          private: repository.private,
+        })) ?? [],
+      repositories_stale: grants.stale,
+      resources_stale: resources.stale,
+      codespaces: services.resource?.listResources(userId).map(projectCodespaceSummary) ?? [],
+      limits: await services.observability.limitsWithBilling(userId, { force: refresh }),
+    };
+  };
+
   router.get(
     "/",
     asyncHandler(async (req, res) => {
       const userId = (req as AuthenticatedRequest).userId;
-      const grants = await services.connection.refreshGrants(userId);
-      const readiness = await services.observability.readiness();
-      res.json({
-        success: true,
-        data: {
-          readiness,
-          connection: services.connection.getStatus(userId),
-          repositories:
-            services.resource?.listRepositories(userId).map((repository) => ({
-              repository_id: repository.id,
-              name: repository.fullName,
-              private: repository.private,
-            })) ?? [],
-          repositories_stale: grants.stale,
-          codespaces: services.resource?.listResources(userId).map(projectCodespaceSummary) ?? [],
-          limits: services.observability.limits(userId),
-        },
-      });
+      res.json({ success: true, data: await managementData(userId, false) });
+    }),
+  );
+
+  router.post(
+    "/refresh",
+    asyncHandler(async (req, res) => {
+      const userId = (req as AuthenticatedRequest).userId;
+      res.json({ success: true, data: await managementData(userId, true) });
     }),
   );
 
@@ -326,6 +343,8 @@ function publicMessage(code: string): string {
       return "Codespace creation or cleanup is still pending";
     case "CODESPACE_AUTHORIZATION_REQUIRED":
       return "Restore codespace repository access in Settings";
+    case "CODESPACE_BILLING_UNSUPPORTED":
+      return "GitHub would bill an organization; this connection supports only personal billing";
     default:
       return "The codespace request was rejected";
   }

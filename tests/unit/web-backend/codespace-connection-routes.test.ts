@@ -53,6 +53,45 @@ describe("GitHub codespace connection web routes", () => {
     expect(response.headers["referrer-policy"]).toBe("no-referrer");
   });
 
+  test("a connected account starts a separate non-destructive reauthorization", async () => {
+    const beginReauthorization = jest
+      .fn<CodespaceConnectionService["beginReauthorization"]>()
+      .mockResolvedValue("https://github.com/login/oauth/authorize?state=renewed");
+    const beginAuthorization = jest.fn<CodespaceConnectionService["beginAuthorization"]>();
+    const service = {
+      getStatus: () => ({ ...baseStatus, state: "connected" as const }),
+      beginAuthorization,
+      beginReauthorization,
+    } as unknown as CodespaceConnectionService;
+
+    const response = await request(appWith(service)).get("/api/integrations/github/reauthorize");
+
+    expect(response.status).toBe(303);
+    expect(response.headers.location).toBe(
+      "https://github.com/login/oauth/authorize?state=renewed",
+    );
+    expect(response.headers["cache-control"]).toBe("no-store");
+    expect(response.headers["referrer-policy"]).toBe("no-referrer");
+    expect(beginReauthorization).toHaveBeenCalledWith("user-a", "web-session-secret");
+    expect(beginAuthorization).not.toHaveBeenCalled();
+  });
+
+  test("a refused reauthorization does not claim that the account must disconnect", async () => {
+    const service = {
+      getStatus: () => ({ ...baseStatus, state: "connected" as const }),
+      beginReauthorization: jest
+        .fn<CodespaceConnectionService["beginReauthorization"]>()
+        .mockRejectedValue(new CodespaceConnectionError("AUTHORIZATION_FAILED", "cannot renew")),
+    } as unknown as CodespaceConnectionService;
+
+    const response = await request(appWith(service)).get("/api/integrations/github/reauthorize");
+
+    expect(response.status).toBe(303);
+    expect(response.headers.location).toBe(
+      "https://moira.example.com/app/settings?github=authorization_failed#integrations-github",
+    );
+  });
+
   test("turns callback failure into a safe same-origin Settings result without reflecting secrets", async () => {
     const service = {
       getStatus: () => baseStatus,

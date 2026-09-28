@@ -268,16 +268,16 @@
     "fingerprint": "14554319"
   },
   "settings-github.connect": {
-    "revision": 1,
-    "fingerprint": "43a7b0b1"
+    "revision": 2,
+    "fingerprint": "52012de3"
   },
   "settings-github.codespaces": {
-    "revision": 1,
-    "fingerprint": "dca3a596"
+    "revision": 2,
+    "fingerprint": "22fc3e42"
   },
   "settings-github.limits": {
-    "revision": 1,
-    "fingerprint": "51baa04b"
+    "revision": 2,
+    "fingerprint": "dfee77fe"
   },
   "settings-github.autopause": {
     "revision": 1,

@@ -9,7 +9,15 @@
 
 import React, { useEffect, useState } from "react";
 import { afterEach, beforeEach, describe, expect, jest, test } from "@jest/globals";
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  renderHook,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import "@testing-library/jest-dom/jest-globals";
 import { I18nextProvider } from "react-i18next";
 import { MemoryRouter } from "react-router-dom";
@@ -128,7 +136,7 @@ jest.unstable_mockModule("../../../packages/web-frontend/src/guides/registry", (
 const { GuideProvider, useGuidePage } =
   await import("../../../packages/web-frontend/src/guides/GuideContext");
 const { GuideButton } = await import("../../../packages/web-frontend/src/guides/GuideButton");
-const { GUIDE_PROGRESS_KEY, resetGuideProgress } =
+const { GUIDE_PROGRESS_KEY, resetGuideProgress, useGuideProgress } =
   await import("../../../packages/web-frontend/src/guides/progress");
 const { fakeUserSettings } = await import("./helpers/fake-user-settings");
 const { resetBeginnerPanels } =
@@ -147,6 +155,15 @@ function recordCardSteps(): { shown: string[]; stop: () => void } {
   });
   observer.observe(document.body, { subtree: true, childList: true, attributes: true });
   return { shown, stop: () => observer.disconnect() };
+}
+
+/** Advance the runner's polling and page timers without relying on a loaded worker's wall clock. */
+function elapseGuideTimers(ms: number): void {
+  for (let passed = 0; passed < ms; passed += 250) {
+    act(() => {
+      jest.advanceTimersByTime(250);
+    });
+  }
 }
 
 /** An element that is drawn only a while after the page. */
@@ -243,6 +260,7 @@ afterEach(() => {
 
 describe("an optional step", () => {
   test("whose element is absent is never shown, announced or recorded, and is passed with a note; one drawn late is shown", async () => {
+    jest.useFakeTimers();
     renderPage();
     // Every step the card ever names, and everything the live region ever says.
     const shownSteps: string[] = [];
@@ -257,31 +275,43 @@ describe("an optional step", () => {
     });
     observer.observe(document.body, { subtree: true, childList: true, attributes: true });
 
-    fireEvent.click(screen.getByTestId("guide-open"));
-    await waitFor(() =>
-      expect(screen.getByTestId("guide-card")).toHaveAttribute("data-guide-step", "page"),
-    );
-    fireEvent.click(screen.getByTestId("guide-next"));
+    const late = document.createElement("section");
+    late.setAttribute("data-guide", "fixture.late");
+    late.textContent = "late";
+    try {
+      fireEvent.click(screen.getByTestId("guide-open"));
+      elapseGuideTimers(500);
+      await act(async () => {});
+      expect(screen.getByTestId("guide-card")).toHaveAttribute("data-guide-step", "page");
+      fireEvent.click(screen.getByTestId("guide-next"));
 
-    // The absent step is passed after the runner's wait; the late element is drawn while the late
-    // step waits for it.
-    await waitFor(
-      () => expect(screen.getByTestId("guide-card")).toHaveAttribute("data-guide-step", "late"),
-      { timeout: 9000 },
-    );
-    expect(screen.getByTestId("guide-note")).toHaveTextContent(
-      i18n.t("guides.ui.skippedHidden", { count: 1 }) as string,
-    );
-    observer.disconnect();
+      // The absent step is passed after the runner's wait. The next step remains unseen until its
+      // page element arrives, independently of how long the test worker takes to draw that element.
+      act(() => jest.advanceTimersByTime(3200));
+      expect(screen.queryByTestId("guide-card")).toBeNull();
+      act(() => document.body.append(late));
+      elapseGuideTimers(250);
+      await Promise.resolve(); // let the observer see the committed card
+      expect(screen.getByTestId("guide-card")).toHaveAttribute("data-guide-step", "late");
+      expect(screen.getByTestId("guide-note")).toHaveTextContent(
+        i18n.t("guides.ui.skippedHidden", { count: 1 }) as string,
+      );
 
-    expect(shownSteps).toEqual(["page", "late"]);
-    expect(announced.some((said) => said.includes("steps.absent"))).toBe(false);
-    await waitFor(() => {
-      const progress = server.stored[GUIDE_PROGRESS_KEY] as { seen?: Record<string, number> };
-      expect(progress?.seen).toMatchObject({ "fixture.page": 1, "fixture.late": 1 });
-      expect(progress?.seen).not.toHaveProperty(["fixture.absent"]);
-    });
-  }, 15000);
+      expect(shownSteps).toEqual(["page", "late"]);
+      expect(announced.some((said) => said.includes("steps.absent"))).toBe(false);
+      // The in-page setting updates synchronously when a shown step is recorded. Server save
+      // ordering is covered by guides-progress.test.tsx; here the distinction is which step ran.
+      const { result } = renderHook(() => useGuideProgress());
+      expect(result.current.progress?.seen).toMatchObject({
+        "fixture.page": 1,
+        "fixture.late": 1,
+      });
+      expect(result.current.progress?.seen).not.toHaveProperty(["fixture.absent"]);
+    } finally {
+      observer.disconnect();
+      late.remove();
+    }
+  });
 
   test("declared absent — in a hidden beginner panel, or opened only by a link — is passed at once, and the note counts every step passed", async () => {
     server = fakeUserSettings({ "ui.hidden_panels": ["home-intro"] });
@@ -399,13 +429,6 @@ describe("an optional step", () => {
     // The runner's waits are timers: driving them by hand makes the sequence independent of how
     // busy the machine is.
     jest.useFakeTimers();
-    const elapse = (ms: number): void => {
-      for (let passed = 0; passed < ms; passed += 250) {
-        act(() => {
-          jest.advanceTimersByTime(250);
-        });
-      }
-    };
     render(
       <MemoryRouter initialEntries={["/fixture"]}>
         <I18nextProvider i18n={i18n}>
@@ -416,15 +439,15 @@ describe("an optional step", () => {
       </MemoryRouter>,
     );
     fireEvent.click(screen.getByTestId("guide-open"));
-    elapse(500);
+    elapseGuideTimers(500);
     expect(screen.getByTestId("guide-card")).toHaveAttribute("data-guide-step", "start");
     fireEvent.click(screen.getByTestId("guide-next"));
     // The required step says it cannot find its element once the wait is over …
-    elapse(3500);
+    elapseGuideTimers(3500);
     expect(screen.getByTestId("guide-note")).toBeInTheDocument();
     expect(screen.getByTestId("guide-card")).toHaveAttribute("data-guide-step", "late");
     // … and finds it when it arrives, a little later.
-    elapse(1500);
+    elapseGuideTimers(1500);
     expect(screen.getByTestId("guide-spotlight")).toHaveAttribute(
       "data-guide-anchor",
       "fixture.late",
@@ -433,7 +456,7 @@ describe("an optional step", () => {
     // The next step is drawn only by a view the page never switches to: it is passed after the
     // same wait, and the tour goes on.
     fireEvent.click(screen.getByTestId("guide-next"));
-    elapse(4000);
+    elapseGuideTimers(4000);
     expect(screen.getByTestId("guide-card")).toHaveAttribute("data-guide-step", "end");
   });
 });

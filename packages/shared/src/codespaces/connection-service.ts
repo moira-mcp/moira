@@ -4,6 +4,8 @@ import { CodespaceCredentialVault } from "./credential-vault.js";
 import {
   CodespaceConnectionRepository,
   digestCodespaceAuthorizationValue,
+  type CodespaceAuthorizationIntent,
+  type ConnectedCodespaceInput,
 } from "./connection-repository.js";
 import {
   CODESPACE_PROVIDER_GITHUB,
@@ -143,6 +145,59 @@ function validateTokenPayload(payload: GitHubCodespaceTokenResponse, now: number
       "GitHub App did not return an expiring user credential",
     );
   }
+}
+
+/** Enumerate only installations visible to this user's App token and repositories owned by each. */
+async function enumerateGrants(
+  client: GitHubCodespaceClient,
+  accessToken: string,
+  identity: GitHubCodespaceUser,
+): Promise<{
+  installations: CodespaceInstallationGrant[];
+  repositories: CodespaceRepositoryGrant[];
+}> {
+  const accountId = validateExternalId(identity.id);
+  const installations: CodespaceInstallationGrant[] = [];
+  const repositories: CodespaceRepositoryGrant[] = [];
+  for (const installation of await client.listInstallations(accessToken)) {
+    if (installation.targetType !== "User" && installation.targetType !== "Organization") continue;
+    const installationAccountId = validateExternalId(installation.accountId);
+    if (installation.targetType === "User" && installationAccountId !== accountId) continue;
+    const installationId = validateExternalId(installation.id);
+    const installationOwner = installation.accountLogin.toLowerCase();
+    if (!/^[a-z0-9-]{1,39}$/.test(installationOwner)) {
+      throw new CodespaceConnectionError(
+        "AUTHORIZATION_FAILED",
+        "GitHub returned an invalid installation",
+      );
+    }
+    installations.push({
+      externalInstallationId: installationId,
+      repositorySelection: installation.repositorySelection,
+    });
+    for (const repository of await client.listInstallationRepositories(
+      accessToken,
+      installationId,
+    )) {
+      const repositoryId = validateExternalId(repository.id);
+      if (
+        !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository.fullName) ||
+        repository.fullName.split("/", 1)[0]?.toLowerCase() !== installationOwner
+      ) {
+        throw new CodespaceConnectionError(
+          "AUTHORIZATION_FAILED",
+          "GitHub returned an invalid repository",
+        );
+      }
+      repositories.push({
+        externalInstallationId: installationId,
+        externalRepositoryId: repositoryId,
+        fullName: repository.fullName,
+        private: repository.private,
+      });
+    }
+  }
+  return { installations, repositories };
 }
 
 function mapSnapshot(
@@ -467,11 +522,26 @@ export class CodespaceConnectionService {
       return pendingRevocationView(config.settingsUrl);
     }
     const view = mapSnapshot(snapshot, config.settingsUrl);
-    view.installationUrl = view.state === "installation_required" ? config.installationUrl : null;
+    view.installationUrl =
+      view.state === "installation_required" || view.state === "connected"
+        ? config.installationUrl
+        : null;
     return view;
   }
 
   async beginAuthorization(userId: string, sessionToken: string): Promise<string> {
+    return this.startAuthorization(userId, sessionToken, "connect");
+  }
+
+  async beginReauthorization(userId: string, sessionToken: string): Promise<string> {
+    return this.startAuthorization(userId, sessionToken, "reauthorize");
+  }
+
+  private async startAuthorization(
+    userId: string,
+    sessionToken: string,
+    kind: CodespaceAuthorizationIntent["kind"],
+  ): Promise<string> {
     const config = requireAvailableConfig(this.dependencies.config());
     let current = this.dependencies.repository.getConnection(userId, CODESPACE_PROVIDER_GITHUB);
     if (this.hasUnreadableCredential(userId, config)) {
@@ -497,12 +567,22 @@ export class CodespaceConnectionService {
         "Revoke the GitHub App grant externally, then confirm recovery in Moira settings",
       );
     }
-    if (current?.status === "connected" || current?.status === "revocation_pending") {
+    if (current?.status === "revocation_pending") {
       throw new CodespaceConnectionError(
         "AUTHORIZATION_FAILED",
-        current.status === "connected"
-          ? "Disconnect GitHub before changing the connected account"
-          : "GitHub disconnect is still pending",
+        "GitHub disconnect is still pending",
+      );
+    }
+    if (kind === "connect" && current?.status === "connected") {
+      throw new CodespaceConnectionError(
+        "AUTHORIZATION_FAILED",
+        "Disconnect GitHub before changing the connected account",
+      );
+    }
+    if (kind === "reauthorize" && current?.status !== "connected") {
+      throw new CodespaceConnectionError(
+        "AUTHORIZATION_FAILED",
+        "A connected GitHub account is required to update permissions",
       );
     }
     try {
@@ -515,12 +595,17 @@ export class CodespaceConnectionService {
     }
     const state = this.randomState();
     const now = this.now();
+    const intent: CodespaceAuthorizationIntent =
+      kind === "reauthorize"
+        ? { kind, connectionId: current!.id, generation: current!.credentialGeneration }
+        : { kind };
     this.dependencies.repository.storeAuthorizationState({
       stateHash: digestCodespaceAuthorizationValue(state),
       userId,
       sessionTokenHash: digestCodespaceAuthorizationValue(sessionToken),
       provider: CODESPACE_PROVIDER_GITHUB,
       redirectPath: config.settingsUrl,
+      intent,
       expiresAt: now + AUTHORIZATION_STATE_TTL_MS,
       now,
     });
@@ -569,6 +654,19 @@ export class CodespaceConnectionService {
       input.userId,
       CODESPACE_PROVIDER_GITHUB,
     );
+    if (
+      consumed.intent.kind === "reauthorize"
+        ? !previous ||
+          previous.connection.status !== "connected" ||
+          previous.connection.id !== consumed.intent.connectionId ||
+          previous.envelope.generation !== consumed.intent.generation
+        : previous?.connection.status === "connected"
+    ) {
+      throw new CodespaceConnectionError(
+        "AUTHORIZATION_FAILED",
+        "GitHub connection changed during authorization",
+      );
+    }
     // The previous credential keeps working until its successor is committed; it is revoked only
     // afterwards (below), so a revocation GitHub refuses can never leave the user without either.
     let previousCredential: CodespaceCredentialPayload | null = null;
@@ -598,6 +696,7 @@ export class CodespaceConnectionService {
 
     let token: GitHubCodespaceTokenResponse | null = null;
     let connectionId: string | null = null;
+    let committedEnvelope: CodespaceCredentialEnvelope | null = null;
     let installationGrants: CodespaceInstallationGrant[] = [];
     let supersededRevocation: { id: string; envelope: CodespaceCredentialEnvelope } | null = null;
     try {
@@ -612,52 +711,34 @@ export class CodespaceConnectionService {
       }
       const githubUser = await client.getUser(token.accessToken);
       const externalAccountId = validateExternalId(githubUser.id);
+      if (
+        consumed.intent.kind === "reauthorize" &&
+        externalAccountId !== previous!.connection.externalAccountId
+      ) {
+        throw new CodespaceConnectionError(
+          "AUTHORIZATION_FAILED",
+          "GitHub returned a different connected account",
+        );
+      }
       if (!/^[A-Za-z0-9-]{1,39}$/.test(githubUser.login)) {
         throw new CodespaceConnectionError(
           "AUTHORIZATION_FAILED",
           "GitHub returned an invalid identity",
         );
       }
-      const installations = (await client.listInstallations(token.accessToken)).filter(
-        (installation) =>
-          installation.targetType === "User" &&
-          validateExternalId(installation.accountId) === externalAccountId,
-      );
-      installationGrants = [];
-      const repositoryGrants: CodespaceRepositoryGrant[] = [];
-      for (const installation of installations) {
-        const installationId = validateExternalId(installation.id);
-        installationGrants.push({
-          externalInstallationId: installationId,
-          repositorySelection: installation.repositorySelection,
-        });
-        const repositories = await client.listInstallationRepositories(
-          token.accessToken,
-          installationId,
-        );
-        for (const repository of repositories) {
-          const repositoryId = validateExternalId(repository.id);
-          if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository.fullName)) {
-            throw new CodespaceConnectionError(
-              "AUTHORIZATION_FAILED",
-              "GitHub returned an invalid repository",
-            );
-          }
-          repositoryGrants.push({
-            externalInstallationId: installationId,
-            externalRepositoryId: repositoryId,
-            fullName: repository.fullName,
-            private: repository.private,
-          });
-        }
-      }
-      connectionId = this.dependencies.repository.reserveConnection({
-        userId: input.userId,
-        provider: CODESPACE_PROVIDER_GITHUB,
-        externalAccountId,
-        externalLogin: githubUser.login,
-        now,
-      });
+      const granted = await enumerateGrants(client, token.accessToken, githubUser);
+      installationGrants = granted.installations;
+      const repositoryGrants = granted.repositories;
+      connectionId =
+        consumed.intent.kind === "reauthorize"
+          ? consumed.intent.connectionId
+          : this.dependencies.repository.reserveConnection({
+              userId: input.userId,
+              provider: CODESPACE_PROVIDER_GITHUB,
+              externalAccountId,
+              externalLogin: githubUser.login,
+              now,
+            });
       const generation = (previous?.envelope.generation ?? 0) + 1;
       // Encrypted now, stored only by the commit below: an authorization that fails before the
       // commit leaves the working credential untouched and nothing queued.
@@ -672,7 +753,8 @@ export class CodespaceConnectionService {
         generation,
         token,
       );
-      this.dependencies.repository.completeConnection({
+      committedEnvelope = envelope;
+      const connectedInput: ConnectedCodespaceInput = {
         connectionId,
         userId: input.userId,
         provider: CODESPACE_PROVIDER_GITHUB,
@@ -684,33 +766,93 @@ export class CodespaceConnectionService {
         repositories: repositoryGrants,
         ...(supersededRevocation ? { supersededRevocation } : {}),
         now,
-      });
+      };
+      if (consumed.intent.kind === "reauthorize") {
+        const replaced = this.dependencies.repository.replaceConnectedAuthorization({
+          ...connectedInput,
+          expectedGeneration: consumed.intent.generation,
+          expectedExternalAccountId: previous!.connection.externalAccountId,
+        });
+        if (!replaced) {
+          throw new CodespaceConnectionError(
+            "AUTHORIZATION_FAILED",
+            "GitHub connection changed during authorization",
+          );
+        }
+      } else {
+        this.dependencies.repository.completeConnection(connectedInput);
+      }
     } catch (error) {
-      if (token) {
-        try {
-          await this.retainAndRevokeCredential(input.userId, config, token);
-        } catch {
-          // The encrypted pending row is intentionally retained for a later exact retry.
+      const current = this.dependencies.repository.getCredential(
+        input.userId,
+        CODESPACE_PROVIDER_GITHUB,
+      );
+      // A caller can observe an exception after a transaction committed. Never revoke the token
+      // that the durable vault now serves, even when the original call did not return normally.
+      const successorCommitted =
+        connectionId !== null &&
+        committedEnvelope !== null &&
+        current?.connection.id === connectionId &&
+        current.envelope.generation === committedEnvelope.generation &&
+        current.envelope.ciphertext === committedEnvelope.ciphertext &&
+        current.envelope.authTag === committedEnvelope.authTag;
+      if (successorCommitted) {
+        // Continue the normal post-commit revocation and rebind path below.
+      } else {
+        // Another authorization or refresh may have committed after this callback read its
+        // predecessor. A repeated GitHub token must never be revoked if either credential is now
+        // active. If the current one cannot be decrypted, its identity is unknown: keep it safe.
+        let candidateMayBeCurrent = false;
+        if (token && current) {
+          try {
+            const active = new CodespaceCredentialVault(
+              config.vaultKeyHex,
+              config.vaultKeyVersion,
+            ).decrypt(
+              input.userId,
+              CODESPACE_PROVIDER_GITHUB,
+              current.connection.id,
+              current.envelope,
+            );
+            candidateMayBeCurrent = active.accessToken === token.accessToken;
+          } catch {
+            candidateMayBeCurrent = true;
+          }
         }
-      }
-      if (connectionId) {
-        if (previous && previousCredential && previous.connection.id === connectionId) {
-          // The credential that worked before is still the stored one: whatever failed (the new
-          // credential, or a database error that rolled the commit back) did not touch it, so the
-          // connection returns to where it was instead of being marked failed.
-          this.dependencies.repository.restoreReservedConnection({
-            userId: input.userId,
-            connectionId,
-            status: previous.connection.status,
-            lastErrorCode: previous.connection.lastErrorCode,
-            now: this.now(),
-          });
-        } else {
-          this.dependencies.repository.markCredentialFailed(input.userId, connectionId, this.now());
+        if (
+          token &&
+          token.accessToken !== previousCredential?.accessToken &&
+          !candidateMayBeCurrent
+        ) {
+          try {
+            await this.retainAndRevokeCredential(input.userId, config, token);
+          } catch {
+            // The encrypted pending row is intentionally retained for a later exact retry.
+          }
         }
+        if (connectionId && consumed.intent.kind !== "reauthorize") {
+          if (previous && previousCredential && previous.connection.id === connectionId) {
+            // The credential that worked before is still the stored one: whatever failed (the new
+            // credential, or a database error that rolled the commit back) did not touch it, so the
+            // connection returns to where it was instead of being marked failed.
+            this.dependencies.repository.restoreReservedConnection({
+              userId: input.userId,
+              connectionId,
+              status: previous.connection.status,
+              lastErrorCode: previous.connection.lastErrorCode,
+              now: this.now(),
+            });
+          } else {
+            this.dependencies.repository.markCredentialFailed(
+              input.userId,
+              connectionId,
+              this.now(),
+            );
+          }
+        }
+        if (error instanceof CodespaceConnectionError) throw error;
+        throw new CodespaceConnectionError("AUTHORIZATION_FAILED", "GitHub authorization failed");
       }
-      if (error instanceof CodespaceConnectionError) throw error;
-      throw new CodespaceConnectionError("AUTHORIZATION_FAILED", "GitHub authorization failed");
     }
     if (!connectionId) {
       throw new CodespaceConnectionError("AUTHORIZATION_FAILED", "GitHub authorization failed");
@@ -869,37 +1011,15 @@ export class CodespaceConnectionService {
     try {
       const identity = await client.getUser(accessToken);
       const externalAccountId = validateExternalId(identity.id);
-      const installations = (await client.listInstallations(accessToken)).filter(
-        (installation) =>
-          installation.targetType === "User" &&
-          validateExternalId(installation.accountId) === externalAccountId,
-      );
-      installationGrants = [];
-      repositoryGrants = [];
-      for (const installation of installations) {
-        const externalInstallationId = validateExternalId(installation.id);
-        installationGrants.push({
-          externalInstallationId,
-          repositorySelection: installation.repositorySelection,
-        });
-        for (const repository of await client.listInstallationRepositories(
-          accessToken,
-          externalInstallationId,
-        )) {
-          if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository.fullName)) {
-            throw new CodespaceConnectionError(
-              "AUTHORIZATION_FAILED",
-              "GitHub returned an invalid repository name",
-            );
-          }
-          repositoryGrants.push({
-            externalInstallationId,
-            externalRepositoryId: validateExternalId(repository.id),
-            fullName: repository.fullName,
-            private: repository.private,
-          });
-        }
+      if (externalAccountId !== snapshot.externalAccountId) {
+        throw new CodespaceConnectionError(
+          "AUTHORIZATION_FAILED",
+          "GitHub returned a different connected account",
+        );
       }
+      const granted = await enumerateGrants(client, accessToken, identity);
+      installationGrants = granted.installations;
+      repositoryGrants = granted.repositories;
     } catch (error) {
       if (
         !(error instanceof CodespaceConnectionError) &&

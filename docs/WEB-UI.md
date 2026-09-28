@@ -774,7 +774,10 @@ execution inspector) receive `null` for a user that no longer exists and show th
 - GitHub & Codespaces: `GitHubCodespacesProvider` loads the connection view and the codespace view
   (repositories and `limits`) together and reloads what a change can affect. The connection card
   shows the `GitHubSetupSteps` stepper (connect GitHub, install the Moira App, grant repositories;
-  each done, current, not started or unavailable on this instance). The Cloud codespaces card shows
+  each done, current, not started or unavailable on this instance). The App can be installed on the
+  connected user's account or an organization, but Codespace creation requires GitHub to bill the
+  connected personal account; an organization-billed repository is rejected before creation. The
+  Cloud codespaces card shows
   instance readiness, the agent-authority disclosure, the create form whose hint says how many
   codespaces the user holds of the per-user ceiling and that stopped ones count, and per-codespace
   cards with repository and current branch (`current_ref`, falling back to `requested_ref`),
@@ -783,9 +786,15 @@ execution inspector) receive `null` for a user that no longer exists and show th
   while pending, and delete goes through `ConfirmDialog`. `CodespaceAutoPause` edits
   `codespaces.auto_stop_enabled` and `codespaces.idle_timeout_minutes` (a switch and a timeout select
   within the server's 5–240 range) and states that only agent activity through Moira counts and that
-  GitHub stops a codespace after 240 minutes regardless. `CodespaceLimitsPanel` shows meters for
-  codespaces held, commands running and file transfers plus a collapsed list of the other limits;
-  billing and quota point to GitHub.
+  GitHub stops a codespace after 240 minutes regardless. `CodespaceLimitsPanel` shows the current
+  month's GitHub Codespaces compute, storage and billed amount for the connected personal account
+  above the separate Moira limits. Billing shows an unavailable state if the App lacks `Plan: read`
+  permission or GitHub's billing API cannot be read; Codespace management and local limits remain
+  available. For an existing connection, **Update GitHub permissions** opens GitHub's App user consent
+  through `GET /api/integrations/github/reauthorize` to grant a new account permission without
+  disconnecting or stopping managed Codespaces. The user must approve `Plan: read` on GitHub;
+  Refresh cannot grant it to the existing token. The local limits show meters for codespaces held,
+  commands running and file transfers plus a collapsed list of other limits.
 
 The administrator counterpart lives on the admin page, not here: Admin Settings → Codespaces
 (`AdminCodespaceControls.tsx`) shows readiness facts (configuration, resource creation, connector,
@@ -842,9 +851,9 @@ PreferencesSettings.tsx
 - OAuth consents via GET/DELETE /api/user/oauth-consents
 - Sessions via GET/DELETE /api/user/sessions
 - Handle change via PATCH /api/user/handle
-- GitHub codespace connection via GET /api/integrations/github, browser navigation to GET /api/integrations/github/start, and DELETE /api/integrations/github; the page reports every `?github=<outcome>` redirect as a localized toast (an unknown outcome as the generic authorization failure), and in `installation_required` the card shows Install GitHub App and Check installation (`github-codespace-check-installation`, a forced refresh) instead of Reconnect
+- GitHub codespace connection via GET /api/integrations/github, browser navigation to GET /api/integrations/github/start or GET /api/integrations/github/reauthorize for a connected account, and DELETE /api/integrations/github; the page reports every `?github=<outcome>` redirect as a localized toast (an unknown outcome as the generic authorization failure), and in `installation_required` the card shows Install GitHub App and Check installation (`github-codespace-check-installation`, a forced refresh) instead of Reconnect
 - External GitHub grant recovery via DELETE /api/integrations/github/external-revocation after the user revokes the grant in GitHub; this covers unreadable credentials and an untracked refresh successor
-- Automatic ten-minute repository-grant refresh on Settings load plus an explicit Refresh button backed by `POST /api/integrations/github/refresh`; a provider failure keeps the saved repositories visible with a stale warning
+- Automatic ten-minute installation and repository-grant refresh on Settings load plus an explicit connection-card Refresh button backed by `POST /api/integrations/github/refresh`; a provider failure keeps the saved repositories visible with a stale warning. The Cloud codespaces card's Refresh calls `POST /api/integrations/github/codespaces/refresh` to force that grant refresh, reconcile stored codespaces against GitHub's current resource state, and re-read monthly billing; repository and resource refresh failures have separate stale warnings, while the local list remains visible
 
 **Password Strength Indicator (Progress component):**
 

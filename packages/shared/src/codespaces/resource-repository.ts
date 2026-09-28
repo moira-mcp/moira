@@ -30,6 +30,18 @@ export const CODESPACE_IDLE_TIMEOUT_MINUTES = { minimum: 5, maximum: 240, defaul
 /** Operation states that mean something is still running in, or about to reach, the codespace. */
 const ACTIVE_OPERATION_STATES = "'reserved', 'running', 'cancel_pending', 'reconcile_pending'";
 
+/** The stored authorization still reaches this record's provider account and repository. */
+const CURRENT_AUTHORIZATION_PREDICATE = `EXISTS (
+  SELECT 1 FROM codespaceConnection c
+  JOIN codespaceConnectionRepository grantRow ON grantRow.connectionId = c.id
+  WHERE c.id = codespaceResource.connectionId
+    AND c.userId = codespaceResource.userId
+    AND c.provider = codespaceResource.provider AND c.status = 'connected'
+    AND c.credentialGeneration = codespaceResource.authorizationGeneration
+    AND (codespaceResource.externalOwnerId IS NULL
+      OR c.externalAccountId = codespaceResource.externalOwnerId)
+    AND grantRow.externalRepositoryId = codespaceResource.repositoryId)`;
+
 /**
  * A user's stored value for a setting, else the setting's seeded default, else `fallback`. `user`
  * is the SQL expression naming the user, so the same text serves a per-row scan and a single read.
@@ -456,14 +468,8 @@ export class CodespaceResourceRepository {
     return Boolean(
       this.sqlite
         .prepare(
-          `SELECT 1 FROM codespaceResource r
-           JOIN codespaceConnection c ON c.id = r.connectionId
-           JOIN codespaceConnectionRepository grantRow
-             ON grantRow.connectionId = c.id AND grantRow.externalRepositoryId = r.repositoryId
-           WHERE r.id = ? AND r.userId = ? AND c.userId = r.userId
-             AND c.provider = r.provider AND c.status = 'connected'
-             AND (r.externalOwnerId IS NULL OR c.externalAccountId = r.externalOwnerId)
-             AND c.credentialGeneration = r.authorizationGeneration`,
+          `SELECT 1 FROM codespaceResource
+           WHERE id = ? AND userId = ? AND ${CURRENT_AUTHORIZATION_PREDICATE}`,
         )
         .get(resourceId, userId),
     );
@@ -605,7 +611,8 @@ export class CodespaceResourceRepository {
 
   /**
    * Takes the right to list up to `limit` users' codespaces from the provider now: users with a
-   * running codespace whose last listing is at least `intervalMs` old, least recently listed first.
+   * persistent running or stopped codespace whose last listing is at least `intervalMs` old,
+   * least recently listed first.
    * The timestamp is written as it is taken, so concurrent ticks never list one user twice.
    */
   claimProviderObservations(
@@ -622,8 +629,10 @@ export class CodespaceResourceRepository {
              AND (c.resourcesObservedAt IS NULL OR c.resourcesObservedAt <= ?)
              AND EXISTS (SELECT 1 FROM codespaceResource r
                WHERE r.userId = c.userId AND r.provider = c.provider
-                 AND r.retentionPolicy = 'persistent' AND r.state = 'usable'
-                 AND r.desiredState = 'running' AND r.providerResourceName IS NOT NULL)
+                 AND r.retentionPolicy = 'persistent'
+                 AND ((r.state = 'usable' AND r.desiredState = 'running')
+                   OR (r.state = 'stopped' AND r.desiredState = 'stopped'))
+                 AND r.providerResourceName IS NOT NULL)
            ORDER BY COALESCE(c.resourcesObservedAt, 0), c.id LIMIT ?`,
         )
         .all(provider, now - intervalMs, limit) as Array<{ id: string; userId: string }>;
@@ -636,13 +645,15 @@ export class CodespaceResourceRepository {
     return transaction.immediate();
   }
 
-  /** The records a provider listing is compared against: usable persistent codespaces. */
-  listObservableRunning(userId: string, provider: string): CodespaceResourceRecord[] {
+  /** Stable persistent records a provider listing is compared against. */
+  listObservablePersistent(userId: string, provider: string): CodespaceResourceRecord[] {
     return (
       this.sqlite
         .prepare(
           `SELECT * FROM codespaceResource WHERE userId = ? AND provider = ?
-           AND retentionPolicy = 'persistent' AND state = 'usable' AND desiredState = 'running'
+           AND retentionPolicy = 'persistent'
+           AND ((state = 'usable' AND desiredState = 'running')
+             OR (state = 'stopped' AND desiredState = 'stopped'))
            AND providerResourceName IS NOT NULL ORDER BY createdAt`,
         )
         .all(userId, provider) as ResourceRow[]
@@ -663,7 +674,8 @@ export class CodespaceResourceRepository {
            observedState = 'stopped', generation = generation + 1,
            lastOutcome = 'provider_observed_stopped', claimId = NULL, claimExpiresAt = NULL,
            reconcileFailures = 0, updatedAt = ?
-           WHERE id = ? AND generation = ? AND state = 'usable' AND desiredState = 'running'`,
+           WHERE id = ? AND generation = ? AND state = 'usable' AND desiredState = 'running'
+             AND ${CURRENT_AUTHORIZATION_PREDICATE}`,
         )
         .run(now, resourceId, generation).changes;
       if (changed !== 1) return false;
@@ -676,6 +688,22 @@ export class CodespaceResourceRepository {
       return true;
     });
     return transaction.immediate();
+  }
+
+  /** A stopped managed codespace started outside Moira; its latest start begins a new idle window. */
+  markObservedRunning(resourceId: string, generation: number, now: number): boolean {
+    return (
+      this.sqlite
+        .prepare(
+          `UPDATE codespaceResource SET desiredState = 'running', state = 'usable',
+           observedState = 'running', generation = generation + 1,
+           lastActivityAt = ?, lastOutcome = 'provider_observed_running',
+           claimId = NULL, claimExpiresAt = NULL, reconcileFailures = 0, updatedAt = ?
+           WHERE id = ? AND generation = ? AND state = 'stopped' AND desiredState = 'stopped'
+             AND ${CURRENT_AUTHORIZATION_PREDICATE}`,
+        )
+        .run(now, now, resourceId, generation).changes === 1
+    );
   }
 
   /**
@@ -1212,6 +1240,7 @@ export class CodespaceResourceRepository {
     desiredState: "running" | "stopped",
     outcome: string,
     now: number,
+    confirmedObservation?: { userId: string; state: "usable" | "stopped" },
   ): boolean {
     const transaction = this.sqlite.transaction(() => {
       const changed = this.sqlite
@@ -1220,9 +1249,20 @@ export class CodespaceResourceRepository {
            observedState = 'absent', lastOutcome = ?, claimId = NULL,
            claimExpiresAt = NULL, reconcileFailures = 0, updatedAt = ?
            WHERE id = ? AND generation = ? AND desiredState = ?
-             AND retentionPolicy = 'persistent'`,
+             AND retentionPolicy = 'persistent'
+             AND (? IS NULL OR (userId = ? AND state = ?
+               AND ${CURRENT_AUTHORIZATION_PREDICATE}))`,
         )
-        .run(outcome, now, resourceId, generation, desiredState).changes;
+        .run(
+          outcome,
+          now,
+          resourceId,
+          generation,
+          desiredState,
+          confirmedObservation?.userId ?? null,
+          confirmedObservation?.userId ?? null,
+          confirmedObservation?.state ?? null,
+        ).changes;
       if (changed !== 1) return false;
       this.sqlite
         .prepare(
@@ -1295,6 +1335,7 @@ export class CodespaceResourceRepository {
    */
   recordProviderObservation(
     resourceId: string,
+    generation: number,
     observation: {
       repositoryFullName: string;
       observedRef: string | null;
@@ -1309,7 +1350,7 @@ export class CodespaceResourceRepository {
         .prepare(
           `UPDATE codespaceResource SET repositoryFullName = ?, observedRef = ?,
            providerLastUsedAt = COALESCE(?, providerLastUsedAt), updatedAt = ?
-           WHERE id = ? AND (repositoryFullName <> ? OR observedRef IS NOT ?
+           WHERE id = ? AND generation = ? AND (repositoryFullName <> ? OR observedRef IS NOT ?
              OR (? IS NOT NULL AND providerLastUsedAt IS NOT ?))`,
         )
         .run(
@@ -1318,6 +1359,7 @@ export class CodespaceResourceRepository {
           observation.lastUsedAt,
           now,
           resourceId,
+          generation,
           observation.repositoryFullName,
           observation.observedRef,
           observation.lastUsedAt,

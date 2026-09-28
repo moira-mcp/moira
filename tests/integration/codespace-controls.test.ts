@@ -79,6 +79,9 @@ class Provider implements CodespaceProviderAdapter {
   async listMachines() {
     return [this.machine];
   }
+  async preflightCreate() {
+    return { billableOwnerId: "101" };
+  }
   async create(_token: string, input: Parameters<CodespaceProviderAdapter["create"]>[1]) {
     this.createCalls();
     this.resource = {
