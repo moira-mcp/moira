@@ -41,6 +41,10 @@ class FakeGitHubClient implements GitHubCodespaceClient {
   repositories: Awaited<ReturnType<GitHubCodespaceClient["listInstallationRepositories"]>> = [
     { id: "101", fullName: "witqq/private-project", private: true },
   ];
+  repositoriesByInstallation = new Map<
+    string,
+    Awaited<ReturnType<GitHubCodespaceClient["listInstallationRepositories"]>>
+  >();
   refreshBarrier: Promise<void> | null = null;
   onRefreshStart: (() => void) | null = null;
   installations: Awaited<ReturnType<GitHubCodespaceClient["listInstallations"]>> = [
@@ -92,9 +96,9 @@ class FakeGitHubClient implements GitHubCodespaceClient {
     return this.installations;
   }
 
-  async listInstallationRepositories() {
+  async listInstallationRepositories(_accessToken: string, installationId: string) {
     this.repositoryListCalls += 1;
-    return this.repositories;
+    return this.repositoriesByInstallation.get(installationId) ?? this.repositories;
   }
 
   async revokeToken(accessToken: string) {
@@ -183,9 +187,11 @@ describe("CodespaceConnectionService with real SQLite persistence", () => {
       account: { id: "25282049", login: "witqq" },
     });
     if (expectedState === "connected") {
-      expect(result.repositories).toEqual([
-        expect.objectContaining({ fullName: "witqq/private-project", private: true }),
-      ]);
+      expect(result.repositories).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ fullName: "witqq/private-project", private: true }),
+        ]),
+      );
     }
   }
 
@@ -1201,6 +1207,100 @@ describe("CodespaceConnectionService with real SQLite persistence", () => {
       state: "installation_required",
       installations: [],
       repositories: [],
+    });
+  });
+
+  test("keeps personal and organization repositories together after authorization and grant refresh", async () => {
+    github.installations.push({
+      id: "9002",
+      accountId: "9911",
+      accountLogin: "moira-mcp",
+      targetType: "Organization",
+      repositorySelection: "selected",
+    });
+    github.repositoriesByInstallation.set("9002", [
+      { id: "201", fullName: "moira-mcp/moira", private: false },
+    ]);
+
+    await connect();
+    expect(service.getStatus("user-a")).toMatchObject({
+      state: "connected",
+      installationUrl: config.installationUrl,
+      installations: [{ externalInstallationId: "9001" }, { externalInstallationId: "9002" }],
+      repositories: expect.arrayContaining([
+        expect.objectContaining({ fullName: "witqq/private-project" }),
+        expect.objectContaining({ fullName: "moira-mcp/moira" }),
+      ]),
+    });
+
+    now += 10 * 60_000 + 1;
+    github.repositoriesByInstallation.set("9002", [
+      { id: "202", fullName: "moira-mcp/new-repository", private: true },
+    ]);
+    await expect(service.refreshGrants("user-a")).resolves.toEqual({
+      refreshed: true,
+      stale: false,
+    });
+    expect(service.getStatus("user-a").repositories).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ fullName: "witqq/private-project" }),
+        expect.objectContaining({ fullName: "moira-mcp/new-repository" }),
+      ]),
+    );
+  });
+
+  test("does not save an organization installation that returns a repository owned elsewhere", async () => {
+    github.installations = [
+      {
+        id: "9002",
+        accountId: "9911",
+        accountLogin: "moira-mcp",
+        targetType: "Organization",
+        repositorySelection: "selected",
+      },
+    ];
+    github.repositoriesByInstallation.set("9002", [
+      { id: "201", fullName: "other-org/private-project", private: true },
+    ]);
+    const authorizationUrl = await service.beginAuthorization("user-a", "web-session-a");
+
+    await expect(
+      service.completeAuthorization({
+        userId: "user-a",
+        sessionToken: "web-session-a",
+        state: new URL(authorizationUrl).searchParams.get("state")!,
+        code: "github-code-123",
+      }),
+    ).rejects.toMatchObject({ code: "AUTHORIZATION_FAILED" });
+    expect(repository.getConnection("user-a", "github-codespaces")).toBeNull();
+  });
+
+  test("an organization installation alone is enough to connect the personal GitHub account", async () => {
+    github.installations = [
+      {
+        id: "9002",
+        accountId: "9911",
+        accountLogin: "moira-mcp",
+        targetType: "Organization",
+        repositorySelection: "selected",
+      },
+    ];
+    github.repositoriesByInstallation.set("9002", [
+      { id: "201", fullName: "moira-mcp/moira", private: false },
+    ]);
+    const authorizationUrl = await service.beginAuthorization("user-a", "web-session-a");
+
+    await expect(
+      service.completeAuthorization({
+        userId: "user-a",
+        sessionToken: "web-session-a",
+        state: new URL(authorizationUrl).searchParams.get("state")!,
+        code: "github-code-123",
+      }),
+    ).resolves.toMatchObject({
+      state: "connected",
+      account: { id: "25282049", login: "witqq" },
+      repositories: [expect.objectContaining({ fullName: "moira-mcp/moira" })],
     });
   });
 

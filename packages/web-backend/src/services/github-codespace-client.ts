@@ -6,6 +6,7 @@ import {
   GitHubCodespaceUser,
   CODESPACE_PROVIDER_CONTRACT_VERSION,
   CODESPACE_PROVIDER_GITHUB,
+  type CodespaceAvailableBillingView,
   type CodespaceMachine,
   type CodespaceProviderAdapter,
   type CodespaceProviderGuidance,
@@ -49,7 +50,7 @@ export function githubCodespaceGuidance(
         "Codespaces are disabled on this Moira instance; ask its administrator to enable them.",
       connection_required: "Connect your GitHub account in Moira settings.",
       installation_required:
-        "Install the Moira GitHub App on your account and grant it the repositories you want to work in.",
+        "Install the Moira GitHub App on your account or organization and grant it the repositories you want to work in.",
       authorization_repair_required:
         "Repair the GitHub authorization in Moira settings and follow any displayed revocation or reconnection step.",
       repository_not_approved:
@@ -150,6 +151,140 @@ function requiredString(value: unknown, field: string): string {
     throw new GitHubCodespaceClientError(`GitHub response omitted ${field}`, 502);
   }
   return value;
+}
+
+const CODESPACES_BILLING_SKUS = {
+  codespaces_compute_d2: { kind: "compute", cores: 2, unitType: "hours", pricePerUnit: 0.18 },
+  codespaces_compute_d4: { kind: "compute", cores: 4, unitType: "hours", pricePerUnit: 0.36 },
+  codespaces_compute_d8: { kind: "compute", cores: 8, unitType: "hours", pricePerUnit: 0.72 },
+  codespaces_compute_d16: { kind: "compute", cores: 16, unitType: "hours", pricePerUnit: 1.44 },
+  codespaces_compute_d32: { kind: "compute", cores: 32, unitType: "hours", pricePerUnit: 2.88 },
+  codespaces_storage: { kind: "storage", unitType: "gigabyte-hours", pricePerUnit: 0.07 },
+  codespaces_prebuild_storage: {
+    kind: "storage",
+    unitType: "gigabyte-hours",
+    pricePerUnit: 0.07,
+  },
+} as const;
+
+function invalidBillingSummary(): never {
+  throw new GitHubCodespaceClientError("GitHub returned an unsupported billing summary", 502);
+}
+
+function billingRecord(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) invalidBillingSummary();
+  return value as Record<string, unknown>;
+}
+
+function billingQuantity(value: unknown): number {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
+    invalidBillingSummary();
+  }
+  return value;
+}
+
+function roundUsage(value: number): number {
+  return Math.round((value + Number.EPSILON) * 1_000_000) / 1_000_000;
+}
+
+function roundUsd(value: number): number {
+  return Math.round((value + Number.EPSILON) * 1_000_000) / 1_000_000;
+}
+
+/** Strictly project the public-preview GitHub summary; unknown metering must not look like zero use. */
+export function projectGitHubCodespaceBillingSummary(
+  raw: unknown,
+  input: {
+    payerLogin: string;
+    year: number;
+    month: number;
+    retrievedAt: number;
+    planName: unknown;
+  },
+): CodespaceAvailableBillingView {
+  const summary = billingRecord(raw);
+  const period = billingRecord(summary.timePeriod);
+  if (
+    period.year !== input.year ||
+    (period.month !== undefined && period.month !== input.month) ||
+    typeof summary.user !== "string" ||
+    summary.user.toLowerCase() !== input.payerLogin.toLowerCase() ||
+    !Array.isArray(summary.usageItems) ||
+    !Number.isSafeInteger(input.retrievedAt) ||
+    input.retrievedAt < 0
+  ) {
+    invalidBillingSummary();
+  }
+
+  let usedCoreHours = 0;
+  let usedGbMonth = 0;
+  let computeNetUsd = 0;
+  let storageNetUsd = 0;
+  for (const value of summary.usageItems) {
+    const item = billingRecord(value);
+    if (typeof item.product !== "string" || typeof item.sku !== "string") {
+      invalidBillingSummary();
+    }
+    const product = item.product.toLowerCase();
+    const sku = item.sku;
+    if (product !== "codespaces" && !sku.startsWith("codespaces_")) continue;
+    const spec = CODESPACES_BILLING_SKUS[sku as keyof typeof CODESPACES_BILLING_SKUS];
+    if (
+      product !== "codespaces" ||
+      !spec ||
+      item.unitType !== spec.unitType ||
+      Math.abs(billingQuantity(item.pricePerUnit) - spec.pricePerUnit) > 1e-9
+    ) {
+      invalidBillingSummary();
+    }
+    const quantity = billingQuantity(item.grossQuantity);
+    const grossAmount = billingQuantity(item.grossAmount);
+    const netAmount = billingQuantity(item.netAmount);
+    billingQuantity(item.discountQuantity);
+    billingQuantity(item.discountAmount);
+    billingQuantity(item.netQuantity);
+    if (
+      Math.abs(grossAmount - quantity * spec.pricePerUnit) > 0.011 ||
+      netAmount > grossAmount + 0.011
+    ) {
+      invalidBillingSummary();
+    }
+    if (spec.kind === "compute") {
+      usedCoreHours += quantity * spec.cores;
+      computeNetUsd += netAmount;
+    } else {
+      // GitHub currently labels this unit `gigabyte-hours` while pricing and grossQuantity use
+      // GB-month. Dividing by the month's hours would undercount the provider's own billed quantity.
+      usedGbMonth += quantity;
+      storageNetUsd += netAmount;
+    }
+  }
+  if (![usedCoreHours, usedGbMonth, computeNetUsd, storageNetUsd].every(Number.isFinite)) {
+    invalidBillingSummary();
+  }
+  const plan =
+    typeof input.planName === "string" &&
+    (input.planName.toLowerCase() === "free" || input.planName.toLowerCase() === "pro")
+      ? (input.planName.toLowerCase() as "free" | "pro")
+      : null;
+  return {
+    state: "available",
+    payer_login: input.payerLogin,
+    period: { year: input.year, month: input.month },
+    retrieved_at: input.retrievedAt,
+    plan,
+    compute: {
+      used_core_hours: roundUsage(usedCoreHours),
+      included_core_hours: plan === "free" ? 120 : plan === "pro" ? 180 : null,
+      net_amount_usd: roundUsd(computeNetUsd),
+    },
+    storage: {
+      used_gb_month: roundUsage(usedGbMonth),
+      included_gb_month: plan === "free" ? 15 : plan === "pro" ? 20 : null,
+      net_amount_usd: roundUsd(storageNetUsd),
+    },
+    net_amount_usd: roundUsd(computeNetUsd + storageNetUsd),
+  };
 }
 
 /**
@@ -388,6 +523,38 @@ export class HttpGitHubCodespaceClient implements GitHubCodespaceClient, Codespa
     return this.getUser(accessToken);
   }
 
+  async getMonthlyBilling(
+    accessToken: string,
+    expectedPayer: GitHubCodespaceUser,
+  ): Promise<CodespaceAvailableBillingView> {
+    const profile = await this.api<Record<string, unknown>>("/user", accessToken);
+    if (!profile || typeof profile !== "object") {
+      throw new GitHubCodespaceClientError("GitHub returned an invalid billing identity", 502);
+    }
+    const payerId = decimalId(profile.id);
+    const payerLogin = requiredString(profile.login, "billing account login");
+    if (payerId !== expectedPayer.id || !/^[A-Za-z0-9-]{1,39}$/.test(payerLogin)) {
+      throw new GitHubCodespaceClientError("GitHub returned a different billing account", 502);
+    }
+    const startedAt = this.now();
+    if (!Number.isSafeInteger(startedAt) || startedAt < 0) {
+      throw new GitHubCodespaceClientError("Billing retrieval time is invalid", 502);
+    }
+    const date = new Date(startedAt);
+    const year = date.getUTCFullYear();
+    const month = date.getUTCMonth() + 1;
+    const path = `/users/${encodeURIComponent(payerLogin)}/settings/billing/usage/summary?year=${year}&month=${month}`;
+    const summary = await this.api<unknown>(path, accessToken);
+    const plan = profile.plan as Record<string, unknown> | undefined;
+    return projectGitHubCodespaceBillingSummary(summary, {
+      payerLogin,
+      year,
+      month,
+      retrievedAt: this.now(),
+      planName: plan?.name,
+    });
+  }
+
   private parseMachine(value: unknown): CodespaceMachine {
     const machine = value as Record<string, unknown>;
     const positiveInteger = (field: string): number => {
@@ -459,6 +626,20 @@ export class HttpGitHubCodespaceClient implements GitHubCodespaceClient, Codespa
     return (Array.isArray(body.machines) ? body.machines : []).map((machine) =>
       this.parseMachine(machine),
     );
+  }
+
+  async preflightCreate(
+    accessToken: string,
+    repository: CodespaceRepositoryTarget,
+    ref: string,
+  ): Promise<{ billableOwnerId: string }> {
+    const path = `/repos/${repositoryPath(repository.fullName)}/codespaces/new?ref=${encodeURIComponent(ref)}`;
+    const body = await this.api<Record<string, unknown>>(path, accessToken);
+    if (!body || typeof body !== "object") {
+      throw new GitHubCodespaceClientError("GitHub returned an invalid codespace preflight", 502);
+    }
+    const billableOwner = body.billable_owner as Record<string, unknown> | undefined;
+    return { billableOwnerId: decimalId(billableOwner?.id) };
   }
 
   async create(

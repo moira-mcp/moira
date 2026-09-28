@@ -104,6 +104,9 @@ class LifecycleProvider implements CodespaceProviderAdapter {
   async listMachines() {
     return [this.machine];
   }
+  async preflightCreate() {
+    return { billableOwnerId: "101" };
+  }
   guidance() {
     return { links: [], instructions: {} };
   }

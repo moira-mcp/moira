@@ -28,6 +28,8 @@ import {
   type CodespaceResourceAuditEvent,
   type CodespaceOperationAuditEvent,
   type CodespaceGuidanceSituation,
+  type CodespaceAvailableBillingView,
+  type CodespaceProviderBillingView,
 } from "@mcp-moira/shared";
 import { dirname, join } from "node:path";
 import { existsSync, mkdirSync, readdirSync, renameSync, rmdirSync } from "node:fs";
@@ -47,6 +49,104 @@ interface CodespaceServices {
   file: CodespaceFileService | null;
   transfer: CodespaceTransferService;
   observability: CodespaceObservabilityService;
+}
+
+/** A billing cache entry is valid only for one connected account and credential generation. */
+export function createCodespaceBillingReader(dependencies: {
+  connection: Pick<CodespaceConnectionService, "getStatus" | "getAccessToken">;
+  authorization: (
+    userId: string,
+  ) => { accountId: string; credentialGeneration: number; status: string } | null;
+  client: Pick<HttpGitHubCodespaceClient, "getMonthlyBilling"> | null;
+  now?: () => number;
+  waitMs?: number;
+}): (userId: string, options?: { force?: boolean }) => Promise<CodespaceProviderBillingView> {
+  const cache = new Map<string, { key: string; value: CodespaceAvailableBillingView }>();
+  const inFlight = new Map<
+    string,
+    { key: string; promise: Promise<CodespaceProviderBillingView> }
+  >();
+  const now = dependencies.now ?? Date.now;
+  const waitMs = dependencies.waitMs ?? 8_000;
+
+  return async (userId, options = {}) => {
+    const status = dependencies.connection.getStatus(userId);
+    const authorization = dependencies.authorization(userId);
+    if (
+      status.state !== "connected" ||
+      !status.account ||
+      !dependencies.client ||
+      authorization?.status !== "connected" ||
+      authorization.accountId !== status.account.id
+    ) {
+      cache.delete(userId);
+      inFlight.delete(userId);
+      return "unavailable";
+    }
+    const account = status.account;
+    const key = `${account.id}:${authorization.credentialGeneration}`;
+    const cached = cache.get(userId);
+    const date = new Date(now());
+    if (
+      !options.force &&
+      cached?.key === key &&
+      now() - cached.value.retrieved_at < 5 * 60_000 &&
+      cached.value.period.year === date.getUTCFullYear() &&
+      cached.value.period.month === date.getUTCMonth() + 1
+    ) {
+      return cached.value;
+    }
+    if (options.force || (cached && cached.key !== key)) cache.delete(userId);
+
+    let pending = inFlight.get(userId);
+    if (options.force || !pending || pending.key !== key) {
+      const entry: { key: string; promise: Promise<CodespaceProviderBillingView> } = {
+        key,
+        promise: Promise.resolve("unavailable"),
+      };
+      entry.promise = (async () => {
+        try {
+          const token = await dependencies.connection.getAccessToken(userId);
+          const result = await dependencies.client!.getMonthlyBilling(token, account);
+          const current = dependencies.authorization(userId);
+          const stillCurrent =
+            inFlight.get(userId) === entry &&
+            current?.status === "connected" &&
+            current.accountId === account.id &&
+            current.credentialGeneration === authorization.credentialGeneration;
+          if (stillCurrent) {
+            cache.set(userId, { key, value: result });
+          }
+          return stillCurrent ? result : "unavailable";
+        } catch {
+          if (inFlight.get(userId) === entry) cache.delete(userId);
+          return "unavailable";
+        } finally {
+          if (inFlight.get(userId) === entry) inFlight.delete(userId);
+        }
+      })();
+      inFlight.set(userId, entry);
+      pending = entry;
+    }
+
+    let timer: NodeJS.Timeout | null = null;
+    try {
+      return await Promise.race([
+        pending.promise,
+        new Promise<"unavailable">((resolve) => {
+          timer = setTimeout(() => {
+            if (inFlight.get(userId) === pending) {
+              inFlight.delete(userId);
+              cache.delete(userId);
+            }
+            resolve("unavailable");
+          }, waitMs);
+        }),
+      ]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  };
 }
 
 function operationAudit(
@@ -150,10 +250,12 @@ function initializeCodespaceServices(): CodespaceServices {
   const auditRepository = new AuditRepository(getDatabase());
   const config = getCodespaceGitHubConfig();
   let resource: CodespaceResourceService | null = null;
+  let billingClient: HttpGitHubCodespaceClient | null = null;
   let operation: CodespaceOperationService | null = null;
   let file: CodespaceFileService | null = null;
+  const connectionRepository = new CodespaceConnectionRepository(getSqliteInstance());
   const connection = new CodespaceConnectionService({
-    repository: new CodespaceConnectionRepository(getSqliteInstance()),
+    repository: connectionRepository,
     config: getCodespaceGitHubConfig,
     client: (availableConfig) => new HttpGitHubCodespaceClient(availableConfig),
     isProviderFailure: (error) => error instanceof GitHubCodespaceClientError,
@@ -198,6 +300,7 @@ function initializeCodespaceServices(): CodespaceServices {
       (credential, resourceName) =>
         availableConnector.probeSshConfiguration(credential, resourceName),
     );
+    billingClient = provider;
     const registry = new CodespaceProviderRegistry();
     registry.register(provider);
     resource = new CodespaceResourceService({
@@ -219,6 +322,10 @@ function initializeCodespaceServices(): CodespaceServices {
         },
       },
       policy: getCodespaceResourcePolicy,
+      refreshAuthorization: async (userId) => {
+        const result = await connection.refreshGrants(userId, { force: true });
+        return !result.stale;
+      },
       audit: async (event) => {
         const context = {
           userId: event.userId,
@@ -303,6 +410,21 @@ function initializeCodespaceServices(): CodespaceServices {
     });
   }
 
+  const readBilling = createCodespaceBillingReader({
+    connection,
+    authorization: (userId) => {
+      const snapshot = connectionRepository.getConnection(userId, CODESPACE_PROVIDER_GITHUB);
+      return snapshot
+        ? {
+            accountId: snapshot.externalAccountId,
+            credentialGeneration: snapshot.credentialGeneration,
+            status: snapshot.status,
+          }
+        : null;
+    },
+    client: billingClient,
+  });
+
   const observability = new CodespaceObservabilityService({
     providerId: CODESPACE_PROVIDER_GITHUB,
     config: getCodespaceGitHubConfig,
@@ -311,6 +433,7 @@ function initializeCodespaceServices(): CodespaceServices {
     operations: operationRepository,
     transfers: new CodespaceTransferRepository(getSqliteInstance()),
     transport: connector,
+    providerBilling: readBilling,
     probeTimeoutMs: 2_000,
     snapshotMaxAgeMs: getCodespaceResourcePolicy().reconcileIntervalMs * 2,
   });

@@ -149,6 +149,14 @@ current missing condition, one provider-owned instruction and those exact availa
 repository creation and, when its URL is configured, App installation; Moira never provisions
 anything while setup is missing.
 
+Install the Moira GitHub App on your personal account or an organization and grant it the repositories
+the agent may use. A connected account with no visible App installation is in
+`installation_required`: finish installation on GitHub, then use **Check installation** in Moira
+Settings. If the App's permissions change, accept the update on GitHub. An organization repository
+can appear among approved targets, but `create` checks GitHub's billing owner before creating
+anything. It returns `CODESPACE_BILLING_UNSUPPORTED` if GitHub would bill an organization; Moira
+supports only Codespaces billed to your connected personal account.
+
 Every call but `list`, `setup_help` and `create` names a `codespace_id`; `list` and `create` return
 that reusable ID, while `setup_help` needs none. Ownership is checked server-side, so an unknown or
 foreign ID returns the generic `CODESPACE_NOT_FOUND` result. A codespace is not tied to a chat or session: reuse the same `codespace_id` from any
@@ -158,9 +166,11 @@ is absent from it while `get` still answers for its `codespace_id`. `stop` prese
 `generation`, so a stale call cannot delete a changed codespace.
 
 `list` refreshes the approved installation and repository snapshot after its TTL and accepts
-`refresh: true` for an immediate refresh. When the provider cannot be reached, it still returns the
-stored repositories with `repositories_stale: true`; a repository newly granted to the App therefore
-appears without reconnecting once refresh succeeds.
+`refresh: true` for an immediate refresh. A forced refresh also checks the current GitHub state of
+stored codespaces and re-reads monthly billing. `repositories_stale` and `resources_stale` identify
+the respective checks that could not complete; the saved repositories and codespaces remain visible.
+A repository newly granted to the App therefore appears without reconnecting once refresh succeeds.
+The Cloud codespaces **Refresh** button in Moira Settings performs the same forced reconciliation.
 
 `list` also returns `limits`: the limits Moira enforces for you, next to your current use. It covers
 the codespaces you hold against your own ceiling and the instance-wide one, plus the interval between
@@ -169,8 +179,13 @@ with the input, output, retained-output, duration and background limits; your tr
 objects against their limits, the bytes still in flight against the in-flight limit, the largest
 file and the link lifetime; retention of stopped
 codespaces, the start wait and your idle auto-pause setting with GitHub's maximum idle timeout.
-Provider billing is reported as `unavailable`, because GitHub does not expose your Codespaces quota or
-billing to Moira. The website's codespace list returns the same limits.
+`limits.provider.billing` separately reports GitHub's current-month Codespaces usage for your
+connected personal account when GitHub's billing API can be read: payer and month, compute core-hours,
+storage GB-month (including prebuilds), included allowance when the personal plan is known, and the
+net amount billed in USD. GitHub usage may appear with a delay. The value is `unavailable` when the
+App lacks `Plan: read` permission, the billing API is unavailable, or the connection cannot supply
+the data; Codespace management and Moira's own limits still work. The website's codespace list shows
+the same billing and local limits in separate cards.
 
 A provider-side repository rename keeps its codespace usable because identity follows the provider
 repository ID. The stored display name refreshes during lifecycle work; a different repository ID is

@@ -119,7 +119,7 @@ const LIMITS = projectCodespaceLimits({
 function services(overrides: Partial<CodespaceToolServices> = {}): CodespaceToolServices {
   return {
     observability: {
-      limits: jest.fn(() => LIMITS),
+      limitsWithBilling: jest.fn(async () => LIMITS),
       readiness: jest.fn(async () => ({
         state: "ready" as const,
         reason: null,
@@ -172,6 +172,7 @@ function services(overrides: Partial<CodespaceToolServices> = {}): CodespaceTool
       listRepositories: jest.fn(() => [{ id: "42", fullName: "owner/repository", private: true }]),
       setupSituation: jest.fn(() => "ready" as const),
       listResources: jest.fn(() => [codespace()]),
+      refreshProviderState: jest.fn(async () => ({ stale: false })),
       getCodespace: jest.fn(() => codespace()),
       create: jest.fn(async () => ({
         resource: codespace(),
@@ -347,7 +348,9 @@ describe("codespace MCP adapter", () => {
       // The caller's own limits, as the domain computed them for this caller.
       limits: LIMITS,
     });
-    expect(dependencies.observability.limits).toHaveBeenCalledWith(USER_ID);
+    expect(dependencies.observability.limitsWithBilling).toHaveBeenCalledWith(USER_ID, {
+      force: false,
+    });
     // The branch an agent switched to is reported next to, not instead of, the one it asked for.
     expect(data(fetched)).toMatchObject({
       codespace: {
@@ -410,8 +413,26 @@ describe("codespace MCP adapter", () => {
     expect(data(listed)).toMatchObject({
       readiness: { state: "connected", reason: null },
       repositories_stale: true,
+      resources_stale: true,
     });
+    expect(dependencies.resource!.refreshProviderState).not.toHaveBeenCalled();
     expect(getStatus).toHaveBeenCalledTimes(2);
+  });
+
+  it("refreshes managed provider state when list requests a fresh GitHub view", async () => {
+    const dependencies = services();
+    const listed = await executeCodespaceTool(
+      parseCodespaceToolParams({ action: "list", refresh: true }),
+      USER_ID,
+      dependencies,
+    );
+    expect(data(listed)).toMatchObject({ resources_stale: false });
+    expect(dependencies.resource!.refreshProviderState).toHaveBeenCalledWith(USER_ID, {
+      authorizationFresh: true,
+    });
+    expect(dependencies.observability.limitsWithBilling).toHaveBeenCalledWith(USER_ID, {
+      force: true,
+    });
   });
 
   it("returns provider-owned setup instructions and exact links for the current missing condition", async () => {

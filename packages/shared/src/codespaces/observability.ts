@@ -28,6 +28,7 @@ import { effectiveCodespaceLimits } from "./resource-policy.js";
 import {
   projectCodespaceLimits,
   type CodespaceLimitsView,
+  type CodespaceProviderBillingView,
   type CodespaceReadinessView,
 } from "./views.js";
 
@@ -107,6 +108,11 @@ export interface CodespaceObservabilityDependencies {
   transfers: Pick<CodespaceTransferRepository, "listLive" | "usageForUser">;
   /** Present only when the provider composition exists; absent while configuration is missing. */
   transport: CodespaceTransportAvailability | null;
+  /** Optional provider usage reader; local limits remain available when it fails. */
+  providerBilling?: (
+    userId: string,
+    options?: { force?: boolean },
+  ) => Promise<CodespaceProviderBillingView>;
   now?: () => number;
   /** Upper bound for one connector health probe; a slower probe counts as unavailable. */
   probeTimeoutMs?: number;
@@ -196,6 +202,21 @@ export class CodespaceObservabilityService {
       idle: this.dependencies.resources.idlePolicy(userId),
       providerIdleMaxMinutes: CODESPACE_IDLE_TIMEOUT_MINUTES.maximum,
     });
+  }
+
+  /** Add the provider's monthly usage without coupling local capacity to billing availability. */
+  async limitsWithBilling(
+    userId: string,
+    options: { force?: boolean } = {},
+  ): Promise<CodespaceLimitsView> {
+    const local = this.limits(userId);
+    if (!this.dependencies.providerBilling) return local;
+    try {
+      const billing = await this.dependencies.providerBilling(userId, options);
+      return { ...local, provider: { billing } };
+    } catch {
+      return local;
+    }
   }
 
   async readiness(): Promise<CodespaceReadinessView> {

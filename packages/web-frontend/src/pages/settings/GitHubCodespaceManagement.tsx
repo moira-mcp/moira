@@ -277,6 +277,14 @@ export const GitHubCodespaceManagement: React.FC = () => {
           </Alert>
         )}
 
+        {view.resources_stale && (
+          <Alert data-testid="github-codespace-resources-stale">
+            <AlertCircle aria-hidden="true" />
+            <AlertTitle>{t("pages.settings.codespaces.resourcesStaleTitle")}</AlertTitle>
+            <AlertDescription>{t("pages.settings.codespaces.resourcesStale")}</AlertDescription>
+          </Alert>
+        )}
+
         {canCreate && (
           <form
             className="grid gap-3 rounded-md border p-3 sm:grid-cols-[1fr_minmax(0,12rem)_auto]"
@@ -340,7 +348,7 @@ export const GitHubCodespaceManagement: React.FC = () => {
           <Button
             variant="ghost"
             size="sm"
-            onClick={() => void load()}
+            onClick={() => void load({ sync: true })}
             aria-label={t("pages.settings.codespaces.refresh")}
           >
             <RefreshCw className="h-4 w-4" aria-hidden="true" />

@@ -145,6 +145,59 @@ function validateTokenPayload(payload: GitHubCodespaceTokenResponse, now: number
   }
 }
 
+/** Enumerate only installations visible to this user's App token and repositories owned by each. */
+async function enumerateGrants(
+  client: GitHubCodespaceClient,
+  accessToken: string,
+  identity: GitHubCodespaceUser,
+): Promise<{
+  installations: CodespaceInstallationGrant[];
+  repositories: CodespaceRepositoryGrant[];
+}> {
+  const accountId = validateExternalId(identity.id);
+  const installations: CodespaceInstallationGrant[] = [];
+  const repositories: CodespaceRepositoryGrant[] = [];
+  for (const installation of await client.listInstallations(accessToken)) {
+    if (installation.targetType !== "User" && installation.targetType !== "Organization") continue;
+    const installationAccountId = validateExternalId(installation.accountId);
+    if (installation.targetType === "User" && installationAccountId !== accountId) continue;
+    const installationId = validateExternalId(installation.id);
+    const installationOwner = installation.accountLogin.toLowerCase();
+    if (!/^[a-z0-9-]{1,39}$/.test(installationOwner)) {
+      throw new CodespaceConnectionError(
+        "AUTHORIZATION_FAILED",
+        "GitHub returned an invalid installation",
+      );
+    }
+    installations.push({
+      externalInstallationId: installationId,
+      repositorySelection: installation.repositorySelection,
+    });
+    for (const repository of await client.listInstallationRepositories(
+      accessToken,
+      installationId,
+    )) {
+      const repositoryId = validateExternalId(repository.id);
+      if (
+        !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository.fullName) ||
+        repository.fullName.split("/", 1)[0]?.toLowerCase() !== installationOwner
+      ) {
+        throw new CodespaceConnectionError(
+          "AUTHORIZATION_FAILED",
+          "GitHub returned an invalid repository",
+        );
+      }
+      repositories.push({
+        externalInstallationId: installationId,
+        externalRepositoryId: repositoryId,
+        fullName: repository.fullName,
+        private: repository.private,
+      });
+    }
+  }
+  return { installations, repositories };
+}
+
 function mapSnapshot(
   snapshot: CodespaceConnectionSnapshot | null,
   settingsUrl: string,
@@ -467,7 +520,10 @@ export class CodespaceConnectionService {
       return pendingRevocationView(config.settingsUrl);
     }
     const view = mapSnapshot(snapshot, config.settingsUrl);
-    view.installationUrl = view.state === "installation_required" ? config.installationUrl : null;
+    view.installationUrl =
+      view.state === "installation_required" || view.state === "connected"
+        ? config.installationUrl
+        : null;
     return view;
   }
 
@@ -618,39 +674,9 @@ export class CodespaceConnectionService {
           "GitHub returned an invalid identity",
         );
       }
-      const installations = (await client.listInstallations(token.accessToken)).filter(
-        (installation) =>
-          installation.targetType === "User" &&
-          validateExternalId(installation.accountId) === externalAccountId,
-      );
-      installationGrants = [];
-      const repositoryGrants: CodespaceRepositoryGrant[] = [];
-      for (const installation of installations) {
-        const installationId = validateExternalId(installation.id);
-        installationGrants.push({
-          externalInstallationId: installationId,
-          repositorySelection: installation.repositorySelection,
-        });
-        const repositories = await client.listInstallationRepositories(
-          token.accessToken,
-          installationId,
-        );
-        for (const repository of repositories) {
-          const repositoryId = validateExternalId(repository.id);
-          if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository.fullName)) {
-            throw new CodespaceConnectionError(
-              "AUTHORIZATION_FAILED",
-              "GitHub returned an invalid repository",
-            );
-          }
-          repositoryGrants.push({
-            externalInstallationId: installationId,
-            externalRepositoryId: repositoryId,
-            fullName: repository.fullName,
-            private: repository.private,
-          });
-        }
-      }
+      const granted = await enumerateGrants(client, token.accessToken, githubUser);
+      installationGrants = granted.installations;
+      const repositoryGrants = granted.repositories;
       connectionId = this.dependencies.repository.reserveConnection({
         userId: input.userId,
         provider: CODESPACE_PROVIDER_GITHUB,
@@ -869,37 +895,15 @@ export class CodespaceConnectionService {
     try {
       const identity = await client.getUser(accessToken);
       const externalAccountId = validateExternalId(identity.id);
-      const installations = (await client.listInstallations(accessToken)).filter(
-        (installation) =>
-          installation.targetType === "User" &&
-          validateExternalId(installation.accountId) === externalAccountId,
-      );
-      installationGrants = [];
-      repositoryGrants = [];
-      for (const installation of installations) {
-        const externalInstallationId = validateExternalId(installation.id);
-        installationGrants.push({
-          externalInstallationId,
-          repositorySelection: installation.repositorySelection,
-        });
-        for (const repository of await client.listInstallationRepositories(
-          accessToken,
-          externalInstallationId,
-        )) {
-          if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository.fullName)) {
-            throw new CodespaceConnectionError(
-              "AUTHORIZATION_FAILED",
-              "GitHub returned an invalid repository name",
-            );
-          }
-          repositoryGrants.push({
-            externalInstallationId,
-            externalRepositoryId: validateExternalId(repository.id),
-            fullName: repository.fullName,
-            private: repository.private,
-          });
-        }
+      if (externalAccountId !== snapshot.externalAccountId) {
+        throw new CodespaceConnectionError(
+          "AUTHORIZATION_FAILED",
+          "GitHub returned a different connected account",
+        );
       }
+      const granted = await enumerateGrants(client, accessToken, identity);
+      installationGrants = granted.installations;
+      repositoryGrants = granted.repositories;
     } catch (error) {
       if (
         !(error instanceof CodespaceConnectionError) &&

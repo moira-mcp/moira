@@ -811,6 +811,8 @@
         "loadFailedDescription": "Your other settings are still available. Retry this request.",
         "retry": "Retry",
         "refresh": "Refresh",
+        "resourcesStaleTitle": "Codespace status could not be refreshed",
+        "resourcesStale": "GitHub could not confirm every managed Codespace. Unconfirmed entries were kept; try refreshing again.",
         "requestFailed": "The codespace request was rejected",
         "created": "Codespace creation was accepted",
         "started": "Codespace start was requested",
@@ -884,11 +886,11 @@
           "id": "Codespace ID"
         },
         "limits": {
-          "title": "Your limits",
-          "description": "What you can use, and how much of it you are using now.",
+          "title": "Moira limits",
+          "description": "Capacity enforced by this Moira instance, separate from GitHub's monthly usage.",
           "helpTitle": "About these limits",
           "helpHeld": "A codespace counts against your limit until it is deleted — stopping it keeps its files and its slot. Delete one you no longer need to free a slot.",
-          "helpBilling": "Codespaces are billed to your personal GitHub account. GitHub does not share billing or quota details with Moira; see them on GitHub.",
+          "helpBilling": "GitHub bills your personal account. Its monthly usage is shown above when the GitHub App can read it; these limits control Moira's local capacity.",
           "held": "Codespaces held",
           "commands": "Commands running",
           "transfers": "File transfers",
@@ -904,14 +906,28 @@
           "retention": "Stopped codespaces kept",
           "createInterval": "Time between creations",
           "instance": "Codespaces on this instance",
-          "billing": "Billing and quota",
-          "billingUnavailable": "Shown on GitHub",
           "minutes_one": "{{count}} minute",
           "minutes_other": "{{count}} minutes",
           "days_one": "{{count}} day",
           "days_other": "{{count}} days",
           "seconds_one": "{{count}} second",
           "seconds_other": "{{count}} seconds"
+        },
+        "billing": {
+          "title": "GitHub monthly Codespaces usage",
+          "description": "Usage billed to your personal GitHub account; this is separate from Moira's limits below.",
+          "unavailable": "GitHub billing data is unavailable. The Moira GitHub App needs Plan: read permission, and GitHub's billing API must be reachable. Codespace management still works.",
+          "payerPeriod": "Billed to @{{payer}} · {{period}}",
+          "plan": "GitHub {{plan}} plan",
+          "planUnknown": "GitHub plan not reported; included allowance unavailable",
+          "compute": "Compute",
+          "storage": "Storage, including prebuilds",
+          "coreHours": "core-hours",
+          "gbMonth": "GB-month",
+          "usedOfAllowance": "{{used}} of {{included}} {{unit}} included",
+          "usedUnknownAllowance": "{{used}} {{unit}} used · allowance unavailable",
+          "billable": "Billed this month",
+          "retrieved": "Retrieved {{time}}. GitHub may report usage with a delay."
         },
         "autoPause": {
           "title": "Automatic pause",
@@ -942,8 +958,9 @@
         "connect": "Connect GitHub",
         "reconnect": "Reconnect GitHub",
         "install": "Install GitHub App",
+        "addInstallation": "Add account or organization",
         "checkInstallation": "Check installation",
-        "installationStillMissing": "GitHub does not show the Moira App installed on your account yet. Finish the installation on GitHub, then check again.",
+        "installationStillMissing": "GitHub does not show the Moira App installed on your account or organization yet. Finish the installation on GitHub, then check again.",
         "disconnect": "Disconnect",
         "confirmDisconnect": "Disconnect GitHub and revoke Moira's stored access? Active cloud codespace sessions will no longer be authorized.",
         "disconnected": "GitHub was disconnected",
@@ -978,7 +995,7 @@
         },
         "outcomes": {
           "connected": "GitHub connected successfully",
-          "installation_required": "Install the GitHub App on your account to finish setup, then check the installation here.",
+          "installation_required": "Install the GitHub App on your account or organization to finish setup, then check the installation here.",
           "authorization_failed": "GitHub authorization failed or expired. Try again from Settings.",
           "already_connected": "GitHub is already connected. To use a different account, disconnect first.",
           "not_configured": "GitHub codespaces are not configured on this Moira instance.",
@@ -1050,7 +1067,7 @@
           },
           "install": {
             "title": "Install the Moira App",
-            "description": "Add the App to your GitHub account."
+            "description": "Add the App to your account or an organization."
           },
           "repositories": {
             "title": "Grant repositories",
@@ -2950,6 +2967,7 @@
       "CODESPACE_AUTHORIZATION_REQUIRED": "Moira no longer has access to this repository. Reconnect GitHub above.",
       "CODESPACE_RESULT_EXPIRED": "That result is no longer available.",
       "CODESPACE_CREATE_REJECTED": "GitHub refused to create the codespace. Check the repository's Codespaces settings on GitHub.",
+      "CODESPACE_BILLING_UNSUPPORTED": "GitHub would bill an organization for this repository. Moira supports only personally billed Codespaces.",
       "CODESPACE_CREATE_PENDING": "A codespace is still being created or cleaned up. Wait a moment and try again.",
       "CODESPACE_NOT_RUNNING": "The codespace is not running.",
       "CODESPACE_START_TIMEOUT": "The codespace is still starting. Try again shortly.",
@@ -3414,15 +3432,15 @@
         },
         "connect": {
           "title": "Connect and install",
-          "body": "Press Connect GitHub and approve Moira on GitHub. If the Moira App is not installed yet, GitHub takes you straight to installing it; choose the repositories there. Back here, Check installation confirms it."
+          "body": "Connect your GitHub account and install the Moira App on your account or an organization. Choose its repositories on GitHub. When already connected, use Add account or organization, then Refresh here to see the new repositories."
         },
         "codespaces": {
           "title": "Create a codespace",
-          "body": "Pick a repository and a branch, then create a codespace. Agents find it by its ID through the codespace tool. Stop keeps its files; Delete removes them."
+          "body": "Pick a repository and branch, then create a personally billed codespace. Agents find it by ID. Stop keeps its files; Delete removes them. Refresh checks GitHub for changes made outside Moira."
         },
         "limits": {
           "title": "Know your limits",
-          "body": "How many codespaces you may hold (stopped ones count), how many commands can run at once and how much can be transferred. Delete a codespace you no longer need to free a slot."
+          "body": "GitHub's monthly personal compute, storage and billed amount appear above Moira's own limits when the App has Plan: read access. Stopped codespaces still use Moira's held slots."
         },
         "autopause": {
           "title": "Pause idle codespaces",

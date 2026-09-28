@@ -16,6 +16,7 @@ export interface CodespaceManagementView {
   connection: CodespaceConnectionView;
   repositories: Array<{ repository_id: string; name: string; private: boolean }>;
   repositories_stale: boolean;
+  resources_stale: boolean;
   codespaces: CodespaceSummaryView[];
   limits: CodespaceLimitsView;
 }

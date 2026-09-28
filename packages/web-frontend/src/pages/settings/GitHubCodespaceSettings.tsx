@@ -259,6 +259,17 @@ export const GitHubCodespaceSettings: React.FC = () => {
               <h3 className="text-sm font-medium">{t("pages.settings.github.repositories")}</h3>
               <div className="flex items-center gap-2">
                 <span className="text-xs text-muted-foreground">{status.repositories.length}</span>
+                {status.installationUrl && (
+                  <Button size="sm" variant="outline" asChild>
+                    <a
+                      href={status.installationUrl}
+                      rel="noreferrer"
+                      data-testid="github-codespace-add-installation"
+                    >
+                      {t("pages.settings.github.addInstallation")}
+                    </a>
+                  </Button>
+                )}
                 <Button
                   size="sm"
                   variant="outline"

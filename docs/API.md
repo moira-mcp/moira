@@ -664,9 +664,12 @@ Authentication: Required
 
 ## Codespace Connection API
 
-Website-only GitHub App authorization and connection management. These routes
-are mounted under `/api/integrations` behind `requireAuth`; they are separate
-from Better Auth social login and are not MCP operations. Every response uses
+Website-only GitHub App authorization and connection management. A personal
+GitHub account can connect through personal or organization App installations;
+the connection view contains the installations and repositories visible to that
+account's App token. These routes are mounted under `/api/integrations` behind
+`requireAuth`; they are separate from Better Auth social login and are not MCP
+operations. Every response uses
 `Cache-Control: no-store` and `Referrer-Policy: no-referrer`.
 
 The sanitized connection view has this shape:
@@ -741,7 +744,8 @@ Authentication: Required
 ### GET /api/integrations/github/callback
 
 Consumes the exact user/session-bound `state`, exchanges `code` server-side,
-verifies the numeric GitHub user and personal installation/repository grants,
+verifies the numeric GitHub user and the visible personal and organization
+installation/repository grants,
 then returns a `303` redirect. When the account has no App installation yet and an
 installation URL is configured, the redirect goes straight to GitHub's installation
 page; otherwise it goes to the same-origin Settings page with only
@@ -1467,18 +1471,34 @@ user's codespaces and the user's limits.
     connection: CodespaceConnectionView;
     repositories: Array<{ repository_id: string; name: string; private: boolean }>;
     repositories_stale: boolean;
+    resources_stale: boolean;
     codespaces: CodespaceSummaryView[];
     limits: CodespaceLimitsView;
   }
 }
 ```
 
-The route refreshes grants behind the normal TTL. If the provider cannot be reached,
-it keeps the saved repositories and returns `repositories_stale: true`.
+The route refreshes grants behind the normal TTL and lists locally stored codespaces.
+It does not observe provider resources; `resources_stale` is `false` on this read.
+If grant enumeration fails, it keeps the saved repositories and returns
+`repositories_stale: true`.
 
-`limits` is the same view the MCP `codespace` `list` action returns. Each limit is the
-value Moira enforces, next to the user's current use; it is read from policy and the
-database without a provider call:
+### POST /api/integrations/github/codespaces/refresh
+
+Returns the same response shape as `GET`. It forces installation and repository
+enumeration, then observes the user's persistent codespaces at GitHub and updates
+the local list. If grant enumeration is stale, provider observation is skipped and
+both `repositories_stale` and `resources_stale` are `true`. If observation fails or
+cannot verify a resource, the local list remains available and `resources_stale` is
+`true`. This request also bypasses the provider billing cache.
+
+`limits` is the same view the MCP `codespace` `list` action returns. Local limits and
+use are read from Moira policy and the database. The separate `provider.billing`
+field reports GitHub's current-month usage for the connected personal account when
+that read succeeds. The GitHub App user token needs `Plan: read` permission;
+`"unavailable"` means no validated billing summary is available.
+Ordinary reads may reuse a billing summary cached for five minutes; the refresh
+route bypasses that cache. Billing availability does not affect the local limits.
 
 ```typescript
 interface CodespaceLimitsView {
@@ -1515,7 +1535,28 @@ interface CodespaceLimitsView {
     start_wait_seconds: number;
     idle: { auto_stop_enabled: boolean; timeout_minutes: number; provider_max_minutes: number };
   };
-  provider: { billing: "unavailable" }; // GitHub does not expose Codespaces quota or billing
+  provider: {
+    billing:
+      | "unavailable"
+      | {
+          state: "available";
+          payer_login: string;
+          period: { year: number; month: number }; // UTC calendar month
+          retrieved_at: number; // retrieval time; GitHub usage may lag
+          plan: "free" | "pro" | null;
+          compute: {
+            used_core_hours: number;
+            included_core_hours: number | null;
+            net_amount_usd: number;
+          };
+          storage: {
+            used_gb_month: number;
+            included_gb_month: number | null;
+            net_amount_usd: number;
+          };
+          net_amount_usd: number;
+        };
+  };
 }
 ```
 
@@ -1523,7 +1564,11 @@ interface CodespaceLimitsView {
 
 Body: `{ "repository_id": string, "ref": string }`. Returns `201` with the sanitized
 codespace, which may still be pending. The route refreshes grants behind the normal TTL
-before it checks repository authorization and creates the codespace. `400` for malformed input; `503`
+before it checks repository authorization. For a provider that requires personal billing,
+creation first reads GitHub's `billable_owner` for that repository and ref. An
+organization repository is allowed when GitHub would bill the connected personal
+account; an organization payer returns `422 CODESPACE_BILLING_UNSUPPORTED` before
+any codespace is created. `400` for malformed input; `503`
 `CODESPACE_NOT_CONFIGURED` with `settings_url` when the feature is not configured.
 
 ### GET /api/integrations/github/codespaces/:codespaceId
@@ -1550,7 +1595,8 @@ Domain errors handled by these routes map as follows: `CODESPACE_NOT_FOUND` → 
 `CODESPACE_GENERATION_CONFLICT`, `CODESPACE_NOT_RUNNING`,
 `CODESPACE_CREATE_PENDING`, `CODESPACE_AUTHORIZATION_REQUIRED` and
 `CODESPACE_SESSION_UNAVAILABLE` → 409; `CODESPACE_RESULT_EXPIRED` → 410;
-`CODESPACE_CREATE_REJECTED` → 422; `CODESPACE_POLICY_LIMIT` and
+`CODESPACE_CREATE_REJECTED` and `CODESPACE_BILLING_UNSUPPORTED` → 422;
+`CODESPACE_POLICY_LIMIT` and
 `CODESPACE_OPERATION_BUSY` → 429; `CODESPACE_PROVIDER_DISABLED` and
 `CODESPACE_PROVIDER_UNAVAILABLE` → 503; `CODESPACE_START_TIMEOUT` → 504; and
 `CODESPACE_RESOURCE_INVALID` → 400. A message

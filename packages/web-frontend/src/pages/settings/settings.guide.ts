@@ -34,9 +34,9 @@ export const githubSetupGuide: GuideDefinition = {
   routes: SETTINGS_ROUTES,
   steps: [
     { id: "steps", anchor: "settings.github-steps", kind: "look", revision: 1 },
-    { id: "connect", anchor: "settings.github-connect", kind: "look", revision: 1 },
-    { id: "codespaces", anchor: "settings.codespaces", kind: "look", revision: 1 },
-    { id: "limits", anchor: "settings.codespace-limits", kind: "look", revision: 1 },
+    { id: "connect", anchor: "settings.github-connect", kind: "look", revision: 2 },
+    { id: "codespaces", anchor: "settings.codespaces", kind: "look", revision: 2 },
+    { id: "limits", anchor: "settings.codespace-limits", kind: "look", revision: 2 },
     { id: "autopause", anchor: "settings.codespace-autopause", kind: "look", revision: 1 },
   ],
 };

@@ -89,6 +89,42 @@ async function gauge(name: string, labels: Record<string, string> = {}): Promise
 }
 
 describe("codespace observability", () => {
+  it("adds provider monthly billing while preserving the local capacity projection", async () => {
+    const service = new CodespaceObservabilityService(
+      dependencies({
+        providerBilling: async () => ({
+          state: "available",
+          payer_login: "owner",
+          period: { year: 2026, month: 9 },
+          retrieved_at: NOW,
+          plan: "free",
+          compute: { used_core_hours: 12, included_core_hours: 120, net_amount_usd: 0 },
+          storage: { used_gb_month: 2, included_gb_month: 15, net_amount_usd: 0 },
+          net_amount_usd: 0,
+        }),
+      }),
+    );
+    const view = await service.limitsWithBilling("user-a");
+    expect(view.provider.billing).toMatchObject({
+      state: "available",
+      compute: { used_core_hours: 12, included_core_hours: 120 },
+    });
+    expect(view.codespaces).toMatchObject({ held: 1, instance_held: 2 });
+  });
+
+  it("keeps local limits available when optional provider billing fails", async () => {
+    const service = new CodespaceObservabilityService(
+      dependencies({
+        providerBilling: async () => {
+          throw new Error("GitHub unavailable");
+        },
+      }),
+    );
+    const view = await service.limitsWithBilling("user-a", { force: true });
+    expect(view.provider.billing).toBe("unavailable");
+    expect(view.codespaces).toMatchObject({ held: 1, max_per_user: 1 });
+  });
+
   it("is ready only when configured, enabled, uncontrolled and the connector answers", async () => {
     const view = await new CodespaceObservabilityService(dependencies()).readiness();
     expect(view).toMatchObject({

@@ -98,10 +98,14 @@ function services(
       }),
       refreshGrants: jest.fn(async () => ({ refreshed: false, stale: false })),
     },
-    observability: { readiness: async () => readiness, limits: jest.fn(() => LIMITS) },
+    observability: {
+      readiness: async () => readiness,
+      limitsWithBilling: jest.fn(async () => LIMITS),
+    },
     resource: {
       listRepositories: () => [{ id: "42", fullName: "owner/repository", private: true }],
       listResources: () => [codespace()],
+      refreshProviderState: jest.fn(async () => ({ stale: false })),
       getCodespace: jest.fn(() => codespace()),
       create: jest.fn(async () => ({
         resource: codespace({ state: "create_submitted" }),
@@ -161,7 +165,9 @@ describe("website codespace management routes", () => {
       codespaces: [{ codespace_id: CODESPACE_ID, state: "usable", generation: 3 }],
       limits: LIMITS,
     });
-    expect(dependencies.observability.limits).toHaveBeenCalledWith("user-a");
+    expect(dependencies.observability.limitsWithBilling).toHaveBeenCalledWith("user-a", {
+      force: false,
+    });
     expect(dependencies.connection.refreshGrants).toHaveBeenCalledWith("user-a");
     for (const secret of [
       "secret-connection",
@@ -182,7 +188,7 @@ describe("website codespace management routes", () => {
       operation: null,
       observability: {
         readiness: async () => ({ ...readiness, state: "disabled", reason: "NOT_CONFIGURED" }),
-        limits: () => LIMITS,
+        limitsWithBilling: async () => LIMITS,
       },
     });
     const list = await request(appWith(disabled)).get("/api/integrations/github/codespaces");
@@ -226,6 +232,55 @@ describe("website codespace management routes", () => {
     expect(response.body.data.repositories).toEqual([
       { repository_id: "42", name: "owner/repository", private: true },
     ]);
+  });
+
+  test("refreshes GitHub grants and managed resource state before returning the list", async () => {
+    const base = services();
+    let present = true;
+    const dependencies = services({
+      connection: {
+        ...base.connection,
+        refreshGrants: jest.fn(async () => ({ refreshed: true, stale: false })),
+      },
+      resource: {
+        ...base.resource!,
+        refreshProviderState: jest.fn(async () => {
+          present = false;
+          return { stale: false };
+        }),
+        listResources: () => (present ? [codespace()] : []),
+      },
+    });
+
+    const response = await request(appWith(dependencies)).post(
+      "/api/integrations/github/codespaces/refresh",
+    );
+    expect(response.status).toBe(200);
+    expect(response.body.data).toMatchObject({ resources_stale: false, codespaces: [] });
+    expect(dependencies.connection.refreshGrants).toHaveBeenCalledWith("user-a", { force: true });
+    expect(dependencies.resource!.refreshProviderState).toHaveBeenCalledWith("user-a", {
+      authorizationFresh: true,
+    });
+  });
+
+  test("stale GitHub grants preserve resources and skip absence reconciliation", async () => {
+    const base = services();
+    const dependencies = services({
+      connection: {
+        ...base.connection,
+        refreshGrants: jest.fn(async () => ({ refreshed: false, stale: true })),
+      },
+    });
+    const response = await request(appWith(dependencies)).post(
+      "/api/integrations/github/codespaces/refresh",
+    );
+    expect(response.status).toBe(200);
+    expect(response.body.data).toMatchObject({
+      repositories_stale: true,
+      resources_stale: true,
+      codespaces: [{ codespace_id: CODESPACE_ID }],
+    });
+    expect(dependencies.resource!.refreshProviderState).not.toHaveBeenCalled();
   });
 
   test("rejects malformed create input before any service call", async () => {

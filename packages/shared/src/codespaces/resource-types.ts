@@ -1,4 +1,4 @@
-export const CODESPACE_PROVIDER_CONTRACT_VERSION = 5 as const;
+export const CODESPACE_PROVIDER_CONTRACT_VERSION = 6 as const;
 
 export interface CodespaceRepositoryTarget {
   id: string;
@@ -122,6 +122,15 @@ export interface CodespaceProviderAdapter {
     repository: CodespaceRepositoryTarget,
     ref: string,
   ): Promise<CodespaceMachine[]>;
+  /**
+   * Read the provider's billing owner for a create request before any resource is created. A
+   * provider that cannot identify the payer must fail this read, not guess from repository owner.
+   */
+  preflightCreate(
+    credential: string,
+    repository: CodespaceRepositoryTarget,
+    ref: string,
+  ): Promise<{ billableOwnerId: string }>;
   create(
     credential: string,
     input: {
@@ -234,6 +243,7 @@ export type CodespaceResourceErrorCode =
   | "CODESPACE_AUTHORIZATION_REQUIRED"
   | "CODESPACE_RESULT_EXPIRED"
   | "CODESPACE_CREATE_REJECTED"
+  | "CODESPACE_BILLING_UNSUPPORTED"
   | "CODESPACE_CREATE_PENDING"
   | "CODESPACE_NOT_RUNNING"
   | "CODESPACE_START_TIMEOUT"
