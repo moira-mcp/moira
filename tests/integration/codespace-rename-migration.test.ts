@@ -41,6 +41,12 @@ function expectedRowsAfterRename(table: string, storedRows: StoredRow[]): Stored
       // Added by the later activity migration.
       expected.resourcesObservedAt = null;
     }
+    if (table === "workspaceAuthorizationState") {
+      // Existing one-time states keep their connect intent after the reauthorization migration.
+      expected.intent = "connect";
+      expected.expectedConnectionId = null;
+      expected.expectedGeneration = null;
+    }
     if (table === "workspaceResource") {
       expected.lastOutcome = String(expected.lastOutcome).replace("workspace_", "codespace_");
       // Added by the later observed-ref migration, with its defaults for existing rows.
@@ -212,7 +218,7 @@ function populateEveryOldTable(sqlite: Database.Database): void {
 }
 
 describe("codespace rename migration", () => {
-  test("preserves every row, foreign key and explicit index while adding refresh metadata", () => {
+  test("preserves every row, foreign key and explicit index while adding current connection metadata", () => {
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), "moira-codespace-rename-"));
     const sqlite = new Database(path.join(directory, "moira.db"));
     sqlite.pragma("foreign_keys = ON");
