@@ -14,6 +14,7 @@ import { NodeExecutionResult } from "../types/node-execution.js";
 import { INodeHandler, WorkflowGraph } from "../interfaces/core-interfaces.js";
 import { IDataRepository } from "../interfaces/data-repository.js";
 import { AgentMessageQueue } from "../services/agent-message-queue.js";
+import { missingExpressionVariables } from "../services/continuation-diagnosis.js";
 import {
   createLogger,
   WorkflowLogger,
@@ -441,10 +442,38 @@ export class GraphExecutionEngine implements IGraphExecutionEngine {
           agentErrorMessage = `${errorTypeLabel}:\n${errorMessage}\n\nPlease retry with correct input.`;
         }
 
+        const missingState =
+          currentNode.type === "agent-directive" &&
+          handlerError instanceof ValidationError &&
+          typeof handlerError.context?.expressionIndex === "number"
+            ? missingExpressionVariables(
+                currentNode,
+                updatedContext.variables,
+                graph.variableRegistry,
+                handlerError.context.expressionIndex as number,
+              )
+            : [];
+        const unresolvedRoot =
+          handlerError instanceof ValidationError
+            ? handlerError.context?.expressionUnresolvedRoot
+            : undefined;
+        const blockedByMissingState =
+          typeof unresolvedRoot === "string" && missingState.includes(unresolvedRoot);
+        if (blockedByMissingState) {
+          agentErrorMessage =
+            `STEP_BLOCKED: This step's expression needs saved execution variables that its answer ` +
+            `cannot supply: ${missingState.join(", ")}. Do not retry the same answer. ` +
+            `Call session({ action: "diagnose", executionId: "${context.executionId}" }), ` +
+            `then session({ action: "recover", executionId: "${context.executionId}", ` +
+            `nodeId: "${currentNode.id}", variableValues: { ... } }) with the missing values.`;
+        }
+
         messageQueue.addMessage(
           currentNode.id,
           agentErrorMessage,
-          "Resolve the error and provide valid input",
+          blockedByMissingState
+            ? "Recover the missing execution state before answering this step"
+            : "Resolve the error and provide valid input",
           undefined,
         );
 

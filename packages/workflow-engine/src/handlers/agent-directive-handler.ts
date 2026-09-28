@@ -141,7 +141,13 @@ export class AgentDirectiveHandler implements INodeHandler {
     if (routing.failure) {
       throw new ValidationError(
         `Expression evaluation failed at index ${routing.failure.index}: ${routing.failure.message}`,
-        { nodeId: agentNode.id, expressionIndex: routing.failure.index },
+        {
+          nodeId: agentNode.id,
+          expressionIndex: routing.failure.index,
+          ...(routing.failure.unresolvedRoot
+            ? { expressionUnresolvedRoot: routing.failure.unresolvedRoot }
+            : {}),
+        },
       );
     }
 

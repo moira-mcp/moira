@@ -150,7 +150,7 @@ export interface ExpressionRunResult {
   /** Declared-global assignments, validated against the registry, in evaluation order. */
   assignments: Record<string, unknown>;
   /** Present when an expression failed; nothing in `assignments` may be published then. */
-  failure?: { index: number; message: string };
+  failure?: { index: number; message: string; unresolvedRoot?: string };
 }
 
 const interpreter = new SafeExpressionInterpreter();
@@ -172,7 +172,14 @@ export function runNodeExpressions(
   for (let index = 0; index < expressions.length; index++) {
     const result = interpreter.evaluate(expressions[index], working);
     if (result.error) {
-      return { assignments: {}, failure: { index, message: result.error } };
+      return {
+        assignments: {},
+        failure: {
+          index,
+          message: result.error,
+          ...(result.unresolvedRoot ? { unresolvedRoot: result.unresolvedRoot } : {}),
+        },
+      };
     }
     let normalized: Record<string, unknown>;
     try {
@@ -225,7 +232,7 @@ export interface NodeRoutingResult {
   /** Declared-global assignments to publish with the node; empty when an expression failed. */
   assignments: Record<string, unknown>;
   /** Set when an expression failed and the node has no `error` output. */
-  failure?: { index: number; message: string };
+  failure?: { index: number; message: string; unresolvedRoot?: string };
 }
 
 /**

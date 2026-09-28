@@ -238,6 +238,28 @@ and a `subgraph` node enters its child — choose one of those as the target onl
 Recovery is also refused unless the run really cannot continue, and refused for a run that is already
 finished or cancelled, which stays that way; a refusal changes nothing.
 
+### `STEP_BLOCKED` or `RECOVERY REQUIRED` for a missing expression variable
+
+**Cause:** The current agent-directive node has an expression that needs saved execution state.
+The named variable is absent, and Moira can establish that no answer field accepted by the input
+schema and declared as a node output can provide it. An open input schema does not make undeclared
+answer fields usable. A declared field is also unavailable when the input schema structurally
+forbids it, such as with `maxProperties: 0`, a false property schema, or an `allOf` prohibition.
+When the schema does not prove a prohibition, correct an invalid answer through the normal retry.
+This can happen when the workflow definition changes while an execution is in progress. A recorded
+error by itself is historical; the current missing value is what blocks continuation.
+
+**Solution:** Call `session({ action: "diagnose", executionId: "..." })` and check for the blocking
+`missing_expression_variables` cause. Call `session({ action: "recover", executionId: "...",
+nodeId: "<current node>", variableValues: { ... } })` with the named values. Values for declared
+variables must satisfy their registry schemas; `session({ action: "variables", executionId: "..." })`
+shows those declarations. If recovery refuses a missing or invalid value, correct `variableValues`
+and retry; a refusal does not change the execution. On success, use the new Step attempt ID to send
+the ordinary answer to the same node. Do not retry an unchanged answer while the saved state is
+missing. If the submitted answer fails an earlier expression for its own reason, correct that
+answer first; `diagnose` may still name a later missing saved value that needs recovery. A node's
+authored error route remains in force.
+
 ### Agent Forgets Workflow Context
 
 **Cause:** Session was archived/compacted

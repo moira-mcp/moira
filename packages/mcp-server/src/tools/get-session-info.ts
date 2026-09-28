@@ -186,7 +186,9 @@ function describeRecoveryRefusal(
     case "node_not_resumable":
       return `RECOVERY_REFUSED: node '${refusal.nodeId}' is a '${refusal.nodeType}' node, which a run never waits on, so resuming there would run the workflow forward instead of repairing it. Nothing was changed. Resume at one of: ${refusal.resumableNodeIds.join(", ")}.`;
     case "missing_variables":
-      return `RECOVERY_REFUSED: node '${refusal.nodeId}' would still be presented with unresolved references. Nothing was changed. Supply these in variableValues: ${refusal.references.join(", ")}.`;
+      return `RECOVERY_REFUSED: node '${refusal.nodeId}' still needs values for unresolved references or expressions. Nothing was changed. Supply these in variableValues: ${refusal.references.join(", ")}.`;
+    case "invalid_variable_values":
+      return `RECOVERY_REFUSED: ${refusal.message}. Nothing was changed. Read the declared schema with session({ action: "variables", executionId: "<Process ID>" }) and supply a matching value.`;
     case "attempt_in_progress":
       return "RECOVERY_REFUSED: an agent step is in progress on this execution, or its outcome is unknown. Nothing was changed.";
     case "execution_changed":
@@ -500,6 +502,21 @@ export async function getSessionInfo(
         }
 
         const formattedText = await MCPEngine.getInstance().getCurrentStep(executionId);
+        const current = (await repository.getExecution(executionId)) ?? execution;
+        const attempt = await repository.getCurrentExecutionAttempt(executionId, userId);
+        const diagnosis = await diagnoseContinuation(repository, current, attempt);
+        const missingState =
+          attempt?.state === "presented"
+            ? diagnosis.causes.find((cause) => cause.kind === "missing_expression_variables")
+            : undefined;
+        const presentation =
+          missingState && !formattedText.includes("STEP_BLOCKED:")
+            ? `${formattedText}\n\nRECOVERY REQUIRED: This step cannot advance because its expression needs saved ` +
+              `variables the answer cannot provide: ${missingState.variables.join(", ")}. ` +
+              `Call session({ action: "diagnose", executionId: "${executionId}" }), then ` +
+              `session({ action: "recover", executionId: "${executionId}", ` +
+              `nodeId: "${missingState.nodeId}", variableValues: { ... } }) with those values.`
+            : formattedText;
 
         // Audit log for current step read
         await logAuditEventDirect(repository as DatabaseRepository, {
@@ -513,7 +530,7 @@ export async function getSessionInfo(
 
         return {
           success: true,
-          data: formattedText,
+          data: presentation,
         };
       }
 
