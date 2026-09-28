@@ -218,6 +218,25 @@ An indeterminate start stays attached to its reserved Process ID and appears thr
 inspection instead of becoming an orphan. Only its owner can cancel it, and cancellation requires
 the current execution revision so a stale recovery action cannot remove newer work.
 
+#### Running-execution compatibility
+
+Workflow definitions can change while executions started against an earlier definition are still
+running. Those executions may reach the updated graph later; a paused Step attempt binds only its
+current node's continuation surface, not the whole workflow version. When changing engine execution
+semantics or a workflow/node contract, identify paths that an existing execution could reach after a
+definition update. For each affected path, establish how the same execution reaches its next required
+step: an ordinary `step()` or `current_step` refresh, an authored error route, or a blocking `diagnose`
+cause followed by guarded `recover` and an ordinary `step()`. Recovery must not skip required work,
+replay an unsafe effect, or make a healthy or terminal execution writable. A bad answer that the agent
+can correct remains an ordinary retry, not a reason to grant recovery. Resolve any affected path with
+no supported continuation or recovery before merging the engine change.
+
+Verify an affected path by starting an execution on the earlier definition, updating the workflow
+while it remains active, and driving it to the changed behavior. Assert ordinary continuation or the
+complete diagnosis, recovery, and subsequent-step path on the same execution, including its recorded
+earlier route and the next required step. When a change cannot affect an in-flight execution, explain
+why in the pull request. Workflow version pinning and blanket migration do not replace this check.
+
 ### Bundled Workflow Reconciliation
 
 Bundled workflows use three exact states: the last accepted upstream baseline, the current instance

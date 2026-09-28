@@ -155,6 +155,13 @@ lifecycle state but must not be used by itself to reserve work.
 8. Open a pull request against `master`, follow the policy below, use a closing
    reference to the claimed issue, and describe what and why.
 
+For engine or workflow-contract changes that can affect an execution already in progress, follow
+the [running-execution compatibility rule](docs/SYSTEM.md#running-execution-compatibility). Test an
+execution started on the earlier definition against the updated workflow: it must continue through
+an ordinary step or authored error route, or have a blocking diagnosis, safe recovery, and a
+subsequent ordinary step on the same execution. If the change cannot affect an in-flight execution,
+explain why in the pull request.
+
 ## Pull-request policy
 
 Every pull request to `master` is checked by **PR Policy**. The check reports all
