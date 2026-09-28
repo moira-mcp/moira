@@ -499,7 +499,7 @@ export class Evaluator {
         : this.getNestedValue(this.context, name);
 
     if (value === undefined || value === null) {
-      throw new ExpressionError(`Variable '${name}' is not defined or is null`, -1);
+      throw new ExpressionError(`Variable '${name}' is not defined or is null`, -1, name);
     }
 
     if (typeof value === "string") {
@@ -527,12 +527,12 @@ export class Evaluator {
 
   private getNestedValue(obj: Record<string, unknown>, path: string): unknown {
     const root = /^[A-Za-z_][A-Za-z0-9_]*/.exec(path);
-    if (
-      !root ||
-      isForbiddenMember(root[0]) ||
-      !Object.prototype.hasOwnProperty.call(obj, root[0])
-    ) {
+    if (!root || isForbiddenMember(root[0])) {
       throw new ExpressionError(`Invalid or unresolved member path '${path}'`, -1);
+    }
+
+    if (!Object.prototype.hasOwnProperty.call(obj, root[0]) || obj[root[0]] == null) {
+      throw new ExpressionError(`Invalid or unresolved member path '${path}'`, -1, root[0]);
     }
 
     let current: unknown = obj[root[0]];
@@ -589,6 +589,9 @@ export class Evaluator {
       : Object.prototype.hasOwnProperty.call(this.context, name)
         ? this.context[name]
         : undefined;
+    if (value === undefined || value === null) {
+      throw new ExpressionError(`Array index '${name}' is not a number`, -1, name);
+    }
     if (typeof value !== "number") {
       throw new ExpressionError(`Array index '${name}' is not a number`, -1);
     }
@@ -638,11 +641,13 @@ function isForbiddenMember(name: string): boolean {
  */
 export class ExpressionError extends Error {
   position: number;
+  unresolvedRoot?: string;
 
-  constructor(message: string, position: number) {
+  constructor(message: string, position: number, unresolvedRoot?: string) {
     super(message);
     this.name = "ExpressionError";
     this.position = position;
+    this.unresolvedRoot = unresolvedRoot;
   }
 }
 
@@ -663,6 +668,8 @@ export interface ExpressionResult {
   value: unknown;
   assignments: Record<string, unknown>;
   error?: string;
+  /** Root whose absent value caused this exact evaluation failure, when known. */
+  unresolvedRoot?: string;
 }
 
 /**
@@ -681,7 +688,12 @@ export class SafeExpressionInterpreter implements IExpressionInterpreter {
       return evaluator.evaluate(ast);
     } catch (error) {
       if (error instanceof ExpressionError) {
-        return { value: 0, assignments: {}, error: error.message };
+        return {
+          value: 0,
+          assignments: {},
+          error: error.message,
+          ...(error.unresolvedRoot ? { unresolvedRoot: error.unresolvedRoot } : {}),
+        };
       }
       return {
         value: 0,

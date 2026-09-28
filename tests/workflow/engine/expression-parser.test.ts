@@ -391,6 +391,26 @@ describe("Expression Parser", () => {
       expect(result.error).toContain("Variable 'unknown' is not defined");
     });
 
+    test.each([
+      ["missing bare variable", "value = unknown + 1", {}, "unknown"],
+      ["missing member root", "value = steps[0].estimate", {}, "steps"],
+      ["missing dynamic index", "value = steps[index].estimate", { steps: [{}] }, "index"],
+      [
+        "earlier division by zero",
+        "value = 12 / divisor + steps[0].estimate",
+        { divisor: 0 },
+        undefined,
+      ],
+      [
+        "missing member on an existing root",
+        "value = steps[0].estimate",
+        { steps: [{}] },
+        undefined,
+      ],
+    ])("identifies the actual missing root for %s", (_name, expression, context, expected) => {
+      expect(interpreter.evaluate(expression, context).unresolvedRoot).toBe(expected);
+    });
+
     test("should return error for invalid syntax", () => {
       const result = interpreter.evaluate("1 + + 2", {});
 

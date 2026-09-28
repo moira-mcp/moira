@@ -128,6 +128,496 @@ describe("recovering a run that cannot continue", () => {
     expect(next).toContain("completed");
   });
 
+  test("a future step added by a workflow update recovers missing expression state", async () => {
+    const { repository, stored, executionId } = await pausedRun("recovery-future-expression");
+    await repository.saveWorkflow(
+      {
+        ...stored,
+        metadata: { ...stored.metadata, version: "2.0.0" },
+        variableRegistry: {
+          plan_units: {
+            type: "array",
+            description: "Approved units",
+            items: {
+              type: "object",
+              required: ["title"],
+              properties: { title: { type: "string" } },
+            },
+          },
+          unit_index: { type: "integer", description: "Current zero-based unit index" },
+          current_title: { type: "string", description: "Current unit title" },
+        },
+        nodes: stored.nodes.map((node) =>
+          node.id === "review"
+            ? {
+                ...node,
+                directive: "Review the work",
+                inputSchema: {
+                  type: "object",
+                  properties: {
+                    approved: { type: "boolean" },
+                    summary: { type: "string" },
+                  },
+                  required: ["approved"],
+                  allOf: [
+                    {
+                      if: { properties: { approved: { const: true } }, required: ["approved"] },
+                      then: { required: ["summary"] },
+                    },
+                  ],
+                },
+                expressions: ["unit_index = 0", "current_title = plan_units[unit_index].title"],
+              }
+            : node,
+        ),
+      },
+      USER_ID,
+    );
+
+    const engine = MCPEngine.getInstance(repository);
+    const task = await requestContext.run({ userId: USER_ID }, () =>
+      engine.getCurrentStep(executionId),
+    );
+    const review = await requestContext.run({ userId: USER_ID }, () =>
+      engine.executeStep(executionId, {}, undefined, attemptIdOf(task)),
+    );
+    expect(review).toContain("Review the work");
+    const resumedStep = await requestContext.run({ userId: USER_ID }, () =>
+      getSessionInfo({ action: "current_step", executionId }),
+    );
+    expect(resumedStep.success).toBe(true);
+    expect(resumedStep.data).toContain("RECOVERY REQUIRED");
+    expect(resumedStep.data).toContain("plan_units");
+
+    const rejected = await requestContext.run({ userId: USER_ID }, () =>
+      engine.executeStep(
+        executionId,
+        { approved: true, summary: "Reviewed" },
+        undefined,
+        attemptIdOf(review),
+      ),
+    );
+    expect(rejected).toContain("STEP_BLOCKED");
+    expect(rejected).toContain("plan_units");
+    expect(rejected).toContain('session({ action: "recover"');
+
+    const diagnosis = (
+      await requestContext.run({ userId: USER_ID }, () =>
+        getSessionInfo({ action: "diagnose", executionId }),
+      )
+    ).data as ContinuationDiagnosis;
+    expect(diagnosis.attempt?.boundToCurrentDefinition).toBe(true);
+    expect(diagnosis.continuable).toBe(false);
+    expect(diagnosis.causes).toContainEqual({
+      kind: "missing_expression_variables",
+      nodeId: "review",
+      variables: ["plan_units"],
+      blocks: true,
+    });
+
+    const beforeRecovery = (await repository.getExecution(executionId))!;
+    const missingValue = await recover(executionId, "review");
+    expect(missingValue.success).toBe(false);
+    expect(missingValue.error).toContain("plan_units");
+    const invalidValue = await recover(executionId, "review", { plan_units: "not a plan" });
+    expect(invalidValue.success).toBe(false);
+    expect(invalidValue.error).toContain("Invalid declared variable 'plan_units'");
+    expect(await repository.getExecution(executionId)).toEqual(beforeRecovery);
+
+    const recoveredResult = await recover(executionId, "review", {
+      plan_units: [{ title: "Ground the current unit" }],
+    });
+    expect({ success: recoveredResult.success, error: recoveredResult.error }).toEqual({
+      success: true,
+      error: undefined,
+    });
+    const recovered = recoveredResult.data as ContinuationRecoveryResult;
+    const afterRecovery = (await repository.getExecution(executionId))!;
+    expect(afterRecovery.visits?.slice(0, beforeRecovery.visits?.length)).toEqual(
+      beforeRecovery.visits,
+    );
+    const finished = await requestContext.run({ userId: USER_ID }, () =>
+      engine.executeStep(
+        executionId,
+        { approved: true, summary: "Reviewed" },
+        undefined,
+        attemptIdOf(recovered.presentation),
+      ),
+    );
+    expect(finished).toContain("completed");
+    expect((await repository.getExecution(executionId))?.status).toBe("completed");
+  });
+
+  test("a composed empty-answer schema recovers missing expression state", async () => {
+    const { repository, stored, executionId } = await pausedRun("recovery-composed-empty-answer");
+    await repository.saveWorkflow(
+      {
+        ...stored,
+        variableRegistry: {
+          plan_units: {
+            type: "array",
+            description: "Approved units",
+            items: {
+              type: "object",
+              required: ["title"],
+              properties: { title: { type: "string" } },
+            },
+          },
+          current_title: { type: "string", description: "Current unit title" },
+        },
+        nodes: stored.nodes.map((node) =>
+          node.id === "review"
+            ? {
+                ...node,
+                directive: "Review the work",
+                inputSchema: {
+                  oneOf: [
+                    {
+                      type: "object",
+                      additionalProperties: false,
+                      maxProperties: 0,
+                    },
+                  ],
+                },
+                expressions: ["current_title = plan_units[0].title"],
+              }
+            : node,
+        ),
+      },
+      USER_ID,
+    );
+
+    const engine = MCPEngine.getInstance(repository);
+    const task = await requestContext.run({ userId: USER_ID }, () =>
+      engine.getCurrentStep(executionId),
+    );
+    const review = await requestContext.run({ userId: USER_ID }, () =>
+      engine.executeStep(executionId, {}, undefined, attemptIdOf(task)),
+    );
+    expect(review).toContain("Review the work");
+
+    const current = await requestContext.run({ userId: USER_ID }, () =>
+      getSessionInfo({ action: "current_step", executionId }),
+    );
+    expect(current.success).toBe(true);
+    expect(current.data).toContain("RECOVERY REQUIRED");
+    expect(current.data).toContain("plan_units");
+    const rejected = await requestContext.run({ userId: USER_ID }, () =>
+      engine.executeStep(executionId, {}, undefined, attemptIdOf(current.data as string)),
+    );
+    expect(rejected).toContain("STEP_BLOCKED");
+    expect(rejected).toContain("plan_units");
+    const diagnosis = (
+      await requestContext.run({ userId: USER_ID }, () =>
+        getSessionInfo({ action: "diagnose", executionId }),
+      )
+    ).data as ContinuationDiagnosis;
+    expect(diagnosis.continuable).toBe(false);
+    expect(diagnosis.causes).toContainEqual({
+      kind: "missing_expression_variables",
+      nodeId: "review",
+      variables: ["plan_units"],
+      blocks: true,
+    });
+
+    const before = (await repository.getExecution(executionId))!;
+    const missingValue = await recover(executionId, "review");
+    expect(missingValue.success).toBe(false);
+    expect(missingValue.error).toContain("plan_units");
+    expect(await repository.getExecution(executionId)).toEqual(before);
+    const recovery = await recover(executionId, "review", {
+      plan_units: [{ title: "From saved state" }],
+    });
+    expect(recovery.success).toBe(true);
+    const recovered = recovery.data as ContinuationRecoveryResult;
+
+    const finished = await requestContext.run({ userId: USER_ID }, () =>
+      engine.executeStep(executionId, {}, undefined, attemptIdOf(recovered.presentation)),
+    );
+    expect(finished).toContain("completed");
+    expect((await repository.getExecution(executionId))?.status).toBe("completed");
+  });
+
+  test("an open answer cannot replace an undeclared saved expression root", async () => {
+    const { repository, stored, executionId } = await pausedRun("recovery-open-answer");
+    await repository.saveWorkflow(
+      {
+        ...stored,
+        variableRegistry: {
+          plan_units: {
+            type: "array",
+            description: "Approved units",
+            items: { type: "object", properties: { title: { type: "string" } } },
+          },
+          current_title: { type: "string", description: "Current unit title" },
+        },
+        nodes: stored.nodes.map((node) =>
+          node.id === "review"
+            ? {
+                ...node,
+                directive: "Review the work",
+                inputSchema: { type: "object" },
+                expressions: ["current_title = plan_units[0].title"],
+              }
+            : node,
+        ),
+      },
+      USER_ID,
+    );
+
+    const engine = MCPEngine.getInstance(repository);
+    const task = await requestContext.run({ userId: USER_ID }, () =>
+      engine.getCurrentStep(executionId),
+    );
+    const review = await requestContext.run({ userId: USER_ID }, () =>
+      engine.executeStep(executionId, {}, undefined, attemptIdOf(task)),
+    );
+    expect(review).toContain("Review the work");
+
+    const current = await requestContext.run({ userId: USER_ID }, () =>
+      getSessionInfo({ action: "current_step", executionId }),
+    );
+    expect(current.success).toBe(true);
+    expect(current.data).toContain("RECOVERY REQUIRED");
+    expect(current.data).toContain("plan_units");
+
+    const rejected = await requestContext.run({ userId: USER_ID }, () =>
+      engine.executeStep(executionId, {}, undefined, attemptIdOf(review)),
+    );
+    expect(rejected).toContain("STEP_BLOCKED");
+    const diagnosis = (
+      await requestContext.run({ userId: USER_ID }, () =>
+        getSessionInfo({ action: "diagnose", executionId }),
+      )
+    ).data as ContinuationDiagnosis;
+    expect(diagnosis.causes).toContainEqual({
+      kind: "missing_expression_variables",
+      nodeId: "review",
+      variables: ["plan_units"],
+      blocks: true,
+    });
+
+    const recovered = await recover(executionId, "review", {
+      plan_units: [{ title: "From saved state" }],
+    });
+    expect(recovered.success).toBe(true);
+    const presentation = (recovered.data as ContinuationRecoveryResult).presentation;
+    const finished = await requestContext.run({ userId: USER_ID }, () =>
+      engine.executeStep(executionId, {}, undefined, attemptIdOf(presentation)),
+    );
+    expect(finished).toContain("completed");
+    expect((await repository.getExecution(executionId))?.status).toBe("completed");
+
+    const updated = (await repository.getWorkflowGraph(stored.id!, USER_ID))!;
+    const secondExecutionId = await engine.executor.startWorkflow(updated, undefined, USER_ID);
+    await engine.executor.executeStep(secondExecutionId, undefined, undefined, {
+      userId: USER_ID,
+      createPresentation: true,
+    });
+    const secondTask = await requestContext.run({ userId: USER_ID }, () =>
+      engine.getCurrentStep(secondExecutionId),
+    );
+    const secondReview = await requestContext.run({ userId: USER_ID }, () =>
+      engine.executeStep(secondExecutionId, {}, undefined, attemptIdOf(secondTask)),
+    );
+    await expect(
+      requestContext.run({ userId: USER_ID }, () =>
+        engine.executeStep(
+          secondExecutionId,
+          { plan_units: [{ title: "Only in the answer" }] },
+          undefined,
+          attemptIdOf(secondReview),
+        ),
+      ),
+    ).rejects.toThrow("produced undeclared output key 'plan_units'");
+    expect((await repository.getExecution(secondExecutionId))?.status).not.toBe("completed");
+  });
+
+  test.each([
+    {
+      name: "maxProperties excludes the declared field",
+      inputSchema: {
+        type: "object",
+        properties: { plan_units: { type: "array" } },
+        maxProperties: 0,
+      },
+    },
+    {
+      name: "a false property schema excludes the declared field",
+      inputSchema: { type: "object", properties: { plan_units: false } },
+    },
+    {
+      name: "not required excludes the declared field",
+      inputSchema: {
+        type: "object",
+        properties: { plan_units: { type: "array" } },
+        not: { required: ["plan_units"] },
+      },
+    },
+    {
+      name: "an allOf branch excludes the declared field",
+      inputSchema: {
+        type: "object",
+        properties: { plan_units: { type: "array" } },
+        allOf: [{ maxProperties: 0 }],
+      },
+    },
+  ])("a schema that $name still permits same-node recovery", async (scenario) => {
+    const base = workflow(`recovery-forbidden-answer-${scenario.name}`);
+    const saved = await getWorkflowService().save({
+      graph: {
+        ...base,
+        variableRegistry: {
+          plan_units: {
+            type: "array",
+            description: "Approved units",
+            items: { type: "object", properties: { estimate: { type: "number" } } },
+          },
+          result: { type: "number", description: "Computed result" },
+        },
+        nodes: base.nodes.map((node) =>
+          node.id === "task"
+            ? {
+                ...node,
+                inputSchema: scenario.inputSchema,
+                expressions: ["result = plan_units[0].estimate"],
+              }
+            : node,
+        ),
+      },
+      userId: USER_ID,
+      visibility: "private",
+    });
+    const repository = new DatabaseRepository();
+    const stored = (await repository.getWorkflowGraph(saved.id, USER_ID))!;
+    const engine = MCPEngine.getInstance(repository);
+    const executionId = await engine.executor.startWorkflow(stored, undefined, USER_ID);
+    await engine.executor.executeStep(executionId, undefined, undefined, {
+      userId: USER_ID,
+      createPresentation: true,
+    });
+    const task = await requestContext.run({ userId: USER_ID }, () =>
+      engine.getCurrentStep(executionId),
+    );
+    const invalid = await requestContext.run({ userId: USER_ID }, () =>
+      engine.executeStep(
+        executionId,
+        { plan_units: [{ estimate: 1 }] },
+        undefined,
+        attemptIdOf(task),
+      ),
+    );
+    expect(invalid).toContain("VALIDATION ERROR");
+
+    const rejected = await requestContext.run({ userId: USER_ID }, () =>
+      engine.executeStep(executionId, {}, undefined, attemptIdOf(invalid)),
+    );
+    expect(rejected).toContain("STEP_BLOCKED");
+    expect(rejected).toContain("plan_units");
+    const diagnosis = (
+      await requestContext.run({ userId: USER_ID }, () =>
+        getSessionInfo({ action: "diagnose", executionId }),
+      )
+    ).data as ContinuationDiagnosis;
+    expect(diagnosis.causes).toContainEqual({
+      kind: "missing_expression_variables",
+      nodeId: "task",
+      variables: ["plan_units"],
+      blocks: true,
+    });
+
+    const before = (await repository.getExecution(executionId))!;
+    const missing = await recover(executionId, "task");
+    expect(missing.success).toBe(false);
+    expect(await repository.getExecution(executionId)).toEqual(before);
+    const recovery = await recover(executionId, "task", { plan_units: [{ estimate: 1 }] });
+    expect(recovery.success).toBe(true);
+    const presentation = (recovery.data as ContinuationRecoveryResult).presentation;
+    const advanced = await requestContext.run({ userId: USER_ID }, () =>
+      engine.executeStep(executionId, {}, undefined, attemptIdOf(presentation)),
+    );
+    expect(advanced).toContain("Review the work");
+  });
+
+  test.each([
+    {
+      name: "a later expression",
+      expressions: ["result = 12 / divisor", "result = result + plan_units[0].estimate"],
+    },
+    {
+      name: "a later read in the same expression",
+      expressions: ["result = 12 / divisor + plan_units[0].estimate"],
+    },
+  ])("an answer fault before $name remains the immediate retry reason", async (scenario) => {
+    const base = workflow(`recovery-first-failure-${scenario.name}`);
+    const saved = await getWorkflowService().save({
+      graph: {
+        ...base,
+        variableRegistry: {
+          result: { type: "number", description: "Computed result" },
+          plan_units: {
+            type: "array",
+            description: "Approved units",
+            items: { type: "object", properties: { estimate: { type: "number" } } },
+          },
+        },
+        nodes: base.nodes.map((node) =>
+          node.id === "task"
+            ? {
+                ...node,
+                inputSchema: {
+                  type: "object",
+                  properties: { divisor: { type: "number" } },
+                  required: ["divisor"],
+                },
+                expressions: scenario.expressions,
+              }
+            : node,
+        ),
+      },
+      userId: USER_ID,
+      visibility: "private",
+    });
+    const repository = new DatabaseRepository();
+    const stored = (await repository.getWorkflowGraph(saved.id, USER_ID))!;
+    const engine = MCPEngine.getInstance(repository);
+    const executionId = await engine.executor.startWorkflow(stored, undefined, USER_ID);
+    await engine.executor.executeStep(executionId, undefined, undefined, {
+      userId: USER_ID,
+      createPresentation: true,
+    });
+    const task = await requestContext.run({ userId: USER_ID }, () =>
+      engine.getCurrentStep(executionId),
+    );
+    const rejected = await requestContext.run({ userId: USER_ID }, () =>
+      engine.executeStep(executionId, { divisor: 0 }, undefined, attemptIdOf(task)),
+    );
+    expect(rejected).toContain("Division by zero");
+    expect(rejected).toContain("Please retry with correct input");
+    expect(rejected).not.toContain("STEP_BLOCKED");
+
+    const diagnosis = (
+      await requestContext.run({ userId: USER_ID }, () =>
+        getSessionInfo({ action: "diagnose", executionId }),
+      )
+    ).data as ContinuationDiagnosis;
+    expect(diagnosis.causes).toContainEqual({
+      kind: "missing_expression_variables",
+      nodeId: "task",
+      variables: ["plan_units"],
+      blocks: true,
+    });
+    const recovery = await recover(executionId, "task", {
+      plan_units: [{ estimate: 1 }],
+    });
+    expect(recovery.success).toBe(true);
+    const presentation = (recovery.data as ContinuationRecoveryResult).presentation;
+    const corrected = await requestContext.run({ userId: USER_ID }, () =>
+      engine.executeStep(executionId, { divisor: 2 }, undefined, attemptIdOf(presentation)),
+    );
+    expect(corrected).toContain("Review the work");
+  });
+
   test("the run is recovered at the very node a deploy changed, and continues there", async () => {
     // This is the scenario the task exists for: the definition changed under a run paused at that
     // node, and the repair is to resume where it already is, rebound to the definition as it stands.
@@ -199,6 +689,86 @@ describe("recovering a run that cannot continue", () => {
     expect(result.success).toBe(false);
     expect(result.error).toContain("can continue without repair");
     expect((await repository.getExecution(executionId))!.revision).toBe(before.revision);
+  });
+
+  test("an actual malformed answer remains a retry, not a recovery opportunity", async () => {
+    const { repository, executionId } = await pausedRun("recovery-invalid-answer-refused");
+    const engine = MCPEngine.getInstance(repository);
+    const task = await requestContext.run({ userId: USER_ID }, () =>
+      engine.getCurrentStep(executionId),
+    );
+    const rejected = await requestContext.run({ userId: USER_ID }, () =>
+      engine.executeStep(executionId, { unexpected: true }, undefined, attemptIdOf(task)),
+    );
+    expect(rejected).toContain("VALIDATION ERROR");
+
+    const diagnosis = (
+      await requestContext.run({ userId: USER_ID }, () =>
+        getSessionInfo({ action: "diagnose", executionId }),
+      )
+    ).data as ContinuationDiagnosis;
+    expect(diagnosis.continuable).toBe(true);
+    expect(diagnosis.causes.map((cause) => cause.kind)).toContain("recorded_error");
+    const recovery = await recover(executionId, "task", { target: "staging" });
+    expect(recovery.success).toBe(false);
+    expect(recovery.error).toContain("can continue without repair");
+  });
+
+  test("an expression failure the agent can fix in its answer does not unlock recovery", async () => {
+    const base = workflow("recovery-answer-fixable");
+    const saved = await getWorkflowService().save({
+      graph: {
+        ...base,
+        variableRegistry: {
+          divisor: { type: "number", description: "Optional answer input" },
+          result: { type: "number", description: "Computed result" },
+        },
+        nodes: base.nodes.map((node) =>
+          node.id === "task"
+            ? {
+                ...node,
+                inputSchema: {
+                  type: "object",
+                  properties: { divisor: { type: "number" } },
+                  additionalProperties: false,
+                },
+                expressions: ["result = 12 / divisor"],
+              }
+            : node,
+        ),
+      },
+      userId: USER_ID,
+      visibility: "private",
+    });
+    const repository = new DatabaseRepository();
+    const stored = (await repository.getWorkflowGraph(saved.id, USER_ID))!;
+    const engine = MCPEngine.getInstance(repository);
+    const executionId = await engine.executor.startWorkflow(stored, undefined, USER_ID);
+    await engine.executor.executeStep(executionId, undefined, undefined, {
+      userId: USER_ID,
+      createPresentation: true,
+    });
+    const task = await requestContext.run({ userId: USER_ID }, () =>
+      engine.getCurrentStep(executionId),
+    );
+    const rejected = await requestContext.run({ userId: USER_ID }, () =>
+      engine.executeStep(executionId, {}, undefined, attemptIdOf(task)),
+    );
+    expect(rejected).toContain("Variable 'divisor' is not defined or is null");
+
+    const diagnosis = (
+      await requestContext.run({ userId: USER_ID }, () =>
+        getSessionInfo({ action: "diagnose", executionId }),
+      )
+    ).data as ContinuationDiagnosis;
+    expect(diagnosis.continuable).toBe(true);
+    const recovery = await recover(executionId, "task", { divisor: 2 });
+    expect(recovery.success).toBe(false);
+
+    const corrected = await requestContext.run({ userId: USER_ID }, () =>
+      engine.executeStep(executionId, { divisor: 2 }, undefined, attemptIdOf(rejected)),
+    );
+    expect(corrected).toContain("Review the work");
   });
 
   test("a run that reached its end is refused, and stays finished", async () => {

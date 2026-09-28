@@ -253,7 +253,9 @@ Rejects any fields not defined in properties. The engine automatically enforces 
 }
 ```
 
-Explicitly set `additionalProperties: true` to allow undefined fields.
+Explicitly set `additionalProperties: true` to admit extra fields during input validation. For an
+agent-directive answer, every object key still needs a top-level output declaration in `properties`
+or `globalInputs`; the engine rejects an undeclared key before the step can advance.
 
 ## Description for Agents
 

@@ -4,13 +4,16 @@ import {
   continuationFacts,
   continuationSurfaceDigest,
   diagnoseContinuation,
+  GraphValidator,
   InMemoryRepository,
   UniversalGraphExecutor,
   type ContinuationDiagnosis,
+  type AgentDirectiveNode,
   type ExecutionAttempt,
   type WorkflowExecution,
   type WorkflowGraph,
 } from "@mcp-moira/workflow-engine";
+import { SchemaValidator } from "../../../packages/workflow-engine/src/utils/schema-validator.js";
 
 const USER_ID = "diagnosis-unit-user";
 
@@ -87,6 +90,327 @@ describe("every cause a paused run can be refused for", () => {
     // The engine's own retry path writes this, and errors are never cleared: a run that once had a
     // rejected answer must not be permanently unrepairable while step() keeps working.
     expect(diagnosis.continuable).toBe(true);
+  });
+
+  test.each([
+    {
+      name: "the agent can provide an optional expression input",
+      expressions: ["result = provided + 1"],
+      inputSchema: {
+        type: "object",
+        properties: { provided: { type: "number" } },
+      },
+      connections: { success: "end" },
+    },
+    {
+      name: "a type-less oneOf allows a declared object answer",
+      expressions: ["result = provided + 1"],
+      inputSchema: {
+        properties: { provided: { type: "number" } },
+        oneOf: [{ type: "object", required: ["provided"] }],
+      },
+      connections: { success: "end" },
+    },
+    {
+      name: "an earlier expression supplies the missing variable",
+      expressions: ["unit_index = 0", "result = unit_index + 1"],
+      connections: { success: "end" },
+    },
+    {
+      name: "a nested assignment supplies a later read",
+      expressions: ["result = (unit_index = 0) + unit_index"],
+      connections: { success: "end" },
+    },
+    {
+      name: "the authored error output handles the expression failure",
+      expressions: ["result = absent + 1"],
+      connections: { success: "end", error: "end" },
+    },
+  ])("a missing expression read does not block when $name", async (scenario) => {
+    const candidate = new InMemoryRepository();
+    const base = graph();
+    const task = base.nodes[1] as AgentDirectiveNode;
+    const definition: WorkflowGraph = {
+      ...base,
+      id: `diagnosis-expression-${scenario.name}`,
+      variableRegistry: {
+        result: { type: "number", description: "Computed result" },
+        unit_index: { type: "integer", description: "Index assigned by an earlier expression" },
+      },
+      nodes: [
+        base.nodes[0],
+        {
+          ...task,
+          expressions: scenario.expressions,
+          inputSchema: scenario.inputSchema,
+          connections: scenario.connections as AgentDirectiveNode["connections"],
+        },
+        base.nodes[2],
+      ],
+    };
+    await candidate.saveWorkflow(definition, USER_ID);
+    const executor = new UniversalGraphExecutor(candidate);
+    const executionId = await executor.startWorkflow(definition, undefined, USER_ID);
+    await executor.executeStep(executionId, undefined, undefined, {
+      userId: USER_ID,
+      createPresentation: true,
+    });
+
+    const diagnosis = await diagnoseContinuation(
+      candidate,
+      (await candidate.getExecution(executionId))!,
+      await candidate.getCurrentExecutionAttempt(executionId, USER_ID),
+    );
+    expect(diagnosis.continuable).toBe(true);
+    expect(kinds(diagnosis)).not.toContain("missing_expression_variables");
+  });
+
+  test("properties under a scalar answer schema cannot supply absent expression state", async () => {
+    const candidate = new InMemoryRepository();
+    const base = graph();
+    const task = base.nodes[1] as AgentDirectiveNode;
+    const definition: WorkflowGraph = {
+      ...base,
+      id: "diagnosis-scalar-answer",
+      variableRegistry: {
+        result: { type: "number", description: "Computed result" },
+      },
+      nodes: [
+        base.nodes[0],
+        {
+          ...task,
+          inputSchema: { type: "string", properties: { absent: { type: "number" } } },
+          expressions: ["result = absent + 1"],
+        },
+        base.nodes[2],
+      ],
+    };
+    await candidate.saveWorkflow(definition, USER_ID);
+    const executor = new UniversalGraphExecutor(candidate);
+    const executionId = await executor.startWorkflow(definition, undefined, USER_ID);
+    await executor.executeStep(executionId, undefined, undefined, {
+      userId: USER_ID,
+      createPresentation: true,
+    });
+
+    const diagnosis = await diagnoseContinuation(
+      candidate,
+      (await candidate.getExecution(executionId))!,
+      await candidate.getCurrentExecutionAttempt(executionId, USER_ID),
+    );
+    expect(diagnosis.causes).toContainEqual({
+      kind: "missing_expression_variables",
+      nodeId: "task",
+      variables: ["absent"],
+      blocks: true,
+    });
+  });
+
+  test("scalar-only oneOf cannot supply absent expression state", async () => {
+    const candidate = new InMemoryRepository();
+    const base = graph();
+    const task = base.nodes[1] as AgentDirectiveNode;
+    const definition: WorkflowGraph = {
+      ...base,
+      id: "diagnosis-scalar-one-of",
+      variableRegistry: {
+        result: { type: "number", description: "Computed result" },
+      },
+      nodes: [
+        base.nodes[0],
+        {
+          ...task,
+          inputSchema: {
+            properties: { absent: { type: "number" } },
+            oneOf: [{ type: "string" }],
+          },
+          expressions: ["result = absent + 1"],
+        },
+        base.nodes[2],
+      ],
+    };
+    await candidate.saveWorkflow(definition, USER_ID);
+    const executor = new UniversalGraphExecutor(candidate);
+    const executionId = await executor.startWorkflow(definition, undefined, USER_ID);
+    await executor.executeStep(executionId, undefined, undefined, {
+      userId: USER_ID,
+      createPresentation: true,
+    });
+
+    const diagnosis = await diagnoseContinuation(
+      candidate,
+      (await candidate.getExecution(executionId))!,
+      await candidate.getCurrentExecutionAttempt(executionId, USER_ID),
+    );
+    expect(diagnosis.causes).toContainEqual({
+      kind: "missing_expression_variables",
+      nodeId: "task",
+      variables: ["absent"],
+      blocks: true,
+    });
+  });
+
+  test.each([
+    {
+      name: "all anyOf branches forbid the field",
+      inputSchema: {
+        type: "object",
+        properties: { absent: { type: "number" } },
+        anyOf: [{ maxProperties: 0 }, { not: { required: ["absent"] } }],
+      },
+      answerable: false,
+    },
+    {
+      name: "all oneOf branches forbid the field",
+      inputSchema: {
+        type: "object",
+        properties: { absent: { type: "number" } },
+        oneOf: [{ maxProperties: 0 }, { type: "string" }],
+      },
+      answerable: false,
+    },
+    {
+      name: "an allOf branch forbids an undeclared property",
+      inputSchema: {
+        type: "object",
+        properties: { absent: { type: "number" } },
+        allOf: [{ type: "object", additionalProperties: false }],
+      },
+      answerable: false,
+    },
+    {
+      name: "required and size constraints in separate branches forbid the field",
+      inputSchema: {
+        type: "object",
+        properties: { absent: { type: "number" }, anchor: { type: "number" } },
+        allOf: [{ required: ["anchor"] }, { maxProperties: 1 }],
+      },
+      answer: { absent: 1, anchor: 1 },
+      answerable: false,
+    },
+    {
+      name: "a negation forbids the field alongside a separately required key",
+      inputSchema: {
+        type: "object",
+        properties: { absent: { type: "number" }, anchor: { type: "number" } },
+        allOf: [{ required: ["anchor"] }, { not: { required: ["anchor", "absent"] } }],
+      },
+      answer: { absent: 1, anchor: 1 },
+      answerable: false,
+    },
+    {
+      name: "a matching pattern forbids the property",
+      inputSchema: {
+        type: "object",
+        properties: { absent: { type: "number" } },
+        allOf: [{ patternProperties: { "^absent$": false } }],
+      },
+      answerable: false,
+    },
+    {
+      name: "a constant object omits the property",
+      inputSchema: {
+        type: "object",
+        properties: { absent: { type: "number" } },
+        const: {},
+      },
+      answerable: false,
+    },
+    {
+      name: "every enumerated object omits the property",
+      inputSchema: {
+        type: "object",
+        properties: { absent: { type: "number" } },
+        enum: [{}],
+      },
+      answerable: false,
+    },
+    {
+      name: "one anyOf branch admits the property",
+      inputSchema: {
+        type: "object",
+        properties: { absent: { type: "number" } },
+        anyOf: [{ maxProperties: 0 }, { required: ["absent"] }],
+      },
+      answerable: true,
+    },
+    {
+      name: "one oneOf branch admits the property",
+      inputSchema: {
+        type: "object",
+        properties: { absent: { type: "number" } },
+        oneOf: [{ maxProperties: 0 }, { required: ["absent"] }],
+      },
+      answerable: true,
+    },
+    {
+      name: "a negated value restriction permits another value",
+      inputSchema: {
+        type: "object",
+        properties: { absent: { type: "number" } },
+        not: { required: ["absent"], properties: { absent: { const: 0 } } },
+      },
+      answerable: true,
+    },
+    {
+      name: "a matching pattern permits the property in a closed branch",
+      inputSchema: {
+        type: "object",
+        properties: { absent: { type: "number" } },
+        allOf: [
+          {
+            type: "object",
+            patternProperties: { "^absent$": { type: "number" } },
+            additionalProperties: false,
+          },
+        ],
+      },
+      answerable: true,
+    },
+    {
+      name: "a constant object includes the property",
+      inputSchema: {
+        type: "object",
+        properties: { absent: { type: "number" } },
+        const: { absent: 1 },
+      },
+      answerable: true,
+    },
+  ])("schema presence proof agrees with validation when $name", async (scenario) => {
+    const schema = SchemaValidator.enforceStrictSchema(
+      scenario.inputSchema as Record<string, unknown>,
+    );
+    const answer = "answer" in scenario ? scenario.answer : { absent: 1 };
+    expect(SchemaValidator.validate(answer, schema).isValid).toBe(scenario.answerable);
+
+    const candidate = new InMemoryRepository();
+    const base = graph();
+    const task = base.nodes[1] as AgentDirectiveNode;
+    const definition: WorkflowGraph = {
+      ...base,
+      id: `diagnosis-presence-${scenario.name}`,
+      variableRegistry: { result: { type: "number", description: "Computed result" } },
+      nodes: [
+        base.nodes[0],
+        { ...task, inputSchema: scenario.inputSchema, expressions: ["result = absent + 1"] },
+        base.nodes[2],
+      ],
+    };
+    expect((await new GraphValidator().validateUnified(definition)).issues).toEqual([]);
+    await candidate.saveWorkflow(definition, USER_ID);
+    const executor = new UniversalGraphExecutor(candidate);
+    const executionId = await executor.startWorkflow(definition, undefined, USER_ID);
+    await executor.executeStep(executionId, undefined, undefined, {
+      userId: USER_ID,
+      createPresentation: true,
+    });
+    const diagnosis = await diagnoseContinuation(
+      candidate,
+      (await candidate.getExecution(executionId))!,
+      await candidate.getCurrentExecutionAttempt(executionId, USER_ID),
+    );
+    expect(diagnosis.continuable).toBe(scenario.answerable);
+    expect(kinds(diagnosis).includes("missing_expression_variables")).toBe(!scenario.answerable);
   });
 
   test("an attempt with no continuation binding is refused as unbound", async () => {

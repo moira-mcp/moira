@@ -1,7 +1,12 @@
 import type { IDataRepository } from "../interfaces/data-repository.js";
 import type { ExecutionContext, WorkflowExecution } from "../types/base-types.js";
 import { PAUSING_NODE_TYPES } from "../utils/execution-visits.js";
-import { diagnoseContinuation, unresolvedReferences } from "./continuation-diagnosis.js";
+import { validateDeclaredRegistryValues } from "../utils/registry-value-validator.js";
+import {
+  diagnoseContinuation,
+  missingExpressionVariables,
+  unresolvedReferences,
+} from "./continuation-diagnosis.js";
 import type { ContinuationDiagnosis } from "./continuation-diagnosis.js";
 import { ExecutionMutationCoordinator } from "./execution-mutation-coordinator.js";
 
@@ -74,6 +79,8 @@ export type ContinuationRecoveryRefusal =
   | { kind: "node_not_resumable"; nodeId: string; nodeType: string; resumableNodeIds: string[] }
   /** The target would be presented with references the context still cannot resolve. */
   | { kind: "missing_variables"; nodeId: string; references: string[] }
+  /** Supplied values violate a declared variable's schema. */
+  | { kind: "invalid_variable_values"; message: string }
   /** Another caller is executing the current attempt, or its outcome is unknown. */
   | { kind: "attempt_in_progress" }
   /** The execution changed under the caller between reading it and recovering it. */
@@ -165,12 +172,35 @@ export async function recoverContinuation(
     };
   }
 
-  const globalContext = mergedContext(execution, variables);
-  const missing = await unresolvedReferences(
+  let validatedValues: Record<string, unknown>;
+  try {
+    validatedValues = validateDeclaredRegistryValues(
+      variables,
+      graph.variableRegistry,
+      "execution.recover",
+    );
+  } catch (error) {
+    return {
+      outcome: "refused",
+      refusal: {
+        kind: "invalid_variable_values",
+        message: error instanceof Error ? error.message : String(error),
+      },
+    };
+  }
+
+  const globalContext = mergedContext(execution, validatedValues);
+  const unresolved = await unresolvedReferences(
     target,
     { ...execution, globalContext },
     graph.variableRegistry,
   );
+  const expressionVariables = missingExpressionVariables(
+    target,
+    globalContext.variables,
+    graph.variableRegistry,
+  );
+  const missing = [...new Set([...unresolved, ...expressionVariables])].sort();
   if (missing.length > 0) {
     return {
       outcome: "refused",
@@ -204,7 +234,7 @@ export async function recoverContinuation(
       executionId: execution.executionId,
       nodeId,
       presentation: await presentCurrentNode(execution.executionId),
-      appliedVariables: Object.keys(variables).sort(),
+      appliedVariables: Object.keys(validatedValues).sort(),
     },
   };
 }
