@@ -741,6 +741,24 @@ session) or `authorization_failed`.
 
 Authentication: Required
 
+### GET /api/integrations/github/reauthorize
+
+For a connected account, creates one ten-minute, single-use state bound to the
+current user and web session, then returns a `303` redirect to GitHub to approve
+updated App user permissions. The callback requires the same GitHub account and
+the connection and credential generation present at start. It replaces the
+credential and grants atomically, then revokes the predecessor; a failed or
+abandoned attempt leaves the existing connection and managed Codespaces working.
+This route does not change the connected GitHub account. A refused start redirects
+to Settings with a bounded `github=<outcome>` as `/start` does.
+
+Adding the App's `Plan: read` account permission requires the connected user to
+authorize the updated permission to obtain a new token. `POST /github/refresh`
+cannot add a token permission, and account-permission updates alone do not require
+reinstalling the App. `DELETE /github` stops managed Codespaces.
+
+Authentication: Required
+
 ### GET /api/integrations/github/callback
 
 Consumes the exact user/session-bound `state`, exchanges `code` server-side,

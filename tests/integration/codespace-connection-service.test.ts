@@ -195,6 +195,26 @@ describe("CodespaceConnectionService with real SQLite persistence", () => {
     }
   }
 
+  async function beginConnectedReauthorization(): Promise<string> {
+    // The regular fixture uses a fixed random state; the second browser navigation needs a
+    // distinct one because consumed state hashes remain in the database for replay detection.
+    service = new CodespaceConnectionService({
+      repository,
+      config: () => config,
+      client: () => github,
+      now: () => now,
+      randomState: () => "state_reauthorize_abcdefghijklmnopqrstuvwxyz0123456789",
+      randomId: () => "refresh-lease",
+      sleep: async () => undefined,
+      audit: (event) => {
+        audits.push(event);
+      },
+    });
+    return new URL(await service.beginReauthorization("user-a", "web-session-a")).searchParams.get(
+      "state",
+    )!;
+  }
+
   test("stores only a state digest and one tenant-bound encrypted credential", async () => {
     await connect();
 
@@ -325,6 +345,224 @@ describe("CodespaceConnectionService with real SQLite persistence", () => {
     expect(repository.getCredential("user-a", "github-codespaces")?.envelope.generation).toBe(2);
   });
 
+  test("connected reauthorization keeps the active grant usable until the same-account successor commits", async () => {
+    await connect();
+    const state = await beginConnectedReauthorization();
+    expect(service.getStatus("user-a")).toMatchObject({ state: "connected" });
+    expect(repository.getCredential("user-a", "github-codespaces")?.envelope.generation).toBe(1);
+    expect(
+      sqlite
+        .prepare(
+          "SELECT intent, expectedGeneration FROM codespaceAuthorizationState WHERE consumedAt IS NULL",
+        )
+        .get(),
+    ).toEqual({ intent: "reauthorize", expectedGeneration: 1 });
+    github.exchangeCode = async () => ({
+      accessToken: "ghu_successor-secret",
+      refreshToken: "ghr_successor-secret",
+      accessTokenExpiresAt: 2_000_000,
+      refreshTokenExpiresAt: 9_000_000,
+    });
+
+    await expect(
+      service.completeAuthorization({
+        userId: "user-a",
+        sessionToken: "web-session-a",
+        state,
+        code: "github-code-reauthorize",
+      }),
+    ).resolves.toMatchObject({ state: "connected", account: { id: "25282049" } });
+    expect(repository.getCredential("user-a", "github-codespaces")?.envelope.generation).toBe(2);
+    expect(await service.getAccessToken("user-a")).toBe("ghu_successor-secret");
+    expect(github.revokedTokens).toEqual(["ghu_initial-secret"]);
+  });
+
+  test("connected reauthorization rejects a different GitHub account and keeps the old grant", async () => {
+    await connect();
+    const state = await beginConnectedReauthorization();
+    github.exchangeCode = async () => ({
+      accessToken: "ghu_other-account",
+      refreshToken: "ghr_other-account",
+      accessTokenExpiresAt: 2_000_000,
+      refreshTokenExpiresAt: 9_000_000,
+    });
+    github.getUser = async () => ({ id: "25282050", login: "someone-else" });
+
+    await expect(
+      service.completeAuthorization({
+        userId: "user-a",
+        sessionToken: "web-session-a",
+        state,
+        code: "github-code-other-account",
+      }),
+    ).rejects.toMatchObject({ code: "AUTHORIZATION_FAILED" });
+    expect(service.getStatus("user-a")).toMatchObject({
+      state: "connected",
+      account: { id: "25282049", login: "witqq" },
+    });
+    expect(repository.getCredential("user-a", "github-codespaces")?.envelope.generation).toBe(1);
+    expect(github.revokedTokens).toEqual(["ghu_other-account"]);
+  });
+
+  test("a repeated GitHub token is rejected without revoking the connected credential", async () => {
+    await connect();
+    const state = await beginConnectedReauthorization();
+
+    await expect(
+      service.completeAuthorization({
+        userId: "user-a",
+        sessionToken: "web-session-a",
+        state,
+        code: "github-code-repeated-token",
+      }),
+    ).rejects.toMatchObject({ code: "AUTHORIZATION_FAILED" });
+    expect(service.getStatus("user-a")).toMatchObject({ state: "connected" });
+    expect(repository.getCredential("user-a", "github-codespaces")?.envelope.generation).toBe(1);
+    expect(github.revokedTokens).toEqual([]);
+  });
+
+  test("connected reauthorization rejects a state made stale by credential refresh", async () => {
+    await connect();
+    const state = await beginConnectedReauthorization();
+    expect(await service.getAccessToken("user-a")).toBe("ghu_refreshed-secret");
+
+    await expect(
+      service.completeAuthorization({
+        userId: "user-a",
+        sessionToken: "web-session-a",
+        state,
+        code: "github-code-stale",
+      }),
+    ).rejects.toMatchObject({ code: "AUTHORIZATION_FAILED" });
+    expect(github.exchangeCalls).toBe(1);
+    expect(service.getStatus("user-a")).toMatchObject({ state: "connected" });
+    expect(repository.getCredential("user-a", "github-codespaces")?.envelope.generation).toBe(2);
+  });
+
+  test("connected reauthorization loses a concurrent refresh without overwriting its successor", async () => {
+    await connect();
+    const state = await beginConnectedReauthorization();
+    github.exchangeCode = async () => ({
+      accessToken: "ghu_reauthorize-candidate",
+      refreshToken: "ghr_reauthorize-candidate",
+      accessTokenExpiresAt: 2_000_000,
+      refreshTokenExpiresAt: 9_000_000,
+    });
+    github.listInstallations = async () => {
+      expect(await service.getAccessToken("user-a")).toBe("ghu_refreshed-secret");
+      return github.installations;
+    };
+
+    await expect(
+      service.completeAuthorization({
+        userId: "user-a",
+        sessionToken: "web-session-a",
+        state,
+        code: "github-code-racing-refresh",
+      }),
+    ).rejects.toMatchObject({ code: "AUTHORIZATION_FAILED" });
+    expect(await service.getAccessToken("user-a")).toBe("ghu_refreshed-secret");
+    expect(repository.getCredential("user-a", "github-codespaces")?.envelope.generation).toBe(2);
+    expect(github.revokedTokens).toEqual(["ghu_reauthorize-candidate"]);
+  });
+
+  test("a callback losing a refresh never revokes the refreshed credential when GitHub repeats it", async () => {
+    await connect();
+    const state = await beginConnectedReauthorization();
+    github.exchangeCode = async () => ({
+      accessToken: "ghu_refreshed-secret",
+      refreshToken: "ghr_refreshed-secret",
+      accessTokenExpiresAt: 5_000_000,
+      refreshTokenExpiresAt: 10_000_000,
+    });
+    github.listInstallations = async () => {
+      expect(await service.getAccessToken("user-a")).toBe("ghu_refreshed-secret");
+      return github.installations;
+    };
+
+    await expect(
+      service.completeAuthorization({
+        userId: "user-a",
+        sessionToken: "web-session-a",
+        state,
+        code: "github-code-racing-repeated-token",
+      }),
+    ).rejects.toMatchObject({ code: "AUTHORIZATION_FAILED" });
+    expect(await service.getAccessToken("user-a")).toBe("ghu_refreshed-secret");
+    expect(repository.getCredential("user-a", "github-codespaces")?.envelope.generation).toBe(2);
+    expect(github.revokedTokens).toEqual([]);
+  });
+
+  test("connected reauthorization cannot complete after disconnect", async () => {
+    await connect();
+    const state = await beginConnectedReauthorization();
+    await service.disconnect("user-a");
+
+    await expect(
+      service.completeAuthorization({
+        userId: "user-a",
+        sessionToken: "web-session-a",
+        state,
+        code: "github-code-after-disconnect",
+      }),
+    ).rejects.toMatchObject({ code: "AUTHORIZATION_FAILED" });
+    expect(github.exchangeCalls).toBe(1);
+    expect(service.getStatus("user-a")).toMatchObject({ state: "disconnected" });
+  });
+
+  test("failed connected reauthorization leaves the old grant and revokes only the candidate", async () => {
+    await connect();
+    const state = await beginConnectedReauthorization();
+    github.exchangeCode = async () => ({
+      accessToken: "ghu_uncommitted-secret",
+      refreshToken: "ghr_uncommitted-secret",
+      accessTokenExpiresAt: 2_000_000,
+      refreshTokenExpiresAt: 9_000_000,
+    });
+    repository.replaceConnectedAuthorization = () => {
+      throw new Error("SQLITE_BUSY: database is locked");
+    };
+
+    await expect(
+      service.completeAuthorization({
+        userId: "user-a",
+        sessionToken: "web-session-a",
+        state,
+        code: "github-code-rollback",
+      }),
+    ).rejects.toMatchObject({ code: "AUTHORIZATION_FAILED" });
+    expect(service.getStatus("user-a")).toMatchObject({ state: "connected" });
+    expect(repository.getCredential("user-a", "github-codespaces")?.envelope.generation).toBe(1);
+    expect(github.revokedTokens).toEqual(["ghu_uncommitted-secret"]);
+  });
+
+  test("post-commit exception cannot revoke the active reauthorization successor", async () => {
+    await connect();
+    const state = await beginConnectedReauthorization();
+    github.exchangeCode = async () => ({
+      accessToken: "ghu_committed-secret",
+      refreshToken: "ghr_committed-secret",
+      accessTokenExpiresAt: 2_000_000,
+      refreshTokenExpiresAt: 9_000_000,
+    });
+    const replace = repository.replaceConnectedAuthorization.bind(repository);
+    repository.replaceConnectedAuthorization = (input) => {
+      replace(input);
+      throw new Error("process stopped after commit");
+    };
+
+    await expect(
+      service.completeAuthorization({
+        userId: "user-a",
+        sessionToken: "web-session-a",
+        state,
+        code: "github-code-committed",
+      }),
+    ).resolves.toMatchObject({ state: "connected" });
+    expect(await service.getAccessToken("user-a")).toBe("ghu_committed-secret");
+    expect(github.revokedTokens).toEqual(["ghu_initial-secret"]);
+  });
+
   test("reauthorization whose old-token revocation fails still commits the new credential and retries the revocation later", async () => {
     await connect();
     sqlite
@@ -433,10 +671,14 @@ describe("CodespaceConnectionService with real SQLite persistence", () => {
       accessTokenExpiresAt: 2_000_000,
       refreshTokenExpiresAt: 9_000_000,
     });
-    // The process stops right after the new credential is committed: nothing after the commit runs.
+    // Observe the database immediately after the transaction, before post-commit cleanup runs.
     const commit = repository.completeConnection.bind(repository);
+    let queuedAtCommit: string[] = [];
     repository.completeConnection = (input) => {
       commit(input);
+      queuedAtCommit = repository
+        .getPendingRevocations("user-a", "github-codespaces")
+        .map((row) => row.id);
       throw new Error("process stopped after commit");
     };
     const reconnect = new CodespaceConnectionService({
@@ -457,13 +699,13 @@ describe("CodespaceConnectionService with real SQLite persistence", () => {
       })
       .catch(() => undefined);
 
-    // The successor is stored, and the credential it replaced is not lost: it waits in the queue.
+    // The successor and the old-token revocation intent are committed together. A post-commit
+    // exception is recognized as success, so cleanup can safely revoke only the old token.
     expect(repository.getCredential("user-a", "github-codespaces")?.envelope.generation).toBe(2);
-    const queued = repository.getPendingRevocations("user-a", "github-codespaces");
-    expect(queued.map((row) => row.id)).toContain("pending-superseded");
-    expect(github.revokedTokens).not.toContain("ghu_initial-secret");
+    expect(queuedAtCommit).toContain("pending-superseded");
+    expect(github.revokedTokens).toEqual(["ghu_initial-secret"]);
+    expect(repository.getPendingRevocations("user-a", "github-codespaces")).toEqual([]);
 
-    // Whichever path drains the queue next revokes it; here, disconnecting.
     repository.completeConnection = commit;
     await reconnect.disconnect("user-a");
     expect(github.revokedTokens).toContain("ghu_initial-secret");

@@ -979,6 +979,7 @@
         "accountId": "ID аккаунта GitHub {{id}}",
         "connect": "Подключить GitHub",
         "reconnect": "Переподключить GitHub",
+        "reauthorize": "Обновить разрешения GitHub",
         "install": "Установить GitHub App",
         "addInstallation": "Добавить аккаунт или организацию",
         "checkInstallation": "Проверить установку",

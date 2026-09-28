@@ -33,8 +33,9 @@ function startUrl(settingsUrl: string): string {
 function startRefusalOutcome(
   error: CodespaceConnectionError,
   state: CodespaceConnectionView["state"],
+  reauthorization = false,
 ): string {
-  if (state === "connected") return "already_connected";
+  if (state === "connected" && !reauthorization) return "already_connected";
   if (state === "revocation_pending") return "revocation_pending";
   switch (error.code) {
     case "CODESPACE_NOT_CONFIGURED":
@@ -85,8 +86,7 @@ export function createCodespaceConnectionRoutes(
     }),
   );
 
-  router.get(
-    "/github/start",
+  const startAuthorization = (reauthorization: boolean) =>
     asyncHandler(async (req, res) => {
       const authenticated = req as AuthenticatedRequest;
       if (!authenticated.session?.token) {
@@ -100,24 +100,28 @@ export function createCodespaceConnectionRoutes(
         return;
       }
       try {
-        const authorizationUrl = await service.beginAuthorization(
-          authenticated.userId,
-          authenticated.session.token,
-        );
+        const authorizationUrl = reauthorization
+          ? await service.beginReauthorization(authenticated.userId, authenticated.session.token)
+          : await service.beginAuthorization(authenticated.userId, authenticated.session.token);
         res.redirect(303, authorizationUrl);
       } catch (error) {
         if (error instanceof CodespaceConnectionError) {
           const status = service.getStatus(authenticated.userId);
           res.redirect(
             303,
-            redirectWithOutcome(status.settingsUrl, startRefusalOutcome(error, status.state)),
+            redirectWithOutcome(
+              status.settingsUrl,
+              startRefusalOutcome(error, status.state, reauthorization),
+            ),
           );
           return;
         }
         throw error;
       }
-    }),
-  );
+    });
+
+  router.get("/github/start", startAuthorization(false));
+  router.get("/github/reauthorize", startAuthorization(true));
 
   router.get("/github/callback", async (req, res) => {
     const authenticated = req as AuthenticatedRequest;

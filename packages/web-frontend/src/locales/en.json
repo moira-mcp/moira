@@ -957,6 +957,7 @@
         "accountId": "GitHub account ID {{id}}",
         "connect": "Connect GitHub",
         "reconnect": "Reconnect GitHub",
+        "reauthorize": "Update GitHub permissions",
         "install": "Install GitHub App",
         "addInstallation": "Add account or organization",
         "checkInstallation": "Check installation",

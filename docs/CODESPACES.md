@@ -792,8 +792,9 @@ Codespace GitHub configuration is distinct from `GITHUB_CLIENT_ID` and
 | `CODESPACE_CREDENTIAL_VAULT_KEY_VERSION` | Envelope key identifier; defaults to `v1`                         |
 
 The GitHub App must request these permissions; the user grants them when installing
-the App on their account, and a later permission change must be accepted by the user
-on GitHub before the connection works again:
+the App on their account. After an account-permission change, the connected user must
+approve the updated permission on GitHub and obtain a new App user token through
+**Update GitHub permissions** in Moira Settings:
 
 | GitHub App permission                  | Level | Used for                                                               |
 | -------------------------------------- | ----- | ---------------------------------------------------------------------- |
@@ -806,10 +807,12 @@ on GitHub before the connection works again:
 
 Enable "Request user authorization (OAuth) during installation" and expiring user
 authorization tokens; the callback URL is the exact same-origin Moira path below.
-After an App permission change, the user must approve the updated permissions on
-GitHub. For organization repositories, an organization owner must install or approve
-the App on that organization and grant the selected repositories; Moira's connected
-user account is still the only supported payer.
+Adding `Account: Plan` does not by itself require reinstalling the App. The
+connection card's **Refresh** re-reads repository grants, while the Cloud codespaces
+card's **Refresh** also re-reads billing; both use the existing token and cannot add
+a permission to it. For organization repositories, an organization owner
+must install or approve the App on that organization and grant the selected
+repositories; Moira's connected user account is still the only supported payer.
 
 No Setup URL is needed: with user authorization during installation enabled, GitHub
 returns the browser to the callback URL after an installation, and Moira recognizes
@@ -875,14 +878,16 @@ All routes are mounted under `/api/integrations` after `requireAuth`.
 | `GET`    | `/github`                     | Refreshes an expired grant snapshot and returns the sanitized connection view with `repositoriesStale`                            |
 | `POST`   | `/github/refresh`             | Forces grant enumeration and returns the current view; a provider failure retains the snapshot and sets `repositoriesStale: true` |
 | `GET`    | `/github/start`               | Stores one-time browser state and redirects to GitHub; a refused start redirects to Settings with `?github=<outcome>`             |
+| `GET`    | `/github/reauthorize`         | For a connected account, stores one-time browser state and redirects to GitHub for updated permissions without disconnecting      |
 | `GET`    | `/github/callback`            | Consumes state, verifies GitHub identity/grants and redirects; a return from App installation (no state) re-reads grants          |
 | `DELETE` | `/github`                     | Stops managed work, revokes the GitHub grant and disconnects                                                                      |
 | `DELETE` | `/github/external-revocation` | Clears an eligible blocked state after external grant revocation                                                                  |
 
 The external-revocation body must be `{ "confirmed": true }`, and the user
-must first revoke the GitHub App grant in GitHub. Start stores a SHA-256 digest
-of one-time state bound to the Moira user, web session and provider. It expires
-after ten minutes, is consumed once and returns only a bounded outcome on the
+must first revoke the GitHub App grant in GitHub. Connect and permission update
+store a SHA-256 digest of one-time state bound to the Moira user, web session,
+provider and authorization intent. The state expires after ten minutes, is consumed
+once and returns only a bounded outcome on the
 same-origin Settings URL.
 
 Connecting takes one pass through GitHub. **Connect GitHub** starts one
@@ -913,7 +918,14 @@ status can be read, to the Settings path on this site under the web app prefix w
 and omitted from nginx access logs.
 
 The Settings integration renders sanitized connection and repository-grant
-state. Its Refresh button uses the forced endpoint, while ordinary page reads
+state. Its **Update GitHub permissions** button is available for a connected account;
+it opens `/github/reauthorize`. The callback accepts the replacement only when
+GitHub returns the same account and the stored connection and credential generation
+still match the state that started the request. The new credential and grants replace
+the old ones atomically; the previous credential is then revoked. A failed or
+abandoned update leaves the working connection in place. This path does not stop
+managed Codespaces. **Disconnect** does stop them before revoking the grant.
+The **Refresh** button uses the forced endpoint, while ordinary page reads
 honor the ten-minute snapshot TTL, except while the connection is
 `installation_required`: then every read enumerates the grants afresh, so the
 Settings page, the website codespace list and the MCP `list` action show a new
@@ -939,7 +951,7 @@ Before replacement, the previous credential is copied into an encrypted
 pending-revocation record and revoked exactly. Provider ambiguity, expiry,
 unreadable ciphertext or an abandoned lease prevents use of the predecessor.
 
-A new authorization for a user who already has a credential commits the new
+A connected user's permission update commits the new
 credential first — the generation advances and codespaces are rebound. The same
 database transaction queues the previous token in an encrypted pending-revocation
 record, so at every moment the old token is either stored or queued; only after the
@@ -974,7 +986,11 @@ Migration `0039_codespace_observed_ref.sql` adds the resource's nullable
 counter, which drives the reconciliation retry backoff. Migration
 `0040_codespace_activity.sql` adds the resource's `lastActivityAt` (Moira's last work
 in the codespace) and `providerLastUsedAt` (the provider's last start time, stored for information), and the
-connection's `resourcesObservedAt`, which paces provider observation. The resulting connection, resource, lifecycle-capability, policy-usage,
+connection's `resourcesObservedAt`, which paces provider observation. Migration
+`0043_codespace_reauthorization_intent.sql`
+adds an authorization-state intent and the expected connection ID and credential
+generation so a returning permission update can be checked against the connection
+that initiated it. The resulting connection, resource, lifecycle-capability, policy-usage,
 provider-mutation, provider-control, operation and private-transfer metadata tables
 use the `codespace` vocabulary. Credential tables
 contain versioned ciphertext; resource, operation and transfer tables contain

@@ -238,6 +238,28 @@ test("Connect GitHub performs a web navigation instead of an agent authorization
   expect(request.method()).toBe("GET");
 });
 
+test("a connected account updates permissions without disconnecting Codespaces", async ({
+  page,
+}) => {
+  await loginAsAdmin(page);
+  let disconnects = 0;
+  await page.route("**/api/integrations/github", (route) => {
+    if (route.request().method() === "DELETE") disconnects += 1;
+    return route.fulfill({ json: { success: true, data: connected } });
+  });
+  await page.route("**/api/integrations/github/reauthorize", (route) =>
+    route.fulfill({ status: 204 }),
+  );
+  await page.goto(`${baseUrl}/settings?lang=en#integrations-github`);
+  await expect(page.getByTestId("github-codespace-status")).toHaveText("Connected");
+
+  const requestPromise = page.waitForRequest("**/api/integrations/github/reauthorize");
+  await page.getByTestId("github-codespace-reauthorize").click();
+  const request = await requestPromise;
+  expect(request.method()).toBe("GET");
+  expect(disconnects).toBe(0);
+});
+
 test("GitHub connection load failure keeps Settings usable and retries", async ({ page }) => {
   await loginAsAdmin(page);
   let failed = false;
