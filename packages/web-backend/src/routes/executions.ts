@@ -25,6 +25,7 @@ import {
   LegacyExecutionStatus,
   workflow,
   getDatabase,
+  ExecutionNotificationRepository,
   isExecutionParentReference,
   logAuditEventDirect,
   AuditAction,
@@ -417,6 +418,10 @@ router.get(
     const lockService = getLockService();
     const activeLock = await lockService.getActiveLock(executionId);
     const isLocked = execution.status === "running" && activeLock !== null;
+    // The latest notification about the wait the run stands in, if it waits for its person.
+    const waitingNotification = new ExecutionNotificationRepository(db).latestForCurrentWait(
+      executionId,
+    );
 
     res.json({
       success: true,
@@ -452,6 +457,16 @@ router.get(
                 reason: activeLock.reason,
                 status: activeLock.status,
                 createdAt: activeLock.createdAt,
+              }
+            : null,
+          waitingNotification: waitingNotification
+            ? {
+                kind: waitingNotification.kind,
+                state: waitingNotification.state,
+                createdAt: waitingNotification.createdAt,
+                sentAt: waitingNotification.sentAt,
+                deliveryStatus: waitingNotification.deliveryStatus,
+                deliveredChannels: waitingNotification.deliveredChannels,
               }
             : null,
         },

@@ -216,10 +216,12 @@ its routing are unchanged: the agent still presents the question and submits the
 }
 ```
 
-| Property          | Required | Description                                                                               |
-| ----------------- | -------- | ----------------------------------------------------------------------------------------- |
-| `humanGate.label` | No       | What the person is asked to do, in a few words; the step's progress label otherwise       |
-| `humanGate.when`  | No       | A structured condition; the step waits for a person only when it holds as the run arrives |
+| Property                | Required | Description                                                                                             |
+| ----------------------- | -------- | ------------------------------------------------------------------------------------------------------- |
+| `humanGate.label`       | No       | What the person is asked to do, in a few words; the step's progress label otherwise                     |
+| `humanGate.when`        | No       | A structured condition; the step waits for a person only when it holds as the run arrives               |
+| `humanGate.notify`      | No       | `auto` (default): the person is notified when the run starts waiting; `off`: no notification            |
+| `humanGate.remindAfter` | No       | How long an unanswered wait lasts before one reminder: a number and `m`, `h` or `d` (`30m`, `4h`, `2d`) |
 
 The condition uses the same syntax as a routing case's `when` and is evaluated once, when the run
 arrives at the step; without it the step always waits for a person. Use it for a step a run in
@@ -227,6 +229,14 @@ autonomous mode also passes through, so an unattended run is not shown as waitin
 Marking, unmarking or changing the gate of a step in a new version of the workflow re-decides it for
 runs already paused on that step, and they continue with their current step attempt; a new version
 that leaves the gate alone does not re-evaluate the condition.
+
+When a run starts waiting at a marked step, the person is notified through their notification
+channels (the same ones `user-notification` uses): the flow and task, what they are asked, and a link
+to the run; the answer goes to the agent in the chat. The notification is sent once per wait — a
+repeated step or a reconnecting agent does not send it again — and if the wait is still open after
+`remindAfter`, exactly one reminder follows. Set `notify: "off"` when the flow already sends its own
+message for that step, so the person does not get two. The run page shows under its banner whether the
+notification was sent, when and where, or that no channel is set up.
 
 ## Condition Node
 

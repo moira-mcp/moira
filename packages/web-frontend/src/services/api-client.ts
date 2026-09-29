@@ -19,6 +19,16 @@ import type {
   CodespaceSummaryView,
 } from "@mcp-moira/shared";
 
+/** The latest notification about the wait a run stands in: what the run page shows under its banner. */
+export interface WaitingNotificationMark {
+  kind: "first" | "remind";
+  state: "pending" | "sent" | "superseded";
+  createdAt: number;
+  sentAt: number | null;
+  deliveryStatus: "delivered" | "partial" | "no_configured_channels" | "all_failed" | null;
+  deliveredChannels: string[];
+}
+
 export interface WorkflowProcessResponse {
   workflowId: string;
   version: string;
@@ -1658,6 +1668,7 @@ export class MoiraApiClient {
       message: string;
       input?: unknown;
     }>;
+    waitingNotification?: WaitingNotificationMark | null;
   }> {
     try {
       type ExecutionResponse = {
@@ -1683,6 +1694,7 @@ export class MoiraApiClient {
             message: string;
             input?: unknown;
           }>;
+          waitingNotification?: WaitingNotificationMark | null;
         };
       };
       const response = await this.client.get<ApiResponse<ExecutionResponse>>(

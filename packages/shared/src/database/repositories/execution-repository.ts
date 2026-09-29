@@ -13,6 +13,7 @@ import { executeListQuery, type ListQueryConfig } from "../list-query-builder.js
 import { ConflictError, ValidationError } from "../../errors/index.js";
 import { metadataRevision } from "../../utils/metadata-revision.js";
 import { awaitingUserAfterWrite, executionRowFields } from "../execution-row.js";
+import { enqueueWaitingNotification } from "../execution-notification.js";
 
 const EXECUTION_LIST_CONFIG: ListQueryConfig<"createdAt" | "updatedAt"> = {
   table: workflowExecution,
@@ -67,33 +68,43 @@ export class ExecutionRepository {
     if (existing.length > 0) {
       // Update (note can be updated via execution_note magic variable)
       const expectedRevision = execution.revision;
-      const result = await this.db
-        .update(workflowExecution)
-        .set({
-          state: row.state,
-          currentNodeId: row.currentNodeId,
-          waitingForInputNodeId: row.waitingForInputNodeId,
-          context: row.context,
-          error: row.error,
-          errors: row.errors,
-          note: row.note,
-          updatedAt,
-          completedAt,
-          revision: expectedRevision + 1,
-          reminders: row.reminders,
-          visits: row.visits,
-          gateWaiting: row.gateWaiting === 1,
-          // The agent's question is not the saver's to write: it stays while the run stays on its
-          // node and is cleared when the run leaves it or finishes (see awaitingUserAfterMove).
-          awaitingUser: awaitingUserAfterWrite(row.state, row.currentNodeId),
-        })
-        .where(
-          and(
-            eq(workflowExecution.executionId, execution.executionId),
-            eq(workflowExecution.revision, expectedRevision),
-          ),
-        );
-      if (result.changes === 0) {
+      // One synchronous transaction: the write and the person's notification it may cause commit
+      // together, so a write refused by the revision guard queues nothing.
+      const changes = this.db.transaction(
+        (tx) => {
+          const result = tx
+            .update(workflowExecution)
+            .set({
+              state: row.state,
+              currentNodeId: row.currentNodeId,
+              waitingForInputNodeId: row.waitingForInputNodeId,
+              context: row.context,
+              error: row.error,
+              errors: row.errors,
+              note: row.note,
+              updatedAt,
+              completedAt,
+              revision: expectedRevision + 1,
+              reminders: row.reminders,
+              visits: row.visits,
+              gateWaiting: row.gateWaiting === 1,
+              // The agent's question is not the saver's to write: it stays while the run stays on its
+              // node and is cleared when the run leaves it or finishes (see awaitingUserAfterMove).
+              awaitingUser: awaitingUserAfterWrite(row.state, row.currentNodeId),
+            })
+            .where(
+              and(
+                eq(workflowExecution.executionId, execution.executionId),
+                eq(workflowExecution.revision, expectedRevision),
+              ),
+            )
+            .run();
+          if (result.changes > 0) enqueueWaitingNotification(tx, execution.executionId);
+          return result.changes;
+        },
+        { behavior: "immediate" },
+      );
+      if (changes === 0) {
         const current = await this.get(execution.executionId);
         throw new ConflictError("Execution state changed; reload before writing", {
           executionId: execution.executionId,
@@ -104,27 +115,35 @@ export class ExecutionRepository {
       execution.revision = expectedRevision + 1;
     } else {
       // Insert
-      await this.db.insert(workflowExecution).values({
-        executionId: execution.executionId,
-        workflowId: execution.workflowId,
-        userId: execution.userId,
-        state: row.state,
-        currentNodeId: row.currentNodeId,
-        waitingForInputNodeId: row.waitingForInputNodeId,
-        context: row.context,
-        error: row.error,
-        errors: row.errors,
-        note: row.note,
-        parentExecutionId: row.parentExecutionId,
-        revision: execution.revision,
-        reminders: row.reminders,
-        visits: row.visits,
-        gateWaiting: row.gateWaiting === 1,
-        workflowVersion: execution.workflowVersion ?? null,
-        createdAt,
-        updatedAt,
-        completedAt,
-      });
+      this.db.transaction(
+        (tx) => {
+          tx.insert(workflowExecution)
+            .values({
+              executionId: execution.executionId,
+              workflowId: execution.workflowId,
+              userId: execution.userId,
+              state: row.state,
+              currentNodeId: row.currentNodeId,
+              waitingForInputNodeId: row.waitingForInputNodeId,
+              context: row.context,
+              error: row.error,
+              errors: row.errors,
+              note: row.note,
+              parentExecutionId: row.parentExecutionId,
+              revision: execution.revision,
+              reminders: row.reminders,
+              visits: row.visits,
+              gateWaiting: row.gateWaiting === 1,
+              workflowVersion: execution.workflowVersion ?? null,
+              createdAt,
+              updatedAt,
+              completedAt,
+            })
+            .run();
+          enqueueWaitingNotification(tx, execution.executionId);
+        },
+        { behavior: "immediate" },
+      );
     }
   }
 
@@ -464,20 +483,29 @@ export class ExecutionRepository {
     const awaitingUser = question
       ? JSON.stringify({ ...question, nodeId: execution.currentNodeId })
       : null;
-    const result = await this.db
-      .update(workflowExecution)
-      .set({ awaitingUser, updatedAt: new Date() })
-      .where(
-        and(
-          eq(workflowExecution.executionId, executionId),
-          eq(workflowExecution.userId, userId),
-          ne(workflowExecution.state, "completed"),
-          execution.currentNodeId === null
-            ? isNull(workflowExecution.currentNodeId)
-            : eq(workflowExecution.currentNodeId, execution.currentNodeId),
-        ),
-      );
-    if (result.changes === 0) {
+    // The raise and the person's notification commit together.
+    const changes = this.db.transaction(
+      (tx) => {
+        const result = tx
+          .update(workflowExecution)
+          .set({ awaitingUser, updatedAt: new Date() })
+          .where(
+            and(
+              eq(workflowExecution.executionId, executionId),
+              eq(workflowExecution.userId, userId),
+              ne(workflowExecution.state, "completed"),
+              execution.currentNodeId === null
+                ? isNull(workflowExecution.currentNodeId)
+                : eq(workflowExecution.currentNodeId, execution.currentNodeId),
+            ),
+          )
+          .run();
+        if (result.changes > 0 && question) enqueueWaitingNotification(tx, executionId);
+        return result.changes;
+      },
+      { behavior: "immediate" },
+    );
+    if (changes === 0) {
       throw new ConflictError("Execution moved while the question was being recorded; retry", {
         executionId,
       });

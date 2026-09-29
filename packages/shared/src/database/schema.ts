@@ -612,6 +612,39 @@ export const workflowExecution = sqliteTable("workflowExecution", {
   completedAt: integer("completedAt", { mode: "timestamp_ms" }),
 });
 
+/**
+ * Notifications that a run waits for its person. A row is written in the same transaction that puts
+ * the run into the wait, keyed by the wait (`gate:<visit seq>` or `agent:<question id>`) and kind, so
+ * a repeated or rolled-back transition never sends twice or for nothing. The MCP server's sender is
+ * the only process that delivers them and records the result here.
+ */
+export const executionNotification = sqliteTable(
+  "executionNotification",
+  {
+    id: text("id").primaryKey(),
+    executionId: text("executionId")
+      .notNull()
+      .references(() => workflowExecution.executionId, { onDelete: "cascade" }),
+    userId: text("userId").notNull(),
+    waitKey: text("waitKey").notNull(), // gate:<visit seq> | agent:<question id>
+    kind: text("kind").notNull(), // first | remind
+    state: text("state").notNull(), // pending | sent | superseded
+    notBefore: integer("notBefore").notNull(), // epoch ms; the sender holds the row until then
+    createdAt: integer("createdAt").notNull(),
+    sentAt: integer("sentAt"),
+    deliveryStatus: text("deliveryStatus"), // delivered | partial | no_configured_channels | all_failed
+    deliveredChannels: text("deliveredChannels"), // JSON string[] of channel ids that took it
+  },
+  (table) => ({
+    waitIdx: uniqueIndex("execution_notification_wait_idx").on(
+      table.executionId,
+      table.waitKey,
+      table.kind,
+    ),
+    pendingIdx: index("execution_notification_pending_idx").on(table.state, table.notBefore),
+  }),
+);
+
 /** Durable replay and ownership state for state-changing MCP workflow operations. */
 export const executionMutationAttempt = sqliteTable(
   "executionMutationAttempt",

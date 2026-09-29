@@ -2610,6 +2610,17 @@ Response:
         status: "active";
         createdAt: string; // ISO timestamp
       } | null;
+      // The latest notification about the wait the run stands in for its person (a humanGate step
+      // or the agent's question); a reminder not due yet is skipped, a held first notification is
+      // returned as pending; null when the run does not wait for its person or nothing was queued
+      waitingNotification: {
+        kind: "first" | "remind";
+        state: "pending" | "sent" | "superseded";
+        createdAt: number;       // epoch ms, queued
+        sentAt: number | null;   // epoch ms, delivered or attempted
+        deliveryStatus: "delivered" | "partial" | "no_configured_channels" | "all_failed" | null;
+        deliveredChannels: string[]; // channel ids that took it
+      } | null;
     }
   }
 }

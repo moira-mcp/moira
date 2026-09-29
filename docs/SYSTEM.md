@@ -134,8 +134,11 @@ causes.
 must be one a run can wait on — `agent-directive`, `teleport`, `materialize`, `lock` or `subgraph`;
 any other node is refused, because resuming "at" a node that never holds a presentation would mean
 running the workflow forward from there and calling it a repair. It moves the execution to
-that node, merges the supplied variable values into the context, and installs a fresh attempt bound
-to the current definition — so the caller's next call is an ordinary `step()`. The run then comes to
+that node, records the arrival there as an open waited visit in the route (in the same guarded write;
+recovered onto the step it already waits on, it keeps that open visit instead — the same wait, not a
+second pass; the presentation that follows continues the open visit), merges the supplied variable values into the
+context, and installs a fresh attempt bound to the current definition — so the caller's next call is an
+ordinary `step()`. The run then comes to
 rest on the named node and never advances past it. That is not the same as nothing running: the
 target node's own presentation path executes, which is inert for an `agent-directive`, a `teleport`
 and a `materialize` node but not for the other two — resuming at a `lock` node creates the lock and
@@ -214,6 +217,46 @@ workflow input or response content.
 
 Recurring reconciliation returns separate bounded Start and Step counts. Maintenance maps them to
 the corresponding `operation` label, so an expired Start lease is never reported as a Step outcome.
+
+### Waiting-for-you notifications
+
+When a run starts waiting for its person — it arrives at a step marked `humanGate` (with
+`notify: "auto"`, the default) whose condition held, or the agent raises `session await-user` — a row
+is written to `executionNotification` in the same transaction as the write that put the run there.
+Every execution writer that can start such a wait does it through `enqueueWaitingNotification`
+(`packages/shared/src/database/execution-notification.ts`): the attempt repository's `complete`,
+`recoverToNode` and `claimStart`, `ExecutionRepository.save` and `setAwaitingUser`, and the
+`gateWaiting` recompute on a new workflow version. The row is keyed `UNIQUE(executionId, waitKey,
+kind)` with `waitKey` = `gate:<seq of the open waited visit>` (for a run with no open waited visit in its route,
+`gate:@<number of engine visits>`, which adjustments do not change) or `agent:<question id>`, so a repeated
+or replayed step, a re-presentation or a reconnect finds it already there, and a write refused by
+its guard queues nothing. `WorkflowRepository.save` and, in `ExecutionRepository`, `save` and `setAwaitingUser` begin their
+transactions `IMMEDIATE` (the attempt repository's transactions already did): with the web backend and
+the sender both writing, a transaction that reads before it writes must hold the write lock from the
+start so SQLite's `busy_timeout` applies instead of failing with «database is locked». Catalog
+reconciliation's apply transaction is still deferred.
+
+The MCP server process is the only sender: `WaitingNotificationSender`
+(`packages/workflow-engine/src/services/waiting-notification-sender.ts`), started in `main()` after the
+extension channels are registered (so a notification due at startup sees every channel), ticks every
+five seconds. It drops (`superseded`) a row whose wait is no
+longer the run's current one, holds an agent-question row until ten minutes after the run's previous
+agent-question notification, and otherwise delivers a plain-text message — the run heading (flow ·
+task, run link) and «🙋 Waiting for your decision: <label>» or «🙋 The agent is asking you:
+<question>» with the choices — through the active `UserCommunicationService`, storing the status,
+the channels that took it and the time in the row. The run's visit log is not touched. When it
+sends a gate's first notification and the gate has `humanGate.remindAfter`, it queues the gate's
+single `remind` row due that long after; if the wait ends first, the reminder is dropped when it
+comes due, like any row whose wait is gone. A gate beneath an open agent question still counts as a
+current wait, so its notification is not lost to the question. A notification refused only by the
+communication service's per-person limits (`rate_limited`: the per-minute budget or the concurrency
+limits) is held for a minute and tried again; any other failed delivery is recorded, not retried. A
+row whose handling throws (for example, a definition that cannot be read) is logged and set aside for
+five minutes, so it never blocks the rows behind it. When a run holds two waits at once — a gate marked
+beneath an open agent question — each gets its own row. `GET /api/executions/:id` returns the
+latest row of the run's current wait, skipping a reminder that is not due yet (a held first
+notification is shown as on its way) as `waitingNotification`, which the run page shows under its
+banner.
 
 An indeterminate start stays attached to its reserved Process ID and appears through session
 inspection instead of becoming an orphan. Only its owner can cancel it, and cancellation requires

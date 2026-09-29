@@ -8,7 +8,8 @@ nodes use the same workflow graph as built-in nodes: Moira validates their confi
 isolated extension runner, stores a successful result under the node ID, and follows the node's
 `error` connection on failure when it exists. Without that connection, Moira records the diagnostic
 and pauses on the node for retry. Communication channels are transports used by Moira's generic
-`user-notification` node; they are not node types and never receive workflow or user identity.
+`user-notification` node and by Moira's own «waiting for you» notifications and reminders; they are
+not node types and never receive workflow or user identity.
 
 Extension code never runs in the Moira application processes. The runner imports each bundle in a
 separate child process. This contains crashes and deadlines, but it is not a hostile-code sandbox:
@@ -169,7 +170,8 @@ The enabled setting, configured values, and secrets are resolved for the notific
 user. The handler receives none of that user's identity, workflow, execution, repository, artifact,
 or log data.
 
-An extension channel participates in the fan-out of the built-in `user-notification` node. A missing,
+An extension channel participates in the fan-out of the built-in `user-notification` node and of
+the «waiting for you» notifications. A missing,
 disabled, invalid, or payload-incompatible channel is skipped. A runner or handler health failure is
 a failed channel with a bounded, sanitized reason; with no successful sibling the aggregate is
 `all_failed`, and with a successful sibling it is `partial`. Neither result exposes endpoint

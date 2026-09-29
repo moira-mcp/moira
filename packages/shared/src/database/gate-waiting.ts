@@ -15,6 +15,7 @@ import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
 import type { WorkflowGraph } from "@mcp-moira/workflow-engine";
 import { humanGateChanged, humanGateWaiting } from "@mcp-moira/workflow-engine/human-gate";
 import { workflow, workflowExecution } from "./schema.js";
+import { enqueueWaitingNotification } from "./execution-notification.js";
 import type * as schema from "./schema.js";
 
 type GraphNodes = Pick<WorkflowGraph, "nodes">;
@@ -86,6 +87,8 @@ export function recomputeGateWaiting(
       .set({ gateWaiting: waiting })
       .where(eq(workflowExecution.executionId, row.executionId))
       .run();
+    // A run the new definition puts into a person's wait is announced like any arrival.
+    if (waiting) enqueueWaitingNotification(db, row.executionId);
     changed += 1;
   }
   return changed;

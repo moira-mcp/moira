@@ -5,8 +5,10 @@ sidebar:
   order: 5
 ---
 
-Moira workflows send ordinary notifications through `user-notification`; when Telegram is enabled,
-its built-in adapter uses the current user's configured bot and chat ID. The deprecated
+Moira workflows send ordinary notifications through `user-notification`, and Moira itself tells you
+when a run starts waiting for you (a step marked `humanGate`, or the agent's question) and, for a
+marked step that sets `remindAfter`, reminds you once; when Telegram is enabled, its built-in adapter uses the current user's configured bot and chat
+ID for both. The deprecated
 `telegram-notification` node keeps Telegram-only compatibility, while `lock` uses a separate trusted
 Telegram path for approval PINs.
 
@@ -90,8 +92,9 @@ Temporary connectivity issue. Wait a moment and retry. If persistent, check that
 ### Bot Does Not Respond
 
 Bots created via @BotFather do not respond to messages by default. Moira sends through them when a
-workflow triggers `user-notification` with Telegram enabled, executes a deprecated
-`telegram-notification` node, or needs trusted PIN delivery for a `lock` node.
+workflow triggers `user-notification` with Telegram enabled, a run starts waiting for you (or its
+reminder is due), executes a deprecated `telegram-notification` node, or needs trusted PIN delivery
+for a `lock` node.
 
 ### Notification Not Received
 

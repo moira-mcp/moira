@@ -29,7 +29,9 @@ const TAB_CLASS = "h-8 flex-none gap-1.5 px-2 text-xs";
 const TAB_ICON = "hidden size-3.5 @[520px]:inline";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { apiClient } from "../../services/api-client";
+import type { TFunction } from "i18next";
+import { apiClient, type WaitingNotificationMark } from "../../services/api-client";
+import { formatDuration } from "../run/duration";
 import type { WorkflowGraph as WorkflowGraphType } from "../../types";
 import {
   ExecutionErrorHistory,
@@ -126,6 +128,8 @@ export interface ExecutionData {
   // Optional owner info (available in admin view); null when the owner's account can no longer be found
   userEmail?: string | null;
   userName?: string | null;
+  /** The latest notification about the run's current wait for its person (execution detail route). */
+  waitingNotification?: WaitingNotificationMark | null;
 }
 
 export interface ExecutionInspectorProps {
@@ -959,6 +963,17 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
               ))}
             </ul>
           ) : null}
+          {execution?.waitingNotification ? (
+            <div
+              className="mt-1 text-xs text-muted-foreground"
+              data-testid="run-waiting-notification"
+              data-state={
+                execution.waitingNotification.deliveryStatus ?? execution.waitingNotification.state
+              }
+            >
+              {waitingNotificationText(execution.waitingNotification, t)}
+            </div>
+          ) : null}
         </div>
       ) : null}
 
@@ -1498,3 +1513,23 @@ const StepProgression: React.FC<StepProgressionProps> = ({
     </StepCardList>
   );
 };
+
+/** The line under the «waiting for you» banner: whether the person was told, and how long ago. */
+function waitingNotificationText(mark: WaitingNotificationMark, t: TFunction): string {
+  const key = "pages.executionInspector.waitingForUser.notification";
+  if (mark.state === "superseded") return t(`${key}.superseded`);
+  if (mark.state === "pending" || mark.sentAt === null) return t(`${key}.pending`);
+  const ago = formatDuration(Math.max(0, Date.now() - mark.sentAt), t);
+  switch (mark.deliveryStatus) {
+    case "delivered":
+    case "partial":
+      return t(mark.kind === "remind" ? `${key}.reminded` : `${key}.sent`, {
+        ago,
+        channels: mark.deliveredChannels.join(", "),
+      });
+    case "no_configured_channels":
+      return t(`${key}.noChannels`);
+    default:
+      return t(`${key}.failed`, { ago });
+  }
+}

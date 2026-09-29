@@ -209,12 +209,35 @@ export async function recoverContinuation(
     };
   }
 
+  // The run arrives at the node it is recovered to: the arrival is recorded like any other, so what
+  // is keyed by the waited visit (the person's notification) does not move when a later adjustment
+  // is appended. Recovered onto the step it already waits on, it keeps that open visit — the same
+  // wait, not a second pass. The presentation that follows continues the open visit either way.
+  const visits = execution.visits ?? [];
+  const lastEngineVisit = [...visits].reverse().find((visit) => !visit.adjusted);
+  const alreadyWaitingThere =
+    lastEngineVisit !== undefined &&
+    lastEngineVisit.nodeId === nodeId &&
+    lastEngineVisit.exitKey === null;
   const moved: WorkflowExecution = {
     ...execution,
     status: "running",
     currentNodeId: nodeId,
     waitingForInputNodeId: nodeId,
     globalContext,
+    visits: alreadyWaitingThere
+      ? visits
+      : [
+          ...visits,
+          {
+            seq: visits.length,
+            nodeId,
+            exitKey: null,
+            changes: {},
+            waited: true,
+            enteredAt: Date.now(),
+          },
+        ],
   };
   const recovered: WorkflowExecution = { ...moved, gateWaiting: humanGateWaiting(graph, moved) };
   const written = await repository.recoverExecutionToNode({

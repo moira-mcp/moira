@@ -330,6 +330,13 @@
       "when": 1790000480000,
       "tag": "0045_execution_awaiting_user",
       "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1790000540000,
+      "tag": "0046_execution_notification",
+      "breakpoints": true
     }
   ]
 }

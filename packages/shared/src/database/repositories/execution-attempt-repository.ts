@@ -19,7 +19,10 @@ import {
   stepAttemptBindingMatches,
   stepAttemptContinuationMatches,
 } from "../../types/step-attempt-binding.js";
+import { drizzle } from "drizzle-orm/better-sqlite3";
 import { executionRowFields } from "../execution-row.js";
+import { enqueueWaitingNotification } from "../execution-notification.js";
+import * as schema from "../schema.js";
 
 type AttemptRow = {
   attemptId: string;
@@ -60,6 +63,11 @@ function asAttempt(row: AttemptRow): ExecutionAttempt {
 
 export class ExecutionAttemptRepository {
   constructor(private readonly sqlite: Database.Database) {}
+
+  /** Queue the person's notification if the run just written waits for them (same transaction). */
+  private enqueueNotification(executionId: string): void {
+    enqueueWaitingNotification(drizzle(this.sqlite, { schema }), executionId);
+  }
 
   prepareStart(attempt: PreparedStartExecutionAttempt): void {
     this.sqlite
@@ -207,6 +215,7 @@ export class ExecutionAttemptRepository {
             execution.updatedAt,
             execution.completedAt,
           );
+        this.enqueueNotification(input.execution.executionId);
         const fence = row.fence + 1;
         const changed = this.sqlite
           .prepare(
@@ -584,7 +593,7 @@ export class ExecutionAttemptRepository {
         const update = this.sqlite
           .prepare(
             `UPDATE workflowExecution SET state = ?, currentNodeId = ?, waitingForInputNodeId = ?,
-               context = ?, gateWaiting = ?, awaitingUser = NULL, updatedAt = ?,
+               context = ?, visits = ?, gateWaiting = ?, awaitingUser = NULL, updatedAt = ?,
                revision = revision + 1
              WHERE executionId = ? AND revision = ? AND state = ?
                AND currentNodeId IS ? AND waitingForInputNodeId IS ? AND context = ?`,
@@ -594,6 +603,7 @@ export class ExecutionAttemptRepository {
             execution.currentNodeId,
             execution.waitingForInputNodeId,
             execution.context,
+            execution.visits,
             execution.gateWaiting,
             now,
             input.execution.executionId,
@@ -604,6 +614,7 @@ export class ExecutionAttemptRepository {
             expected.context,
           );
         if (update.changes !== 1) return "execution_changed";
+        this.enqueueNotification(input.execution.executionId);
 
         if (current) {
           this.sqlite
@@ -666,6 +677,7 @@ export class ExecutionAttemptRepository {
             expectedExecution.note,
           );
         if (update.changes !== 1) return false;
+        this.enqueueNotification(input.execution.executionId);
         const now = Date.now();
         const completed = this.sqlite
           .prepare(

@@ -234,7 +234,8 @@ session({
 ```
 
 The run is then shown as waiting for the user, with your question and choices, instead of looking
-like it waits for you. `question` is up to 500 characters and `options` up to four choices. The
+like it waits for you, and the user is notified through their channels with the question and a link
+to the run (a new question within ten minutes of the previous notification waits for its turn). `question` is up to 500 characters and `options` up to four choices. The
 user answers you in the chat, not in Moira. A new call replaces the question; your next step, a
 variable you set with `set-variable`, or `resolve: true` clears it, and so does the run leaving the
 step. The call does not change the step revision, so your current Step attempt stays valid.

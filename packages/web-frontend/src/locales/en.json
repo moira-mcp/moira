@@ -536,7 +536,15 @@
         "title": "Waiting for you:",
         "agentTitle": "The agent is asking you:",
         "hint": "answer the agent in the chat",
-        "options": "Choices the agent offered"
+        "options": "Choices the agent offered",
+        "notification": {
+          "pending": "The notification is on its way",
+          "sent": "Notification sent via {{channels}} {{ago}} ago",
+          "reminded": "Reminder sent via {{channels}} {{ago}} ago",
+          "noChannels": "No notification channels are set up — you were not notified. Set them up in Settings",
+          "failed": "The notification could not be delivered ({{ago}} ago)",
+          "superseded": "No notification: the wait changed before it was sent"
+        }
       },
       "locks": {
         "noHistory": "No lock history for this execution",

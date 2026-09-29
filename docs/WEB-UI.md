@@ -1214,7 +1214,11 @@ live URL so a duplicate change pushes no history entry.
   (`run-waiting-for-user`, `role="status"`, `data-source` = `gate` or `agent`) reads "Waiting for
   you: <label> — answer the agent in the chat" for a step marked `humanGate`, or "The agent is asking
   you: <question> — answer the agent in the chat" for the agent's question, followed by the choices it
-  offered as chips (`run-waiting-for-user-options`).
+  offered as chips (`run-waiting-for-user-options`). Under it, from the execution detail's
+  `waitingNotification`, a muted line (`run-waiting-notification`, `data-state` = the delivery status
+  or the row state) says whether the person was notified: sent via <channels> <time> ago, reminder
+  sent, on its way, no notification channels set up, could not be delivered, or dropped because the
+  wait changed first.
 - With a process view: the active view fills the remaining width and height and brings the shared
   `DiagramToolbar` with it — the view tabs (**Map** and **Graph**, `run-modes`) in the `modes` slot,
   then the contents fold button and the route cursor (`RunCursor`, when a route is recorded), the
