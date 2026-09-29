@@ -901,7 +901,10 @@ the same heading in plain text.
 
 The validator warns (never blocks) when a notification's `message` would show the reader a file or
 path, a bare counter with nothing naming what it counts, or a step's raw output; see the
-notification content warning in the public Validation reference.
+notification content warning in the public Validation reference. It also warns
+(`gate-notified-twice`, `GraphValidator.validateGateNotifications`) when a notification node leads
+straight into an `agent-directive` marked `humanGate` with `notify: "auto"`: the person would get the
+workflow's message and Moira's about the same wait.
 
 `telegram-notification` is deprecated but remains executable for existing Telegram-specific
 workflows. Its explicit `chatId`, `parseMode`, and `replyMarkup` keep their original meanings and

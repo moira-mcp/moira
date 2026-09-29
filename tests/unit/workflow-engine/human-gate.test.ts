@@ -196,6 +196,61 @@ describe("validating a humanGate", () => {
   });
 });
 
+describe("a flow message right before a gate", () => {
+  /** The draft step's result goes out as a flow message, then the run reaches the gate. */
+  function announced(gate?: Record<string, unknown>): WorkflowGraph {
+    const base = graph(gate);
+    return {
+      ...base,
+      nodes: base.nodes.flatMap((node) =>
+        node.id === "draft"
+          ? [
+              { ...node, connections: { success: "tell" } } as WorkflowGraph["nodes"][number],
+              {
+                type: "user-notification",
+                id: "tell",
+                progressNodeId: "work",
+                message: "The draft is ready for your approval",
+                connections: { default: "approve" },
+                connectionLabels: { default: "drafted" },
+              } as unknown as WorkflowGraph["nodes"][number],
+            ]
+          : [node],
+      ),
+    };
+  }
+
+  async function doubled(workflow: WorkflowGraph) {
+    const result = await new GraphValidator().validateUnified(workflow);
+    return result.issues.filter((issue) => issue.message.includes("gate-notified-twice"));
+  }
+
+  test("is warned about when the gate notifies the person too", async () => {
+    for (const gate of [{ label: "Approve" }, { label: "Approve", notify: "auto" }]) {
+      const warnings = await doubled(announced(gate));
+      expect(warnings).toEqual([
+        expect.objectContaining({
+          severity: "warning",
+          nodeId: "tell",
+          field: "connections.default",
+        }),
+      ]);
+      expect(warnings[0].message).toContain('"approve"');
+    }
+  });
+
+  test.each([
+    [
+      "the gate leaves the first message to the flow",
+      announced({ label: "Approve", notify: "off" }),
+    ],
+    ["the step is not a gate", announced()],
+    ["no flow message precedes the gate", graph({ label: "Approve" })],
+  ])("is not warned about when %s", async (_case, workflow) => {
+    expect(await doubled(workflow)).toEqual([]);
+  });
+});
+
 describe("the progress projection of a gated step", () => {
   test("a live run the engine marked waits for the person, worded with the gate's label", () => {
     const progress = projectExecutionRun(

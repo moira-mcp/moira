@@ -216,16 +216,20 @@ its routing are unchanged: the agent still presents the question and submits the
 }
 ```
 
-| Property                | Required | Description                                                                                             |
-| ----------------------- | -------- | ------------------------------------------------------------------------------------------------------- |
-| `humanGate.label`       | No       | What the person is asked to do, in a few words; the step's progress label otherwise                     |
-| `humanGate.when`        | No       | A structured condition; the step waits for a person only when it holds as the run arrives               |
-| `humanGate.notify`      | No       | `auto` (default): the person is notified when the run starts waiting; `off`: no notification            |
-| `humanGate.remindAfter` | No       | How long an unanswered wait lasts before one reminder: a number and `m`, `h` or `d` (`30m`, `4h`, `2d`) |
+| Property                | Required | Description                                                                                                                                   |
+| ----------------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `humanGate.label`       | No       | What the person is asked to do, in a few words; the step's progress label otherwise                                                           |
+| `humanGate.when`        | No       | A structured condition; the step waits for a person only when it holds as the run arrives                                                     |
+| `humanGate.notify`      | No       | `auto` (default): the engine notifies the person when the run starts waiting; `off`: the flow sends the first message itself                  |
+| `humanGate.remindAfter` | No       | How long an unanswered wait lasts before one reminder from the engine, with either `notify`: a number and `m`, `h` or `d` (`30m`, `4h`, `1d`) |
 
 The condition uses the same syntax as a routing case's `when` and is evaluated once, when the run
-arrives at the step; without it the step always waits for a person. Use it for a step a run in
-autonomous mode also passes through, so an unattended run is not shown as waiting for someone.
+arrives at the step; without it the step always waits for a person. Use it for a step that a run in
+autonomous mode also enters and decides by itself, so an unattended run is not shown as waiting for
+someone. A step that waits for the person in either mode — an external blocker only the person can
+clear, say — needs no condition. A step where the agent does long work first and asks only at the end
+is better left unmarked, since the mark would show the run as waiting for you during that work; its
+directive has the agent raise the question with `session await-user` when it asks.
 Marking, unmarking or changing the gate of a step in a new version of the workflow re-decides it for
 runs already paused on that step, and they continue with their current step attempt; a new version
 that leaves the gate alone does not re-evaluate the condition.
@@ -235,8 +239,17 @@ channels (the same ones `user-notification` uses): the flow and task, what they 
 to the run; the answer goes to the agent in the chat. The notification is sent once per wait — a
 repeated step or a reconnecting agent does not send it again — and if the wait is still open after
 `remindAfter`, exactly one reminder follows. Set `notify: "off"` when the flow already sends its own
-message for that step, so the person does not get two. The run page shows under its banner whether the
-notification was sent, when and where, or that no channel is set up.
+message right before that step — typically because the message carries what the person decides on,
+such as the plan or the reason for a blocker — so the person does not get two; the validator warns
+(`gate-notified-twice`) about a notification node that leads straight into a step with
+`notify: "auto"`. With `notify: "off"` the flow's message is the first one, and `remindAfter` still
+brings the engine's single reminder. The reminder is counted from when the run started waiting there,
+or, for a run already paused on the step when a new version marked it, from that update. The run page
+shows under its banner whether the notification or the reminder was sent, when and where, or that no
+channel is set up; for a `notify: "off"` step it shows nothing until the reminder goes out.
+
+The `moira-workflow` CLI sets the mark with `update <node> --human-gate '<json>'` and removes it with
+`--human-gate none`.
 
 ## Condition Node
 

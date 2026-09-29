@@ -2612,7 +2612,8 @@ Response:
       } | null;
       // The latest notification about the wait the run stands in for its person (a humanGate step
       // or the agent's question); a reminder not due yet is skipped, a held first notification is
-      // returned as pending; null when the run does not wait for its person or nothing was queued
+      // returned as pending; null when the run does not wait for its person or nothing was queued —
+      // also for a `notify: "off"` step until its reminder is sent (its flow sent the first message)
       waitingNotification: {
         kind: "first" | "remind";
         state: "pending" | "sent" | "superseded";

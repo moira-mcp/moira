@@ -2,7 +2,7 @@
   "id": "be95cedc-35ec-4314-87ce-331ac3d11579",
   "metadata": {
     "name": "Robust Task",
-    "version": "9.7.0",
+    "version": "9.8.0",
     "description": "Executes one complex authorized task through durable planning, canonical materialized guidance, cause-owned recovery and independently reviewed delivery without imposing a software-specific lifecycle. It creates an execution-correlated workspace, captures the complete task and authority, materializes one domain-neutral guide, produces and independently reviews a current plan, executes plan steps with concise durable evidence and materially changed retry attempts, and preserves restartable immutable history across context loss. Cause-aware step and final reviews separate result defects from evidence/projection defects and upstream plan or criterion defects; result and evidence repair have bounded budgets, while spreading or invalid work enters material replanning instead of false success. Autonomous mode skips only human waits; interactive mode keeps plan and recovery decisions. Outcomes distinguish complete and truthfully incomplete work and expose stable artifacts rather than process narration. Choose Robust Task for critical or long-running general work that needs recovery; use Quick Task for a bounded non-development task, Todo List for a supplied checklist, or Software Development Flow for one complete repository implementation lifecycle.",
     "tags": [
       "задача",
@@ -296,7 +296,19 @@
         "summary": "Resolve the bounded plan-review decision from current evidence",
         "next": "Perform one justified changed repair or deliver truthfully incomplete"
       },
-      "cases": []
+      "cases": [],
+      "humanGate": {
+        "label": "Decide: fix the plan again or finish incomplete",
+        "when": {
+          "operator": "neq",
+          "left": {
+            "contextPath": "operating_mode"
+          },
+          "right": "autonomous"
+        },
+        "notify": "off",
+        "remindAfter": "1d"
+      }
     },
     {
       "id": "reset-plan-review-for-repair",
@@ -496,6 +508,11 @@
       ],
       "connectionLabels": {
         "check-all-steps-done": "plan approved"
+      },
+      "humanGate": {
+        "label": "Approve the plan",
+        "notify": "off",
+        "remindAfter": "1d"
       }
     },
     {
@@ -864,7 +881,19 @@
         "summary": "Resolve exhausted result-repair recovery from changed knowledge or exact unresolved scope",
         "next": "Retry with changed knowledge, replace the plan, or deliver truthfully incomplete"
       },
-      "cases": []
+      "cases": [],
+      "humanGate": {
+        "label": "Decide how to continue the failing step",
+        "when": {
+          "operator": "neq",
+          "left": {
+            "contextPath": "operating_mode"
+          },
+          "right": "autonomous"
+        },
+        "notify": "off",
+        "remindAfter": "1d"
+      }
     },
     {
       "id": "reset-step-retry",
@@ -1207,7 +1236,19 @@
         "summary": "Resolve the bounded final-review decision from the exact current report",
         "next": "Perform one justified changed repair or deliver explicitly incomplete"
       },
-      "cases": []
+      "cases": [],
+      "humanGate": {
+        "label": "Decide: fix the result again or accept it",
+        "when": {
+          "operator": "neq",
+          "left": {
+            "contextPath": "operating_mode"
+          },
+          "right": "autonomous"
+        },
+        "notify": "off",
+        "remindAfter": "1d"
+      }
     },
     {
       "id": "reset-final-for-repair",

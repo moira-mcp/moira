@@ -536,6 +536,8 @@ export function renderWorkflowSchema(workflow: WorkflowSchemaInput): string {
         lines.push(`    PROGRESS_ACTIVE_LABEL ${quotedText(node.progressActiveLabel)}`);
       if (node.progressActiveContent)
         lines.push(`    PROGRESS_ACTIVE_CONTENT ${stableJson(node.progressActiveContent)}`);
+      if (node.type === "agent-directive" && node.humanGate)
+        lines.push(`    HUMAN_GATE ${stableJson(node.humanGate)}`);
       renderedNodes++;
       const preview = directivePreview(node);
       if (preview) lines.push(`    DIRECTIVE ${quotedText(preview)}`);

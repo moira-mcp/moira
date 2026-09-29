@@ -1360,12 +1360,12 @@
         "notify": {
           "type": "string",
           "enum": ["auto", "off"],
-          "description": "`auto` (default): the person is notified when the run arrives; `off`: the workflow sends its own notification."
+          "description": "`auto` (default): the person is notified when the run arrives; `off`: the workflow sends its own first message, and only the reminder of `remindAfter`, if set, comes from the engine."
         },
         "remindAfter": {
           "type": "string",
           "pattern": "^[1-9][0-9]{0,4}[mhd]$",
-          "description": "How long an unanswered wait lasts before one repeated notification: minutes, hours or days, e.g. `30m`, `4h`, `2d`."
+          "description": "How long an unanswered wait lasts before one reminder, counted from when the run started waiting here (or, for a run already here when the step was marked, from that update): minutes, hours or days, e.g. `30m`, `4h`, `1d`."
         }
       }
     },

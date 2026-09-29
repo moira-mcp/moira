@@ -79,6 +79,7 @@ import {
   type SearchResult,
 } from "@mcp-moira/shared/services/workflow-query-service";
 import { readCatalogEntry } from "@mcp-moira/shared/services/workflow-catalog";
+import { HUMAN_GATE_DURATION_PATTERN } from "@mcp-moira/shared/utils/human-gate-duration";
 import {
   validateVersionChange,
   isValidSemver,
@@ -364,6 +365,46 @@ interface UpdateOptions {
   progressActiveContent?: string | null;
   attachProgressImage?: boolean;
   planList?: "full" | "progress" | "none";
+  humanGate?: string | null;
+}
+
+/**
+ * Read a `humanGate` value from JSON, refusing what the workflow schema would refuse: an object with
+ * only `label`, `when`, `notify` and `remindAfter`, in their accepted forms. The condition's own
+ * structure is checked by `validate`, like a routing case's.
+ */
+function parseHumanGate(json: string): Record<string, unknown> {
+  const parsed: unknown = JSON.parse(json);
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("expected a JSON object");
+  }
+  const gate = parsed as Record<string, unknown>;
+  const unknown = Object.keys(gate).filter(
+    (key) => !["label", "when", "notify", "remindAfter"].includes(key),
+  );
+  if (unknown.length > 0) throw new Error(`unknown field(s): ${unknown.join(", ")}`);
+  if (
+    gate.label !== undefined &&
+    (typeof gate.label !== "string" || gate.label.trim() === "" || gate.label.length > 120)
+  ) {
+    throw new Error("label must be a non-empty string of at most 120 characters");
+  }
+  if (
+    gate.when !== undefined &&
+    (!gate.when || typeof gate.when !== "object" || Array.isArray(gate.when))
+  ) {
+    throw new Error("when must be a condition object, as in a routing case");
+  }
+  if (gate.notify !== undefined && gate.notify !== "auto" && gate.notify !== "off") {
+    throw new Error('notify must be "auto" or "off"');
+  }
+  if (
+    gate.remindAfter !== undefined &&
+    (typeof gate.remindAfter !== "string" || !HUMAN_GATE_DURATION_PATTERN.test(gate.remindAfter))
+  ) {
+    throw new Error("remindAfter must be a duration such as 30m, 4h or 1d");
+  }
+  return gate;
 }
 
 // === UPDATE COMMAND ===
@@ -585,6 +626,26 @@ function updateNode(
     changes++;
   }
 
+  if (options.humanGate !== undefined) {
+    if (node.type !== "agent-directive") {
+      console.error(c("red", "ERROR: --human-gate is valid only for agent-directive nodes"));
+      process.exit(1);
+    }
+    if (options.humanGate === null) {
+      delete node.humanGate;
+      console.log(c("green", "✓ Cleared humanGate"));
+    } else {
+      try {
+        node.humanGate = parseHumanGate(options.humanGate);
+        console.log(c("green", "✓ Updated humanGate"));
+      } catch (error) {
+        console.error(c("red", `ERROR: Invalid humanGate: ${(error as Error).message}`));
+        process.exit(1);
+      }
+    }
+    changes++;
+  }
+
   if (options.connections !== undefined) {
     try {
       node.connections = JSON.parse(options.connections);
@@ -624,7 +685,7 @@ function updateNode(
     console.log(
       c(
         "yellow",
-        "No changes specified. Use --directive, --completion-condition, --input-schema, --cases, --expressions, --message, --connections, --progress-node-id, --progress-active-label, --progress-active-content, --attach-progress-image, --plan-list, or --add-connection",
+        "No changes specified. Use --directive, --completion-condition, --input-schema, --cases, --expressions, --message, --connections, --progress-node-id, --progress-active-label, --progress-active-content, --attach-progress-image, --plan-list, --human-gate, or --add-connection",
       ),
     );
     process.exit(0);
@@ -1325,6 +1386,10 @@ function showStructure(workflow: WorkflowGraph, config: StructureConfig): void {
       });
     }
 
+    if (node.type === "agent-directive" && node.humanGate) {
+      console.log(`    ${c("dim", "Human gate:")} ${JSON.stringify(node.humanGate)}`);
+    }
+
     if (config.detailed) {
       if ("directive" in node && node.directive) {
         const directive =
@@ -1461,6 +1526,10 @@ function cmdDiff(workflow1: WorkflowGraph, workflow2Path: string): void {
         JSON.stringify(node1.initialData) !== JSON.stringify(node2.initialData)
       )
         changes.push("initialData");
+      // Present on one side only counts too: marking or unmarking a step is a change.
+      const gate1 = node1.type === "agent-directive" ? node1.humanGate : undefined;
+      const gate2 = node2.type === "agent-directive" ? node2.humanGate : undefined;
+      if (JSON.stringify(gate1) !== JSON.stringify(gate2)) changes.push("humanGate");
 
       if (changes.length > 0) {
         modifiedNodes.push({ id, changes });
@@ -1751,6 +1820,8 @@ ${c("cyan", "Update Options:")}
   --progress-active-content <json|none> Set or clear its active-only structured content
   --attach-progress-image <true|false>  Toggle progress image on notification nodes
   --plan-list <full|progress|none>      How much of the plan a user-notification carries
+  --human-gate <json|none>              Mark or unmark an agent-directive as waiting for a person:
+                                        {"label","when","notify":"auto|off","remindAfter":"1d"}
   --cases '[{"when":{...},"output":"key"}]'  Update routing cases (condition / agent-directive)
   --expressions '["a = a + 1"]'       Update node expressions ('[]' removes them)
   --message "text"                     Update message
@@ -1866,6 +1937,9 @@ ${c("cyan", "Examples:")}
       i++;
     } else if (args[i] === "--progress-active-content" && args[i + 1]) {
       config.options.progressActiveContent = args[i + 1] === "none" ? null : args[i + 1];
+      i++;
+    } else if (args[i] === "--human-gate" && args[i + 1]) {
+      config.options.humanGate = args[i + 1] === "none" ? null : args[i + 1];
       i++;
     } else if (args[i] === "--attach-progress-image" && args[i + 1]) {
       if (args[i + 1] !== "true" && args[i + 1] !== "false") {

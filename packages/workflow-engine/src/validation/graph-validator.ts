@@ -17,6 +17,7 @@ import {
   defaultOutputOf,
   caseRoutableOutputs,
   RESERVED_CONTROL_OUTPUTS,
+  isAgentDirectiveNode,
 } from "../types/graph-nodes.js";
 import type { BuiltinGraphNode } from "../types/graph-nodes.js";
 import { notificationContentWarnings } from "./notification-content-rule.js";
@@ -673,6 +674,9 @@ export class GraphValidator {
     // Static user-facing progress graph and primary-node mappings.
     issues.push(...this.validateProgress(workflow));
 
+    // A flow message right before a gate the engine announces itself.
+    issues.push(...this.validateGateNotifications(workflow));
+
     // Check for unreachable nodes (exclude teleport nodes — they are jump targets)
     const reachableNodes = this.findReachableNodes(workflow);
     const unreachableNodes = workflow.nodes
@@ -704,6 +708,32 @@ export class GraphValidator {
     // Validate each variableRegistry entry is a well-formed JSON Schema
     issues.push(...this.validateRegistryEntries(workflow));
 
+    return issues;
+  }
+
+  /**
+   * A notification node that leads straight into a step marked `humanGate` with `notify: auto` (the
+   * default) sends the person a message the engine is about to send too: two messages about one
+   * wait. The flow either keeps its message and sets `notify: "off"`, or drops its message.
+   */
+  private validateGateNotifications(workflow: WorkflowGraph): UnifiedValidationIssue[] {
+    const issues: UnifiedValidationIssue[] = [];
+    const byId = new Map(workflow.nodes.map((node) => [node.id, node]));
+    for (const node of workflow.nodes) {
+      if (node.type !== "user-notification" && node.type !== "telegram-notification") continue;
+      for (const [output, target] of Object.entries(node.connections ?? {})) {
+        const next = typeof target === "string" ? byId.get(target) : undefined;
+        if (!next || !isAgentDirectiveNode(next) || !next.humanGate) continue;
+        if (next.humanGate.notify === "off") continue;
+        issues.push({
+          type: "node",
+          severity: "warning",
+          nodeId: node.id,
+          field: `connections.${output}`,
+          message: `Node ${node.id}: leads straight into "${next.id}", whose humanGate notifies the person itself (notify: auto); the person gets two messages about one wait (gate-notified-twice). Set humanGate.notify to "off" on "${next.id}" to keep this message, or remove this node`,
+        });
+      }
+    }
     return issues;
   }
 

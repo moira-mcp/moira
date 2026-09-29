@@ -93,6 +93,7 @@ byte-for-byte unchanged.
 --progress-active-label <text|none> # Set or clear its active-only block label
 --attach-progress-image <bool>  # Set true/false; notification nodes only
 --plan-list <full|progress|none> # Plan lines of a user-notification (progress = default)
+--human-gate <json|none>        # Mark an agent-directive as waiting for a person (humanGate)
 --connections '{"key":"target"}' # Update connections
 --add-connection <key> <target> # Add connection
 --remove-connection <key>       # Remove connection

@@ -7,7 +7,8 @@ sidebar:
 
 Moira workflows send ordinary notifications through `user-notification`, and Moira itself tells you
 when a run starts waiting for you (a step marked `humanGate`, or the agent's question) and, for a
-marked step that sets `remindAfter`, reminds you once; when Telegram is enabled, its built-in adapter uses the current user's configured bot and chat
+marked step that sets `remindAfter`, reminds you once — also when the workflow sent the first message
+about that step itself (`notify: "off"`); when Telegram is enabled, its built-in adapter uses the current user's configured bot and chat
 ID for both. The deprecated
 `telegram-notification` node keeps Telegram-only compatibility, while `lock` uses a separate trusted
 Telegram path for approval PINs.

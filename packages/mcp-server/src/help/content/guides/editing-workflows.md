@@ -113,7 +113,12 @@ moira-workflow ./workflow.json set-progress --file ./progress.json
 moira-workflow ./workflow.json update implement --progress-node-id implementation
 moira-workflow ./workflow.json update implement --progress-active-label "Implement {{unit}}/{{total}}"
 moira-workflow ./workflow.json update notify --progress-node-id review --attach-progress-image true
+moira-workflow ./workflow.json update approve --human-gate '{"label":"Approve the plan","notify":"off","remindAfter":"1d"}'
 ```
+
+`--human-gate` marks an `agent-directive` as a step that waits for a person's decision (see
+`humanGate` in the node reference) and `--human-gate none` removes the mark; `schema`, `structure` and
+`diff` show it.
 
 The block contract has its own commands: own a node by a block, add or edit a block with its
 description, bind a block to the list its steps work through, label a connection that leaves a

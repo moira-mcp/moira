@@ -80,6 +80,19 @@ progress. Because the flow notifies, starting it for a user with no configured c
 with an instruction; an agent that wants to run without notifications prepares the start again
 with `skipNotificationCheck: true`. A failed notification does not stop the run.
 
+### Waiting for you
+
+The steps where SDF waits for your decision are marked as waiting for you: confirming the
+requirements, the plan approval, a unit's approval, the unit closure, the final acceptance, and the
+blocker steps (health check, runtime, broad and final checks, finalization). While a run stands on
+one, the run page and the run's progress say **waiting for you** with what you are asked, and the
+message that asks ends with `🙋 waiting for you`. The blocker steps wait for you in autonomous runs
+too — only you can change the external state or end the run — so they are marked in both modes; an
+autonomous run decides the unit closure itself and is not shown as waiting there. Where the flow sends
+its own message before the step, that message is the first notification; confirming the requirements
+has none, so Moira notifies you itself. If nobody answers for a day, Moira sends one reminder with a
+link to the run.
+
 ## Execution progress
 
 The run's progress map is derived from the executable graph: every node belongs to one stage, every stage-leaving edge is labelled, and every return explains its cause and exit. The implementation stage binds the plan itself — `plan_units` as the items with each `title`, `current_step_index` as the unit in progress, counted from `1`, `completed_units` as the units closed, and `total_steps` as the unit count — so the run's progress data (`session progress` and the execution progress API) and its notifications show every unit, which ones are done and which one is in progress, and how long each pass through the stage took. Every plan writer returns `plan_units`, one short title per unit in plan order; the plan review derives `total_steps` from it, and activation returns only where to resume.

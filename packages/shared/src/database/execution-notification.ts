@@ -1,9 +1,10 @@
 /**
  * Queueing the notification that a run waits for its person.
  *
- * A run starts waiting for the person when it arrives at a step marked `humanGate` (with
- * `notify: auto`, the default) whose condition held, or when the agent raises its question
- * (`session await-user`). Every writer that can put a run into such a wait calls
+ * A run starts waiting for the person when it arrives at a step marked `humanGate` whose condition
+ * held, or when the agent raises its question (`session await-user`). A gate with `notify: auto` (the
+ * default) gets the engine's first notification; a gate with `notify: off` is one whose flow sends
+ * its own first message, so the queue holds only its reminder, when it has `remindAfter`. Every writer that can put a run into such a wait calls
  * `enqueueWaitingNotification` inside its own transaction, after its write: it reads the row as
  * written and inserts the `first` notification of the current wait, keyed by the wait. The key makes
  * the insert idempotent — a repeated step, a re-presentation or a reconnect finds the row already
@@ -14,6 +15,7 @@
 import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
 import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
+import { humanGateDurationMs } from "../utils/human-gate-duration.js";
 import { executionNotification, workflow, workflowExecution } from "./schema.js";
 import type * as schema from "./schema.js";
 
@@ -89,24 +91,37 @@ export function personWaitKeys(row: Parameters<typeof currentPersonWait>[0]): st
   return keys;
 }
 
-/** The `humanGate.notify` of the node a run stands on; `auto` when the graph cannot be read. */
-function gateNotify(db: Db, workflowId: string, nodeId: string): "auto" | "off" {
+/**
+ * How the gate of the node a run stands on is announced: `notify` (`auto` when the graph cannot be
+ * read) and its reminder delay in milliseconds, or null without a valid `remindAfter`.
+ */
+function gateAnnouncement(
+  db: Db,
+  workflowId: string,
+  nodeId: string,
+): { notify: "auto" | "off"; remindAfterMs: number | null } {
   const row = db
     .select({ graph: workflow.graph })
     .from(workflow)
     .where(eq(workflow.id, workflowId))
     .get();
-  const graph = parse<{ nodes?: Array<{ id?: string; humanGate?: { notify?: string } }> }>(
-    row?.graph,
-  );
-  const node = graph?.nodes?.find((candidate) => candidate.id === nodeId);
-  return node?.humanGate?.notify === "off" ? "off" : "auto";
+  const graph = parse<{
+    nodes?: Array<{ id?: string; humanGate?: { notify?: string; remindAfter?: string } }>;
+  }>(row?.graph);
+  const gate = graph?.nodes?.find((candidate) => candidate.id === nodeId)?.humanGate;
+  return {
+    notify: gate?.notify === "off" ? "off" : "auto",
+    remindAfterMs: humanGateDurationMs(gate?.remindAfter),
+  };
 }
 
 /**
  * Insert the `first` notification of every person-facing wait the run holds, where the row does not
- * exist yet. Call inside the transaction that wrote the run. Returns the primary key queued, or null
- * when the run does not wait for its person (or its only wait is a gate with `notify: off`).
+ * exist yet; for a gate with `notify: off` insert instead its single reminder, due `remindAfter`
+ * after now — the moment the queue first records the wait, on arrival or on the recompute of a new
+ * workflow version (a later call finds the row and leaves its due time alone). Call inside the
+ * transaction that wrote the run. Returns the primary key queued with a first notification, or null
+ * when the run does not wait for its person or its only wait is a gate with `notify: off`.
  */
 export function enqueueWaitingNotification(
   db: Db,
@@ -129,24 +144,27 @@ export function enqueueWaitingNotification(
   if (!row) return null;
   // Every wait the run holds gets its notification: a gate marked beneath an open question is
   // announced too, not only the wait the page shows first.
-  const keys = personWaitKeys(row).filter(
-    (waitKey) =>
-      !waitKey.startsWith("gate:") || gateNotify(db, row.workflowId, row.currentNodeId!) !== "off",
-  );
-  for (const waitKey of keys) {
+  const queued: string[] = [];
+  for (const waitKey of personWaitKeys(row)) {
+    const gate = waitKey.startsWith("gate:")
+      ? gateAnnouncement(db, row.workflowId, row.currentNodeId!)
+      : null;
+    if (gate?.notify === "off" && gate.remindAfterMs === null) continue;
+    const reminderOnly = gate?.notify === "off";
     db.insert(executionNotification)
       .values({
         id: randomUUID(),
         executionId,
         userId: row.userId,
         waitKey,
-        kind: "first",
+        kind: reminderOnly ? "remind" : "first",
         state: "pending",
-        notBefore: now,
+        notBefore: reminderOnly ? now + gate.remindAfterMs! : now,
         createdAt: now,
       })
       .onConflictDoNothing()
       .run();
+    if (!reminderOnly) queued.push(waitKey);
   }
-  return keys[0] ?? null;
+  return queued[0] ?? null;
 }

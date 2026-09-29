@@ -115,7 +115,11 @@ moira-workflow ./workflow.json set-progress --file ./progress.json
 moira-workflow ./workflow.json update implement --progress-node-id implementation
 moira-workflow ./workflow.json update implement --progress-active-label "Implement {{unit}}/{{total}}"
 moira-workflow ./workflow.json update notify --progress-node-id review --attach-progress-image true
+moira-workflow ./workflow.json update approve --human-gate '{"label":"Approve the plan","notify":"off","remindAfter":"1d"}'
 ```
+
+`--human-gate` помечает `agent-directive` как шаг, который ждёт решения человека (см. `humanGate` в
+справочнике нод), а `--human-gate none` снимает пометку; `schema`, `structure` и `diff` её показывают.
 
 У контракта блоков есть собственные команды: привязать ноду к блоку, добавить или изменить блок с
 его описанием, привязать блок к списку, который проходят его шаги, подписать связь, выходящую из

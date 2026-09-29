@@ -50,11 +50,22 @@ export interface DeliveredNotification {
   format?: string;
 }
 
+/** A pause the run stood at, as stored before it was answered. */
+export interface ScenarioPause {
+  nodeId: string;
+  /** 1 on the first visit of the node. */
+  visit: number;
+  /** The stored «waiting for you» mark of a `humanGate` step, decided as the run arrived. */
+  gateWaiting: boolean;
+}
+
 export interface NotificationScenarioResult {
   executionId: string;
   status: string;
   /** Every node the run passed, in order. */
   route: string[];
+  /** Every pause the run was answered at, in order. */
+  pauses: ScenarioPause[];
   notifications: DeliveredNotification[];
   variables: Record<string, unknown>;
 }
@@ -112,6 +123,7 @@ export async function runNotificationScenario(
       scenario.note,
     );
     const visits = new Map<string, number>();
+    const pauses: ScenarioPause[] = [];
     let teleported = false;
     const maxSteps = scenario.maxSteps ?? 200;
     for (let step = 0; step < maxSteps; step++) {
@@ -121,6 +133,7 @@ export async function runNotificationScenario(
       const nodeId = execution.currentNodeId!;
       const visit = (visits.get(nodeId) ?? 0) + 1;
       visits.set(nodeId, visit);
+      pauses.push({ nodeId, visit, gateWaiting: execution.gateWaiting === true });
       const jump = scenario.teleportAt;
       if (jump && !teleported && nodeId === jump.node && visit === (jump.visit ?? 1)) {
         teleported = true;
@@ -160,6 +173,7 @@ export async function runNotificationScenario(
       executionId,
       status: execution.status,
       route,
+      pauses,
       notifications: delivered.map((message, index) => ({
         nodeId: senders[index],
         text: message.text,

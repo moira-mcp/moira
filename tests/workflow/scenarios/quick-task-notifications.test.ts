@@ -12,6 +12,7 @@ import {
   internalValues,
   runNotificationScenario,
   type NotificationMockContext,
+  type NotificationScenarioResult,
 } from "../../helpers/notification-scenario.js";
 
 const workflow = catalogGraph("quick-task");
@@ -54,6 +55,10 @@ function answers(mode: "interactive" | "autonomous", extra: Record<string, unkno
     ...extra,
   };
 }
+
+/** The stored «waiting for you» mark at each visit of a step, in order. */
+const gateMarks = (run: NotificationScenarioResult, nodeId: string) =>
+  run.pauses.filter((pause) => pause.nodeId === nodeId).map((pause) => pause.gateWaiting);
 
 const heading = (executionId: string) =>
   `[Quick Task · Add a dark_mode toggle](${runPageUrl({ executionId })})`;
@@ -103,6 +108,13 @@ describe("Quick Task notifications", () => {
     expect(result).toContain(
       "Accept it to finish, or ask for rework and say what to change.\n\n📝 3/3\n\n",
     );
+    // Both decisions are the person's: the run stands on them marked «waiting for you», and the
+    // message that asks for them ends by saying so.
+    expect(gateMarks(run, "present-plan")).toEqual([true, true]);
+    expect(gateMarks(run, "present-to-user")).toEqual([true, true]);
+    for (const text of [plan, revised, result]) {
+      expect(text).toMatch(/🙋 waiting for you: [^\n]+$/u);
+    }
     // The finish: the result and every unit done.
     expect(finished).toContain("Finished");
     expect(finished).toContain(
@@ -116,6 +128,9 @@ describe("Quick Task notifications", () => {
       "notify-work-started",
       "notify-finished",
     ]);
+    // The autonomous route goes around both decisions, so the run never waits for the person.
+    expect(run.pauses.filter((pause) => pause.gateWaiting)).toEqual([]);
+    expect(gateMarks(run, "present-plan")).toEqual([]);
     const [started, finished] = run.notifications.map((message) => message.text);
     for (const text of [started, finished]) {
       expect(text.startsWith(heading(run.executionId))).toBe(true);

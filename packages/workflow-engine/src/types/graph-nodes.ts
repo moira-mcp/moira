@@ -131,9 +131,15 @@ export interface HumanGate {
    * it, always. Same syntax as a routing case's `when`.
    */
   when?: StructuredCondition;
-  /** `auto` (default): the person is notified when the run arrives; `off`: the flow notifies itself. */
+  /**
+   * `auto` (default): the person is notified when the run arrives; `off`: the flow sends its own first
+   * message, and the engine sends only the reminder of `remindAfter`, if set.
+   */
   notify?: "auto" | "off";
-  /** How long an unanswered wait lasts before one repeated notification, e.g. `30m`, `4h`, `2d`. */
+  /**
+   * How long an unanswered wait lasts before one reminder, e.g. `30m`, `4h`, `1d` — counted from when
+   * the run started waiting here, or, for a run already here when the step was marked, from that update.
+   */
   remindAfter?: string;
 }
 

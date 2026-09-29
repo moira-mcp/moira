@@ -145,7 +145,11 @@ moira-workflow ./workflows/production/flows/<flow>.json move node-to-move
 `--attach-progress-image` accepts `true` or `false` and is rejected for every node type except
 `user-notification` or deprecated `telegram-notification`. `--plan-list <full|progress|none>` sets
 how much of the run's plan a `user-notification` carries; `progress` is the default and removes the
-field, and every other node type is rejected. These update options persist the requested fields; they do not derive the
+field, and every other node type is rejected. `--human-gate <json|none>` sets or removes an
+`agent-directive`'s `humanGate` (`label`, `when`, `notify`, `remindAfter`); the value's fields and
+forms are checked before writing, the condition's structure by `validate`, and every other node type is
+rejected. `get`, `schema` (a `HUMAN_GATE` line under the node), `structure` and `diff` show the mark.
+These update options persist the requested fields; they do not derive the
 process or validate its meaning — run `derive` afterwards.
 
 `--progress-active-label` is valid only for a node that pauses the run and belongs to a block. It

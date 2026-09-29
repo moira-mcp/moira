@@ -122,3 +122,22 @@ live in the engine reference, `reference/engine.md`:
 
 The light review asks on the simple level, and the full quality review checks on the standard and
 complex levels, that every notification's message follows these rules.
+
+### Waiting for you
+
+The structure and edit-plan approvals, the result review, the audit question, the save question and
+the saving-failed decision are marked as steps that wait for you. While an interactive run stands on
+one, the run page and the run's progress say **waiting for you** with what you are asked, and the
+message that asks ends with `🙋 waiting for you`. The flow's own message is the first notification
+about the wait; if nobody answers for a day, Moira sends one reminder with a link to the run. An
+autonomous run answers the audit, save and saving-failed questions itself and is not shown as waiting
+for you there. The full audit is not marked: it is mostly the agent's own work and asks only at its
+end which repairs join the edit, so in an interactive run the agent raises that question itself
+(`session await-user`), and the run shows it as waiting for you, with the question, only then.
+
+WMF also carries these rules into the workflows it builds and edits: a workflow of more than one stage
+declares progress blocks unless the design records why not, a stage that works through a list binds
+it, and every step that asks a person for a decision and waits for it is marked with `humanGate` —
+with a condition for a step an autonomous run decides itself, and `notify: "off"` after the
+workflow's own message about the wait. Its reviews treat a missing mark, a gate that would show an
+autonomous run as waiting, and two messages about one wait as blocking findings.

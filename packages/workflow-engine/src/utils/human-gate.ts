@@ -12,6 +12,7 @@ import type { WorkflowExecution } from "../types/base-types.js";
 import type { AgentDirectiveNode, HumanGate } from "../types/graph-nodes.js";
 import { isAgentDirectiveNode } from "../types/graph-nodes.js";
 import { evaluateStructuredCondition } from "../services/node-routing.js";
+import { humanGateDurationMs } from "@mcp-moira/shared/utils/human-gate-duration";
 
 /** The execution facts a gate decision reads. */
 export type HumanGateExecution = Pick<
@@ -100,15 +101,7 @@ export function humanGateChanged(
   return gateOf(previous) !== gateOf(next);
 }
 
-/** Matches the duration form `remindAfter` accepts: a positive integer and m, h or d. */
-export const HUMAN_GATE_DURATION_PATTERN = /^[1-9][0-9]{0,4}[mhd]$/;
-
 /** `remindAfter` in milliseconds, or null when absent or not in the accepted form. */
 export function humanGateRemindAfterMs(gate: Pick<HumanGate, "remindAfter">): number | null {
-  const value = gate.remindAfter;
-  if (value === undefined || !HUMAN_GATE_DURATION_PATTERN.test(value)) return null;
-  const amount = Number(value.slice(0, -1));
-  const unit = value.slice(-1);
-  const minute = 60_000;
-  return amount * (unit === "m" ? minute : unit === "h" ? 60 * minute : 24 * 60 * minute);
+  return humanGateDurationMs(gate.remindAfter);
 }

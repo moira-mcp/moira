@@ -9,7 +9,11 @@ A workflow in Moira is a directed graph of nodes that defines a multi-step proce
 
 ### Static execution progress
 
-A workflow may declare an optional top-level `progress` graph for a concise user-facing view. Its
+A workflow may declare an optional top-level `progress` graph for a concise user-facing view. A
+workflow of more than one stage should declare it, and mark with `humanGate` every step where it
+waits for a person's decision: a run is shown to people through exactly what the workflow declares,
+and a workflow without blocks is shown as a run with no progress to report. The Workflow Management
+Flow applies this by default and asks for a recorded reason to leave progress out. Its
 definition may include a template-enabled title, goal, bounded generic facts, and ordered nodes.
 Nodes contain `id`, template-enabled `label`, optional structured plain-text `content` (`summary`,
 `details`, `outcome`, and `next`), an optional `list` binding, and an optional static

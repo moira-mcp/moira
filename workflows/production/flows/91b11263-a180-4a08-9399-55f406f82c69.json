@@ -2,7 +2,7 @@
   "id": "91b11263-a180-4a08-9399-55f406f82c69",
   "metadata": {
     "name": "Software Development Flow",
-    "version": "16.1.0",
+    "version": "16.2.0",
     "description": "Implements one complete repository change through source-grounded requirements, independently reviewed planning, vertical units, staged validation, post-validation permanent-documentation updates, independent unit completeness, and one numeric final semantic/requirements review. Reports stay semantic and diff-first; HTML reports prefer agentic-report@latest and preserve Artifact/user-communication delivery. Authorized unit checkpoints are commit-or-no-op without receipt files or automatic repair branches. A fifteen-block process view derived from the graph, cause-aware replan, user gates, external-blocker recovery, local VCS authority, and caller-owned delivery boundaries remain intact.",
     "author": "mcp-moira-team",
     "tags": [
@@ -181,6 +181,10 @@
       ],
       "connectionLabels": {
         "assess-project-health": "requirements confirmed, or autonomous"
+      },
+      "humanGate": {
+        "label": "Confirm the requirements",
+        "remindAfter": "1d"
       }
     },
     {
@@ -350,6 +354,11 @@
           }
         },
         "success": "blocker did not clear"
+      },
+      "humanGate": {
+        "label": "Resolve the blocker",
+        "notify": "off",
+        "remindAfter": "1d"
       }
     },
     {
@@ -598,7 +607,12 @@
           },
           "output": "approved"
         }
-      ]
+      ],
+      "humanGate": {
+        "label": "Approve the plan",
+        "notify": "off",
+        "remindAfter": "1d"
+      }
     },
     {
       "id": "revise-plan-after-rejection",
@@ -1288,6 +1302,18 @@
       ],
       "connectionLabels": {
         "success": "closure not approved"
+      },
+      "humanGate": {
+        "label": "Approve revising the plan",
+        "when": {
+          "operator": "neq",
+          "left": {
+            "contextPath": "operating_mode"
+          },
+          "right": "autonomous"
+        },
+        "notify": "off",
+        "remindAfter": "1d"
       }
     },
     {
@@ -1588,6 +1614,11 @@
           }
         },
         "success": "external blocker did not clear"
+      },
+      "humanGate": {
+        "label": "Resolve the blocker",
+        "notify": "off",
+        "remindAfter": "1d"
       }
     },
     {
@@ -1940,6 +1971,11 @@
           }
         },
         "success": "external blocker did not clear"
+      },
+      "humanGate": {
+        "label": "Resolve the blocker",
+        "notify": "off",
+        "remindAfter": "1d"
       }
     },
     {
@@ -2015,6 +2051,11 @@
       ],
       "connectionLabels": {
         "success": "accepted, or autonomous"
+      },
+      "humanGate": {
+        "label": "Accept the unit",
+        "notify": "off",
+        "remindAfter": "1d"
       }
     },
     {
@@ -2164,6 +2205,11 @@
           }
         },
         "success": "finalization could not complete"
+      },
+      "humanGate": {
+        "label": "Resolve what blocks finishing",
+        "notify": "off",
+        "remindAfter": "1d"
       }
     },
     {
@@ -2417,6 +2463,11 @@
           }
         },
         "success": "external blocker did not clear"
+      },
+      "humanGate": {
+        "label": "Resolve the blocker",
+        "notify": "off",
+        "remindAfter": "1d"
       }
     },
     {
@@ -2694,6 +2745,11 @@
       ],
       "connectionLabels": {
         "route-vcs-authority": "accepted, or autonomous"
+      },
+      "humanGate": {
+        "label": "Accept the result",
+        "notify": "off",
+        "remindAfter": "1d"
       }
     },
     {

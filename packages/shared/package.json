@@ -15,6 +15,7 @@
     "./services/workflow-catalog": "./src/services/workflow-catalog.ts",
     "./services/workflow-query-service": "./src/services/workflow-query-service.ts",
     "./utils/version-utils": "./src/utils/version-utils.ts",
+    "./utils/human-gate-duration": "./src/utils/human-gate-duration.ts",
     "./logging/logger": "./src/logging/logger.ts",
     "./config/env": "./src/config/env.ts",
     "./errors": "./src/errors/index.ts",

@@ -6,7 +6,9 @@
  * like the attempt maintenance — delivers due rows through the person's communication channels and
  * records the outcome in the row. It drops a row whose wait is no longer current, keeps agent
  * questions at least `questionPauseMs` apart, and, when it sends a gate's notification, queues the
- * gate's single reminder due after its `remindAfter` — dropped like any row if the wait ends first. Time comes from the injected clock, so tests drive it.
+ * gate's single reminder due after its `remindAfter` — dropped like any row if the wait ends first.
+ * (A gate with `notify: off` sends its own first message; the queue holds only its reminder, queued
+ * by the writer.) Time comes from the injected clock, so tests drive it.
  */
 
 import { createLogger, type ExecutionNotificationRepository } from "@mcp-moira/shared";

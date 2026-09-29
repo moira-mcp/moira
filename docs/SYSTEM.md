@@ -220,9 +220,15 @@ the corresponding `operation` label, so an expired Start lease is never reported
 
 ### Waiting-for-you notifications
 
-When a run starts waiting for its person — it arrives at a step marked `humanGate` (with
-`notify: "auto"`, the default) whose condition held, or the agent raises `session await-user` — a row
-is written to `executionNotification` in the same transaction as the write that put the run there.
+When a run starts waiting for its person — it arrives at a step marked `humanGate` whose condition
+held, or the agent raises `session await-user` — a row is written to `executionNotification` in the
+same transaction as the write that put the run there. For a gate with `notify: "auto"` (the default)
+and for the agent's question it is the `first` row; a gate with `notify: "off"` is one whose flow
+sends its own first message, so it gets only its single `remind` row, due `remindAfter` after that
+write — the moment the queue first records the wait: the arrival, or the recompute when a new version
+marks a step a run already stands on — and nothing without `remindAfter`. The duration form is parsed
+by `humanGateDurationMs` (`packages/shared/src/utils/human-gate-duration.ts`), shared by the queue, the
+sender and the CLI.
 Every execution writer that can start such a wait does it through `enqueueWaitingNotification`
 (`packages/shared/src/database/execution-notification.ts`): the attempt repository's `complete`,
 `recoverToNode` and `claimStart`, `ExecutionRepository.save` and `setAwaitingUser`, and the

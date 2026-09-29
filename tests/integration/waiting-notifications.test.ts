@@ -247,6 +247,91 @@ describe("waiting-for-you notifications", () => {
     expect(rows(executionId)).toEqual([]);
   });
 
+  test("notify: off with remindAfter queues only the reminder, delivered once when due", async () => {
+    const { executionId } = await runAtGate("notify-off-remind", {
+      gate: { label: "Approve the release plan", notify: "off", remindAfter: "30m" },
+    });
+    const [reminder] = rows(executionId);
+    expect(rows(executionId)).toEqual([
+      expect.objectContaining({ kind: "remind", state: "pending", waitKey: reminder.waitKey }),
+    ]);
+    expect(reminder.waitKey).toMatch(/^gate:\d+$/);
+    expect(reminder.notBefore - reminder.createdAt).toBe(30 * MINUTE);
+
+    // The flow sends its own first message; until the reminder is due the page has nothing to add.
+    clock = reminder.notBefore - MINUTE;
+    await sender().tick();
+    expect(deliveredFor(executionId)).toEqual([]);
+    expect(queue().latestForCurrentWait(executionId, clock)).toBeNull();
+
+    clock = reminder.notBefore;
+    await sender().tick();
+    expect(deliveredFor(executionId)).toEqual([
+      expect.stringContaining("Reminder — Waiting for your decision: Approve the release plan"),
+    ]);
+    expect(queue().latestForCurrentWait(executionId, clock)).toEqual(
+      expect.objectContaining({ kind: "remind", state: "sent" }),
+    );
+
+    clock = reminder.notBefore + 5 * 60 * MINUTE;
+    await sender().tick();
+    expect(deliveredFor(executionId)).toHaveLength(1);
+    expect(rows(executionId).map((row) => [row.kind, row.state])).toEqual([["remind", "sent"]]);
+  });
+
+  test("notify: off — a run that leaves the step before the reminder is due is not reminded", async () => {
+    const { engine, executionId, atGate } = await runAtGate("notify-off-left", {
+      gate: { label: "Approve", notify: "off", remindAfter: "30m" },
+    });
+    const [reminder] = rows(executionId);
+    await agentStep(engine, executionId, atGate);
+    clock = reminder.notBefore + MINUTE;
+    await sender().tick();
+    expect(deliveredFor(executionId)).toEqual([]);
+    expect(rows(executionId).map((row) => [row.kind, row.state])).toEqual([
+      ["remind", "superseded"],
+    ]);
+  });
+
+  test("a version that marks a step a run has long stood on reminds remindAfter after the update, not at once", async () => {
+    const { stored, executionId } = await runAtGate("notify-off-version", { gate: null });
+    // The run arrived two days ago: a reminder counted from its arrival would be overdue already.
+    const twoDaysAgo = Date.now() - 2 * 24 * 60 * MINUTE;
+    const sqlite = getSqliteInstance();
+    const row = sqlite
+      .prepare("SELECT visits FROM workflowExecution WHERE executionId = ?")
+      .get(executionId) as { visits: string };
+    const visits = (JSON.parse(row.visits) as Array<Record<string, unknown>>).map((visit) => ({
+      ...visit,
+      ...(visit.enteredAt ? { enteredAt: twoDaysAgo } : {}),
+      ...(visit.leftAt ? { leftAt: twoDaysAgo } : {}),
+    }));
+    sqlite
+      .prepare("UPDATE workflowExecution SET visits = ?, updatedAt = ? WHERE executionId = ?")
+      .run(JSON.stringify(visits), twoDaysAgo, executionId);
+
+    const updatedAt = Date.now();
+    const marked = graph("notify-off-version", {
+      gate: { label: "Approve the release plan", notify: "off", remindAfter: "1d" },
+    });
+    await getWorkflowService().save({
+      graph: { ...marked, id: stored.id, metadata: { ...marked.metadata, version: "1.1.0" } },
+      userId: USER_ID,
+      visibility: "private",
+    });
+
+    const [reminder] = rows(executionId);
+    expect(rows(executionId)).toEqual([
+      expect.objectContaining({ kind: "remind", state: "pending" }),
+    ]);
+    expect(reminder.createdAt).toBeGreaterThanOrEqual(updatedAt);
+    expect(reminder.notBefore).toBe(reminder.createdAt + 24 * 60 * MINUTE);
+
+    clock = updatedAt + MINUTE;
+    await sender().tick();
+    expect(deliveredFor(executionId)).toEqual([]);
+  });
+
   test.each([
     [
       "a start whose first step is the gate",
