@@ -919,21 +919,46 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
         </div>
       ) : null}
 
-      {/* The move is the person's: the run stands on a step its workflow marks as theirs. */}
+      {/* The move is the person's: the run stands on a step its workflow marks as theirs, or the
+          agent asked them a question it cannot go on without. The answer goes to the agent. */}
       {shownProgress?.waitingForUser ? (
         <div
           className="border-b border-violet-500/30 bg-violet-500/10 px-4 py-2 text-sm"
           role="status"
           data-testid="run-waiting-for-user"
+          data-source={shownProgress.waitingForUser.source}
         >
           <span className="font-medium text-violet-700 dark:text-violet-300">
-            {t("pages.executionInspector.waitingForUser.title")}
+            {shownProgress.waitingForUser.source === "agent"
+              ? t("pages.executionInspector.waitingForUser.agentTitle")
+              : t("pages.executionInspector.waitingForUser.title")}
           </span>{" "}
-          <span>{shownProgress.waitingForUser.label}</span>
+          <span className="break-words">
+            {shownProgress.waitingForUser.source === "agent"
+              ? shownProgress.waitingForUser.question
+              : shownProgress.waitingForUser.label}
+          </span>
           <span className="text-muted-foreground">
             {" — "}
             {t("pages.executionInspector.waitingForUser.hint")}
           </span>
+          {shownProgress.waitingForUser.source === "agent" &&
+          shownProgress.waitingForUser.options.length > 0 ? (
+            <ul
+              className="mt-1 flex flex-wrap gap-1.5"
+              aria-label={t("pages.executionInspector.waitingForUser.options")}
+              data-testid="run-waiting-for-user-options"
+            >
+              {shownProgress.waitingForUser.options.map((option) => (
+                <li
+                  key={option}
+                  className="rounded-full border border-violet-500/30 bg-background px-2 py-0.5 text-xs"
+                >
+                  {option}
+                </li>
+              ))}
+            </ul>
+          ) : null}
         </div>
       ) : null}
 

@@ -78,8 +78,11 @@ completed runs of that version — the median with quartiles and range — so a 
 against what is usual; one user's runs are never another's statistics. The projection also says
 who a paused run waits for (`waitingFor`): `user` at a gate a person clears (a `lock` step's
 PIN) or on a step the workflow marks with `humanGate` whose condition held as the run arrived,
-`agent` on any other paused step, `null` when the run is not waiting. For a marked step it also
-says what is asked of the person (`waitingForUser`: `{ source: "gate", label }`).
+or while the agent's own question (`session await-user`) is open, `agent` on any other paused step,
+`null` when the run is not waiting. It also says what is asked of the person (`waitingForUser`):
+`{ source: "agent", question, options, since }` for the agent's question — which takes precedence —
+or `{ source: "gate", label }` for a marked step. A projection at a route cursor never carries the
+agent's question, which is not part of the route.
 `GET /api/workflows/:id/statistics?version=` returns the same aggregate for any version over the
 caller's completed runs.
 

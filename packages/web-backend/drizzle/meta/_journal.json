@@ -323,6 +323,13 @@
       "when": 1790000420000,
       "tag": "0044_execution_gate_waiting",
       "breakpoints": true
+    },
+    {
+      "idx": 46,
+      "version": "7",
+      "when": 1790000480000,
+      "tag": "0045_execution_awaiting_user",
+      "breakpoints": true
     }
   ]
 }

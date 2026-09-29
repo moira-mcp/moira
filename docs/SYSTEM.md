@@ -1606,11 +1606,14 @@ Action-based tool for session-related information.
 // Parameters
 {
   action: 'user' | 'executions' | 'execution_context' | 'current_step' | 'diagnose' | 'recover'
-        | 'update-note';
-  executionId?: string;  // Required for execution_context, current_step, diagnose, recover, update-note
+        | 'update-note' | 'await-user';
+  executionId?: string;  // Required for execution_context, current_step, diagnose, recover, update-note, await-user
   nodeId?: string;       // Required for recover: the node the run must resume from
   variableValues?: Record<string, unknown>; // recover: values written into the execution context
   note?: string;         // Required for update-note (max 500 chars)
+  question?: string;     // await-user: what the agent needs from the person (1-500 chars)
+  options?: string[];    // await-user: up to 4 choices (1-200 chars each)
+  resolve?: true;        // await-user: clear the open question instead of raising one
 }
 
 // action: 'user' - Returns authenticated user information
@@ -1694,6 +1697,14 @@ string  // Formatted directive including Process ID and Step attempt ID
   success: boolean;
   executionId: string;
   note: string;
+}
+
+// action: 'await-user' - Raises, replaces (new id) or clears (resolve: true) the agent's question.
+// Owner-only, running runs only; bound to the node the run stands on; the step revision is unchanged.
+{
+  executionId: string;
+  awaitingUser: { id: string; nodeId: string; question: string; options?: string[]; since: number } | null;
+  message: string;
 }
 ```
 

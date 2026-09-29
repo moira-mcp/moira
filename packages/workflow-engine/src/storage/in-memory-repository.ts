@@ -13,6 +13,7 @@ import {
 import { WorkflowGraph } from "../interfaces/core-interfaces.js";
 import {
   WorkflowExecution,
+  type ExecutionAwaitingUser,
   type ExecutionVisit,
   type ReminderMutation,
   type ReminderMutationResult,
@@ -30,6 +31,7 @@ import {
 } from "@mcp-moira/shared";
 import { encryptValue, decryptValue } from "../utils/encryption.js";
 import { humanGateChanged, humanGateWaiting } from "../utils/human-gate.js";
+import { awaitingUserAfterMove } from "../utils/awaiting-user.js";
 import type {
   ExecutionFilter,
   ExecutionListResult,
@@ -359,6 +361,8 @@ export class InMemoryRepository implements IDataRepository {
         });
       }
       execution.revision += 1;
+      // The agent's question is not the saver's to write (as in the database's save).
+      execution.awaitingUser = awaitingUserAfterMove(current.awaitingUser, execution);
     }
     this.executions.set(execution.executionId, structuredClone(execution));
 
@@ -514,6 +518,28 @@ export class InMemoryRepository implements IDataRepository {
     }
   }
 
+  async setExecutionAwaitingUser(
+    executionId: string,
+    userId: string,
+    question: Omit<ExecutionAwaitingUser, "nodeId"> | null,
+  ): Promise<WorkflowExecution> {
+    const execution = this.executions.get(executionId);
+    if (!execution || execution.userId !== userId) {
+      throw new ValidationError("Execution must belong to the authenticated user");
+    }
+    if (execution.status === "completed" || execution.status === "failed") {
+      throw new ValidationError("Execution is already finished");
+    }
+    if (question && !execution.currentNodeId) {
+      throw new ValidationError("Execution is not standing on a step");
+    }
+    execution.awaitingUser = question
+      ? { ...structuredClone(question), nodeId: execution.currentNodeId! }
+      : null;
+    execution.updatedAt = Date.now();
+    return structuredClone(execution);
+  }
+
   async appendError(executionId: string, error: ExecutionError): Promise<boolean> {
     const execution = this.executions.get(executionId);
     if (!execution) {
@@ -552,6 +578,7 @@ export class InMemoryRepository implements IDataRepository {
     execution.errors.push(error);
     execution.status = "completed";
     execution.gateWaiting = false;
+    execution.awaitingUser = null;
     execution.updatedAt = Date.now();
     execution.completedAt = execution.updatedAt;
     return { changed: true, execution: structuredClone(execution) };
@@ -703,6 +730,7 @@ export class InMemoryRepository implements IDataRepository {
       const visits = (execution.visits ??= []);
       visits.push({ seq: visits.length, ...structuredClone(visit) });
     }
+    if (visit?.actor?.role === "agent") execution.awaitingUser = null;
     execution.updatedAt = Date.now();
     return true;
   }
@@ -961,6 +989,7 @@ export class InMemoryRepository implements IDataRepository {
     const updated = structuredClone(execution);
     updated.status = "completed";
     updated.gateWaiting = false;
+    updated.awaitingUser = null;
     updated.error = error.message;
     updated.errors = [...(updated.errors ?? []), error];
     updated.completedAt = error.timestamp;
@@ -1094,6 +1123,7 @@ export class InMemoryRepository implements IDataRepository {
     this.executions.set(input.execution.executionId, {
       ...structuredClone(input.execution),
       revision: stored.revision + 1,
+      awaitingUser: null,
       updatedAt: Date.now(),
     });
     if (current) {
@@ -1138,6 +1168,7 @@ export class InMemoryRepository implements IDataRepository {
     updatedExecution.errors = structuredClone(current.errors);
     updatedExecution.reminders = structuredClone(current.reminders);
     updatedExecution.parentExecutionId = current.parentExecutionId;
+    updatedExecution.awaitingUser = null; // the agent acted
     if (!noteChanged) updatedExecution.note = current.note;
     const now = Date.now();
     const completedAttempt: ExecutionAttempt = {

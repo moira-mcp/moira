@@ -28,6 +28,7 @@ import type {
 import { EXECUTION_PROGRESS_TEXT_LIMITS } from "./execution-progress-contract.js";
 import { deriveProcess, type ProcessProjection } from "./process-derivation.js";
 import { currentGatedNode, humanGateWaiting } from "./human-gate.js";
+import { awaitingUserAfterMove } from "./awaiting-user.js";
 import {
   blockTimings,
   itemIndexResolver,
@@ -466,11 +467,17 @@ export function projectExecutionRun(
           ...execution,
           globalContext: { ...execution.globalContext, variables: variablesAtCursor },
         }));
-  const waitingFor: ExecutionProgress["waitingFor"] = waitingNodeId
-    ? nodeTypes.get(waitingNodeId) === "lock" || gateWaits
-      ? "user"
-      : "agent"
-    : null;
+  // The agent's own question (`session await-user`) lives on the row, not in the route: a live run
+  // shows it while it is open on the node the run stands on, a cursor projection never does.
+  const agentQuestion =
+    cursor === null && !finished ? awaitingUserAfterMove(execution.awaitingUser, execution) : null;
+  const waitingFor: ExecutionProgress["waitingFor"] = agentQuestion
+    ? "user"
+    : waitingNodeId
+      ? nodeTypes.get(waitingNodeId) === "lock" || gateWaits
+        ? "user"
+        : "agent"
+      : null;
 
   // Statuses: from the route, or — without one — only the block the run is on.
   let statuses: Map<string, { status: ExecutionBlockStatus; iterations: number; visits: number }>;
@@ -660,8 +667,14 @@ export function projectExecutionRun(
     source: "trace",
     projectedAt: now,
     waitingFor,
-    waitingForUser:
-      gateWaits && gatedNode
+    waitingForUser: agentQuestion
+      ? {
+          source: "agent",
+          question: agentQuestion.question,
+          options: agentQuestion.options ?? [],
+          since: agentQuestion.since,
+        }
+      : gateWaits && gatedNode
         ? {
             source: "gate",
             // What the person is asked: the gate's own words, else the label of the block the run

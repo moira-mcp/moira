@@ -4,6 +4,7 @@
  * Replaces: get_current_user, list_active_executions, get_execution_context, get_current_step
  */
 
+import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { getSessionInfoHandlerSchema, getSessionInfoSchema } from "./tool-schemas.js";
 export { getSessionInfoSchema };
@@ -99,6 +100,8 @@ interface ExecutionContextData {
   waitingForInputNodeId: string | null;
   note?: string | null;
   parentExecutionId?: string | null;
+  /** The agent's open question to the person (`await-user`), or null. */
+  awaitingUser: import("@mcp-moira/workflow-engine").ExecutionAwaitingUser | null;
   revision: number;
   metadataRevisions: {
     parent: string;
@@ -130,6 +133,12 @@ interface NoteUpdateResult {
   message: string;
 }
 
+interface AwaitUserResult {
+  executionId: string;
+  awaitingUser: import("@mcp-moira/workflow-engine").ExecutionAwaitingUser | null;
+  message: string;
+}
+
 interface ParentUpdateResult {
   executionId: string;
   parentExecutionId: string | null;
@@ -142,6 +151,7 @@ type SessionInfoData =
   | ExecutionsResponse
   | ExecutionContextData
   | NoteUpdateResult
+  | AwaitUserResult
   | ParentUpdateResult
   | { executionId: string; cancelled: true; revision: number }
   | {
@@ -417,6 +427,7 @@ export async function getSessionInfo(
           waitingForInputNodeId: execution.waitingForInputNodeId || null,
           note: execution.note,
           parentExecutionId: execution.parentExecutionId,
+          awaitingUser: execution.awaitingUser ?? null,
           revision: execution.revision,
           metadataRevisions: {
             parent: metadataRevision(execution.parentExecutionId ?? null),
@@ -972,6 +983,66 @@ export async function getSessionInfo(
             value: params.variableValue,
             revision: updated.revision,
             contextRevision: metadataRevision(updated.globalContext),
+          },
+        };
+      }
+
+      case "await-user": {
+        if (!executionId) {
+          return { success: false, error: ERRORS.execution_id_required("await-user") };
+        }
+        const resolving = params.resolve === true;
+        if (resolving && (params.question !== undefined || params.options !== undefined)) {
+          return {
+            success: false,
+            error: "await-user with resolve: true clears the question; omit question and options",
+          };
+        }
+        if (!resolving && params.question === undefined) {
+          return {
+            success: false,
+            error: "question is required for await-user (or pass resolve: true to clear it)",
+          };
+        }
+        const repository = MCPEngine.getInstance().repository;
+        const execution = await repository.getExecution(executionId);
+        if (!execution || !(await mayUseExecution(userId, execution))) {
+          return { success: false, error: ERRORS.execution_not_found(executionId) };
+        }
+        if (execution.status === "completed" || execution.status === "failed") {
+          return {
+            success: false,
+            error: "The execution is already finished; there is no one to wait for",
+          };
+        }
+        const updated = await repository.setExecutionAwaitingUser(
+          executionId,
+          execution.userId,
+          resolving
+            ? null
+            : {
+                id: randomUUID(),
+                question: params.question!,
+                ...(params.options ? { options: params.options } : {}),
+                since: Date.now(),
+              },
+        );
+        await logAuditEventDirect(repository as DatabaseRepository, {
+          userId,
+          action: AuditAction.EXECUTION_UPDATE_CONTEXT,
+          resource: "execution",
+          resourceId: executionId,
+          source: "mcp",
+          metadata: { action: "await-user", resolved: resolving },
+        });
+        return {
+          success: true,
+          data: {
+            executionId,
+            awaitingUser: updated.awaitingUser ?? null,
+            message: resolving
+              ? "The question is cleared; the run no longer waits for the person"
+              : "The run now shows that it waits for the person. Ask the question in the chat too: the person answers you there, and your next step clears it",
           },
         };
       }

@@ -86,6 +86,10 @@ Before calling `step()`:
 
 If completion is impossible, report the verified cause, completed partial work, and the unmet requirement. Do not claim success, lower the criteria, or substitute assumptions for inspection.
 
+## Waiting for the user
+
+When you cannot continue without the user's answer — a requirement you do not understand, access you lack, a choice only they can make — call `session({ action: "await-user", executionId, question, options })` on the active execution, and ask the same question in the chat. The run is then shown and announced as waiting for the user, instead of looking like it waits for you. The user answers you in the chat, not in Moira; your next step clears the question, or clear it with `resolve: true`.
+
 ## Follow-up reminders
 
 When the user requests an action after the current workflow completes, preserve it on the active execution with `session({ action: "add-reminder", ... })`. Use the existing `reminders`, `update-reminder`, and `remove-reminder` session actions to inspect, revise, or cancel it. Moira returns active reminders only when that workflow completes; a reminder preserves requested follow-up work but neither performs nor authorizes it.

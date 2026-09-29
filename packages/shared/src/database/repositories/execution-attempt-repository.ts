@@ -317,7 +317,8 @@ export class ExecutionAttemptRepository {
         errors.push(error);
         const changed = this.sqlite
           .prepare(
-            `UPDATE workflowExecution SET state = 'completed', gateWaiting = 0, error = ?, errors = ?,
+            `UPDATE workflowExecution SET state = 'completed', gateWaiting = 0, awaitingUser = NULL,
+             error = ?, errors = ?,
              completedAt = ?, updatedAt = ?
              WHERE executionId = ? AND userId = ? AND state = 'running' AND revision = ?`,
           )
@@ -583,7 +584,8 @@ export class ExecutionAttemptRepository {
         const update = this.sqlite
           .prepare(
             `UPDATE workflowExecution SET state = ?, currentNodeId = ?, waitingForInputNodeId = ?,
-               context = ?, gateWaiting = ?, updatedAt = ?, revision = revision + 1
+               context = ?, gateWaiting = ?, awaitingUser = NULL, updatedAt = ?,
+               revision = revision + 1
              WHERE executionId = ? AND revision = ? AND state = ?
                AND currentNodeId IS ? AND waitingForInputNodeId IS ? AND context = ?`,
           )
@@ -637,7 +639,8 @@ export class ExecutionAttemptRepository {
           .prepare(
             `UPDATE workflowExecution SET state = ?, currentNodeId = ?, waitingForInputNodeId = ?,
              context = ?, visits = ?, note = CASE WHEN ? = 1 THEN ? ELSE note END,
-             gateWaiting = ?, updatedAt = ?, completedAt = ?, revision = revision + 1
+             gateWaiting = ?, awaitingUser = NULL, updatedAt = ?, completedAt = ?,
+             revision = revision + 1
            WHERE executionId = ? AND revision = ? AND state = ?
              AND currentNodeId IS ? AND waitingForInputNodeId IS ? AND context = ?
              AND (? = 0 OR note IS ?)`,

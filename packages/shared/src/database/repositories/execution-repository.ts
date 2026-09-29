@@ -6,13 +6,13 @@
 import { eq, ne, and, or, like, inArray, isNotNull, isNull, sql, desc } from "drizzle-orm";
 import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
 import { workflowExecution } from "../schema.js";
-import type { WorkflowExecution } from "@mcp-moira/workflow-engine";
+import type { ExecutionAwaitingUser, WorkflowExecution } from "@mcp-moira/workflow-engine";
 import type * as schema from "../schema.js";
 import { type ExecutionError, type LegacyExecutionStatus } from "../../types/execution-error.js";
 import { executeListQuery, type ListQueryConfig } from "../list-query-builder.js";
 import { ConflictError, ValidationError } from "../../errors/index.js";
 import { metadataRevision } from "../../utils/metadata-revision.js";
-import { executionRowFields } from "../execution-row.js";
+import { awaitingUserAfterWrite, executionRowFields } from "../execution-row.js";
 
 const EXECUTION_LIST_CONFIG: ListQueryConfig<"createdAt" | "updatedAt"> = {
   table: workflowExecution,
@@ -83,6 +83,9 @@ export class ExecutionRepository {
           reminders: row.reminders,
           visits: row.visits,
           gateWaiting: row.gateWaiting === 1,
+          // The agent's question is not the saver's to write: it stays while the run stays on its
+          // node and is cleared when the run leaves it or finishes (see awaitingUserAfterMove).
+          awaitingUser: awaitingUserAfterWrite(row.state, row.currentNodeId),
         })
         .where(
           and(
@@ -169,6 +172,15 @@ export class ExecutionRepository {
       visits = [];
     }
 
+    let awaitingUser: ExecutionAwaitingUser | null = null;
+    if (row.awaitingUser) {
+      try {
+        awaitingUser = JSON.parse(row.awaitingUser) as ExecutionAwaitingUser;
+      } catch {
+        awaitingUser = null;
+      }
+    }
+
     // Parse context JSON defensively: a single malformed row must not crash listing
     // of all executions (e.g. analytics that map over every execution).
     let globalContext: WorkflowExecution["globalContext"];
@@ -199,6 +211,7 @@ export class ExecutionRepository {
       reminders,
       visits,
       gateWaiting: row.gateWaiting,
+      awaitingUser,
       workflowVersion: row.workflowVersion ?? null,
       createdAt: row.createdAt ? (row.createdAt as Date).getTime() : Date.now(),
       updatedAt: row.updatedAt ? (row.updatedAt as Date).getTime() : Date.now(),
@@ -427,6 +440,51 @@ export class ExecutionRepository {
       .where(eq(workflowExecution.executionId, executionId));
   }
 
+  /**
+   * Raise, replace or clear the agent's open question on a running run. Raising binds the question
+   * to the node the run stands on, in the same statement, so a run that moved meanwhile is refused
+   * instead of getting a question about a step it has left. The step-generation `revision` is not
+   * touched: the agent's presented Step attempt stays valid.
+   */
+  async setAwaitingUser(
+    executionId: string,
+    userId: string,
+    question: Omit<ExecutionAwaitingUser, "nodeId"> | null,
+  ): Promise<WorkflowExecution> {
+    const execution = await this.get(executionId);
+    if (!execution || execution.userId !== userId) {
+      throw new ValidationError("Execution must belong to the authenticated user");
+    }
+    if (execution.status === "completed" || execution.status === "failed") {
+      throw new ValidationError("Execution is already finished");
+    }
+    if (question && !execution.currentNodeId) {
+      throw new ValidationError("Execution is not standing on a step");
+    }
+    const awaitingUser = question
+      ? JSON.stringify({ ...question, nodeId: execution.currentNodeId })
+      : null;
+    const result = await this.db
+      .update(workflowExecution)
+      .set({ awaitingUser, updatedAt: new Date() })
+      .where(
+        and(
+          eq(workflowExecution.executionId, executionId),
+          eq(workflowExecution.userId, userId),
+          ne(workflowExecution.state, "completed"),
+          execution.currentNodeId === null
+            ? isNull(workflowExecution.currentNodeId)
+            : eq(workflowExecution.currentNodeId, execution.currentNodeId),
+        ),
+      );
+    if (result.changes === 0) {
+      throw new ConflictError("Execution moved while the question was being recorded; retry", {
+        executionId,
+      });
+    }
+    return (await this.get(executionId))!;
+  }
+
   async setParent(
     executionId: string,
     parentExecutionId: string | null,
@@ -605,6 +663,9 @@ export class ExecutionRepository {
       .set({
         context: JSON.stringify(updatedContext),
         ...(visits !== undefined ? { visits } : {}),
+        // A variable the agent sets is the agent acting: its open question is answered. A person's
+        // edit is not an answer and leaves the question open.
+        ...(visit?.actor?.role === "agent" ? { awaitingUser: null } : {}),
         updatedAt: new Date(),
       })
       .where(
@@ -684,6 +745,7 @@ export class ExecutionRepository {
       .set({
         state: "completed",
         gateWaiting: false,
+        awaitingUser: null,
         errors: sql<string>`CASE
           WHEN ${workflowExecution.errors} IS NULL OR json_valid(${workflowExecution.errors}) = 0
             THEN json_array(json(${errorJson}))

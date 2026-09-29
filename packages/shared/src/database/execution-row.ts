@@ -7,7 +7,9 @@
  * writers is pinned by `tests/unit/shared/execution-row-writers.test.ts`.
  */
 
+import { sql, type SQL } from "drizzle-orm";
 import type { WorkflowExecution } from "@mcp-moira/workflow-engine";
+import { workflowExecution } from "./schema.js";
 
 /** The cursor-bearing columns of `workflowExecution`, in the representation raw SQL binds. */
 export interface ExecutionRowFields {
@@ -44,4 +46,21 @@ export function executionRowFields(execution: WorkflowExecution): ExecutionRowFi
     updatedAt: execution.updatedAt,
     completedAt: execution.completedAt ?? null,
   };
+}
+
+/**
+ * `awaitingUser` after a write that moves the cursor without being the agent's own action (the
+ * ordinary save, used by a run-page answer): the stored question stays while the run stays on the
+ * node it was asked on and is cleared when the run leaves it or finishes. Evaluated against the
+ * stored value in the same statement, so a question raised after the writer loaded the run is kept
+ * rather than overwritten with the writer's stale copy.
+ */
+export function awaitingUserAfterWrite(state: string, currentNodeId: string | null): SQL {
+  return sql`CASE
+    WHEN ${workflowExecution.awaitingUser} IS NULL THEN NULL
+    WHEN ${state} IN ('completed', 'failed') THEN NULL
+    WHEN json_valid(${workflowExecution.awaitingUser}) = 0 THEN NULL
+    WHEN json_extract(${workflowExecution.awaitingUser}, '$.nodeId') IS ${currentNodeId} THEN ${workflowExecution.awaitingUser}
+    ELSE NULL
+  END`;
 }

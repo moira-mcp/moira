@@ -7,6 +7,7 @@
 import { WorkflowGraph } from "./core-interfaces.js";
 import {
   WorkflowExecution,
+  type ExecutionAwaitingUser,
   type ExecutionVisit,
   type ReminderMutation,
   type ReminderMutationResult,
@@ -271,6 +272,18 @@ export interface IDataRepository {
    * Used by: session(action: "update-note") and magic variable execution_note
    */
   updateExecutionNote(executionId: string, note: string): Promise<void>;
+
+  /**
+   * Raise, replace or clear (null) the agent's open question on a running run it owns. Raising binds
+   * the question to the node the run stands on. The step generation is not advanced, so the agent's
+   * presented Step attempt stays valid.
+   * Used by: session(action: "await-user")
+   */
+  setExecutionAwaitingUser(
+    executionId: string,
+    userId: string,
+    question: Omit<ExecutionAwaitingUser, "nodeId"> | null,
+  ): Promise<WorkflowExecution>;
 
   /**
    * Append error to execution's errors array

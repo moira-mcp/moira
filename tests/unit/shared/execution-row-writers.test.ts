@@ -3,7 +3,8 @@ import { extname, relative, resolve } from "node:path";
 import { describe, expect, test } from "@jest/globals";
 
 /**
- * The execution row carries columns derived from the run's state (`gateWaiting` today). A writer
+ * The execution row carries columns derived from the run's state (`gateWaiting`, and the agent's
+ * open question `awaitingUser`, which a move off its node clears). A writer
  * that stores the cursor without them leaves a stale flag no test of another writer would notice,
  * so the set of writers is pinned here. Adding a writer fails this test until the writer is added
  * to the inventory below — which is the moment to decide what it must keep true.
@@ -31,9 +32,9 @@ const WRITE_PATTERNS = [
 /** Every file that writes the execution table, with how many write sites it has and what they are. */
 const INVENTORY: Record<string, { sites: number; writers: string }> = {
   "packages/shared/src/database/repositories/execution-repository.ts": {
-    sites: 11,
+    sites: 12,
     writers:
-      "save (update, insert), delete, deleteCompletedOlderThan, updateNote, setParent, updateReminders, updateContext, appendError, cancelExecution, clearErrors",
+      "save (update, insert), delete, deleteCompletedOlderThan, updateNote, setAwaitingUser, setParent, updateReminders, updateContext, appendError, cancelExecution, clearErrors",
   },
   "packages/shared/src/database/repositories/execution-attempt-repository.ts": {
     sites: 4,
@@ -106,5 +107,17 @@ describe("writers of the execution row", () => {
       .filter((sql) => /currentNodeId/.test(sql));
     expect(statements.length).toBeGreaterThan(0);
     for (const sql of statements) expect(sql).toMatch(/gateWaiting/);
+  });
+
+  test("every raw statement that moves an existing run's cursor also decides the agent's question", () => {
+    const text = readFileSync(
+      resolve(root, "packages/shared/src/database/repositories/execution-attempt-repository.ts"),
+      "utf8",
+    );
+    const updates = [...text.matchAll(/`(UPDATE workflowExecution[^`]*)`/g)]
+      .map((match) => match[1])
+      .filter((sql) => /currentNodeId = \?|state = 'completed'/.test(sql));
+    expect(updates.length).toBe(3);
+    for (const sql of updates) expect(sql).toMatch(/awaitingUser = NULL/);
   });
 });

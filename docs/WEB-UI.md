@@ -1210,9 +1210,11 @@ live URL so a duplicate change pushes no history entry.
   screen (the "unavailable" banner is a first-load state only). The Locks tab holds its history in a
   `useResource` store: opening it again refreshes behind the list (`locks-panel` with
   `data-pending`), the spinner (`locks-loading`) shows only before the first list.
-- Under the header, while the shown projection carries `waitingForUser` (the run stands on a step
-  marked `humanGate`), a banner (`run-waiting-for-user`, `role="status"`) reads "Waiting for you:
-  <label> — answer the agent in the chat".
+- Under the header, while the shown projection carries `waitingForUser`, a banner
+  (`run-waiting-for-user`, `role="status"`, `data-source` = `gate` or `agent`) reads "Waiting for
+  you: <label> — answer the agent in the chat" for a step marked `humanGate`, or "The agent is asking
+  you: <question> — answer the agent in the chat" for the agent's question, followed by the choices it
+  offered as chips (`run-waiting-for-user-options`).
 - With a process view: the active view fills the remaining width and height and brings the shared
   `DiagramToolbar` with it — the view tabs (**Map** and **Graph**, `run-modes`) in the `modes` slot,
   then the contents fold button and the route cursor (`RunCursor`, when a route is recorded), the
@@ -1356,8 +1358,8 @@ line `block-detail-facts`); the status chip carries none.
 one of its nodes, and the projection's `waitingFor` says who is waited for. `waitingSuffix`
 maps `user` to the `waiting` key and anything else to `waitingAgent`; `waitingLabel` and
 `blockStatusLabel` word the state, so the status chip, the legend and the block texts read
-"waiting for you" only for a person's gate (a `lock` node's PIN, or a step marked `humanGate`) and
-"agent on the step" otherwise.
+"waiting for you" only when a person must act (a `lock` node's PIN, a step marked `humanGate`, or
+the agent's open question) and "agent on the step" otherwise.
 Durations (`components/run/duration.ts`): `formatDuration` renders `12 s`, `1 min 20 s`,
 `2 h 05 min` and "—" for `null` (never "0 s"); `formatClock` renders an epoch stamp as wall-clock
 time in the interface locale, "—" when absent.

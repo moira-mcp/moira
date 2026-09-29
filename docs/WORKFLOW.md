@@ -533,9 +533,20 @@ duration. The projection reports `executionWorkflowVersion` (the version stamped
 epoch ms it was made at, and `waitingFor` — who the run waits for while it pauses: `user` when the
 paused node is a `lock` (a gate a person clears with the PIN) or a directive marked with
 `humanGate` whose `when` held as the run arrived, `agent` on any other paused node (a directive,
-teleport or materialize wait), `null` when the run is not waiting. `waitingForUser` is
-`{ source: "gate", label }` at such a marked directive (`label` is `humanGate.label`, else the block
-label) and `null` otherwise.
+teleport or materialize wait), `null` when the run is not waiting; the agent's own open question
+(`WorkflowExecution.awaitingUser`, raised with `session await-user`) also makes it `user`.
+`waitingForUser` is `{ source: "agent", question, options, since }` for that question (it takes
+precedence), `{ source: "gate", label }` at a marked directive (`label` is `humanGate.label`, else
+the block label), and `null` otherwise.
+
+The agent's question is stored as `{ id, nodeId, question, options?, since }`, bound to the node the
+run stood on when it was raised, and written without advancing the step revision. It ends by who
+acts: the agent's own claimed step (accepted or refused), a context write whose adjustment actor is
+`agent`, recovery, cancellation and completion clear it; the ordinary save (a run-page answer) keeps
+it while the run stays on its node and clears it when the run leaves or finishes — decided in the
+same SQL statement against the stored value (`awaitingUserAfterWrite`), so a writer holding an older
+copy cannot erase it; a person's context edit keeps it. The in-memory repository applies the same
+rule (`awaitingUserAfterMove`). A projection at a route cursor never shows it.
 
 For a live run the gate decision is the engine's stored one, `WorkflowExecution.gateWaiting`: the
 executor sets it where it sets the waiting node, evaluating `humanGate.when` against the context the

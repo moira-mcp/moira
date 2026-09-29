@@ -219,6 +219,26 @@ session({
 })
 ```
 
+## Waiting for the User
+
+When you cannot continue without the user — a requirement you do not understand, access you lack,
+a choice only they can make — raise your question on the run and ask it in the chat as well:
+
+```json
+session({
+  action: "await-user",
+  executionId: "abc-123",
+  question: "Which environment should the release go to?",
+  options: ["staging", "production"]
+})
+```
+
+The run is then shown as waiting for the user, with your question and choices, instead of looking
+like it waits for you. `question` is up to 500 characters and `options` up to four choices. The
+user answers you in the chat, not in Moira. A new call replaces the question; your next step, a
+variable you set with `set-variable`, or `resolve: true` clears it, and so does the run leaving the
+step. The call does not change the step revision, so your current Step attempt stays valid.
+
 ## Finding Workflows
 
 ### List the First Page

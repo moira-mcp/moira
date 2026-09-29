@@ -534,7 +534,9 @@
       },
       "waitingForUser": {
         "title": "Waiting for you:",
-        "hint": "answer the agent in the chat"
+        "agentTitle": "The agent is asking you:",
+        "hint": "answer the agent in the chat",
+        "options": "Choices the agent offered"
       },
       "locks": {
         "noHistory": "No lock history for this execution",
