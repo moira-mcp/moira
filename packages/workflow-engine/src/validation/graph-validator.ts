@@ -975,6 +975,11 @@ export class GraphValidator {
       case "agent-directive":
         issues.push(...this.validateAgentDirectiveNode(node));
         issues.push(...this.validateRoutingCases(node));
+        if (node.humanGate?.when && typeof node.humanGate.when === "object") {
+          issues.push(
+            ...this.validateConditionStructure(node.humanGate.when, node.id, "humanGate.when"),
+          );
+        }
         issues.push(...this.validateExpressions(node.id, node.expressions));
         issues.push(
           ...this.validateOutputScopeDeclaration(
@@ -1929,6 +1934,13 @@ export class GraphValidator {
               ...this.validateConditionReferences(routingCase.when, node.id, definedVariables),
             );
           }
+        }
+      }
+      // A human gate's condition reads the same variables a routing case may read.
+      if (node.type === "agent-directive") {
+        const when = (node as AgentDirectiveNode).humanGate?.when;
+        if (when && typeof when === "object") {
+          issues.push(...this.validateConditionReferences(when, node.id, definedVariables));
         }
       }
 

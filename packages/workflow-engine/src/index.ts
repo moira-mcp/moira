@@ -80,6 +80,7 @@ export * from "./utils/schema-validator.js";
 export * from "./utils/registry-value-validator.js";
 export * from "./utils/execution-variable-policy.js";
 export * from "./utils/execution-run-projection.js";
+export * from "./utils/human-gate.js";
 export * from "./utils/execution-visits.js";
 export * from "./utils/execution-progress-lists.js";
 export * from "./utils/notification-text.js";

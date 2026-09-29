@@ -141,6 +141,7 @@ The primary node type for agent tasks. Contains a directive (what to do) and com
 | `connections.success`      | Yes      | Default output, taken when no case holds                       |
 | `connections.error`        | No       | Control output taken when an expression on the node fails      |
 | `connections.timeout`      | No       | Reserved control output; a case may not name it                |
+| `humanGate`                | No       | Marks the step as one where the run waits for a person         |
 
 In the example, `analysis_done` is a declared global (it must exist in `variableRegistry`) written by this node and readable elsewhere as `{{analysis_done}}`; `features` is a node-local output readable as `{{analyze-requirements.features}}`. A returned key that is neither a declared global nor a described local output is rejected.
 
@@ -188,6 +189,44 @@ read the context after the answer has been merged, so an answer field is readabl
 ```
 
 `error` and `timeout` are reserved control outputs: a case may not name them, and they need no case.
+
+### Waiting for a person
+
+Some steps are where the flow stops for a person's decision: the agent presents a plan or a result
+and waits for an answer in the chat. Mark such a step with `humanGate`, and while a run is paused on
+it the run is shown as **waiting for you** instead of waiting for the agent — on the run page, in its
+progress, and in the waiting line of a notification that leads to it. The directive, its input and
+its routing are unchanged: the agent still presents the question and submits the answer.
+
+```json
+{
+  "id": "approve-plan",
+  "type": "agent-directive",
+  "directive": "Present the plan and ask the person to approve it",
+  "completionCondition": "The person's decision is recorded",
+  "humanGate": {
+    "label": "Approve the plan",
+    "when": {
+      "operator": "neq",
+      "left": { "contextPath": "operating_mode" },
+      "right": "autonomous"
+    }
+  },
+  "connections": { "success": "execute" }
+}
+```
+
+| Property          | Required | Description                                                                               |
+| ----------------- | -------- | ----------------------------------------------------------------------------------------- |
+| `humanGate.label` | No       | What the person is asked to do, in a few words; the step's progress label otherwise       |
+| `humanGate.when`  | No       | A structured condition; the step waits for a person only when it holds as the run arrives |
+
+The condition uses the same syntax as a routing case's `when` and is evaluated once, when the run
+arrives at the step; without it the step always waits for a person. Use it for a step a run in
+autonomous mode also passes through, so an unattended run is not shown as waiting for someone.
+Marking, unmarking or changing the gate of a step in a new version of the workflow re-decides it for
+runs already paused on that step, and they continue with their current step attempt; a new version
+that leaves the gate alone does not re-evaluate the condition.
 
 ## Condition Node
 
@@ -430,7 +469,8 @@ choose a provider, recipient, or credential:
 Every delivered message opens with a heading — the workflow's name and the run's task note (the
 note set with `execution_note`), linked to the run page — followed by `message`, the run's plan,
 and, when the node leads straight to a step the run pauses on, who is waited for there:
-`⏳ agent on the step: <block>` or `🙋 waiting for you: <block>` (a lock gate). A run without a note
+`⏳ agent on the step: <block>` or `🙋 waiting for you: <block>` (a lock gate or a step marked
+`humanGate`). A run without a note
 is headed by the workflow name alone, still linked. The plan comes from the bound list nearest the
 run as of this node, including what the current step has just written; `planList` chooses how much
 of it the message carries:

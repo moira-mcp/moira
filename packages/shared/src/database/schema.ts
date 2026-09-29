@@ -602,6 +602,8 @@ export const workflowExecution = sqliteTable("workflowExecution", {
   revision: integer("revision").notNull().default(0), // Workflow-step generation
   reminders: text("reminders").notNull().default("[]"), // JSON ExecutionReminder[]
   visits: text("visits").notNull().default("[]"), // JSON ExecutionVisit[]: the append-only route log
+  // Paused on a step the workflow marks as waiting for a person (`humanGate`); set by the engine
+  gateWaiting: integer("gateWaiting", { mode: "boolean" }).notNull().default(false),
   workflowVersion: text("workflowVersion"), // metadata.version of the definition the run started on
   createdAt: integer("createdAt", { mode: "timestamp_ms" }),
   updatedAt: integer("updatedAt", { mode: "timestamp_ms" }),

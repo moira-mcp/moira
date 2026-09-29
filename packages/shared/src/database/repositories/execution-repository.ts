@@ -12,6 +12,7 @@ import { type ExecutionError, type LegacyExecutionStatus } from "../../types/exe
 import { executeListQuery, type ListQueryConfig } from "../list-query-builder.js";
 import { ConflictError, ValidationError } from "../../errors/index.js";
 import { metadataRevision } from "../../utils/metadata-revision.js";
+import { executionRowFields } from "../execution-row.js";
 
 const EXECUTION_LIST_CONFIG: ListQueryConfig<"createdAt" | "updatedAt"> = {
   table: workflowExecution,
@@ -61,11 +62,7 @@ export class ExecutionRepository {
       .where(eq(workflowExecution.executionId, execution.executionId))
       .limit(1);
 
-    // Serialize errors array to JSON (null if empty/undefined)
-    const errorsJson =
-      execution.errors && execution.errors.length > 0 ? JSON.stringify(execution.errors) : null;
-    const remindersJson = JSON.stringify(execution.reminders ?? []);
-    const visitsJson = JSON.stringify(execution.visits ?? []);
+    const row = executionRowFields(execution);
 
     if (existing.length > 0) {
       // Update (note can be updated via execution_note magic variable)
@@ -73,18 +70,19 @@ export class ExecutionRepository {
       const result = await this.db
         .update(workflowExecution)
         .set({
-          state: execution.status,
-          currentNodeId: execution.currentNodeId,
-          waitingForInputNodeId: execution.waitingForInputNodeId || null,
-          context: JSON.stringify(execution.globalContext),
-          error: execution.error || null,
-          errors: errorsJson,
-          note: execution.note || null,
+          state: row.state,
+          currentNodeId: row.currentNodeId,
+          waitingForInputNodeId: row.waitingForInputNodeId,
+          context: row.context,
+          error: row.error,
+          errors: row.errors,
+          note: row.note,
           updatedAt,
           completedAt,
           revision: expectedRevision + 1,
-          reminders: remindersJson,
-          visits: visitsJson,
+          reminders: row.reminders,
+          visits: row.visits,
+          gateWaiting: row.gateWaiting === 1,
         })
         .where(
           and(
@@ -107,17 +105,18 @@ export class ExecutionRepository {
         executionId: execution.executionId,
         workflowId: execution.workflowId,
         userId: execution.userId,
-        state: execution.status,
-        currentNodeId: execution.currentNodeId,
-        waitingForInputNodeId: execution.waitingForInputNodeId || null,
-        context: JSON.stringify(execution.globalContext),
-        error: execution.error || null,
-        errors: errorsJson,
-        note: execution.note || null,
-        parentExecutionId: execution.parentExecutionId || null,
+        state: row.state,
+        currentNodeId: row.currentNodeId,
+        waitingForInputNodeId: row.waitingForInputNodeId,
+        context: row.context,
+        error: row.error,
+        errors: row.errors,
+        note: row.note,
+        parentExecutionId: row.parentExecutionId,
         revision: execution.revision,
-        reminders: remindersJson,
-        visits: visitsJson,
+        reminders: row.reminders,
+        visits: row.visits,
+        gateWaiting: row.gateWaiting === 1,
         workflowVersion: execution.workflowVersion ?? null,
         createdAt,
         updatedAt,
@@ -199,6 +198,7 @@ export class ExecutionRepository {
       revision: row.revision,
       reminders,
       visits,
+      gateWaiting: row.gateWaiting,
       workflowVersion: row.workflowVersion ?? null,
       createdAt: row.createdAt ? (row.createdAt as Date).getTime() : Date.now(),
       updatedAt: row.updatedAt ? (row.updatedAt as Date).getTime() : Date.now(),
@@ -683,6 +683,7 @@ export class ExecutionRepository {
       .update(workflowExecution)
       .set({
         state: "completed",
+        gateWaiting: false,
         errors: sql<string>`CASE
           WHEN ${workflowExecution.errors} IS NULL OR json_valid(${workflowExecution.errors}) = 0
             THEN json_array(json(${errorJson}))

@@ -82,7 +82,7 @@ per case plus an `EDGE` line per connection, `structure --detailed` lists each c
 change is reviewable without reading the raw JSON.
 
 Structure is changed with `rename` and `delete`. `rename` gives a node a new kebab-case id and
-rewrites every reference to it — connection targets, `{{node.name}}` templates, routing case paths,
+rewrites every reference to it — connection targets, `{{node.name}}` templates, routing case and human-gate condition paths,
 expressions, list bindings, subgraph mappings and write allowances — and prints each location it
 changed. Prose that mentions the id outside a reference stays as it is. `delete` refuses while
 another node still leads to the node being removed and names each such edge; decide every one with

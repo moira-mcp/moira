@@ -77,7 +77,9 @@ pass, a whole run through a block and each list position typically take across t
 completed runs of that version — the median with quartiles and range — so a run can be read
 against what is usual; one user's runs are never another's statistics. The projection also says
 who a paused run waits for (`waitingFor`): `user` at a gate a person clears (a `lock` step's
-PIN), `agent` on any other paused step, `null` when the run is not waiting.
+PIN) or on a step the workflow marks with `humanGate` whose condition held as the run arrived,
+`agent` on any other paused step, `null` when the run is not waiting. For a marked step it also
+says what is asked of the person (`waitingForUser`: `{ source: "gate", label }`).
 `GET /api/workflows/:id/statistics?version=` returns the same aggregate for any version over the
 caller's completed runs.
 
@@ -115,7 +117,8 @@ status and, for a block with a bound list, `done/total: current item`; it is 390
 shrunk, and grows downwards for a long flow. Below the message come the bound list's plan lines (see `planList` on the
 node) and then who the run waits for after it — `⏳ agent on the step: <block>` or
 `🙋 waiting for you: <block>` when the node leads straight to a step that pauses (a lock gate is a
-person's; a directive, teleport, materialize or subgraph wait is the agent's); the attached image
+person's, and so is a directive marked `humanGate` whose `when` holds; any other directive,
+teleport, materialize or subgraph wait is the agent's); the attached image
 shows the same state. The deprecated `telegram-notification` compatibility node supports
 the same attachment for existing provider-specific workflows.
 

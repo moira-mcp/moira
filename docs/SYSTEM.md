@@ -168,7 +168,8 @@ A paused step attempt is bound to its execution revision, its node, its workflow
 run's **continuation surface**: everything the paused node declares, minus the inherited fields that
 describe how it is displayed rather than what it does — `metadata` (display name, description, icon,
 colour, tags, estimated duration), `progressNodeId`, `progressActiveLabel`, `progressActiveContent`
-and `connectionLabels` — together with the `variableRegistry` entries for the global names that node
+and `connectionLabels`, plus an `agent-directive`'s `humanGate`, which changes who the run is shown
+as waiting for and never the directive, input or route — together with the `variableRegistry` entries for the global names that node
 declares as inputs, which the engine inlines into the schema the agent is validated against.
 
 The surface is defined by exclusion because any node type can be the one a run is paused on:
@@ -874,6 +875,14 @@ interface AgentDirectiveNode {
   expressions?: string[];
   // Routing on the node's own validated answer; `success` is taken when no case holds.
   cases?: RoutingCase[];
+  // Marks the step as waiting for a person while `when` holds (unconditionally without `when`);
+  // display and notification only — excluded from the continuation surface.
+  humanGate?: {
+    label?: string;
+    when?: StructuredCondition;
+    notify?: "auto" | "off";
+    remindAfter?: string;
+  };
   // `success` is the default output; `error`/`timeout` are reserved control outputs; every other
   // key is an authored output named by a case.
   connections: { success: string; error?: string; timeout?: string } & Record<string, string>;
@@ -1200,8 +1209,9 @@ interface ValidationError {
   node's `default` connection leads straight to an `end` node, the run's last message, no item is
   in progress: unfinished items read `○` and the `progress` line names no current item), then
   `⏳ agent on the step: <block>` or `🙋 waiting for you: <block>` when the node's single forward
-  connection leads to a node the run pauses on (`lock` → a person; `agent-directive`, `teleport`,
-  `materialize`, `subgraph` → the agent). Values substituted into a Markdown or HTML message, list
+  connection leads to a node the run pauses on (`lock` → a person, and so is an `agent-directive`
+  marked `humanGate` whose `when` holds; any other `agent-directive`, `teleport`, `materialize`,
+  `subgraph` → the agent). Values substituted into a Markdown or HTML message, list
   titles and block labels are escaped for the format. The text is fitted to the communication
   service's `maxTextLength`: the plan takes the room left, and an over-long message is cut at a
   line with `…`, so delivery never fails for length

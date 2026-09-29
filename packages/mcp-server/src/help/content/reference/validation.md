@@ -46,6 +46,10 @@ Graph structure is analyzed for correctness:
   path — and `title` is a path inside one item, so it is an error without `items`
 - **Routing cases** - Each case of a `condition` or `agent-directive` node is checked as described
   under _Routing Diagnostics_ below
+- **Human gates** - An `agent-directive`'s `humanGate` is a closed object: `label` is 1–120
+  characters, `notify` is `auto` or `off`, and `remindAfter` is a positive number followed by `m`,
+  `h` or `d`; an unknown field is an error. Its `when` gets the same structure check and the same
+  declared-variable check as a routing case's `when`
 - **Extension node types** - Types found in the live extension registry or a published registry
   snapshot validate their declared configuration schema. A live registry that does not contain a
   type reports an error; a type absent from a snapshot, or validation without usable registry data,

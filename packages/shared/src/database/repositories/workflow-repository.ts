@@ -35,6 +35,7 @@ import {
 } from "../../validation/slug-handle.js";
 import { executeListQuery, type ListQueryConfig } from "../list-query-builder.js";
 import { WorkflowRevisionConflictError } from "../../errors/domain-errors.js";
+import { recomputeGateWaiting, storedGraphNodes } from "../gate-waiting.js";
 
 const DELETED_WORKFLOW_LIST_CONFIG: ListQueryConfig<"name" | "deletedAt"> = {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -934,27 +935,34 @@ export class WorkflowRepository {
       }
 
       // Update - only owner can update. With an expected revision the check and the write are one
-      // statement, so two writers that read the same revision cannot both succeed.
-      const updated = await this.db
-        .update(workflow)
-        .set({
-          name: graph.metadata.name,
-          description: graph.metadata.description || null,
-          version: graph.metadata.version,
-          graph: graphJson,
-          visibility,
-          deleted: false,
-          deletedAt: null,
-          deletedBy: null,
-          updatedAt: now,
-          revision: sql`${workflow.revision} + 1`,
-        })
-        .where(
-          options.expectedRevision === undefined
-            ? eq(workflow.id, existingId)
-            : and(eq(workflow.id, existingId), eq(workflow.revision, options.expectedRevision)),
-        )
-        .returning({ id: workflow.id });
+      // statement, so two writers that read the same revision cannot both succeed. The paused runs
+      // of the workflow whose gate the new definition changes are re-decided in the same transaction.
+      const updated = this.db.transaction((tx) => {
+        const previous = storedGraphNodes(tx, existingId);
+        const rows = tx
+          .update(workflow)
+          .set({
+            name: graph.metadata.name,
+            description: graph.metadata.description || null,
+            version: graph.metadata.version,
+            graph: graphJson,
+            visibility,
+            deleted: false,
+            deletedAt: null,
+            deletedBy: null,
+            updatedAt: now,
+            revision: sql`${workflow.revision} + 1`,
+          })
+          .where(
+            options.expectedRevision === undefined
+              ? eq(workflow.id, existingId)
+              : and(eq(workflow.id, existingId), eq(workflow.revision, options.expectedRevision)),
+          )
+          .returning({ id: workflow.id })
+          .all();
+        if (rows.length > 0) recomputeGateWaiting(tx, existingId, previous, graph);
+        return rows;
+      });
 
       if (updated.length === 0) {
         const [current] = await this.db

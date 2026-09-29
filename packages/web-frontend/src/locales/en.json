@@ -532,6 +532,10 @@
         "loading": "Loading execution progress...",
         "error": "Progress is temporarily unavailable. The execution details remain available below."
       },
+      "waitingForUser": {
+        "title": "Waiting for you:",
+        "hint": "answer the agent in the chat"
+      },
       "locks": {
         "noHistory": "No lock history for this execution",
         "node": "Node:",

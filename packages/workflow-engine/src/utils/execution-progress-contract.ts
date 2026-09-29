@@ -171,9 +171,22 @@ export interface ExecutionProgress {
   /** Epoch ms the projection was made at; open passes are measured to it. */
   projectedAt: number;
   /**
-   * Who the run waits for while it pauses: `user` at a gate a person clears (a lock's PIN),
-   * `agent` on a step the agent must complete (a directive, teleport or materialize wait),
+   * Who the run waits for while it pauses: `user` at a gate a person clears (a lock's PIN) or on a
+   * directive marked `humanGate` whose condition holds, `agent` on any other step the agent must
+   * complete (a directive, teleport or materialize wait),
    * `null` when the run is not waiting.
    */
   waitingFor: "agent" | "user" | null;
+  /**
+   * What the person is waited for, while the run stands on a step its workflow marks as waiting for
+   * a person (`source: "gate"`); null otherwise. A lock's PIN is reported by `waitingFor` alone.
+   */
+  waitingForUser: ExecutionWaitingForUser | null;
+}
+
+/** Why a run waits for a person, worded for them. */
+export interface ExecutionWaitingForUser {
+  source: "gate";
+  /** What the person is asked to do; never a node id. */
+  label: string;
 }

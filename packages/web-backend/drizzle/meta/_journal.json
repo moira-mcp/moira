@@ -316,6 +316,13 @@
       "when": 1790000360000,
       "tag": "0043_codespace_reauthorization_intent",
       "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "7",
+      "when": 1790000420000,
+      "tag": "0044_execution_gate_waiting",
+      "breakpoints": true
     }
   ]
 }

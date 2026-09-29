@@ -516,6 +516,9 @@
             "$ref": "#/$defs/routingCase"
           },
           "description": "Routing on the node's own validated answer; `success` is taken when no case holds."
+        },
+        "humanGate": {
+          "$ref": "#/$defs/humanGate"
         }
       }
     },
@@ -1338,6 +1341,33 @@
         }
       },
       "additionalProperties": false
+    },
+    "humanGate": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Marks the step as waiting for a person's decision: while a run is paused here its status is 'waiting for you' and the person is notified. The directive, input and routing are unchanged.",
+      "properties": {
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120,
+          "description": "What the person is asked to do, in a few words; defaults to the step's progress label."
+        },
+        "when": {
+          "type": "object",
+          "description": "Structured condition, same syntax as a routing case's `when`; the step waits for a person only when it holds as the run arrives."
+        },
+        "notify": {
+          "type": "string",
+          "enum": ["auto", "off"],
+          "description": "`auto` (default): the person is notified when the run arrives; `off`: the workflow sends its own notification."
+        },
+        "remindAfter": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,4}[mhd]$",
+          "description": "How long an unanswered wait lasts before one repeated notification: minutes, hours or days, e.g. `30m`, `4h`, `2d`."
+        }
+      }
     },
     "routingCase": {
       "type": "object",

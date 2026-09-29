@@ -15,6 +15,7 @@
     "./extensions/contract": "./src/extensions/extension-contract.ts",
     "./progress-visual": "./src/utils/execution-progress-visual.ts",
     "./process": "./src/utils/process-derivation.ts",
+    "./human-gate": "./src/utils/human-gate.ts",
     "./authoring": "./src/authoring/index.ts",
     "./migration": "./src/migration/index.ts"
   },

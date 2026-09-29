@@ -960,6 +960,9 @@ export function analyzeVariableUsage(workflow: WorkflowGraph): VariableAnalysis 
         extractFromCondition(routingCase?.when, node.id);
       }
     }
+    // Usages: the condition under which a marked directive waits for a person
+    const humanGate = nodeAny.humanGate as { when?: unknown } | undefined;
+    extractFromCondition(humanGate?.when, node.id);
   }
 
   return analysis;

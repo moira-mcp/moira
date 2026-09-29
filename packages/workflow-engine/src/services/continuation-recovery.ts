@@ -2,6 +2,7 @@ import type { IDataRepository } from "../interfaces/data-repository.js";
 import type { ExecutionContext, WorkflowExecution } from "../types/base-types.js";
 import { PAUSING_NODE_TYPES } from "../utils/execution-visits.js";
 import { validateDeclaredRegistryValues } from "../utils/registry-value-validator.js";
+import { humanGateWaiting } from "../utils/human-gate.js";
 import {
   diagnoseContinuation,
   missingExpressionVariables,
@@ -208,13 +209,14 @@ export async function recoverContinuation(
     };
   }
 
-  const recovered: WorkflowExecution = {
+  const moved: WorkflowExecution = {
     ...execution,
     status: "running",
     currentNodeId: nodeId,
     waitingForInputNodeId: nodeId,
     globalContext,
   };
+  const recovered: WorkflowExecution = { ...moved, gateWaiting: humanGateWaiting(graph, moved) };
   const written = await repository.recoverExecutionToNode({
     execution: recovered,
     expectedExecution: execution,

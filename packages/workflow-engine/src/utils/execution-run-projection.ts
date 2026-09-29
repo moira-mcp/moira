@@ -27,6 +27,7 @@ import type {
 } from "./execution-progress-contract.js";
 import { EXECUTION_PROGRESS_TEXT_LIMITS } from "./execution-progress-contract.js";
 import { deriveProcess, type ProcessProjection } from "./process-derivation.js";
+import { currentGatedNode, humanGateWaiting } from "./human-gate.js";
 import {
   blockTimings,
   itemIndexResolver,
@@ -445,13 +446,28 @@ export function projectExecutionRun(
   if (!finished && execution.currentNodeId && !currentPrimaryNode?.progressNodeId) {
     diagnostics.push(`Current primary node '${execution.currentNodeId}' has no progressNodeId`);
   }
-  // Who is waited for: a person at a lock's PIN gate, the agent on any other paused step.
+  const variableStates = projectVariables(workflow, execution, visits, cursor);
+  const variablesAtCursor = variablesObject(variableStates);
+
+  // Who is waited for: a person at a lock's PIN gate or at a step the workflow marks as waiting
+  // for a person, the agent on any other paused step. A live run carries the engine's decision;
+  // a run projected at a route cursor has none stored for that moment, so it is decided again
+  // against the variables as they stood at the cursor, not the run's current ones.
   const waitingNodeId =
     !finished && execution.waitingForInputNodeId === execution.currentNodeId
       ? (execution.waitingForInputNodeId ?? null)
       : null;
+  const gatedNode = waitingNodeId ? currentGatedNode(workflow, execution) : null;
+  const gateWaits =
+    gatedNode !== null &&
+    (cursor === null
+      ? Boolean(execution.gateWaiting)
+      : humanGateWaiting(workflow, {
+          ...execution,
+          globalContext: { ...execution.globalContext, variables: variablesAtCursor },
+        }));
   const waitingFor: ExecutionProgress["waitingFor"] = waitingNodeId
-    ? nodeTypes.get(waitingNodeId) === "lock"
+    ? nodeTypes.get(waitingNodeId) === "lock" || gateWaits
       ? "user"
       : "agent"
     : null;
@@ -509,8 +525,6 @@ export function projectExecutionRun(
   // Timings and bound lists: the variables at the cursor, the passes of every block, and — for
   // a bound block — the item each pass worked on.
   const now = options.now ?? Date.now();
-  const variableStates = projectVariables(workflow, execution, visits, cursor);
-  const variablesAtCursor = variablesObject(variableStates);
   const bindings = new Map(
     definition.nodes.filter((node) => node.list).map((node) => [node.id, node.list!]),
   );
@@ -646,5 +660,17 @@ export function projectExecutionRun(
     source: "trace",
     projectedAt: now,
     waitingFor,
+    waitingForUser:
+      gateWaits && gatedNode
+        ? {
+            source: "gate",
+            // What the person is asked: the gate's own words, else the label of the block the run
+            // stands in (which already carries the step's active label).
+            label:
+              gatedNode.humanGate.label?.trim() ||
+              nodes.find((node) => node.id === activeNodeId)?.label ||
+              workflow.metadata.name,
+          }
+        : null,
   };
 }

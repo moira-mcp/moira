@@ -8,6 +8,7 @@ import {
   buildExecutionProgressVisualModel,
   projectExecutionRun,
   renderProgressVisualSvg,
+  waitingActorLine,
   withInFlightPause,
   withInFlightVisit,
   type EngineVisit,
@@ -430,6 +431,52 @@ describe("the execution as a notification sees it", () => {
       { viewportWidth: 720 },
     );
     expect(agentModel.nodes[0].statusLine).toBe("agent on the step");
+  });
+
+  test.each([
+    ["a gate without a condition", {}, "🙋 waiting for you: Wrap"],
+    [
+      "a gate whose condition holds",
+      { when: { operator: "neq", left: { contextPath: "mode" }, right: "autonomous" } },
+      "🙋 waiting for you: Wrap",
+    ],
+    [
+      "a gate whose condition does not hold",
+      { when: { operator: "eq", left: { contextPath: "mode" }, right: "autonomous" } },
+      "⏳ agent on the step: Wrap",
+    ],
+  ])("a notification before %s words who is waited for there", (_case, gate, line) => {
+    const graph = {
+      metadata: { name: "Gate", version: "1.0.0", description: "x" },
+      variableRegistry: { mode: { type: "string", description: "m" } },
+      progress: { nodes: [{ id: "wrap", label: "Wrap" }] },
+      nodes: [
+        { id: "start", type: "start", progressNodeId: "wrap", connections: { default: "notify" } },
+        {
+          id: "notify",
+          type: "user-notification",
+          progressNodeId: "wrap",
+          message: "x",
+          connections: { default: "approve" },
+        },
+        {
+          id: "approve",
+          type: "agent-directive",
+          progressNodeId: "wrap",
+          directive: "d",
+          completionCondition: "c",
+          humanGate: gate,
+          connections: { success: "end" },
+        },
+        { id: "end", type: "end", progressNodeId: "wrap" },
+      ],
+    } as unknown as WorkflowGraph;
+    const run = {
+      ...base(),
+      globalContext: { ...base().globalContext, variables: { mode: "interactive" } },
+    } as WorkflowExecution;
+    const projected = projectExecutionRun(graph, withInFlightPause(graph, run, "notify"));
+    expect(waitingActorLine(projected)).toBe(line);
   });
 
   test("never mutates the persisted execution", () => {

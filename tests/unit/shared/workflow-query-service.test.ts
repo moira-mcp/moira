@@ -717,6 +717,30 @@ describe("WorkflowQueryService", () => {
       expect(analysis.status.usages.some((u) => u.field === "completionCondition")).toBe(true);
     });
 
+    test("should find variables read by a human gate's condition", () => {
+      const workflow = createWorkflow({
+        variableRegistry: { autonomous: { type: "boolean", description: "Autonomous mode" } },
+        nodes: [
+          { id: "start", type: "start", connections: { default: "approve" } },
+          {
+            id: "approve",
+            type: "agent-directive",
+            directive: "Ask for approval",
+            completionCondition: "Approved",
+            humanGate: {
+              when: { operator: "eq", left: { contextPath: "autonomous" }, right: false },
+            },
+            connections: { success: "end" },
+          },
+          { id: "end", type: "end" },
+        ] as GraphNode[],
+      });
+
+      expect(analyzeVariableUsage(workflow).autonomous.usages).toContainEqual(
+        expect.objectContaining({ nodeId: "approve", field: "condition" }),
+      );
+    });
+
     test("should find compared context paths without regex backtracking", () => {
       const workflow = createWorkflow({
         variableRegistry: {

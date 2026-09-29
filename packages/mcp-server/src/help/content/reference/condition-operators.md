@@ -4,7 +4,8 @@ description: Reference for all condition operators in workflow nodes
 ---
 
 A structured condition is the object that decides whether a routing case holds. It appears as the
-`when` of a case on a `condition` or `agent-directive` node:
+`when` of a case on a `condition` or `agent-directive` node, and as the `when` of an
+`agent-directive`'s `humanGate`, where it decides whether the step waits for a person:
 
 ```json
 {

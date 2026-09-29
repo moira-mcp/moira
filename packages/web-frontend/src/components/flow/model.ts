@@ -67,6 +67,7 @@ export function definitionProgress(
     executionWorkflowVersion: null,
     projectedAt: 0,
     waitingFor: null,
+    waitingForUser: null,
     executionRevision: 0,
     executionStatus: "definition",
     diagnostics: process.diagnostics.map((d) => d.message),

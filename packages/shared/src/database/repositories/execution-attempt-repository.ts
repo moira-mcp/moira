@@ -13,13 +13,13 @@ import type {
   RecoverExecutionToNodeInput,
   RecoverExecutionToNodeResult,
   StartPreconditionCompletionResult,
-  WorkflowExecution,
 } from "@mcp-moira/workflow-engine";
 import type { ExecutionError } from "../../types/execution-error.js";
 import {
   stepAttemptBindingMatches,
   stepAttemptContinuationMatches,
 } from "../../types/step-attempt-binding.js";
+import { executionRowFields } from "../execution-row.js";
 
 type AttemptRow = {
   attemptId: string;
@@ -56,23 +56,6 @@ const START_RECEIPT_LIMIT = 1_000;
 
 function asAttempt(row: AttemptRow): ExecutionAttempt {
   return { ...row };
-}
-
-function serializeExecution(execution: WorkflowExecution) {
-  return {
-    state: execution.status,
-    currentNodeId: execution.currentNodeId,
-    waitingForInputNodeId: execution.waitingForInputNodeId ?? null,
-    context: JSON.stringify(execution.globalContext),
-    error: execution.error ?? null,
-    errors: execution.errors?.length ? JSON.stringify(execution.errors) : null,
-    note: execution.note ?? null,
-    parentExecutionId: execution.parentExecutionId ?? null,
-    reminders: JSON.stringify(execution.reminders ?? []),
-    visits: JSON.stringify(execution.visits ?? []),
-    updatedAt: execution.updatedAt,
-    completedAt: execution.completedAt ?? null,
-  };
 }
 
 export class ExecutionAttemptRepository {
@@ -194,14 +177,14 @@ export class ExecutionAttemptRepository {
         )
           return { kind: "stale" };
 
-        const execution = serializeExecution(input.execution);
+        const execution = executionRowFields(input.execution);
         this.sqlite
           .prepare(
             `INSERT INTO workflowExecution (
               executionId, workflowId, userId, state, currentNodeId, waitingForInputNodeId,
               context, error, errors, note, parentExecutionId, revision, reminders, visits,
-              workflowVersion, createdAt, updatedAt, completedAt
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              gateWaiting, workflowVersion, createdAt, updatedAt, completedAt
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           )
           .run(
             input.execution.executionId,
@@ -218,6 +201,7 @@ export class ExecutionAttemptRepository {
             input.execution.revision,
             execution.reminders,
             execution.visits,
+            execution.gateWaiting,
             input.execution.workflowVersion ?? null,
             input.execution.createdAt,
             execution.updatedAt,
@@ -333,8 +317,8 @@ export class ExecutionAttemptRepository {
         errors.push(error);
         const changed = this.sqlite
           .prepare(
-            `UPDATE workflowExecution SET state = 'completed', error = ?, errors = ?, completedAt = ?,
-             updatedAt = ?
+            `UPDATE workflowExecution SET state = 'completed', gateWaiting = 0, error = ?, errors = ?,
+             completedAt = ?, updatedAt = ?
              WHERE executionId = ? AND userId = ? AND state = 'running' AND revision = ?`,
           )
           .run(
@@ -593,13 +577,13 @@ export class ExecutionAttemptRepository {
         const current = this.getCurrent(input.execution.executionId, input.execution.userId);
         if (current && current.state !== "presented") return "attempt_in_progress";
 
-        const execution = serializeExecution(input.execution);
-        const expected = serializeExecution(input.expectedExecution);
+        const execution = executionRowFields(input.execution);
+        const expected = executionRowFields(input.expectedExecution);
         const now = Date.now();
         const update = this.sqlite
           .prepare(
             `UPDATE workflowExecution SET state = ?, currentNodeId = ?, waitingForInputNodeId = ?,
-               context = ?, updatedAt = ?, revision = revision + 1
+               context = ?, gateWaiting = ?, updatedAt = ?, revision = revision + 1
              WHERE executionId = ? AND revision = ? AND state = ?
                AND currentNodeId IS ? AND waitingForInputNodeId IS ? AND context = ?`,
           )
@@ -608,6 +592,7 @@ export class ExecutionAttemptRepository {
             execution.currentNodeId,
             execution.waitingForInputNodeId,
             execution.context,
+            execution.gateWaiting,
             now,
             input.execution.executionId,
             input.expectedExecution.revision,
@@ -645,14 +630,14 @@ export class ExecutionAttemptRepository {
           { executionRevision: number } | undefined;
         if (!current) return false;
 
-        const execution = serializeExecution(input.execution);
-        const expectedExecution = serializeExecution(input.expectedExecution);
+        const execution = executionRowFields(input.execution);
+        const expectedExecution = executionRowFields(input.expectedExecution);
         const noteChanged = input.execution.note !== input.expectedExecution.note;
         const update = this.sqlite
           .prepare(
             `UPDATE workflowExecution SET state = ?, currentNodeId = ?, waitingForInputNodeId = ?,
              context = ?, visits = ?, note = CASE WHEN ? = 1 THEN ? ELSE note END,
-             updatedAt = ?, completedAt = ?, revision = revision + 1
+             gateWaiting = ?, updatedAt = ?, completedAt = ?, revision = revision + 1
            WHERE executionId = ? AND revision = ? AND state = ?
              AND currentNodeId IS ? AND waitingForInputNodeId IS ? AND context = ?
              AND (? = 0 OR note IS ?)`,
@@ -665,6 +650,7 @@ export class ExecutionAttemptRepository {
             execution.visits,
             noteChanged ? 1 : 0,
             execution.note,
+            execution.gateWaiting,
             execution.updatedAt,
             execution.completedAt,
             input.execution.executionId,

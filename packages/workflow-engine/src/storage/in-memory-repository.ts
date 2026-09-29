@@ -29,6 +29,7 @@ import {
   stepAttemptContinuationMatches,
 } from "@mcp-moira/shared";
 import { encryptValue, decryptValue } from "../utils/encryption.js";
+import { humanGateChanged, humanGateWaiting } from "../utils/human-gate.js";
 import type {
   ExecutionFilter,
   ExecutionListResult,
@@ -274,6 +275,15 @@ export class InMemoryRepository implements IDataRepository {
       updatedAt: now,
       revision: existing ? existing.revision + 1 : 0,
     });
+    // A new definition can mark, unmark or change the gate of the step a paused run stands on; only
+    // those runs are re-decided, the rest keep the decision taken on arrival.
+    if (existing) {
+      for (const execution of this.executions.values()) {
+        if (execution.workflowId !== workflowId) continue;
+        if (!humanGateChanged(existing.graph, storedGraph, execution.currentNodeId)) continue;
+        execution.gateWaiting = humanGateWaiting(storedGraph, execution);
+      }
+    }
 
     this.logger.debug("Workflow saved in memory", {
       workflowId,
@@ -541,6 +551,7 @@ export class InMemoryRepository implements IDataRepository {
     execution.errors ??= [];
     execution.errors.push(error);
     execution.status = "completed";
+    execution.gateWaiting = false;
     execution.updatedAt = Date.now();
     execution.completedAt = execution.updatedAt;
     return { changed: true, execution: structuredClone(execution) };
@@ -949,6 +960,7 @@ export class InMemoryRepository implements IDataRepository {
       return false;
     const updated = structuredClone(execution);
     updated.status = "completed";
+    updated.gateWaiting = false;
     updated.error = error.message;
     updated.errors = [...(updated.errors ?? []), error];
     updated.completedAt = error.timestamp;

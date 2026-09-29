@@ -919,6 +919,24 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
         </div>
       ) : null}
 
+      {/* The move is the person's: the run stands on a step its workflow marks as theirs. */}
+      {shownProgress?.waitingForUser ? (
+        <div
+          className="border-b border-violet-500/30 bg-violet-500/10 px-4 py-2 text-sm"
+          role="status"
+          data-testid="run-waiting-for-user"
+        >
+          <span className="font-medium text-violet-700 dark:text-violet-300">
+            {t("pages.executionInspector.waitingForUser.title")}
+          </span>{" "}
+          <span>{shownProgress.waitingForUser.label}</span>
+          <span className="text-muted-foreground">
+            {" — "}
+            {t("pages.executionInspector.waitingForUser.hint")}
+          </span>
+        </div>
+      ) : null}
+
       {/* Main content: the run on the left, the panel on the right. On a phone the two stack into
           one scrolling column — the view keeps a readable height instead of being squeezed into
           what the panel leaves — and from `lg` the row fills the page and scrolls nowhere. */}

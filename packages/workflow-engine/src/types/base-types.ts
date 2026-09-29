@@ -106,6 +106,11 @@ export interface WorkflowExecution {
   workflowVersion?: string | null;
   reminders?: ExecutionReminder[]; // Durable caller follow-ups returned at completion
   visits?: ExecutionVisit[]; // Append-only route log written by the executor on every node transition
+  /**
+   * The run is paused on a step its workflow marks as waiting for a person (`humanGate`), and the
+   * gate's condition held when the run entered it. Set by the engine where it sets the waiting node.
+   */
+  gateWaiting?: boolean;
   createdAt: number;
   updatedAt: number;
   completedAt?: number;

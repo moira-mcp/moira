@@ -18,10 +18,12 @@ import { canonicalJson } from "../extensions/declared-schema.js";
  * whichever it forgot — a `materialize` node's file list or a `lock` node's reason are that node's
  * directive just as much as an `agent-directive` node's `directive` field is.
  *
- * So the whole node is bound, minus the fields every node inherits that describe how it is
- * *displayed* rather than what it does. Those are named in `DISPLAY_ONLY_NODE_FIELDS` and read off
- * `BaseNode`; a field added there in future binds until it is deliberately added to this list, which
- * is a visible correction rather than a silently stale step.
+ * So the whole node is bound, minus the fields that describe how a run is *displayed or announced*
+ * rather than what it does. Those are named in `DISPLAY_ONLY_NODE_FIELDS`: the presentation fields
+ * every node inherits from `BaseNode`, and `humanGate`, which an `agent-directive` carries to say who
+ * the run waits for — it changes the run's status and notifications, never the directive, the input
+ * or the route. A field added to a node in future binds until it is deliberately added to this list,
+ * which is a visible correction rather than a silently stale step.
  *
  * The surface also carries the `variableRegistry` entries for the global names the node declares in
  * `inputSchema.globalInputs`: the engine inlines those descriptors into the schema the agent is
@@ -47,9 +49,10 @@ export interface ContinuationSurface {
 }
 
 /**
- * Inherited `BaseNode` fields that decide only how a node is drawn or labelled, never what it asks
- * of the agent or where it continues. Everything else a node declares is part of the binding,
- * including `hooks` and `timeout`, which are execution behaviour.
+ * Fields that decide only how a run is drawn, labelled or announced, never what it asks of the agent
+ * or where it continues: the inherited `BaseNode` presentation fields, and an `agent-directive`'s
+ * `humanGate`. Everything else a node declares is part of the binding, including `hooks` and
+ * `timeout`, which are execution behaviour.
  */
 const DISPLAY_ONLY_NODE_FIELDS = new Set([
   "metadata",
@@ -57,6 +60,7 @@ const DISPLAY_ONLY_NODE_FIELDS = new Set([
   "progressActiveLabel",
   "progressActiveContent",
   "connectionLabels",
+  "humanGate",
 ]);
 
 function declaredGlobalInputs(node: GraphNode): string[] {

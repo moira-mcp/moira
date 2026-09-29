@@ -81,7 +81,7 @@ moira-workflow ./workflows/production/flows/<flow>.json rename review-plan indep
 ```
 
 Gives a node a new id and rewrites every reference to it: connection targets, `{{node.name}}`
-templates and block-helper arguments in any template text, routing case `contextPath` operands,
+templates and block-helper arguments in any template text, routing case and `humanGate.when` `contextPath` operands,
 progress list bindings, subgraph mappings, end `finalOutput`, batch write-note sources, expression
 identifiers and `runtimePolicy` write allowances. Connection keys, case outputs and block ids are
 not node references and stay as they are, and so does prose that mentions the id outside a
