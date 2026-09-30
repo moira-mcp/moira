@@ -29,9 +29,8 @@ const TAB_CLASS = "h-8 flex-none gap-1.5 px-2 text-xs";
 const TAB_ICON = "hidden size-3.5 @[520px]:inline";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import type { TFunction } from "i18next";
 import { apiClient, type WaitingNotificationMark } from "../../services/api-client";
-import { formatDuration } from "../run/duration";
+import { waitingNotificationText } from "./waitingNotification";
 import type { WorkflowGraph as WorkflowGraphType } from "../../types";
 import {
   ExecutionErrorHistory,
@@ -927,12 +926,12 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
           agent asked them a question it cannot go on without. The answer goes to the agent. */}
       {shownProgress?.waitingForUser ? (
         <div
-          className="border-b border-violet-500/30 bg-violet-500/10 px-4 py-2 text-sm"
+          className="border-b border-your-move/30 bg-your-move/10 px-4 py-2 text-sm"
           role="status"
           data-testid="run-waiting-for-user"
           data-source={shownProgress.waitingForUser.source}
         >
-          <span className="font-medium text-violet-700 dark:text-violet-300">
+          <span className="font-medium text-your-move">
             {shownProgress.waitingForUser.source === "agent"
               ? t("pages.executionInspector.waitingForUser.agentTitle")
               : t("pages.executionInspector.waitingForUser.title")}
@@ -956,7 +955,7 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
               {shownProgress.waitingForUser.options.map((option) => (
                 <li
                   key={option}
-                  className="rounded-full border border-violet-500/30 bg-background px-2 py-0.5 text-xs"
+                  className="rounded-full border border-your-move/30 bg-background px-2 py-0.5 text-xs"
                 >
                   {option}
                 </li>
@@ -1513,23 +1512,3 @@ const StepProgression: React.FC<StepProgressionProps> = ({
     </StepCardList>
   );
 };
-
-/** The line under the «waiting for you» banner: whether the person was told, and how long ago. */
-function waitingNotificationText(mark: WaitingNotificationMark, t: TFunction): string {
-  const key = "pages.executionInspector.waitingForUser.notification";
-  if (mark.state === "superseded") return t(`${key}.superseded`);
-  if (mark.state === "pending" || mark.sentAt === null) return t(`${key}.pending`);
-  const ago = formatDuration(Math.max(0, Date.now() - mark.sentAt), t);
-  switch (mark.deliveryStatus) {
-    case "delivered":
-    case "partial":
-      return t(mark.kind === "remind" ? `${key}.reminded` : `${key}.sent`, {
-        ago,
-        channels: mark.deliveredChannels.join(", "),
-      });
-    case "no_configured_channels":
-      return t(`${key}.noChannels`);
-    default:
-      return t(`${key}.failed`, { ago });
-  }
-}

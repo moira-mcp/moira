@@ -23,6 +23,7 @@ All colors use OKLCH format. Never use hardcoded Tailwind color classes (e.g., `
 | `success` / `success-foreground`              | Success states                             | `text-success`                                    |
 | `warning` / `warning-foreground`              | Warning states                             | `text-warning`                                    |
 | `info` / `info-foreground`                    | Info states                                | `text-info`                                       |
+| `your-move`                                   | The move is the person's (waiting for you) | `text-your-move`, `bg-your-move/10`               |
 | `border`                                      | Borders                                    | `border-border`                                   |
 | `input`                                       | Form input borders                         | `border-input`                                    |
 | `ring`                                        | Focus rings                                | `ring-ring`                                       |

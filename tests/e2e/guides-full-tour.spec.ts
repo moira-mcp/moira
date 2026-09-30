@@ -1,7 +1,7 @@
 /**
  * E2E: the full tour — every main-app screen's tour, one after another — as a reader meets it.
  *
- * Started from "Show me around", it walks home, the flow list, the example flow, the runs list, the
+ * Started from "Show me around", it walks home, the overview, the flow list, the example flow, the runs list, the
  * reader's latest run (or, with no run yet, the runs list's first-run step), notes, playbooks,
  * artifacts and Settings, never an admin page; at every step the spotlight is on the element the
  * card explains. It waits for each screen's code and data. Leaving the tour's page pauses it, and
@@ -93,6 +93,7 @@ for (const language of ["en", "ru"] as const) {
     const visits = await walkTour(page);
     expect(guidesOf(visits)).toEqual([
       "home",
+      "overview",
       "flows",
       "flow",
       "runs",

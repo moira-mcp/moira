@@ -506,15 +506,18 @@ router.get(
 /**
  * GET /api/executions/overview/changes?after=<seq>
  * The signed-in user's run changes after a cursor, for a page that cannot hold the live stream:
- * `{ reset: false, events: [{ seq, executionId, kind }], lastSeq }`, or `{ reset: true }` when events
- * after the cursor are no longer kept.
+ * `{ reset: false, events: [{ seq, executionId, kind }], lastSeq }`, or `{ reset: true, lastSeq }`
+ * when the events after the cursor cannot be replayed. Without `after`: no events, only the position
+ * to poll from.
  */
 router.get(
   "/overview/changes",
   asyncHandler(async (req: Request, res: Response) => {
     const userId = (req as AuthenticatedRequest).userId;
+    const raw = req.query.after;
     const cursor = changeCursor(req);
-    if (cursor === undefined) throw createApiError.badRequest("after is required");
+    if (raw !== undefined && raw !== "" && cursor === undefined)
+      throw createApiError.badRequest("Invalid after");
     const data = changesAfter(new ExecutionChangeRepository(getSqliteInstance()), userId, cursor);
     res.json({ success: true, data, timestamp: new Date().toISOString() });
   }),

@@ -24,6 +24,7 @@ describe("the full tour", () => {
   test("visits every toured main-app screen once, in the order a reader meets them", () => {
     expect(FULL_TOUR_LEGS.map((leg) => leg.guide)).toEqual([
       "home",
+      "overview",
       "flows",
       "flow",
       "runs",

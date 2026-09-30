@@ -640,7 +640,7 @@ listed alongside those file-backed topics and renders directly from the typed MC
 | --------------- | ------------------------------------------------------------------------------------------------------------- | ------------------ |
 | Getting started | Introduction (agent-first), quickstart, tutorial on the learning flows, which ready flow to use, self-hosting | `getting-started/` |
 | Concepts        | Workflows, nodes, templates, notes, playbooks, artifacts                                                      | `concepts/`        |
-| Guides          | Writing directives, creating & editing workflows, reading a flow and a run, extensions                        | `guides/`          |
+| Guides          | Writing directives, creating & editing workflows, reading a flow and a run, the overview of runs, extensions  | `guides/`          |
 | Reference       | Tools, input schema, magic variables, condition operators, validation, workflow catalog                       | `reference/`       |
 | Integration     | MCP clients, Claude Code, agent guide, Telegram setup, troubleshooting                                        | `integration/`     |
 | Patterns        | Branching, validation loop, escalation, subagent review, workspace, and more                                  | `patterns/`        |

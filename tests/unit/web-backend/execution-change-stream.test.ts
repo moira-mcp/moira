@@ -52,8 +52,9 @@ class FakeFeed {
   latestSeq() {
     return this.events.at(-1)?.seq ?? 0;
   }
-  isExpired() {
-    return this.read(() => false);
+  expiredBelow = 0;
+  isExpired(cursor: number) {
+    return this.read(() => cursor < this.expiredBelow || cursor > this.latestSeq());
   }
   deleteOlderThan() {
     return this.read(() => 0);
@@ -172,5 +173,43 @@ describe("nothing is skipped silently", () => {
     if (second.reset) throw new Error("unexpected reset");
 
     expect([...first.events, ...second.events].map((change) => change.seq)).toEqual([1, 2]);
+  });
+
+  test("a poll without a cursor returns no events, only where the feed stands", () => {
+    const feed = new FakeFeed();
+    feed.events.push(event(1), event(2));
+    expect(changesAfter(asRepository(feed), USER_ID, undefined)).toEqual({
+      reset: false,
+      events: [],
+      lastSeq: 2,
+    });
+  });
+
+  test("a poll whose cursor cannot be replayed is told to reset and where to continue", () => {
+    const feed = new FakeFeed();
+    feed.events.push(event(5), event(6));
+    feed.expiredBelow = 4;
+    expect(changesAfter(asRepository(feed), USER_ID, 1)).toEqual({ reset: true, lastSeq: 6 });
+  });
+
+  test("a stream resumed from a cursor confirms itself with ready once it has caught up", () => {
+    const feed = new FakeFeed();
+    feed.events.push(event(1), event(2), event(3));
+    const hub = new ExecutionChangeHub(asRepository(feed), 60_000);
+    hubs.push(hub);
+    const { response, state } = fakeResponse();
+    openExecutionChangeStream(fakeRequest("1"), response, USER_ID, {
+      hub,
+      feed: asRepository(feed),
+      sessionStillValid: async () => true,
+      recheckMs: 60_000,
+    });
+    response.emit("close");
+    const frames = state.written.join("");
+    expect(frames.indexOf("id: 3\nevent: change")).toBeGreaterThan(-1);
+    // After the missed changes, the position to resume from, so the client knows the stream is live.
+    expect(frames.indexOf("id: 3\nevent: ready")).toBeGreaterThan(
+      frames.indexOf("id: 3\nevent: change"),
+    );
   });
 });

@@ -177,7 +177,9 @@ For component patterns, color token rules, and new-page checklist: `docs/DESIGN-
 
 - **Core:** `--background`, `--foreground`, `--card`, `--popover`, `--primary`, `--secondary`, `--muted`, `--accent`, `--destructive` (each with `-foreground` variant)
 - **Destructive roles:** `--destructive` is destructive text and accents (text, borders, rings, tints) and must stay readable on dark surfaces; `--destructive-fill` (`bg-destructive-fill`) is a solid destructive fill — buttons, badges, the failed status, danger counters — with `--destructive-foreground` as the text on it. `tests/unit/web-frontend/destructive-contrast.test.ts` holds both pairs to WCAG AA in each theme from `globals.css`.
-- **Semantic:** `--success`, `--warning`, `--info` (each with `-foreground` variant)
+- **Semantic:** `--success`, `--warning`, `--info` (each with `-foreground` variant), and `--your-move`
+  (`text-your-move`, `bg-your-move/10`): the move is the person's — a run waiting for their decision
+  or answer, on the overview and the run page
 - **Chart:** `--chart-1` through `--chart-5`
 - **Sidebar:** Aliases to main theme variables (`--sidebar: var(--background)`)
 - **Layout:** `--radius`, `--border`, `--input`, `--ring`
@@ -283,6 +285,7 @@ page it explains.
 | `home`              | screen   | `pages/home.guide.ts`                | "What is this?" in the home page header                          |
 | `flows`             | screen   | `pages/flows.guide.ts`               | "What is this?" in the flow list header                          |
 | `flow`              | screen   | `pages/flow.guide.ts`                | "What is this?" in the flow page's diagram toolbar               |
+| `overview`          | screen   | `pages/overview.guide.ts`            | "What is this?" in the overview's header                         |
 | `runs`              | screen   | `pages/runs.guide.ts`                | "What is this?" in the runs list header                          |
 | `run`               | screen   | `components/execution/run.guide.ts`  | "What is this?" in the run page's diagram toolbar                |
 | `notes`             | screen   | `pages/notes.guide.ts`               | "What is this?" in the notes page header                         |
@@ -475,7 +478,7 @@ tutorial opens from the **Practice** card after the examples in the recommended 
 (`TourClosingOffer`), shown once the last screen's tour is walked.
 
 **The full tour** (`guides/fullTour.ts`) chains the screen tours in a fixed order (every toured
-screen of the route table, the admin area excluded) (`FULL_TOUR_LEGS`): home, the flow list, the example flow of the reader's
+screen of the route table, the admin area excluded) (`FULL_TOUR_LEGS`): home, the overview, the flow list, the example flow of the reader's
 language (the Simple Steps entry of `recommendedFlows`), runs, the reader's latest run (the newest
 by `updatedAt` from `getExecutions` with `mine`, so an admin gets their own), notes, playbooks, artifacts and Settings. A reader with no run,
 or whose run list cannot be read, gets the `runs-empty` fallback on the runs list instead, which
@@ -542,6 +545,7 @@ Main routes (signed in):
 | Path                       | Guard | Coverage         |
 | -------------------------- | ----- | ---------------- |
 | `/`                        |       | tour `home`      |
+| `/overview`                |       | tour `overview`  |
 | `/workflows`               |       | tour `flows`     |
 | `/workflows/:handle/:slug` |       | tour `flow`      |
 | `/workflows/:id`           |       | tour `flow`      |
@@ -578,6 +582,7 @@ Admin routes (administrators; the admin tour is postponed and tracked separately
 Sidebar navigation:
 
 - Home (/)
+- Overview (/overview)
 - Workflows (/workflows)
 - Executions (/executions)
 - Notes (/notes)
@@ -861,6 +866,56 @@ PreferencesSettings.tsx
 - Fair: 6-9 chars (33%)
 - Good: 10-14 chars (66%)
 - Strong: 15+ chars (100%)
+
+### Overview page
+
+`/overview` (`pages/Overview.tsx`, components in `components/overview/`) shows the signed-in person's
+own runs from `GET /api/executions/overview`, 50 trees a page, runs waiting for the person first.
+
+- **Filters in the URL** (`components/overview/model.ts`, `filtersFromParams` / `paramsWithFilters`):
+  `status` (`active` by default, `waiting-user`, `waiting-agent`, `locked`, `completed`, `all`),
+  `idle` (`1h`…`30d`), `activeFrom` / `activeTo` (epoch ms), `workflowId`, `sort` (`activity`,
+  `idle`, `created`), `refusals`, `q` (search: the note, the flow's name, the run id), `layout`
+  (`grid`, `lanes`), `page`, and `run` for the open panel. Defaults are left out of the URL; a
+  malformed value reads as its default. The status switch and the «No movement > 7 days» chip
+  (`idle=7d`) sit in the toolbar, the rest in the Filters popover; the search box follows the URL
+  when a link or the browser changes it.
+- **Card** (`OverviewCard.tsx`, `data-testid="overview-card"`, `data-run-id`, `data-status`): a
+  constant 340 px height with fixed rows — status (its meaning in a hint) and the age of the subtree's
+  last step (dates in the hint), the two-line title as the button that opens the panel
+  (`overview-card-open`), the flow or «↳ child of «…»», then the waiting banner (`overview-waiting`)
+  or the stage strip, the plan (`overview-plan`) and the footer with flags for child runs and
+  refusals (and the note when it differs from the title). The plan window (`planRows`) is centred on
+  the current item in five or six one-line slots (six without the strip row); a current item longer
+  than one line takes two; what does not fit folds into «↑ N» / «↓ N». The list items come from the
+  overview's five-item window; a flow with stages but no list shows the stages as the plan.
+- **Groups** (`OverviewBoard.tsx`, `boardNode`): a run with children is a group
+  (`overview-group`, `data-depth`); children without children share the parent's row, nested groups
+  follow at full width; from depth 2 a group starts folded (`overview-group-fold`); rows the filter
+  admits only through their tree are dimmed. **Grid** or **Lanes** layout.
+- **Panel** (`OverviewPanel.tsx`, `overview-panel`): a modal `Sheet` that returns focus to what opened
+  it; the status and its meaning, the parent chain, what is waited for with the choices and the
+  notification line (`waitingNotificationText`, shared with the run page), the current step, refusals,
+  the active block's list through `BlockListCard` and all stages from `GET /api/executions/:id/progress`,
+  child runs, dates and **Open run**. No answer form.
+- **Live updates** (`liveConnection.ts`, `useLiveOverview.ts`, `useOverviewRows.ts`): one tab per
+  browser leads through Web Locks (`moira-overview-stream`) and holds the `EventSource` on
+  `/api/executions/overview/stream`; the others receive changes and the connection state over the
+  `BroadcastChannel` `moira-overview`, which also carries the stream's position from `ready`, so the
+  next leader resumes from it. `activity` (unless the page filters by time without movement or by
+  date) and `meta` changes refresh the run and its ancestors on the page with one batched `ids=`
+  request per 300 ms, keeping each row's place in the tree (whether it matches, the parent it names);
+  `created`, `deleted`, `status`, `lock`, `reset`, and `activity` under an activity filter refetch the
+  page (debounced); a row refresh begun before a newer page is dropped. With every tab hidden the
+  stream is closed and resumes with `after=`. A stream counts as working only once the server sends
+  `ready` (or a change) within 10 s; three failures in a row — never opening, or opening without
+  confirming, as behind a buffering proxy — switch to polling `/api/executions/overview/changes` every
+  15 s, with a stream retry after five minutes. A page restored from the back-forward cache joins the
+  connection again. The panel keeps the run it shows when a refetch takes it off the page and fetches
+  its row again on live changes, at most every 5 s. For a dimmed run the panel, like the card's hint,
+  says why it is shown. The
+  indicator (`overview-connection`, `data-state` = `connecting`, `live`, `reconnecting`, `polling`) is
+  the page's only `aria-live` region.
 
 ### Executions Page
 

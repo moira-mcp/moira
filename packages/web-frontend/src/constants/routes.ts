@@ -28,6 +28,7 @@ export interface RoutesShape {
   OAUTH_AUTHORIZE: string;
   FORCED_PASSWORD_RESET: string;
   DASHBOARD: string;
+  OVERVIEW: string;
   WORKFLOWS: string;
   EXECUTIONS: string;
   SETTINGS: string;
@@ -64,6 +65,7 @@ export function buildRoutes(appPrefix: string): RoutesShape {
 
     // App routes
     DASHBOARD: appPrefix === "" ? "/" : `${appPrefix}/`,
+    OVERVIEW: `${appPrefix}/overview`,
     WORKFLOWS: `${appPrefix}/workflows`,
     EXECUTIONS: `${appPrefix}/executions`,
     SETTINGS: `${appPrefix}/settings`,

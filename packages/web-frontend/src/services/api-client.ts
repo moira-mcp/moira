@@ -29,6 +29,103 @@ export interface WaitingNotificationMark {
   deliveredChannels: string[];
 }
 
+/** Where a run of the overview stands: the move is the person's, the agent's, a PIN's, or it ended. */
+export type OverviewStatus = "waiting-user" | "waiting-agent" | "locked" | "completed";
+/** The overview's status filter: every unfinished run (`active`), one status, or everything. */
+export type OverviewStatusFilter = "active" | OverviewStatus | "all";
+export type OverviewSort = "activity" | "idle" | "created";
+export type OverviewIdle = "1h" | "1d" | "3d" | "7d" | "30d";
+
+/** The latest notification about a run's wait, as the overview carries it. */
+export interface OverviewNotificationMark {
+  kind: "first" | "remind";
+  state: string;
+  sentAt: number | null;
+  deliveryStatus: string | null;
+  deliveredChannels: string[];
+}
+
+/** What the person is waited for: a step the flow marks as theirs, or the agent's question. */
+export type OverviewWaitingForUser =
+  | { source: "gate"; label: string; notification: OverviewNotificationMark | null }
+  | {
+      source: "agent";
+      question: string;
+      options: string[];
+      since: number;
+      notification: OverviewNotificationMark | null;
+    };
+
+/** One item of the active block's list, in the window the overview sends around the current one. */
+export interface OverviewListItem {
+  index: number;
+  title: string;
+  done: boolean;
+  current: boolean;
+  durationMs: number | null;
+}
+
+/** One run of the overview with its child runs (`GET /api/executions/overview`). */
+export interface OverviewRun {
+  executionId: string;
+  workflowId: string;
+  workflowName: string | null;
+  workflowVersion: string | null;
+  title: string;
+  status: OverviewStatus;
+  /** False for a run shown only because its tree matches (drawn muted). */
+  matches: boolean;
+  waitingForUser: OverviewWaitingForUser | null;
+  refusalCount: number;
+  note: string | null;
+  current: { stepName: string | null; directiveShownAt: number | null } | null;
+  stages: { labels: string[]; activeIndex: number | null; doneCount: number } | null;
+  list: {
+    title: string;
+    done: number | null;
+    total: number | null;
+    items: OverviewListItem[];
+  } | null;
+  lastActivityAt: number | null;
+  subtreeActivityAt: number | null;
+  createdAt: number;
+  completedAt: number | null;
+  parentExecutionId: string | null;
+  parent: { executionId: string; title: string } | null;
+  children: { total: number; unfinished: number };
+  childRuns: OverviewRun[];
+}
+
+export interface OverviewQuery {
+  status?: OverviewStatusFilter;
+  refusals?: boolean;
+  workflowId?: string;
+  search?: string;
+  idle?: OverviewIdle;
+  activeFrom?: number;
+  activeTo?: number;
+  sort?: OverviewSort;
+  limit?: number;
+  offset?: number;
+}
+
+export interface OverviewPage {
+  total: number;
+  limit: number;
+  offset: number;
+  runs: OverviewRun[];
+}
+
+/** A change of one of the person's runs, as the change feed numbers it. */
+export interface OverviewChange {
+  seq: number;
+  executionId: string;
+  kind: "created" | "activity" | "status" | "lock" | "meta" | "deleted";
+}
+
+export type OverviewChanges =
+  { reset: true; lastSeq: number } | { reset: false; events: OverviewChange[]; lastSeq: number };
+
 export interface WorkflowProcessResponse {
   workflowId: string;
   version: string;
@@ -1643,6 +1740,52 @@ export class MoiraApiClient {
     } catch (error) {
       throw new ApiClientError("Failed to get executions", ApiErrorCode.INTERNAL_ERROR);
     }
+  }
+
+  /** A page of the person's own runs as trees, for the overview. */
+  async getOverview(query: OverviewQuery): Promise<OverviewPage> {
+    const params: Record<string, string> = {};
+    if (query.status) params.status = query.status;
+    if (query.refusals) params.refusals = "true";
+    if (query.workflowId) params.workflowId = query.workflowId;
+    if (query.search) params.search = query.search;
+    if (query.idle) params.idle = query.idle;
+    if (query.activeFrom !== undefined) params.activeFrom = String(query.activeFrom);
+    if (query.activeTo !== undefined) params.activeTo = String(query.activeTo);
+    if (query.sort) params.sort = query.sort;
+    if (query.limit !== undefined) params.limit = String(query.limit);
+    if (query.offset !== undefined) params.offset = String(query.offset);
+    return this.wrapFailure("load the overview", async () => {
+      const response = await this.client.get<ApiResponse<OverviewPage>>("/executions/overview", {
+        params,
+      });
+      return response.data.data!;
+    });
+  }
+
+  /** The overview rows of these runs (at most 100), without nesting; other people's are left out. */
+  async getOverviewRows(executionIds: string[]): Promise<OverviewRun[]> {
+    return this.wrapFailure("refresh the overview", async () => {
+      const response = await this.client.get<ApiResponse<{ runs: OverviewRun[] }>>(
+        "/executions/overview",
+        { params: { ids: executionIds.join(",") } },
+      );
+      return response.data.data!.runs;
+    });
+  }
+
+  /**
+   * The person's run changes after a cursor, for a page that cannot hold the live stream; without a
+   * cursor, only the position to poll from.
+   */
+  async getOverviewChanges(after: number | null): Promise<OverviewChanges> {
+    return this.wrapFailure("check the overview for changes", async () => {
+      const response = await this.client.get<ApiResponse<OverviewChanges>>(
+        "/executions/overview/changes",
+        { params: after === null ? {} : { after: String(after) } },
+      );
+      return response.data.data!;
+    });
   }
 
   async getExecution(executionId: string): Promise<{

@@ -29,6 +29,7 @@ export interface TourLeg {
 /** The screen tours of the full tour, in order. Paths are written without the app's base path. */
 export const FULL_TOUR_LEGS: readonly TourLeg[] = [
   { guide: "home", stop: { kind: "fixed", path: "/" } },
+  { guide: "overview", stop: { kind: "fixed", path: "/overview" } },
   { guide: "flows", stop: { kind: "fixed", path: "/workflows" } },
   { guide: "flow", stop: { kind: "example-flow" } },
   { guide: "runs", stop: { kind: "fixed", path: "/executions" } },

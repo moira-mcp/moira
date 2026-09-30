@@ -208,6 +208,8 @@ export function openExecutionChangeStream(
       } else {
         lastSent = cursor;
         for (const event of missed) send(event);
+        // Caught up: say so, with the position to resume from, as a new stream does.
+        res.write(`id: ${lastSent}\nevent: ready\ndata: {}\n\n`);
       }
     } else {
       // A new stream starts from what the watcher has handed out; later events reach it through the
@@ -246,22 +248,27 @@ export function openExecutionChangeStream(
   timers.push(heartbeat, recheck);
 }
 
-/** The signed-in user's changes after a cursor, for clients that cannot hold a stream. */
+/**
+ * The signed-in user's changes after a cursor, for clients that cannot hold a stream. Without a
+ * cursor the answer is only the position to poll from, as a new stream's `ready`; `reset` carries the
+ * position too, so a client that reloads knows where to continue.
+ */
 export function changesAfter(
   feed: ExecutionChangeRepository,
   userId: string,
-  cursor: number,
+  cursor: number | undefined,
 ):
-  | { reset: true }
+  | { reset: true; lastSeq: number }
   | {
       reset: false;
       events: Array<{ seq: number; executionId: string; kind: string }>;
       lastSeq: number;
     } {
-  if (feed.isExpired(cursor)) return { reset: true };
   // The position is read first and the events only up to it: an event committed in between lies
   // after the returned position and comes with the next poll.
   const latest = feed.latestSeq();
+  if (cursor === undefined) return { reset: false, events: [], lastSeq: latest };
+  if (feed.isExpired(cursor)) return { reset: true, lastSeq: latest };
   const events = feed.forUserAfter(userId, cursor, CATCH_UP_LIMIT, latest);
   return {
     reset: false,

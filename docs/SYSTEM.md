@@ -1175,12 +1175,12 @@ In the web backend, `packages/web-backend/src/services/execution-change-stream.t
 `ExecutionChangeHub` per process, started with the server: every second it reads the events after
 the last one it handed out and passes each only to its owner's open streams; every hour it trims the
 feed to 24 hours. A failed read or trim is logged and retried on the next tick.
-`openExecutionChangeStream` serves `GET /api/executions/overview/stream` (catch-up from the cursor;
+`openExecutionChangeStream` serves `GET /api/executions/overview/stream` (catch-up from the cursor, then `ready`;
 `reset` when the cursor is expired — older than the kept events or ahead of the latest one — or when
 1000 or more events were missed; heartbeat, session re-check through `isSessionStillValid`, five
 streams per user) and `changesAfter` serves the poll, reading the latest position before the events
-and returning events only up to it, so an event committed in between comes with the next poll. The
-stream route is mounted before the rate-limited `/api/executions` router. Both nginx configs route
+and returning events only up to it, so an event committed in between comes with the next poll;
+without a cursor it answers only that position, and a `reset` carries it too. The stream route is mounted before the rate-limited `/api/executions` router. Both nginx configs route
 `location ^~ /api/executions/overview/stream` with buffering off, HTTP/1.1 and hour-long timeouts.
 
 ## Web UI Architecture

@@ -2652,12 +2652,14 @@ through `GET /api/executions/overview?ids=`.
 Headers:
 
 - `Last-Event-ID` (or the `after` query parameter): the number of the last event the client saw. The
-  stream first sends the user's events after it, then the live ones. When 1000 or more events were
-  missed, it sends `reset` instead.
+  stream first sends the user's events after it, then `ready`, then the live ones. When 1000 or more
+  events were missed, it sends `reset` instead.
 
 Events:
 
-- `ready` — a stream opened without a cursor; its `id` is the position to resume from.
+- `ready` — the stream is live: sent first by a stream opened without a cursor, and after the
+  catch-up by a resumed one; its `id` is the position to resume from. A client that sees no `ready`
+  soon after opening can treat the stream as not working (a proxy buffering or cutting it).
 - `change` — `id` is the event number, `data` is `{ executionId, kind }` with `kind` one of `created`,
   `activity`, `status`, `lock`, `meta` and `deleted`: `status` when what the run waits for or how it
   stands changed, `activity` when its last event of work moved, `lock` for a lock's status, `meta`
@@ -2682,7 +2684,8 @@ The same changes for a client that cannot hold the stream.
 
 Query parameters:
 
-- `after` (required): the number of the last event seen.
+- `after`: the number of the last event seen. Without it the response has no events, only `lastSeq`:
+  the position to poll from, as a new stream's `ready`.
 
 Response:
 
@@ -2691,7 +2694,7 @@ Response:
   success: boolean;
   data:
     | { reset: false; events: Array<{ seq: number; executionId: string; kind: string }>; lastSeq: number }
-    | { reset: true }; // events after the cursor are no longer kept, or the cursor lies ahead of the feed: reload the list
+    | { reset: true; lastSeq: number }; // the cursor cannot be replayed: reload the list and poll from lastSeq
 }
 ```
 

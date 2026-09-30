@@ -270,6 +270,31 @@ describe("GET /api/executions/overview/stream", () => {
     expect(data.lastSeq).toBeGreaterThan(cursor);
   });
 
+  test("a poll without a cursor returns no events, only the position to poll from", async () => {
+    await startRun("Import August orders");
+    const response = await fetch(`${BASE_URL}/api/executions/overview/changes`, {
+      headers: { Cookie: formatSessionCookie(BASE_URL, owner.cookie) },
+    });
+    expect(response.status).toBe(200);
+    const { data } = (await response.json()) as {
+      data: { reset: boolean; events: unknown[]; lastSeq: number };
+    };
+    expect(data.reset).toBe(false);
+    expect(data.events).toEqual([]);
+    expect(data.lastSeq).toBeGreaterThan(0);
+    // From that position the next poll returns what happens after it.
+    const executionId = await startRun("Import September orders");
+    const next = await fetch(`${BASE_URL}/api/executions/overview/changes?after=${data.lastSeq}`, {
+      headers: { Cookie: formatSessionCookie(BASE_URL, owner.cookie) },
+    });
+    const later = (await next.json()) as {
+      data: { events: Array<{ executionId: string; kind: string }> };
+    };
+    expect(later.data.events).toContainEqual(
+      expect.objectContaining({ executionId, kind: "created" }),
+    );
+  });
+
   test("beyond the per-user limit a new stream is refused", async () => {
     const opened = [];
     for (let index = 0; index < 5; index += 1) opened.push(await open(owner.cookie));

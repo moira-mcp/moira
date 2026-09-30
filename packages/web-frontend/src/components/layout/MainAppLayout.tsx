@@ -28,6 +28,7 @@ export const MainAppLayout: React.FC = () => {
 
   const MAIN_APP_ROUTES: NavRoute[] = [
     { path: ROUTES.DASHBOARD, label: t("layout.nav.home"), icon: "🏠" },
+    { path: ROUTES.OVERVIEW, label: t("layout.nav.overview"), icon: "🗂️" },
     { path: ROUTES.WORKFLOWS, label: t("layout.nav.workflows"), icon: "⚡" },
     { path: ROUTES.EXECUTIONS, label: t("layout.nav.executions"), icon: "📊" },
     { path: ROUTES.NOTES, label: t("layout.nav.notes"), icon: "📝" },
