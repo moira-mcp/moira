@@ -63,7 +63,13 @@ export function OverviewFiltersPopover({
   return (
     <Popover>
       <PopoverTrigger asChild>
-        <Button type="button" variant="outline" size="sm" data-testid="overview-filters">
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="h-9"
+          data-testid="overview-filters"
+        >
           <SlidersHorizontal className="h-4 w-4" aria-hidden="true" />
           {t("pages.overview.filters.button")}
           {count > 0 ? (
@@ -78,6 +84,7 @@ export function OverviewFiltersPopover({
       </PopoverTrigger>
       <PopoverContent
         align="end"
+        collisionPadding={16}
         className="grid w-[300px] gap-3"
         data-testid="overview-filters-popover"
       >
@@ -91,7 +98,7 @@ export function OverviewFiltersPopover({
               onChange({ idle: value === ANY ? null : (value as OverviewIdle), page: 1 })
             }
           >
-            <SelectTrigger id="overview-idle" data-testid="overview-filter-idle">
+            <SelectTrigger id="overview-idle" className="w-full" data-testid="overview-filter-idle">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -108,31 +115,41 @@ export function OverviewFiltersPopover({
           <legend className="mb-1 text-xs text-muted-foreground">
             {t("pages.overview.filters.range")}
           </legend>
-          <div className="grid grid-cols-[auto_1fr] items-center gap-x-2 gap-y-1.5">
-            <Label htmlFor="overview-active-from" className="text-xs">
-              {t("pages.overview.filters.from")}
-            </Label>
-            <Input
-              id="overview-active-from"
-              type="datetime-local"
-              value={toLocalInput(filters.activeFrom)}
-              onChange={(event) =>
-                onChange({ activeFrom: fromLocalInput(event.target.value), page: 1 })
-              }
-              data-testid="overview-filter-from"
-            />
-            <Label htmlFor="overview-active-to" className="text-xs">
-              {t("pages.overview.filters.to")}
-            </Label>
-            <Input
-              id="overview-active-to"
-              type="datetime-local"
-              value={toLocalInput(filters.activeTo)}
-              onChange={(event) =>
-                onChange({ activeTo: fromLocalInput(event.target.value), page: 1 })
-              }
-              data-testid="overview-filter-to"
-            />
+          <div className="grid gap-2">
+            <div className="grid gap-1">
+              <Label
+                htmlFor="overview-active-from"
+                className="text-xs font-normal text-muted-foreground"
+              >
+                {t("pages.overview.filters.from")}
+              </Label>
+              <Input
+                id="overview-active-from"
+                type="datetime-local"
+                value={toLocalInput(filters.activeFrom)}
+                onChange={(event) =>
+                  onChange({ activeFrom: fromLocalInput(event.target.value), page: 1 })
+                }
+                data-testid="overview-filter-from"
+              />
+            </div>
+            <div className="grid gap-1">
+              <Label
+                htmlFor="overview-active-to"
+                className="text-xs font-normal text-muted-foreground"
+              >
+                {t("pages.overview.filters.to")}
+              </Label>
+              <Input
+                id="overview-active-to"
+                type="datetime-local"
+                value={toLocalInput(filters.activeTo)}
+                onChange={(event) =>
+                  onChange({ activeTo: fromLocalInput(event.target.value), page: 1 })
+                }
+                data-testid="overview-filter-to"
+              />
+            </div>
           </div>
         </fieldset>
         {workflows.length > 0 ? (
@@ -150,6 +167,8 @@ export function OverviewFiltersPopover({
                 ...workflows.map((workflow) => ({ value: workflow.id, label: workflow.name })),
               ]}
               searchPlaceholder={t("common.filters.search")}
+              className="w-full"
+              contentClassName="w-full"
               testId="overview-filter-flow"
             />
           </div>
@@ -162,7 +181,7 @@ export function OverviewFiltersPopover({
             value={filters.sort}
             onValueChange={(value) => onChange({ sort: value as OverviewSort, page: 1 })}
           >
-            <SelectTrigger id="overview-sort" data-testid="overview-filter-sort">
+            <SelectTrigger id="overview-sort" className="w-full" data-testid="overview-filter-sort">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>

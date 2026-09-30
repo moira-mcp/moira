@@ -30,6 +30,8 @@ interface SearchableSelectProps {
   searchPlaceholder?: string;
   emptyMessage?: string;
   className?: string;
+  /** Classes of the dropdown list, e.g. `w-full` to match a trigger that fills its container. */
+  contentClassName?: string;
   testId?: string;
 }
 
@@ -41,6 +43,7 @@ export function SearchableSelect({
   searchPlaceholder = "Search...",
   emptyMessage = "No results found.",
   className,
+  contentClassName,
   testId,
 }: SearchableSelectProps) {
   const [open, setOpen] = useState(false);
@@ -91,7 +94,10 @@ export function SearchableSelect({
       {open && (
         <div
           data-slot="popover-content"
-          className="absolute top-full left-0 z-50 mt-1 w-[200px] rounded-md border bg-popover shadow-md animate-in fade-in-0 zoom-in-95"
+          className={cn(
+            "absolute top-full left-0 z-50 mt-1 w-[200px] rounded-md border bg-popover shadow-md animate-in fade-in-0 zoom-in-95",
+            contentClassName,
+          )}
         >
           <Command>
             <CommandInput placeholder={searchPlaceholder} />

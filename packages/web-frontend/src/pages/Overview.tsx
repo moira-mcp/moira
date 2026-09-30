@@ -151,115 +151,130 @@ export const Overview: React.FC = () => {
     filters.search.trim() !== "";
   const stale = filters.idle === STALE_IDLE;
 
-  const toolbar = (
-    <div className="mb-4 grid gap-3">
-      <div className="flex flex-wrap items-center gap-2">
-        <ConnectionIndicator snapshot={live} now={now} guide={guideAnchor("overview.live")} />
-        <div className="flex-1" />
-        <div
-          className="inline-flex overflow-hidden rounded-md border border-border"
-          role="group"
-          aria-label={t("pages.overview.layout.label")}
-        >
-          {(["grid", "lanes"] as const).map((layout) => (
-            <Button
-              key={layout}
-              type="button"
-              variant="ghost"
-              size="sm"
-              className={cn(
-                "h-8 rounded-none px-2.5 text-muted-foreground",
-                filters.layout === layout && "bg-accent font-semibold text-foreground",
-              )}
-              aria-pressed={filters.layout === layout}
-              data-testid={`overview-layout-${layout}`}
-              onClick={() => setFilters({ layout })}
-            >
-              {layout === "grid" ? (
-                <LayoutGrid className="h-4 w-4" aria-hidden="true" />
-              ) : (
-                <Rows3 className="h-4 w-4" aria-hidden="true" />
-              )}
-              {t(`pages.overview.layout.${layout}`)}
-            </Button>
-          ))}
-        </div>
-        <div className="relative">
-          <Search
-            className="pointer-events-none absolute left-2.5 top-2 h-4 w-4 text-muted-foreground"
-            aria-hidden="true"
-          />
-          <Input
-            type="search"
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            placeholder={t("pages.overview.search.placeholder")}
-            aria-label={t("pages.overview.search.label")}
-            className="h-8 w-[200px] pl-8"
-            data-testid="overview-search"
-          />
-        </div>
-        <OverviewFiltersPopover filters={filters} workflows={workflows} onChange={setFilters} />
-      </div>
-      <div className="flex flex-wrap items-center gap-2">
-        <div
-          className="inline-flex flex-wrap gap-0.5 rounded-lg bg-secondary p-[3px]"
-          role="group"
-          aria-label={t("pages.overview.status.label")}
-          data-testid="overview-status-filter"
-          {...guideAnchor("overview.status")}
-        >
-          {STATUS_FILTERS.map((status) => (
-            <Button
-              key={status}
-              type="button"
-              variant="ghost"
-              size="sm"
-              className={cn(
-                "h-7 px-2.5 text-[13px] text-muted-foreground",
-                filters.status === status && "bg-card font-semibold text-foreground shadow-sm",
-              )}
-              aria-pressed={filters.status === status}
-              data-testid={`overview-status-${status}`}
-              onClick={() => setFilters({ status, page: 1 })}
-            >
-              {t(`pages.overview.status.${status}`)}
-            </Button>
-          ))}
-        </div>
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          className={cn(
-            "h-8 rounded-full border-dashed text-muted-foreground",
-            stale && "border-solid border-warning bg-warning/15 font-semibold text-foreground",
-          )}
-          aria-pressed={stale}
-          aria-describedby="overview-stale-hint"
-          data-testid="overview-stale"
-          {...guideAnchor("overview.idle")}
-          onClick={() =>
-            setFilters({
-              idle: stale ? null : STALE_IDLE,
-              ...(!stale && filters.status === "completed"
-                ? { status: DEFAULT_FILTERS.status }
-                : {}),
-              page: 1,
-            })
-          }
-        >
-          <Timer className="h-4 w-4" aria-hidden="true" />
-          {t("pages.overview.stale.chip")}
-        </Button>
-        <span id="overview-stale-hint" className="sr-only">
-          {t("pages.overview.stale.hint")}
+  // The page's state beside its tour button: whether changes arrive live, and how many runs match.
+  const pageState = (
+    <div className="flex items-center gap-3">
+      {page.data ? (
+        <span className="text-xs text-muted-foreground" data-testid="overview-total">
+          {t("pages.overview.total", { count: total })}
         </span>
-        {page.data ? (
-          <span className="ml-auto text-xs text-muted-foreground" data-testid="overview-total">
-            {t("pages.overview.total", { count: total })}
+      ) : null}
+      <ConnectionIndicator snapshot={live} now={now} guide={guideAnchor("overview.live")} />
+    </div>
+  );
+
+  // One line of controls of one height: what to show on the left, how to find and lay it out on the
+  // right. It lays itself out by its own width (a container query), not the window's, since the
+  // sidebar narrows the page. When the line does not fit, the right group takes the next line
+  // and stretches over it; on a phone the status switch becomes an even grid.
+  const segment = "rounded-lg bg-secondary p-1";
+  const segmentItem = (on: boolean) =>
+    cn(
+      "h-7 text-[13px] text-muted-foreground",
+      on && "bg-card font-semibold text-foreground shadow-sm",
+    );
+  const toolbar = (
+    <div className="@container mb-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <div
+            className={cn(
+              segment,
+              "grid w-full grid-cols-2 gap-0.5 @lg:grid-cols-3 @min-[38rem]:flex @min-[38rem]:h-9 @min-[38rem]:w-auto",
+            )}
+            role="group"
+            aria-label={t("pages.overview.status.label")}
+            data-testid="overview-status-filter"
+            {...guideAnchor("overview.status")}
+          >
+            {STATUS_FILTERS.map((status) => (
+              <Button
+                key={status}
+                type="button"
+                variant="ghost"
+                size="sm"
+                className={cn(segmentItem(filters.status === status), "px-2.5")}
+                aria-pressed={filters.status === status}
+                data-testid={`overview-status-${status}`}
+                onClick={() => setFilters({ status, page: 1 })}
+              >
+                {t(`pages.overview.status.${status}`)}
+              </Button>
+            ))}
+          </div>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className={cn(
+              "h-9 border-dashed text-[13px] text-muted-foreground",
+              stale && "border-solid border-warning bg-warning/15 font-semibold text-foreground",
+            )}
+            aria-pressed={stale}
+            aria-describedby="overview-stale-hint"
+            data-testid="overview-stale"
+            {...guideAnchor("overview.idle")}
+            onClick={() =>
+              setFilters({
+                idle: stale ? null : STALE_IDLE,
+                ...(!stale && filters.status === "completed"
+                  ? { status: DEFAULT_FILTERS.status }
+                  : {}),
+                page: 1,
+              })
+            }
+          >
+            <Timer className="h-4 w-4" aria-hidden="true" />
+            {t("pages.overview.stale.chip")}
+          </Button>
+          <span id="overview-stale-hint" className="sr-only">
+            {t("pages.overview.stale.hint")}
           </span>
-        ) : null}
+        </div>
+        <div className="ml-auto flex min-w-[18rem] flex-1 items-center gap-2">
+          <div className="relative min-w-0 flex-1">
+            <Search
+              className="pointer-events-none absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground"
+              aria-hidden="true"
+            />
+            <Input
+              type="search"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder={t("pages.overview.search.placeholder")}
+              aria-label={t("pages.overview.search.label")}
+              className="h-9 w-full pl-8"
+              data-testid="overview-search"
+            />
+          </div>
+          <OverviewFiltersPopover filters={filters} workflows={workflows} onChange={setFilters} />
+          <div
+            className={cn(segment, "flex h-9 gap-0.5")}
+            role="group"
+            aria-label={t("pages.overview.layout.label")}
+          >
+            {(["grid", "lanes"] as const).map((layout) => (
+              <Button
+                key={layout}
+                type="button"
+                variant="ghost"
+                size="sm"
+                className={cn(segmentItem(filters.layout === layout), "w-8 px-0")}
+                aria-pressed={filters.layout === layout}
+                aria-label={t(`pages.overview.layout.${layout}`)}
+                title={t(`pages.overview.layout.${layout}`)}
+                data-testid={`overview-layout-${layout}`}
+                onClick={() => setFilters({ layout })}
+              >
+                {layout === "grid" ? (
+                  <LayoutGrid className="h-4 w-4" aria-hidden="true" />
+                ) : (
+                  <Rows3 className="h-4 w-4" aria-hidden="true" />
+                )}
+              </Button>
+            ))}
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -295,6 +310,7 @@ export const Overview: React.FC = () => {
       description={t("pages.overview.subtitle")}
       guide={guideAnchor("overview.header")}
       loading={page.pending && !page.data && !page.error}
+      actions={pageState}
     >
       {toolbar}
       <section
