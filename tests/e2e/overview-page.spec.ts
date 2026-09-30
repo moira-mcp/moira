@@ -185,6 +185,10 @@ test.describe("The overview", () => {
       await expect(page).toHaveURL(/idle=7d/);
       await expect(page.getByTestId("empty-state")).toBeVisible();
       await expect(page.getByTestId("overview-card")).toHaveCount(0);
+
+      // The other filters open beside their button, on screen.
+      await page.getByTestId("overview-filters").click();
+      await expect(page.getByTestId("overview-filters-popover")).toBeInViewport();
     } finally {
       await me.cleanup();
     }
