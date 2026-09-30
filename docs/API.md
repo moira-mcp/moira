@@ -2552,6 +2552,97 @@ Response:
 Authentication: Required
 Admin users see all executions unless `mine=true`; regular users see only their own.
 
+### GET /api/executions/overview
+
+The signed-in user's runs as trees of a root run and its child runs, for the overview page. Only the
+caller's own runs are returned, administrators included.
+
+Query parameters:
+
+- `status`: `active` (default: every unfinished run), `waiting-user`, `waiting-agent`, `locked`,
+  `completed` or `all`. A run's status is `completed` when it ended, `locked` when it runs with an
+  active execution lock, `waiting-user` when it is paused on a step marked `humanGate` whose condition
+  held or the agent's question is open, and `waiting-agent` otherwise.
+- `refusals`: `true` shows only runs with refusals.
+- `workflowId`: runs of one workflow.
+- `search`: matched against the note, the run id and the workflow name (at most 200 characters).
+- `idle`: `1h`, `1d`, `3d`, `7d` or `30d` — trees without activity for longer than that.
+- `activeFrom`, `activeTo`: epoch ms or ISO date — trees whose latest activity lies within.
+- `sort`: `activity` (latest activity first, default), `idle` (longest without activity first) or
+  `created` (newest first). In every sort, trees holding a run that waits for its person come first.
+- `limit`: trees per page (1–100). Default: 50
+- `offset`: trees to skip. Default: 0
+- `ids`: comma-separated run ids (at most 100) — returns those runs' rows only (`data.runs`), without
+  nesting or paging, for refreshing single cards: `childRuns` is empty and `parent` null, while
+  `children` and `subtreeActivityAt` still describe each run's whole subtree; other users' ids are
+  left out.
+
+The status filter decides the candidate runs; a root is a candidate with no ancestor among the
+candidates — a running child of a finished parent is a root under the default filter and names its
+parent in `parent`. Under a root, `childRuns` hold all its descendants, whatever their status, so each
+run appears once. `refusals`, `workflowId`, `search` and the activity filters apply to a tree: it is
+shown when some candidate run of it matches, and its other runs come back with `matches: false`
+(shown muted). Activity filters read `subtreeActivityAt`, the latest activity of the root and all its
+descendants. `total` counts trees.
+
+Response:
+
+```typescript
+{
+  success: boolean;
+  data: {
+    total: number;
+    limit: number;
+    offset: number;
+    runs: OverviewRun[];
+  }
+}
+
+interface OverviewRun {
+  executionId: string;
+  workflowId: string;
+  workflowName: string | null;
+  workflowVersion: string | null;
+  title: string; // the run's task title: its note, else the flow's progress title or name
+  status: "waiting-user" | "waiting-agent" | "locked" | "completed";
+  matches: boolean;
+  waitingForUser:
+    | { source: "gate"; label: string; notification: NotificationMark | null }
+    | {
+        source: "agent";
+        question: string;
+        options: string[];
+        since: number;
+        notification: NotificationMark | null;
+      }
+    | null; // present while status is "waiting-user"
+  refusalCount: number;
+  note: string | null;
+  current: { stepName: string | null; directiveShownAt: number | null } | null; // null once ended
+  stages: { labels: string[]; activeIndex: number | null; doneCount: number } | null; // null without progress blocks
+  list: {
+    title: string; // the active block's label
+    done: number | null;
+    total: number | null;
+    items: Array<{ index: number; title: string; done: boolean; current: boolean; durationMs: number | null }>; // up to five around the current item
+  } | null;
+  lastActivityAt: number | null; // the run's last event of work
+  subtreeActivityAt: number | null; // the latest over the run and its descendants
+  createdAt: number;
+  completedAt: number | null;
+  parentExecutionId: string | null;
+  parent: { executionId: string; title: string } | null; // for a root that continues another run
+  children: { total: number; unfinished: number };
+  childRuns: OverviewRun[]; // unfinished first, then by latest activity
+}
+// NotificationMark: as `waitingNotification` of GET /api/executions/:id, without createdAt
+```
+
+The step is named as the run page names it (the node's active label or display name, else its
+block's label) and never by a node id. Invalid parameters return 400.
+
+Authentication: Required
+
 ### GET /api/executions/:id
 
 Get execution details with full context.

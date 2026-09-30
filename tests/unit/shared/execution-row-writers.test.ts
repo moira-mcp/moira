@@ -3,8 +3,9 @@ import { extname, relative, resolve } from "node:path";
 import { describe, expect, test } from "@jest/globals";
 
 /**
- * The execution row carries columns derived from the run's state (`gateWaiting`, and the agent's
- * open question `awaitingUser`, which a move off its node clears). A writer
+ * The execution row carries columns derived from the run's state (`gateWaiting`, the agent's open
+ * question `awaitingUser`, which a move off its node clears, and `lastActivityAt` / `refusalCount`,
+ * derived from the visits, completion and journal a writer stores). A writer
  * that stores the cursor without them leaves a stale flag no test of another writer would notice,
  * so the set of writers is pinned here. Adding a writer fails this test until the writer is added
  * to the inventory below — which is the moment to decide what it must keep true.

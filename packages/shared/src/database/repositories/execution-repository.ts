@@ -13,6 +13,8 @@ import { executeListQuery, type ListQueryConfig } from "../list-query-builder.js
 import { ConflictError, ValidationError } from "../../errors/index.js";
 import { metadataRevision } from "../../utils/metadata-revision.js";
 import { awaitingUserAfterWrite, executionRowFields } from "../execution-row.js";
+import { executionActivity, parseStoredErrors, parseStoredVisits } from "../execution-activity.js";
+
 import { enqueueWaitingNotification } from "../execution-notification.js";
 
 const EXECUTION_LIST_CONFIG: ListQueryConfig<"createdAt" | "updatedAt"> = {
@@ -88,6 +90,8 @@ export class ExecutionRepository {
               reminders: row.reminders,
               visits: row.visits,
               gateWaiting: row.gateWaiting === 1,
+              lastActivityAt: row.lastActivityAt,
+              refusalCount: row.refusalCount,
               // The agent's question is not the saver's to write: it stays while the run stays on its
               // node and is cleared when the run leaves it or finishes (see awaitingUserAfterMove).
               awaitingUser: awaitingUserAfterWrite(row.state, row.currentNodeId),
@@ -134,6 +138,8 @@ export class ExecutionRepository {
               reminders: row.reminders,
               visits: row.visits,
               gateWaiting: row.gateWaiting === 1,
+              lastActivityAt: row.lastActivityAt,
+              refusalCount: row.refusalCount,
               workflowVersion: execution.workflowVersion ?? null,
               createdAt,
               updatedAt,
@@ -159,6 +165,16 @@ export class ExecutionRepository {
     }
 
     return this.rowToExecution(row);
+  }
+
+  /** The runs with these ids, in one query; unknown ids are left out. */
+  async getMany(executionIds: string[]): Promise<WorkflowExecution[]> {
+    if (executionIds.length === 0) return [];
+    const rows = await this.db
+      .select()
+      .from(workflowExecution)
+      .where(inArray(workflowExecution.executionId, executionIds));
+    return rows.map((row) => this.rowToExecution(row));
   }
 
   /**
@@ -230,6 +246,8 @@ export class ExecutionRepository {
       reminders,
       visits,
       gateWaiting: row.gateWaiting,
+      lastActivityAt: row.lastActivityAt ?? null,
+      refusalCount: row.refusalCount,
       awaitingUser,
       workflowVersion: row.workflowVersion ?? null,
       createdAt: row.createdAt ? (row.createdAt as Date).getTime() : Date.now(),
@@ -638,80 +656,91 @@ export class ExecutionRepository {
     expectedContextRevision: string,
     visit?: Omit<NonNullable<WorkflowExecution["visits"]>[number], "seq">,
   ): Promise<boolean> {
-    // First get current execution to merge context
-    const execution = await this.get(executionId);
-    if (!execution) {
-      return false;
-    }
-    if (execution.revision !== expectedRevision) {
-      throw new ConflictError("Execution state changed; reload before updating context", {
-        executionId,
-        expectedRevision,
-        currentRevision: execution.revision,
-      });
-    }
-    if (metadataRevision(execution.globalContext) !== expectedContextRevision) {
-      throw new ConflictError("Execution context changed; reload before updating context", {
-        executionId,
-        expectedContextRevision,
-      });
-    }
+    // Read, check and write in one IMMEDIATE transaction: the context, the adjustment visit and the
+    // activity derived from the visits are stored together from the row as it is.
+    return this.db.transaction(
+      (tx) => {
+        const row = tx
+          .select()
+          .from(workflowExecution)
+          .where(eq(workflowExecution.executionId, executionId))
+          .get();
+        if (!row) return false;
+        const execution = this.rowToExecution(row);
+        if (execution.revision !== expectedRevision) {
+          throw new ConflictError("Execution state changed; reload before updating context", {
+            executionId,
+            expectedRevision,
+            currentRevision: execution.revision,
+          });
+        }
+        if (metadataRevision(execution.globalContext) !== expectedContextRevision) {
+          throw new ConflictError("Execution context changed; reload before updating context", {
+            executionId,
+            expectedContextRevision,
+          });
+        }
 
-    // Merge new context with existing
-    const updatedContext = {
-      ...execution.globalContext,
-      ...(context.variables && {
-        variables: { ...execution.globalContext.variables, ...context.variables },
-      }),
-      ...(context.nodeStates && {
-        nodeStates: { ...execution.globalContext.nodeStates, ...context.nodeStates },
-      }),
-    };
+        // Merge new context with existing
+        const updatedContext = {
+          ...execution.globalContext,
+          ...(context.variables && {
+            variables: { ...execution.globalContext.variables, ...context.variables },
+          }),
+          ...(context.nodeStates && {
+            nodeStates: { ...execution.globalContext.nodeStates, ...context.nodeStates },
+          }),
+        };
 
-    // Size validation: max 10MB for execution context
-    const contextJson = JSON.stringify(updatedContext);
-    const sizeBytes = Buffer.byteLength(contextJson, "utf8");
-    const maxSize = 10 * 1024 * 1024; // 10MB
+        // Size validation: max 10MB for execution context
+        const contextJson = JSON.stringify(updatedContext);
+        const sizeBytes = Buffer.byteLength(contextJson, "utf8");
+        const maxSize = 10 * 1024 * 1024; // 10MB
+        if (sizeBytes > maxSize) {
+          const sizeMB = (sizeBytes / 1024 / 1024).toFixed(2);
+          const maxMB = (maxSize / 1024 / 1024).toFixed(0);
+          throw new Error(`Execution context size ${sizeMB}MB exceeds maximum ${maxMB}MB limit`);
+        }
 
-    if (sizeBytes > maxSize) {
-      const sizeMB = (sizeBytes / 1024 / 1024).toFixed(2);
-      const maxMB = (maxSize / 1024 / 1024).toFixed(0);
-      throw new Error(`Execution context size ${sizeMB}MB exceeds maximum ${maxMB}MB limit`);
-    }
-
-    // The route log gains the adjustment in the same guarded write as the context it changed.
-    const visits = visit
-      ? JSON.stringify([
-          ...(execution.visits ?? []),
-          { seq: (execution.visits ?? []).length, ...visit },
-        ])
-      : undefined;
-    const result = await this.db
-      .update(workflowExecution)
-      .set({
-        context: JSON.stringify(updatedContext),
-        ...(visits !== undefined ? { visits } : {}),
-        // A variable the agent sets is the agent acting: its open question is answered. A person's
-        // edit is not an answer and leaves the question open.
-        ...(visit?.actor?.role === "agent" ? { awaitingUser: null } : {}),
-        updatedAt: new Date(),
-      })
-      .where(
-        and(
-          eq(workflowExecution.executionId, executionId),
-          eq(workflowExecution.revision, expectedRevision),
-          eq(workflowExecution.context, JSON.stringify(execution.globalContext)),
-        ),
-      );
-
-    if (result.changes === 0) {
-      throw new ConflictError("Execution state changed; reload before updating context", {
-        executionId,
-        expectedRevision,
-      });
-    }
-
-    return result.changes > 0;
+        // The route log gains the adjustment in the same write as the context it changed.
+        const nextVisits = visit
+          ? [...(execution.visits ?? []), { seq: (execution.visits ?? []).length, ...visit }]
+          : undefined;
+        const result = tx
+          .update(workflowExecution)
+          .set({
+            context: contextJson,
+            ...(nextVisits !== undefined
+              ? {
+                  visits: JSON.stringify(nextVisits),
+                  lastActivityAt: executionActivity({
+                    visits: nextVisits,
+                    completedAt: execution.completedAt ?? null,
+                  }).lastActivityAt,
+                }
+              : {}),
+            // A variable the agent sets is the agent acting: its open question is answered. A
+            // person's edit is not an answer and leaves the question open.
+            ...(visit?.actor?.role === "agent" ? { awaitingUser: null } : {}),
+            updatedAt: new Date(),
+          })
+          .where(
+            and(
+              eq(workflowExecution.executionId, executionId),
+              eq(workflowExecution.revision, expectedRevision),
+            ),
+          )
+          .run();
+        if (result.changes === 0) {
+          throw new ConflictError("Execution state changed; reload before updating context", {
+            executionId,
+            expectedRevision,
+          });
+        }
+        return true;
+      },
+      { behavior: "immediate" },
+    );
   }
 
   /**
@@ -725,41 +754,33 @@ export class ExecutionRepository {
    * @returns true if error was appended, false if execution not found
    */
   async appendError(executionId: string, error: ExecutionError): Promise<boolean> {
-    for (let attempt = 0; attempt < 5; attempt += 1) {
-      const [row] = await this.db
-        .select({ errors: workflowExecution.errors })
-        .from(workflowExecution)
-        .where(eq(workflowExecution.executionId, executionId))
-        .limit(1);
-      if (!row) return false;
-      let errors: ExecutionError[] = [];
-      if (row.errors) {
-        try {
-          errors = JSON.parse(row.errors) as ExecutionError[];
-        } catch {
-          errors = [];
+    // Read, append and write in one IMMEDIATE transaction, so the journal and the refusal count
+    // derived from it are stored together and no concurrent append is lost.
+    return this.db.transaction(
+      (tx) => {
+        const row = tx
+          .select({ errors: workflowExecution.errors })
+          .from(workflowExecution)
+          .where(eq(workflowExecution.executionId, executionId))
+          .get();
+        if (!row) return false;
+        let errors: ExecutionError[] = parseStoredErrors(row.errors);
+        errors.push(error);
+        if (Buffer.byteLength(JSON.stringify(errors), "utf8") > 1024 * 1024) {
+          errors = errors.slice(-100);
         }
-      }
-      errors.push(error);
-      if (Buffer.byteLength(JSON.stringify(errors), "utf8") > 1024 * 1024) {
-        errors = errors.slice(-100);
-      }
-      const result = await this.db
-        .update(workflowExecution)
-        .set({ errors: JSON.stringify(errors), updatedAt: new Date() })
-        .where(
-          and(
-            eq(workflowExecution.executionId, executionId),
-            row.errors === null
-              ? isNull(workflowExecution.errors)
-              : eq(workflowExecution.errors, row.errors),
-          ),
-        );
-      if (result.changes === 1) return true;
-    }
-    throw new ConflictError("Execution errors changed concurrently; retry appending the error", {
-      executionId,
-    });
+        tx.update(workflowExecution)
+          .set({
+            errors: JSON.stringify(errors),
+            refusalCount: executionActivity({ errors }).refusalCount,
+            updatedAt: new Date(),
+          })
+          .where(eq(workflowExecution.executionId, executionId))
+          .run();
+        return true;
+      },
+      { behavior: "immediate" },
+    );
   }
 
   async cancelExecution(
@@ -767,30 +788,51 @@ export class ExecutionRepository {
     error: ExecutionError,
   ): Promise<{ changed: boolean; execution: WorkflowExecution | null }> {
     const now = new Date();
-    const errorJson = JSON.stringify(error);
-    const result = await this.db
-      .update(workflowExecution)
-      .set({
-        state: "completed",
-        gateWaiting: false,
-        awaitingUser: null,
-        errors: sql<string>`CASE
-          WHEN ${workflowExecution.errors} IS NULL OR json_valid(${workflowExecution.errors}) = 0
-            THEN json_array(json(${errorJson}))
-          ELSE json_insert(${workflowExecution.errors}, '$[#]', json(${errorJson}))
-        END`,
-        updatedAt: now,
-        completedAt: now,
-      })
-      .where(
-        and(
-          eq(workflowExecution.executionId, executionId),
-          ne(workflowExecution.state, "completed"),
-        ),
-      );
+    const changed = this.db.transaction(
+      (tx) => {
+        const row = tx
+          .select({ errors: workflowExecution.errors, visits: workflowExecution.visits })
+          .from(workflowExecution)
+          .where(
+            and(
+              eq(workflowExecution.executionId, executionId),
+              ne(workflowExecution.state, "completed"),
+            ),
+          )
+          .get();
+        if (!row) return false;
+        const errors = [...parseStoredErrors(row.errors), error];
+        const activity = executionActivity({
+          visits: parseStoredVisits(row.visits),
+          completedAt: now.getTime(),
+          errors,
+        });
+        const result = tx
+          .update(workflowExecution)
+          .set({
+            state: "completed",
+            gateWaiting: false,
+            awaitingUser: null,
+            errors: JSON.stringify(errors),
+            lastActivityAt: activity.lastActivityAt,
+            refusalCount: activity.refusalCount,
+            updatedAt: now,
+            completedAt: now,
+          })
+          .where(
+            and(
+              eq(workflowExecution.executionId, executionId),
+              ne(workflowExecution.state, "completed"),
+            ),
+          )
+          .run();
+        return result.changes > 0;
+      },
+      { behavior: "immediate" },
+    );
 
     return {
-      changed: result.changes > 0,
+      changed,
       execution: await this.get(executionId),
     };
   }
@@ -834,6 +876,7 @@ export class ExecutionRepository {
       .update(workflowExecution)
       .set({
         errors: null,
+        refusalCount: 0,
         updatedAt: new Date(),
       })
       .where(eq(workflowExecution.executionId, executionId));

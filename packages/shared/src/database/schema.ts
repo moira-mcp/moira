@@ -583,34 +583,49 @@ export const workflowReconciliationResolution = sqliteTable(
   }),
 );
 
-export const workflowExecution = sqliteTable("workflowExecution", {
-  executionId: text("executionId").primaryKey(),
-  workflowId: text("workflowId")
-    .notNull()
-    .references(() => workflow.id, { onDelete: "cascade" }),
-  userId: text("userId")
-    .notNull()
-    .references(() => user.id, { onDelete: "cascade" }),
-  state: text("state").notNull(), // 'running' | 'completed' (simplified from 4 to 2 statuses, Issue #386)
-  currentNodeId: text("currentNodeId"),
-  waitingForInputNodeId: text("waitingForInputNodeId"),
-  context: text("context").notNull(), // JSON
-  error: text("error"), // DEPRECATED: kept for migration, use errors array instead
-  errors: text("errors"), // JSON array of ExecutionError (Issue #386)
-  note: text("note"), // User-provided note for identification (max 500 chars)
-  parentExecutionId: text("parentExecutionId"), // Links to parent execution for continuation
-  revision: integer("revision").notNull().default(0), // Workflow-step generation
-  reminders: text("reminders").notNull().default("[]"), // JSON ExecutionReminder[]
-  visits: text("visits").notNull().default("[]"), // JSON ExecutionVisit[]: the append-only route log
-  // Paused on a step the workflow marks as waiting for a person (`humanGate`); set by the engine
-  gateWaiting: integer("gateWaiting", { mode: "boolean" }).notNull().default(false),
-  // JSON ExecutionAwaitingUser: the agent's open question (`session await-user`), null when none
-  awaitingUser: text("awaitingUser"),
-  workflowVersion: text("workflowVersion"), // metadata.version of the definition the run started on
-  createdAt: integer("createdAt", { mode: "timestamp_ms" }),
-  updatedAt: integer("updatedAt", { mode: "timestamp_ms" }),
-  completedAt: integer("completedAt", { mode: "timestamp_ms" }),
-});
+export const workflowExecution = sqliteTable(
+  "workflowExecution",
+  {
+    executionId: text("executionId").primaryKey(),
+    workflowId: text("workflowId")
+      .notNull()
+      .references(() => workflow.id, { onDelete: "cascade" }),
+    userId: text("userId")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    state: text("state").notNull(), // 'running' | 'completed' (simplified from 4 to 2 statuses, Issue #386)
+    currentNodeId: text("currentNodeId"),
+    waitingForInputNodeId: text("waitingForInputNodeId"),
+    context: text("context").notNull(), // JSON
+    error: text("error"), // DEPRECATED: kept for migration, use errors array instead
+    errors: text("errors"), // JSON array of ExecutionError (Issue #386)
+    note: text("note"), // User-provided note for identification (max 500 chars)
+    parentExecutionId: text("parentExecutionId"), // Links to parent execution for continuation
+    revision: integer("revision").notNull().default(0), // Workflow-step generation
+    reminders: text("reminders").notNull().default("[]"), // JSON ExecutionReminder[]
+    visits: text("visits").notNull().default("[]"), // JSON ExecutionVisit[]: the append-only route log
+    // Paused on a step the workflow marks as waiting for a person (`humanGate`); set by the engine
+    gateWaiting: integer("gateWaiting", { mode: "boolean" }).notNull().default(false),
+    // JSON ExecutionAwaitingUser: the agent's open question (`session await-user`), null when none
+    awaitingUser: text("awaitingUser"),
+    workflowVersion: text("workflowVersion"), // metadata.version of the definition the run started on
+    // Epoch ms of the last event of work (visits' enteredAt/leftAt, completedAt); see execution-activity.ts
+    lastActivityAt: integer("lastActivityAt"),
+    // How many journal entries are refusals (countRefusals over `errors`)
+    refusalCount: integer("refusalCount").notNull().default(0),
+    createdAt: integer("createdAt", { mode: "timestamp_ms" }),
+    updatedAt: integer("updatedAt", { mode: "timestamp_ms" }),
+    completedAt: integer("completedAt", { mode: "timestamp_ms" }),
+  },
+  (table) => ({
+    userStateActivityIdx: index("workflow_execution_user_state_activity_idx").on(
+      table.userId,
+      table.state,
+      table.lastActivityAt,
+    ),
+    parentIdx: index("workflow_execution_parent_idx").on(table.parentExecutionId),
+  }),
+);
 
 /**
  * Notifications that a run waits for its person. A row is written in the same transaction that puts

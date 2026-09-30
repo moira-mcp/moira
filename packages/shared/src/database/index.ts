@@ -176,3 +176,15 @@ export type {
   PlaybookVisibility,
   SavePlaybookOptions,
 } from "./repositories/playbook-repository.js";
+export { executionActivity } from "./execution-activity.js";
+export type { ExecutionActivity, ExecutionActivitySource } from "./execution-activity.js";
+export { ExecutionOverviewRepository } from "./repositories/execution-overview-repository.js";
+export type {
+  OverviewNode,
+  OverviewPage,
+  OverviewQuery,
+  OverviewRowFacts,
+  OverviewSort,
+  OverviewStatus,
+  OverviewStatusFilter,
+} from "./repositories/execution-overview-repository.js";

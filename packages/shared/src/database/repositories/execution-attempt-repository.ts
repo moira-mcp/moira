@@ -22,6 +22,8 @@ import {
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { executionRowFields } from "../execution-row.js";
 import { enqueueWaitingNotification } from "../execution-notification.js";
+import { executionActivity, parseStoredVisits } from "../execution-activity.js";
+
 import * as schema from "../schema.js";
 
 type AttemptRow = {
@@ -191,8 +193,9 @@ export class ExecutionAttemptRepository {
             `INSERT INTO workflowExecution (
               executionId, workflowId, userId, state, currentNodeId, waitingForInputNodeId,
               context, error, errors, note, parentExecutionId, revision, reminders, visits,
-              gateWaiting, workflowVersion, createdAt, updatedAt, completedAt
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              gateWaiting, lastActivityAt, refusalCount, workflowVersion, createdAt, updatedAt,
+              completedAt
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           )
           .run(
             input.execution.executionId,
@@ -210,6 +213,8 @@ export class ExecutionAttemptRepository {
             execution.reminders,
             execution.visits,
             execution.gateWaiting,
+            execution.lastActivityAt,
+            execution.refusalCount,
             input.execution.workflowVersion ?? null,
             input.execution.createdAt,
             execution.updatedAt,
@@ -311,7 +316,7 @@ export class ExecutionAttemptRepository {
       .transaction(() => {
         const row = this.sqlite
           .prepare(
-            `SELECT errors, currentNodeId FROM workflowExecution
+            `SELECT errors, visits, currentNodeId FROM workflowExecution
              WHERE executionId = ? AND userId = ? AND state = 'running' AND revision = ?
                AND EXISTS (
                  SELECT 1 FROM executionMutationAttempt
@@ -320,20 +325,27 @@ export class ExecutionAttemptRepository {
                )`,
           )
           .get(executionId, userId, expectedRevision, executionId, userId) as
-          { errors: string | null; currentNodeId: string | null } | undefined;
+          { errors: string | null; visits: string; currentNodeId: string | null } | undefined;
         if (!row) return false;
         const errors = row.errors ? (JSON.parse(row.errors) as ExecutionError[]) : [];
         errors.push(error);
+        const activity = executionActivity({
+          visits: parseStoredVisits(row.visits),
+          completedAt: error.timestamp,
+          errors,
+        });
         const changed = this.sqlite
           .prepare(
             `UPDATE workflowExecution SET state = 'completed', gateWaiting = 0, awaitingUser = NULL,
-             error = ?, errors = ?,
+             error = ?, errors = ?, lastActivityAt = ?, refusalCount = ?,
              completedAt = ?, updatedAt = ?
              WHERE executionId = ? AND userId = ? AND state = 'running' AND revision = ?`,
           )
           .run(
             error.message,
             JSON.stringify(errors),
+            activity.lastActivityAt,
+            activity.refusalCount,
             error.timestamp,
             error.timestamp,
             executionId,
@@ -594,7 +606,7 @@ export class ExecutionAttemptRepository {
           .prepare(
             `UPDATE workflowExecution SET state = ?, currentNodeId = ?, waitingForInputNodeId = ?,
                context = ?, visits = ?, gateWaiting = ?, awaitingUser = NULL, updatedAt = ?,
-               revision = revision + 1
+               lastActivityAt = ?, revision = revision + 1
              WHERE executionId = ? AND revision = ? AND state = ?
                AND currentNodeId IS ? AND waitingForInputNodeId IS ? AND context = ?`,
           )
@@ -606,6 +618,7 @@ export class ExecutionAttemptRepository {
             execution.visits,
             execution.gateWaiting,
             now,
+            execution.lastActivityAt,
             input.execution.executionId,
             input.expectedExecution.revision,
             expected.state,
@@ -651,7 +664,7 @@ export class ExecutionAttemptRepository {
             `UPDATE workflowExecution SET state = ?, currentNodeId = ?, waitingForInputNodeId = ?,
              context = ?, visits = ?, note = CASE WHEN ? = 1 THEN ? ELSE note END,
              gateWaiting = ?, awaitingUser = NULL, updatedAt = ?, completedAt = ?,
-             revision = revision + 1
+             lastActivityAt = ?, revision = revision + 1
            WHERE executionId = ? AND revision = ? AND state = ?
              AND currentNodeId IS ? AND waitingForInputNodeId IS ? AND context = ?
              AND (? = 0 OR note IS ?)`,
@@ -667,6 +680,7 @@ export class ExecutionAttemptRepository {
             execution.gateWaiting,
             execution.updatedAt,
             execution.completedAt,
+            execution.lastActivityAt,
             input.execution.executionId,
             input.execution.revision,
             expectedExecution.state,

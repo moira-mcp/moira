@@ -10,6 +10,7 @@
 import { sql, type SQL } from "drizzle-orm";
 import type { WorkflowExecution } from "@mcp-moira/workflow-engine";
 import { workflowExecution } from "./schema.js";
+import { executionActivity } from "./execution-activity.js";
 
 /** The cursor-bearing columns of `workflowExecution`, in the representation raw SQL binds. */
 export interface ExecutionRowFields {
@@ -25,6 +26,10 @@ export interface ExecutionRowFields {
   visits: string;
   /** SQLite boolean: 1 while the run is paused on a step that waits for a person. */
   gateWaiting: 0 | 1;
+  /** Derived from `visits` and `completedAt` (see execution-activity.ts). */
+  lastActivityAt: number | null;
+  /** Derived from `errors`; only a writer that stores `errors` stores it. */
+  refusalCount: number;
   updatedAt: number;
   completedAt: number | null;
 }
@@ -43,6 +48,11 @@ export function executionRowFields(execution: WorkflowExecution): ExecutionRowFi
     reminders: JSON.stringify(execution.reminders ?? []),
     visits: JSON.stringify(execution.visits ?? []),
     gateWaiting: execution.gateWaiting ? 1 : 0,
+    ...executionActivity({
+      visits: execution.visits,
+      completedAt: execution.completedAt ?? null,
+      errors: execution.errors,
+    }),
     updatedAt: execution.updatedAt,
     completedAt: execution.completedAt ?? null,
   };

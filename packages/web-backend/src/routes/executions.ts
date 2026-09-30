@@ -34,7 +34,14 @@ import {
   RESOURCE_TYPES,
   countRefusals,
   latestRefusal,
+  ExecutionOverviewRepository,
+  ExecutionRepository,
+  WorkflowRepository,
+  getSqliteInstance,
+  type OverviewSort,
+  type OverviewStatusFilter,
 } from "@mcp-moira/shared";
+import { overviewPage, overviewRows } from "../services/execution-overview.js";
 
 /**
  * Whether this user may act on the execution **as its owner would**.
@@ -384,6 +391,113 @@ router.get(
       },
       timestamp: new Date().toISOString(),
     });
+  }),
+);
+
+/** Idle presets of the overview: no activity for longer than this. */
+const OVERVIEW_IDLE_MS: Record<string, number> = {
+  "1h": 3_600_000,
+  "1d": 86_400_000,
+  "3d": 3 * 86_400_000,
+  "7d": 7 * 86_400_000,
+  "30d": 30 * 86_400_000,
+};
+const OVERVIEW_STATUSES: OverviewStatusFilter[] = [
+  "active",
+  "waiting-user",
+  "waiting-agent",
+  "locked",
+  "completed",
+  "all",
+];
+const OVERVIEW_SORTS: OverviewSort[] = ["activity", "idle", "created"];
+const OVERVIEW_MAX_LIMIT = 100;
+
+/** An epoch-ms or ISO date query value, or undefined; anything else is a 400. */
+function overviewInstant(value: unknown, name: string): number | undefined {
+  if (value === undefined || value === "") return undefined;
+  const text = String(value);
+  const parsed = /^\d+$/.test(text) ? Number(text) : Date.parse(text);
+  if (!Number.isFinite(parsed)) throw createApiError.badRequest(`Invalid ${name}`);
+  return parsed;
+}
+
+/**
+ * GET /api/executions/overview
+ * The signed-in user's runs as trees of root and child runs, one card each. Query: status
+ * (active | waiting-user | waiting-agent | locked | completed | all; default active), refusals
+ * (true: only runs with refusals), workflowId, search, idle (1h | 1d | 3d | 7d | 30d: no activity
+ * for longer), activeFrom / activeTo (latest activity within), sort (activity | idle | created),
+ * limit (1–100, default 50), offset; or ids (comma-separated, up to 100) for single rows. Only the
+ * user's own runs are returned, for administrators too.
+ */
+router.get(
+  "/overview",
+  asyncHandler(async (req: Request, res: Response) => {
+    const userId = (req as AuthenticatedRequest).userId;
+    const db = getDatabase();
+    const deps = {
+      overview: new ExecutionOverviewRepository(getSqliteInstance()),
+      executions: new ExecutionRepository(db),
+      workflows: new WorkflowRepository(db),
+      notifications: new ExecutionNotificationRepository(db),
+    };
+
+    if (typeof req.query.ids === "string") {
+      const ids = req.query.ids
+        .split(",")
+        .map((id) => id.trim())
+        .filter((id) => id.length > 0);
+      if (ids.length > OVERVIEW_MAX_LIMIT) {
+        throw createApiError.badRequest(`At most ${OVERVIEW_MAX_LIMIT} ids`);
+      }
+      const runs = await overviewRows(userId, ids, deps);
+      res.json({ success: true, data: { runs }, timestamp: new Date().toISOString() });
+      return;
+    }
+
+    const status = (req.query.status ?? "active") as OverviewStatusFilter;
+    if (!OVERVIEW_STATUSES.includes(status)) throw createApiError.badRequest("Invalid status");
+    const sort = (req.query.sort ?? "activity") as OverviewSort;
+    if (!OVERVIEW_SORTS.includes(sort)) throw createApiError.badRequest("Invalid sort");
+    const idle = req.query.idle as string | undefined;
+    if (idle !== undefined && idle !== "" && !Object.hasOwn(OVERVIEW_IDLE_MS, idle)) {
+      throw createApiError.badRequest("Invalid idle");
+    }
+    const limit = req.query.limit === undefined ? 50 : Number(req.query.limit);
+    const offset = req.query.offset === undefined ? 0 : Number(req.query.offset);
+    if (!Number.isInteger(limit) || limit < 1 || limit > OVERVIEW_MAX_LIMIT) {
+      throw createApiError.badRequest("Invalid limit");
+    }
+    if (!Number.isInteger(offset) || offset < 0) throw createApiError.badRequest("Invalid offset");
+    const search = typeof req.query.search === "string" ? req.query.search.trim() : "";
+    if (search.length > 200) throw createApiError.badRequest("Search is too long");
+    const now = Date.now();
+    const idleCut = idle ? now - OVERVIEW_IDLE_MS[idle] : undefined;
+    const activeTo = overviewInstant(req.query.activeTo, "activeTo");
+    const idleSince =
+      idleCut === undefined
+        ? activeTo
+        : activeTo === undefined
+          ? idleCut
+          : Math.min(idleCut, activeTo);
+
+    const data = await overviewPage(
+      {
+        userId,
+        status,
+        refusalsOnly: req.query.refusals === "true" || req.query.refusals === "1",
+        workflowId: typeof req.query.workflowId === "string" ? req.query.workflowId : undefined,
+        search: search || undefined,
+        idleSince,
+        activeSince: overviewInstant(req.query.activeFrom, "activeFrom"),
+        sort,
+        limit,
+        offset,
+      },
+      deps,
+    );
+    res.json({ success: true, data, timestamp: new Date().toISOString() });
   }),
 );
 

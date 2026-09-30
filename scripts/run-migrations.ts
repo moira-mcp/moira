@@ -322,7 +322,8 @@ const executionsWithError = sqlite
 
 if (executionsWithError.length > 0) {
   const updateStmt = sqlite.prepare(
-    "UPDATE workflowExecution SET errors = ? WHERE executionId = ?",
+    // The entry is a refusal, so the stored refusal count (migration 0047) counts it.
+    "UPDATE workflowExecution SET errors = ?, refusalCount = 1 WHERE executionId = ?",
   );
 
   for (const exec of executionsWithError) {

@@ -112,6 +112,13 @@ export interface WorkflowExecution {
    */
   gateWaiting?: boolean;
   /**
+   * Epoch ms of the run's last event of work (its visits' `enteredAt`/`leftAt`, `completedAt`), and
+   * how many journal entries are refusals — derived by `executionActivity` and stored by every writer
+   * that changes the facts they come from. Read-only for callers.
+   */
+  lastActivityAt?: number | null;
+  refusalCount?: number;
+  /**
    * The agent's open question to the person (`session await-user`), or null. It is cleared by the
    * agent's own next action and when the run leaves the node the question was asked on — never by a
    * person's edits — so it names what the person is asked while the agent stands there.

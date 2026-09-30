@@ -704,6 +704,37 @@ describe("waiting-for-you notifications", () => {
     expect(rows(executionId).filter((row) => row.kind === "first")).toHaveLength(1);
   });
 
+  test("the overview's batch read gives each run the mark the run page shows", async () => {
+    const sent = await runAtGate("notify-batch-sent");
+    const offGate = await runAtGate("notify-batch-off", {
+      gate: { label: "Approve", notify: "off", remindAfter: "30m" },
+    });
+    const question = await runAtGate("notify-batch-question", { gate: null });
+    await session({
+      action: "await-user",
+      executionId: question.executionId,
+      question: "Ship it?",
+    });
+    const left = await runAtGate("notify-batch-left");
+    await agentStep(left.engine, left.executionId, left.atGate);
+    at(0);
+    await sender().tick();
+
+    const ids = [sent, offGate, question, left].map((run) => run.executionId);
+    for (const now of [clock, clock + 60 * MINUTE]) {
+      const batch = queue().latestForCurrentWaits(ids, now);
+      const single = ids.flatMap((id) => {
+        const mark = queue().latestForCurrentWait(id, now);
+        return mark ? [[id, mark] as const] : [];
+      });
+      expect([...batch.entries()].sort()).toEqual(single.sort());
+    }
+    // Before the reminder is due the off gate has no mark, and the run that left its gate none.
+    expect([...queue().latestForCurrentWaits(ids, clock).keys()].sort()).toEqual(
+      [sent.executionId, question.executionId].sort(),
+    );
+  });
+
   test("a notification whose wait ended before it was sent is dropped, not delivered", async () => {
     const { engine, executionId, atGate } = await runAtGate("notify-superseded");
     await agentStep(engine, executionId, atGate);

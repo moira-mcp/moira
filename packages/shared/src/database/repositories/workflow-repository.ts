@@ -675,6 +675,39 @@ export class WorkflowRepository {
   // ===== Get Operations =====
 
   /**
+   * The definitions with these ids the user may view, with their names, in one query (the access
+   * decision is `mayView`, as for `get`); deleted and inaccessible workflows are left out.
+   */
+  async getManyForUser(
+    workflowIds: string[],
+    userId: string,
+  ): Promise<Map<string, { name: string; graph: WorkflowGraph }>> {
+    const result = new Map<string, { name: string; graph: WorkflowGraph }>();
+    if (workflowIds.length === 0) return result;
+    const rows = await this.db
+      .select({
+        id: workflow.id,
+        userId: workflow.userId,
+        visibility: workflow.visibility,
+        name: workflow.name,
+        graph: workflow.graph,
+      })
+      .from(workflow)
+      .where(
+        and(
+          inArray(workflow.id, [...new Set(workflowIds)]),
+          or(eq(workflow.deleted, false), isNull(workflow.deleted)),
+        ),
+      );
+    for (const row of rows) {
+      if (await this.mayView(userId, row)) {
+        result.set(row.id, { name: row.name, graph: parseStoredGraph(row.graph) });
+      }
+    }
+    return result;
+  }
+
+  /**
    * Get workflow by ID
    * Checks access: owner OR public OR shared (via sharedAccessChecker)
    */

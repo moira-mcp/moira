@@ -236,8 +236,8 @@ Every execution writer that can start such a wait does it through `enqueueWaitin
 kind)` with `waitKey` = `gate:<seq of the open waited visit>` (for a run with no open waited visit in its route,
 `gate:@<number of engine visits>`, which adjustments do not change) or `agent:<question id>`, so a repeated
 or replayed step, a re-presentation or a reconnect finds it already there, and a write refused by
-its guard queues nothing. `WorkflowRepository.save` and, in `ExecutionRepository`, `save` and `setAwaitingUser` begin their
-transactions `IMMEDIATE` (the attempt repository's transactions already did): with the web backend and
+its guard queues nothing. `WorkflowRepository.save` and, in `ExecutionRepository`, `save`, `setAwaitingUser`, `updateContext`,
+`appendError` and `cancelExecution` begin their transactions `IMMEDIATE` (the attempt repository's transactions already did): with the web backend and
 the sender both writing, a transaction that reads before it writes must hold the write lock from the
 start so SQLite's `busy_timeout` applies instead of failing with «database is locked». Catalog
 reconciliation's apply transaction is still deferred.
@@ -286,6 +286,29 @@ while it remains active, and driving it to the changed behavior. Assert ordinary
 complete diagnosis, recovery, and subsequent-step path on the same execution, including its recorded
 earlier route and the next required step. When a change cannot affect an in-flight execution, explain
 why in the pull request. Workflow version pinning and blanket migration do not replace this check.
+
+### Run activity and the overview
+
+Two columns of `workflowExecution` feed the overview's filters and order. `lastActivityAt` is the
+run's last event of work — the latest `enteredAt` or `leftAt` of its visits (a step handed in, a
+directive shown, a variable adjustment by the agent or a person) or `completedAt`; a note, reminders,
+a new parent, a journal entry, a lock or the agent's `await-user` do not move it. `refusalCount` is
+`countRefusals` over the journal. One function, `executionActivity`
+(`packages/shared/src/database/execution-activity.ts`), derives both, and every writer that stores the
+facts they come from stores them in the same write: the cursor writers through `executionRowFields`,
+`updateContext` with its adjustment visit, `appendError`, `clearErrors`, `cancelExecution` and the
+cancellation of a run whose start outcome is unknown. The in-memory repository derives them on read
+with the same function. Migration `0047_execution_activity` fills existing rows with the same formula
+in SQL and adds the indexes `(userId, state, lastActivityAt)` and `(parentExecutionId)`.
+
+`ExecutionOverviewRepository` (`packages/shared/src/database/repositories/execution-overview-repository.ts`)
+decides the overview's membership, nesting and order in SQL: the status predicate, the candidate set,
+roots (candidates with no candidate ancestor, found by a recursive CTE), each root's tree, the subtree
+facts (a match anywhere, the latest activity, a run waiting for its person) and paging over roots.
+`packages/web-backend/src/services/execution-overview.ts` projects the page's runs into rows in batch —
+the runs in one query, each flow's definition once (`WorkflowRepository.getManyForUser`), the
+notification marks in two (`ExecutionNotificationRepository.latestForCurrentWaits`) — so the number of
+queries does not grow with the page; the projection is `projectExecutionRun`.
 
 ### Bundled Workflow Reconciliation
 

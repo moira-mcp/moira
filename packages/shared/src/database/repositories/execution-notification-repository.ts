@@ -7,7 +7,7 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { and, asc, desc, eq, isNotNull, like, lte, ne, or } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, like, lte, ne, or } from "drizzle-orm";
 import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
 import { executionNotification, workflowExecution } from "../schema.js";
 import type * as schema from "../schema.js";
@@ -204,5 +204,47 @@ export class ExecutionNotificationRepository {
       .limit(1)
       .get();
     return row ? toRow(row) : null;
+  }
+
+  /**
+   * `latestForCurrentWait` for many runs at once, in two queries: the runs' wait fields and their
+   * notification rows. Runs without a current wait or without a row are left out.
+   */
+  latestForCurrentWaits(
+    executionIds: string[],
+    now: number = Date.now(),
+  ): Map<string, ExecutionNotificationRow> {
+    const result = new Map<string, ExecutionNotificationRow>();
+    if (executionIds.length === 0) return result;
+    const waits = new Map<string, string>();
+    for (const row of this.db
+      .select({
+        executionId: workflowExecution.executionId,
+        state: workflowExecution.state,
+        currentNodeId: workflowExecution.currentNodeId,
+        gateWaiting: workflowExecution.gateWaiting,
+        awaitingUser: workflowExecution.awaitingUser,
+        visits: workflowExecution.visits,
+      })
+      .from(workflowExecution)
+      .where(inArray(workflowExecution.executionId, executionIds))
+      .all()) {
+      const waitKey = currentPersonWait(row)?.waitKey;
+      if (waitKey) waits.set(row.executionId, waitKey);
+    }
+    if (waits.size === 0) return result;
+    const rows = this.db
+      .select()
+      .from(executionNotification)
+      .where(inArray(executionNotification.executionId, [...waits.keys()]))
+      .orderBy(desc(executionNotification.createdAt))
+      .all();
+    for (const row of rows) {
+      if (result.has(row.executionId) || waits.get(row.executionId) !== row.waitKey) continue;
+      // A reminder queued for later is not news yet.
+      if (row.kind === "remind" && row.state === "pending" && row.notBefore > now) continue;
+      result.set(row.executionId, toRow(row));
+    }
+    return result;
   }
 }

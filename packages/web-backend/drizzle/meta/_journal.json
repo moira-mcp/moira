@@ -337,6 +337,13 @@
       "when": 1790000540000,
       "tag": "0046_execution_notification",
       "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "7",
+      "when": 1790000600000,
+      "tag": "0047_execution_activity",
+      "breakpoints": true
     }
   ]
 }

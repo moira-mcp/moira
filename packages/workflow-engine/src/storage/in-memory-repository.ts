@@ -51,6 +51,7 @@ import type {
   ReconciledExecutionAttemptCounts,
   StartPreconditionCompletionResult,
 } from "../types/execution-attempt.js";
+import { executionActivity } from "@mcp-moira/shared/database/execution-activity";
 
 export class InMemoryRepository implements IDataRepository {
   private workflows = new Map<
@@ -373,17 +374,20 @@ export class InMemoryRepository implements IDataRepository {
 
   async getExecution(executionId: string): Promise<WorkflowExecution | null> {
     const execution = this.executions.get(executionId);
-    return execution ? structuredClone(execution) : null;
+    if (!execution) return null;
+    // The database stores these two on every write; derived on read here, from the same function.
+    const copy = structuredClone(execution);
+    return { ...copy, ...executionActivity(copy) };
   }
 
   async listExecutions(): Promise<WorkflowExecution[]> {
-    return Array.from(this.executions.values()).map((e) => ({ ...e }));
+    return Array.from(this.executions.values()).map((e) => ({ ...e, ...executionActivity(e) }));
   }
 
   async listUserExecutions(userId: string): Promise<WorkflowExecution[]> {
     return Array.from(this.executions.values())
       .filter((e) => e.userId === userId)
-      .map((e) => ({ ...e }));
+      .map((e) => ({ ...e, ...executionActivity(e) }));
   }
 
   async listExecutionsByWorkflowVersion(
@@ -399,7 +403,7 @@ export class InMemoryRepository implements IDataRepository {
           e.status === "completed" &&
           e.workflowVersion === workflowVersion,
       )
-      .map((e) => ({ ...e }));
+      .map((e) => ({ ...e, ...executionActivity(e) }));
   }
 
   async summarizeExecutionsByWorkflowVersion(
@@ -497,7 +501,7 @@ export class InMemoryRepository implements IDataRepository {
     executions = executions.slice(effectiveOffset, effectiveOffset + effectiveLimit);
 
     return {
-      executions: executions.map((e) => ({ ...e })),
+      executions: executions.map((e) => ({ ...e, ...executionActivity(e) })),
       total,
     };
   }
