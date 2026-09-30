@@ -628,6 +628,26 @@ export const workflowExecution = sqliteTable(
 );
 
 /**
+ * The change feed of execution rows (see execution-change.ts): every write of a run records one event
+ * here in its own transaction; readers follow `seq`. No foreign key — a `deleted` event outlives its
+ * run. Kept for a fixed 24 hours.
+ */
+export const executionChange = sqliteTable(
+  "executionChange",
+  {
+    seq: integer("seq").primaryKey({ autoIncrement: true }),
+    executionId: text("executionId").notNull(),
+    userId: text("userId").notNull(),
+    kind: text("kind").notNull(), // created | activity | status | lock | meta | deleted
+    at: integer("at").notNull(), // epoch ms
+  },
+  (table) => ({
+    userSeqIdx: index("execution_change_user_seq_idx").on(table.userId, table.seq),
+    atIdx: index("execution_change_at_idx").on(table.at),
+  }),
+);
+
+/**
  * Notifications that a run waits for its person. A row is written in the same transaction that puts
  * the run into the wait, keyed by the wait (`gate:<visit seq>` or `agent:<question id>`) and kind, so
  * a repeated or rolled-back transition never sends twice or for nothing. The MCP server's sender is

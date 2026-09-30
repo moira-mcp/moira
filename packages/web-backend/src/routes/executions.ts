@@ -35,6 +35,7 @@ import {
   countRefusals,
   latestRefusal,
   ExecutionOverviewRepository,
+  ExecutionChangeRepository,
   ExecutionRepository,
   WorkflowRepository,
   getSqliteInstance,
@@ -42,6 +43,7 @@ import {
   type OverviewStatusFilter,
 } from "@mcp-moira/shared";
 import { overviewPage, overviewRows } from "../services/execution-overview.js";
+import { changeCursor, changesAfter } from "../services/execution-change-stream.js";
 
 /**
  * Whether this user may act on the execution **as its owner would**.
@@ -497,6 +499,23 @@ router.get(
       },
       deps,
     );
+    res.json({ success: true, data, timestamp: new Date().toISOString() });
+  }),
+);
+
+/**
+ * GET /api/executions/overview/changes?after=<seq>
+ * The signed-in user's run changes after a cursor, for a page that cannot hold the live stream:
+ * `{ reset: false, events: [{ seq, executionId, kind }], lastSeq }`, or `{ reset: true }` when events
+ * after the cursor are no longer kept.
+ */
+router.get(
+  "/overview/changes",
+  asyncHandler(async (req: Request, res: Response) => {
+    const userId = (req as AuthenticatedRequest).userId;
+    const cursor = changeCursor(req);
+    if (cursor === undefined) throw createApiError.badRequest("after is required");
+    const data = changesAfter(new ExecutionChangeRepository(getSqliteInstance()), userId, cursor);
     res.json({ success: true, data, timestamp: new Date().toISOString() });
   }),
 );

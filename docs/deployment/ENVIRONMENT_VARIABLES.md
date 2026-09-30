@@ -62,6 +62,9 @@ An exception for the config module itself is configured in `.eslintrc.json` over
 **TESTING/DEVELOPMENT:**
 
 - DISABLE_RATE_LIMIT=true - disables rate limiting (used in Docker for tests)
+- `OVERVIEW_STREAM_RECHECK_MS` - how often an open overview stream re-checks its session, in
+  milliseconds. Unset or not a positive integer → 120000 (two minutes). The test environments
+  (`.env.ci`, `.env.local.example`) set 2000. Getter: `getOverviewStreamRecheckMs()`.
 
 **CLIENT ADDRESS AND RATE LIMITS:**
 

@@ -26,6 +26,7 @@ export function parseStoredGraph(json: string): WorkflowGraph {
 }
 import { createLogger } from "../../logging/logger.js";
 import type * as schema from "../schema.js";
+import { recordExecutionsDeleted } from "../execution-change.js";
 import { randomUUID } from "node:crypto";
 import {
   generateSlugFromName,
@@ -1097,10 +1098,23 @@ export class WorkflowRepository {
   // ===== Delete Operations =====
 
   async delete(workflowId: string, userId: string): Promise<void> {
-    // Hard delete - only owner can delete
-    await this.db
-      .delete(workflow)
-      .where(and(eq(workflow.id, workflowId), eq(workflow.userId, userId)));
+    // Hard delete - only owner can delete. Its runs go with it (cascade): the change feed records
+    // them as deleted in the same transaction, before the delete.
+    this.db.transaction(
+      (tx) => {
+        const owned = tx
+          .select({ id: workflow.id })
+          .from(workflow)
+          .where(and(eq(workflow.id, workflowId), eq(workflow.userId, userId)))
+          .get();
+        if (!owned) return;
+        recordExecutionsDeleted(tx, { workflowId });
+        tx.delete(workflow)
+          .where(and(eq(workflow.id, workflowId), eq(workflow.userId, userId)))
+          .run();
+      },
+      { behavior: "immediate" },
+    );
   }
 
   async softDelete(workflowId: string, userId: string): Promise<boolean> {

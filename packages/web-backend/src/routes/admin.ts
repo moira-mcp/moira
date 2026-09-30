@@ -903,7 +903,7 @@ router.delete(
       throw createApiError.badRequest("Cannot delete your own account");
     }
 
-    const { user, getDatabase } = await import("@mcp-moira/shared");
+    const { user, getDatabase, deleteUserAccount } = await import("@mcp-moira/shared");
     const { eq } = await import("drizzle-orm");
     const db = getDatabase();
 
@@ -911,8 +911,8 @@ router.delete(
     const [userData] = await db.select().from(user).where(eq(user.id, id)).limit(1);
     const userEmail = userData?.email || "unknown";
 
-    // Delete user (cascades to workflows and settings)
-    await db.delete(user).where(eq(user.id, id));
+    // Delete user (cascades to workflows, runs and settings; the change feed records the runs)
+    deleteUserAccount(db, id);
 
     // Audit logging
     await logAuditEvent(repository, req, {

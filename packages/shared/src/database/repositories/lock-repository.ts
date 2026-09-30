@@ -5,7 +5,8 @@
 
 import { eq, and, like } from "drizzle-orm";
 import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
-import { executionLock } from "../schema.js";
+import { executionLock, workflowExecution } from "../schema.js";
+import { recordExecutionChange } from "../execution-change.js";
 import type * as schema from "../schema.js";
 
 export type PublicLockStatus = "active" | "unlocked";
@@ -38,16 +39,38 @@ export class LockRepository {
   constructor(private db: BetterSQLite3Database<typeof schema>) {}
 
   async create(input: CreateLockInput): Promise<void> {
-    await this.db.insert(executionLock).values({
-      id: input.id,
-      executionId: input.executionId,
-      nodeId: input.nodeId,
-      reason: input.reason,
-      lockedBy: input.lockedBy,
-      pin: input.pin,
-      status: input.status ?? "active",
-      createdAt: input.createdAt,
-    });
+    this.db.transaction(
+      (tx) => {
+        tx.insert(executionLock)
+          .values({
+            id: input.id,
+            executionId: input.executionId,
+            nodeId: input.nodeId,
+            reason: input.reason,
+            lockedBy: input.lockedBy,
+            pin: input.pin,
+            status: input.status ?? "active",
+            createdAt: input.createdAt,
+          })
+          .run();
+        this.recordLockChange(tx, input.executionId);
+      },
+      { behavior: "immediate" },
+    );
+  }
+
+  /**
+   * Record a `lock` event for the run: every write of a lock's status changes whether the run is
+   * shown as locked. Each status write is its own small transaction — lock delivery waits on the
+   * network between creation and activation, so the lock never shares the run's writes.
+   */
+  private recordLockChange(tx: BetterSQLite3Database<typeof schema>, executionId: string): void {
+    const run = tx
+      .select({ userId: workflowExecution.userId })
+      .from(workflowExecution)
+      .where(eq(workflowExecution.executionId, executionId))
+      .get();
+    if (run) recordExecutionChange(tx, { executionId, userId: run.userId, kind: "lock" });
   }
 
   async getById(lockId: string): Promise<LockRecord | null> {
@@ -81,7 +104,22 @@ export class LockRepository {
     if (extra?.unlockedAt !== undefined) {
       updates.unlockedAt = extra.unlockedAt;
     }
-    await this.db.update(executionLock).set(updates).where(eq(executionLock.id, lockId));
+    this.db.transaction(
+      (tx) => {
+        const lock = tx
+          .select({ executionId: executionLock.executionId })
+          .from(executionLock)
+          .where(eq(executionLock.id, lockId))
+          .get();
+        const result = tx
+          .update(executionLock)
+          .set(updates)
+          .where(eq(executionLock.id, lockId))
+          .run();
+        if (lock && result.changes > 0) this.recordLockChange(tx, lock.executionId);
+      },
+      { behavior: "immediate" },
+    );
   }
 
   async getActiveByExecutionPrefix(

@@ -188,3 +188,14 @@ export type {
   OverviewStatus,
   OverviewStatusFilter,
 } from "./repositories/execution-overview-repository.js";
+export {
+  EXECUTION_CHANGE_RETENTION_MS,
+  executionChangeKind,
+  recordExecutionChange,
+  recordExecutionsDeleted,
+  trackExecutionChange,
+} from "./execution-change.js";
+export type { ExecutionChangeFacts, ExecutionChangeKind } from "./execution-change.js";
+export { deleteUserAccount } from "./user-deletion.js";
+export { ExecutionChangeRepository } from "./repositories/execution-change-repository.js";
+export type { ExecutionChangeEvent } from "./repositories/execution-change-repository.js";

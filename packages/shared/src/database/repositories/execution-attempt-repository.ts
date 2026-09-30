@@ -22,6 +22,7 @@ import {
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { executionRowFields } from "../execution-row.js";
 import { enqueueWaitingNotification } from "../execution-notification.js";
+import { recordExecutionChange, trackExecutionChange } from "../execution-change.js";
 import { executionActivity, parseStoredVisits } from "../execution-activity.js";
 
 import * as schema from "../schema.js";
@@ -65,6 +66,16 @@ function asAttempt(row: AttemptRow): ExecutionAttempt {
 
 export class ExecutionAttemptRepository {
   constructor(private readonly sqlite: Database.Database) {}
+
+  /** Run a write of one existing row and record its change in the feed (same transaction). */
+  private tracked<T extends { changes: number }>(executionId: string, write: () => T): T {
+    return trackExecutionChange(
+      drizzle(this.sqlite, { schema }),
+      executionId,
+      write,
+      (written) => written.changes > 0,
+    );
+  }
 
   /** Queue the person's notification if the run just written waits for them (same transaction). */
   private enqueueNotification(executionId: string): void {
@@ -220,6 +231,11 @@ export class ExecutionAttemptRepository {
             execution.updatedAt,
             execution.completedAt,
           );
+        recordExecutionChange(drizzle(this.sqlite, { schema }), {
+          executionId: input.execution.executionId,
+          userId: input.execution.userId,
+          kind: "created",
+        });
         this.enqueueNotification(input.execution.executionId);
         const fence = row.fence + 1;
         const changed = this.sqlite
@@ -334,24 +350,26 @@ export class ExecutionAttemptRepository {
           completedAt: error.timestamp,
           errors,
         });
-        const changed = this.sqlite
-          .prepare(
-            `UPDATE workflowExecution SET state = 'completed', gateWaiting = 0, awaitingUser = NULL,
+        const changed = this.tracked(executionId, () =>
+          this.sqlite
+            .prepare(
+              `UPDATE workflowExecution SET state = 'completed', gateWaiting = 0, awaitingUser = NULL,
              error = ?, errors = ?, lastActivityAt = ?, refusalCount = ?,
              completedAt = ?, updatedAt = ?
              WHERE executionId = ? AND userId = ? AND state = 'running' AND revision = ?`,
-          )
-          .run(
-            error.message,
-            JSON.stringify(errors),
-            activity.lastActivityAt,
-            activity.refusalCount,
-            error.timestamp,
-            error.timestamp,
-            executionId,
-            userId,
-            expectedRevision,
-          );
+            )
+            .run(
+              error.message,
+              JSON.stringify(errors),
+              activity.lastActivityAt,
+              activity.refusalCount,
+              error.timestamp,
+              error.timestamp,
+              executionId,
+              userId,
+              expectedRevision,
+            ),
+        );
         if (changed.changes !== 1) return false;
         this.sqlite
           .prepare(
@@ -602,30 +620,32 @@ export class ExecutionAttemptRepository {
         const execution = executionRowFields(input.execution);
         const expected = executionRowFields(input.expectedExecution);
         const now = Date.now();
-        const update = this.sqlite
-          .prepare(
-            `UPDATE workflowExecution SET state = ?, currentNodeId = ?, waitingForInputNodeId = ?,
+        const update = this.tracked(input.execution.executionId, () =>
+          this.sqlite
+            .prepare(
+              `UPDATE workflowExecution SET state = ?, currentNodeId = ?, waitingForInputNodeId = ?,
                context = ?, visits = ?, gateWaiting = ?, awaitingUser = NULL, updatedAt = ?,
                lastActivityAt = ?, revision = revision + 1
              WHERE executionId = ? AND revision = ? AND state = ?
                AND currentNodeId IS ? AND waitingForInputNodeId IS ? AND context = ?`,
-          )
-          .run(
-            execution.state,
-            execution.currentNodeId,
-            execution.waitingForInputNodeId,
-            execution.context,
-            execution.visits,
-            execution.gateWaiting,
-            now,
-            execution.lastActivityAt,
-            input.execution.executionId,
-            input.expectedExecution.revision,
-            expected.state,
-            expected.currentNodeId,
-            expected.waitingForInputNodeId,
-            expected.context,
-          );
+            )
+            .run(
+              execution.state,
+              execution.currentNodeId,
+              execution.waitingForInputNodeId,
+              execution.context,
+              execution.visits,
+              execution.gateWaiting,
+              now,
+              execution.lastActivityAt,
+              input.execution.executionId,
+              input.expectedExecution.revision,
+              expected.state,
+              expected.currentNodeId,
+              expected.waitingForInputNodeId,
+              expected.context,
+            ),
+        );
         if (update.changes !== 1) return "execution_changed";
         this.enqueueNotification(input.execution.executionId);
 
@@ -659,37 +679,39 @@ export class ExecutionAttemptRepository {
         const execution = executionRowFields(input.execution);
         const expectedExecution = executionRowFields(input.expectedExecution);
         const noteChanged = input.execution.note !== input.expectedExecution.note;
-        const update = this.sqlite
-          .prepare(
-            `UPDATE workflowExecution SET state = ?, currentNodeId = ?, waitingForInputNodeId = ?,
+        const update = this.tracked(input.execution.executionId, () =>
+          this.sqlite
+            .prepare(
+              `UPDATE workflowExecution SET state = ?, currentNodeId = ?, waitingForInputNodeId = ?,
              context = ?, visits = ?, note = CASE WHEN ? = 1 THEN ? ELSE note END,
              gateWaiting = ?, awaitingUser = NULL, updatedAt = ?, completedAt = ?,
              lastActivityAt = ?, revision = revision + 1
            WHERE executionId = ? AND revision = ? AND state = ?
              AND currentNodeId IS ? AND waitingForInputNodeId IS ? AND context = ?
              AND (? = 0 OR note IS ?)`,
-          )
-          .run(
-            execution.state,
-            execution.currentNodeId,
-            execution.waitingForInputNodeId,
-            execution.context,
-            execution.visits,
-            noteChanged ? 1 : 0,
-            execution.note,
-            execution.gateWaiting,
-            execution.updatedAt,
-            execution.completedAt,
-            execution.lastActivityAt,
-            input.execution.executionId,
-            input.execution.revision,
-            expectedExecution.state,
-            expectedExecution.currentNodeId,
-            expectedExecution.waitingForInputNodeId,
-            expectedExecution.context,
-            noteChanged ? 1 : 0,
-            expectedExecution.note,
-          );
+            )
+            .run(
+              execution.state,
+              execution.currentNodeId,
+              execution.waitingForInputNodeId,
+              execution.context,
+              execution.visits,
+              noteChanged ? 1 : 0,
+              execution.note,
+              execution.gateWaiting,
+              execution.updatedAt,
+              execution.completedAt,
+              execution.lastActivityAt,
+              input.execution.executionId,
+              input.execution.revision,
+              expectedExecution.state,
+              expectedExecution.currentNodeId,
+              expectedExecution.waitingForInputNodeId,
+              expectedExecution.context,
+              noteChanged ? 1 : 0,
+              expectedExecution.note,
+            ),
+        );
         if (update.changes !== 1) return false;
         this.enqueueNotification(input.execution.executionId);
         const now = Date.now();

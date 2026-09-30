@@ -5,7 +5,8 @@ import { describe, expect, test } from "@jest/globals";
 /**
  * The execution row carries columns derived from the run's state (`gateWaiting`, the agent's open
  * question `awaitingUser`, which a move off its node clears, and `lastActivityAt` / `refusalCount`,
- * derived from the visits, completion and journal a writer stores). A writer
+ * derived from the visits, completion and journal a writer stores) and an event in the change feed
+ * (`executionChange`) for every write. A writer
  * that stores the cursor without them leaves a stale flag no test of another writer would notice,
  * so the set of writers is pinned here. Adding a writer fails this test until the writer is added
  * to the inventory below — which is the moment to decide what it must keep true.
@@ -53,9 +54,9 @@ const INVENTORY: Record<string, { sites: number; writers: string }> = {
     sites: 1,
     writers: "applyWorkflow absent lifecycle (catalog removal cascades to executions)",
   },
-  "packages/web-backend/src/routes/admin.ts": {
+  "packages/shared/src/database/user-deletion.ts": {
     sites: 1,
-    writers: "admin user deletion (cascades to the user's executions)",
+    writers: "deleteUserAccount (cascades to the user's executions and their workflows' runs)",
   },
   "scripts/run-migrations.ts": {
     sites: 3,

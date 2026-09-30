@@ -1145,6 +1145,44 @@ Per-node-type checks that AJV schema cannot perform:
 - **Output-scope declaration (AgentDirectiveNode / TeleportNode)** — Blocking errors. Every name in `inputSchema.globalInputs` must exist in the workflow `variableRegistry` (`declares global write '<name>' which is not in the workflow variableRegistry`); a name must not be both a declared global write and a node-local output, i.e. a `globalInputs` name cannot also appear in `inputSchema.properties` (`local output '<name>' shadows the declared global write of the same name`). Non-string `globalInputs` entries are rejected.
 - **ExpressionNode** — each expression is parsed before execution; targets must be safe bare names, and member reads support own-property paths plus bounded fixed or variable array indexes.
 
+### Change feed and live updates
+
+The overview learns about changes from the table `executionChange` (migration
+`0048_execution_change`): one row per change of a run — `seq` (autoincrement), `executionId`,
+`userId`, `kind`, `at` — indexed by `(userId, seq)` and `at`, without a foreign key, so a `deleted`
+event outlives its run. `packages/shared/src/database/execution-change.ts` owns the kinds and the
+decision between them (`executionChangeKind`: a change of state, gate flag, agent question or refusal
+count is `status`; else a moved `lastActivityAt` is `activity`; else `meta`) and three writers, all
+called inside the writer's own transaction so the row and its event commit together:
+
+- `recordExecutionChange` — one event; an insert of a run records `created`;
+- `trackExecutionChange` — wraps a write of an existing row, reads its facts before and after and
+  records the decided kind only when the write changed the row (a write refused by its guard records
+  nothing);
+- `recordExecutionsDeleted` — records `deleted` for the runs a delete is about to remove, by workflow,
+  by user (their own runs and everyone's runs of the workflows they own) or by ids.
+
+Every writer of `workflowExecution` goes through them: the cursor writers, `updateContext`,
+`setAwaitingUser`, `appendError`, `clearErrors`, note, parent and reminder writes, both cancellations
+and the `gateWaiting` recompute; `ExecutionRepository.delete`, the retention cleanup,
+`WorkflowRepository.delete`, catalog reconciliation's workflow removal and `deleteUserAccount`
+(`packages/shared/src/database/user-deletion.ts`, used by the admin's user deletion) record `deleted`
+before their cascade. `LockRepository.create` and `updateStatus` record `lock` in their own small
+transaction. `ExecutionChangeRepository` reads the feed (`since`, `forUserAfter`, `latestSeq`,
+`isExpired`) and trims it.
+
+In the web backend, `packages/web-backend/src/services/execution-change-stream.ts` holds one
+`ExecutionChangeHub` per process, started with the server: every second it reads the events after
+the last one it handed out and passes each only to its owner's open streams; every hour it trims the
+feed to 24 hours. A failed read or trim is logged and retried on the next tick.
+`openExecutionChangeStream` serves `GET /api/executions/overview/stream` (catch-up from the cursor;
+`reset` when the cursor is expired — older than the kept events or ahead of the latest one — or when
+1000 or more events were missed; heartbeat, session re-check through `isSessionStillValid`, five
+streams per user) and `changesAfter` serves the poll, reading the latest position before the events
+and returning events only up to it, so an event committed in between comes with the next poll. The
+stream route is mounted before the rate-limited `/api/executions` router. Both nginx configs route
+`location ^~ /api/executions/overview/stream` with buffering off, HTTP/1.1 and hour-long timeouts.
+
 ## Web UI Architecture
 
 ### Backend (Express - internal port 4201, accessed via nginx proxy)

@@ -5,6 +5,7 @@ import type { WorkflowGraph } from "@mcp-moira/workflow-engine";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import * as schema from "../schema.js";
 import { recomputeGateWaiting, storedGraphNodes } from "../gate-waiting.js";
+import { recordExecutionsDeleted } from "../execution-change.js";
 import type { ManagedResourceState } from "../../services/managed-resource-reconciler.js";
 import { AuditAction } from "../../audit/actions.js";
 
@@ -743,6 +744,10 @@ export class WorkflowReconciliationRepository {
   private applyWorkflow(operation: WorkflowApplyOperation, now: number): void {
     if (operation.state.lifecycle === "absent") {
       if (operation.workflowId) {
+        // The workflow's runs go with it (cascade): record them as deleted first, in this transaction.
+        recordExecutionsDeleted(drizzle(this.sqlite, { schema }), {
+          workflowId: operation.workflowId,
+        });
         const result = this.sqlite
           .prepare("DELETE FROM workflow WHERE id = ? AND userId = ?")
           .run(operation.workflowId, operation.owner);

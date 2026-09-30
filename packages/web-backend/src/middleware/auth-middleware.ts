@@ -139,6 +139,29 @@ async function validateAuth(
 }
 
 /**
+ * Whether the session a request was admitted with still admits it: the session exists and its user
+ * is neither blocked nor otherwise denied. For long-lived responses that re-check themselves.
+ */
+export async function isSessionStillValid(headers: Request["headers"]): Promise<boolean> {
+  const session = await auth.api.getSession({ headers: toHeaders(headers) });
+  if (!session?.user) return false;
+  const [userData] = await getDatabase()
+    .select()
+    .from(user)
+    .where(eq(user.id, session.user.id))
+    .limit(1);
+  if (!userData) return false;
+  return (
+    getAccountAccessDenial({
+      userId: userData.id,
+      blocked: !!userData.blocked,
+      approvedAt: userData.approvedAt,
+      emailVerified: !!userData.emailVerified,
+    }) === null
+  );
+}
+
+/**
  * Basic auth - requires valid session, checks blocked status
  * Does NOT require email verification
  */

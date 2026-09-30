@@ -2643,6 +2643,63 @@ block's label) and never by a node id. Invalid parameters return 400.
 
 Authentication: Required
 
+### GET /api/executions/overview/stream
+
+Live changes of the signed-in user's runs as Server-Sent Events, for keeping the overview current.
+An event carries the run id and the kind of change only; the client refetches the affected rows
+through `GET /api/executions/overview?ids=`.
+
+Headers:
+
+- `Last-Event-ID` (or the `after` query parameter): the number of the last event the client saw. The
+  stream first sends the user's events after it, then the live ones. When 1000 or more events were
+  missed, it sends `reset` instead.
+
+Events:
+
+- `ready` — a stream opened without a cursor; its `id` is the position to resume from.
+- `change` — `id` is the event number, `data` is `{ executionId, kind }` with `kind` one of `created`,
+  `activity`, `status`, `lock`, `meta` and `deleted`: `status` when what the run waits for or how it
+  stands changed, `activity` when its last event of work moved, `lock` for a lock's status, `meta`
+  for a note, reminders, a new parent or another write that changes neither.
+- `reset` — the stream cannot replay what happened after the cursor: those events are no longer kept
+  (the feed keeps 24 hours), there were 1000 or more of them, or the cursor lies ahead of the feed
+  (the database was restored from an older copy). The client reloads the whole list; the event's `id`
+  is the position to resume from.
+- `close` — the session ended or the user was blocked; the server closes the stream.
+- A `: heartbeat` comment every 25 seconds.
+
+The session and the user's standing are re-checked every `OVERVIEW_STREAM_RECHECK_MS` (default two
+minutes). A user may hold five open streams; the sixth gets `429` with code `TOO_MANY_STREAMS`. The
+stream is not counted by the `/api` rate limit. A stream that fails to read its catch-up ends, and the
+client reconnects with its cursor.
+
+Authentication: Required
+
+### GET /api/executions/overview/changes
+
+The same changes for a client that cannot hold the stream.
+
+Query parameters:
+
+- `after` (required): the number of the last event seen.
+
+Response:
+
+```typescript
+{
+  success: boolean;
+  data:
+    | { reset: false; events: Array<{ seq: number; executionId: string; kind: string }>; lastSeq: number }
+    | { reset: true }; // events after the cursor are no longer kept, or the cursor lies ahead of the feed: reload the list
+}
+```
+
+`lastSeq` is the cursor for the next poll. At most 1000 events are returned per call; when that many
+come back, `lastSeq` is the last of them and the next poll continues from there.
+
+Authentication: Required
+
 ### GET /api/executions/:id
 
 Get execution details with full context.

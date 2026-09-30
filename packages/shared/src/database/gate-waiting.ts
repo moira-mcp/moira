@@ -16,6 +16,7 @@ import type { WorkflowGraph } from "@mcp-moira/workflow-engine";
 import { humanGateChanged, humanGateWaiting } from "@mcp-moira/workflow-engine/human-gate";
 import { workflow, workflowExecution } from "./schema.js";
 import { enqueueWaitingNotification } from "./execution-notification.js";
+import { trackExecutionChange } from "./execution-change.js";
 import type * as schema from "./schema.js";
 
 type GraphNodes = Pick<WorkflowGraph, "nodes">;
@@ -83,10 +84,17 @@ export function recomputeGateWaiting(
       globalContext,
     });
     if (waiting === row.gateWaiting) continue;
-    db.update(workflowExecution)
-      .set({ gateWaiting: waiting })
-      .where(eq(workflowExecution.executionId, row.executionId))
-      .run();
+    trackExecutionChange(
+      db,
+      row.executionId,
+      () =>
+        db
+          .update(workflowExecution)
+          .set({ gateWaiting: waiting })
+          .where(eq(workflowExecution.executionId, row.executionId))
+          .run(),
+      (written) => written.changes > 0,
+    );
     // A run the new definition puts into a person's wait is announced like any arrival.
     if (waiting) enqueueWaitingNotification(db, row.executionId);
     changed += 1;

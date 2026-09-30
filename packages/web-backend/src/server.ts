@@ -39,7 +39,13 @@ import {
 setGlobalService(Service.WEB_BACKEND);
 import { setupCorsMiddleware } from "./middleware/cors-middleware.js";
 import { setupErrorMiddleware } from "./middleware/error-middleware.js";
-import { requireAuth, optionalAuth } from "./middleware/auth-middleware.js";
+import { requireAuth, optionalAuth, isSessionStillValid } from "./middleware/auth-middleware.js";
+import {
+  getExecutionChangeHub,
+  openExecutionChangeStream,
+  streamRecheckMs,
+} from "./services/execution-change-stream.js";
+import type { AuthenticatedRequest } from "./types/express-types.js";
 import { requireAdmin } from "./middleware/admin-middleware.js";
 import {
   requireCapability,
@@ -95,7 +101,11 @@ import { auth } from "./auth.js";
 import { getCodespaceResourceService } from "./services/codespace-resource-service.js";
 import { getCodespaceOperationService } from "./services/codespace-operation-service.js";
 import { getCodespaceObservabilityService } from "./services/codespace-services.js";
-import { getCodespaceResourcePolicy } from "@mcp-moira/shared";
+import {
+  getCodespaceResourcePolicy,
+  ExecutionChangeRepository,
+  getSqliteInstance,
+} from "@mcp-moira/shared";
 
 // ES module compatibility
 const __filename = fileURLToPath(import.meta.url);
@@ -397,6 +407,16 @@ class MoiraApiServer {
     this.app.use("/api/workflows", apiLimiter, requireAuth, workflowSharingRoutes);
     this.app.use("/api/workflows", apiLimiter, requireAuth, workflowRoutes);
     this.app.use("/api/invites", apiLimiter, optionalAuth, inviteAcceptRoutes); // Auth optional for GET, checked inside for POST
+    // The live stream of the overview is one long request per open page; it is kept out of the
+    // `/api` rate limit, which counts requests, and is limited per user by the stream itself.
+    this.app.get("/api/executions/overview/stream", requireAuth, (req, res) => {
+      openExecutionChangeStream(req, res, (req as AuthenticatedRequest).userId, {
+        hub: getExecutionChangeHub(),
+        feed: new ExecutionChangeRepository(getSqliteInstance()),
+        sessionStillValid: (request) => isSessionStillValid(request.headers),
+        recheckMs: streamRecheckMs(),
+      });
+    });
     this.app.use("/api/executions", apiLimiter, requireAuth, executionRoutes);
     this.app.use("/api/settings", apiLimiter, requireAuth, settingsRoutes);
     this.app.use(
@@ -483,6 +503,8 @@ class MoiraApiServer {
       // Start periodic execution-retention cleanup (no-op unless
       // executions.retention_days > 0).
       getExecutionRetentionService().start();
+      // The overview's live updates: this process's watcher of the change feed and its trimming.
+      getExecutionChangeHub().start();
       getCodespaceResourceService()?.start();
       getCodespaceOperationService()?.start();
       getCodespaceObservabilityService().start(getCodespaceResourcePolicy().reconcileIntervalMs);

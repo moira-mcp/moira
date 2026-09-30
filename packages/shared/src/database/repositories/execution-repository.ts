@@ -16,6 +16,11 @@ import { awaitingUserAfterWrite, executionRowFields } from "../execution-row.js"
 import { executionActivity, parseStoredErrors, parseStoredVisits } from "../execution-activity.js";
 
 import { enqueueWaitingNotification } from "../execution-notification.js";
+import {
+  recordExecutionChange,
+  recordExecutionsDeleted,
+  trackExecutionChange,
+} from "../execution-change.js";
 
 const EXECUTION_LIST_CONFIG: ListQueryConfig<"createdAt" | "updatedAt"> = {
   table: workflowExecution,
@@ -74,35 +79,41 @@ export class ExecutionRepository {
       // together, so a write refused by the revision guard queues nothing.
       const changes = this.db.transaction(
         (tx) => {
-          const result = tx
-            .update(workflowExecution)
-            .set({
-              state: row.state,
-              currentNodeId: row.currentNodeId,
-              waitingForInputNodeId: row.waitingForInputNodeId,
-              context: row.context,
-              error: row.error,
-              errors: row.errors,
-              note: row.note,
-              updatedAt,
-              completedAt,
-              revision: expectedRevision + 1,
-              reminders: row.reminders,
-              visits: row.visits,
-              gateWaiting: row.gateWaiting === 1,
-              lastActivityAt: row.lastActivityAt,
-              refusalCount: row.refusalCount,
-              // The agent's question is not the saver's to write: it stays while the run stays on its
-              // node and is cleared when the run leaves it or finishes (see awaitingUserAfterMove).
-              awaitingUser: awaitingUserAfterWrite(row.state, row.currentNodeId),
-            })
-            .where(
-              and(
-                eq(workflowExecution.executionId, execution.executionId),
-                eq(workflowExecution.revision, expectedRevision),
-              ),
-            )
-            .run();
+          const result = trackExecutionChange(
+            tx,
+            execution.executionId,
+            () =>
+              tx
+                .update(workflowExecution)
+                .set({
+                  state: row.state,
+                  currentNodeId: row.currentNodeId,
+                  waitingForInputNodeId: row.waitingForInputNodeId,
+                  context: row.context,
+                  error: row.error,
+                  errors: row.errors,
+                  note: row.note,
+                  updatedAt,
+                  completedAt,
+                  revision: expectedRevision + 1,
+                  reminders: row.reminders,
+                  visits: row.visits,
+                  gateWaiting: row.gateWaiting === 1,
+                  lastActivityAt: row.lastActivityAt,
+                  refusalCount: row.refusalCount,
+                  // The agent's question is not the saver's to write: it stays while the run stays on its
+                  // node and is cleared when the run leaves it or finishes (see awaitingUserAfterMove).
+                  awaitingUser: awaitingUserAfterWrite(row.state, row.currentNodeId),
+                })
+                .where(
+                  and(
+                    eq(workflowExecution.executionId, execution.executionId),
+                    eq(workflowExecution.revision, expectedRevision),
+                  ),
+                )
+                .run(),
+            (written) => written.changes > 0,
+          );
           if (result.changes > 0) enqueueWaitingNotification(tx, execution.executionId);
           return result.changes;
         },
@@ -146,6 +157,11 @@ export class ExecutionRepository {
               completedAt,
             })
             .run();
+          recordExecutionChange(tx, {
+            executionId: execution.executionId,
+            userId: execution.userId,
+            kind: "created",
+          });
           enqueueWaitingNotification(tx, execution.executionId);
         },
         { behavior: "immediate" },
@@ -413,7 +429,13 @@ export class ExecutionRepository {
   }
 
   async delete(executionId: string): Promise<void> {
-    await this.db.delete(workflowExecution).where(eq(workflowExecution.executionId, executionId));
+    this.db.transaction(
+      (tx) => {
+        recordExecutionsDeleted(tx, { executionIds: [executionId] });
+        tx.delete(workflowExecution).where(eq(workflowExecution.executionId, executionId)).run();
+      },
+      { behavior: "immediate" },
+    );
   }
 
   /**
@@ -459,7 +481,13 @@ export class ExecutionRepository {
 
     if (toDelete.length === 0) return 0;
 
-    await this.db.delete(workflowExecution).where(inArray(workflowExecution.executionId, toDelete));
+    this.db.transaction(
+      (tx) => {
+        recordExecutionsDeleted(tx, { executionIds: toDelete });
+        tx.delete(workflowExecution).where(inArray(workflowExecution.executionId, toDelete)).run();
+      },
+      { behavior: "immediate" },
+    );
     return toDelete.length;
   }
 
@@ -468,13 +496,21 @@ export class ExecutionRepository {
    * Used by session(action: "update-note") and magic variable execution_note
    */
   async updateNote(executionId: string, note: string): Promise<void> {
-    await this.db
-      .update(workflowExecution)
-      .set({
-        note,
-        updatedAt: new Date(),
-      })
-      .where(eq(workflowExecution.executionId, executionId));
+    this.db.transaction(
+      (tx) =>
+        trackExecutionChange(
+          tx,
+          executionId,
+          () =>
+            tx
+              .update(workflowExecution)
+              .set({ note, updatedAt: new Date() })
+              .where(eq(workflowExecution.executionId, executionId))
+              .run(),
+          (written) => written.changes > 0,
+        ),
+      { behavior: "immediate" },
+    );
   }
 
   /**
@@ -504,20 +540,26 @@ export class ExecutionRepository {
     // The raise and the person's notification commit together.
     const changes = this.db.transaction(
       (tx) => {
-        const result = tx
-          .update(workflowExecution)
-          .set({ awaitingUser, updatedAt: new Date() })
-          .where(
-            and(
-              eq(workflowExecution.executionId, executionId),
-              eq(workflowExecution.userId, userId),
-              ne(workflowExecution.state, "completed"),
-              execution.currentNodeId === null
-                ? isNull(workflowExecution.currentNodeId)
-                : eq(workflowExecution.currentNodeId, execution.currentNodeId),
-            ),
-          )
-          .run();
+        const result = trackExecutionChange(
+          tx,
+          executionId,
+          () =>
+            tx
+              .update(workflowExecution)
+              .set({ awaitingUser, updatedAt: new Date() })
+              .where(
+                and(
+                  eq(workflowExecution.executionId, executionId),
+                  eq(workflowExecution.userId, userId),
+                  ne(workflowExecution.state, "completed"),
+                  execution.currentNodeId === null
+                    ? isNull(workflowExecution.currentNodeId)
+                    : eq(workflowExecution.currentNodeId, execution.currentNodeId),
+                ),
+              )
+              .run(),
+          (written) => written.changes > 0,
+        );
         if (result.changes > 0 && question) enqueueWaitingNotification(tx, executionId);
         return result.changes;
       },
@@ -596,20 +638,31 @@ export class ExecutionRepository {
           SELECT 1 FROM ancestors WHERE executionId = ${executionId}
         )`
       : sql`1 = 1`;
-    const result = await this.db
-      .update(workflowExecution)
-      .set({ parentExecutionId, updatedAt: new Date() })
-      .where(
-        and(
-          eq(workflowExecution.executionId, executionId),
-          eq(workflowExecution.revision, expectedRevision),
-          eq(workflowExecution.state, "running"),
-          child.parentExecutionId
-            ? eq(workflowExecution.parentExecutionId, child.parentExecutionId)
-            : isNull(workflowExecution.parentExecutionId),
-          parentGuard,
+    const result = this.db.transaction(
+      (tx) =>
+        trackExecutionChange(
+          tx,
+          executionId,
+          () =>
+            tx
+              .update(workflowExecution)
+              .set({ parentExecutionId, updatedAt: new Date() })
+              .where(
+                and(
+                  eq(workflowExecution.executionId, executionId),
+                  eq(workflowExecution.revision, expectedRevision),
+                  eq(workflowExecution.state, "running"),
+                  child.parentExecutionId
+                    ? eq(workflowExecution.parentExecutionId, child.parentExecutionId)
+                    : isNull(workflowExecution.parentExecutionId),
+                  parentGuard,
+                ),
+              )
+              .run(),
+          (written) => written.changes > 0,
         ),
-      );
+      { behavior: "immediate" },
+    );
     if (result.changes === 0) {
       const current = await this.get(executionId);
       throw new ConflictError("Execution state changed; reload before changing parent", {
@@ -630,18 +683,29 @@ export class ExecutionRepository {
     expectedReminders: WorkflowExecution["reminders"],
     reminders: WorkflowExecution["reminders"],
   ): Promise<boolean> {
-    const result = await this.db
-      .update(workflowExecution)
-      .set({ reminders: JSON.stringify(reminders ?? []), updatedAt: new Date() })
-      .where(
-        and(
-          eq(workflowExecution.executionId, executionId),
-          eq(workflowExecution.userId, userId),
-          eq(workflowExecution.state, "running"),
-          eq(workflowExecution.revision, expectedRevision),
-          eq(workflowExecution.reminders, JSON.stringify(expectedReminders ?? [])),
+    const result = this.db.transaction(
+      (tx) =>
+        trackExecutionChange(
+          tx,
+          executionId,
+          () =>
+            tx
+              .update(workflowExecution)
+              .set({ reminders: JSON.stringify(reminders ?? []), updatedAt: new Date() })
+              .where(
+                and(
+                  eq(workflowExecution.executionId, executionId),
+                  eq(workflowExecution.userId, userId),
+                  eq(workflowExecution.state, "running"),
+                  eq(workflowExecution.revision, expectedRevision),
+                  eq(workflowExecution.reminders, JSON.stringify(expectedReminders ?? [])),
+                ),
+              )
+              .run(),
+          (written) => written.changes > 0,
         ),
-      );
+      { behavior: "immediate" },
+    );
     return result.changes === 1;
   }
 
@@ -706,31 +770,37 @@ export class ExecutionRepository {
         const nextVisits = visit
           ? [...(execution.visits ?? []), { seq: (execution.visits ?? []).length, ...visit }]
           : undefined;
-        const result = tx
-          .update(workflowExecution)
-          .set({
-            context: contextJson,
-            ...(nextVisits !== undefined
-              ? {
-                  visits: JSON.stringify(nextVisits),
-                  lastActivityAt: executionActivity({
-                    visits: nextVisits,
-                    completedAt: execution.completedAt ?? null,
-                  }).lastActivityAt,
-                }
-              : {}),
-            // A variable the agent sets is the agent acting: its open question is answered. A
-            // person's edit is not an answer and leaves the question open.
-            ...(visit?.actor?.role === "agent" ? { awaitingUser: null } : {}),
-            updatedAt: new Date(),
-          })
-          .where(
-            and(
-              eq(workflowExecution.executionId, executionId),
-              eq(workflowExecution.revision, expectedRevision),
-            ),
-          )
-          .run();
+        const result = trackExecutionChange(
+          tx,
+          executionId,
+          () =>
+            tx
+              .update(workflowExecution)
+              .set({
+                context: contextJson,
+                ...(nextVisits !== undefined
+                  ? {
+                      visits: JSON.stringify(nextVisits),
+                      lastActivityAt: executionActivity({
+                        visits: nextVisits,
+                        completedAt: execution.completedAt ?? null,
+                      }).lastActivityAt,
+                    }
+                  : {}),
+                // A variable the agent sets is the agent acting: its open question is answered. A
+                // person's edit is not an answer and leaves the question open.
+                ...(visit?.actor?.role === "agent" ? { awaitingUser: null } : {}),
+                updatedAt: new Date(),
+              })
+              .where(
+                and(
+                  eq(workflowExecution.executionId, executionId),
+                  eq(workflowExecution.revision, expectedRevision),
+                ),
+              )
+              .run(),
+          (written) => written.changes > 0,
+        );
         if (result.changes === 0) {
           throw new ConflictError("Execution state changed; reload before updating context", {
             executionId,
@@ -769,14 +839,21 @@ export class ExecutionRepository {
         if (Buffer.byteLength(JSON.stringify(errors), "utf8") > 1024 * 1024) {
           errors = errors.slice(-100);
         }
-        tx.update(workflowExecution)
-          .set({
-            errors: JSON.stringify(errors),
-            refusalCount: executionActivity({ errors }).refusalCount,
-            updatedAt: new Date(),
-          })
-          .where(eq(workflowExecution.executionId, executionId))
-          .run();
+        trackExecutionChange(
+          tx,
+          executionId,
+          () =>
+            tx
+              .update(workflowExecution)
+              .set({
+                errors: JSON.stringify(errors),
+                refusalCount: executionActivity({ errors }).refusalCount,
+                updatedAt: new Date(),
+              })
+              .where(eq(workflowExecution.executionId, executionId))
+              .run(),
+          (written) => written.changes > 0,
+        );
         return true;
       },
       { behavior: "immediate" },
@@ -807,25 +884,31 @@ export class ExecutionRepository {
           completedAt: now.getTime(),
           errors,
         });
-        const result = tx
-          .update(workflowExecution)
-          .set({
-            state: "completed",
-            gateWaiting: false,
-            awaitingUser: null,
-            errors: JSON.stringify(errors),
-            lastActivityAt: activity.lastActivityAt,
-            refusalCount: activity.refusalCount,
-            updatedAt: now,
-            completedAt: now,
-          })
-          .where(
-            and(
-              eq(workflowExecution.executionId, executionId),
-              ne(workflowExecution.state, "completed"),
-            ),
-          )
-          .run();
+        const result = trackExecutionChange(
+          tx,
+          executionId,
+          () =>
+            tx
+              .update(workflowExecution)
+              .set({
+                state: "completed",
+                gateWaiting: false,
+                awaitingUser: null,
+                errors: JSON.stringify(errors),
+                lastActivityAt: activity.lastActivityAt,
+                refusalCount: activity.refusalCount,
+                updatedAt: now,
+                completedAt: now,
+              })
+              .where(
+                and(
+                  eq(workflowExecution.executionId, executionId),
+                  ne(workflowExecution.state, "completed"),
+                ),
+              )
+              .run(),
+          (written) => written.changes > 0,
+        );
         return result.changes > 0;
       },
       { behavior: "immediate" },
@@ -872,14 +955,21 @@ export class ExecutionRepository {
    * @returns true if cleared, false if execution not found
    */
   async clearErrors(executionId: string): Promise<boolean> {
-    const result = await this.db
-      .update(workflowExecution)
-      .set({
-        errors: null,
-        refusalCount: 0,
-        updatedAt: new Date(),
-      })
-      .where(eq(workflowExecution.executionId, executionId));
+    const result = this.db.transaction(
+      (tx) =>
+        trackExecutionChange(
+          tx,
+          executionId,
+          () =>
+            tx
+              .update(workflowExecution)
+              .set({ errors: null, refusalCount: 0, updatedAt: new Date() })
+              .where(eq(workflowExecution.executionId, executionId))
+              .run(),
+          (written) => written.changes > 0,
+        ),
+      { behavior: "immediate" },
+    );
 
     return result.changes > 0;
   }
