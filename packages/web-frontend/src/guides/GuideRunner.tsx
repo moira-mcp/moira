@@ -229,14 +229,11 @@ export default function GuideRunner(): React.JSX.Element | null {
   const missing = stepKey !== null && missingFor === stepKey;
   // A step whose open view does not draw it waits too, while the page switches to a view that does.
   const switchesView = anchor === null && !!step && !!fallbackView(step) && !!controller?.setView;
-  // A view-specific required step also waits for its target before showing a card. If the target
-  // never appears, the existing required-step note becomes visible after the bounded wait.
+  // Every step with an element waits for it before showing a card: a card shown earlier has no box
+  // to sit beside, lands in the corner and jumps to its element a moment later. If a required
+  // step's element never appears, its card shows in the corner with the note after the bounded wait.
   const resolving =
-    !!step &&
-    anchor !== null &&
-    (step.optional || !!fallbackView(step)) &&
-    resolvedFor !== stepKey &&
-    (step.optional || !missing);
+    !!step && anchor !== null && resolvedFor !== stepKey && (step.optional || !missing);
   // The switch has the same bound as any wait for an element: a page that never draws the step is
   // passed, not waited on for ever.
   useEffect(() => {
